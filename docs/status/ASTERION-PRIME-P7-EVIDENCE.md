@@ -440,3 +440,14 @@ KA59 L2 retry (cap=7 levels; L2 human-baseline cap=109 actions) under new mechan
 ## 2026-09-26 TR87 L2 retry (new budget-aware prompt) — failed (no-action stall)
 
 TR87 L2 retry (cap=13+58=71, baseline-aligned) with new budget-aware prompt (commit cc5a56a7) ended in 5-min no-action stall at 48 actions. Levels reached: 1 (L2 not advanced). Model hypothesized "ACTION1 cycles tile pattern through a fixed library" and dispatched 20 ACTION1 (up) presses to test, then stalled when hypothesis did not converge. New prompt made the model more deliberate (less spamming) but did not produce the L2 mechanism. Sokoban/maze puzzles remain unsolved by current prompt+tools within baseline budget.
+
+## 2026-09-26 FT09 L3 retry — PASSED in 17 actions
+
+FT09 L3 retry (cap=42 = 19 L2 prefix + 23 L3 baseline) passed in 17 L3 actions under new budget-aware prompt. Levels reached 3, terminal=level-completed.
+
+**Key finding**: Model's worker-cell PLAN explicitly referenced previous level pattern:
+> "Hyp: ACTION6 on a solid-red(8) cell toggles it 8->12 (orange), **like level2 solid9->12**; bottom bar +2"
+
+Model transferred "color X → 12" rule from L2 to L3. This confirms: previous level solutions help current level. L2+ retries are MORE valuable than L2 retries because the model has accumulated patterns.
+
+Strategy shift: focus on L3+ for L2-passed games (12 candidates) over L2 retries for L1-only games.
