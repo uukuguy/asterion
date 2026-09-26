@@ -15,6 +15,48 @@ class ArcBrokerError(RuntimeError):
     """Public P7 broker failure; its message contains no engine data."""
 
 
+@dataclass(frozen=True, slots=True)
+class Tool:
+    """Application-level tool description exposed to the model.
+
+    The P7 framework prompt only carries general principles; each P7
+    application (or framework extension) registers the concrete tools it
+    exposes via :class:`P7ToolRegistry`. The operator renders the
+    registered tools into the model's prompt at run start so the model
+    knows what methods exist on ``p7_client``.
+    """
+
+    name: str
+    description: str
+    signature: str
+    category: str
+
+
+class P7ToolRegistry:
+    """Mutable tool registry scoped to one P7 run; thread-unsafe."""
+
+    def __init__(self) -> None:
+        self._tools: dict[str, Tool] = {}
+
+    def register(self, tool: Tool) -> None:
+        """Add or replace a tool. ``tool.name`` is the unique key."""
+        if type(tool) is not Tool:
+            raise TypeError("tool must be a Tool instance")
+        self._tools[tool.name] = tool
+
+    def unregister(self, name: str) -> None:
+        self._tools.pop(name, None)
+
+    def render_section(self) -> str:
+        """Return the markdown 'Tool reference' section; empty if no tools."""
+        if not self._tools:
+            return ""
+        lines: list[str] = ["Tool reference (application surface; not game-specific):"]
+        for tool in self._tools.values():
+            lines.append(f"- `{tool.signature}`: {tool.description}")
+        return "\n".join(lines)
+
+
 class _ArcEngine(Protocol):
     def observe(self) -> object: ...
 
@@ -643,6 +685,8 @@ __all__ = (
     "ArcStatus",
     "ArcTerminalSnapshot",
     "ArcTransition",
+    "P7ToolRegistry",
+    "Tool",
     "P7_ACTION_CAP",
     "P7_GAME_ID",
     "P7_SEED",

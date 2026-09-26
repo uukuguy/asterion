@@ -24,6 +24,8 @@ from asterion.applications.prime.p7.broker import (
     ArcRunReceipt,
     ArcStatus,
     ArcTransition,
+    P7ToolRegistry,
+    Tool,
     _observation_digest,
 )
 from asterion.applications.prime.p7.diagnostics import analyze_trace
@@ -53,7 +55,7 @@ from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
-    P7_SOLVE_PROMPT,
+    build_solve_prompt,
 )
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
@@ -95,9 +97,9 @@ def _resolve_history_variant(
     return variant
 
 
-def _prompt_for_variant(variant: str) -> str:
+def _prompt_for_variant(variant: str, tool_registry: object = None) -> str:
     if variant == "verified":
-        return P7_SOLVE_PROMPT
+        return build_solve_prompt(tool_registry)
     if variant == "legacy":
         return P7_LEGACY_SOLVE_PROMPT
     raise P7OperatorError("P7 history variant is unavailable")
@@ -1126,7 +1128,46 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     variant = _resolve_history_variant(invocation.environment, invocation.game)
 
     root = invocation.operator_root
-    prompt = _prompt_for_variant(variant)
+    # Build the application-level tool registry. The framework prompt
+    # carries only general principles; this is where P7 surfaces its
+    # own tools (retrodict query APIs, no-effect hint, etc.) to the model.
+    tool_registry = P7ToolRegistry()
+    tool_registry.register(Tool(
+        name="tried_actions",
+        description=(
+            "Enumerate every (level, action_name, position) tuple you have "
+            "dispatched this run, with counts. Position is {\"x\": int, \"y\": int} "
+            "for ACTION6 clicks and None for direction/interact actions. Call this "
+            "before dispatching a probe you are unsure about; if the same "
+            "(action, position) tuple already has a non-zero count at this "
+            "level, the broker has already observed its outcome."
+        ),
+        signature="p7_client.tried_actions(level=None)",
+        category="retrodict",
+    ))
+    tool_registry.register(Tool(
+        name="last_outcome_summary",
+        description=(
+            "Aggregate per-action counts for the current run, split into "
+            "{\"attempts\": {action: count}, \"no_effect\": {action: count}}. "
+            "Useful for spotting an action that has been attempted many times "
+            "at this level with no observed frame change."
+        ),
+        signature="p7_client.last_outcome_summary(level=None)",
+        category="retrodict",
+    ))
+    tool_registry.register(Tool(
+        name="act_checked_hint",
+        description=(
+            "When act_checked returns stop_reason 'observation-no-change' the "
+            "response also carries a no_effect_hint field with this same "
+            "action and position plus a no-effect count; read it in-band "
+            "instead of recomputing."
+        ),
+        signature="result['no_effect_hint'] (when stop_reason='observation-no-change')",
+        category="retrodict",
+    ))
+    prompt = _prompt_for_variant(variant, tool_registry)
     prefix = (
         load_best_prefix(
             invocation.arc_root,

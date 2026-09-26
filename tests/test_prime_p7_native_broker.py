@@ -709,3 +709,73 @@ class TestRetrodictTrialTracking(unittest.TestCase):
         summary = broker.last_outcome_summary()
         self.assertEqual(summary["attempts"]["ACTION1"], 3)
         self.assertEqual(summary["no_effect"]["ACTION1"], 3)
+
+
+class TestP7ToolRegistry(unittest.TestCase):
+    """P7ToolRegistry renders an application-level tool section for the
+    solve prompt; build_solve_prompt applies it without contaminating
+    the base prompt template."""
+
+    def test_render_section_empty_when_no_tools(self) -> None:
+        from asterion.applications.prime.p7.broker import P7ToolRegistry
+
+        reg = P7ToolRegistry()
+        self.assertEqual(reg.render_section(), "")
+
+    def test_register_and_render(self) -> None:
+        from asterion.applications.prime.p7.broker import P7ToolRegistry, Tool
+
+        reg = P7ToolRegistry()
+        reg.register(Tool(
+            name="tried_actions",
+            description="Enumerate tried (level, action, position) tuples.",
+            signature="p7_client.tried_actions(level=None)",
+            category="retrodict",
+        ))
+        section = reg.render_section()
+        self.assertIn("Tool reference", section)
+        self.assertIn("p7_client.tried_actions(level=None)", section)
+        self.assertIn("Enumerate tried", section)
+        self.assertNotIn("retrodict", section)  # category is internal, not rendered
+
+    def test_register_replaces_existing(self) -> None:
+        from asterion.applications.prime.p7.broker import P7ToolRegistry, Tool
+
+        reg = P7ToolRegistry()
+        reg.register(Tool(
+            name="x", description="v1", signature="x()", category="c",
+        ))
+        reg.register(Tool(
+            name="x", description="v2", signature="x()", category="c",
+        ))
+        self.assertIn("v2", reg.render_section())
+        self.assertNotIn("v1", reg.render_section())
+
+    def test_build_solve_prompt_with_registry(self) -> None:
+        from asterion.applications.prime.p7.broker import P7ToolRegistry, Tool
+        from asterion.applications.prime.p7.prompt import (
+            P7_SOLVE_PROMPT, build_solve_prompt,
+        )
+
+        reg = P7ToolRegistry()
+        reg.register(Tool(
+            name="alpha", description="First tool.",
+            signature="alpha()", category="x",
+        ))
+        rendered = build_solve_prompt(reg)
+        self.assertIn(P7_SOLVE_PROMPT, rendered)
+        self.assertIn("alpha()", rendered)
+        self.assertIn("First tool.", rendered)
+
+    def test_build_solve_prompt_without_registry_equals_base(self) -> None:
+        from asterion.applications.prime.p7.prompt import (
+            P7_SOLVE_PROMPT, build_solve_prompt,
+        )
+
+        self.assertEqual(build_solve_prompt(None), P7_SOLVE_PROMPT)
+        self.assertEqual(build_solve_prompt(P7ToolRegistry_shim()), P7_SOLVE_PROMPT)
+
+
+class P7ToolRegistry_shim:
+    def render_section(self) -> str:
+        return ""
