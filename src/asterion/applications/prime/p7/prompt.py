@@ -25,6 +25,16 @@ falsifiable hypothesis + RESET over extended trial-and-error when stuck.
 When p7_client.status() shows actions_remaining low relative to a level's
 baseline, switch from exploration to the most likely winning sequence.
 
+Before dispatching a probe you are unsure about, call
+p7_client.tried_actions(level) or p7_client.last_outcome_summary(level) to
+check what you have already tried at this level. If the same
+``(action, position)`` tuple already has a non-zero count at this level,
+the broker has already observed its outcome. Cluster-clicking the same
+``x,y`` column 4+ times, repeating one direction key 15+ times, or
+pressing ACTION5 more than 10 times in a level without progress are
+strong signals you are in a no-effect loop: change the action, the
+position, or RESET to a new hypothesis before the next dispatch.
+
 Use only the persistent ipython tool. Import only p7_client; do not inspect its
 source. The broker API is p7_client.observe(), p7_client.status(),
 p7_client.history(start, limit), p7_client.frame_at(sequence),
