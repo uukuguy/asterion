@@ -519,3 +519,11 @@ Prompt fix ineffective. Possible reasons:
 - Cluster/wander is genuine model behavior, not detectable in retrospect
 
 Starting L4 sequence per user direction.
+
+## 2026-09-26 M0R0 L4 retry — failed (full baseline)
+
+M0R0 L4 retry (cap=217 = 191 prefix + 26 L4 baseline) failed at human-baseline. 26/26 L4 actions used (100%), levels_completed=3. Model fully utilized L4 budget without advancing.
+
+L4 actions distribution: ACTION4 7, ACTION1 6, ACTION5 2, ACTION3 1, ACTION6 1, RESET 1. No cluster/wander anomaly but no progress either. Model explored with directional + click but didn't find L4 mechanism.
+
+Starting VC33 L4 (last L4 candidate, baseline 61 click).
