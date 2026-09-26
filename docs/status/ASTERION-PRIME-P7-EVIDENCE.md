@@ -358,3 +358,19 @@ After the framework refactor (commits ba6011a8 + 119f8d16) exposed tools via Pi'
 API call distribution (v4): observe=9, status=2, history=1, frame_at=8, act_checked=3, tried_actions=1, last_outcome_summary=1. The model actively queried game state and tried a grid-walk click sequence (33,23)→(38,29)→(41,35)→(41,37)→(36,31) but did not identify the L2 mechanism.
 
 Conclusion: The framework tool-injection path (commit ba6011a8 — Tool / P7ToolRegistry / build_solve_prompt) is now exercised end-to-end via Pi's registerTool API. Proper function-calling more than doubled the model's tool-use frequency versus v3. The L2 outcome is identical (42 L2 actions, levels_completed=1, terminal human-baseline) — mechanism identification remains a model-side inductive bottleneck, not a framework reachability issue.
+
+## 2026-09-26 SU15 L2 v5: 11-tool control — passed but tools mostly idle
+
+After the worker module source was updated to expose all 11 `p7_*` methods (with proper `p7_` prefix naming, including new `p7_components`, `p7_untried_clicks`, `p7_hypothesis`), the SU15 L2 retry ran with the full tool surface.
+
+| Run | L2 actions | API calls | Result |
+| --- | ---: | --- | --- |
+| baseline | 42 | 0 | ❌ cap-hit, levels=1 |
+| v1 (compaction) | 42 | 0 | ❌ cap-hit, levels=1 |
+| v3 (prompt listing) | 42 | 2 (text refs) | ❌ cap-hit, levels=1 |
+| v4 (framework tools) | 42 | 25 (proper function-calling) | ❌ cap-hit, levels=1 |
+| **v5 (11 tools)** | **41** | **2** | **✅ levels=2 at seq=102** |
+
+API call distribution in v5: `p7_observe`=1, `p7_status`=1. All other tools (`p7_history`, `p7_frame_at`, `p7_act_checked`, `p7_tried_actions`, `p7_last_outcome_summary`, `p7_components`, `p7_untried_clicks`, `p7_hypothesis`) called **0 times**. The model **continued using the original `ipython(code=...)` tool** for 50 of 51 cells.
+
+Conclusion: SU15 L2 v5 **passed** but the model didn't use the new tools. The 11-tool set sits largely idle. The pass is consistent with the SU15 L2 mechanism being occasionally reachable within the cap (theoretical optimal ~17 actions; 41 is well below the 55 cap). Pass probability is a function of the model's click-space coverage rather than tool sophistication. The framework tool-injection mechanism is verified correct end-to-end (proper function-calling, full TypeBox schemas, worker exposure, broker dispatch); the next step is model-side training/instruction-tuning to prefer the registered tools over the generic ipython tool.
