@@ -502,3 +502,9 @@ Action histogram: keyboard + click mix. Model solved L3 with combined approach.
 RE86 L3 retry (cap=145) reached 85/86 L3 baseline (99%). levels_completed=2 (no progress). Action distribution: ACTION4 26, ACTION2 19, ACTION3 19, ACTION1 17, ACTION5 4. Model wandered all 4 direction keys + interact with no convergence. Killed at 144 total actions (over cap).
 
 L3 retry stats updated: 4 passes / 4 fails = 50% pass rate. Pass: FT09 17, SU15 24, TU93 24, AR25 47. Fail: SC25 60, DC22 171, LS20 167, RE86 144. All fails show "wander" anomaly (no progress, repeated diverse actions).
+
+## 2026-09-26 WA30 L3 retry — failed (full baseline consumed, no progress)
+
+WA30 L3 retry (cap=278 = 95 L2 prefix + 183 L3 baseline) failed at human-baseline. 183/183 L3 actions used (100%), levels_completed=2. Model fully utilized L3 budget without advancing.
+
+L3 queue complete. Final stats: 4 pass (FT09 17, SU15 24, TU93 24, AR25 47) / 9 attempts = 44% pass rate.
