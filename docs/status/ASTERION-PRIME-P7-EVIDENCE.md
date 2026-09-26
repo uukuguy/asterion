@@ -537,3 +537,13 @@ L4 queue complete: 0 pass / 2 attempts (M0R0 L4, VC33 L4). Both games hit cap wi
 Action plan:
 - Submit accumulated score (4 new L3 passes: FT09, SU15, TU93, AR25)
 - L3/L4 retry queue exhausted (no L3-passed games have working L4 mechanisms within baseline)
+
+## 2026-09-26 SC25 L3 retry with improvements (commit 1083708e) — still failed
+
+SC25 L3 retry after applying 4 no-effect-loop guards still failed:
+- 60/60 actions, levels=2
+- L3 actions: 33 (vs 33 before)
+- Cluster at (30, 55): 3 vs 4 before (REPLAN_REQUIRED fired, but model still failed)
+- Action diversity improved: 4 direction keys (8+8+7+4) + 3 click positions
+
+Improvements had PARTIAL effect: cluster-mode reduced but model still doesn't find L3 mechanism within baseline budget. The 3-strike guard freed actions but not insight.
