@@ -27,14 +27,15 @@
 - G50T 修订后一次实跑成功，但该 run 没有触发 `REPLAN_REQUIRED` 或 `observation-no-change`，不能把成功归因于守卫，也不能声称稳定通过率提高。
 - FT09 一次实跑成功，仅说明 `partial-failed` 证据读取路径正确并能解出更少动作的解，不构成对其他 L2 重试的可靠性估计。
 - SB26 一次实跑失败（28 新 L2 动作全用完仍未过），证明：cap 宽窄不是方法可靠性因子；即便有 64 条失败事实与 9 次 act_checked 调用，机制识别仍是关键。partial-failure 经验的成功率目前 2/3（FT09、SC25 过；SB26 未）。
-- **2026-09-26 重构**：删除 `failed_attempts.py` 与 `build_p7_retry_prompt`、移除 pre-computed advice 注入；保留 prefix replay（数据）与 runtime 通用守卫（稳定末帧无 effect、`prediction-mismatch`）。5 次 retry 的 `failed_attempt_advice` 字段保留作历史档案但 RESUME 必须标注"其通过不能归因于通用机制"。当前机制独立效果待 1 次对照验证。
+- **2026-09-26 重构**：删除 `failed_attempts.py` 与 `build_p7_retry_prompt`、移除 pre-computed advice 注入；保留 prefix replay（数据）与 runtime 通用守卫（稳定末帧无 effect、`prediction-mismatch`）。5 次 retry 的 `failed_attempt_advice` 字段保留作历史档案但 RESUME 必须标注"其通过不能归因于通用机制"。
+- **2026-09-26 对照验证**：KA59 L1 用新机制（无 advice）36 步通过，与旧 breadth resweep 在同 game 同 cap 下 78 步未过形成对照；advice 不是 P7 L1 通过的必要条件，5 次 retry 通过最可能也是通用机制在工作。
 - 官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 
 ## 下一动作
 
-1. **对照验证**：用新机制跑一次 G50T L1（之前 58/78 通过带 advice）。若仍过 → 原 4 次通过与 advice 无关，通用方法独立有效；若不过 → 原方法依赖 advice，需诚实降级声明。
+1. ~~对照验证：KA59 L1 用新机制跑出 36 步通过，sealed/replay/cleanup 全 true；`failed_attempt_advice=null` 确认无 advice 注入。原 4 次 retry 通过（BP35 L1、G50T L1、FT09 L2、SC25 L2）很可能也是通用机制在工作，不是 advice 的功劳。~~
 2. 对照完成后继续 SP80 L2（64 ac）/ SU15 L2（55 ac）作为下一题同题重试。按 cap 由小到大推进，每题独立 retry，不修改机制。
 3. 对选定题先 `make p7-retry-preflight GAME=<alias>`：必须只选到已校验 L1 前缀和已校验同题旧记录；来宾连通性、seed 一致、动作上限核对均通过。
 4. 启动 `make p7-retry GAME=<alias>`：单次 OFFLINE 重试，30 分钟与 5 分钟无动作停止线维持，每次新通过关卡核验 seal/replay/cleanup 与用量，导出中文网页，更新 `prime-p7-games-and-official-results.md`、`ASTERION-PRIME-P7-EVIDENCE.md` 与本检查点。**不得擅自再次提交官方卡片。**
-5. L2 全部推进后再开始 KA59/SK48/TN36 首关同题重试；这三题目前没有已校验首关前缀，需先用普通 `solve` 走一遍。
+5. L2 全部推进后再开始 SK48/TN36 首关同题重试；这两题目前没有已校验首关前缀，需先用普通 `solve` 走一遍（KA59 已用新机制通过 L1）。
 6. **不再引入** Retrodict 经验机制。原因：当前 prefix replay + runtime guards 已是合理的最小修复；再叠新机制变成多变量改动无法归因。

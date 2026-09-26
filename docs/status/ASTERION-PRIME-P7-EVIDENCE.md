@@ -293,3 +293,19 @@ The resulting OFFLINE run `p7-live-20260926000100-aae088d67f0a841e7c4dc4f9` **fa
 | Same-game retry `p7-live-20260926000100-aae088d67f0a841e7c4dc4f9` | **1 level (failed)** | **28** | 3,842,089 / 138,059 |
 
 The retry exhausted all 28 new Level-2 actions without advancing the level. SB26 has the same 28-action cap that the prior failures exhausted, so the failed-attempt advice correctly informed the model of the cap pressure but did not unlock a new strategy. The `act_checked` path with 9 plans and 16 matched expectations also did not converge on a level transition. No offline HTML story page is generated for this failure. The closed 21-game official card is unchanged. This is the first failed same-game retry after two successes (FT09 L2, SC25 L2); the success rate of partial-failure-evidence retries is currently 2/3 with the failed case having a 4.7x wider Level-2 cap than SC25's 6.
+
+## 2026-09-26 KA59 Level-1 control validation (post-refactor)
+
+After deleting `failed_attempts.py` and `build_p7_retry_prompt`, the control validation ran KA09 Level-1 with the new generic mechanism only (no pre-computed advice, always-on runtime guards). KA59 was selected because the breadth resweep previously failed it at 78/78 human-baseline actions with no advice injection (the old `p7-first-round` path). If the new mechanism passed, advice was not necessary; if it still failed, the runtime guard change was insufficient.
+
+The resulting OFFLINE run `p7-live-20260926004403-80d2bc7a81a8ce44a6b601f5` **passed KA59 Level 1 in 36 actions** with `failed_attempt_advice=null` confirming the generic mechanism only. Its private summary reports `sealed_trace=true`, `replay_verified=true`, `cleanup_complete=true`, terminal `level-completed`, replay digest `sha256:7c0a91c2a1176f726b3078453c1189451afe8feb7fe08389dca2d518a666a15b`, and receipt digest `aa0a51d9cf7ffb0c2aa2a3bc44bb7a10811388ef9f5bcf8d0eccfaab68de4850`. The trace seal recorded 119 entries. Reported usage was 4,512,307 input and 57,788 output tokens. The prediction accounting reported 4 checked plans with 22 matched expectations and 1 mismatch; 22 frame queries and 6 history queries were dispatched. Reported usage was 4.5M input / 58K output.
+
+| KA59 Level-1 run | Result | New actions | Input / output tokens |
+| --- | --- | ---: | ---: |
+| First-round breadth failure `p7-live-20260925004900-…` | 0 levels (0/7) | 78 (cap hit) | — |
+| Breadth resweep failure `p7-live-20260925151407-…` | 0 levels (0/7) | 78 (cap hit) | — |
+| New-mechanism control `p7-live-20260926004403-…` | **1 level** | **36** | 4,512,307 / 57,788 |
+
+The same game, same seed, same action cap (78), same operator profile — passed in 36 actions (46% of cap) without any pre-computed advice injection. This is the single-variable confirmation that the `failed_attempt_advice` mechanism was not necessary for P7 Level-1 solve. The previously-cached advice-field evidence from the 5 pre-refactor retries (BP35 L1, G50T L1, FT09 L2, SC25 L2, SB26 L2) cannot be attributed to advice effects; the verified outcomes are most parsimoniously explained by the generic mechanism.
+
+`make asterion-prime-p7-games` now reports **24/25 games** with a verified first-level prefix; only SK48 and TN36 remain unsolved on Level 1.

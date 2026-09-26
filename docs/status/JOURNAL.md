@@ -3192,3 +3192,4 @@
 - 08:11 SB26 二关同题重试 `p7-live-20260926000100` 失败：28 步（13 前缀 + 28 二关，用完 cap）未过 L2；seal/replay/cleanup 校验完成；9 个 act_checked plan，16 matched/5 mismatch；token 3.84M/138K；partial-failure 经验成功率 2/3。
 - 08:11 RESUME 已刷新，记录 SB26 L2 失败与下一动作（SP80/SU15 → R11L → S5I5 → BP35 按 cap 排序），暂停引入其它经验类型。
 - 07:48 P7 retry 重构落地（commit f8d0591d）：删除 failed_attempts.py 整个模块（~465 行）、build_p7_retry_prompt 与 P7_RETRY_GUIDANCE；移除 operator.py 中 _retry_input_and_diagnostics 与 retry env-var 处理；ArcBroker 的 no_effect_guard 改为始终启用、空计数启动（runtime observation）；Makefile 与 retry 工具不再设 ASTERION_PRIME_P7_RETRY_MODE。324 focused 测试全过、Ruff 干净。5 次 retry 的 `failed_attempt_advice` 字段保留作历史档案。
+- 08:52 KA59 L1 控制验证通过：`p7-live-20260926004403` 在 36 步通过 L1，sealed/replay/cleanup 全 true；`failed_attempt_advice=null` 确认新机制无 advice 注入；输入 4.5M、输出 58K token。验证：原 `failed_attempt_advice` 注入不是 P7 L1 通过的必要条件。
