@@ -508,3 +508,14 @@ L3 retry stats updated: 4 passes / 4 fails = 50% pass rate. Pass: FT09 17, SU15 
 WA30 L3 retry (cap=278 = 95 L2 prefix + 183 L3 baseline) failed at human-baseline. 183/183 L3 actions used (100%), levels_completed=2. Model fully utilized L3 budget without advancing.
 
 L3 queue complete. Final stats: 4 pass (FT09 17, SU15 24, TU93 24, AR25 47) / 9 attempts = 44% pass rate.
+
+## 2026-09-26 SC25 L3 retry (with prompt fix) — failed again
+
+SC25 L3 retry with new prompt (commit 633d030d, no-effect loop signals) failed at 60/60 actions, levels=2. Same pattern: model didn't use tried_actions. L3 actions used: 33 (32 baseline + 1 over).
+
+Prompt fix ineffective. Possible reasons:
+- Model didn't read the new paragraph
+- tried_actions tool call overhead outweighs benefit
+- Cluster/wander is genuine model behavior, not detectable in retrospect
+
+Starting L4 sequence per user direction.
