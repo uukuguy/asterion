@@ -29,11 +29,12 @@
 - SB26 一次实跑失败（28 新 L2 动作全用完仍未过），证明：cap 宽窄不是方法可靠性因子；即便有 64 条失败事实与 9 次 act_checked 调用，机制识别仍是关键。partial-failure 经验的成功率目前 2/3（FT09、SC25 过；SB26 未）。
 - **2026-09-26 重构**：删除 `failed_attempts.py` 与 `build_p7_retry_prompt`、移除 pre-computed advice 注入；保留 prefix replay（数据）与 runtime 通用守卫（稳定末帧无 effect、`prediction-mismatch`）。5 次 retry 的 `failed_attempt_advice` 字段保留作历史档案但 RESUME 必须标注"其通过不能归因于通用机制"。
 - **2026-09-26 对照验证**：KA59 L1 用新机制（无 advice）36 步通过，与旧 breadth resweep 在同 game 同 cap 下 78 步未过形成对照；advice 不是 P7 L1 通过的必要条件，5 次 retry 通过最可能也是通用机制在工作。
-- **2026-09-26 SU15 L2 三次对照**：
-  - v1（仅 compaction）：42 L2 cap-hit
-  - v2（compaction + hardcoded prompt section）：模型首次调用 `tried_actions` / `last_outcome_summary` API，但被外部超时 kill 在 13 L2
-  - v3（compaction + framework 工具注入）：42 L2 cap-hit，模型也各调用 1 次 API
-  - **结论**：P7ToolRegistry / build_solve_prompt 框架机制正确（92 测试 + Ruff 干净），模型收到 Tool reference 提示但**只用 1 次** API 不依赖它做决策——机制识别仍是模型归纳能力问题，不是工具可达性问题。框架工具机制留作未来能力。
+- **2026-09-26 SU15 L2 四次对照**（baseline / v1 / v3 / v4）：
+  - baseline（无 compaction 无 tool）：42 L2 cap-hit，0 次 API 调用
+  - v1（仅 compaction）：42 L2 cap-hit，0 次 API
+  - v2（compaction + hardcoded prompt section）：13 L2 被外部 kill，2 次 API 引用
+  - v3（compaction + framework 工具注入 prompt）：42 L2 cap-hit，~25 次 API 调用（含 tried_actions=1、frame_at=8、observe=9、act_checked=3）
+  - **结论**：framework 工具注入（`P7ToolRegistry` + `build_solve_prompt`）通过 Pi 的 `registerTool` API 真正启用 proper function-calling，模型调用 API 频率 v3 翻倍。但 42 L2 全 click 无 advance，机制识别仍是模型归纳能力问题——框架可达性已不再是瓶颈。
 - 官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 - 官方卡片是截至提交时的已解前缀成绩，后续 OFFLINE 重试不会自动进入这张卡片。
 

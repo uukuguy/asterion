@@ -344,3 +344,17 @@ After wiring Pi's compaction into P7 operator as default (commit 0a1729a3), SU15
 The compressed run hit cap at the exact same L2 action count (42) with the same outcome (cap-hit, levels_completed still 1). Token usage was reduced by ~51% in input and ~26% in output, confirming Pi's summarization path is actually exercised end-to-end. However, the model still failed to identify the level-2 mechanism within the cap, regardless of context size.
 
 Conclusion: compaction is a necessary framework default for Prime's persistent-kernel agent (P7 was missing it; context growth was unbounded), but it is not sufficient to solve P7's mechanism-identification problem. The remaining bottleneck is the model's own inductive strategy, not context management.
+
+## 2026-09-26 SU15 L2 v4 control: framework tool injection via proper function-calling
+
+After the framework refactor (commits ba6011a8 + 119f8d16) exposed tools via Pi's `registerTool` API (proper function-calling with JSON schema), SU15 L2 was retried with the new wheel. The model now calls each p7_client method via a discrete tool_use block rather than embedding Python in `ipython(code=...)`.
+
+| SU15 L2 run | Result | New actions | API calls | Method |
+| --- | --- | ---: | --- | --- |
+| baseline (no compaction, no tools) | cap-hit | 42 | 0 | bare ipython calls |
+| v3 (compaction + prompt-only listing) | cap-hit | 42 | 2 (text refs only) | prompt-only |
+| **v4 (compaction + framework tools)** | **cap-hit** | **42** | **~25** | **proper function-calling** |
+
+API call distribution (v4): observe=9, status=2, history=1, frame_at=8, act_checked=3, tried_actions=1, last_outcome_summary=1. The model actively queried game state and tried a grid-walk click sequence (33,23)→(38,29)→(41,35)→(41,37)→(36,31) but did not identify the L2 mechanism.
+
+Conclusion: The framework tool-injection path (commit ba6011a8 — Tool / P7ToolRegistry / build_solve_prompt) is now exercised end-to-end via Pi's registerTool API. Proper function-calling more than doubled the model's tool-use frequency versus v3. The L2 outcome is identical (42 L2 actions, levels_completed=1, terminal human-baseline) — mechanism identification remains a model-side inductive bottleneck, not a framework reachability issue.
