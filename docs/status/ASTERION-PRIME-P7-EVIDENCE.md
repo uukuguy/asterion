@@ -594,3 +594,14 @@ AR25 game score impact:
 - Gain: +11.11 game score points
 
 This is the first L4 pass. After full submit, AR25 game score = 27.78 instead of 16.67.
+
+## 2026-09-27 TU93 L4 retry — PASSED in 42 L4 actions
+
+TU93 L4 retry (cap=101 = 58 prefix + 42 L4 baseline) passed in 42 L4 actions. levels=4, terminal=level-completed. L4 efficiency 100% (42/42 baseline) → score 100, just shy of 115 cap (need ≤39 actions).
+
+TU93 game score impact:
+- Old: 3/9 levels, score 13.33
+- New: 4/9 levels, score = 10/45*100 = 22.22 (capped at completed_weight/weight_sum * 100)
+- Gain: +8.89 game score points
+
+Two L4 passes today (AR25, TU93). Need to re-submit to bake in score gains.
