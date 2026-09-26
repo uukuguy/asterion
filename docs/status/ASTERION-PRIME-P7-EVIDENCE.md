@@ -648,3 +648,9 @@ Net L4 gain this session: +39.05 game score, +1.56 overall.
 CN04 L3 retry (cap=151 = 65 L1+L2 prefix + 85 L3 baseline) failed at human-baseline. 86/85 L3 actions used (101%). levels=2 (L3 not advanced). kb_click type.
 
 CN04 was un-tried L2-passed game. Model solved L3 with same over-budget pattern as other L3 fails.
+
+## 2026-09-27 BP35 L3 retry — failed (L2 not passed)
+
+BP35 L3 retry: 68 actions, levels=1, terminal=human-baseline. L1=19 actions (prefix), L2=49 actions (model failed to pass L2 itself). Only L1 prefix existed; L3 retry effectively attempted L2 fresh solve.
+
+BP35 only had L1 verified prefix; retry target L3 means "next after L1", which is L2.
