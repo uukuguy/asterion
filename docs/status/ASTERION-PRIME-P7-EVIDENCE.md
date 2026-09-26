@@ -628,3 +628,17 @@ L4 retry status this session:
 - TU93: PASSED (42 actions, +8.89)
 - FT09: PASSED (24 actions, +19.05)
 - SU15: not finished (killed, can retry)
+
+## 2026-09-27 SU15 L4 retry — failed (116/115 baseline)
+
+SU15 L4 retry (cap=192 = 77 prefix + 115 L4 baseline) failed at human-baseline. 116/115 L4 actions used (101%). levels=3 (L4 not advanced). Click-only game.
+
+L4 retry final tally:
+- M0R0: killed early
+- VC33: failed (62/61)
+- AR25: ✅ passed (33 actions, +11.11 game score)
+- TU93: ✅ passed (42 actions, +8.89)
+- FT09: ✅ passed (24 actions, +19.05)
+- SU15: failed (116/115)
+
+Net L4 gain this session: +39.05 game score, +1.56 overall.
