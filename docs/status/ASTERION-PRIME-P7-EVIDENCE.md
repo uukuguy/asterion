@@ -666,3 +666,14 @@ Same pattern as BP35 — L2 prefix missing, retry attempted fresh L2 solve, fail
 SK48 L3 retry: 42 actions (L1=41 efficient, L2=1 just started). Process died at ~1 hour, no L2 advance. No L2 prefix existed; target was effectively L2.
 
 SK48 has only L1 prefix saved. L2 baseline=177, but model didn't get to use it (process killed early).
+
+## 2026-09-27 G50T L3 retry — failed (L2 not passed)
+
+G50T L3 retry: 233 actions, L1=57, L2=176 (1 over baseline 175), levels=1. Same pattern as BP35/SB26 — no L2 prefix, fresh L2 solve failed.
+
+L3+ retry queue exhausted:
+- 3 passes (FT09/AR25/TU93 L4)
+- 8 fails (other L3/L4 attempts)
+- Total gain: +39.05 game score, +1.56 overall after re-submit
+
+Recommendation: re-submit official card 4b77cf7f with updated prefixes.
