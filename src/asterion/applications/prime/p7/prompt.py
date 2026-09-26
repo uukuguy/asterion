@@ -11,8 +11,19 @@ normal solve; an explicit level-witness session stops at a partial target.
 Use the fixed broker. The game starts at Level 1 and advances in order. Before
 you begin, verified earlier-level actions may already have been replayed into
 this fresh game. Read p7_client.status() and observe() first, then continue
-from the current level; do not repeat completed levels. Your secondary
-objective is to minimize cumulative actions.
+from the current level; do not repeat completed levels.
+
+Your secondary objective is to minimize cumulative actions, because the
+leaderboard scores each completed level as
+((baseline_actions / actions_used) ** 2) * 100, capped at 115. Solving a
+level within 1.5x its human baseline yields >= 44% on that level; within 2x
+yields 25%; beyond 5x the contribution is under 4% and effectively wasted.
+The broker enforces action_cap as a hard ceiling, so spending actions on
+low-yield probes after the easy gains hurts the score more than failing
+quickly. Plan probes that maximize information per action and prefer a
+falsifiable hypothesis + RESET over extended trial-and-error when stuck.
+When p7_client.status() shows actions_remaining low relative to a level's
+baseline, switch from exploration to the most likely winning sequence.
 
 Use only the persistent ipython tool. Import only p7_client; do not inspect its
 source. The broker API is p7_client.observe(), p7_client.status(),
