@@ -661,3 +661,51 @@ class TestNativeP7Broker(unittest.TestCase):
         self.assertEqual(broker.seal().terminal_reason, "action-unavailable")
         with self.assertRaisesRegex(ArcBrokerError, "closed"):
             broker.status()
+
+
+class TestRetrodictTrialTracking(unittest.TestCase):
+    """Retrodict: broker tracks (level, action, position) tuples the model has
+    tried, with counts, so the model can avoid repeating probes."""
+
+    def test_tried_actions_records_direction_actions_with_no_position(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        engine = _SettledNoEffectEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-1")
+        broker.act(("ACTION1",))
+        broker.act(("ACTION2",))
+        broker.act(("ACTION1",))  # repeat same action
+        tried = broker.tried_actions()
+        # Two distinct (action, level) tuples: ACTION1 and ACTION2
+        self.assertEqual(len(tried), 2)
+        action1 = next(e for e in tried if e["action"] == "ACTION1")
+        self.assertEqual(action1["count"], 2)
+        self.assertIsNone(action1["position"])
+
+    def test_tried_actions_filters_by_level(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        engine = _SettledNoEffectEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-1")
+        # At level 0
+        broker.act(("ACTION1",))
+        # Stay on level 0 (engine.levels_completed never advances for settled engine)
+        l0 = broker.tried_actions(level=0)
+        l_all = broker.tried_actions()
+        self.assertEqual(len(l0), 1)
+        self.assertEqual(len(l_all), 1)
+        self.assertEqual(l0[0]["level"], 0)
+
+    def test_last_outcome_summary_counts_attempts_and_no_effect(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        engine = _SettledNoEffectEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-1")
+        for _ in range(3):
+            broker.act(("ACTION1",))
+        summary = broker.last_outcome_summary()
+        self.assertEqual(summary["attempts"]["ACTION1"], 3)
+        self.assertEqual(summary["no_effect"]["ACTION1"], 3)

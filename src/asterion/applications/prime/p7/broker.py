@@ -217,6 +217,11 @@ class ArcBroker:
         # It starts empty and accumulates only from the current run.
         self._no_effect_guard = True
         self._no_effect_counts: dict[tuple[int, str], int] = {}
+        # Retrodict: track every (level, action, position) tuple the model
+        # has tried this run, with counts. Position is the (x, y) tuple for
+        # click actions and None for direction/interact actions. The model
+        # can query this through the broker API to avoid repeating probes.
+        self._tried_actions: dict[tuple[int, str, tuple[tuple[str, int], ...] | None], int] = {}
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -325,6 +330,22 @@ class ArcBroker:
                 break
             if self._no_effect_guard and self._settled_grid_unchanged(record):
                 stop_reason = "observation-no-change"
+                # Retrodict: attach a small no-effect summary so the model can
+                # see, in-band, which (action, position) tuples it has already
+                # tried at this level. Generic — no game-specific content.
+                this_action_pos = dict(plan[0].get("action", {}).get("data", {})) if plan else {}
+                self._retrodict_no_effect_hint = {
+                    "action": name,
+                    "position": this_action_pos or None,
+                    "level": previous_levels,
+                    "no_effect_count_for_action_at_level":
+                        self._no_effect_counts.get((previous_levels, name), 0),
+                    "total_tried_action_names_at_level":
+                        sum(
+                            1 for k in self._tried_actions
+                            if k[0] == previous_levels
+                        ),
+                }
                 break
             if record.state == "GAME_OVER":
                 stop_reason = "game-over"
@@ -467,8 +488,12 @@ class ArcBroker:
                 self._level_gameplay_actions = 0
             else:
                 self._level_gameplay_actions += 1
+                # Retrodict: record every attempted (level, action, position)
+                # tuple, regardless of outcome. The model can query this to
+                # see what it has already tried — both succeeded and not.
+                self._record_tried_action(action, after.levels_completed)
                 if self._no_effect_guard and after.frame[-1] == before.frame[-1]:
-                    self._record_no_effect(action.name, after.levels_completed)
+                    self._record_no_effect(action, after.levels_completed)
             if after.levels_completed == self._game.target_level:
                 self._terminal_reason = (
                     ("game-won" if after.state == "WIN" else "game-incomplete")
@@ -514,14 +539,79 @@ class ArcBroker:
             return True
         return False
 
-    def _record_no_effect(self, action: str, level: int) -> None:
-        key = (level, action)
+    def _record_no_effect(self, action: ArcAction, level: int) -> None:
+        key = (level, action.name)
         self._no_effect_counts[key] = min(3, self._no_effect_counts.get(key, 0) + 1)
+        # NOTE: _tried_actions is already incremented by the unconditional
+        # _record_tried_action call in act(); do not double-count here.
 
     def _clear_no_effect_level(self, level: int) -> None:
         for key in tuple(self._no_effect_counts):
             if key[0] == level:
                 del self._no_effect_counts[key]
+        for key in tuple(self._tried_actions):
+            if key[0] == level:
+                del self._tried_actions[key]
+
+    @staticmethod
+    def _position_key(action: ArcAction) -> tuple[tuple[str, int], ...] | None:
+        """Canonicalize click/coord position; None for direction actions."""
+        if action.name == "ACTION6":
+            x = None
+            y = None
+            for k, v in action.data:
+                if k == "x" and type(v) is int:
+                    x = v
+                elif k == "y" and type(v) is int:
+                    y = v
+            if x is not None and y is not None:
+                return (("x", x), ("y", y))
+        return None
+
+    def _record_tried_action(self, action: ArcAction, level: int) -> None:
+        """Retrodict: track this attempt unconditionally."""
+        pos_key = self._position_key(action)
+        tried_key = (level, action.name, pos_key)
+        self._tried_actions[tried_key] = self._tried_actions.get(tried_key, 0) + 1
+
+    def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+        """Retrodict: enumerate (action, position, count) tuples tried in this run.
+
+        ``level=None`` returns all levels. The returned dict shape mirrors
+        the data the broker has tracked from the current run; the model can
+        inspect it to avoid repeating probes that already had no observed
+        frame change. Position is None for direction / interact actions.
+        """
+        result: list[dict[str, object]] = []
+        for (lvl, action_name, pos_key), count in sorted(self._tried_actions.items()):
+            if level is not None and lvl != level:
+                continue
+            entry: dict[str, object] = {
+                "level": lvl,
+                "action": action_name,
+                "count": count,
+            }
+            if pos_key is not None:
+                pos = {k: v for k, v in pos_key}
+                entry["position"] = pos
+            else:
+                entry["position"] = None
+            result.append(entry)
+        return result
+
+    def last_outcome_summary(self, level: int | None = None) -> dict[str, object]:
+        """Retrodict: per-action aggregate of attempts and no-effect outcomes."""
+        attempts: dict[str, int] = {}
+        no_effect: dict[str, int] = {}
+        for (lvl, action_name, _pos), count in self._tried_actions.items():
+            if level is not None and lvl != level:
+                continue
+            attempts[action_name] = attempts.get(action_name, 0) + count
+        for (lvl, action_name), count in self._no_effect_counts.items():
+            if level is not None and lvl != level:
+                continue
+            no_effect[action_name] = count
+        return {"attempts": attempts, "no_effect": no_effect}
 
     def seal(self) -> ArcRunReceipt:
         if self._terminal_reason == "active":
