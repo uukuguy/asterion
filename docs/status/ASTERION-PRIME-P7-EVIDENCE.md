@@ -320,3 +320,14 @@ The first new-mechanism queue item. SP80 L1 prefix `p7-live-20260925020429-0e535
 | New-mechanism control `p7-live-20260926011612-…` | **execution-stalled** | **13** | ~2,770,037 / ~184,678 |
 
 The 5-min no-action supervisor correctly interrupted the run; this is the intended runtime guard behavior, not a defect. SP80 L2 needs either a more decisive model trajectory or a different game strategy; the next queue item will proceed without re-attempting SP80.
+
+## 2026-09-26 SU15 Level-2 same-game retry (cap-hit)
+
+SU15 L1 prefix `p7-live-20260925020545-47e9d29b354c697a009d2c27` (13 verified actions) was replayed, then 42 L2 actions dispatched in 14 minutes before the human-baseline cap (55 total) hit. The run sealed/replay/cleaned cleanly but did not advance past L1. `failed_attempt_advice=null` confirms the new mechanism delivered no advice injection.
+
+| SU15 Level-2 run | Result | New actions | Input / output tokens |
+| --- | --- | ---: | ---: |
+| Breadth resweep failure `p7-live-20260925020545-…` | 0 levels (L1 only) | 13 (cap hit) | — |
+| New-mechanism control `p7-live-20260926013245-…` | **1 level (cap-hit, no advance)** | **42** | 7,632,934 / 174,280 |
+
+Two consecutive new-mechanism L2 failures (SP80 stall + SU15 cap-hit) suggest the generic mechanism is reliable for narrow-cap L1 (KA59 control) but unreliable for L2 where the model needs stronger mechanism hypotheses. The 55-action cap and 14-minute runtime were not the limiting factor; the model's exploration strategy under larger action space did not converge.
