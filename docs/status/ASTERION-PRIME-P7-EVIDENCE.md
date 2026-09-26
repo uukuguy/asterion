@@ -488,3 +488,11 @@ Same anomaly pattern as SC25 L3 (model cluster-clicks at one position). Killed a
 LS20 L3 retry (cap=145) failed at 74 L3 actions / 73 L3 baseline. levels_completed=2. Action histogram: ACTION1 27, ACTION4 19, ACTION2 18, ACTION3 10 — model wandered direction keys without finding L3 mechanism. Killed.
 
 L3 retry pass rate: 3/6 (FT09, SU15, TU93 pass; SC25, DC22, LS20 fail). All 3 fails show "loop" anomaly: SC25 cluster-clicks, DC22 column-x=48, LS20 direction keys.
+
+## 2026-09-26 AR25 L3 retry — PASSED in 47 L3 actions
+
+AR25 L3 retry (cap=113 = 38 L2 prefix + 75 L3 baseline) passed in 47 L3 actions. levels_completed=3, terminal=level-completed. Efficiency 63% (47/75). kb_click type.
+
+L3 retry stats updated: 4 passes (FT09 17, SU15 24, TU93 24, AR25 47) + 3 fails (SC25, DC22, LS20) = 57% pass rate.
+
+Action histogram: keyboard + click mix. Model solved L3 with combined approach.
