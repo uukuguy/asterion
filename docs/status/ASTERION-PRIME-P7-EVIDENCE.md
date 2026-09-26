@@ -374,3 +374,17 @@ After the worker module source was updated to expose all 11 `p7_*` methods (with
 API call distribution in v5: `p7_observe`=1, `p7_status`=1. All other tools (`p7_history`, `p7_frame_at`, `p7_act_checked`, `p7_tried_actions`, `p7_last_outcome_summary`, `p7_components`, `p7_untried_clicks`, `p7_hypothesis`) called **0 times**. The model **continued using the original `ipython(code=...)` tool** for 50 of 51 cells.
 
 Conclusion: SU15 L2 v5 **passed** but the model didn't use the new tools. The 11-tool set sits largely idle. The pass is consistent with the SU15 L2 mechanism being occasionally reachable within the cap (theoretical optimal ~17 actions; 41 is well below the 55 cap). Pass probability is a function of the model's click-space coverage rather than tool sophistication. The framework tool-injection mechanism is verified correct end-to-end (proper function-calling, full TypeBox schemas, worker exposure, broker dispatch); the next step is model-side training/instruction-tuning to prefer the registered tools over the generic ipython tool.
+
+## 2026-09-26 SU15 L2 v6: minimal callable set + auto-inject — over-tooled
+
+After trimming the worker module surface to 6 public methods (p7_act, p7_observe, p7_history, p7_frame_at, p7_act_checked, p7_components), with p7_untried_clicks and p7_hypothesis made internal helpers, the SU15 L2 retry ran. Components + untried_clicks were also auto-injected into the broker response on level-advance and observation-no-change.
+
+| Run | Callable tools | API call count | Result |
+| --- | --- | --- | --- |
+| v4 (7 tools) | 7 | observe=9, frame_at=8 | 42 actions ❌ |
+| v5 (11 tools) | 11 | observe=1, status=1 | 41 actions ✅ |
+| **v6 (3 callable + auto-inject)** | 3 | observe=9, history=5, frame_at=9 | **80 actions ❌** |
+
+Conclusion: the model uses more proper-function-calling tools than v5, but **analysis overhead consumed too many actions** — model called history/frame_at/observe repeatedly without dispatching actions. Auto-injection alone doesn't drive convergence; the model must commit to actions.
+
+Next direction: cap per-cell tool-call count, or bias the prompt to prefer direct dispatch over analysis when context permits.
