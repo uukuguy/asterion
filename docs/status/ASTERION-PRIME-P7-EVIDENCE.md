@@ -436,3 +436,7 @@ CD82 L2 sequence shows the model repeated similar ACTION6 clicks at different po
 ## 2026-09-26 KA59 L2 retry — failed (model stuck on ACTION4)
 
 KA59 L2 retry (cap=7 levels; L2 human-baseline cap=109 actions) under new mechanism failed. Model dispatched 74 actions in ~9 min then was killed for non-convergence. Last 30 actions: ACTION4×13, ACTION2×7, ACTION3×6, ACTION6×3, ACTION1×1 — model looped without advancing L2. Levels reached: {0, 1} only. Same pattern as SP80/CD82: model uses all 5 available actions but no level_hint / no_effect_hint guidance changes strategy.
+
+## 2026-09-26 TR87 L2 retry (new budget-aware prompt) — failed (no-action stall)
+
+TR87 L2 retry (cap=13+58=71, baseline-aligned) with new budget-aware prompt (commit cc5a56a7) ended in 5-min no-action stall at 48 actions. Levels reached: 1 (L2 not advanced). Model hypothesized "ACTION1 cycles tile pattern through a fixed library" and dispatched 20 ACTION1 (up) presses to test, then stalled when hypothesis did not converge. New prompt made the model more deliberate (less spamming) but did not produce the L2 mechanism. Sokoban/maze puzzles remain unsolved by current prompt+tools within baseline budget.
