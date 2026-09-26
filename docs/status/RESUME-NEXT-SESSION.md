@@ -40,14 +40,14 @@
 
 ## 下一动作（handoff）
 
-### CD82 L2 retry 在跑（cap=6，keyboard_click）
+### CD82 L2 retry 完成（commit `49124d4d`）— failed at cap
 
-CD82 L2 retry 已在 16:25 启动。等终止后继续按类型易难度排：
+CD82 L2 retry（cap=6）已完成：36 actions、levels=1、terminal=human-baseline。模型反复 click 同区域未收敛——level_hint / no_effect_hint 注入未改变动作策略。
 
 **keyboard_click**（cap=6-9）：
 1. ~~SP80 L2（failed, human-baseline，cap=6）~~
-2. **CD82 L2** ← in flight（cap=6）
-3. KA59 L2（cap=7）
+2. ~~CD82 L2（failed, human-baseline，cap=6）~~
+3. **KA59 L2** ← 下一站（cap=7）
 4. SB26 L2（cap=8）
 5. SK48 L2（cap=8）
 6. BP35 L2（cap=9，already failed once）
@@ -80,8 +80,8 @@ CD82 L2 retry 已在 16:25 启动。等终止后继续按类型易难度排：
 
 ### 未提交官方卡的 local prefix（5 个已过）
 
-- **SK48 L1**（42 actions, 已 commit）
-- **TN36 L1**（50 actions, 已 commit）
+- **SK48 L1**（42 actions, 已 commit `32a745f1`）
+- **TN36 L1**（50 actions, 已 commit `0d0fb378`）
 - **SC25 L2 v6**（28 actions, 已 commit）
 - **SU15 L2 v5**（54 actions, 已 commit）
 - **FT09 L2 v5**（19 actions, 已 commit）
