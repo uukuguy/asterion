@@ -642,3 +642,9 @@ L4 retry final tally:
 - SU15: failed (116/115)
 
 Net L4 gain this session: +39.05 game score, +1.56 overall.
+
+## 2026-09-27 CN04 L3 retry — failed (86/85 baseline)
+
+CN04 L3 retry (cap=151 = 65 L1+L2 prefix + 85 L3 baseline) failed at human-baseline. 86/85 L3 actions used (101%). levels=2 (L3 not advanced). kb_click type.
+
+CN04 was un-tried L2-passed game. Model solved L3 with same over-budget pattern as other L3 fails.
