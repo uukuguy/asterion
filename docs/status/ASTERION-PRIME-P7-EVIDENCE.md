@@ -583,3 +583,14 @@ User's image insight: even all-9 WIN scores 100 because of cap; even all-6 WIN s
 M0R0 L4 retry: terminal_reason=active (interrupted), only 3 L4 actions dispatched. Likely the background job was killed by the harness after monitor timeout. Summary shows primitive_actions=193 with target_level=4 but no L4 advance.
 
 L4 baseline=26. With only 3 actions, no chance to pass. Process needs to survive long enough for full L4 solve (~30+ min).
+
+## 2026-09-27 AR25 L4 retry — PASSED in 33 L4 actions
+
+AR25 L4 retry (cap=122 = 85 prefix + 37 L4 baseline) passed in 33 L4 actions. levels=4, terminal=level-completed. L4 efficiency 89% (33/37 baseline) → 115 cap.
+
+AR25 game score impact:
+- Old: 3/8 levels, score 16.67 (capped at 6/36*100=16.67)
+- New: 4/8 levels, score = 10/36*100 = 27.78 (capped, weighted_score/36 if all 115 = 1150/36 = 31.94, capped at 27.78)
+- Gain: +11.11 game score points
+
+This is the first L4 pass. After full submit, AR25 game score = 27.78 instead of 16.67.
