@@ -21,6 +21,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - Full TypeScript test suite still has its pre-existing context-witness fixture path failures when invoked from the repository root; this is separate from P7 bridge registration.
 - The current TypeScript source and packaged extension resource both expose the same nine tools, including `p7_mechanics_prior`; `npm run build` and the extension build-closure suite passed, with the generated bundle digest matching the packaged resource.
 - `make promotion-check` was attempted but is external-limited: its isolated temporary environment omitted `python-dotenv` (`ModuleNotFoundError` in `p7.official_operator`) and the aggregate run reported 5 failures and 2 errors. This is not promoted to PASS.
+- The optional `python-dotenv` import is now lazy with a bounded standard-library `.env` fallback (`f7ba5f1c`); the focused 116-test P7/operator-config suite passes. The installed official smoke then reaches P7 host preflight and fails on its intentionally minimal fixture environment, so promotion remains unresolved rather than being claimed green.
 
 ## 当前判断
 
