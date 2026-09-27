@@ -3232,3 +3232,4 @@
 - 09:28 RESUME 补充 native failure stage/type 诊断入口，继续维持“零 bridge 调用即先查 runtime”边界（`239a64df`）。
 - 09:35 收口并提交 P7 bridge/prior follow-up report `697da942`；工作树已清洁，当前未验证 live 新关。
 - 09:38 RESUME 修正为工作树 clean，task report 已审查提交，不再保留未跟踪状态。
+- 09:55 私有 trace 增加 `arc.tool.call` 方法名事件，stall 进程终止后仍可审计 Pi 工具调用；46 live-command tests 通过（`17d4d708`）。
