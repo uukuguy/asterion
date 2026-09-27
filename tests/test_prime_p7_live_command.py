@@ -22,7 +22,7 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
     trace_root = path / outcome
     trace_root.mkdir()
     recorder = PrimeTraceRecorder(trace_root)
-    identities = {"model_id": "deepseek-v4-flash", "reasoning_id": "asterion.prime"}
+    identities = {"model_id": "gpt-6-sol", "reasoning_id": "asterion.prime"}
     for index in range(action_count):
         recorder.append(
             "arc.action",
@@ -187,7 +187,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     broker_receipt=None, game=DEFAULT_GAME, replay_verified=False,
                     sealed_trace=False, cleanup_complete=True, comparison_report=None,
                     reason=None, failure=None, diagnostics={},
-                    experiment={"prediction_variant": variant, "model": "deepseek-v4-flash",
+                    experiment={"prediction_variant": variant, "model": "gpt-6-sol",
                                 "game_id": DEFAULT_GAME.game_id, "seed": DEFAULT_GAME.seed,
                                 "target_level": DEFAULT_GAME.target_level, "action_cap": DEFAULT_GAME.action_cap,
                                 "deadline_ms": 3600000, "stall_seconds": 300},
@@ -741,7 +741,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             (catalog / "zx42.py").write_text("# source not imported\n")
             (catalog / "metadata.json").write_text(json.dumps({"game_id": "zx42-abc123", "baseline_actions": [10, 20, 30], "win_levels": 3}))
             (root / ".env").write_text("ASTERION_PRIME_P7_TARGET_LEVEL=1\n")
-            with mock.patch.dict(os.environ, {"DEEPSEEK_API_KEY": "fixture", "ASTERION_PRIME_P7_GAME_ID": "zx42"}, clear=True):
+            with mock.patch.dict(os.environ, {"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_P7_GAME_ID": "zx42"}, clear=True):
                 resolved = live_module.load_operator_environment(root)
             whole = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "solve"}, resolved, root)
             selected = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "solve", "ASTERION_PRIME_P7_TARGET_LEVEL": "2"}, resolved, root)
@@ -764,7 +764,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         bounded = _sweep_game(game, prefix)
         self.assertEqual(bounded.action_cap, 143)
         self.assertEqual(bounded.target_level, 2)
-        self.assertEqual(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, bounded).max_actions, 143)
+        self.assertEqual(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")}, bounded).max_actions, 143)
         with self.assertRaises(P7OperatorError):
             _sweep_game(game, None)
 
@@ -847,7 +847,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
         game = P7GameSelection("ls20-9607627b", 0, 7)
         self.assertGreater(game.action_cap, 500)
-        self.assertEqual(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, game).max_actions, game.action_cap)
+        self.assertEqual(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")}, game).max_actions, game.action_cap)
         result = P7LiveExecution(
             run_id="test-run", completed_level_count=7, primitive_action_count=700,
             replay_verified=True, sealed_trace=True, cleanup_complete=True,

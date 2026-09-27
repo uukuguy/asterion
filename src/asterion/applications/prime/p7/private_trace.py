@@ -20,7 +20,7 @@ _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 P7_TRACE_IDENTITIES = {
     "application_id": "prime.arc-agi-3-solving",
     "application_version": "1.0.0",
-    "model_id": "deepseek-v4-flash",
+    "model_id": "gpt-6-sol",
     "reasoning_id": "asterion.prime",
     "runtime_id": "asterion.prime",
 }

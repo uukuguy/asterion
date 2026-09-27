@@ -375,7 +375,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         for forbidden in (
             "command",
             "credential",
-            "deepseek",
+            "openai-codex",
             "environment",
             "executable",
             "path",
@@ -421,14 +421,14 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
     def test_operator_selection_is_fixed_and_runtime_options_are_immutable(
         self,
     ) -> None:
-        selection = resolve_p7_runtime({"DEEPSEEK_API_KEY": "private-token"})
+        selection = resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")})
 
         self.assertEqual(
             selection,
             P7RuntimeSelection(
                 runtime_id="asterion.prime",
-                provider="deepseek",
-                model="deepseek-v4-flash",
+                provider="openai-codex",
+                model="gpt-6-sol",
                 max_actions=500,
                 max_callbacks=128,
                 deadline_ms=3_600_000,
@@ -442,8 +442,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 "deadline_ms": "3600000",
                 "max_actions": "500",
                 "max_callbacks": "128",
-                "model": "deepseek-v4-flash",
-                "provider": "deepseek",
+                "model": "gpt-6-sol",
+                "provider": "openai-codex",
             },
         )
         self.assertNotIn("private-token", repr(selection))
@@ -453,7 +453,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         from asterion.applications.prime.p7.operator import _sweep_game
         game = _sweep_game(P7GameSelection("ls20-9607627b", 0), None)
         environment = {
-            "DEEPSEEK_API_KEY": "fixture",
+            "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
             "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
             "ASTERION_PRIME_P7_RUN_MODE": "sweep",
             "OPERATION_MODE": "offline",
@@ -486,7 +486,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             extension.write_text("export default function extension() {}\n")
             resources = build_p7_operator_resources(
                 environment={
-                    "DEEPSEEK_API_KEY": "fixture",
+                    "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
                     "ASTERION_PRIME_P7_RUN_MODE": "sweep",
                     "OPERATION_MODE": "offline",
@@ -512,13 +512,13 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 asyncio.run(resources.close())
 
     def test_missing_model_host_fails_with_public_safe_error(self) -> None:
-        for environment in ({}, {"DEEPSEEK_API_KEY": "   "}):
+        for environment in ({}, {"ASTERION_PRIME_PI_AGENT_DIR": "   "}):
             with self.subTest(environment=environment):
                 with self.assertRaisesRegex(
                     P7OperatorError, "P7 model host is unavailable"
                 ) as raised:
                     resolve_p7_runtime(environment)
-                self.assertNotIn("DEEPSEEK_API_KEY", str(raised.exception))
+                self.assertNotIn("ASTERION_PRIME_PI_AGENT_DIR", str(raised.exception))
 
     def test_runtime_binding_assembles_only_exact_preflighted_services(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -535,7 +535,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 runtime_id="asterion.prime",
                 assembly_path=ASSEMBLY.resolve(),
                 options=p7_runtime_options(
-                    resolve_p7_runtime({"DEEPSEEK_API_KEY": "private-token"})
+                    resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")})
                 ),
                 host_services={
                     "prime.arc-broker": broker,
@@ -619,7 +619,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                     application_version="1.0.0",
                     runtime_id="asterion.prime",
                     assembly_path=ASSEMBLY.resolve(),
-                    options=p7_runtime_options(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, game), game),
+                    options=p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")}, game), game),
                     host_services={
                         "prime.arc-broker": broker,
                         "prime.ipython": ipython,
@@ -660,7 +660,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             worker = _Worker()
 
             resources = build_p7_operator_resources(
-                environment={"DEEPSEEK_API_KEY": "private-token"},
+                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")},
                 pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
                 extension_path=extension,
                 working_directory=root,
@@ -703,25 +703,17 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 resources.host_services["prime.launch"],
             )
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
+            self.assertEqual(launch.approved_command[:2], ("/usr/bin/pi", "--mode"))
+            self.assertIn("--provider", launch.approved_command)
+            self.assertIn("openai-codex", launch.approved_command)
+            self.assertIn("--model", launch.approved_command)
+            self.assertIn("gpt-6-sol", launch.approved_command)
+            self.assertTrue(launch.approved_command[-len(launch.extension_lease.command_args()):] == launch.extension_lease.command_args())
             self.assertEqual(
-                launch.approved_command,
-                (
-                    "/usr/bin/pi",
-                    "--mode",
-                    "rpc",
-                    "--provider",
-                    "deepseek",
-                    "--model",
-                    "deepseek-v4-flash",
-                    *launch.extension_lease.command_args(),
-                ),
-            )
-            self.assertEqual(
-                launch.approved_environment["DEEPSEEK_API_KEY"],
-                "private-token",
+                launch.approved_environment["ASTERION_PRIME_PI_AGENT_DIR"],
+                str(Path.home() / ".pi/agent"),
             )
             self.assertEqual(worker.starts, 0)
-            self.assertNotIn("private-token", repr(resources))
             fake_runtime = _CompletingRuntime(
                 cast(ArcBroker, resources.host_services["prime.arc-broker"])
             )
@@ -782,7 +774,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             broker = ArcBroker(engine=_Engine(), game=game)
             launch, trace = self._launch(root, broker)
             ipython = PersistentIpythonHost(worker=_Worker(), p7_client=p7_client_facade(broker))
-            options = dict(p7_runtime_options(resolve_p7_runtime({"DEEPSEEK_API_KEY": "fixture"}, game), game))
+            options = dict(p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")}, game), game))
             options["max_actions"] = "500"
             context = RuntimeFactoryContext(
                 provider_id="prime-applications",

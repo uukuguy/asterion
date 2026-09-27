@@ -54,7 +54,7 @@ OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
 ARC_ROOT_ENV = "ASTERION_PRIME_ARC_ROOT"
 NODE_ENV = "ASTERION_PRIME_NODE"
 PI_ENTRY_ENV = "ASTERION_PRIME_PI_ENTRY"
-MODEL_HOST_ENV = "DEEPSEEK_API_KEY"
+PI_AGENT_DIR_ENV = "ASTERION_PRIME_PI_AGENT_DIR"
 _EXTENSION_RESOURCE = "resources/ipython-extension.mjs"
 
 # The fixed Pi RPC contract this application launches. It is the same mode
@@ -69,6 +69,13 @@ _PI_RPC_FLAGS = (
     "ipython",
     "--approve",
     "--no-session",
+    "--no-extensions",
+    "--no-skills",
+    "--no-prompt-templates",
+    "--no-themes",
+    "--no-context-files",
+    "--thinking",
+    "high",
 )
 
 
@@ -787,14 +794,14 @@ def load_operator_environment(operator_root: Path) -> Mapping[str, str]:
     """Merge operator-owned configuration with the process environment.
 
     The preset exports the operator-owned values, so the process environment
-    wins over the file. ``DEEPSEEK_API_KEY`` is required here because the
-    operator module must reject an invocation with no fixed model host before
-    it starts any process.
+    wins over the file. ``ASTERION_PRIME_PI_AGENT_DIR`` is required here so
+    the operator rejects an invocation without an authenticated Pi profile
+    before it starts any process.
     """
 
     values = {**_dotenv_values(operator_root / ".env"), **os.environ}
-    if not values.get(MODEL_HOST_ENV, "").strip():
-        raise P7LiveSolveError("fixed model host is unavailable")
+    if not values.get(PI_AGENT_DIR_ENV, "").strip():
+        raise P7LiveSolveError("Pi agent profile is unavailable")
     return values
 
 
@@ -825,6 +832,29 @@ def resolve_pi_entry(environment: Mapping[str, str]) -> Path:
     """
 
     return _resolved_file(environment, PI_ENTRY_ENV)
+
+
+def resolve_pi_agent_dir(environment: Mapping[str, str]) -> Path:
+    """Resolve the operator-owned Pi profile used for Codex OAuth."""
+
+    raw = environment.get(PI_AGENT_DIR_ENV, "").strip()
+    if not raw:
+        raise P7LiveSolveError(f"{PI_AGENT_DIR_ENV} is unavailable")
+    raw_path = Path(raw)
+    if raw_path.is_symlink():
+        raise P7LiveSolveError(f"{PI_AGENT_DIR_ENV} is unavailable")
+    try:
+        path = raw_path.resolve(strict=True)
+    except OSError:
+        raise P7LiveSolveError(f"{PI_AGENT_DIR_ENV} is unavailable") from None
+    if (
+        not path.is_dir()
+        or not (path / "auth.json").is_file()
+        or not (path / "models-store.json").is_file()
+        or (path / "auth.json").is_symlink()
+    ):
+        raise P7LiveSolveError(f"{PI_AGENT_DIR_ENV} is unavailable")
+    return path
 
 
 def resolve_arc_root(environment: Mapping[str, str]) -> Path:
@@ -1073,7 +1103,7 @@ def write_summary(
 __all__ = (
     "ARC_ROOT_ENV",
     "GAME_ID",
-    "MODEL_HOST_ENV",
+    "PI_AGENT_DIR_ENV",
     "NODE_ENV",
     "OPERATOR_ROOT_ENV",
     "PI_ENTRY_ENV",
@@ -1097,6 +1127,7 @@ __all__ = (
     "resolve_arc_root",
     "resolve_node",
     "resolve_pi_entry",
+    "resolve_pi_agent_dir",
     "safe_run_id",
     "safe_stderr_summary",
     "worker_cell_count",

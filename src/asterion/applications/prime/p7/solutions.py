@@ -11,8 +11,22 @@ import tempfile
 from .broker import ArcRunReceipt, ArcTransition
 from .game import GAME_ID_ENV, SEED_ENV, TARGET_LEVEL_ENV, P7GameSelection, resolve_game_selection
 from .live import ArcadeEngine, read_trace_entries
+from .private_trace import P7_TRACE_IDENTITIES
 from .replay import replay_arc_run
 from .score import replay_sha256
+
+
+_HISTORICAL_P7_TRACE_IDENTITIES = {
+    "application_id": "prime.arc-agi-3-solving",
+    "application_version": "1.0.0",
+    "model_id": "deepseek-v4-flash",
+    "reasoning_id": "asterion.prime",
+    "runtime_id": "asterion.prime",
+}
+_KNOWN_P7_TRACE_IDENTITIES = (
+    frozenset(P7_TRACE_IDENTITIES.items()),
+    frozenset(_HISTORICAL_P7_TRACE_IDENTITIES.items()),
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,6 +107,10 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         if type(run_id) is not str or run_id != run.name:
             return None
         entries = read_trace_entries(trace_root)
+        if not entries or frozenset(entries[0].identities.items()) not in _KNOWN_P7_TRACE_IDENTITIES:
+            return None
+        if any(entry.identities != entries[0].identities for entry in entries):
+            return None
         seal = json.loads(seal_path.read_text(encoding="utf-8"))
         if (
             type(seal) is not dict or set(seal) != {"entry_count", "final_sha256", "sealed_at"}

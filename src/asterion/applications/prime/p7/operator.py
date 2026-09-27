@@ -71,8 +71,8 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 
 
 _RUNTIME_ID = "asterion.prime"
-_PROVIDER = "deepseek"
-_MODEL = "deepseek-v4-flash"
+_PROVIDER = "openai-codex"
+_MODEL = "gpt-6-sol"
 _MISSING = object()
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
@@ -876,13 +876,13 @@ class P7OperatorResources:
 
 
 def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
-    """Resolve only the fixed DeepSeek host from passed operator environment."""
+    """Resolve only the fixed Codex host from passed operator environment."""
 
     try:
         available = (
             isinstance(environment, Mapping)
             and model == _MODEL
-            and bool(environment.get("DEEPSEEK_API_KEY", "").strip())
+            and live.resolve_pi_agent_dir(environment)
         )
     except Exception:
         available = False
@@ -1169,22 +1169,7 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
-        # Prime's persistent-kernel coding agent requires compaction to keep
-        # context quality bounded. This is a framework-level requirement, not
-        # an opt-in: a per-run agent directory with compaction enabled is
-        # provisioned so Pi can invoke the standard summarization path.
-        agent_dir = root / ".asterion-private" / "pi-agent"
-        agent_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        (agent_dir / "settings.json").write_text(
-            json.dumps({
-                "compaction": {
-                    "enabled": True,
-                    "reserveTokens": 16384,
-                    "keepRecentTokens": 20000,
-                },
-            }),
-            encoding="utf-8",
-        )
+        agent_dir = live.resolve_pi_agent_dir(resolved)
         resolved[PI_CODING_AGENT_DIR] = str(agent_dir)
         resolved.pop(UNBOUNDED_FIRST_ROUND_ENV, None)
         if UNBOUNDED_FIRST_ROUND_ENV in environment:

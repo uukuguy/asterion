@@ -44,8 +44,8 @@ _HOST_CAPABILITIES = frozenset(
 _RUNTIME_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
-    "model": "deepseek-v4-flash",
-    "provider": "deepseek",
+    "model": "gpt-6-sol",
+    "provider": "openai-codex",
 }
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
@@ -56,8 +56,8 @@ _GAMEPLAY_HOST_CAPABILITIES = frozenset(
 _GAMEPLAY_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
-    "model": "deepseek-v4-flash",
-    "provider": "deepseek",
+    "model": "gpt-6-sol",
+    "provider": "openai-codex",
 }
 _GAMEPLAY_ARTIFACT = "prime.p7-gameplay-run.evidence"
 _GAMEPLAY_MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
