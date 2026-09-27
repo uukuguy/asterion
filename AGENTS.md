@@ -66,6 +66,10 @@ Runners receive a resolved plan, runtime, implementations, cancellation signal, 
 
 Host services are operator-owned and explicitly injected. `executor.controlled` does not itself authorize commands. The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output caps, and cancellation; it is not an OS sandbox.
 
+### P7 应用级工具
+
+P7 工具由打包的 Pi 扩展注册：TypeScript 源码中的 `register(pi)` 调用 `registerTool`，构建产物是 `src/asterion/applications/prime/resources/ipython-extension.mjs`。Python 侧只负责在 P7 operator 中建立 `P7ToolRegistry` 的元数据，并由 `_IpythonBridgeServer` 将已注册工具映射到 `P7ClientFacade`（`p7_mechanics_prior` 对应 `mechanics_prior`）。不要用 prompt 伪造注册，也不要在通用 runtime 另造一套工具注册；改工具时同步更新 TypeScript、打包资源、bridge dispatch 和对应测试。
+
 The repository `.env` already contains operator-owned backend LLM configuration. Application or operator integration may resolve that configuration and inject an exact host service; framework modules must never read `.env`, credentials, or provider settings directly. A user-facing “small verification” is one preset action: it must not ask the user for provider, model, cost, or deadline knobs. The integration enforces finite controls internally and exposes only public-safe status. Missing Native host wiring is an application-integration task, not a request for the user to budget or configure a backend.
 
 ## Route Changes by Intent
