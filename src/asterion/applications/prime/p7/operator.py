@@ -593,6 +593,7 @@ class _P7BrokerClient:
         return {
             "available_actions": list(observation.available_actions),
             "frame": observation.frame,
+            "frame_summary": summarize_frame(observation.frame),
             "levels_completed": observation.levels_completed,
             "state": observation.state,
             "win_levels": observation.win_levels,

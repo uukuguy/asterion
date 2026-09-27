@@ -41,6 +41,19 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_registered_observe_includes_frame_summary(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            client = _P7BrokerClient(ArcBroker(engine=_HistoryEngine()), recorder)
+            observed = client.observe()
+            self.assertEqual(observed["frame_summary"]["shape"], [1, 1])
+            self.assertEqual(observed["frame_summary"]["counts"], {0: 1})
+            recorder.close()
+
     def test_retry_replan_required_is_returned_without_trace_dispatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient
