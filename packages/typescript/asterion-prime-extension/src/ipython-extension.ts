@@ -428,7 +428,7 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_observe",
-      "Read the current game state: available_actions, last settled frame, levels_completed, state, win_levels. Call this *first* on a new level. The framework also injects a component summary and untried-clicks list into your observation-no-change responses, so you don't need to call p7_components or p7_untried_clicks manually.",
+      "Read the current game state: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), levels_completed, state, and win_levels. Call this *first* on a new level and use frame_summary to form a structural hypothesis before acting.",
       TypeObject({}, { additionalProperties: false }),
       "observe",
     ),

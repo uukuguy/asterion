@@ -60,6 +60,7 @@ from asterion.applications.prime.p7.prompt import (
     build_solve_prompt,
 )
 from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
+from asterion.applications.prime.p7.frame_analysis import summarize_frame
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
@@ -542,6 +543,7 @@ class _P7BrokerClient:
         return {
             "available_actions": list(observation.available_actions),
             "frame": observation.frame,
+            "frame_summary": summarize_frame(observation.frame),
             "levels_completed": observation.levels_completed,
             "state": observation.state,
             "win_levels": observation.win_levels,
