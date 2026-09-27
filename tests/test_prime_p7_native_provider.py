@@ -402,6 +402,9 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "[plan]",
             "p7_client.history(0, 32)",
             "p7_client.act_checked(plan)",
+            "p7_client.mechanics_prior()",
+            "shortest distinguishing probe",
+            "prior over the hidden action mechanics",
         ):
             self.assertIn(required, lowered)
         for forbidden in (

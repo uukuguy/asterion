@@ -76,6 +76,17 @@ Use p7_client.frame_at(sequence) only for a sequence already returned by
 history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
 
+When levels_completed is above 0, call p7_client.mechanics_prior() once before
+the first new-level probe. It summarizes bounded evidence from earlier levels:
+repeated action effects, no-effect counts, click-coordinate ranges, level
+advances, and candidate rules with confidence. Treat it as a prior over the
+hidden action mechanics, never as a route or guaranteed action sequence. For
+each candidate rule, state the current-level observation that would support or
+contradict it, then choose the shortest distinguishing probe. After every
+LEVEL_ADVANCED response, refresh mechanics_prior() and combine the refreshed
+evidence with the new settled frame; do not blindly replay an earlier route or
+discard a rule solely because the current level has different objects.
+
 Treat only broker observations and retained Python state as game information.
 Never inspect engine source, another game or run, network resources, credentials,
 or unprovided files. Do not create agents, use mocks, call online APIs, or use a
