@@ -101,6 +101,14 @@ legal gameplay action. Do not call mechanics_prior() repeatedly while the level
 has not advanced. After an act_checked mismatch or no-effect result, inspect
 the returned observation once, then dispatch a new falsifiable probe or RESET;
 do not enter another read-only planning loop.
+When a new level is entered, make the first of those read-only calls a single
+structured frame analysis through persistent ipython: import p7_client, read
+one observation, and print p7_client.summary(observation) plus a compact
+p7_client.render(observation) or component/position summary. Use that result to
+name the current objects, candidate target, and shortest distinguishing probe
+before dispatching the first action. Do not spend the call re-reading raw
+frames or the prior history; if the summary is unavailable, fall back to the
+registered p7_observe tool and proceed with one action.
 If a registered p7_act_checked call returns an unavailable/error result or
 applies zero items, immediately use the persistent ipython fallback with one
 `p7_client.act([...])` gameplay action, then observe the settled result. Do not
