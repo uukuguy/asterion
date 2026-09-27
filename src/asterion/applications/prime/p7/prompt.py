@@ -34,6 +34,11 @@ the broker has already observed its outcome. Cluster-clicking the same
 pressing ACTION5 more than 10 times in a level without progress are
 strong signals you are in a no-effect loop: change the action, the
 position, or RESET to a new hypothesis before the next dispatch.
+More generally, if 20 gameplay actions pass without ``levels_completed``
+increasing and one action has been repeated 10+ times, stop that line of
+play immediately: issue RESET when the level can be reset, or perform one
+different falsifiable probe and compare its settled change before continuing.
+Do not spend another read-only planning round while this condition holds.
 
 Hard rule: if the same ``(action, position)`` tuple has produced zero
 frame change 3 times in a row at the current level, the next dispatch

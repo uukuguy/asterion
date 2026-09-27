@@ -168,8 +168,39 @@ def analyze_model_round_snapshot(entries: tuple[PrimeTraceEntry, ...]) -> Mappin
     )
 
 
+def combine_model_round_action_evidence(
+    model_report: Mapping[str, object],
+    action_report: DiagnosticReport,
+) -> Mapping[str, object]:
+    """Add bounded gameplay evidence to the private model-round diagnosis.
+
+    Model-round signals alone can show that a model produced an action plan,
+    but they cannot show whether that plan kept making objective progress.
+    Keeping the two reports separate at the trace boundary avoids exposing
+    gameplay payloads while this small merge makes the operator diagnosis
+    useful for the next prompt adjustment.
+    """
+
+    if not isinstance(model_report, Mapping) or not isinstance(action_report, DiagnosticReport):
+        raise ValueError("diagnostic reports are unavailable")
+    result = dict(model_report)
+    result.update(
+        {
+            "repeated_action_streak": action_report.repeated_action_streak,
+            "actions_since_progress": action_report.actions_since_progress,
+        }
+    )
+    if (
+        action_report.actions_since_progress >= 20
+        and action_report.repeated_action_streak >= 10
+    ):
+        result["recommendation"] = "force-replan-after-no-progress"
+    return result
+
+
 __all__ = (
     "DiagnosticReport",
+    "combine_model_round_action_evidence",
     "analyze_model_round_snapshot",
     "analyze_model_rounds",
     "analyze_trace",

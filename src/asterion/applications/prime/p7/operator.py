@@ -30,6 +30,7 @@ from asterion.applications.prime.p7.broker import (
     _observation_digest,
 )
 from asterion.applications.prime.p7.diagnostics import (
+    combine_model_round_action_evidence,
     analyze_model_round_snapshot,
     analyze_model_rounds,
     analyze_trace,
@@ -1640,8 +1641,10 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         )
         replay_verified = True
         trace_entries = live.read_trace_entries(trace_root)
-        analyze_trace(trace_entries)
-        diagnostics["model_rounds"] = analyze_model_rounds(trace_entries)
+        action_report = analyze_trace(trace_entries)
+        diagnostics["model_rounds"] = combine_model_round_action_evidence(
+            analyze_model_rounds(trace_entries), action_report
+        )
         sealed_trace = True
         comparison_report = live.compare_if_available(root, trace_root, private)
     except Exception as error:
@@ -1722,8 +1725,9 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             if recorder is not None and "model_rounds" not in diagnostics:
                 try:
                     if sealed_trace:
-                        diagnostics["model_rounds"] = analyze_model_rounds(
-                            live.read_trace_entries(trace_root)
+                        trace_entries = live.read_trace_entries(trace_root)
+                        diagnostics["model_rounds"] = combine_model_round_action_evidence(
+                            analyze_model_rounds(trace_entries), analyze_trace(trace_entries)
                         )
                     else:
                         diagnostics["model_rounds"] = analyze_model_round_snapshot(
