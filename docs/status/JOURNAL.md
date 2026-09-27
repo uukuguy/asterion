@@ -3213,3 +3213,6 @@
 - 12:20 handoff 收口：RESUME、CURRENT-STATE、DECISIONS、MEMORY 已同步，P7 自有 Pi 边界保留。 [677555f8]
 - 12:22 修正 handoff 命令为可移植占位路径，docs-check 恢复通过。 [eb47a836]
 - 12:24 移除 handoff 中用户绝对路径，保持独立仓库文档可移植。 [64cc2a48]
+- 13:31 FT09 L5 retry stalled after 59-step prefix replay; cleanup confirmed, no new verified level [p7-live-20260927052451-e84b0f94000f367380fafe66]
+- 13:37 AR25 L5 next-level stalled after 33 new actions beyond 118-step prefix; cleanup confirmed, no new verified level [p7-live-20260927053150-11b10dba655981433304af86]
+- 14:03 已批准并提交 P7 结构化跨关先验设计 `bcb9cbe1`：把前缀回放升级为可验证规则先验，先完成离线实现与测试再做一次受控现场验证。
