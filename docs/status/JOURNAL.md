@@ -3247,3 +3247,4 @@
 - 11:32 提交 `3f865aad`：接通既有 Prime 应用工具注册的活动工具 allowlist，并保留通用 runtime 的默认 ipython 行为。
 - 11:45 提交 `5fd0219d`：依据 LS20 L3 live trace 收紧只读查询预算，避免模型在动作后重复规划停滞。
 - 11:55 记录 LS20 L3 live `p7-live-20260927192648-44682d9ca51c56d759e37bf2`：已调用 mechanics_prior，仍在 4 个新动作后停滞。
+- 12:05 提交 `73841e4e`：checked probe 未应用动作时立即回退单步 ipython act，避免模型重复失败计划。
