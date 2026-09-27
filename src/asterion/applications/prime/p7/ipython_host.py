@@ -39,7 +39,7 @@ class P7ClientError(RuntimeError):
 
 
 class P7ClientFacade:
-    """Sealed worker-visible facade containing the six game operations."""
+    """Sealed worker-visible facade containing the exact game operations."""
 
     __slots__ = ("__client", "__module_source", "__sealed")
 
@@ -124,13 +124,17 @@ class P7ClientFacade:
             self.__invoke("last_outcome_summary", level),
         )
 
+    def mechanics_prior(self) -> Mapping[str, object]:
+        """Return bounded, redacted mechanics evidence from prior actions."""
+        return cast(Mapping[str, object], self.__invoke("mechanics_prior"))
+
     def __invoke(self, name: str, *args: object) -> object:
         try:
             if self.__client is None:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if (name in {"observe", "status", "act", "act_checked"} and type(value) is not dict) or (
+            if (name in {"observe", "status", "act", "act_checked", "mechanics_prior"} and type(value) is not dict) or (
                 name in {"history", "frame_at"} and type(value) is not list
             ):
                 raise ValueError
@@ -590,12 +594,14 @@ def _valid_client_module(source: object) -> bool:
             return False
     if set(public) != {
         "act", "observe", "status", "history", "frame_at", "act_checked",
-        "positions", "diff", "summary", "render", "act_and_observe",
+        "tried_actions", "last_outcome_summary", "mechanics_prior", "positions",
+        "diff", "summary", "render", "act_and_observe",
     }:
         return False
     return (
         _exact_arguments(public["observe"], 0)
         and _exact_arguments(public["status"], 0)
+        and _exact_arguments(public["mechanics_prior"], 0)
         and _exact_arguments(public["act"], 1)
         and public["act"].args.args[0].arg == "actions"
         and _exact_arguments(public["history"], 2)
@@ -604,6 +610,8 @@ def _valid_client_module(source: object) -> bool:
         and public["frame_at"].args.args[0].arg == "sequence"
         and _exact_arguments(public["act_checked"], 1)
         and public["act_checked"].args.args[0].arg == "plan"
+        and _helper_arguments(public["tried_actions"], ("level",), (None,))
+        and _helper_arguments(public["last_outcome_summary"], ("level",), (None,))
         and _helper_arguments(public["positions"], ("values", "obs"), (None,))
         and _helper_arguments(public["diff"], ("before", "after"), ())
         and _helper_arguments(public["summary"], ("obs",), (None,))

@@ -211,6 +211,59 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         with self.assertRaises(P7ClientError):
             p7_client_module_facade(source + b"\ndef extra():\n    return 1\n")
 
+    def test_facade_exposes_mechanics_prior_with_safe_mapping_shape(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import P7ClientError, p7_client_facade
+
+        class Client:
+            def observe(self) -> dict[str, object]:
+                return {}
+
+            def status(self) -> dict[str, object]:
+                return {}
+
+            def act(self, actions: object) -> dict[str, object]:
+                return {}
+
+            def history(self, start: int, limit: int) -> list[dict[str, object]]:
+                return []
+
+            def frame_at(self, sequence: int) -> list[list[int]]:
+                return []
+
+            def act_checked(self, plan: object) -> dict[str, object]:
+                return {}
+
+            def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+                return []
+
+            def last_outcome_summary(self, level: int | None = None) -> dict[str, object]:
+                return {}
+
+            def mechanics_prior(self) -> dict[str, object]:
+                return {"available": True, "levels": [], "candidate_rules": []}
+
+        facade = p7_client_facade(Client())
+        self.assertEqual(
+            facade.mechanics_prior(),
+            {"available": True, "levels": [], "candidate_rules": []},
+        )
+
+        class Invalid(Client):
+            def mechanics_prior(self) -> list[object]:
+                return ["private-sentinel"]
+
+        with self.assertRaises(P7ClientError):
+            p7_client_facade(Invalid()).mechanics_prior()
+
+    def test_generated_module_exposes_mechanics_prior_as_zero_argument_call(self) -> None:
+        namespace: dict[str, object] = {}
+        exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)
+        calls: list[tuple[str, tuple[object, ...]]] = []
+        result = {"available": False, "reason": "history-unavailable", "current_level": 0}
+        namespace["_call"] = lambda method, *args: calls.append((method, args)) or result
+        self.assertEqual(namespace["mechanics_prior"](), result)  # type: ignore[operator]
+        self.assertEqual(calls, [("mechanics_prior", ())])
+
     def test_checked_trace_keeps_success_before_later_engine_error(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
@@ -265,6 +318,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             ) -> dict[str, object]:
                 return {"attempts": {}, "no_effect": {}}
 
+            def mechanics_prior(self) -> dict[str, object]:
+                return {"available": True, "levels": [], "candidate_rules": []}
+
         client = Client()
         server = live_module.P7ClientServer(p7_client_facade(client))
         try:
@@ -313,6 +369,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             ) -> dict[str, object]:
                 return {"attempts": {}, "no_effect": {}}
 
+            def mechanics_prior(self) -> dict[str, object]:
+                return {"available": True, "levels": [], "candidate_rules": []}
+
         server = live_module.P7ClientServer(p7_client_facade(Client()))
         try:
             for method, args in (("unknown", []), ("history", [-1, 1]), ("history", [0]), ("history", [0, 1])):
@@ -321,6 +380,62 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     reply = json.loads(server._dispatch(json.dumps(request).encode()))
                     self.assertEqual(reply, {"protocol": live_module.WORKER_PROTOCOL, "id": None, "ok": False})
                     self.assertNotIn("private history sentinel", repr(reply))
+        finally:
+            server.close()
+
+    def test_socket_dispatches_mechanics_prior_without_arguments_and_redacts_failures(self) -> None:
+        from asterion.applications.prime.p7.ipython_host import p7_client_facade
+
+        class Client:
+            def observe(self) -> dict[str, object]:
+                return {}
+
+            def status(self) -> dict[str, object]:
+                return {}
+
+            def act(self, actions: object) -> dict[str, object]:
+                return {}
+
+            def history(self, start: int, limit: int) -> list[dict[str, object]]:
+                return []
+
+            def frame_at(self, sequence: int) -> list[list[int]]:
+                return []
+
+            def act_checked(self, plan: object) -> dict[str, object]:
+                return {}
+
+            def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+                return []
+
+            def last_outcome_summary(self, level: int | None = None) -> dict[str, object]:
+                return {}
+
+            def mechanics_prior(self) -> dict[str, object]:
+                return {
+                    "available": True,
+                    "current_level": 2,
+                    "candidate_rules": [{"action": "ACTION1", "confidence": "observed"}],
+                }
+
+        server = live_module.P7ClientServer(p7_client_facade(Client()))
+        try:
+            request = {
+                "protocol": live_module.WORKER_PROTOCOL,
+                "id": 1,
+                "method": "mechanics_prior",
+                "args": [],
+            }
+            response = json.loads(server._dispatch(json.dumps(request).encode()))
+            self.assertEqual(response["ok"], True)
+            self.assertEqual(response["value"]["current_level"], 2)
+            self.assertNotIn("private", json.dumps(response))
+
+            malformed = dict(request, id=2, args=[None])
+            self.assertEqual(
+                json.loads(server._dispatch(json.dumps(malformed).encode())),
+                {"protocol": live_module.WORKER_PROTOCOL, "id": None, "ok": False},
+            )
         finally:
             server.close()
 

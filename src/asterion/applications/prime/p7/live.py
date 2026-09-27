@@ -225,7 +225,7 @@ class P7ClientServer:
     """Operator-side endpoint the restricted worker process calls over a socket.
 
     The worker never receives the live client object; it receives only the
-    six game operations through this single-threaded server, which is the
+    exact game operations through this single-threaded server, which is the
     only holder of the sealed facade.
     """
 
@@ -288,13 +288,19 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "act", "history", "frame_at", "act_checked"}
+                or request.get("method") not in {
+                    "observe", "status", "act", "history", "frame_at", "act_checked",
+                    "mechanics_prior",
+                }
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
-            if len(args) != {"observe": 0, "status": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1}[method]:
+            if len(args) != {
+                "observe": 0, "status": 0, "act": 1, "history": 2,
+                "frame_at": 1, "act_checked": 1, "mechanics_prior": 0,
+            }[method]:
                 raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
@@ -304,7 +310,9 @@ class P7ClientServer:
                 "value": value,
             }
             encoded = json.dumps(response, allow_nan=False, separators=(",", ":")).encode()
-            if method == "history" and len(json.dumps(value, allow_nan=False, separators=(",", ":")).encode()) > 16384:
+            if method in {"history", "mechanics_prior"} and len(
+                json.dumps(value, allow_nan=False, separators=(",", ":")).encode()
+            ) > 16384:
                 raise ValueError
             return encoded
         except Exception:
@@ -467,7 +475,7 @@ def client_module_source(socket_path: str) -> str:
     """The exact module the restricted worker imports to reach the game.
 
     ``p7_client_module_facade`` validates this source against a fixed shape, so
-    it stays a plain module with six public functions and no other public
+    it stays a plain module with exact public functions and no other public
     statements.
     """
 
@@ -619,11 +627,11 @@ def render(obs=None, *, x0=0, y0=0, x1=64, y1=64):
     return "\\n".join(rows)
 
 def act_and_observe(actions):
-    before = p7_observe()
-    after = p7_act(actions)
+    before = observe()
+    after = act(actions)
     return {{"act": after["batch"], "diff": diff(before, after), "summary": summary(after)}}
 
-def p7_observe():
+def observe():
     """Read the current game state.
 
     Returns the full observation dictionary: available_actions, last
@@ -632,27 +640,31 @@ def p7_observe():
     """
     return _call("observe")
 
-def p7_history(start, limit):
+def status():
+    """Read the current bounded broker status."""
+    return _call("status")
+
+def history(start, limit):
     """Read a page of session history records starting at index `start` with up to `limit` records."""
     return _call("history", start, limit)
 
-def p7_frame_at(sequence):
+def frame_at(sequence):
     """Read the settled frame at history sequence `sequence`."""
     return _call("frame_at", sequence)
 
-def p7_act_checked(plan):
+def act_checked(plan):
     """Dispatch a checked batch of actions with prediction.
 
     ``plan`` is a list of ``{{action, expect}}`` dicts. Each ``expect`` keys
     on a cell value, frame hash, levels_completed, or state. The broker
     stops at the first mismatch / no-effect / unavailable action. Use this
-    instead of bare :func:`p7_act` when you have a specific hypothesis to
+    instead of bare :func:`act` when you have a specific hypothesis to
     test; a wrong prediction costs only one tool_use call instead of an
     action slot.
     """
     return _call("act_checked", plan)
 
-def p7_tried_actions(level=None):
+def tried_actions(level=None):
     """Enumerate every ``(level, action, position)`` tuple the model has
     dispatched this run, with counts.
 
@@ -667,7 +679,7 @@ def p7_tried_actions(level=None):
     """
     return _call("tried_actions", level)
 
-def p7_last_outcome_summary(level=None):
+def last_outcome_summary(level=None):
     """Aggregate per-action counts for the current run, split into
     ``{{"attempts": {{action: count}}, "no_effect": {{action: count}}}}``.
 
@@ -677,7 +689,11 @@ def p7_last_outcome_summary(level=None):
     """
     return _call("last_outcome_summary", level)
 
-def p7_components(level=None):
+def mechanics_prior():
+    """Summarize bounded cross-level evidence from prior actions."""
+    return _call("mechanics_prior")
+
+def _p7_components(level=None):
     """Return connected-component analysis of the current settled grid.
 
     Each component is a 4-connected region of non-background cells, with
@@ -689,7 +705,7 @@ def p7_components(level=None):
     the structural layout (cart, markers, walls, etc.) without forcing the
     model to recompute connected components in Python.
     """
-    value = p7_observe()
+    value = observe()
     grid = _grid(value)
     return _components(grid)
 
@@ -697,7 +713,7 @@ def p7_components(level=None):
 def _p7_untried_clicks(level=None):
     """Return the components at ``level`` that the model has NOT yet clicked.
 
-    Combines :func:`p7_components` with :func:`p7_tried_actions` so the
+    Combines the component view with :func:`tried_actions` so the
     model can see, at a glance, which component positions are still
     unexplored. ``tried_actions`` only returns a flat list of counts;
     this function returns structured component positions that are NOT
@@ -707,8 +723,8 @@ def _p7_untried_clicks(level=None):
     been visited yet; the broker will still apply ``no_effect_guard`` on
     repeated clicks inside that component.
     """
-    components = p7_components(level)
-    tried = p7_tried_actions(level)
+    components = _p7_components(level)
+    tried = tried_actions(level)
     tried_keys = {{
         (
             item["action"],
@@ -744,7 +760,7 @@ def _p7_hypothesis(level, key, value=None):
     return hypothesis_store(level).getset(key, value)
 
 
-def p7_act(actions):
+def act(actions):
     if isinstance(actions, str):
         actions = [{{"name": actions, "data": {{}}}}]
     elif isinstance(actions, dict):
