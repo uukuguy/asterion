@@ -3198,3 +3198,6 @@
 - 10:08 SU15 L2 带压缩对照完成：同样撞 55 cap，同样 L2 没通过，但 input tokens 从 7.6M 降到 3.7M（−51%）、output 从 174K 降到 128K（−26%）。压缩机械上生效（Pi summarization 路径走通），但没解决机制识别问题。结论：压缩是 Prime 必要默认，但模型归纳能力是另一回事。
 - 10:25 P7 Retrodict 双 commit：`1253d325` ArcBroker 跟踪 (level, action, position) 与尝试计数；`b4ea95d9` 通过 P7ClientFacade 把 `tried_actions(level)` 和 `last_outcome_summary(level)` 暴露给模型，act_checked 的 observation-no-change 响应里附 no_effect_hint（包含 action、position、no_effect 次数、关卡总尝试动作数）。87 focused 测试 + Ruff 干净。下一步：跑一次对照看模型是否使用新 API。
 - 12:13 SU15 L2 三次对照完成：v1（仅 compaction）42 L2 cap-hit 失败；v2（compaction+hardcoded prompt section）模型调用 tried_actions=1 + last_outcome_summary=1 但被外部 kill；v3（compaction+framework 工具注入）42 L2 cap-hit 失败，模型也调用了 API 1 次。结论：P7ToolRegistry + build_solve_prompt 框架正确（92 测试 + Ruff 干净），模型接收到 Tool reference 提示但只调用一次不依赖——机制识别是模型归纳能力问题，不是工具可达性问题。框架工具机制留作未来能力。
+
+## 2026-09-27
+- 08:46 系统 Pi 启动故障确认为两个 npm extension 重复注册 web_search；移除重复启用项后交互启动与退出通过。
