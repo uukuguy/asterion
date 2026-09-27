@@ -71,6 +71,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
+from asterion.services.diagnostics import MemoryDiagnosticSink
 
 
 _RUNTIME_ID = "asterion.prime"
@@ -1503,6 +1504,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     reason: str | None = None
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
+    diagnostic_sink = MemoryDiagnosticSink()
     diagnostics["prediction_variant"] = variant
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
@@ -1554,6 +1556,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             host_services=resources_.host_services,
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
             signal=live.NeverCancelled(),
+            diagnostics=diagnostic_sink,
         )
         receipt = live.receipt_value(result.artifacts)
         broker = resources_.host_services["prime.arc-broker"]
@@ -1573,6 +1576,17 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         comparison_report = live.compare_if_available(root, trace_root, private)
     except Exception as error:
         failure = error
+        diagnostic_id = getattr(error, "diagnostic_id", None)
+        if type(diagnostic_id) is str:
+            try:
+                diagnostic = diagnostic_sink.get(diagnostic_id)
+            except KeyError:
+                diagnostic = None
+            if diagnostic is not None:
+                diagnostics["application_failure"] = {
+                    "stage": diagnostic.stage,
+                    "exception_type": diagnostic.exception_type,
+                }
         reason = (
             str(error)
             if isinstance(error, live.P7LiveSolveError)
