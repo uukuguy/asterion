@@ -3244,3 +3244,4 @@
 - 10:58 安装版官方 smoke 在 dotenv 回退后仍受测试夹具边界限制；临时补齐 profile 后只推进到 composed capability generic failure，夹具修改已撤销，未保留生产行为变化。
 - 11:12 提交 `d3a21fea`：把 verified P7 提示改为优先调用注册工具，并强制跨关首个工具调用为 `p7_mechanics_prior`；115 项 focused 测试通过。
 - 11:20 提交 `432a4c0c`：明确 Prime 应用级工具注册是通用机制，P7 为当前实用验证。
+- 11:32 提交 `3f865aad`：接通既有 Prime 应用工具注册的活动工具 allowlist，并保留通用 runtime 的默认 ipython 行为。
