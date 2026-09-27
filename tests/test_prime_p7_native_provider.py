@@ -403,6 +403,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "p7_client.history(0, 32)",
             "p7_client.act_checked(plan)",
             "p7_client.mechanics_prior()",
+            "registered p7_mechanics_prior",
+            "next tool call must be the registered p7_mechanics_prior",
             "shortest distinguishing probe",
             "prior over the hidden action mechanics",
         ):
