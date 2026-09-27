@@ -235,7 +235,7 @@ export class IpythonBridge {
     );
     await writeAll(
       this.#descriptor,
-      Buffer.from(request, "utf8"),
+      Buffer.from(`${request}\n`, "utf8"),
     );
     const executeResult = await this.#withCancellation(
       this.#readResult(requestId),
