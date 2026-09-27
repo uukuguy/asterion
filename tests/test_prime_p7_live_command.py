@@ -491,7 +491,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
         left, right = socket.socketpair()
         host = Host()
-        server = _IpythonBridgeServer(left, host, host.client)
+        recording_dir = tempfile.TemporaryDirectory()
+        recorder = PrimeTraceRecorder(Path(recording_dir.name))
+        identities = {"model_id": "gpt-6-sol", "reasoning_id": "asterion.prime"}
+        server = _IpythonBridgeServer(left, host, host.client, recorder, identities)
         try:
             frames = [
                 ("observe", {}),
@@ -533,6 +536,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             accounting = server.private_accounting()
             self.assertEqual(accounting["method_calls_total"], len(frames))
             self.assertEqual(accounting["method_calls_mechanics_prior"], 1)
+            tool_calls = recorder.snapshot()
+            self.assertEqual(len(tool_calls), len(frames))
+            self.assertEqual(tool_calls[2].kind, "arc.tool.call")
+            self.assertEqual(tool_calls[2].payload, {"method": "mechanics_prior"})
             malformed = json.loads(server._dispatch(json.dumps({
                 "method": "history",
                 "params": {"start": 0, "limit": 1, "extra": True},
@@ -547,6 +554,8 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         finally:
             right.close()
             server.close()
+            recorder.close()
+            recording_dir.cleanup()
 
     def test_worker_exposes_history_frame_and_checked_plan(self) -> None:
         namespace: dict[str, object] = {}

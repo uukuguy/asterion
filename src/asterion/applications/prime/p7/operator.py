@@ -172,10 +172,14 @@ class _IpythonBridgeServer:
         channel: socket.socket,
         host: PersistentIpythonHost,
         client: object,
+        recorder: PrimeTraceRecorder | None = None,
+        identities: Mapping[str, str] | None = None,
     ) -> None:
         self._channel = channel
         self._host = host
         self._client = p7_client_facade(client)
+        self._recorder = recorder
+        self._identities = identities
         self._method_calls = {name: 0 for name in _BRIDGE_METHODS}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
@@ -325,6 +329,15 @@ class _IpythonBridgeServer:
         try:
             if method in self._method_calls:
                 self._method_calls[method] = min(5000, self._method_calls[method] + 1)
+                if self._recorder is not None and self._identities is not None:
+                    try:
+                        self._recorder.append(
+                            "arc.tool.call",
+                            self._identities,
+                            {"method": method},
+                        )
+                    except Exception:
+                        pass
             facade = self._client
             if method in {"observe", "status", "mechanics_prior"}:
                 if type(params) is not dict or params:
@@ -1239,7 +1252,9 @@ def build_p7_operator_resources(
             PrimeGameplayTrace(broker, trace, engine.guid, identities)
             if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
-        bridge = _IpythonBridgeServer(parent, ipython, prediction_client)
+        bridge = _IpythonBridgeServer(
+            parent, ipython, prediction_client, trace, identities
+        )
         bridge.start()
         parent = None
         return P7OperatorResources(
