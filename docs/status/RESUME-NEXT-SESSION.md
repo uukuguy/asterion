@@ -1,68 +1,59 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-09-27 12:20 CST. Final session closeout.
+> Updated: 2026-09-27 16:16 CST. Session remains active; this is not a final handoff.
 
 ## TL;DR
 
-1. The system Pi startup conflict was fixed by removing the duplicate `web_search` extension; global Pi now starts with `openai-codex/gpt-6-sol` and high reasoning.
-2. P7 currently initializes its own Pi from Asterion operator configuration. Provider/model selection is in `.env`; P7 consumes the resolved environment and does not parse `.env` itself.
-3. The current code does not yet implement one shared Asterion Pi base for Prime/native runtimes. That architecture is explicitly deferred for later discussion.
+P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. No new live game has been run after these changes, so cross-level live improvement is not yet verified.
 
 ## 已验证事实
 
-- Host Pi `0.87.1` starts after removing the duplicate `@counterposition/pi-web-search` registration; the backup is outside this repository at `~/.pi/agent/settings.json.before-web-search-conflict-20260927-084346.bak`.
-- A zero-prompt guest RPC resolved `provider=openai-codex`, `model=gpt-6-sol`, `thinkingLevel=high`, and automatic compaction through the operator Pi profile.
-- `.env` contains the operator-owned selection:
-  ```env
-  ASTERION_PRIME_PROVIDER=openai-codex
-  ASTERION_PRIME_MODEL=gpt-6-sol
-  ```
-- `src/asterion/applications/prime/operator_config.py` is the Asterion configuration boundary. It loads `.env` and overlays the invoking environment. P7, official gameplay, and run-story receive the resolved mapping.
-- P7 selection and runtime options now carry the configured provider/model dynamically. Focused Prime tests: 93 passed; Ruff passed; `make docs-check` passed; `make asterion-prime-p7-retry-preflight GAME=ft09` passed.
-- Relevant commits are `05df517b`, `7f45696b`, `d650c9fb`, and journal commits `0ae9bccf`, `99b0e4d6`.
-- No P7/Pi process remains, and the repository worktree is clean at handoff.
+- Design and plan for structured cross-level prior were approved and committed as `bcb9cbe1` and `5910b645`.
+- `build_mechanics_prior()` is deterministic, bounded, redacted, immutable-input safe, and accepts only ACTION1–ACTION7 with level bounds. Implementation: `ec69aa51`, boundary fix: `08f25fa2`.
+- `_P7BrokerClient.mechanics_prior()` pages bounded detached history and returns a capped safe mapping.
+- Pi registers `p7_mechanics_prior` alongside the existing P7 tools. The Python `_IpythonBridgeServer` injects the live prediction client, allowlists methods, decodes exact parameter shapes, and returns the five-field method-result envelope.
+- The TypeScript method-call writer now appends the newline required by the Python newline-delimited socket server; packaged resource was rebuilt. Bridge repair commits: `c4b390b5`, compatibility fix `7f463b65`, framing fix `57342951`.
+- Verified solve guidance calls `p7_client.mechanics_prior()` on later levels, treats results as evidence rather than routes, and requests a falsifiable distinguishing probe. Legacy prompt remains unchanged. Commit: `df70f09d`.
+- Verification passed:
+  - `uv run python -m unittest -q tests.test_prime_p7_mechanics_prior tests.test_prime_p7_live_command tests.test_prime_p7_native_broker tests.test_prime_p7_native_provider` — 115 passed.
+  - `uv run python -m unittest -v tests.test_prime_extension_build` — 8 passed.
+  - TypeScript typecheck, focused registration test, Ruff, and diff-check passed.
+- Full TypeScript test suite still has its pre-existing context-witness fixture path failures when invoked from the repository root; this is separate from P7 bridge registration.
 
 ## 当前判断
 
-- Keep the current bounded route: P7 initializes its own Pi using the injected entry path, agent profile, provider, and model.
-- The shared-base architecture should be designed later at Asterion initialization level and then injected into the Prime/native runtime families. Do not widen the present P7 task into that consolidation.
-- The current P7 path is `p7/operator.py → PrimeLaunch → AsterionPrimeSession → PiRpcSession`. It uses the operator-injected Pi entry; it is not the same as the old Prime-agent checkout path.
+- The implementation boundary is ready for one bounded live verification using a game with a verified replayed prefix and an unfinished next level.
+- The prior is intentionally evidence-only: it summarizes repeated effects, no-effect counts, click ranges, advances, and confidence; it does not synthesize a route or authorize actions.
+- A legacy client without `mechanics_prior` receives an empty safe prior for compatibility; the live prediction client implements the real method.
 
 ## 历史归档
 
-- The earlier “P7 migration to GPT-6-Sol” framing is superseded by environment-driven Pi selection and the temporary P7-owned initialization boundary.
-- The generic `pi.reference` factory, Prime `AsterionPrimeSession`, P1/native backend, P7 operator, and legacy Prime-agent local entry remain separate historical/current paths. They were recorded as scattered ownership, not consolidated.
-- The first Codex FT09 retry reached the model and emitted usage, then stopped after the five-minute no-action guard. It produced only a stall receipt and no verified new level; no official submission was made.
+- Prompt-only tool listing was insufficient; prior GPT-6-Sol runs stalled at the replay prefix with no new actions.
+- Earlier bridge tests covered the old worker socket but not the actual Pi Unix bridge. That gap caused the parameter, result-envelope, injected-client, and newline-framing fixes above.
+- Existing successful FT09 and SU15 runs remain historical evidence; they do not prove the new structured prior improves live solving.
 
 ## 未完成边界
 
-- A shared Asterion Pi base component is not implemented or end-to-end verified.
-- P1/native still has its own Pi construction and historical DeepSeek preset; this session did not migrate it.
-- Full live P7 Codex solving remains unverified. The focused suite passes, but `tests.test_prime_p7_live_command` retains seven pre-existing generated-worker/facade errors outside this configuration change.
-- No claim is made that Prime/native can already share one initialized Pi process or one lifecycle owner.
+- No post-change live run has shown that the model actually calls `p7_mechanics_prior` and uses it to solve a new level.
+- No claim is made that all games or hidden rules are solved, or that the current model will generalize from one prior.
+- The full npm test suite remains broader than the focused registration test and retains unrelated fixture-harness failures.
 
 ## 下一动作
 
-1. Resume by reading `docs/status/CURRENT-STATE.md`, this file, `docs/status/DECISIONS.md`, and the latest `JOURNAL.md` entries.
-2. If continuing P7, use the existing `.env` provider/model keys and run only bounded preflight or explicitly authorized live work.
-3. Before changing P1/native or introducing a shared Pi component, hold the architecture discussion and define the Asterion initialization/injection contract.
+1. Run one explicitly bounded P7 live verification on a replayed-prefix game with a next-level target; inspect tool-call trace for `p7_mechanics_prior`, action count, sealed/replay/cleanup evidence, and terminal reason.
+2. If the tool is not called, adjust only verified prompt/tool descriptions after recording the trace; do not infer a bridge failure without socket evidence.
+3. Keep the live result as evidence until a second independent run confirms behavior.
 
-## Ready-to-paste commands / configs
+## Ready commands
 
 ```bash
 cd <asterion-repo>
-project-state resume
-make asterion-prime-p7-retry-preflight GAME=ft09
 uv run python -m unittest -q \
-  tests.test_prime_arc_agi_3_run_story \
-  tests.test_prime_p7_native_provider \
-  tests.test_prime_p7_official_operator \
-  tests.test_prime_p7_official \
-  tests.test_prime_p7_solutions \
-  tests.test_prime_p7_pi_model_config
+  tests.test_prime_p7_mechanics_prior \
+  tests.test_prime_p7_live_command \
+  tests.test_prime_p7_native_broker \
+  tests.test_prime_p7_native_provider
+npm run typecheck --prefix packages/typescript/asterion-prime-extension
 ```
 
-```env
-ASTERION_PRIME_PROVIDER=openai-codex
-ASTERION_PRIME_MODEL=gpt-6-sol
-```
+The working tree intentionally retains the pre-existing scratch changes in `.superpowers/sdd/task-1-report.md`; do not revert them blindly.
