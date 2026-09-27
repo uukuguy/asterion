@@ -3241,3 +3241,4 @@
 - 10:46 `make promotion-check` 未通过：隔离 venv 缺少 `python-dotenv`，`p7.official_operator` 导入失败，汇总 5 failures/2 errors；该结果标记 external-limited，不晋级为 PASS。
 - 10:47 提交 `4585664d` 与 `6bf2633a`：记录 promotion-check 的隔离依赖限制，避免把失败门禁误报为实现回归或通过。
 - 10:52 提交 `f7ba5f1c`：为无可选依赖的 installed-wheel smoke test 增加惰性 `dotenv` 与受限 `.env` 回退；116 项 focused 测试通过，官方 fixture 后续仍受 host preflight 限制。
+- 10:58 安装版官方 smoke 在 dotenv 回退后仍受测试夹具边界限制；临时补齐 profile 后只推进到 composed capability generic failure，夹具修改已撤销，未保留生产行为变化。
