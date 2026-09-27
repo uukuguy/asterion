@@ -57,4 +57,4 @@ uv run python -m unittest -q \
 npm run typecheck --prefix packages/typescript/asterion-prime-extension
 ```
 
-The working tree intentionally retains the pre-existing scratch changes in `.superpowers/sdd/task-1-report.md`; do not revert them blindly.
+The previously retained `.superpowers/sdd/task-1-report.md` scratch changes were reviewed and committed in `697da942`; the working tree is clean.
