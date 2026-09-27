@@ -107,6 +107,10 @@ legal gameplay action. Do not call mechanics_prior() repeatedly while the level
 has not advanced. After an act_checked mismatch or no-effect result, inspect
 the returned observation once, then dispatch a new falsifiable probe or RESET;
 do not enter another read-only planning loop.
+If two checked predictions mismatch at the same level, stop batching checked
+plans: use one-item probes with a newly stated expected change, or RESET and
+rebuild the hypothesis. A mismatch is evidence against the prediction, not a
+reason to submit another unchecked batch of the same shape.
 When a new level is entered, make the first of those read-only calls a single
 structured frame analysis through persistent ipython: import p7_client, read
 one observation, and print p7_client.summary(observation) plus a compact
