@@ -114,7 +114,16 @@ class MechanicsPriorTests(unittest.TestCase):
         self.assertNotIn("pixels", rendered)
 
     def test_empty_and_malformed_rows_are_safe(self):
-        result = build_mechanics_prior([{}, {"action": "RESET"}, {"action": "ACTION1"}], current_level=3)
+        result = build_mechanics_prior(
+            [
+                {},
+                {"action": "RESET"},
+                {"action": "ACTION_SECRET", "levels_completed": 0, "changed_cell_count": 1},
+                {"action": "ACTION1", "levels_completed": 64, "changed_cell_count": 1},
+                {"action": "ACTION1"},
+            ],
+            current_level=3,
+        )
         self.assertEqual(result["prefix_actions"], 0)
         self.assertFalse(result["available"])
         self.assertEqual(result["current_level"], 3)

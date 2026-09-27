@@ -10,6 +10,7 @@ _MAX_RECORDS = 512
 _MAX_CELLS = 16
 _MAX_RULES = 32
 _MAX_LEVELS = 64
+_ACTIONS = frozenset(f"ACTION{index}" for index in range(1, 8))
 
 
 @dataclass(frozen=True)
@@ -34,9 +35,9 @@ def _record(row: Mapping[str, object], fallback_sequence: int) -> _Record | None
     action = row.get("action")
     level = row.get("levels_completed")
     changed = row.get("changed_cell_count")
-    if not isinstance(action, str) or not action.startswith("ACTION"):
+    if not isinstance(action, str) or action not in _ACTIONS:
         return None
-    if type(level) is not int or level < 0 or level > _MAX_LEVELS:
+    if type(level) is not int or level < 0 or level >= _MAX_LEVELS:
         return None
     if type(changed) is not int or changed < 0:
         return None
