@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-28 10:35 CST. Session remains active; this is not a final handoff.
+> Updated: 2026-09-28 12:40 CST. Session remains active; this is not a final handoff.
 
 ## TL;DR
 
-P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. A controlled LS20 L3 run after activating the existing Prime application tool allowlist recorded `mechanics_prior` and other registered bridge calls, then stalled after four new actions; no level advance is verified. Cross-level live improvement remains unverified.
+P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. The latest controlled LS20 L3 run recorded the registered prior path, applied seven new actions including RESET, then stopped after a 300-second no-action stall with cleanup confirmed; no level advance is verified. Cross-level live improvement remains unverified.
 
 ## 已验证事实
 
@@ -42,14 +42,15 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - FT09 second run `p7-live-20260927083252-0bd5aa566c21a90c48c60cf7` ended `child-evidence-invalid`; private accounting shows zero bridge calls, worker cell count 0, two usage events, and successful prefix replay/seal/cleanup. The native runtime error is intentionally redacted to a generic application failure; operator now retains private failure stage/type when a composed capability diagnostic is available.
 - FT09 fourth run `p7-live-20260927170356-0499ca87ddaeba7c4a2d6ce8` recorded `application_failure={stage: capability.execute, exception_type: ProtocolError}`, zero bridge calls, worker cell count 0, and successful prefix replay/seal/cleanup. This places the failure before P7 tool dispatch.
 - LS20 L3 run `p7-live-20260927192648-44682d9ca51c56d759e37bf2` recorded 4 `mechanics_prior`, 6 `act_checked`, and 98 total actions including the 94-action verified prefix; it stalled after four new actions with no level advance. This confirms the registered tool path is live and moves the remaining issue to model planning/action selection.
+- LS20 L3 run `p7-live-20260927201952-f8fa61c11bdff7da4b441230` recorded 3 `mechanics_prior`, 12 `act_checked`, 7 `observe`, and 101 total actions including the 94-action verified prefix. The new sequence was `ACTION2, ACTION1, ACTION3, ACTION4, ACTION2, RESET, ACTION1`; it remained at level 2 and produced a private stall receipt with `action_count=101`, `stall_seconds=300`, and `cleanup_complete=true`. The manifest is `execution-stalled-evidence-invalid` because the interrupted run was not sealed; this is execution-stall evidence, not a verified solve.
 - No claim is made that all games or hidden rules are solved, or that the current model will generalize from one prior.
 - The full npm test suite remains broader than the focused registration test and retains unrelated fixture-harness failures.
 
 ## 下一动作
 
-1. Re-run one bounded LS20 L3 attempt after the read-only planning-loop guard (`5fd0219d`), then inspect action count and registered method calls.
-2. Keep the FT09 pre-tool failures as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
-3. If the guarded run still stalls, inspect its action-level evidence before changing mechanics prior or runtime behavior.
+1. Inspect the latest LS20 L3 action-level evidence and decide whether the next intervention should target checked-plan usage or model geometry analysis; do not change registration/runtime wiring.
+2. Keep the FT09 pre-tool failures and the three LS20 L3 stalls as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
+3. Run another bounded attempt only after an evidence-based prompt or model-session change, and track it at startup, first actions, and termination.
 
 ## Ready commands
 
