@@ -3234,3 +3234,4 @@
 - 09:38 RESUME 修正为工作树 clean，task report 已审查提交，不再保留未跟踪状态。
 - 09:55 私有 trace 增加 `arc.tool.call` 方法名事件，stall 进程终止后仍可审计 Pi 工具调用；46 live-command tests 通过（`17d4d708`）。
 - 10:20 第四次 FT09 有界验证 `p7-live-20260927170356-0499ca87ddaeba7c4a2d6ce8`：`application_failure={stage:capability.execute,exception_type:ProtocolError}`，0 bridge calls、worker 0、prefix replay/seal/cleanup 成功；故障早于 Pi 工具调用。
+- 10:22 RESUME 更新为四次 FT09 验证；后续不再消耗 FT09 live budget，先诊断 native ProtocolError 或更换 Pi session/provider（`92b4e614`）。
