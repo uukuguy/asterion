@@ -3227,3 +3227,4 @@
 - 16:42 为区分模型未用工具与桥接失败，加入私有 bridge method-call 标量 accounting（含 mechanics_prior 次数），70 个 P7 相关测试通过（`21fa5a2e`）。
 - 16:44 RESUME 下一动作更新为使用 bridge method accounting 做第二次有界 replay-prefix 验证（`cbb390ed`）。
 - 2026-09-28 FT09 第二次有界验证 `p7-live-20260927083252-0bd5aa566c21a90c48c60cf7`：`child-evidence-invalid`，prefix 59/L5，0 bridge method calls、worker 0、cleanup/replay/seal true；Pi 在首轮 usage 后未进入工具调用，需查 runtime 子进程错误证据。
+- 09:10 RESUME 更新为 2026-09-28：第二次 FT09 在首个 bridge 调用前 runtime 失败，当前不再修改桥接，保留为边界证据（`d7daa2cc`）。
