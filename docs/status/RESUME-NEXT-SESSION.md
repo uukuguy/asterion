@@ -50,7 +50,7 @@
 ## Ready-to-paste commands / configs
 
 ```bash
-cd /Users/sujiangwen/sandbox/agentic-2026/asterion
+cd <asterion-repo>
 project-state resume
 make asterion-prime-p7-retry-preflight GAME=ft09
 uv run python -m unittest -q \
