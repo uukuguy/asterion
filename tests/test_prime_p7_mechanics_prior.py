@@ -1,9 +1,74 @@
 import unittest
+from pathlib import Path
+import tempfile
 
+from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
+from asterion.applications.prime.p7.operator import _P7BrokerClient
+from asterion.applications.prime.p7.broker import ArcStatus
 
 
 class MechanicsPriorTests(unittest.TestCase):
+    def test_client_pages_bounded_history_and_redacts_identity_and_frames(self):
+        class Broker:
+            game = type("Game", (), {"target_level": 3})()
+
+            def __init__(self):
+                self.calls = []
+
+            def status(self):
+                return ArcStatus(300, 2, 100, "active")
+
+            def history(self, start, limit):
+                self.calls.append((start, limit))
+                return [
+                    {
+                        "sequence": index,
+                        "action": "ACTION1",
+                        "data": {},
+                        "changed_cell_count": 0,
+                        "changed_cells": [],
+                        "levels_completed": index // 32,
+                        "state": "NOT_FINISHED",
+                        "run_id": "private",
+                        "frame": [["secret"]],
+                    }
+                    for index in range(start, min(start + limit, 300))
+                ]
+
+            journal = ()
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = Broker()
+            result = _P7BrokerClient(broker, recorder).mechanics_prior()
+            recorder.close()
+        self.assertLessEqual(len(broker.calls), 8)
+        self.assertTrue(all(limit == 32 for _, limit in broker.calls))
+        self.assertTrue(result["available"])
+        rendered = repr(result)
+        self.assertNotIn("private", rendered)
+        self.assertNotIn("secret", rendered)
+
+    def test_client_history_failure_returns_scalar_safe_status(self):
+        class Broker:
+            game = type("Game", (), {"target_level": 3})()
+            journal = ()
+
+            def status(self):
+                return ArcStatus(4, 1, 20, "active")
+
+            def history(self, start, limit):
+                raise RuntimeError("private broker detail")
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            result = _P7BrokerClient(Broker(), recorder).mechanics_prior()
+            recorder.close()
+        self.assertEqual(result["reason"], "history-unavailable")
+        self.assertEqual(result["levels_completed"], 1)
+        self.assertNotIn("private", repr(result))
+
     def test_summarizes_levels_coordinates_advances_and_confidence(self):
         records = [
             {"sequence": 1, "action": "ACTION1", "data": {}, "changed_cell_count": 0,

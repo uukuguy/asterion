@@ -59,6 +59,7 @@ from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
     build_solve_prompt,
 )
+from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
@@ -331,6 +332,60 @@ class _P7BrokerClient:
             return page
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
+
+    def mechanics_prior(self) -> dict[str, object]:
+        """Return bounded, redacted mechanics evidence from broker history."""
+        try:
+            status = self._broker.status()
+            latest = status.primitive_actions
+            records: list[dict[str, object]] = []
+            start = 0
+            for _ in range(8):
+                page = self._broker.history(start, 32)
+                self._count("history_queries")
+                self._count("history_records_returned", len(page))
+                # Public history is already detached, but detach again before
+                # handing it to the summarizer so it cannot retain broker data.
+                records.extend(json.loads(json.dumps(page, separators=(",", ":"))))
+                if not page or page[-1].get("sequence") >= latest or len(page) < 32:
+                    break
+                next_sequence = page[-1].get("sequence")
+                if type(next_sequence) is not int or next_sequence < start:
+                    raise ArcBrokerError("unavailable")
+                start = next_sequence + 1
+            result = build_mechanics_prior(records, current_level=status.levels_completed)
+            return self._cap_mechanics_prior(result)
+        except Exception:
+            try:
+                status = self._broker.status()
+            except Exception:
+                try:
+                    status = self._broker.terminal_snapshot().status
+                except Exception:
+                    status = ArcStatus(0, 0, 0, "unavailable")
+            return {
+                "available": False,
+                "reason": "history-unavailable",
+                **self._status_view(status),
+            }
+
+    @staticmethod
+    def _cap_mechanics_prior(result: dict[str, object]) -> dict[str, object]:
+        """Keep serialized evidence within the public host-service budget."""
+        if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode()) <= 16384:
+            return result
+        capped = dict(result)
+        for key in ("levels", "candidate_rules", "level_advances"):
+            value = capped.get(key)
+            if isinstance(value, list):
+                capped[key] = value[:8]
+            if len(json.dumps(capped, separators=(",", ":"), ensure_ascii=False).encode()) <= 16384:
+                return capped
+        return {
+            key: capped[key]
+            for key in ("available", "prefix_actions", "highest_verified_level", "current_level")
+            if key in capped
+        }
 
     def frame_at(self, sequence: int) -> list[list[int]]:
         try:
@@ -1300,6 +1355,15 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             "at this level with no observed frame change."
         ),
         signature="p7_client.last_outcome_summary(level=None)",
+        category="retrodict",
+    ))
+    tool_registry.register(Tool(
+        name="mechanics_prior",
+        description=(
+            "Summarize bounded cross-level mechanics evidence from prior actions. "
+            "The result is evidence for planning, not a route or executable plan."
+        ),
+        signature="p7_client.mechanics_prior()",
         category="retrodict",
     ))
     tool_registry.register(Tool(

@@ -31,6 +31,16 @@ does not read `.env`, ambient credentials, or provider settings.
 - `tests/test_dci_pi_rpc_recovery.py`: asserts existing recovery JSON frames
   flow byte-for-byte through the common transport seam.
 
+## P7 Task 2 Addendum
+
+Implemented `_P7BrokerClient.mechanics_prior()` with eight-page maximum history
+paging (32 records per page), detached redacted records, scalar-only unavailable
+fallbacks, and serialized evidence capping. Registered the
+`p7_client.mechanics_prior()` tool with evidence-versus-route wording.
+
+Verification: focused P7 mechanics-prior and native-broker unittest suite passed
+(50 tests); Ruff passed for all assigned files.
+
 ## TDD RED evidence
 
 Exact command:
