@@ -3220,3 +3220,4 @@
 - 14:36 独立回归发现旧客户端装配兼容性回归并修复提交 `7f463b65`：legacy facade 无 mechanics_prior 时返回空先验；115 个 P7 focused tests、Ruff 与 diff-check 通过。
 - 14:49 独立桥接复核发现 method_call 缺少换行分帧，提交 `57342951` 修复 TypeScript 与 packaged resource；否则真实 Pi→Python 调用会等待超时。
 - 14:55 verified solve prompt now instructs structured cross-level prior use and falsifiable distinguishing probes; legacy prompt remains untouched (`df70f09d`).
+- 15:02 收紧 mechanics prior 输入边界：仅接受 ACTION1–ACTION7，拒绝被摘要截断的 level 64；115 个 focused tests 通过（`08f25fa2`）。
