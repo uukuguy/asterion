@@ -80,6 +80,28 @@ class TestPrimeP7Diagnostics(unittest.TestCase):
             self.assertEqual(report["recommendation"], "reinforce-hypothesis-to-action-link")
             self.assertNotIn("sentinel", repr(report))
 
+    def test_model_round_snapshot_is_available_before_trace_seal(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            identities = {"model_id": "deepseek-r1", "reasoning_id": "sol"}
+            recorder.append(
+                "prime.model.round",
+                identities,
+                {
+                    "round_index": 0,
+                    "prompt_bytes": 1,
+                    "prompt_sha256": "sha256:" + "a" * 64,
+                    "output_bytes": 1,
+                    "output_sha256": "sha256:" + "b" * 64,
+                    "prompt_signals": [],
+                    "output_signals": [],
+                },
+            )
+            from asterion.applications.prime.p7.diagnostics import analyze_model_round_snapshot
+            report = analyze_model_round_snapshot(recorder.snapshot())
+            self.assertEqual(report["round_count"], 1)
+            self.assertEqual(report["recommendation"], "require-action-after-planning")
+
     def test_repeated_noop_and_resource_reset_are_labeled(self) -> None:
         report = analyze_trace(noop_then_life_loss_trace())
 

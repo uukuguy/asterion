@@ -120,11 +120,7 @@ def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
     )
 
 
-def analyze_model_rounds(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
-    """Summarize model guidance uptake without exposing prompt or prose."""
-
-    entries = validate_trace(entries)
-    rounds = tuple(entry for entry in entries if entry.kind == "prime.model.round")
+def _model_round_report(rounds: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
     read_only = 0
     planned_actions = 0
     prior_rounds = 0
@@ -153,4 +149,28 @@ def analyze_model_rounds(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, o
     }
 
 
-__all__ = ("DiagnosticReport", "analyze_model_rounds", "analyze_trace")
+def analyze_model_rounds(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
+    """Summarize sealed model guidance uptake without exposing prompt or prose."""
+
+    entries = validate_trace(entries)
+    return _model_round_report(
+        tuple(entry for entry in entries if entry.kind == "prime.model.round")
+    )
+
+
+def analyze_model_round_snapshot(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
+    """Summarize recorder snapshots while a live trace is still unsealed."""
+
+    if type(entries) is not tuple or any(type(entry) is not PrimeTraceEntry for entry in entries):
+        raise ValueError("model diagnostics are unavailable")
+    return _model_round_report(
+        tuple(entry for entry in entries if entry.kind == "prime.model.round")
+    )
+
+
+__all__ = (
+    "DiagnosticReport",
+    "analyze_model_round_snapshot",
+    "analyze_model_rounds",
+    "analyze_trace",
+)

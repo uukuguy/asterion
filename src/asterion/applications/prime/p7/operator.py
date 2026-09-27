@@ -29,7 +29,11 @@ from asterion.applications.prime.p7.broker import (
     Tool,
     _observation_digest,
 )
-from asterion.applications.prime.p7.diagnostics import analyze_model_rounds, analyze_trace
+from asterion.applications.prime.p7.diagnostics import (
+    analyze_model_round_snapshot,
+    analyze_model_rounds,
+    analyze_trace,
+)
 from asterion.applications.prime.p7.game import (
     ArcGameContract,
     DEFAULT_GAME,
@@ -1714,11 +1718,17 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                         )
                     ):
                         sealed_trace = True
-            if sealed_trace and "model_rounds" not in diagnostics:
+            recorder = getattr(getattr(resources_, "_prediction_client", None), "_recorder", None)
+            if recorder is not None and "model_rounds" not in diagnostics:
                 try:
-                    diagnostics["model_rounds"] = analyze_model_rounds(
-                        live.read_trace_entries(trace_root)
-                    )
+                    if sealed_trace:
+                        diagnostics["model_rounds"] = analyze_model_rounds(
+                            live.read_trace_entries(trace_root)
+                        )
+                    else:
+                        diagnostics["model_rounds"] = analyze_model_round_snapshot(
+                            recorder.snapshot()
+                        )
                 except Exception:
                     pass
             # The launch seam carries plain data only, so there is no live Pi
