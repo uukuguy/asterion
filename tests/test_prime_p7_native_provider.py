@@ -189,10 +189,19 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             def observe(self):
                 return ArcObservation(("ACTION1",), (((0, 0),),), 2, "NOT_FINISHED", 3)
 
+            def tried_actions(self, level):
+                del level
+                return [{"level": 2, "action": "ACTION1", "count": 10, "position": None}]
+
+            def last_outcome_summary(self, level):
+                return {"attempts": {"ACTION1": 10}, "no_effect": {"ACTION1": 3}}
+
         prompt = _p7_continuation_prompt(Broker(), 1)
         self.assertIn("Round 1", prompt)
         self.assertIn("actions_remaining", prompt)
         self.assertIn("frame_summary", prompt)
+        self.assertIn("force-replan-after-repeated-action", prompt)
+        self.assertIn("tried_summary", prompt)
         self.assertIn("one falsifiable gameplay action", prompt)
 
     def test_p7_runtime_terminal_predicate_stops_after_game_over(self) -> None:

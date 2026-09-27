@@ -94,6 +94,40 @@ def _p7_continuation_prompt(broker: ArcBroker, round_index: int) -> str:
         raise RuntimeFactoryError(_ERROR)
     status = broker.status()
     observation = broker.observe()
+    tried_summary: Mapping[str, object] = {}
+    tried_actions = getattr(broker, "tried_actions", None)
+    last_outcome_summary = getattr(broker, "last_outcome_summary", None)
+    if callable(tried_actions) and callable(last_outcome_summary):
+        tried = tried_actions(observation.levels_completed)
+        top_repeated = sorted(
+            (
+                item
+                for item in tried
+                if isinstance(item, Mapping)
+                and type(item.get("count")) is int
+                and not isinstance(item.get("count"), bool)
+            ),
+            key=lambda item: (-item["count"], str(item.get("action", ""))),
+        )[:5]
+        outcome = last_outcome_summary(observation.levels_completed)
+        tried_summary = {
+            "attempts": outcome.get("attempts", {}) if isinstance(outcome, Mapping) else {},
+            "no_effect": outcome.get("no_effect", {}) if isinstance(outcome, Mapping) else {},
+            "top_repeated": top_repeated,
+        }
+    top_count = max(
+        (
+            item.get("count", 0)
+            for item in tried_summary.get("top_repeated", ())
+            if isinstance(item, Mapping)
+        ),
+        default=0,
+    )
+    action_guard = (
+        "force-replan-after-repeated-action"
+        if top_count >= 10
+        else "no-repetition-threshold"
+    )
     state = {
         "available_actions": list(observation.available_actions),
         "frame_summary": summarize_frame(observation.frame),
@@ -104,12 +138,16 @@ def _p7_continuation_prompt(broker: ArcBroker, round_index: int) -> str:
         "primitive_actions": status.primitive_actions,
         "target_level": broker.game.target_level,
         "terminal_reason": status.terminal_reason,
+        "tried_summary": tried_summary,
+        "action_guard": action_guard,
     }
     return (
         f"Continue Round {round_index} from this application-supplied settled state. "
         "Treat it as authoritative. Before another read-only query, perform one "
         "falsifiable gameplay action or RESET that distinguishes the current "
-        "hypothesis; record the expected changed region and stop condition.\n"
+        "hypothesis; record the expected changed region and stop condition. "
+        "If action_guard is force-replan-after-repeated-action, stop repeating "
+        "that action and RESET or switch to one different probe.\n"
         + json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
 
