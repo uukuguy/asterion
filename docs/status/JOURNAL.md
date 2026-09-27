@@ -3235,3 +3235,4 @@
 - 09:55 私有 trace 增加 `arc.tool.call` 方法名事件，stall 进程终止后仍可审计 Pi 工具调用；46 live-command tests 通过（`17d4d708`）。
 - 10:20 第四次 FT09 有界验证 `p7-live-20260927170356-0499ca87ddaeba7c4a2d6ce8`：`application_failure={stage:capability.execute,exception_type:ProtocolError}`，0 bridge calls、worker 0、prefix replay/seal/cleanup 成功；故障早于 Pi 工具调用。
 - 10:22 RESUME 更新为四次 FT09 验证；后续不再消耗 FT09 live budget，先诊断 native ProtocolError 或更换 Pi session/provider（`92b4e614`）。
+- 10:35 复核当前工作树：P7/桥接 focused Python 115 项通过，扩展构建闭包 8 项通过，TypeScript typecheck、Ruff、diff-check 通过；源码与打包资源工具列表及 digest 一致。RESUME 修正为暂停 FT09 live，等待 native ProtocolError 或 provider/session 诊断。

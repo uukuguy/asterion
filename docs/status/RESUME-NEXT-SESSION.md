@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-28 10:20 CST. Session remains active; this is not a final handoff.
+> Updated: 2026-09-28 10:35 CST. Session remains active; this is not a final handoff.
 
 ## TL;DR
 
@@ -19,10 +19,11 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
   - `uv run python -m unittest -v tests.test_prime_extension_build` — 8 passed.
   - TypeScript typecheck, focused registration test, Ruff, and diff-check passed.
 - Full TypeScript test suite still has its pre-existing context-witness fixture path failures when invoked from the repository root; this is separate from P7 bridge registration.
+- The current TypeScript source and packaged extension resource both expose the same nine tools, including `p7_mechanics_prior`; `npm run build` and the extension build-closure suite passed, with the generated bundle digest matching the packaged resource.
 
 ## 当前判断
 
-- The implementation boundary is ready for one bounded live verification using a game with a verified replayed prefix and an unfinished next level.
+- The implementation boundary is code-verified, but FT09 live verification is paused until the native runtime `ProtocolError` is independently diagnosed or the Pi provider/session is changed.
 - The prior is intentionally evidence-only: it summarizes repeated effects, no-effect counts, click ranges, advances, and confidence; it does not synthesize a route or authorize actions.
 - A legacy client without `mechanics_prior` receives an empty safe prior for compatibility; the live prediction client implements the real method.
 
