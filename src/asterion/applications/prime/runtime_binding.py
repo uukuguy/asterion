@@ -21,6 +21,7 @@ from asterion.applications.prime.p7.gameplay_trace import (
     PrimeGameplayTrace,
     PrimeGameplayTraceError,
 )
+from asterion.applications.prime.p7.live import P7_APPLICATION_TOOL_NAMES
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -439,6 +440,7 @@ def build_p7_runtime(
             approved_environment=launch.approved_environment,
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
+            allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
         launch = None
         return AsterionPrimeRuntimeClient(
@@ -524,6 +526,7 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
             completion_predicate=lambda: _p7_gameplay_terminal(broker),
+            allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
         launch = None
         return AsterionPrimeRuntimeClient(

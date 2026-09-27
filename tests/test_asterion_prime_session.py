@@ -200,6 +200,7 @@ class SessionFixture:
         release_after_events: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         unbounded: bool = False,
+        allowed_tool_names: tuple[str, ...] = ("ipython",),
     ) -> tuple[AsterionPrimeSession, FakePiRpcSession, PiExtensionLease]:
         limits = prime_session_module.AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS
         lease = self.binding.preflight()
@@ -227,6 +228,7 @@ class SessionFixture:
             approved_command=config.command,
             limits=limits,
             completion_predicate=completion_predicate,
+            allowed_tool_names=allowed_tool_names,
         )
         return session, rpc, lease
 
@@ -498,6 +500,29 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertNotIn("1+1", repr(public))
         self.assertNotIn("PRIVATE-PARTIAL", repr(public))
         self.assertNotIn('"2"', repr(public))
+
+    def test_accepts_allowlisted_prime_application_tool_event(self) -> None:
+        events = native_events(
+            ("agent_start", {}),
+            ("turn_start", {}),
+            (
+                "tool_execution_start",
+                {"toolCallId": "call-prior", "toolName": "p7_mechanics_prior", "args": {}},
+            ),
+            (
+                "tool_execution_end",
+                {"toolCallId": "call-prior", "result": [], "isError": False},
+            ),
+            ("agent_end", {}),
+        )
+        session, _rpc, lease = self.fixture.make(
+            events,
+            allowed_tool_names=("ipython", "p7_mechanics_prior"),
+        )
+        public = asyncio.run(collect(session))
+        self.assertEqual(public[1].payload["name"], "p7_mechanics_prior")
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+        self.assertTrue(lease.closed)
 
     def test_unmatched_tool_call_is_not_published_on_failure_or_cancellation(
         self,

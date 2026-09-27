@@ -58,6 +58,17 @@ PI_AGENT_DIR_ENV = "ASTERION_PRIME_PI_AGENT_DIR"
 PI_PROVIDER_ENV = "ASTERION_PRIME_PROVIDER"
 PI_MODEL_ENV = "ASTERION_PRIME_MODEL"
 _EXTENSION_RESOURCE = "resources/ipython-extension.mjs"
+P7_APPLICATION_TOOL_NAMES = (
+    "ipython",
+    "p7_observe",
+    "p7_status",
+    "p7_mechanics_prior",
+    "p7_tried_actions",
+    "p7_last_outcome_summary",
+    "p7_history",
+    "p7_frame_at",
+    "p7_act_checked",
+)
 
 # The fixed Pi RPC contract this application launches. It is the same mode
 # surface the intact run-story narrator uses; only the tool exposure differs,
@@ -68,7 +79,7 @@ _PI_RPC_FLAGS = (
     "--print",
     "--no-builtin-tools",
     "--tools",
-    "ipython",
+    ",".join(P7_APPLICATION_TOOL_NAMES),
     "--approve",
     "--no-session",
     "--no-extensions",
