@@ -3207,3 +3207,5 @@
 - 10:57 FT09 L5 Codex 控制跑通模型调用并上报 usage，5 分钟无新动作安全停机；仅 stall receipt，无新验证关卡。
 - 10:58 更新恢复边界与结构状态，记录 Codex 首次停滞控制及后续有限预算要求。 [73387b39]
 - 10:59 修正恢复文档中的绝对路径示例，docs-check 通过且命令可移植。 [9a8c5cce]
+- 11:12 P7 改为从 `.env` 读取 Prime Pi provider/model，切换模型无需改代码；动态身份与 runtime options 同步。 [05df517b]
+- 11:30 将 `.env` 解析移至 Asterion Prime operator 配置层，P7 只消费已解析环境。 [7f45696b]
