@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. No new live game has been run after these changes, so cross-level live improvement is not yet verified.
+P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. One bounded FT09 next-level run was executed after these changes; it stalled at the 59-action replay prefix, so cross-level live improvement is not verified.
 
 ## 已验证事实
 
@@ -34,15 +34,15 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 
 ## 未完成边界
 
-- No post-change live run has shown that the model actually calls `p7_mechanics_prior` and uses it to solve a new level.
+- FT09 post-change run `p7-live-20260927081939-5c7820a6bfe22dbc0be38357` ended `execution-stalled` at prefix 59 / target L5 with cleanup true and no new verified level. The recording has no model tool-call events, so it cannot establish whether `p7_mechanics_prior` was called.
 - No claim is made that all games or hidden rules are solved, or that the current model will generalize from one prior.
 - The full npm test suite remains broader than the focused registration test and retains unrelated fixture-harness failures.
 
 ## 下一动作
 
-1. Run one explicitly bounded P7 live verification on a replayed-prefix game with a next-level target; inspect tool-call trace for `p7_mechanics_prior`, action count, sealed/replay/cleanup evidence, and terminal reason.
-2. If the tool is not called, adjust only verified prompt/tool descriptions after recording the trace; do not infer a bridge failure without socket evidence.
-3. Keep the live result as evidence until a second independent run confirms behavior.
+1. Improve live observability or add a private, redacted tool-call counter so the next bounded run can distinguish model non-use from bridge failure.
+2. Only after that evidence, run one more replay-prefix target and check whether `p7_mechanics_prior` is called before new-level actions.
+3. Keep the FT09 stall as bounded negative evidence; do not promote it to a general model or bridge conclusion.
 
 ## Ready commands
 
