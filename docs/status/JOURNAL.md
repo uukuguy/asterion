@@ -3209,3 +3209,4 @@
 - 10:59 修正恢复文档中的绝对路径示例，docs-check 通过且命令可移植。 [9a8c5cce]
 - 11:12 P7 改为从 `.env` 读取 Prime Pi provider/model，切换模型无需改代码；动态身份与 runtime options 同步。 [05df517b]
 - 11:30 将 `.env` 解析移至 Asterion Prime operator 配置层，P7 只消费已解析环境。 [7f45696b]
+- 12:15 暂定 P7 自行初始化 Pi；记录通用、Prime/native、P1 与旧 Prime-agent 的分散路径，统一架构后续研究。 [d650c9fb]
