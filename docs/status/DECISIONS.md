@@ -18,6 +18,7 @@
 | D-2026-09-14-01 | 🟢 active | Keep the application layer free of implementation references; the runtime seam carries plain data |
 | D-2026-09-14-02 | 🟢 active | Supply research-preset external engines as operator-owned roots plus wheels, never as checkout-relative paths |
 | D-2026-09-14-03 | 🟢 active | Inject the Pi runtime as an operator-owned entry path, satisfied by an independently installed upstream Pi |
+| D-2026-09-27-01 | 🟢 active (interim) | Let P7 initialize its own Pi; defer consolidation of scattered Pi ownership into a shared Asterion base |
 | D-2026-09-17-01 | 🟢 active | Denominate the compaction reservation in tokens and convert at the call site |
 | D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
 | D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
@@ -303,6 +304,22 @@
   20 primitive actions and 40 cells, trace sealed, replay verified, cleanup
   complete, `promotion: unpromoted`; detachment gate 0; the Pi answers
   `--version` with 0.85.1 inside Orb under node v22.23.2.
+
+## D-2026-09-27-01 — Temporary P7-owned Pi initialization
+
+- Status: 🟢 active (interim)
+- Context: The current code contains several Pi ownership paths: the generic
+  `pi.reference` runtime, the Prime `AsterionPrimeSession` transport, P1/native
+  backend construction, P7 launch construction, and legacy Prime-agent local
+  entry points. They are not yet one shared Asterion-initialized Pi component.
+- Decision: For the current bounded work, P7 initializes its own Pi from the
+  operator-injected entry path, profile, provider, and model. Do not expand
+  this task into a cross-runtime Pi consolidation.
+- Consequence: Treat the scattered Pi paths as an architecture research item.
+  A future consolidation must define the Asterion initialization contract and
+  inject one shared Pi base into the Prime and native runtime families.
+- Evidence: architecture audit on 2026-09-27; current P7 path is
+  `p7/operator.py` → `PrimeLaunch` → `AsterionPrimeSession` → `PiRpcSession`.
 
 ## D-2026-09-16-01 — Asterion owns compaction summarization through Pi's extension hook
 
