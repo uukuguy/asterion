@@ -62,7 +62,7 @@ class P7ClientFacade:
             not callable(getattr(client, name, None))
             for name in (
                 "observe", "status", "act", "history", "frame_at", "act_checked",
-                "tried_actions", "last_outcome_summary", "mechanics_prior",
+                "tried_actions", "last_outcome_summary",
             )
         ):
             raise P7ClientError()
@@ -126,6 +126,10 @@ class P7ClientFacade:
 
     def mechanics_prior(self) -> Mapping[str, object]:
         """Return bounded, redacted mechanics evidence from prior actions."""
+        if self.__client is not None and not callable(
+            getattr(self.__client, "mechanics_prior", None)
+        ):
+            return {}
         return cast(Mapping[str, object], self.__invoke("mechanics_prior"))
 
     def __invoke(self, name: str, *args: object) -> object:
