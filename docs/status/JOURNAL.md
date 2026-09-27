@@ -3225,3 +3225,4 @@
 - 16:25 有界 FT09 next-level 运行 `p7-live-20260927081939-5c7820a6bfe22dbc0be38357`：前缀 59、目标 L5、cap 65；无新增动作，`execution-stalled`，cleanup true，未验证新关。Recording 不包含模型 tool-call 事件，不能据此判断是否调用 mechanics_prior。
 - 16:27 RESUME 记录 FT09 post-change stall 及 observability 缺口：下一步先区分模型未调用与桥接失败，再决定再次 live（`2e0e8316`）。
 - 16:42 为区分模型未用工具与桥接失败，加入私有 bridge method-call 标量 accounting（含 mechanics_prior 次数），70 个 P7 相关测试通过（`21fa5a2e`）。
+- 16:44 RESUME 下一动作更新为使用 bridge method accounting 做第二次有界 replay-prefix 验证（`cbb390ed`）。
