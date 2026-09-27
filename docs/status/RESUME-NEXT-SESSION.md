@@ -40,8 +40,8 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 
 ## 下一动作
 
-1. Improve live observability or add a private, redacted tool-call counter so the next bounded run can distinguish model non-use from bridge failure.
-2. Only after that evidence, run one more replay-prefix target and check whether `p7_mechanics_prior` is called before new-level actions.
+1. Run one more bounded replay-prefix target now that private bridge accounting records per-method calls, including `mechanics_prior`.
+2. Compare `bridge_method_calls` with the action trace to distinguish model non-use from bridge failure.
 3. Keep the FT09 stall as bounded negative evidence; do not promote it to a general model or bridge conclusion.
 
 ## Ready commands
