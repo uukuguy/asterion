@@ -9,7 +9,7 @@ import tomllib
 import unittest
 from importlib import metadata
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import AsyncIterator, cast
 
 from asterion.agents.prime.session import ASTERION_PRIME_LIMITS
@@ -176,6 +176,25 @@ class _CompletingRuntime:
 
 
 class TestPrimeP7NativeProvider(unittest.TestCase):
+    def test_p7_continuation_prompt_carries_current_state(self) -> None:
+        from asterion.applications.prime.runtime_binding import _p7_continuation_prompt
+        from asterion.applications.prime.p7.broker import ArcObservation, ArcStatus
+
+        class Broker:
+            game = SimpleNamespace(target_level=3)
+
+            def status(self):
+                return ArcStatus(4, 2, 40, "active")
+
+            def observe(self):
+                return ArcObservation(("ACTION1",), (((0, 0),),), 2, "NOT_FINISHED", 3)
+
+        prompt = _p7_continuation_prompt(Broker(), 1)
+        self.assertIn("Round 1", prompt)
+        self.assertIn("actions_remaining", prompt)
+        self.assertIn("frame_summary", prompt)
+        self.assertIn("one falsifiable gameplay action", prompt)
+
     def test_p7_runtime_terminal_predicate_stops_after_game_over(self) -> None:
         from asterion.applications.prime.runtime_binding import _p7_terminal
         from tests.test_prime_p7_native_broker import _Engine as TerminalEngine

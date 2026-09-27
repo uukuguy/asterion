@@ -206,6 +206,7 @@ def _round_diagnostic(round_index: int, prompt: str, output: str) -> PrimeRoundD
             ("tool-guidance", ("tool reference", "registered")),
             ("mechanics-prior", ("mechanics_prior", "mechanics prior")),
             ("state-guidance", ("p7_client.status", "p7_client.observe")),
+            ("application-state", ("application-supplied settled state", "frame_summary")),
             ("completion-guidance", ("game_solved", "levels_completed")),
         ) if any(needle in prompt_lower for needle in needles)
     )

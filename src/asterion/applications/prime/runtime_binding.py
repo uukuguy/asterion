@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import cast
 
@@ -22,6 +23,7 @@ from asterion.applications.prime.p7.gameplay_trace import (
     PrimeGameplayTraceError,
 )
 from asterion.applications.prime.p7.live import P7_APPLICATION_TOOL_NAMES
+from asterion.applications.prime.p7.frame_analysis import summarize_frame
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -77,6 +79,39 @@ def _p7_gameplay_terminal(broker: ArcBroker) -> bool:
         return broker.status().terminal_reason not in {"active", "reset-required"}
     except Exception:
         return True
+
+
+def _p7_continuation_prompt(broker: ArcBroker, round_index: int) -> str:
+    """Carry the latest settled state into every model continuation round."""
+
+    if (
+        type(round_index) is not int
+        or round_index < 1
+        or not callable(getattr(broker, "status", None))
+        or not callable(getattr(broker, "observe", None))
+        or not hasattr(getattr(broker, "game", None), "target_level")
+    ):
+        raise RuntimeFactoryError(_ERROR)
+    status = broker.status()
+    observation = broker.observe()
+    state = {
+        "available_actions": list(observation.available_actions),
+        "frame_summary": summarize_frame(observation.frame),
+        "levels_completed": observation.levels_completed,
+        "state": observation.state,
+        "win_levels": observation.win_levels,
+        "actions_remaining": status.actions_remaining,
+        "primitive_actions": status.primitive_actions,
+        "target_level": broker.game.target_level,
+        "terminal_reason": status.terminal_reason,
+    }
+    return (
+        f"Continue Round {round_index} from this application-supplied settled state. "
+        "Treat it as authoritative. Before another read-only query, perform one "
+        "falsifiable gameplay action or RESET that distinguishes the current "
+        "hypothesis; record the expected changed region and stop condition.\n"
+        + json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -440,6 +475,7 @@ def build_p7_runtime(
             approved_environment=launch.approved_environment,
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
+            continuation_prompt=lambda round_index: _p7_continuation_prompt(broker, round_index),
             round_diagnostic=trace_adapter.record_model_round,
             allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
