@@ -3203,3 +3203,4 @@
 - 08:46 系统 Pi 启动故障确认为两个 npm extension 重复注册 web_search；移除重复启用项后交互启动与退出通过。
 - 08:54 记录系统 Pi 重复 web_search 扩展修复，供跨会话定位全局配置。 [e1490e59]
 - 09:23 确认系统 Pi 已切换为 openai-codex/gpt-6-sol high；启动 P7 迁移设计与计划。 [38e5b545]
+- 09:36 P7 已切换 Codex GPT-6 Sol，复用全局 Pi profile，固定 high reasoning，并保留历史 DeepSeek 前缀兼容。 [d50897f7]
