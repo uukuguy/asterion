@@ -3238,3 +3238,4 @@
 - 10:35 复核当前工作树：P7/桥接 focused Python 115 项通过，扩展构建闭包 8 项通过，TypeScript typecheck、Ruff、diff-check 通过；源码与打包资源工具列表及 digest 一致。RESUME 修正为暂停 FT09 live，等待 native ProtocolError 或 provider/session 诊断。
 - 10:36 提交 `5fb97529`：修正 RESUME 的 FT09 边界并记录完整桥接/构建回归证据，避免继续消耗未诊断的 live 预算。
 - 10:38 提交 `2a1275bf`：更新 CURRENT-STATE 的 P7 结构化先验架构事实与 native ProtocolError 证据边界。
+- 10:46 `make promotion-check` 未通过：隔离 venv 缺少 `python-dotenv`，`p7.official_operator` 导入失败，汇总 5 failures/2 errors；该结果标记 external-limited，不晋级为 PASS。
