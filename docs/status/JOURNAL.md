@@ -3242,3 +3242,4 @@
 - 10:47 提交 `4585664d` 与 `6bf2633a`：记录 promotion-check 的隔离依赖限制，避免把失败门禁误报为实现回归或通过。
 - 10:52 提交 `f7ba5f1c`：为无可选依赖的 installed-wheel smoke test 增加惰性 `dotenv` 与受限 `.env` 回退；116 项 focused 测试通过，官方 fixture 后续仍受 host preflight 限制。
 - 10:58 安装版官方 smoke 在 dotenv 回退后仍受测试夹具边界限制；临时补齐 profile 后只推进到 composed capability generic failure，夹具修改已撤销，未保留生产行为变化。
+- 11:12 提交 `d3a21fea`：把 verified P7 提示改为优先调用注册工具，并强制跨关首个工具调用为 `p7_mechanics_prior`；115 项 focused 测试通过。
