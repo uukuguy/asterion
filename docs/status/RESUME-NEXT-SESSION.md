@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. Four bounded FT09 next-level runs were executed after these changes: two stalled at the 59-action replay prefix and two failed before any bridge call. Cross-level live improvement is not verified.
+P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, and verified solve guidance are connected. A controlled LS20 L3 run after activating the existing Prime application tool allowlist recorded `mechanics_prior` and other registered bridge calls, then stalled after four new actions; no level advance is verified. Cross-level live improvement remains unverified.
 
 ## 已验证事实
 
@@ -41,14 +41,15 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - FT09 post-change run `p7-live-20260927081939-5c7820a6bfe22dbc0be38357` ended `execution-stalled` at prefix 59 / target L5 with cleanup true and no new verified level. The recording has no model tool-call events, so it cannot establish whether `p7_mechanics_prior` was called.
 - FT09 second run `p7-live-20260927083252-0bd5aa566c21a90c48c60cf7` ended `child-evidence-invalid`; private accounting shows zero bridge calls, worker cell count 0, two usage events, and successful prefix replay/seal/cleanup. The native runtime error is intentionally redacted to a generic application failure; operator now retains private failure stage/type when a composed capability diagnostic is available.
 - FT09 fourth run `p7-live-20260927170356-0499ca87ddaeba7c4a2d6ce8` recorded `application_failure={stage: capability.execute, exception_type: ProtocolError}`, zero bridge calls, worker cell count 0, and successful prefix replay/seal/cleanup. This places the failure before P7 tool dispatch.
+- LS20 L3 run `p7-live-20260927192648-44682d9ca51c56d759e37bf2` recorded 4 `mechanics_prior`, 6 `act_checked`, and 98 total actions including the 94-action verified prefix; it stalled after four new actions with no level advance. This confirms the registered tool path is live and moves the remaining issue to model planning/action selection.
 - No claim is made that all games or hidden rules are solved, or that the current model will generalize from one prior.
 - The full npm test suite remains broader than the focused registration test and retains unrelated fixture-harness failures.
 
 ## 下一动作
 
-1. Do not change the bridge based on the second run: its zero-call evidence places the failure before Pi tool dispatch.
-2. Do not spend further live budget on FT09 until the native runtime ProtocolError boundary is independently diagnosed or the Pi provider/session is changed.
-3. Keep all FT09 outcomes as bounded negative evidence; do not promote them to a general model or bridge conclusion.
+1. Re-run one bounded LS20 L3 attempt after the read-only planning-loop guard (`5fd0219d`), then inspect action count and registered method calls.
+2. Keep the FT09 pre-tool failures as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
+3. If the guarded run still stalls, inspect its action-level evidence before changing mechanics prior or runtime behavior.
 
 ## Ready commands
 
