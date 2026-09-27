@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -182,6 +183,52 @@ ASTERION_PRIME_LIMITS = AsterionPrimeLimits(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class PrimeRoundDiagnostic:
+    """Bounded, content-free evidence about one model round."""
+
+    round_index: int
+    prompt_bytes: int
+    prompt_sha256: str
+    output_bytes: int
+    output_sha256: str
+    prompt_signals: tuple[str, ...]
+    output_signals: tuple[str, ...]
+
+
+def _round_diagnostic(round_index: int, prompt: str, output: str) -> PrimeRoundDiagnostic:
+    prompt_bytes = len(prompt.encode("utf-8"))
+    output_bytes = len(output.encode("utf-8"))
+    prompt_lower = prompt.lower()
+    output_lower = output.lower()
+    prompt_signals = tuple(
+        name for name, needles in (
+            ("tool-guidance", ("tool reference", "registered")),
+            ("mechanics-prior", ("mechanics_prior", "mechanics prior")),
+            ("state-guidance", ("p7_client.status", "p7_client.observe")),
+            ("completion-guidance", ("game_solved", "levels_completed")),
+        ) if any(needle in prompt_lower for needle in needles)
+    )
+    output_signals = tuple(
+        name for name, needles in (
+            ("plan", ("[plan]", "hypothesis", "expected change")),
+            ("observation", ("observe", "status", "frame")),
+            ("prior", ("mechanics_prior", "mechanics prior")),
+            ("action", ("act_checked", "p7_act", "action1", "action2", "action3", "action4", "reset")),
+            ("progress", ("progress", "level_advanced", "game_solved", "objective")),
+        ) if any(needle in output_lower for needle in needles)
+    )
+    return PrimeRoundDiagnostic(
+        round_index=round_index,
+        prompt_bytes=prompt_bytes,
+        prompt_sha256=sha256(prompt.encode("utf-8")).hexdigest(),
+        output_bytes=output_bytes,
+        output_sha256=sha256(output.encode("utf-8")).hexdigest(),
+        prompt_signals=prompt_signals,
+        output_signals=output_signals,
+    )
+
+
 class _NeverCancelled:
     @property
     def cancelled(self) -> bool:
@@ -212,6 +259,7 @@ class PrimeExecutionKernel:
         reusable: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         self._validate_launch_material(
@@ -228,6 +276,9 @@ class PrimeExecutionKernel:
         self._reusable = reusable
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
+        if round_diagnostic is not None and not callable(round_diagnostic):
+            raise ProtocolError("Asterion-prime round diagnostic is invalid")
+        self._round_diagnostic = round_diagnostic
         if (
             type(allowed_tool_names) is not tuple
             or not allowed_tool_names
@@ -528,6 +579,14 @@ class PrimeExecutionKernel:
                 emit("run.completed", {"status": "cancelled"})
                 return
             self._final_text = result.final_text
+            if self._round_diagnostic is not None:
+                try:
+                    self._round_diagnostic(
+                        _round_diagnostic(round_index, prompt, result.final_text)
+                    )
+                except Exception:
+                    # Diagnostics are private observability and cannot alter gameplay.
+                    pass
             current_round = native[round_start:]
             if (
                 not round_terminal_seen

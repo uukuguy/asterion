@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
-from asterion.applications.prime.p7.diagnostics import analyze_trace
+from asterion.applications.prime.p7.diagnostics import analyze_model_rounds, analyze_trace
 
 
 def noop_then_life_loss_trace():
@@ -42,6 +42,44 @@ def noop_then_life_loss_trace():
 
 
 class TestPrimeP7Diagnostics(unittest.TestCase):
+    def test_model_round_diagnostic_is_bounded_and_guides_followup(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            identities = {"model_id": "deepseek-r1", "reasoning_id": "sol"}
+            recorder.append(
+                "prime.model.round",
+                identities,
+                {
+                    "round_index": 0,
+                    "prompt_bytes": 120,
+                    "prompt_sha256": "sha256:" + "a" * 64,
+                    "output_bytes": 80,
+                    "output_sha256": "sha256:" + "b" * 64,
+                    "prompt_signals": ["tool-guidance", "mechanics-prior"],
+                    "output_signals": ["plan", "observation"],
+                },
+            )
+            recorder.append(
+                "prime.model.round",
+                identities,
+                {
+                    "round_index": 1,
+                    "prompt_bytes": 120,
+                    "prompt_sha256": "sha256:" + "c" * 64,
+                    "output_bytes": 80,
+                    "output_sha256": "sha256:" + "d" * 64,
+                    "prompt_signals": ["tool-guidance"],
+                    "output_signals": ["plan", "action"],
+                },
+            )
+            recorder.seal()
+            report = analyze_model_rounds(recorder.entries)
+            self.assertEqual(report["round_count"], 2)
+            self.assertEqual(report["read_only_rounds"], 1)
+            self.assertEqual(report["planned_action_rounds"], 1)
+            self.assertEqual(report["recommendation"], "reinforce-hypothesis-to-action-link")
+            self.assertNotIn("sentinel", repr(report))
+
     def test_repeated_noop_and_resource_reset_are_labeled(self) -> None:
         report = analyze_trace(noop_then_life_loss_trace())
 

@@ -440,6 +440,7 @@ def build_p7_runtime(
             approved_environment=launch.approved_environment,
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
+            round_diagnostic=trace_adapter.record_model_round,
             allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
         launch = None

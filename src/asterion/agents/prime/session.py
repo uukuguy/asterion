@@ -11,6 +11,7 @@ from asterion.agents.prime.execution import (
     ASTERION_PRIME_LIMITS,
     AsterionPrimeLimits,
     PrimeExecutionKernel,
+    PrimeRoundDiagnostic,
 )
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError
@@ -59,6 +60,7 @@ class AsterionPrimeSession:
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
@@ -86,6 +88,8 @@ class AsterionPrimeSession:
             raise ProtocolError("Asterion-prime continuation is invalid")
         if continuation_prompt is not None and not callable(continuation_prompt):
             raise ProtocolError("Asterion-prime continuation is invalid")
+        if round_diagnostic is not None and not callable(round_diagnostic):
+            raise ProtocolError("Asterion-prime round diagnostic is invalid")
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
         self._used_run_ids: set[str] = set()
@@ -100,6 +104,7 @@ class AsterionPrimeSession:
             limits=limits,
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
+            round_diagnostic=round_diagnostic,
             allowed_tool_names=allowed_tool_names,
         )
 
@@ -225,4 +230,5 @@ __all__ = (
     "ASTERION_PRIME_LIMITS",
     "AsterionPrimeLimits",
     "AsterionPrimeSession",
+    "PrimeRoundDiagnostic",
 )

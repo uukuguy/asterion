@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from collections.abc import Mapping
 import re
 
+from asterion.agents.prime.execution import PrimeRoundDiagnostic
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import (
     ArcBroker, ArcRunReceipt, ArcTransition, _observation_digest,
@@ -150,6 +151,30 @@ class P7PrivateTraceReceipt:
         except Exception:
             raise P7PrivateTraceReceiptError(
                 "P7 usage evidence is invalid"
+            ) from None
+
+    def record_model_round(self, diagnostic: PrimeRoundDiagnostic) -> None:
+        """Append bounded prompt/output diagnostics without retaining text."""
+
+        if self._accessed or type(diagnostic) is not PrimeRoundDiagnostic:
+            raise P7PrivateTraceReceiptError("P7 model diagnostics are invalid")
+        try:
+            self._recorder.append(
+                "prime.model.round",
+                self._identities,
+                {
+                    "round_index": diagnostic.round_index,
+                    "prompt_bytes": diagnostic.prompt_bytes,
+                    "prompt_sha256": "sha256:" + diagnostic.prompt_sha256,
+                    "output_bytes": diagnostic.output_bytes,
+                    "output_sha256": "sha256:" + diagnostic.output_sha256,
+                    "prompt_signals": list(diagnostic.prompt_signals),
+                    "output_signals": list(diagnostic.output_signals),
+                },
+            )
+        except Exception:
+            raise P7PrivateTraceReceiptError(
+                "P7 model diagnostics are invalid"
             ) from None
 
     def close(self) -> None:

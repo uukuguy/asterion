@@ -120,4 +120,37 @@ def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
     )
 
 
-__all__ = ("DiagnosticReport", "analyze_trace")
+def analyze_model_rounds(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
+    """Summarize model guidance uptake without exposing prompt or prose."""
+
+    entries = validate_trace(entries)
+    rounds = tuple(entry for entry in entries if entry.kind == "prime.model.round")
+    read_only = 0
+    planned_actions = 0
+    prior_rounds = 0
+    for entry in rounds:
+        output = entry.payload.get("output_signals")
+        signals = tuple(output) if isinstance(output, (list, tuple)) else ()
+        if "action" not in signals:
+            read_only += 1
+        if "plan" in signals and "action" in signals:
+            planned_actions += 1
+        if "prior" in signals:
+            prior_rounds += 1
+    recommendation = (
+        "require-action-after-planning"
+        if rounds and read_only == len(rounds)
+        else "reinforce-hypothesis-to-action-link"
+        if read_only > 0
+        else "guidance-is-being-used"
+    )
+    return {
+        "round_count": len(rounds),
+        "read_only_rounds": read_only,
+        "planned_action_rounds": planned_actions,
+        "prior_rounds": prior_rounds,
+        "recommendation": recommendation,
+    }
+
+
+__all__ = ("DiagnosticReport", "analyze_model_rounds", "analyze_trace")
