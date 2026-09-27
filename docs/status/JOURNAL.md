@@ -3216,3 +3216,5 @@
 - 13:31 FT09 L5 retry stalled after 59-step prefix replay; cleanup confirmed, no new verified level [p7-live-20260927052451-e84b0f94000f367380fafe66]
 - 13:37 AR25 L5 next-level stalled after 33 new actions beyond 118-step prefix; cleanup confirmed, no new verified level [p7-live-20260927053150-11b10dba655981433304af86]
 - 14:03 已批准并提交 P7 结构化跨关先验设计 `bcb9cbe1`：把前缀回放升级为可验证规则先验，先完成离线实现与测试再做一次受控现场验证。
+- 14:32 P7 实际 Pi 桥接修复提交 `c4b390b5`：注入真实 prediction client，严格 allowlist/参数解码/五字段 method_result，注册 `p7_mechanics_prior`，重建扩展资源；无 live 运行。
+- 14:36 独立回归发现旧客户端装配兼容性回归并修复提交 `7f463b65`：legacy facade 无 mechanics_prior 时返回空先验；115 个 P7 focused tests、Ruff 与 diff-check 通过。
