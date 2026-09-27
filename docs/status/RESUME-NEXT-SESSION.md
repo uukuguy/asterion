@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-28 07:31 CST. Session remains active; this is not a final handoff.
+> Updated: 2026-09-28 07:54 CST. Session remains active; this is not a final handoff.
 
 ## TL;DR
 
-P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, verified solve guidance, and bounded `p7_observe.frame_summary` are connected. The latest LS20 L3 run used application-supplied continuation state, avoided the former read-only loop, but made 200 new actions without advancing beyond level 2 and ended `GAME_OVER`; seal, replay, and cleanup passed. Cross-level live improvement remains unverified.
+P7 now has a bounded structured cross-level mechanics prior and a real Pi registered tool path. The Python broker, facade, Unix bridge, TypeScript registration, packaged extension, verified solve guidance, and bounded `p7_observe.frame_summary` are connected. The latest sealed LS20 L3 run avoided the former read-only loop but made 200 new actions without advancing beyond level 2 and ended `GAME_OVER`; a follow-up with dynamic tried-action context made 34 new actions, used two RESETs, then was manually stopped while idle. Cross-level live improvement remains unverified.
 
 ## 已验证事实
 
@@ -24,6 +24,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - The optional `python-dotenv` import is now lazy with a bounded standard-library `.env` fallback (`f7ba5f1c`); the focused 116-test P7/operator-config suite passes. The installed official smoke then reaches P7 host preflight and fails on its intentionally minimal fixture environment, so promotion remains unresolved rather than being claimed green.
 - A temporary fixture-only profile experiment advanced that smoke into composed application execution, where it still failed with the generic capability error; the fixture change was discarded, so no production or test-fixture behavior was retained from that experiment.
 - Required settled state is now appended by the application before the Pi session and on each continuation; only scenario-useful registered query/action tools remain exposed. Model-round private diagnostics retain hashes/signals only, and the sealed LS20 L3 run reports one action-producing round rather than the former read-only loop.
+- Continuations now also receive bounded `tried_summary` and an application-generated `action_guard`; unsealed recorder snapshots are merged with action diagnostics before the private summary is written. This is guidance and observability, not an engine-specific route or hard action stop.
 
 ## 当前判断
 
@@ -47,12 +48,13 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - LS20 L3 run `p7-live-20260927215428-0bd2d477fe937f5a9fa6592c` ran with the bounded `p7_observe.frame_summary`. It recorded 1 `mechanics_prior`, 9 `act_checked`, 6 `observe`, 2 `history`, and 99 total actions including the 94-action verified prefix. The new sequence was `ACTION2, ACTION1, RESET, ACTION3, ACTION4`; it remained at level 2 and produced a private stall receipt with `action_count=99`, `stall_seconds=300`, and `cleanup_complete=true`. The manifest is `execution-stalled-evidence-invalid` because the interrupted run was not sealed; this is execution-stall evidence, not a verified solve.
 - LS20 L3 run `p7-live-20260927221112-13a287271776e58251e98863` ran after the registered `p7_observe` wiring fix. It recorded 2 `mechanics_prior` before action and 4 total, 1 `act_checked`, 9 `observe`, 8 `status`, 2 `history`, and 95 total actions including the 94-action verified prefix. The new sequence was only `ACTION1`; it remained at level 2 and produced a private stall receipt with `action_count=95`, `stall_seconds=300`, and `cleanup_complete=true`. The manifest is `execution-stalled-evidence-invalid` because the interrupted run was not sealed; this is execution-stall evidence, not a verified solve.
 - LS20 L3 run `p7-live-20260927231351-9091397216b90957b1db2915` used the continuation state contract and completed 200 new actions after the 94-action prefix. It remained at level 2, ended `GAME_OVER`/`reset-required` at sequence 294, and passed seal, replay, and cleanup. Private model/action diagnosis is `round_count=1`, `planned_action_rounds=1`, `repeated_action_streak=30`, `actions_since_progress=200`, recommendation `force-replan-after-no-progress`; this is valid negative evidence, not a solved level.
+- Follow-up LS20 L3 run `p7-live-20260927233815-f11534a8432f44972983050a` made 34 new actions after the prefix and remained at level 2. It included two RESETs and then no new action for roughly two minutes, so it was manually stopped; cleanup completed, but no seal/replay or solve evidence exists. Summary accounting recorded 42 checked plans, 31 mismatches, and 50 registered bridge calls. The unsealed snapshot is retained as bounded negative evidence.
 - No claim is made that all games or hidden rules are solved, or that the current model will generalize from one prior.
 - The full npm test suite remains broader than the focused registration test and retains unrelated fixture-harness failures.
 
 ## 下一动作
 
-1. Use the new `force-replan-after-no-progress` evidence to decide whether the next bounded attempt needs a model-session change or an action-level guard; do not add game-specific routes.
+1. Use the sealed and unsealed action evidence to decide whether the next bounded attempt needs a model-session change or an action-level guard; do not add game-specific routes.
 2. Keep the FT09 pre-tool failures and LS20 L3 failures as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
 3. Run another bounded attempt only after an evidence-based prompt or model-session change, and track it at startup, first actions, and termination.
 
