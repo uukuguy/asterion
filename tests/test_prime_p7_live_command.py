@@ -52,7 +52,41 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             observed = client.observe()
             self.assertEqual(observed["frame_summary"]["shape"], [1, 1])
             self.assertEqual(observed["frame_summary"]["counts"], {0: 1})
+            self.assertIn("actions_remaining", observed)
+            self.assertIn("terminal_reason", observed)
             recorder.close()
+
+    def test_initial_game_context_includes_observation_and_prior_once(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame_summary": {"shape": [2, 2], "counts": {0: 4}, "components": []},
+                    "levels_completed": 2,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 5,
+                    "tried_summary": {"attempts": {}, "no_effect": {}, "top_repeated": []},
+                }
+
+            def status(self):
+                return {
+                    "actions_remaining": 80,
+                    "levels_completed": 2,
+                    "primitive_actions": 20,
+                    "target_level": 5,
+                    "terminal_reason": "active",
+                }
+
+            def mechanics_prior(self):
+                return {"available": True, "current_level": 2, "candidate_rules": []}
+
+        context = _initial_game_context(Client(), include_prior=True)
+        self.assertIn("Initial broker state", context)
+        self.assertIn('"actions_remaining":80', context)
+        self.assertIn("Cross-level mechanics evidence", context)
+        self.assertIn('"current_level":2', context)
 
     def test_retry_replan_required_is_returned_without_trace_dispatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker

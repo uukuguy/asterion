@@ -61,10 +61,8 @@ _EXTENSION_RESOURCE = "resources/ipython-extension.mjs"
 P7_APPLICATION_TOOL_NAMES = (
     "ipython",
     "p7_observe",
-    "p7_status",
     "p7_mechanics_prior",
     "p7_tried_actions",
-    "p7_last_outcome_summary",
     "p7_history",
     "p7_frame_at",
     "p7_act_checked",

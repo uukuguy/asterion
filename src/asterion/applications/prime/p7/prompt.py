@@ -46,10 +46,12 @@ The framework auto-injects a ``tried_summary`` field on every observe
 call; treat ``no_effect`` counts >= 2 as a stop-and-reflect signal.
 
 Use the registered P7 application tools for broker operations whenever they
-are available: p7_observe, p7_status, p7_mechanics_prior, p7_tried_actions,
-p7_last_outcome_summary, p7_history, p7_frame_at, and p7_act_checked. Use
-the persistent ipython tool for bounded programmatic analysis or only as a
-fallback when a registered tool cannot express the query. Import only
+are available: p7_observe, p7_mechanics_prior, p7_tried_actions, p7_history,
+p7_frame_at, and p7_act_checked. The application supplies the initial status,
+settled frame summary, budget, and (when a verified prefix exists) mechanics
+prior directly in this instruction; do not spend a startup tool call rereading
+those values. Use the persistent ipython tool for bounded programmatic analysis
+or only as a fallback when a registered tool cannot express the query. Import only
 p7_client; do not inspect its source. The equivalent broker API is
 p7_client.observe(), p7_client.status(),
 p7_client.history(start, limit), p7_client.frame_at(sequence),
@@ -81,10 +83,9 @@ Use p7_client.frame_at(sequence) only for a sequence already returned by
 history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
 
-When levels_completed is above 0, your next tool call MUST be the registered
-p7_mechanics_prior tool (or p7_client.mechanics_prior() through ipython only
-if that registered tool is unavailable). Do not call history, frame_at, act,
-or act_checked before this prior call. It summarizes bounded evidence from earlier levels:
+When a new level is entered after an authoritative LEVEL_ADVANCED response,
+call the registered p7_mechanics_prior tool once before the next probe. Do not
+call history, frame_at, act, or act_checked before this prior call. It summarizes bounded evidence from earlier levels:
 repeated action effects, no-effect counts, click-coordinate ranges, level
 advances, and candidate rules with confidence. Treat it as a prior over the
 hidden action mechanics, never as a route or guaranteed action sequence. For
@@ -96,7 +97,7 @@ discard a rule solely because the current level has different objects.
 
 Bound information gathering between gameplay actions. On an active level, after
 the required mechanics_prior() call, use at most two additional read-only tool
-calls (observe/status/history/tried_actions/last_outcome_summary) before one
+calls (observe/history/tried_actions) before one
 legal gameplay action. Do not call mechanics_prior() repeatedly while the level
 has not advanced. After an act_checked mismatch or no-effect result, inspect
 the returned observation once, then dispatch a new falsifiable probe or RESET;

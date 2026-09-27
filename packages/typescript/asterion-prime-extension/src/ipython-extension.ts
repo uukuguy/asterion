@@ -360,10 +360,8 @@ export function toolNames(): string[] {
   return [
     "ipython",
     "p7_observe",
-    "p7_status",
     "p7_mechanics_prior",
     "p7_tried_actions",
-    "p7_last_outcome_summary",
     "p7_history",
     "p7_frame_at",
     "p7_act_checked",
@@ -428,16 +426,9 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_observe",
-      "Read the current game state: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), levels_completed, state, and win_levels. Call this *first* on a new level and use frame_summary to form a structural hypothesis before acting.",
+      "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason, state, and win_levels. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
       TypeObject({}, { additionalProperties: false }),
       "observe",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_status",
-      "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason.",
-      TypeObject({}, { additionalProperties: false }),
-      "status",
     ),
     makeMethodTool(
       bridge,
@@ -460,22 +451,6 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
         { additionalProperties: false },
       ),
       "tried_actions",
-      "level",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_last_outcome_summary",
-      "Aggregate per-action counts for the current run, split into {\"attempts\": {action: count}, \"no_effect\": {action: count}}. Useful for spotting an action that has been attempted many times at this level with no observed frame change.",
-      TypeObject(
-        {
-          level: TypeUnion([
-            TypeNumber({ minimum: 0 }),
-            TypeNull(),
-          ]),
-        },
-        { additionalProperties: false },
-      ),
-      "last_outcome_summary",
       "level",
     ),
     makeMethodTool(

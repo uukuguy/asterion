@@ -172,10 +172,8 @@ test("registers the ipython and P7 application tools", async () => {
   const expectedNames = [
     "ipython",
     "p7_observe",
-    "p7_status",
     "p7_mechanics_prior",
     "p7_tried_actions",
-    "p7_last_outcome_summary",
     "p7_history",
     "p7_frame_at",
     "p7_act_checked",
@@ -470,10 +468,8 @@ test("built artifact is comment-free and loads through the pinned loader", async
     assert.deepEqual(registered.map((tool) => tool.name), [
       "ipython",
       "p7_observe",
-      "p7_status",
       "p7_mechanics_prior",
       "p7_tried_actions",
-      "p7_last_outcome_summary",
       "p7_history",
       "p7_frame_at",
       "p7_act_checked",
