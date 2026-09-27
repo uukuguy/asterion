@@ -31,6 +31,7 @@ from asterion.runtimes.pi_rpc import (
     validate_pi_compact_result,
     normalize_pi_usage,
 )
+from asterion.services.diagnostics import bounded_failure_code
 
 
 ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
@@ -41,6 +42,7 @@ _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
 _NATIVE_EVENT_ERROR = "Asterion-prime native event is invalid"
+_DEFAULT_TOOL_NAMES = ("ipython",)
 
 
 class _CallbackRejected(Exception):
@@ -211,6 +213,7 @@ class PrimeExecutionKernel:
         reusable: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         self._validate_launch_material(
             rpc_session,
@@ -226,14 +229,32 @@ class PrimeExecutionKernel:
         self._reusable = reusable
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
+        if (
+            type(allowed_tool_names) is not tuple
+            or not allowed_tool_names
+            or any(type(name) is not str or not name or not name.isascii() for name in allowed_tool_names)
+            or len(set(allowed_tool_names)) != len(allowed_tool_names)
+        ):
+            raise ProtocolError("Asterion-prime launch material is invalid")
+        self._allowed_tool_names = allowed_tool_names
         self.model_callbacks = 0
         self.tool_callbacks = 0
         self._sequence = 0
         self._native_events: list[PiRpcEvent] = []
         self._final_text = ""
+        self._private_failure_code: str | None = None
 
     def __repr__(self) -> str:
         return "<PrimeExecutionKernel redacted>"
+
+    @property
+    def private_failure_code(self) -> str | None:
+        return bounded_failure_code(self._private_failure_code)
+
+    def _set_failure_code(self, code: object) -> None:
+        bounded = bounded_failure_code(code)
+        if bounded is not None:
+            self._private_failure_code = bounded
 
     async def invoke(
         self,
@@ -241,10 +262,12 @@ class PrimeExecutionKernel:
         signal: CancellationSignal | None,
         emit: Callable[[str, Mapping[str, object]], None],
     ) -> PrimeExecutionResult:
+        self._private_failure_code = None
         if (
             self._limits.model_callbacks is not None
             and self.model_callbacks >= self._limits.model_callbacks
         ):
+            self._set_failure_code("model_callback_limit")
             raise ProtocolError("Asterion-prime model callback limit exceeded")
         self._native_events = []
         self._final_text = ""
@@ -260,6 +283,7 @@ class PrimeExecutionKernel:
                 raise ValueError
             self._sequence = events[-1].sequence
         except BaseException:
+            self._set_failure_code("transport_protocol")
             raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR) from None
 
     @staticmethod
@@ -445,14 +469,17 @@ class PrimeExecutionKernel:
             try:
                 trusted_event = _snapshot_native_event(event)
             except BaseException:
+                self._set_failure_code("event_malformed")
                 callback_failure = ProtocolError(_NATIVE_EVENT_ERROR)
                 raise _CallbackRejected from None
             safe_failure: ProtocolError | None = None
             try:
                 consume_checked(trusted_event)
             except _NativeEventRejected as error:
+                self._set_failure_code(error.code.value)
                 safe_failure = ProtocolError(_NATIVE_DIAGNOSTIC_MESSAGES[error.code])
             except Exception:
+                self._set_failure_code("event_malformed")
                 safe_failure = ProtocolError(_NATIVE_EVENT_ERROR)
             if safe_failure is not None:
                 callback_failure = safe_failure
@@ -482,6 +509,7 @@ class PrimeExecutionKernel:
                     _NATIVE_EVENT_ERROR
                 )
             except ProtocolError:
+                self._set_failure_code("transport_protocol")
                 protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
             except asyncio.CancelledError:
                 raise
@@ -500,6 +528,7 @@ class PrimeExecutionKernel:
             if protocol_failure is not None:
                 raise protocol_failure from None
             if result is None or type(result) is not PiRpcResult:
+                self._set_failure_code("native_result_malformed")
                 raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
             result_events: tuple[PiRpcEvent, ...] | None = None
             result_snapshot_failed = False
@@ -508,8 +537,10 @@ class PrimeExecutionKernel:
             except BaseException:
                 result_snapshot_failed = True
             if result_snapshot_failed or result_events is None:
+                self._set_failure_code("native_result_malformed")
                 raise ProtocolError(_TRANSPORT_PROTOCOL_ERROR) from None
             if result_events != tuple(native[round_start:]):
+                self._set_failure_code("native_result_malformed")
                 raise ProtocolError("Asterion-prime native result is malformed")
             if signal is not None and signal.cancelled:
                 emit("run.completed", {"status": "cancelled"})
@@ -521,6 +552,7 @@ class PrimeExecutionKernel:
                 or not current_round
                 or current_round[-1].type not in {"agent_end", "agent_settled"}
             ):
+                self._set_failure_code("native_terminal_invalid")
                 raise ProtocolError("Asterion-prime native terminal is invalid")
             if self._completion_predicate is None or self._completion_predicate():
                 ledger.seal()
@@ -551,6 +583,7 @@ class PrimeExecutionKernel:
                 else self._continuation_prompt(round_index)
             )
             if type(prompt) is not str or not prompt:
+                self._set_failure_code("continuation_invalid")
                 raise ProtocolError("Asterion-prime continuation is invalid")
 
     @staticmethod
@@ -563,8 +596,7 @@ class PrimeExecutionKernel:
         if type(assistant.get("delta")) is not str:
             raise _NativeEventRejected(_NativeDiagnostic.MESSAGE_UPDATE_MALFORMED)
 
-    @staticmethod
-    def _tool_call(payload: Mapping[str, object]) -> PrimeToolCall:
+    def _tool_call(self, payload: Mapping[str, object]) -> PrimeToolCall:
         call_id = payload.get("toolCallId")
         name = payload.get("toolName")
         arguments = payload.get("args")
@@ -572,7 +604,7 @@ class PrimeExecutionKernel:
             type(call_id) is not str
             or not call_id
             or type(name) is not str
-            or name != "ipython"
+            or name not in self._allowed_tool_names
             or not isinstance(arguments, Mapping)
         ):
             raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALL_MALFORMED)

@@ -33,7 +33,18 @@ from asterion.runtime.host import (
     RunRequest,
 )
 from asterion.runtime.protocol import ProtocolError
-from asterion.services.diagnostics import DiagnosticSink, capture_failure
+from asterion.services.diagnostics import (
+    DiagnosticSink,
+    bounded_failure_code,
+    capture_failure,
+)
+
+
+def _runtime_failure_code(runtime: object) -> str | None:
+    try:
+        return bounded_failure_code(getattr(runtime, "private_failure_code", None))
+    except Exception:
+        return None
 
 
 async def run_composed_application(
@@ -190,6 +201,7 @@ async def run_composed_application(
                         error=error,
                         subject_id=run_id,
                         capability_ref=f"{capability_ref.capability_id}@{capability_ref.version}",
+                        failure_code=_runtime_failure_code(runtime),
                     ),
                 ) from None
             lifecycle.record_capability_outputs(

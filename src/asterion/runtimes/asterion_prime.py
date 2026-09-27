@@ -15,6 +15,7 @@ from asterion.runtime.host import (
     RuntimeManifest,
 )
 from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import bounded_failure_code
 
 
 @runtime_checkable
@@ -53,6 +54,14 @@ class AsterionPrimeRuntimeClient:
         return RuntimeManifest(
             runtime_id="asterion.prime",
             capabilities=ASTERION_PRIME_CAPABILITIES,
+        )
+
+    @property
+    def private_failure_code(self) -> str | None:
+        """Expose only a bounded private diagnostic scalar from the session."""
+
+        return bounded_failure_code(
+            getattr(self._session, "private_failure_code", None)
         )
 
     def run(
