@@ -94,6 +94,14 @@ LEVEL_ADVANCED response, refresh mechanics_prior() and combine the refreshed
 evidence with the new settled frame; do not blindly replay an earlier route or
 discard a rule solely because the current level has different objects.
 
+Bound information gathering between gameplay actions. On an active level, after
+the required mechanics_prior() call, use at most two additional read-only tool
+calls (observe/status/history/tried_actions/last_outcome_summary) before one
+legal gameplay action. Do not call mechanics_prior() repeatedly while the level
+has not advanced. After an act_checked mismatch or no-effect result, inspect
+the returned observation once, then dispatch a new falsifiable probe or RESET;
+do not enter another read-only planning loop.
+
 Treat only broker observations and retained Python state as game information.
 Never inspect engine source, another game or run, network resources, credentials,
 or unprovided files. Do not create agents, use mocks, call online APIs, or use a
