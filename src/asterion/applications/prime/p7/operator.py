@@ -82,6 +82,10 @@ _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
+_BRIDGE_METHODS = (
+    "observe", "status", "mechanics_prior", "tried_actions",
+    "last_outcome_summary", "history", "frame_at", "act_checked",
+)
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 
 class P7OperatorError(RuntimeError):
@@ -171,12 +175,23 @@ class _IpythonBridgeServer:
         self._channel = channel
         self._host = host
         self._client = p7_client_facade(client)
+        self._method_calls = {name: 0 for name in _BRIDGE_METHODS}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._started = False
 
     def __repr__(self) -> str:
         return "<_IpythonBridgeServer redacted>"
+
+    def private_accounting(self) -> dict[str, int]:
+        """Return bounded private counts of registered Pi method calls."""
+        return {
+            "method_calls_total": sum(self._method_calls.values()),
+            **{
+                f"method_calls_{name}": count
+                for name, count in self._method_calls.items()
+            },
+        }
 
     def start(self) -> None:
         self._thread.start()
@@ -307,6 +322,8 @@ class _IpythonBridgeServer:
             }
 
         try:
+            if method in self._method_calls:
+                self._method_calls[method] = min(5000, self._method_calls[method] + 1)
             facade = self._client
             if method in {"observe", "status", "mechanics_prior"}:
                 if type(params) is not dict or params:
@@ -1619,6 +1636,10 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                         sealed_trace = True
             # The launch seam carries plain data only, so there is no live Pi
             # session object left to read a failure or an stderr tail from.
+            bridge = getattr(resources_, "_bridge", None)
+            accounting = getattr(bridge, "private_accounting", None)
+            if callable(accounting):
+                diagnostics["bridge_method_calls"] = accounting()
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
             cleanup_failed = False
             try:

@@ -530,6 +530,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 ("frame_at", (4,)),
                 ("act_checked", ([],)),
             ])
+            accounting = server.private_accounting()
+            self.assertEqual(accounting["method_calls_total"], len(frames))
+            self.assertEqual(accounting["method_calls_mechanics_prior"], 1)
             malformed = json.loads(server._dispatch(json.dumps({
                 "method": "history",
                 "params": {"start": 0, "limit": 1, "extra": True},
