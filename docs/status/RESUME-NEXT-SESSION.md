@@ -10,7 +10,7 @@
 
 ## 已验证事实
 
-- Host Pi `0.87.1` starts after removing the duplicate `@counterposition/pi-web-search` registration; the backup is outside this repository at `/Users/sujiangwen/.pi/agent/settings.json.before-web-search-conflict-20260927-084346.bak`.
+- Host Pi `0.87.1` starts after removing the duplicate `@counterposition/pi-web-search` registration; the backup is outside this repository at `~/.pi/agent/settings.json.before-web-search-conflict-20260927-084346.bak`.
 - A zero-prompt guest RPC resolved `provider=openai-codex`, `model=gpt-6-sol`, `thinkingLevel=high`, and automatic compaction through the operator Pi profile.
 - `.env` contains the operator-owned selection:
   ```env
