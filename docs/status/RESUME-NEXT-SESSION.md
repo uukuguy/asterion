@@ -53,7 +53,7 @@
 
 - **Re-submit after any new L4 pass**:
   ```
-  cd /Users/sujiangwen/sandbox/agentic-2026/asterion
+  cd <repo>
   timeout 1800 make asterion-prime-p7-official-submit GAME=all
   ```
 
@@ -72,12 +72,16 @@
 
 - **Per-level score gap analysis** (used to identify under-115 levels):
   ```
-  cd /Users/sujiangwen/sandbox/agentic-2026/asterion
+  cd <repo>
   python3 -c "
-  import json
+  import json, os
+  from pathlib import Path
   card = json.load(open('.asterion-private/prime-p7-official/p7-live-20260926235934-8d921e7c607621adb5e35542/official-receipt.json'))
+  arc_root = Path(os.environ['ARC_ROOT'])
   for g in card['games']:
-    bl = json.load(open(f'/Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3/environment_files/{g[\"game_id\"].split(\"-\")[0].lower()}/{os.listdir(f\"/Users/sujiangwen/sandbox/agentic-2026/external-prime/arc-agi-3/environment_files/{g['game_id'].split('-')[0].lower()}\")[0]}/metadata.json'))['baseline_actions']
+    game_root = arc_root / 'environment_files' / g['game_id'].split('-')[0].lower()
+    metadata = next(game_root.glob('*/metadata.json'))
+    bl = json.loads(metadata.read_text())['baseline_actions']
     ws = len(bl)*(len(bl)+1)//2
     cw = sum(range(1, g['levels_completed']+1))
     print(f'{g[\"game_id\"][:12]} score={g[\"score\"]:.2f} cap={cw/ws*100:.2f}')
