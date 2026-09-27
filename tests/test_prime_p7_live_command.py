@@ -439,6 +439,112 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         finally:
             server.close()
 
+    def test_ipython_bridge_dispatches_allowlisted_methods_with_canonical_results(self) -> None:
+        from asterion.applications.prime.p7.operator import _IpythonBridgeServer
+
+        calls: list[tuple[str, tuple[object, ...]]] = []
+
+        class Client:
+            def observe(self) -> dict[str, object]:
+                calls.append(("observe", ()))
+                return {"state": "PLAY"}
+
+            def status(self) -> dict[str, object]:
+                calls.append(("status", ()))
+                return {"primitive_actions": 2}
+
+            def act(self, actions: object) -> dict[str, object]:
+                return {}
+
+            def history(self, start: int, limit: int) -> list[dict[str, object]]:
+                calls.append(("history", (start, limit)))
+                return [{"limit": limit, "start": start}]
+
+            def frame_at(self, sequence: int) -> list[list[int]]:
+                calls.append(("frame_at", (sequence,)))
+                return [[sequence]]
+
+            def act_checked(self, plan: object) -> dict[str, object]:
+                calls.append(("act_checked", (plan,)))
+                return {"applied_count": len(plan)}  # type: ignore[arg-type]
+
+            def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+                calls.append(("tried_actions", (level,)))
+                return [{"level": level}]
+
+            def last_outcome_summary(self, level: int | None = None) -> dict[str, object]:
+                calls.append(("last_outcome_summary", (level,)))
+                return {"level": level}
+
+            def mechanics_prior(self) -> dict[str, object]:
+                calls.append(("mechanics_prior", ()))
+                return {"available": True}
+
+        class Host:
+            def __init__(self) -> None:
+                self.client = Client()
+
+            def broker(self) -> Client:
+                return self.client
+
+        import socket
+
+        left, right = socket.socketpair()
+        host = Host()
+        server = _IpythonBridgeServer(left, host, host.client)
+        try:
+            frames = [
+                ("observe", {}),
+                ("status", {}),
+                ("mechanics_prior", {}),
+                ("tried_actions", None),
+                ("last_outcome_summary", 3),
+                ("history", {"start": 1, "limit": 2}),
+                ("frame_at", {"sequence": 4}),
+                ("act_checked", {"plan": []}),
+            ]
+            for index, (method, params) in enumerate(frames):
+                with self.subTest(method=method):
+                    response = json.loads(server._dispatch(json.dumps({
+                        "method": method,
+                        "params": params,
+                        "protocol": "asterion.prime-ipython/v1",
+                        "request_id": f"call-{index}",
+                        "type": "method_call",
+                    }).encode()))
+                    self.assertEqual(
+                        set(response), {"output", "protocol", "request_id", "status", "type"}
+                    )
+                    self.assertEqual(response["status"], "ok")
+                    self.assertEqual(response["type"], "method_result")
+                    self.assertEqual(response["protocol"], "asterion.prime-ipython/v1")
+                    json.loads(response["output"])
+
+            self.assertEqual(calls, [
+                ("observe", ()),
+                ("status", ()),
+                ("mechanics_prior", ()),
+                ("tried_actions", (None,)),
+                ("last_outcome_summary", (3,)),
+                ("history", (1, 2)),
+                ("frame_at", (4,)),
+                ("act_checked", ([],)),
+            ])
+            malformed = json.loads(server._dispatch(json.dumps({
+                "method": "history",
+                "params": {"start": 0, "limit": 1, "extra": True},
+                "protocol": "asterion.prime-ipython/v1",
+                "request_id": "bad-shape",
+                "type": "method_call",
+            }).encode()))
+            self.assertEqual(malformed["status"], "error")
+            self.assertEqual(malformed["type"], "method_result")
+            self.assertEqual(set(malformed), {"output", "protocol", "request_id", "status", "type"})
+            self.assertEqual(malformed["output"], "")
+        finally:
+            right.close()
+            server.close()
+
     def test_worker_exposes_history_frame_and_checked_plan(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)

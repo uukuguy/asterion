@@ -21,6 +21,7 @@ import register, {
   PROTOCOL,
   canonicalJson,
   composeSummarizationRequest,
+  createAppLevelTools,
   createIpythonBridge,
   registerContextWitness,
   summarizeInstruction,
@@ -164,12 +165,23 @@ function readJsonLine(socket) {
   });
 }
 
-test("registers exactly the ipython tool", async () => {
+test("registers the ipython and P7 application tools", async () => {
   const registered = [];
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
   register({ registerTool: (tool) => registered.push(tool) });
-  assert.deepEqual(toolNames(), ["ipython"]);
-  assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
+  const expectedNames = [
+    "ipython",
+    "p7_observe",
+    "p7_status",
+    "p7_mechanics_prior",
+    "p7_tried_actions",
+    "p7_last_outcome_summary",
+    "p7_history",
+    "p7_frame_at",
+    "p7_act_checked",
+  ];
+  assert.deepEqual(toolNames(), expectedNames);
+  assert.deepEqual(registered.map((tool) => tool.name), expectedNames);
   assert.equal(registered[0].label, "ipython");
   assert.equal(
     registered[0].description,
@@ -183,6 +195,26 @@ test("registers exactly the ipython tool", async () => {
     message: "Asterion ipython bridge is unavailable",
   });
   assert.equal(process.env.ASTERION_PRIME_IPYTHON_FD, undefined);
+});
+
+test("registers the mechanics evidence tool with a bounded empty schema", async () => {
+  const calls = [];
+  const fakeBridge = { callMethod: async (...args) => {
+    calls.push(args);
+    return { available: true, current_level: 2 };
+  } };
+  const tool = createAppLevelTools(fakeBridge).find((candidate) => candidate.name === "p7_mechanics_prior");
+  assert.ok(tool);
+  assert.equal(IsSchema(tool.parameters), true);
+  assert.deepEqual(tool.parameters.properties, {});
+  assert.equal(tool.parameters.additionalProperties, false);
+  assert.match(tool.description, /evidence/i);
+  assert.match(tool.description, /not a route/i);
+  assert.deepEqual(await tool.execute("mechanics-1", {}), {
+    available: true,
+    current_level: 2,
+  });
+  assert.deepEqual(calls, [["mechanics-1", "mechanics_prior", {} , undefined]]);
 });
 
 test("rejects malformed requests before writing", async () => {
@@ -435,7 +467,17 @@ test("built artifact is comment-free and loads through the pinned loader", async
     writeFileSync(loaderCopy, readFileSync(loaderPath));
     const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
     await loader.default({ registerTool: (tool) => registered.push(tool) });
-    assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
+    assert.deepEqual(registered.map((tool) => tool.name), [
+      "ipython",
+      "p7_observe",
+      "p7_status",
+      "p7_mechanics_prior",
+      "p7_tried_actions",
+      "p7_last_outcome_summary",
+      "p7_history",
+      "p7_frame_at",
+      "p7_act_checked",
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

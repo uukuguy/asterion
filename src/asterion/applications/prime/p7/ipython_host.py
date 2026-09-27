@@ -62,7 +62,7 @@ class P7ClientFacade:
             not callable(getattr(client, name, None))
             for name in (
                 "observe", "status", "act", "history", "frame_at", "act_checked",
-                "tried_actions", "last_outcome_summary",
+                "tried_actions", "last_outcome_summary", "mechanics_prior",
             )
         ):
             raise P7ClientError()

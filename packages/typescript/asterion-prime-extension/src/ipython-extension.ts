@@ -23,7 +23,6 @@ const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const RESULT_KEYS = ["output", "protocol", "request_id", "status", "type"];
 const REQUEST_KEYS = ["code", "protocol", "request_id", "type"];
-const METHOD_RESULT_KEYS = ["error", "params", "protocol", "request_id", "status", "type", "value"];
 const METHOD_REQUEST_KEYS = ["method", "params", "protocol", "request_id", "type"];
 
 type ResultStatus = "ok" | "error" | "uncertain";
@@ -358,7 +357,17 @@ export function createIpythonBridge(
 }
 
 export function toolNames(): string[] {
-  return ["ipython", "p7_observe", "p7_act_checked"];
+  return [
+    "ipython",
+    "p7_observe",
+    "p7_status",
+    "p7_mechanics_prior",
+    "p7_tried_actions",
+    "p7_last_outcome_summary",
+    "p7_history",
+    "p7_frame_at",
+    "p7_act_checked",
+  ];
 }
 
 interface MethodToolInput {
@@ -429,6 +438,13 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
       "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason.",
       TypeObject({}, { additionalProperties: false }),
       "status",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_mechanics_prior",
+      "Read bounded mechanics evidence inferred from prior actions. This is evidence for reasoning, not a route or action prescription.",
+      TypeObject({}, { additionalProperties: false }),
+      "mechanics_prior",
     ),
     makeMethodTool(
       bridge,

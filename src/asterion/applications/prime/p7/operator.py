@@ -162,9 +162,15 @@ class _BridgeSignal:
 class _IpythonBridgeServer:
     """Operator-owned duplex adapter between the Pi extension and host."""
 
-    def __init__(self, channel: socket.socket, host: PersistentIpythonHost) -> None:
+    def __init__(
+        self,
+        channel: socket.socket,
+        host: PersistentIpythonHost,
+        client: object,
+    ) -> None:
         self._channel = channel
         self._host = host
+        self._client = p7_client_facade(client)
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._started = False
@@ -239,6 +245,8 @@ class _IpythonBridgeServer:
                 }
             elif request_type == "method_call":
                 if (
+                    set(value) != {"method", "params", "protocol", "request_id", "type"}
+                    or
                     "method" not in value
                     or type(value["method"]) is not str
                     or "params" not in value
@@ -270,25 +278,79 @@ class _IpythonBridgeServer:
         "method_call"`` instead of going through the ipython cell-execution
         path.
         """
-        from .ipython_host import p7_client_facade
-        try:
-            facade = p7_client_facade(self._host.broker())
-            value = getattr(facade, method)(params)
-        except BaseException as exc:
+        def error_response() -> dict[str, object]:
             return {
+                "output": "",
                 "protocol": _BRIDGE_PROTOCOL,
                 "request_id": request_id,
                 "status": "error",
                 "type": "method_result",
-                "error": str(exc),
             }
-        return {
-            "protocol": _BRIDGE_PROTOCOL,
-            "request_id": request_id,
-            "status": "ok",
-            "type": "method_result",
-            "value": value,
-        }
+
+        def ok_response(result: object) -> dict[str, object]:
+            try:
+                output = json.dumps(
+                    result,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            except (TypeError, ValueError, OverflowError):
+                return error_response()
+            return {
+                "output": output,
+                "protocol": _BRIDGE_PROTOCOL,
+                "request_id": request_id,
+                "status": "ok",
+                "type": "method_result",
+            }
+
+        try:
+            facade = self._client
+            if method in {"observe", "status", "mechanics_prior"}:
+                if type(params) is not dict or params:
+                    return error_response()
+                value = getattr(facade, method)()
+            elif method in {"tried_actions", "last_outcome_summary"}:
+                if params is not None and (
+                    type(params) is not int or params < 0
+                ):
+                    return error_response()
+                value = getattr(facade, method)(params)
+            elif method == "history":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"start", "limit"}
+                    or type(params["start"]) is not int
+                    or params["start"] < 0
+                    or type(params["limit"]) is not int
+                    or params["limit"] < 1
+                ):
+                    return error_response()
+                value = facade.history(params["start"], params["limit"])
+            elif method == "frame_at":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"sequence"}
+                    or type(params["sequence"]) is not int
+                    or params["sequence"] < 0
+                ):
+                    return error_response()
+                value = facade.frame_at(params["sequence"])
+            elif method == "act_checked":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"plan"}
+                    or type(params["plan"]) is not list
+                ):
+                    return error_response()
+                value = facade.act_checked(params["plan"])
+            else:
+                return error_response()
+        except BaseException:
+            return error_response()
+        return ok_response(value)
 
 
 class _P7BrokerClient:
@@ -1159,7 +1221,7 @@ def build_p7_operator_resources(
             PrimeGameplayTrace(broker, trace, engine.guid, identities)
             if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
-        bridge = _IpythonBridgeServer(parent, ipython)
+        bridge = _IpythonBridgeServer(parent, ipython, prediction_client)
         bridge.start()
         parent = None
         return P7OperatorResources(
