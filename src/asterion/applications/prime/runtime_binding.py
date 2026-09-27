@@ -44,8 +44,6 @@ _HOST_CAPABILITIES = frozenset(
 _RUNTIME_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
-    "model": "gpt-6-sol",
-    "provider": "openai-codex",
 }
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
@@ -56,8 +54,6 @@ _GAMEPLAY_HOST_CAPABILITIES = frozenset(
 _GAMEPLAY_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
-    "model": "gpt-6-sol",
-    "provider": "openai-codex",
 }
 _GAMEPLAY_ARTIFACT = "prime.p7-gameplay-run.evidence"
 _GAMEPLAY_MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
@@ -367,6 +363,15 @@ def build_p7_runtime(
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
         unbounded = launch is not None and launch.deadline_seconds is None
         expected_options = dict(_RUNTIME_OPTIONS)
+        provider = context.options.get("provider")
+        model = context.options.get("model")
+        if (
+            type(provider) is not str or not provider
+            or type(model) is not str or not model
+            or not provider.isascii() or not model.isascii()
+        ):
+            raise RuntimeFactoryError(_ERROR)
+        expected_options.update(provider=provider, model=model)
         if unbounded:
             # The operator validates OFFLINE authorization before stripping ARC
             # configuration from the model subprocess environment. This seam
@@ -455,6 +460,14 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
     launch_value = context.host_services.get("prime.launch")
     launch = launch_value if type(launch_value) is PrimeLaunch else None
     try:
+        provider = context.options.get("provider")
+        model = context.options.get("model")
+        if (
+            type(provider) is not str or not provider
+            or type(model) is not str or not model
+            or not provider.isascii() or not model.isascii()
+        ):
+            raise RuntimeFactoryError(_ERROR)
         ipython = context.host_services.get("prime.ipython")
         broker = context.host_services.get("prime.arc-broker")
         trace_value = context.host_services.get("prime.arc-run-evidence")
@@ -474,6 +487,8 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             or not getattr(broker.game, "is_full_game", False)
             or dict(context.options) != {
                 **_GAMEPLAY_OPTIONS,
+                "provider": provider,
+                "model": model,
                 "max_actions": str(broker.game.action_cap),
             }
             or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")

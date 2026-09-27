@@ -5,8 +5,8 @@ import unittest
 from pathlib import Path
 
 
-class TestPrimeP7Gpt6Migration(unittest.TestCase):
-    def test_runtime_selects_codex_from_operator_pi_profile(self) -> None:
+class TestPrimeP7PiModelConfig(unittest.TestCase):
+    def test_runtime_selects_model_from_operator_pi_profile(self) -> None:
         from asterion.applications.prime.p7.game import P7GameSelection
         from asterion.applications.prime.p7.operator import resolve_p7_runtime
 
@@ -15,11 +15,29 @@ class TestPrimeP7Gpt6Migration(unittest.TestCase):
             (profile / "auth.json").write_text('{"openai-codex": {}}')
             (profile / "models-store.json").write_text('{"openai-codex": {}}')
             selection = resolve_p7_runtime(
-                {"ASTERION_PRIME_PI_AGENT_DIR": str(profile)},
+                {"ASTERION_PRIME_PI_AGENT_DIR": str(profile), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"},
                 P7GameSelection("ls20-9607627b", 0, 1),
             )
         self.assertEqual(selection.provider, "openai-codex")
         self.assertEqual(selection.model, "gpt-6-sol")
+
+    def test_provider_and_model_are_selected_from_operator_environment(self) -> None:
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import resolve_p7_runtime
+
+        with tempfile.TemporaryDirectory() as directory:
+            profile = Path(directory)
+            (profile / "auth.json").write_text("{}")
+            (profile / "models-store.json").write_text("{}")
+            selection = resolve_p7_runtime(
+                {
+                    "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
+                    "ASTERION_PRIME_PROVIDER": "deepseek",
+                    "ASTERION_PRIME_MODEL": "deepseek-v4-flash",
+                },
+                P7GameSelection("ls20-9607627b", 0, 1),
+            )
+        self.assertEqual((selection.provider, selection.model), ("deepseek", "deepseek-v4-flash"))
 
     def test_pi_profile_root_must_not_be_a_symlink(self) -> None:
         from asterion.applications.prime.p7.live import P7LiveSolveError, resolve_pi_agent_dir

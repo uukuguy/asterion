@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -24,6 +25,14 @@ GAMEPLAY_TRACE_IDENTITIES = {
 }
 
 
+def gameplay_trace_identities(model_id: str) -> Mapping[str, str]:
+    """Build official trace identity for the operator-selected Pi model."""
+
+    if type(model_id) is not str or not model_id or not model_id.isascii():
+        raise ValueError
+    return {**GAMEPLAY_TRACE_IDENTITIES, "model_id": model_id}
+
+
 class PrimeGameplayTraceError(RuntimeError):
     """The private gameplay trace cannot publish evidence."""
 
@@ -39,6 +48,7 @@ class PrimeGameplayTrace:
     _broker: ArcBroker
     _recorder: PrimeTraceRecorder
     _guid: str
+    _identities: Mapping[str, str] = field(default_factory=lambda: dict(GAMEPLAY_TRACE_IDENTITIES))
     _accessed: bool = field(default=False, init=False, compare=False)
     _evidence: PrimeArcAgi3GameplayEvidence | None = field(
         default=None, init=False, compare=False
@@ -49,6 +59,8 @@ class PrimeGameplayTrace:
             type(self._broker) is not ArcBroker
             or type(self._broker.game) is not ArcGameContract
             or type(self._recorder) is not PrimeTraceRecorder
+            or set(self._identities) != set(GAMEPLAY_TRACE_IDENTITIES)
+            or any(type(key) is not str or type(value) is not str for key, value in self._identities.items())
             or type(self._guid) is not str
             or not self._guid
             or len(self._guid) > 256
@@ -81,7 +93,7 @@ class PrimeGameplayTrace:
         try:
             self._recorder.append(
                 "arc.usage.reported",
-                GAMEPLAY_TRACE_IDENTITIES,
+                self._identities,
                 {"input_tokens": input_tokens, "output_tokens": output_tokens},
             )
         except Exception:
@@ -95,7 +107,7 @@ class PrimeGameplayTrace:
             evidence = self._build_evidence(run_id)
             self._recorder.append(
                 "arc.run.completed",
-                GAMEPLAY_TRACE_IDENTITIES,
+                self._identities,
                 {
                     "game_id": evidence.game_id,
                     "guid": evidence.guid,
@@ -176,6 +188,7 @@ class PrimeGameplayTrace:
 
 __all__ = (
     "GAMEPLAY_TRACE_IDENTITIES",
+    "gameplay_trace_identities",
     "PrimeGameplayTrace",
     "PrimeGameplayTraceError",
 )

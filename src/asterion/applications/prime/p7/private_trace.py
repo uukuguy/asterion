@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 import re
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -26,6 +27,14 @@ P7_TRACE_IDENTITIES = {
 }
 
 
+def p7_trace_identities(model_id: str) -> Mapping[str, str]:
+    """Build the trace identity for the operator-selected Pi model."""
+
+    if type(model_id) is not str or not model_id or not model_id.isascii():
+        raise ValueError
+    return {**P7_TRACE_IDENTITIES, "model_id": model_id}
+
+
 class P7PrivateTraceReceiptError(RuntimeError):
     """The private trace cannot publish the requested public receipt."""
 
@@ -36,6 +45,7 @@ class P7PrivateTraceReceipt:
 
     _broker: ArcBroker
     _recorder: PrimeTraceRecorder
+    _identities: Mapping[str, str] = field(default_factory=lambda: dict(P7_TRACE_IDENTITIES))
     _accessed: bool = field(default=False, init=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -43,6 +53,8 @@ class P7PrivateTraceReceipt:
             type(self._broker) is not ArcBroker
             or type(self._broker.game) is not P7GameSelection
             or type(self._recorder) is not PrimeTraceRecorder
+            or set(self._identities) != set(P7_TRACE_IDENTITIES)
+            or any(type(key) is not str or type(value) is not str for key, value in self._identities.items())
         ):
             raise P7PrivateTraceReceiptError("P7 solve receipt is unavailable")
 
@@ -79,7 +91,7 @@ class P7PrivateTraceReceipt:
                 or not 0 <= status.levels_completed < self._broker.game.target_level
                 or len(journal) != status.primitive_actions
                 or len(recorded) != len(journal)
-                or any(entry.identities != P7_TRACE_IDENTITIES for entry in entries)
+                or any(entry.identities != self._identities for entry in entries)
             ):
                 return False
             previous_digest = _observation_digest(self._broker._initial)
@@ -129,7 +141,7 @@ class P7PrivateTraceReceipt:
         try:
             self._recorder.append(
                 "arc.usage.reported",
-                P7_TRACE_IDENTITIES,
+                self._identities,
                 {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
@@ -167,7 +179,7 @@ class P7PrivateTraceReceipt:
                 raise ValueError
             self._recorder.append(
                 "arc.run.completed",
-                P7_TRACE_IDENTITIES,
+                self._identities,
                 {
                     "game_id": broker_receipt.game_id,
                     "seed": broker_receipt.seed,
@@ -257,4 +269,6 @@ class P7PrivateTraceReceipt:
 __all__ = (
     "P7PrivateTraceReceipt",
     "P7PrivateTraceReceiptError",
+    "P7_TRACE_IDENTITIES",
+    "p7_trace_identities",
 )

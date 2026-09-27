@@ -158,7 +158,7 @@ class TestOfficialOperator(unittest.TestCase):
 
     def test_official_game_uses_bounded_gameplay_runtime(self) -> None:
         game = ArcGameContract("ab12-12345678", win_levels=12, action_cap=1000)
-        selection = resolve_p7_runtime({"DEEPSEEK_API_KEY": "private"}, game)
+        selection = resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"}, game)
 
         self.assertEqual(selection.max_actions, 1000)
         self.assertEqual(selection.deadline_ms, 3_600_000)
@@ -200,7 +200,7 @@ class TestOfficialOperator(unittest.TestCase):
             trace_root = root / "trace"
             trace_root.mkdir()
             resources = build_p7_operator_resources(
-                environment={"DEEPSEEK_API_KEY": "model-secret", "ARC_API_KEY": "arc-secret"},
+                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol", "ARC_API_KEY": "arc-secret"},
                 pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
                 extension_path=extension,
                 working_directory=root,
@@ -223,7 +223,7 @@ class TestOfficialOperator(unittest.TestCase):
             assembly = application.assemblies[0]
             self.assertEqual(dict(resources.runtime_options), {
                 "deadline_ms": "3600000", "max_actions": "1000", "max_callbacks": "128",
-                "model": "deepseek-v4-flash", "provider": "deepseek",
+                "model": "gpt-6-sol", "provider": "openai-codex",
             })
             runtime = assembly.runtime_binding.factory(RuntimeFactoryContext(
                 provider_id="prime-applications",
@@ -247,7 +247,7 @@ class TestOfficialOperator(unittest.TestCase):
             root = Path(directory)
             invocation = OfficialInvocation(
                 operator_root=root,
-                environment={"DEEPSEEK_API_KEY": "private"},
+                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"},
                 pi_base_command=("pi",),
                 extension_path=root / "extension.mjs",
                 api_key="arc-private",

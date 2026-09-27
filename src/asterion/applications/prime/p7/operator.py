@@ -1,4 +1,4 @@
-"""Operator-owned fixed model selection for the native P7 application."""
+"""Operator-owned Pi selection and execution for the native P7 application."""
 
 from __future__ import annotations
 
@@ -38,8 +38,8 @@ from asterion.applications.prime.p7.game import (
     resolve_game_selection,
 )
 from asterion.applications.prime.p7.gameplay_trace import (
-    GAMEPLAY_TRACE_IDENTITIES,
     PrimeGameplayTrace,
+    gameplay_trace_identities,
 )
 from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
@@ -50,6 +50,7 @@ from asterion.applications.prime.p7 import live
 from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7_TRACE_IDENTITIES,
+    p7_trace_identities,
 )
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
@@ -71,8 +72,6 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 
 
 _RUNTIME_ID = "asterion.prime"
-_PROVIDER = "openai-codex"
-_MODEL = "gpt-6-sol"
 _MISSING = object()
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
@@ -84,7 +83,22 @@ _BRIDGE_JOIN_SECONDS = 1.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 
 class P7OperatorError(RuntimeError):
-    """The fixed P7 model host is unavailable."""
+    """The configured P7 Pi host is unavailable."""
+
+
+def _pi_selection(environment: Mapping[str, str]) -> tuple[str, str]:
+    """Resolve the Pi provider/model selected by the operator's .env."""
+
+    provider = environment.get(live.PI_PROVIDER_ENV, "").strip()
+    model = environment.get(live.PI_MODEL_ENV, "").strip()
+    if (
+        not provider
+        or not model
+        or any(not value.isascii() or any(ord(char) <= 32 for char in value) for value in (provider, model))
+        or live.resolve_pi_agent_dir(environment) is None
+    ):
+        raise P7OperatorError("P7 model host is unavailable")
+    return provider, model
 
 
 def _resolve_history_variant(
@@ -811,8 +825,10 @@ class P7RuntimeSelection:
     def __post_init__(self) -> None:
         if (
             self.runtime_id != _RUNTIME_ID
-            or self.provider != _PROVIDER
-            or self.model != _MODEL
+            or not self.provider
+            or not self.model
+            or not self.provider.isascii()
+            or not self.model.isascii()
             or type(self.max_actions) is not int
             or not 1 <= self.max_actions <= 5000
             or type(self.unbounded_first_round) is not bool
@@ -823,11 +839,17 @@ class P7RuntimeSelection:
             raise P7OperatorError("P7 runtime selection is invalid")
 
     @classmethod
-    def fixed(cls, game: P7GameSelection | ArcGameContract = DEFAULT_GAME) -> P7RuntimeSelection:
+    def fixed(
+        cls,
+        game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
+        *,
+        provider: str,
+        model: str,
+    ) -> P7RuntimeSelection:
         value = object.__new__(cls)
         object.__setattr__(value, "runtime_id", _RUNTIME_ID)
-        object.__setattr__(value, "provider", _PROVIDER)
-        object.__setattr__(value, "model", _MODEL)
+        object.__setattr__(value, "provider", provider)
+        object.__setattr__(value, "model", model)
         object.__setattr__(value, "max_actions", game.action_cap)
         object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
@@ -875,28 +897,21 @@ class P7OperatorResources:
                     launch.extension_lease.close()
 
 
-def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
-    """Resolve only the fixed Codex host from passed operator environment."""
+def resolve_pi_provider(environment: Mapping[str, str], *, model: str | None = None) -> str:
+    """Resolve the operator-selected Pi provider."""
 
-    try:
-        available = (
-            isinstance(environment, Mapping)
-            and model == _MODEL
-            and live.resolve_pi_agent_dir(environment)
-        )
-    except Exception:
-        available = False
-    if not available:
-        raise P7OperatorError("P7 model host is unavailable") from None
-    return _PROVIDER
+    provider, selected_model = _pi_selection(environment)
+    if model is not None and model != selected_model:
+        raise P7OperatorError("P7 model host is unavailable")
+    return provider
 
 
 def resolve_p7_runtime(
     environment: Mapping[str, str], game: P7GameSelection | ArcGameContract = DEFAULT_GAME
 ) -> P7RuntimeSelection:
-    """Resolve the one fixed model/runtime preset without exposing tuning knobs."""
+    """Resolve bounded runtime controls with the operator-selected Pi model."""
 
-    provider = resolve_pi_provider(environment, model=_MODEL)
+    provider, model = _pi_selection(environment)
     unbounded = UNBOUNDED_FIRST_ROUND_ENV in environment
     if unbounded and (
         environment[UNBOUNDED_FIRST_ROUND_ENV] != "1"
@@ -909,7 +924,7 @@ def resolve_p7_runtime(
     return P7RuntimeSelection(
         runtime_id=_RUNTIME_ID,
         provider=provider,
-        model=_MODEL,
+        model=model,
         max_actions=game.action_cap,
         max_callbacks=None if unbounded else _MAX_CALLBACKS,
         deadline_ms=None if unbounded else _DEADLINE_MS,
@@ -920,12 +935,12 @@ def resolve_p7_runtime(
 def p7_runtime_options(
     selection: P7RuntimeSelection, game: P7GameSelection | ArcGameContract = DEFAULT_GAME
 ) -> Mapping[str, str]:
-    """Return immutable private factory options for the fixed selection."""
+    """Return immutable private factory options for the selected Pi model."""
 
     if (
         type(selection) is not P7RuntimeSelection
         or selection != replace(
-            P7RuntimeSelection.fixed(game),
+            P7RuntimeSelection.fixed(game, provider=selection.provider, model=selection.model),
             max_callbacks=None if selection.unbounded_first_round else _MAX_CALLBACKS,
             deadline_ms=None if selection.unbounded_first_round else _DEADLINE_MS,
             unbounded_first_round=selection.unbounded_first_round,
@@ -953,7 +968,7 @@ def _private_experiment(
     deadline = runtime_options.get("deadline_ms")
     return {
         "prediction_variant": variant,
-        "model": _MODEL,
+        "model": runtime_options.get("model", ""),
         "game_id": game.game_id,
         "seed": game.seed,
         "target_level": game.target_level,
@@ -1070,10 +1085,14 @@ def build_p7_operator_resources(
             raise ValueError
         broker.bind_history(history_run_id)
         official = type(game) is ArcGameContract
+        identities = (
+            gameplay_trace_identities(selection.model)
+            if official else p7_trace_identities(selection.model)
+        )
         prediction_client = _P7BrokerClient(
             broker,
             trace,
-            GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
+            identities,
             variant=variant,
         )
         ipython = PersistentIpythonHost(
@@ -1081,8 +1100,8 @@ def build_p7_operator_resources(
             p7_client=p7_client_facade(prediction_client),
         )
         private_trace = (
-            PrimeGameplayTrace(broker, trace, engine.guid)
-            if official else P7PrivateTraceReceipt(broker, trace)
+            PrimeGameplayTrace(broker, trace, engine.guid, identities)
+            if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
         bridge = _IpythonBridgeServer(parent, ipython)
         bridge.start()
@@ -1539,6 +1558,8 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         game=invocation.game,
         broker_replay_sha256=broker_receipt.replay_sha256,
         terminal_reason=broker_receipt.terminal_reason,
+        provider=resources_.runtime_options.get("provider", ""),
+        model=resources_.runtime_options.get("model", ""),
     )
 
 
@@ -1569,6 +1590,8 @@ def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
         comparison_report=result.comparison_report,
         game=result.game,
         broker_replay_sha256=result.broker_replay_sha256,
+        provider=result.provider,
+        model=result.model,
     )
 
 
@@ -1587,6 +1610,8 @@ def _public_receipt(
     terminal_reason: str | None = None,
     game: P7GameSelection = DEFAULT_GAME,
     broker_replay_sha256: str | None = None,
+    provider: str = "",
+    model: str = "",
 ) -> Mapping[str, object]:
     """Build the one public receipt; private evidence never crosses this line."""
 
@@ -1595,8 +1620,8 @@ def _public_receipt(
         "schema": "asterion.prime.p7-live-receipt/v1",
         "application_id": "prime.arc-agi-3-solving",
         "runtime_id": "asterion.prime",
-        "provider": _PROVIDER,
-        "model": _MODEL,
+        "provider": provider,
+        "model": model,
         "game_id": game.game_id,
         "seed": game.seed,
         "target_level": game.target_level,
@@ -1688,6 +1713,8 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 _public_receipt(
                     "unsuccessful", run_id, reason=reason, game=invocation.game,
+                    provider=getattr(invocation, "environment", {}).get(live.PI_PROVIDER_ENV, ""),
+                    model=getattr(invocation, "environment", {}).get(live.PI_MODEL_ENV, ""),
                     **failure_evidence,
                 ),
                 allow_nan=False,

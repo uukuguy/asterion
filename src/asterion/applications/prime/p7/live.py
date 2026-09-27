@@ -55,6 +55,8 @@ ARC_ROOT_ENV = "ASTERION_PRIME_ARC_ROOT"
 NODE_ENV = "ASTERION_PRIME_NODE"
 PI_ENTRY_ENV = "ASTERION_PRIME_PI_ENTRY"
 PI_AGENT_DIR_ENV = "ASTERION_PRIME_PI_AGENT_DIR"
+PI_PROVIDER_ENV = "ASTERION_PRIME_PROVIDER"
+PI_MODEL_ENV = "ASTERION_PRIME_MODEL"
 _EXTENSION_RESOURCE = "resources/ipython-extension.mjs"
 
 # The fixed Pi RPC contract this application launches. It is the same mode
@@ -104,6 +106,8 @@ class P7LiveExecution:
     game: P7GameSelection
     broker_replay_sha256: str
     terminal_reason: str
+    provider: str = ""
+    model: str = ""
 
 
 class NeverCancelled:
@@ -1104,6 +1108,8 @@ __all__ = (
     "ARC_ROOT_ENV",
     "GAME_ID",
     "PI_AGENT_DIR_ENV",
+    "PI_MODEL_ENV",
+    "PI_PROVIDER_ENV",
     "NODE_ENV",
     "OPERATOR_ROOT_ENV",
     "PI_ENTRY_ENV",
