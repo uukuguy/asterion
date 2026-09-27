@@ -25,6 +25,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - A temporary fixture-only profile experiment advanced that smoke into composed application execution, where it still failed with the generic capability error; the fixture change was discarded, so no production or test-fixture behavior was retained from that experiment.
 - Required settled state is now appended by the application before the Pi session and on each continuation; only scenario-useful registered query/action tools remain exposed. Model-round private diagnostics retain hashes/signals only, and the sealed LS20 L3 run reports one action-producing round rather than the former read-only loop.
 - Continuations now also receive bounded `tried_summary` and an application-generated `action_guard`; unsealed recorder snapshots are merged with action diagnostics before the private summary is written. This is guidance and observability, not an engine-specific route or hard action stop.
+- The follow-up summary had 42 checked plans with 31 mismatches, so verified guidance now stops batching after two same-level mismatches and requires a one-item probe or RESET (`5db4a62b`).
 
 ## 当前判断
 
