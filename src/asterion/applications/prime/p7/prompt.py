@@ -101,6 +101,10 @@ legal gameplay action. Do not call mechanics_prior() repeatedly while the level
 has not advanced. After an act_checked mismatch or no-effect result, inspect
 the returned observation once, then dispatch a new falsifiable probe or RESET;
 do not enter another read-only planning loop.
+If a registered p7_act_checked call returns an unavailable/error result or
+applies zero items, immediately use the persistent ipython fallback with one
+`p7_client.act([...])` gameplay action, then observe the settled result. Do not
+repeat the failed checked-plan shape.
 
 Treat only broker observations and retained Python state as game information.
 Never inspect engine source, another game or run, network resources, credentials,
