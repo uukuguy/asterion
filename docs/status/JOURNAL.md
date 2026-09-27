@@ -3204,3 +3204,4 @@
 - 08:54 记录系统 Pi 重复 web_search 扩展修复，供跨会话定位全局配置。 [e1490e59]
 - 09:23 确认系统 Pi 已切换为 openai-codex/gpt-6-sol high；启动 P7 迁移设计与计划。 [38e5b545]
 - 09:36 P7 已切换 Codex GPT-6 Sol，复用全局 Pi profile，固定 high reasoning，并保留历史 DeepSeek 前缀兼容。 [d50897f7]
+- 10:57 FT09 L5 Codex 控制跑通模型调用并上报 usage，5 分钟无新动作安全停机；仅 stall receipt，无新验证关卡。

@@ -1,14 +1,15 @@
 # Next-Session Handoff
 
-> Updated: 2026-09-27 08:21 CST. End of session.
+> Updated: 2026-09-27 10:58 CST. Active checkpoint after P7 Codex migration.
 
 ## TL;DR
 
-1. **Final card `8cd88c5b-ec12-49e3-9ff6-1d4af2e1e8c5` scored 11.55** (vs prev 9.98, +1.57 / +15.7%).
+1. **Final card `8cd88c5b-ec12-49e3-9ff6-1d4af2e1e8c5` scored 11.55** (vs prev 9.98, +1.57 / +15.7%); no new official submission was made.
 2. **3 L4 passes this session**: FT09 (+19.05 game score), AR25 (+11.11), TU93 (+8.89). Total +39.05 game score, +1.56 overall contribution.
 3. **L3+L4 queue exhausted** — 11 attempts: 3 pass / 8 fail / 1 killed (process). Remaining L2-only games can't be tightened without prefix deletion (destructive).
 4. **Optimization strategy revised**: passing more levels (cap increases) >> tightening under-115 actions (only helps when game score < cap; most passed levels already at 115).
-5. 4 no-effect-loop improvements committed (commits `c93264a9`, `633d030d`, `1083708e`) — partial effect on cluster/wander failures (3→3 cluster attempts at SC25 reduced to 3 max per position via REPLAN_REQUIRED, but model still didn't solve L3).
+5. **P7 native model migration is committed** (`d50897f7`, journal `f886af66`): fixed `openai-codex/gpt-6-sol`, high reasoning, global operator Pi profile, isolated resource discovery, and historical DeepSeek prefix compatibility.
+6. **First Codex retry control** on FT09 L5 (`p7-live-20260927024817-d3f5b26a514cd1958c142df1`) loaded the 59-action verified prefix, reported GPT-6-Sol usage, then hit the 300-second no-action stall; only `stall-receipt.json` exists, so it is not a verified result.
 
 ## Where things stand
 
@@ -20,7 +21,7 @@
   - 7 games at 2 levels (DC22/CN04/SC25/RE86/LS20/KA59/WA30/TR87): 6.67–14.29
   - 11 games at L1 only: 1.46–4.76
 - 25/25 games attempted; no game at 100% (would require all levels at 115).
-- **Working tree**: 3 modified files (`broker.py`, `ipython_host.py`, `test_prime_p7_live_command.py`), 1 typo duplicate file (`docs/status/ASTERION-PRIME-PRIME-PRIME-PRIME-EVIDENCE.md` — needs `git rm`), 1 untracked empty dir (`src/asterion/applications/prime/resources/`).
+- **Working tree**: clean after commits `d50897f7` and `f886af66`; no P7 or Pi processes remain.
 
 ## What this session delivered
 
@@ -34,15 +35,9 @@
 
 ## Next steps (immediate, action-level)
 
-1. **Clean up uncommitted changes** before any next session:
-   ```
-   git rm docs/status/ASTERION-PRIME-PRIME-PRIME-PRIME-EVIDENCE.md
-   git checkout -- src/asterion/applications/prime/p7/broker.py src/asterion/applications/prime/p7/ipython_host.py tests/test_prime_p7_live_command.py
-   rmdir src/asterion/applications/prime/resources 2>/dev/null
-   ```
-   The `broker.py` / `ipython_host.py` / `tests` diffs are from earlier commit chain (likely unrelated to current session); only the new `RESUME-NEXT-SESSION.md` change should remain.
+1. **Keep the Codex route bounded while diagnosing the stall.** The zero-prompt guest RPC is proven (`get_state` → `openai-codex/gpt-6-sol`, `thinkingLevel=high`, auto compaction enabled). The FT09 run proves model access and usage reporting, but not action progress. Inspect the Pi/runtime settlement path before another paid retry.
 
-2. **If more score gains wanted**: only M0R0 L4 (cap 217 = 191 prefix + 26 baseline, already failed twice) remains as an un-tried L4 candidate. Other L4 candidates (FT09/AR25/TU93/SU15/VC33) have been retried at least once. Expected additional gain: < +0.20 overall.
+2. **If more score gains wanted**: do not submit the stalled FT09 run. First reproduce a tiny bounded Codex action probe or fix the settlement issue; then consider M0R0 L4 (cap 217 = 191 prefix + 26 baseline, already failed twice) only with explicit budget authorization.
 
 3. **If strategy pivot**: delete saved prefix for one game (e.g., TN36 L1 prefix at `.asterion-private/prime-p7-live/p7-live-20260926062602-958fbcdcb0e53f999a388dc1/summary.json` + `prefix-replay-recordings/`) and re-solve from L1 — but no retry tool supports target_level=1. Requires modifying `run_prime_p7_retry.py:_target_level` or running an offline full solve.
 
@@ -98,4 +93,4 @@
 
 ## Current task authorization
 
-User has authorized L3+ retry queue to push the official score. L3/L4 queue exhausted this session at 3/11 pass rate. No further actions authorized without explicit confirmation. User may want to (a) stop and accept 11.55, (b) attempt one more M0R0 L4 retry, or (c) pivot strategy (e.g., modify retry tool to support full re-solve).
+Current authorization covers the migration and one bounded FT09 control. Further paid retries require an explicit new finite budget after the stall is understood.
