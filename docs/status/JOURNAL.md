@@ -3212,3 +3212,4 @@
 - 12:15 暂定 P7 自行初始化 Pi；记录通用、Prime/native、P1 与旧 Prime-agent 的分散路径，统一架构后续研究。 [d650c9fb]
 - 12:20 handoff 收口：RESUME、CURRENT-STATE、DECISIONS、MEMORY 已同步，P7 自有 Pi 边界保留。 [677555f8]
 - 12:22 修正 handoff 命令为可移植占位路径，docs-check 恢复通过。 [eb47a836]
+- 12:24 移除 handoff 中用户绝对路径，保持独立仓库文档可移植。 [64cc2a48]
