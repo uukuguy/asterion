@@ -3223,3 +3223,4 @@
 - 15:02 收紧 mechanics prior 输入边界：仅接受 ACTION1–ACTION7，拒绝被摘要截断的 level 64；115 个 focused tests 通过（`08f25fa2`）。
 - 16:16 RESUME 刷新为当前 P7 bridge/prior 验证边界，明确下一步仅做一次有界 replay-prefix live 验证（`672b2a35`）。
 - 16:25 有界 FT09 next-level 运行 `p7-live-20260927081939-5c7820a6bfe22dbc0be38357`：前缀 59、目标 L5、cap 65；无新增动作，`execution-stalled`，cleanup true，未验证新关。Recording 不包含模型 tool-call 事件，不能据此判断是否调用 mechanics_prior。
+- 16:27 RESUME 记录 FT09 post-change stall 及 observability 缺口：下一步先区分模型未调用与桥接失败，再决定再次 live（`2e0e8316`）。
