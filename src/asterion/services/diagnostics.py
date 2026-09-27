@@ -12,33 +12,6 @@ from typing import Protocol
 from uuid import uuid4
 
 
-PRIVATE_FAILURE_CODES = frozenset(
-    {
-        "event_malformed",
-        "model_callback_limit",
-        "tool_callback_limit",
-        "tool_call_invalid",
-        "tool_result_invalid",
-        "duplicate_terminal",
-        "event_type_invalid",
-        "message_update_malformed",
-        "usage_malformed",
-        "tool_call_malformed",
-        "tool_result_malformed",
-        "transport_protocol",
-        "native_result_malformed",
-        "native_terminal_invalid",
-        "continuation_invalid",
-    }
-)
-
-
-def bounded_failure_code(value: object) -> str | None:
-    """Return one approved scalar code without preserving arbitrary text."""
-
-    return value if type(value) is str and value in PRIVATE_FAILURE_CODES else None
-
-
 @dataclass(frozen=True, slots=True)
 class FailureDiagnostic:
     diagnostic_id: str
@@ -46,11 +19,6 @@ class FailureDiagnostic:
     exception_type: str
     subject_sha256: str
     capability_sha256: str | None
-    failure_code: str | None = None
-
-    def __post_init__(self) -> None:
-        if bounded_failure_code(self.failure_code) != self.failure_code:
-            raise ValueError("failure diagnostic code is invalid")
 
 
 class DiagnosticSink(Protocol):
@@ -79,7 +47,6 @@ def capture_failure(
     error: Exception,
     subject_id: str,
     capability_ref: str | None = None,
-    failure_code: object = None,
 ) -> str | None:
     """Return a correlation ID only when the optional sink accepted a record."""
 
@@ -96,7 +63,6 @@ def capture_failure(
             if capability_ref is None
             else sha256(capability_ref.encode("utf-8")).hexdigest()
         ),
-        failure_code=bounded_failure_code(failure_code),
     )
     try:
         sink.record(record)
@@ -109,7 +75,5 @@ __all__ = (
     "DiagnosticSink",
     "FailureDiagnostic",
     "MemoryDiagnosticSink",
-    "PRIVATE_FAILURE_CODES",
-    "bounded_failure_code",
     "capture_failure",
 )

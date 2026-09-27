@@ -48,17 +48,6 @@ _RUNTIME_OPTIONS = {
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
 _RECEIPT_MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
-_P7_TOOL_NAMES = (
-    "ipython",
-    "p7_observe",
-    "p7_status",
-    "p7_mechanics_prior",
-    "p7_tried_actions",
-    "p7_last_outcome_summary",
-    "p7_history",
-    "p7_frame_at",
-    "p7_act_checked",
-)
 _GAMEPLAY_HOST_CAPABILITIES = frozenset(
     {"prime.arc-broker", "prime.arc-run-evidence", "prime.ipython", "prime.launch"}
 )
@@ -450,7 +439,6 @@ def build_p7_runtime(
             approved_environment=launch.approved_environment,
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
-            allowed_tool_names=_P7_TOOL_NAMES,
         )
         launch = None
         return AsterionPrimeRuntimeClient(
@@ -536,7 +524,6 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
             completion_predicate=lambda: _p7_gameplay_terminal(broker),
-            allowed_tool_names=_P7_TOOL_NAMES,
         )
         launch = None
         return AsterionPrimeRuntimeClient(
