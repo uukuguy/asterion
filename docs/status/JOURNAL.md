@@ -3230,3 +3230,4 @@
 - 09:10 RESUME 更新为 2026-09-28：第二次 FT09 在首个 bridge 调用前 runtime 失败，当前不再修改桥接，保留为边界证据（`d7daa2cc`）。
 - 09:25 为 native 首轮失败增加私有 bounded diagnostic stage/type（不含 stderr/prompt/provider payload），便于区分 runtime 错误与 bridge 未调用（`830db3ac`）。
 - 09:28 RESUME 补充 native failure stage/type 诊断入口，继续维持“零 bridge 调用即先查 runtime”边界（`239a64df`）。
+- 09:35 收口并提交 P7 bridge/prior follow-up report `697da942`；工作树已清洁，当前未验证 live 新关。
