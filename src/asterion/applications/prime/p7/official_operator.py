@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from asterion.applications.prime import create_prime_arc_agi_3_gameplay_provider
+from asterion.applications.prime.operator_config import load_operator_environment
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_gameplay.provider import (
     CAPABILITY_REF,
@@ -119,7 +120,7 @@ def _preflight_catalog(process_environment: Mapping[str, str]) -> CatalogInvocat
         package = Path(str(asterion.__file__)).resolve(strict=True)
         if package.is_relative_to(root) or "site-packages" not in package.parts:
             raise ValueError
-        environment = {**live._dotenv_values(root / ".env"), **process_environment}
+        environment = load_operator_environment(root, process_environment)
         api_key = environment.get("ARC_API_KEY", "").strip()
         if not api_key:
             raise ValueError
@@ -137,7 +138,7 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
         package = Path(str(asterion.__file__)).resolve(strict=True)
         if package.is_relative_to(root) or "site-packages" not in package.parts:
             raise ValueError
-        environment = live.load_operator_environment(root)
+        environment = load_operator_environment(root, process_environment)
         api_key = environment.get("ARC_API_KEY", "").strip()
         if not api_key:
             raise ValueError
@@ -165,7 +166,7 @@ def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
         package = Path(str(asterion.__file__)).resolve(strict=True)
         if package.is_relative_to(root) or "site-packages" not in package.parts:
             raise ValueError
-        environment = {**live._dotenv_values(root / ".env"), **process_environment}
+        environment = load_operator_environment(root, process_environment)
         api_key = environment.get("ARC_API_KEY", "").strip()
         if not api_key:
             raise ValueError

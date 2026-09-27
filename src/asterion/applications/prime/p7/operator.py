@@ -16,6 +16,7 @@ from typing import cast
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
+from asterion.applications.prime.operator_config import load_operator_environment
 from asterion.applications.prime.p7.broker import (
     ArcAction,
     ArcBroker,
@@ -87,7 +88,7 @@ class P7OperatorError(RuntimeError):
 
 
 def _pi_selection(environment: Mapping[str, str]) -> tuple[str, str]:
-    """Resolve the Pi provider/model selected by the operator's .env."""
+    """Resolve the Pi provider/model from resolved operator configuration."""
 
     provider = environment.get(live.PI_PROVIDER_ENV, "").strip()
     model = environment.get(live.PI_MODEL_ENV, "").strip()
@@ -1187,7 +1188,9 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
     if not root.is_dir():
         raise P7OperatorError("P7 operator root is invalid")
     try:
-        resolved = dict(live.load_operator_environment(root))
+        resolved = load_operator_environment(root, environment)
+        if not resolved.get(live.PI_AGENT_DIR_ENV, "").strip():
+            raise P7OperatorError("Pi agent profile is unavailable")
         agent_dir = live.resolve_pi_agent_dir(resolved)
         resolved[PI_CODING_AGENT_DIR] = str(agent_dir)
         resolved.pop(UNBOUNDED_FIRST_ROUND_ENV, None)

@@ -779,36 +779,6 @@ def p7_act(actions):
 '''
 
 
-def _dotenv_values(path: Path) -> Mapping[str, str]:
-    if not path.is_file():
-        return {}
-    values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if key:
-            values[key] = value.strip().strip("'").strip('"')
-    return values
-
-
-def load_operator_environment(operator_root: Path) -> Mapping[str, str]:
-    """Merge operator-owned configuration with the process environment.
-
-    The preset exports the operator-owned values, so the process environment
-    wins over the file. ``ASTERION_PRIME_PI_AGENT_DIR`` is required here so
-    the operator rejects an invocation without an authenticated Pi profile
-    before it starts any process.
-    """
-
-    values = {**_dotenv_values(operator_root / ".env"), **os.environ}
-    if not values.get(PI_AGENT_DIR_ENV, "").strip():
-        raise P7LiveSolveError("Pi agent profile is unavailable")
-    return values
-
-
 def _resolved_file(environment: Mapping[str, str], name: str) -> Path:
     raw = environment.get(name, "").strip()
     if not raw:
@@ -1125,7 +1095,6 @@ __all__ = (
     "compare_if_available",
     "extension_path",
     "find_baseline_trace",
-    "load_operator_environment",
     "pi_base_command",
     "private_root",
     "read_trace_entries",
