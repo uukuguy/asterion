@@ -3211,3 +3211,4 @@
 - 11:30 将 `.env` 解析移至 Asterion Prime operator 配置层，P7 只消费已解析环境。 [7f45696b]
 - 12:15 暂定 P7 自行初始化 Pi；记录通用、Prime/native、P1 与旧 Prime-agent 的分散路径，统一架构后续研究。 [d650c9fb]
 - 12:20 handoff 收口：RESUME、CURRENT-STATE、DECISIONS、MEMORY 已同步，P7 自有 Pi 边界保留。 [677555f8]
+- 12:22 修正 handoff 命令为可移植占位路径，docs-check 恢复通过。 [eb47a836]
