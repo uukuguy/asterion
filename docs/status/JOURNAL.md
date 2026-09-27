@@ -3206,3 +3206,4 @@
 - 09:36 P7 已切换 Codex GPT-6 Sol，复用全局 Pi profile，固定 high reasoning，并保留历史 DeepSeek 前缀兼容。 [d50897f7]
 - 10:57 FT09 L5 Codex 控制跑通模型调用并上报 usage，5 分钟无新动作安全停机；仅 stall receipt，无新验证关卡。
 - 10:58 更新恢复边界与结构状态，记录 Codex 首次停滞控制及后续有限预算要求。 [73387b39]
+- 10:59 修正恢复文档中的绝对路径示例，docs-check 通过且命令可移植。 [9a8c5cce]
