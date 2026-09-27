@@ -10,8 +10,45 @@ from __future__ import annotations
 import os
 from collections.abc import Mapping
 from pathlib import Path
+import shlex
 
-from dotenv import dotenv_values
+try:
+    from dotenv import dotenv_values as _dotenv_values
+except ModuleNotFoundError:  # pragma: no cover - exercised by installed-wheel smoke tests
+    _dotenv_values = None
+
+
+def _fallback_dotenv_values(path: Path) -> dict[str, str]:
+    """Parse the small operator ``.env`` subset without an optional dependency."""
+
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return values
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if stripped.startswith("export "):
+            stripped = stripped[7:].lstrip()
+        if "=" not in stripped:
+            continue
+        name, raw = stripped.split("=", 1)
+        name = name.strip()
+        if (
+            not name
+            or not name.isascii()
+            or not name.replace("_", "a").isalnum()
+            or name[0].isdigit()
+        ):
+            continue
+        try:
+            parsed = shlex.split(raw, comments=True, posix=True)
+        except ValueError:
+            continue
+        values[name] = parsed[0] if parsed else ""
+    return values
 
 
 def load_operator_environment(
@@ -26,11 +63,9 @@ def load_operator_environment(
     """
 
     process = os.environ if process_environment is None else process_environment
-    dotenv = {
-        name: value
-        for name, value in dotenv_values(Path(operator_root) / ".env").items()
-        if value is not None
-    }
+    path = Path(operator_root) / ".env"
+    loaded = _dotenv_values(path) if _dotenv_values is not None else _fallback_dotenv_values(path)
+    dotenv = {name: value for name, value in loaded.items() if value is not None}
     return {**dotenv, **dict(process)}
 
 
