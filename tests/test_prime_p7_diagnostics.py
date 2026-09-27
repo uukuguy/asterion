@@ -8,6 +8,7 @@ from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.diagnostics import (
     analyze_model_rounds,
     analyze_trace,
+    analyze_trace_snapshot,
     combine_model_round_action_evidence,
 )
 
@@ -105,6 +106,8 @@ class TestPrimeP7Diagnostics(unittest.TestCase):
             report = analyze_model_round_snapshot(recorder.snapshot())
             self.assertEqual(report["round_count"], 1)
             self.assertEqual(report["recommendation"], "require-action-after-planning")
+            action_report = analyze_trace_snapshot(recorder.snapshot())
+            self.assertEqual(action_report.actions_since_progress, 0)
 
     def test_repeated_noop_and_resource_reset_are_labeled(self) -> None:
         report = analyze_trace(noop_then_life_loss_trace())

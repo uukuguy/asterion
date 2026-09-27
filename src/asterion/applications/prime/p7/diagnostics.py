@@ -43,10 +43,7 @@ def _progress(payload: Mapping[str, object], previous_level: int | None) -> tupl
     ), valid_level if valid_level is not None else previous_level
 
 
-def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
-    """Read trace evidence only; this function has no execution-side callbacks."""
-
-    entries = validate_trace(entries)
+def _analyze_trace_entries(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
     transitions = tuple(entry for entry in entries if entry.kind == "arc.action")
     maximum_noop = 0
     current_noop = 0
@@ -118,6 +115,20 @@ def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
         contradicted_hypotheses=contradicted,
         experiment_information_gain=tuple(information_gain),
     )
+
+
+def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
+    """Read sealed trace evidence only; this function has no callbacks."""
+
+    return _analyze_trace_entries(validate_trace(entries))
+
+
+def analyze_trace_snapshot(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
+    """Read a recorder snapshot before sealing without requiring a terminal marker."""
+
+    if type(entries) is not tuple or any(type(entry) is not PrimeTraceEntry for entry in entries):
+        raise ValueError("trace snapshot is unavailable")
+    return _analyze_trace_entries(entries)
 
 
 def _model_round_report(rounds: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
@@ -204,4 +215,5 @@ __all__ = (
     "analyze_model_round_snapshot",
     "analyze_model_rounds",
     "analyze_trace",
+    "analyze_trace_snapshot",
 )

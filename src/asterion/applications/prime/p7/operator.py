@@ -34,6 +34,7 @@ from asterion.applications.prime.p7.diagnostics import (
     analyze_model_round_snapshot,
     analyze_model_rounds,
     analyze_trace,
+    analyze_trace_snapshot,
 )
 from asterion.applications.prime.p7.game import (
     ArcGameContract,
@@ -1730,8 +1731,10 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                             analyze_model_rounds(trace_entries), analyze_trace(trace_entries)
                         )
                     else:
-                        diagnostics["model_rounds"] = analyze_model_round_snapshot(
-                            recorder.snapshot()
+                        snapshot = recorder.snapshot()
+                        diagnostics["model_rounds"] = combine_model_round_action_evidence(
+                            analyze_model_round_snapshot(snapshot),
+                            analyze_trace_snapshot(snapshot),
                         )
                 except Exception:
                     pass
