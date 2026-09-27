@@ -109,6 +109,18 @@ name the current objects, candidate target, and shortest distinguishing probe
 before dispatching the first action. Do not spend the call re-reading raw
 frames or the prior history; if the summary is unavailable, fall back to the
 registered p7_observe tool and proceed with one action.
+Treat counters, meters, timers, and replenishment markers as gameplay state.
+Before choosing a route, determine whether a move consumes a finite resource,
+whether a visible object restores it, and whether a controller changes the
+player's shape, color, rotation, or other target state. A shortest geometric
+route is not a valid plan when it misses a required controller or exhausts a
+resource; plan bounded route segments between resource resets and verify each
+state change from the settled frame.
+After every gameplay action, record the action, the changed object or region,
+the resource/state delta, and whether the objective moved closer. A changed
+frame is evidence even when it is a small local change. After RESET, call
+observe once, discard the old queued route, and form one new falsifiable probe;
+RESET is a hypothesis restart, never an ordinary exploratory move.
 If a registered p7_act_checked call returns an unavailable/error result or
 applies zero items, immediately use the persistent ipython fallback with one
 `p7_client.act([...])` gameplay action, then observe the settled result. Do not
