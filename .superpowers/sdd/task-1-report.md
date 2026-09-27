@@ -37,6 +37,22 @@ git diff --check
 exit 0
 ```
 
+## Task 1: P7 structured mechanics prior (2026-09-27)
+
+- Status: complete; commit `ec69aa51` (`feat(p7): extract structured cross-level mechanics prior`).
+- Tests: `uv run python -m unittest -v tests.test_prime_p7_mechanics_prior` (3 passed).
+- Lint: focused `uv run ruff check` (passed).
+- Scope: bounded, deterministic, redacted summaries of detached history; runtime and prompt wiring landed in the follow-up bridge and guidance commits.
+- Concern: evidence-only extractor; it does not infer universal routes, object identities, or objective rules.
+
+## Follow-up: P7 Pi bridge and verified guidance (2026-09-27–28)
+
+- Bridge: `c4b390b5`, `7f463b65`, and `57342951` inject the live prediction client, enforce method/parameter/result contracts, register `p7_mechanics_prior` in Pi, and frame method calls with the required newline.
+- Compatibility and bounds: `7f463b65` preserves legacy facade clients; `08f25fa2` constrains prior records to ACTION1–ACTION7 and bounded levels.
+- Guidance: `df70f09d` adds cross-level prior usage and falsifiable distinguishing probes to the verified prompt while preserving the legacy prompt.
+- Diagnostics: `21fa5a2e` and `830db3ac` add private bridge-call accounting and bounded runtime failure stage/type diagnostics.
+- Verification: 115 focused P7 tests, extension build-closure tests (8), TypeScript typecheck/registration, Ruff, and diff checks passed. Two bounded FT09 next-level runs did not verify a new level; the second failed before any bridge call.
+
 # Task 1 review-fix: malformed unavailable receipt material (2026-09-05)
 
 ## Scope delivered
