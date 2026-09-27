@@ -35,14 +35,14 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 ## 未完成边界
 
 - FT09 post-change run `p7-live-20260927081939-5c7820a6bfe22dbc0be38357` ended `execution-stalled` at prefix 59 / target L5 with cleanup true and no new verified level. The recording has no model tool-call events, so it cannot establish whether `p7_mechanics_prior` was called.
-- FT09 second run `p7-live-20260927083252-0bd5aa566c21a90c48c60cf7` ended `child-evidence-invalid`; private accounting shows zero bridge calls, worker cell count 0, two usage events, and successful prefix replay/seal/cleanup. The native runtime error is intentionally redacted to a generic application failure.
+- FT09 second run `p7-live-20260927083252-0bd5aa566c21a90c48c60cf7` ended `child-evidence-invalid`; private accounting shows zero bridge calls, worker cell count 0, two usage events, and successful prefix replay/seal/cleanup. The native runtime error is intentionally redacted to a generic application failure; operator now retains private failure stage/type when a composed capability diagnostic is available.
 - No claim is made that all games or hidden rules are solved, or that the current model will generalize from one prior.
 - The full npm test suite remains broader than the focused registration test and retains unrelated fixture-harness failures.
 
 ## 下一动作
 
 1. Do not change the bridge based on the second run: its zero-call evidence places the failure before Pi tool dispatch.
-2. If another live run is authorized, retain private accounting and capture a bounded native runtime failure stage/code before interpreting model behavior.
+2. If another live run is authorized, inspect `diagnostics.application_failure` together with private bridge accounting before interpreting model behavior.
 3. Keep both FT09 outcomes as bounded negative evidence; do not promote them to a general model or bridge conclusion.
 
 ## Ready commands
