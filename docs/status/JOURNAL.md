@@ -3245,3 +3245,4 @@
 - 11:12 提交 `d3a21fea`：把 verified P7 提示改为优先调用注册工具，并强制跨关首个工具调用为 `p7_mechanics_prior`；115 项 focused 测试通过。
 - 11:20 提交 `432a4c0c`：明确 Prime 应用级工具注册是通用机制，P7 为当前实用验证。
 - 11:32 提交 `3f865aad`：接通既有 Prime 应用工具注册的活动工具 allowlist，并保留通用 runtime 的默认 ipython 行为。
+- 11:45 提交 `5fd0219d`：依据 LS20 L3 live trace 收紧只读查询预算，避免模型在动作后重复规划停滞。
