@@ -162,7 +162,9 @@ class TestPrimeP7Sweep(unittest.TestCase):
         from types import SimpleNamespace
 
         with tempfile.TemporaryDirectory() as directory:
-            scheduler, run, _summary, entry = self._execution_failure_fixture(Path(directory))
+            scheduler, run, _summary, entry = self._execution_failure_fixture(
+                Path(directory), include_tool_call=True
+            )
             trace = run / "trace" / "prime-trace.jsonl"
             rows = trace.read_text(encoding="utf-8").splitlines()
             trace.write_text("\n".join(rows[:-2]) + "\n", encoding="utf-8")

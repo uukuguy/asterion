@@ -720,7 +720,7 @@ class SweepScheduler:
                 or receipt.get("trace_final_sha256") != entries[-1]["sha256"]
                 or entries[-1]["kind"] == "trace.sealed"
                 or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
-                or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial"} for row in entries)
+                or any(row["kind"] not in {"arc.action", "arc.tool.call", "arc.usage.reported", "arc.run.partial"} for row in entries)
                 or sum(row["kind"] == "arc.action" for row in entries) != receipt["action_count"]
                 or _recorded_game_id(run, {game_id}) != game_id
                 or (target_level > 1 and not _trace_reached_level(entries, target_level - 1))
