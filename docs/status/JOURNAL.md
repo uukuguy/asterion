@@ -3315,3 +3315,4 @@
 - 提交 `0f738721`：允许 stall 证据校验真实 `arc.tool.call` 事件，避免把有效停滞轨迹误报为 evidence-invalid。
 - 提交 `757faefa`：同步 BP35 停滞 witness、诊断分类和下一步检查边界，确保恢复文档不再把停滞误判为请求失败。
 - BP35 L2 rerun `p7-live-20260928113552-80b115bf4529ad2ad9c75306`：20 步前缀后新增 10 步并执行一次 `RESET`，usage 全为正 token；随后 `pi.prompt` `_CallbackRejected` 被分类为 `prime-native-callback`，封存/回放/清理通过，L1 前缀保留，L2 未过。
+- 提交 `2b5d5e67`：同步 native callback rejection 的端到端影响，明确前缀保留但本次 L2 尝试终止。
