@@ -12,6 +12,7 @@
 6. `28da86c9` adds direct `progress_guidance` to observe/act_checked results; next bounded witness must measure whether this reduces early mismatch and reaches level 3.
 7. Run `p7-live-20260928072349-177a232e9b1db4d109bf9a78` had zero model rounds/actions after prefix replay; treat as startup variance and do not infer anything about guidance.
 8. Runs `p7-live-20260928074135-39346a6b32de1f63cd6a328b`, `p7-live-20260928074743-9073b1b03b2472744e81b76f`, and `p7-live-20260928082138-3fcfc9fd11d1bd596714b3b6` all stopped before a model round; the third reached one `mechanics_prior` call, then failed at `capability.execute`. SC25 L3 `p7-live-20260928090051-26d9c5dc70d9c4440b92075e` reproduced the same zero-action boundary after a 28-step prefix. These are runtime boundary evidence, not L3 strategy results.
+9. BP35 L2 then entered a real model loop: run `p7-live-20260928091036-3c259e093dcc7f9a14edca36` executed 23 actions and completed L1 at action 22, but produced 63 invalid plans out of 64 and was manually stopped before L2; it is useful gameplay progress but not a verified prefix.
 
 ## 已验证事实
 
