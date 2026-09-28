@@ -1670,6 +1670,11 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 diagnostics["application_failure"] = {
                     "stage": diagnostic.stage,
                     "exception_type": diagnostic.exception_type,
+                    **(
+                        {"failure_code": diagnostic.failure_code}
+                        if diagnostic.failure_code is not None
+                        else {}
+                    ),
                 }
         reason = (
             str(error)

@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 
 from asterion.applications.prime.p3.operator import _drive_success, run_success_path
-from asterion.services.diagnostics import MemoryDiagnosticSink
+from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import MemoryDiagnosticSink, capture_failure
 
 
 class _Runner:
@@ -81,3 +82,18 @@ class TestP3OperatorDiagnosticInjection(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].stage, "prime.worker")
         self.assertNotIn("PRIVATE-WORKER-PAYLOAD", repr(records[0]))
+
+
+class TestFailureCodeDiagnostics(unittest.TestCase):
+    def test_protocol_failure_code_is_bounded_without_message(self) -> None:
+        sink = MemoryDiagnosticSink()
+        diagnostic_id = capture_failure(
+            sink,
+            stage="capability.execute",
+            error=ProtocolError("Pi runtime provider execution failed"),
+            subject_id="run-1",
+        )
+        self.assertIsNotNone(diagnostic_id)
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.failure_code, "pi-provider-execution")
+        self.assertNotIn("Pi runtime provider execution failed", repr(record))
