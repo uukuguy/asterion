@@ -479,7 +479,10 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_act_checked",
-      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. The broker stops at first prediction mismatch / no-effect / unavailable action.",
+      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
+        + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
+        + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
+        + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
       TypeObject(
         {
           plan: TypeArray(

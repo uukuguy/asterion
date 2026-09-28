@@ -180,6 +180,10 @@ test("registers the ipython and P7 application tools", async () => {
   ];
   assert.deepEqual(toolNames(), expectedNames);
   assert.deepEqual(registered.map((tool) => tool.name), expectedNames);
+  assert.match(
+    registered.find((tool) => tool.name === "p7_act_checked").description,
+    /invalid-checked-plan.*one-item.*RESET/s,
+  );
   assert.equal(registered[0].label, "ipython");
   assert.equal(
     registered[0].description,

@@ -666,10 +666,12 @@ def act_checked(plan):
 
     ``plan`` is a list of ``{{action, expect}}`` dicts. Each ``expect`` keys
     on a cell value, frame hash, levels_completed, or state. The broker
-    stops at the first mismatch / no-effect / unavailable action. Use this
-    instead of bare :func:`act` when you have a specific hypothesis to
-    test; a wrong prediction costs only one tool_use call instead of an
-    action slot.
+    stops at the first mismatch / no-effect / unavailable action. If the
+    result has ``stop_reason == 'invalid-checked-plan'``, do not submit
+    another batch: inspect the settled observation once, then use a one-item
+    probe or RESET with one valid expect object. Use this instead of bare
+    :func:`act` when you have a specific hypothesis to test; a wrong
+    prediction costs only one tool_use call instead of an action slot.
     """
     return _call("act_checked", plan)
 
