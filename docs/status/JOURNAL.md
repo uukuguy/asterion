@@ -3288,3 +3288,5 @@
 - 提交 `415b3bc3`：把最近 settled action 的 changed-cell progress 直接追加到 P7 observe/act_checked，并同步注册工具描述，帮助模型区分“动作有效但尚未升级”和无效果。
 - LS20 L3 run `p7-live-20260928065144-20547ddb73d8dbfda34b6213`：新 progress 部署后新增 53 个 L3 动作，checked plans 10、mismatch 2、errors 0，仍未到 level 3；recording 显示颜色 11 每步递减 4，ACTION4 在阈值处触发周期重置，封存/回放/清理通过。
 - 提交 `35817e03`：在 settled progress 中追加有界 `color_count_delta`，把已观察到的单调/周期变化直接反馈给模型并同步注册工具说明。
+- LS20 L3 run `p7-live-20260928071500-eb179a897f51290a0b9fb226`：颜色增量部署后仅新增 6 个 L3 动作，7 个 checked plans 中 6 mismatch、1 error，仍在 level 2；封存/回放/清理通过。
+- 提交 `28da86c9`：在 act_checked/observe 结果追加客观 `progress_guidance`，明确有 settled 变化继续假设、无变化才切换或 RESET，并同步注册工具描述。

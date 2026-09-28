@@ -8,7 +8,8 @@
 2. Run `p7-live-20260928054122-3404f72d04e738282ef11a06` added 10 L3 actions and stayed at level 2; recording proved every action changed the settled frame, then manual cleanup completed.
 3. Run `p7-live-20260928065144-20547ddb73d8dbfda34b6213` with `progress` added 53 L3 actions, 0 invalid-plan errors, and sealed/replay-verified evidence, but still stopped at level 2. Recording shows color 11 decreases by four per action and ACTION4 resets the cycle.
 4. `35817e03` adds bounded `color_count_delta` to the application-supplied progress object and registered descriptions.
-5. Next action: run one bounded LS20 L3 witness with color deltas, then verify whether the model recognizes the cycle and reaches level 3; gameplay advancement remains the primary metric.
+5. Run `p7-live-20260928071500-eb179a897f51290a0b9fb226` added only 6 L3 actions (6 mismatches, 1 error), so color deltas alone did not stabilize planning.
+6. `28da86c9` adds direct `progress_guidance` to observe/act_checked results; next bounded witness must measure whether this reduces early mismatch and reaches level 3.
 
 ## 已验证事实
 
