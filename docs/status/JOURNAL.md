@@ -3294,3 +3294,4 @@
 - `make promotion-check`：定向源码/资源检查前的隔离官方回归运行完成 3423 项，其中 5 failures、2 errors；失败发生在官方安装环境缺少 P7 host services，不能作为 L3 过关证据。
 - LS20 L3 witness `p7-live-20260928074135-39346a6b32de1f63cd6a328b`：94 步前缀回放成功，但首轮前即在 `capability.execute` 报 native `ProtocolError`，`checked_plans=0`、新增动作=0、`levels_completed=2`；封存/回放/清理通过，不能评价 L3 策略。
 - LS20 L3 retry `p7-live-20260928074743-9073b1b03b2472744e81b76f`：复用封存失败事实后仍只有 94 步前缀，`input/output_tokens=0`、`child-evidence-invalid`，无模型回合、无新增动作；记录为运行边界，不计入 L3 失败样本。
+- 15:50 提交 `62d68e74`：记录 LS20 L3 两次零模型回合运行与 promotion 隔离 host 缺失边界。
