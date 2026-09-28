@@ -3317,3 +3317,4 @@
 - BP35 L2 rerun `p7-live-20260928113552-80b115bf4529ad2ad9c75306`：20 步前缀后新增 10 步并执行一次 `RESET`，usage 全为正 token；随后 `pi.prompt` `_CallbackRejected` 被分类为 `prime-native-callback`，封存/回放/清理通过，L1 前缀保留，L2 未过。
 - 提交 `2b5d5e67`：同步 native callback rejection 的端到端影响，明确前缀保留但本次 L2 尝试终止。
 - 提交 `d56aa32f`：保留 native callback 的有界内部原因码，便于区分非法事件、工具调用、终端和回调上限。
+- 提交 `daa5c62a`：同步原因码透传验证与下一次 witness 的精确诊断边界。
