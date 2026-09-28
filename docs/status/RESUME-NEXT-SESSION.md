@@ -27,6 +27,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - Continuations now also receive bounded `tried_summary` and an application-generated `action_guard`; unsealed recorder snapshots are merged with action diagnostics before the private summary is written. This is guidance and observability, not an engine-specific route or hard action stop.
 - The follow-up summary had 42 checked plans with 31 mismatches, so verified guidance now stops batching after two same-level mismatches and requires a one-item probe or RESET (`5db4a62b`).
 - Completed run `p7-live-20260928000722-c0ad73a972c21edd9c357bc0` replayed the 94-step L1/L2 prefix and added 44 L3 actions, but stayed at `levels_completed=2`; prefix replay, seal, replay verification, and cleanup passed before a native `ProtocolError` at `capability.execute` ended the application. Five model rounds carried the application state; 103 checked plans produced 41 mismatches, 59 errors, 3 matches, and 355 unexecuted items. The next run must verify the new in-band `checked_plan_guidance` from `ad71d5d5`.
+- Retries `p7-live-20260928005634-caddcfa10b894019e77e9449` and `p7-live-20260928010922-24be5e8179381f438191716b` each replayed the prefix, made one L3 action, then failed at `capability.execute` with `ProtocolError`; both had zero model-round diagnostics, so they cannot evaluate prompt/output behavior. Private diagnostics now classify known protocol failure messages without retaining text (`b2dff557`).
 
 ## 当前判断
 
@@ -56,7 +57,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 
 ## 下一动作
 
-1. Run one bounded L3 attempt to verify whether in-band `checked_plan_guidance` reduces repeated mismatches and checked-plan errors; do not add game-specific routes.
+1. After the native ProtocolError path is classified by the new private code, run one bounded L3 attempt to verify whether in-band `checked_plan_guidance` reduces repeated mismatches and checked-plan errors; do not add game-specific routes.
 2. Keep the FT09 pre-tool failures and LS20 L3 failures as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
 3. Run another bounded attempt only after an evidence-based prompt or model-session change, and track it at startup, first actions, and termination.
 
