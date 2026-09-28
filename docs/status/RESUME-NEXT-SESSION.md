@@ -10,6 +10,7 @@
 4. `35817e03` adds bounded `color_count_delta` to the application-supplied progress object and registered descriptions.
 5. Run `p7-live-20260928071500-eb179a897f51290a0b9fb226` added only 6 L3 actions (6 mismatches, 1 error), so color deltas alone did not stabilize planning.
 6. `28da86c9` adds direct `progress_guidance` to observe/act_checked results; next bounded witness must measure whether this reduces early mismatch and reaches level 3.
+7. Run `p7-live-20260928072349-177a232e9b1db4d109bf9a78` had zero model rounds/actions after prefix replay; treat as startup variance and do not infer anything about guidance.
 
 ## 已验证事实
 
