@@ -3311,3 +3311,5 @@
 - 提交 `f3adc300`：实现并测试 P7 模型失败诊断透传，下一步用真实 witness 验证 provider/协议分类。
 - 提交 `ef6d3280`：补记诊断透传提交，保持状态链可恢复。
 - 提交 `c21f03cb`：将 `_CallbackRejected` 归一为 `prime-native-callback`，并允许 sweep 验证真实 `arc.tool.call` 失败轨迹。
+- BP35 L2 witness `p7-live-20260928112006-82ff01fa56bb3cca16be34ec`：回放 20 步 L1 前缀后新增 5 个动作、完成 3 个模型回合，usage 全为正 token；随后 300 秒无新动作停滞，仍在 L1，不能视为请求失败或过关。
+- 提交 `0f738721`：允许 stall 证据校验真实 `arc.tool.call` 事件，避免把有效停滞轨迹误报为 evidence-invalid。
