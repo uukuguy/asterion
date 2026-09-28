@@ -32,6 +32,7 @@
 - Diagnostic透传已实现：P7 将 Pi 私有 failure code 传到 `summary.json`，只保留 stage、exception type 和 bounded failure code。定向 Prime/P7 回归 143 项通过；下一步用一次有限 GPT-6-Sol witness 验证真实分类。`0/0` usage 在验证前仍只表示回合未完成。
 - `c21f03cb` maps internal `_CallbackRejected` to `prime-native-callback`; `0f738721` admits `arc.tool.call` in execution/stall evidence validation. The latest stall receipt contains 3 model rounds, 25 actions, 24 tool calls, and no `0/0` usage; the remaining issue is no new action for 300 seconds, not request failure.
 - The rerun confirms the diagnostic path end to end: `pi.prompt` callback rejection is distinguished from provider failure, and its impact is only current-attempt termination plus preservation of the replay-verified L1 prefix.
+- `d56aa32f` carries the callback's bounded native reason through the private diagnostic sink; focused diagnostics/session/RPC tests pass (72 tests). The next witness should use this to identify the exact native rejection instead of stopping at the broad callback code.
 - The new codes are classification only. They do not explain the 04:35 run and do not authorize another paid attempt.
 - Cross-level mechanics prior and the registered P7 tool path remain connected. Live L3 improvement is still unverified.
 - Project route stays managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Active theme is the P7 LS20 L3 protocol boundary, not a new numbered phase.
