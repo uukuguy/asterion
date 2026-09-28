@@ -3295,5 +3295,6 @@
 - LS20 L3 witness `p7-live-20260928074135-39346a6b32de1f63cd6a328b`：94 步前缀回放成功，但首轮前即在 `capability.execute` 报 native `ProtocolError`，`checked_plans=0`、新增动作=0、`levels_completed=2`；封存/回放/清理通过，不能评价 L3 策略。
 - LS20 L3 retry `p7-live-20260928074743-9073b1b03b2472744e81b76f`：复用封存失败事实后仍只有 94 步前缀，`input/output_tokens=0`、`child-evidence-invalid`，无模型回合、无新增动作；记录为运行边界，不计入 L3 失败样本。
 - LS20 L3 witness `p7-live-20260928082138-3fcfc9fd11d1bd596714b3b6`：第三次连续首轮边界复现；仅调用 1 次 `mechanics_prior`，随后 `capability.execute` `ProtocolError`，无模型回合、无新增动作，封存/回放/清理通过。
+- 切换 SC25 L3：`p7-live-20260928090051-26d9c5dc70d9c4440b92075e` 成功回放 28 步 L1/L2 前缀，但同样在首轮前 `capability.execute` 失败，`checked_plans=0`、新增动作=0；确认阻断跨题复现，不是 LS20 特有。
 - 15:50 提交 `62d68e74`：记录 LS20 L3 两次零模型回合运行与 promotion 隔离 host 缺失边界。
 - 15:58 提交 `8161d5a3`：记录三次 LS20 L3 首轮边界复现，避免把零动作运行误判为策略失败。
