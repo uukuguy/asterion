@@ -528,10 +528,17 @@ class _P7BrokerClient:
             batch = result["batch"]
             observation = result["observation"]
             terminal = result["terminal"]
+            checked_plan_guidance = (
+                "prediction mismatch: inspect the returned settled observation once, "
+                "then use a one-item probe or RESET; make it falsifiable and do not submit another batch"
+                if result["mismatch"] is not None
+                else "checked plan accepted; continue only with objective progress evidence"
+            )
             return {
                 "applied_count": result["applied_count"],
                 "stop_reason": result["stop_reason"],
                 "mismatch": result["mismatch"],
+                "checked_plan_guidance": checked_plan_guidance,
                 "unexecuted_count": result["unexecuted_count"],
                 "observation": self._observation_view(observation),
                 "terminal": self._status_view(terminal),
@@ -1516,9 +1523,12 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             "When act_checked returns stop_reason 'observation-no-change' the "
             "response also carries a no_effect_hint field with this same "
             "action and position plus a no-effect count; read it in-band "
-            "instead of recomputing."
+            "instead of recomputing. A prediction mismatch also carries "
+            "checked_plan_guidance requiring a one-item probe or RESET."
         ),
-        signature="result['no_effect_hint'] (when stop_reason='observation-no-change')",
+        signature=(
+            "result['no_effect_hint'] or result['checked_plan_guidance']"
+        ),
         category="retrodict",
     ))
     prompt = _prompt_for_variant(variant, tool_registry)

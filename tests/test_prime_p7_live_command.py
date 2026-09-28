@@ -148,6 +148,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 2}}},
             ])
             self.assertEqual((result["applied_count"], result["unexecuted_count"]), (1, 1))
+            self.assertIn("one-item probe", result["checked_plan_guidance"])
             self.assertEqual(len([entry for entry in recorder.snapshot() if entry.kind == "arc.action"]), 1)
             self.assertEqual(client.private_accounting(), {
                 "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
