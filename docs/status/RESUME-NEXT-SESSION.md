@@ -16,6 +16,7 @@
 10. BP35 `p7-next` then replayed the verified 20-action L1 prefix but failed before its first L2 model round (`checked_plans=0`, new actions=0); do not treat it as an L2 strategy result.
 11. GPT-6-Sol audit for 2026-09-28: 19 runs, 9 with at least one completed `prime.model.round` (22 total), 10 with none; 9 failed runs ended after a `0/0` usage marker and generic `ProtocolError`, while one was manually stopped. This is not a provider failure rate because the current Pi/RPC chain drops the private failure category. BP35 `p7-live-20260928091036-3c259e093dcc7f9a14edca36` proves a successful model loop can still fail at planning: 4 rounds, 90 tool calls, 23 actions, L1 completed, then 63/64 invalid checked plans.
 12. Latest BP35 L2 witness `p7-live-20260928112006-82ff01fa56bb3cca16be34ec` replayed 20 verified L1 actions, added 5 L2 actions, and completed 3 model rounds with positive-token usage throughout. It stalled for 300 seconds at total action 25, still level 1; no provider failure was observed.
+13. BP35 rerun `p7-live-20260928113552-80b115bf4529ad2ad9c75306` replayed the same prefix, added 10 actions including a model-issued `RESET`, then ended sealed/replay-verified with `application_failure={stage: pi.prompt, exception_type: _CallbackRejected, failure_code: prime-native-callback}`. Usage remained positive; this is a native callback/event rejection and the verified 20-action prefix was retained.
 
 ## 已验证事实
 
@@ -30,6 +31,7 @@
 - The blocking boundary is the native runtime `ProtocolError` at `capability.execute`, after the registered-tool description was shown to reduce invalid plans.
 - Diagnostic透传已实现：P7 将 Pi 私有 failure code 传到 `summary.json`，只保留 stage、exception type 和 bounded failure code。定向 Prime/P7 回归 143 项通过；下一步用一次有限 GPT-6-Sol witness 验证真实分类。`0/0` usage 在验证前仍只表示回合未完成。
 - `c21f03cb` maps internal `_CallbackRejected` to `prime-native-callback`; `0f738721` admits `arc.tool.call` in execution/stall evidence validation. The latest stall receipt contains 3 model rounds, 25 actions, 24 tool calls, and no `0/0` usage; the remaining issue is no new action for 300 seconds, not request failure.
+- The rerun confirms the diagnostic path end to end: `pi.prompt` callback rejection is distinguished from provider failure, and its impact is only current-attempt termination plus preservation of the replay-verified L1 prefix.
 - The new codes are classification only. They do not explain the 04:35 run and do not authorize another paid attempt.
 - Cross-level mechanics prior and the registered P7 tool path remain connected. Live L3 improvement is still unverified.
 - Project route stays managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Active theme is the P7 LS20 L3 protocol boundary, not a new numbered phase.
@@ -49,7 +51,7 @@
 
 ## 下一动作
 
-1. Inspect the BP35 stalled recording and final prompt/output around the last three `ACTION6` steps; determine whether the model had a valid hypothesis but repeated coordinates, or stopped producing actions after feedback.
+1. Inspect the BP35 rerun recording around the `RESET` and final `ACTION6(32,32)`; determine whether the native callback rejection followed a malformed event/tool result or a Pi settlement boundary.
 2. Run one bounded next-level witness only after that inspection; track model rounds, `0/0` usage, checked-plan errors/mismatches, new actions, and level transitions separately.
 
 ## Ready commands
