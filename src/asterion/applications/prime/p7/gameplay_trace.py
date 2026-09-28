@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
+from types import MappingProxyType
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt
 from asterion.applications.prime.p7.game import ArcGameContract
+from asterion.applications.prime.p7.model_selection import (
+    DEFAULT_MODEL,
+    P7ModelSelectionError,
+    valid_selection_name,
+)
 from asterion.capabilities.prime_arc_agi_3_gameplay.host import (
     PrimeArcAgi3GameplayEvidence,
     validate_prime_arc_agi_3_gameplay_evidence,
@@ -15,13 +22,24 @@ from asterion.capabilities.prime_arc_agi_3_gameplay.host import (
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+# The identity of the default selection. Runs that select another model
+# record that model through ``trace_identities_for``; the four non-model
+# fields are the stable application identity.
 GAMEPLAY_TRACE_IDENTITIES = {
     "application_id": "prime.arc-agi-3-gameplay",
     "application_version": "1.0.0",
-    "model_id": "gpt-6-sol",
+    "model_id": DEFAULT_MODEL,
     "reasoning_id": "asterion.prime",
     "runtime_id": "asterion.prime",
 }
+
+
+def trace_identities_for(model_id: str) -> dict[str, str]:
+    """Return the P7 gameplay trace identity for one selected model."""
+
+    if not valid_selection_name(model_id):
+        raise P7ModelSelectionError("P7 model selection is invalid")
+    return {**GAMEPLAY_TRACE_IDENTITIES, "model_id": model_id}
 
 
 class PrimeGameplayTraceError(RuntimeError):
@@ -39,6 +57,7 @@ class PrimeGameplayTrace:
     _broker: ArcBroker
     _recorder: PrimeTraceRecorder
     _guid: str
+    _identities: Mapping[str, str] | None = field(default=None, compare=False)
     _accessed: bool = field(default=False, init=False, compare=False)
     _evidence: PrimeArcAgi3GameplayEvidence | None = field(
         default=None, init=False, compare=False
@@ -56,9 +75,28 @@ class PrimeGameplayTrace:
             or any(ord(char) <= 32 or ord(char) == 127 for char in self._guid)
         ):
             raise PrimeGameplayTraceError("P7 gameplay evidence is unavailable")
+        declared = (
+            GAMEPLAY_TRACE_IDENTITIES if self._identities is None else self._identities
+        )
+        stable = {
+            name: item for name, item in GAMEPLAY_TRACE_IDENTITIES.items()
+            if name != "model_id"
+        }
+        if (
+            not isinstance(declared, Mapping)
+            or {name: item for name, item in declared.items() if name != "model_id"} != stable
+        ):
+            raise PrimeGameplayTraceError("P7 gameplay evidence is unavailable")
+        object.__setattr__(self, "_identities", dict(declared))
 
     def __repr__(self) -> str:
         return "<PrimeGameplayTrace redacted>"
+
+    @property
+    def identities(self) -> Mapping[str, str]:
+        """Return the exact trace identity this trace records."""
+
+        return MappingProxyType(dict(self._identities or GAMEPLAY_TRACE_IDENTITIES))
 
     @property
     def runtime_recorder(self) -> PrimeTraceRecorder:
@@ -81,7 +119,7 @@ class PrimeGameplayTrace:
         try:
             self._recorder.append(
                 "arc.usage.reported",
-                GAMEPLAY_TRACE_IDENTITIES,
+                self._identities,
                 {"input_tokens": input_tokens, "output_tokens": output_tokens},
             )
         except Exception:
@@ -95,7 +133,7 @@ class PrimeGameplayTrace:
             evidence = self._build_evidence(run_id)
             self._recorder.append(
                 "arc.run.completed",
-                GAMEPLAY_TRACE_IDENTITIES,
+                self._identities,
                 {
                     "game_id": evidence.game_id,
                     "guid": evidence.guid,
@@ -178,4 +216,5 @@ __all__ = (
     "GAMEPLAY_TRACE_IDENTITIES",
     "PrimeGameplayTrace",
     "PrimeGameplayTraceError",
+    "trace_identities_for",
 )

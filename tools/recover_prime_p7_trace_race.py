@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -24,10 +25,12 @@ from asterion.applications.prime.p7.game import (
     P7GameSelection,
     resolve_game_selection,
 )
+from asterion.applications.prime.p7.model_selection import declared_model_selection
 from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
-    P7_TRACE_IDENTITIES,
+    are_p7_trace_identities,
+    trace_identities_for,
 )
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import replay_sha256
@@ -118,7 +121,7 @@ def _read_rows(source: Path) -> tuple[list[dict[str, object]], dict[str, object]
     for row in rows:
         if type(row) is not dict or set(row) != _ENTRY_FIELDS:
             raise ValueError
-        if row["identities"] != P7_TRACE_IDENTITIES:
+        if not are_p7_trace_identities(row["identities"]):
             raise ValueError
         if row["sha256"] != _entry_digest(
             row["sequence"],
@@ -362,8 +365,9 @@ def _replay_into(
     broker: ArcBroker,
     recorder: PrimeTraceRecorder,
     transitions: tuple[ArcTransition, ...],
+    identities: Mapping[str, str],
 ) -> None:
-    client = _P7BrokerClient(broker, recorder)
+    client = _P7BrokerClient(broker, recorder, identities)
     for expected in transitions:
         client.act([{"name": expected.action, "data": dict(expected.data)}])
         if broker.journal[-1] != expected:
@@ -396,16 +400,24 @@ def recover_trace_race(
         )
         broker = ArcBroker(engine=engine, game=candidate.game)
         recorder = PrimeTraceRecorder(trace_root)
-        evidence = P7PrivateTraceReceipt(broker, recorder)
+        identities = trace_identities_for(
+            declared_model_selection(
+                {
+                    **live._dotenv_values(operator_root / ".env"),
+                    **os.environ,
+                }
+            ).model
+        )
+        evidence = P7PrivateTraceReceipt(broker, recorder, identities)
         recorder.append(
             "arc.recovery.source",
-            P7_TRACE_IDENTITIES,
+            identities,
             {
                 "source_run_id": source_run_id,
                 **dict(candidate.source_hashes),
             },
         )
-        _replay_into(broker, recorder, candidate.transitions)
+        _replay_into(broker, recorder, candidate.transitions, identities)
         broker_receipt = broker.seal()
         if broker_receipt != candidate.receipt:
             raise ValueError

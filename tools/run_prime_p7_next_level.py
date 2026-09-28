@@ -14,7 +14,7 @@ from typing import Any
 
 from asterion.applications.prime.p7.broker import ArcTransition
 from asterion.applications.prime.p7.game import _read_catalog
-from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+from asterion.applications.prime.p7.private_trace import are_p7_trace_identities
 from asterion.applications.prime.p7.score import replay_sha256
 from asterion.applications.prime.p7.solutions import VerifiedPrefix, load_best_prefix
 
@@ -72,7 +72,7 @@ def _verified_success(
     if (
         not _valid_attempt_summary(summary, run_id, game_id, level, 0)
         or not entries or entries[-1]["kind"] != "trace.sealed"
-        or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+        or any(not are_p7_trace_identities(row["identities"]) for row in entries)
         or [row["kind"] for row in entries[-2:]] != ["arc.run.completed", "trace.sealed"]
         or any(row["kind"] not in {"arc.action", "arc.usage.reported"} for row in entries[:-2])
         or type(seal) is not dict

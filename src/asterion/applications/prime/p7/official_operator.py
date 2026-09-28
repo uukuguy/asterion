@@ -24,6 +24,7 @@ from asterion.runtime.factory import RuntimeFactoryContext
 
 from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, _read_catalog, resolve_game_selection
 from . import live
+from .model_selection import declared_model_selection
 from .official import CompetitionEngine, CompetitionSession, OfficialError, prepare_session
 from .official_result import (
     validate_closed_scorecard,
@@ -166,6 +167,7 @@ def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
         if package.is_relative_to(root) or "site-packages" not in package.parts:
             raise ValueError
         environment = {**live._dotenv_values(root / ".env"), **process_environment}
+        expected_model_id = declared_model_selection(environment).model
         api_key = environment.get("ARC_API_KEY", "").strip()
         if not api_key:
             raise ValueError
@@ -176,12 +178,24 @@ def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
             raise ValueError
         if requested == "all":
             catalog_ids = tuple(str(row["game_id"]) for row in _read_catalog(arc_root))
-            prefixes = list_verified_prefixes(arc_root, runs_root, catalog_ids, 0)
+            prefixes = list_verified_prefixes(
+                arc_root,
+                runs_root,
+                catalog_ids,
+                0,
+                expected_model_id=expected_model_id,
+            )
         else:
             game = resolve_game_selection(
                 {GAME_ID_ENV: requested, SEED_ENV: "0"}, arc_root
             )
-            prefix = load_best_prefix(arc_root, runs_root, game.game_id, 0)
+            prefix = load_best_prefix(
+                arc_root,
+                runs_root,
+                game.game_id,
+                0,
+                expected_model_id=expected_model_id,
+            )
             prefixes = () if prefix is None else (prefix,)
         if not prefixes:
             raise ValueError

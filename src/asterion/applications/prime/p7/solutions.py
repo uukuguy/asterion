@@ -11,7 +11,10 @@ import tempfile
 from .broker import ArcRunReceipt, ArcTransition
 from .game import GAME_ID_ENV, SEED_ENV, TARGET_LEVEL_ENV, P7GameSelection, resolve_game_selection
 from .live import ArcadeEngine, read_trace_entries
-from .private_trace import P7_TRACE_IDENTITIES
+from .private_trace import (
+    are_p7_trace_identities,
+    trace_identities_for,
+)
 from .replay import replay_arc_run
 from .score import replay_sha256
 
@@ -23,10 +26,25 @@ _HISTORICAL_P7_TRACE_IDENTITIES = {
     "reasoning_id": "asterion.prime",
     "runtime_id": "asterion.prime",
 }
-_KNOWN_P7_TRACE_IDENTITIES = (
-    frozenset(P7_TRACE_IDENTITIES.items()),
-    frozenset(_HISTORICAL_P7_TRACE_IDENTITIES.items()),
-)
+def _known_trace_identities(
+    identities: object, expected_model_id: str | None
+) -> bool:
+    """Report whether one trace identity may be reused as a P7 prefix.
+
+    Without an expected model this stays permissive so offline tooling can
+    read runs produced by any operator selection. The runtime path names the
+    model it resolved, so a trace from a different selection is rejected.
+    """
+
+    if not are_p7_trace_identities(identities):
+        return False
+    if expected_model_id is None:
+        return True
+    as_mapping = dict(identities)
+    if as_mapping == trace_identities_for(expected_model_id):
+        return True
+    # Prefixes recorded before the model became selectable stay reusable.
+    return as_mapping == _HISTORICAL_P7_TRACE_IDENTITIES
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +69,7 @@ def load_best_prefix(
     seed: int,
     *,
     max_level: int | None = None,
+    expected_model_id: str | None = None,
 ) -> VerifiedPrefix | None:
     """Return the strongest sealed local prefix for one exact identity."""
 
@@ -61,7 +80,9 @@ def load_best_prefix(
         for run in sorted(runs_root.iterdir(), key=lambda item: item.name):
             if run.is_symlink() or not run.is_dir():
                 continue
-            prefix = _load_one(arc_root, run, game_id, seed, max_level)
+            prefix = _load_one(
+                arc_root, run, game_id, seed, max_level, expected_model_id
+            )
             if prefix is not None:
                 candidates.append(prefix)
     except OSError:
@@ -72,7 +93,12 @@ def load_best_prefix(
 
 
 def list_verified_prefixes(
-    arc_root: Path, runs_root: Path, game_ids: tuple[str, ...], seed: int
+    arc_root: Path,
+    runs_root: Path,
+    game_ids: tuple[str, ...],
+    seed: int,
+    *,
+    expected_model_id: str | None = None,
 ) -> tuple[VerifiedPrefix, ...]:
     """List one best verified prefix per selected exact game ID."""
 
@@ -80,13 +106,33 @@ def list_verified_prefixes(
         return ()
     return tuple(
         sorted(
-            (prefix for game_id in game_ids if (prefix := load_best_prefix(arc_root, runs_root, game_id, seed)) is not None),
+            (
+                prefix
+                for game_id in game_ids
+                if (
+                    prefix := load_best_prefix(
+                        arc_root,
+                        runs_root,
+                        game_id,
+                        seed,
+                        expected_model_id=expected_model_id,
+                    )
+                )
+                is not None
+            ),
             key=lambda value: value.game_id,
         )
     )
 
 
-def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_level: int | None) -> VerifiedPrefix | None:
+def _load_one(
+    arc_root: Path,
+    run: Path,
+    expected_game_id: str,
+    seed: int,
+    max_level: int | None,
+    expected_model_id: str | None = None,
+) -> VerifiedPrefix | None:
     try:
         summary_path = _private_path(run, "summary.json")
         trace_root = _private_path(run, "trace")
@@ -107,7 +153,9 @@ def _load_one(arc_root: Path, run: Path, expected_game_id: str, seed: int, max_l
         if type(run_id) is not str or run_id != run.name:
             return None
         entries = read_trace_entries(trace_root)
-        if not entries or frozenset(entries[0].identities.items()) not in _KNOWN_P7_TRACE_IDENTITIES:
+        if not entries or not _known_trace_identities(
+            entries[0].identities, expected_model_id
+        ):
             return None
         if any(entry.identities != entries[0].identities for entry in entries):
             return None

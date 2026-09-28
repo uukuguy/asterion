@@ -9,6 +9,8 @@ from types import SimpleNamespace
 from unittest.mock import patch
 import unittest
 
+from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+
 
 class TestPrimeP7Breadth(unittest.TestCase):
     def test_preflight_selects_unverified_l1_and_exact_l1_prefixes_for_l2(self) -> None:
@@ -103,7 +105,7 @@ class TestPrimeP7Breadth(unittest.TestCase):
             (runs / "breadth-resweep-campaign.json").write_text(json.dumps(ledger), encoding="utf-8")
             controller = BreadthCampaignController(BreadthCampaignConfig(root / "arc", runs, root, root, guest_machine=None))
             rows = (
-                {"identities": breadth.P7_TRACE_IDENTITIES, "kind": "arc.action", "payload": {}, "sha256": "sha256:" + "b" * 64},
+                {"identities": P7_TRACE_IDENTITIES, "kind": "arc.action", "payload": {}, "sha256": "sha256:" + "b" * 64},
             )
             with patch.object(controller, "_metadata", return_value={"aa11-00000000": {"baseline_actions": (5,)}}), \
                  patch.object(controller, "_interrupted_run_candidates", return_value=(run,)), \
@@ -259,8 +261,8 @@ class TestPrimeP7Breadth(unittest.TestCase):
                 "output_tokens": 4, "stop_reason": "completed", "evidence_sha256": "sha256:" + "a" * 64,
             }
             rows = (
-                {"identities": breadth.P7_TRACE_IDENTITIES, "kind": "arc.action", "payload": {}, "sha256": "sha256:" + "b" * 64},
-                {"identities": breadth.P7_TRACE_IDENTITIES, "kind": "trace.sealed", "payload": {}, "sha256": "sha256:" + "a" * 64},
+                {"identities": P7_TRACE_IDENTITIES, "kind": "arc.action", "payload": {}, "sha256": "sha256:" + "b" * 64},
+                {"identities": P7_TRACE_IDENTITIES, "kind": "trace.sealed", "payload": {}, "sha256": "sha256:" + "a" * 64},
             )
             with patch.object(breadth, "_read_hash_chained_trace", return_value=rows), \
                  patch.object(breadth, "read_run_usage", return_value=(3, 4, False, False)), \

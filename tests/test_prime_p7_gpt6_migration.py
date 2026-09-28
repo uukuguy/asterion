@@ -12,8 +12,12 @@ class TestPrimeP7Gpt6Migration(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             profile = Path(directory)
-            (profile / "auth.json").write_text('{"openai-codex": {}}')
-            (profile / "models-store.json").write_text('{"openai-codex": {}}')
+            (profile / "auth.json").write_text(
+                '{"openai-codex": {"type": "oauth", "access": "profile-token"}}'
+            )
+            (profile / "models-store.json").write_text(
+                '{"openai-codex": {"models": [{"id": "gpt-6-sol"}]}}'
+            )
             selection = resolve_p7_runtime(
                 {"ASTERION_PRIME_PI_AGENT_DIR": str(profile)},
                 P7GameSelection("ls20-9607627b", 0, 1),

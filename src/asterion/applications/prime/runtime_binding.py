@@ -10,6 +10,7 @@ from typing import cast
 from asterion.agents.prime.session import AsterionPrimeSession
 from asterion.agents.prime.execution import ASTERION_PRIME_LIMITS, AsterionPrimeLimits
 from asterion.applications.prime.p7.game import P7GameSelection
+from asterion.applications.prime.p7.model_selection import valid_selection_name
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
@@ -41,11 +42,11 @@ _HOST_CAPABILITIES = frozenset(
         "prime.private-trace",
     }
 )
+# The bounds are framework-owned; the provider/model pair is operator-owned
+# and must agree with the approved launch command (see _launch_selection).
 _RUNTIME_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
-    "model": "gpt-6-sol",
-    "provider": "openai-codex",
 }
 _ERROR = "Asterion-prime runtime configuration is invalid"
 _RECEIPT_ARTIFACT = "prime.p7-solving.receipt"
@@ -56,11 +57,28 @@ _GAMEPLAY_HOST_CAPABILITIES = frozenset(
 _GAMEPLAY_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
-    "model": "gpt-6-sol",
-    "provider": "openai-codex",
 }
 _GAMEPLAY_ARTIFACT = "prime.p7-gameplay-run.evidence"
 _GAMEPLAY_MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
+
+
+def _launch_selection(command: object) -> tuple[str, str] | None:
+    """Return the one provider/model pair the approved launch declares."""
+
+    if type(command) is not tuple or not command:
+        return None
+    declared: dict[str, str] = {}
+    for flag in ("--provider", "--model"):
+        positions = [
+            index for index, part in enumerate(command) if part == flag
+        ]
+        if len(positions) != 1:
+            return None
+        value = command[positions[0] + 1 : positions[0] + 2]
+        if len(value) != 1 or not valid_selection_name(value[0]):
+            return None
+        declared[flag] = value[0]
+    return declared["--provider"], declared["--model"]
 
 
 def _p7_terminal(broker: ArcBroker) -> bool:
@@ -366,7 +384,14 @@ def build_p7_runtime(
         )
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
         unbounded = launch is not None and launch.deadline_seconds is None
+        declared = (
+            None if launch is None else _launch_selection(launch.approved_command)
+        )
         expected_options = dict(_RUNTIME_OPTIONS)
+        if declared is not None:
+            expected_options.update(
+                provider=declared[0], model=declared[1]
+            )
         if unbounded:
             # The operator validates OFFLINE authorization before stripping ARC
             # configuration from the model subprocess environment. This seam
@@ -388,6 +413,7 @@ def build_p7_runtime(
             or context.runtime_id != "asterion.prime"
             or set(context.host_services) != _HOST_CAPABILITIES
             or launch is None
+            or declared is None
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
@@ -460,6 +486,14 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
         trace_value = context.host_services.get("prime.arc-run-evidence")
         trace_adapter = trace_value if type(trace_value) is PrimeGameplayTrace else None
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
+        declared = (
+            None if launch is None else _launch_selection(launch.approved_command)
+        )
+        expected_options = dict(_GAMEPLAY_OPTIONS)
+        if declared is not None:
+            expected_options.update(
+                provider=declared[0], model=declared[1]
+            )
         if (
             context.provider_id != "prime-applications"
             or context.application_id != "prime.arc-agi-3-gameplay"
@@ -467,13 +501,14 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             or context.runtime_id != "asterion.prime"
             or set(context.host_services) != _GAMEPLAY_HOST_CAPABILITIES
             or launch is None
+            or declared is None
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
             or not getattr(broker.game, "is_full_game", False)
             or dict(context.options) != {
-                **_GAMEPLAY_OPTIONS,
+                **expected_options,
                 "max_actions": str(broker.game.action_cap),
             }
             or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")

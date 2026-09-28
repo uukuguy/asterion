@@ -16,7 +16,7 @@ import tempfile
 from typing import Any
 
 from asterion.applications.prime.p7.game import _read_catalog
-from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+from asterion.applications.prime.p7.private_trace import are_p7_trace_identities
 from asterion.applications.prime.p7.solutions import _load_one, load_best_prefix
 
 try:  # Works both as ``python -m tools...`` and installed-wheel ``python -I tools/...``.
@@ -299,7 +299,7 @@ class BreadthCampaignController:
         if _RUN_ID.fullmatch(run_id) is None:
             raise ValueError("interrupted breadth run id is invalid")
         rows = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
-        if any(row.get("identities") != P7_TRACE_IDENTITIES for row in rows):
+        if any(not are_p7_trace_identities(row.get("identities")) for row in rows):
             raise ValueError("interrupted breadth trace identity is invalid")
         game_id = entry["game_id"]
         level = entry["target_level"]
@@ -395,7 +395,7 @@ class BreadthCampaignController:
             return False
         if not entries or entry["evidence_sha256"] != entries[-1]["sha256"]:
             return False
-        if any(row.get("identities") != P7_TRACE_IDENTITIES for row in entries):
+        if any(not are_p7_trace_identities(row.get("identities")) for row in entries):
             return False
         usage = read_run_usage(run, in_progress=in_progress)
         if usage[3] or usage[2] or (entry["input_tokens"], entry["output_tokens"]) != usage[:2]:

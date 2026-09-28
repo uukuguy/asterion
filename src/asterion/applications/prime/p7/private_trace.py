@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
+from types import MappingProxyType
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import (
     ArcBroker, ArcRunReceipt, ArcTransition, _observation_digest,
 )
 from asterion.applications.prime.p7.game import P7GameSelection
+from asterion.applications.prime.p7.model_selection import (
+    DEFAULT_MODEL,
+    P7ModelSelectionError,
+    valid_selection_name,
+)
 from asterion.applications.prime.p7.score import partial_game_score
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
@@ -17,13 +24,50 @@ from asterion.capabilities.prime_arc_agi_3_solver.host import (
 
 
 _DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+# The identity of the default selection. Runs that select another model record
+# that model through ``trace_identities_for``; the four non-model fields are the
+# stable application identity and never change with the selection.
 P7_TRACE_IDENTITIES = {
     "application_id": "prime.arc-agi-3-solving",
     "application_version": "1.0.0",
-    "model_id": "gpt-6-sol",
+    "model_id": DEFAULT_MODEL,
     "reasoning_id": "asterion.prime",
     "runtime_id": "asterion.prime",
 }
+
+
+def trace_identities_for(model_id: str) -> dict[str, str]:
+    """Return the P7 solve trace identity for one selected model."""
+
+    if not valid_selection_name(model_id):
+        raise P7ModelSelectionError("P7 model selection is invalid")
+    return {**P7_TRACE_IDENTITIES, "model_id": model_id}
+
+
+def are_p7_trace_identities(value: object, *, model_id: str | None = None) -> bool:
+    """Report whether one trace identity belongs to this application.
+
+    The stable application fields must match exactly. The model is checked only
+    when the caller names one, so offline analysis of an earlier selection can
+    still read its own traces.
+    """
+
+    if not isinstance(value, Mapping):
+        return False
+    try:
+        stable = {
+            name: item for name, item in value.items() if name != "model_id"
+        }
+    except Exception:
+        return False
+    if stable != {
+        name: item for name, item in P7_TRACE_IDENTITIES.items() if name != "model_id"
+    }:
+        return False
+    recorded = value.get("model_id")
+    if not valid_selection_name(recorded):
+        return False
+    return model_id is None or recorded == model_id
 
 
 class P7PrivateTraceReceiptError(RuntimeError):
@@ -36,6 +80,7 @@ class P7PrivateTraceReceipt:
 
     _broker: ArcBroker
     _recorder: PrimeTraceRecorder
+    _identities: Mapping[str, str] | None = field(default=None, compare=False)
     _accessed: bool = field(default=False, init=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -45,9 +90,21 @@ class P7PrivateTraceReceipt:
             or type(self._recorder) is not PrimeTraceRecorder
         ):
             raise P7PrivateTraceReceiptError("P7 solve receipt is unavailable")
+        declared = (
+            P7_TRACE_IDENTITIES if self._identities is None else self._identities
+        )
+        if not are_p7_trace_identities(declared):
+            raise P7PrivateTraceReceiptError("P7 solve receipt is unavailable")
+        object.__setattr__(self, "_identities", dict(declared))
 
     def __repr__(self) -> str:
         return "<P7PrivateTraceReceipt redacted>"
+
+    @property
+    def identities(self) -> Mapping[str, str]:
+        """Return the exact trace identity this receipt records."""
+
+        return MappingProxyType(dict(self._identities or P7_TRACE_IDENTITIES))
 
     @property
     def runtime_recorder(self) -> PrimeTraceRecorder:
@@ -79,7 +136,7 @@ class P7PrivateTraceReceipt:
                 or not 0 <= status.levels_completed < self._broker.game.target_level
                 or len(journal) != status.primitive_actions
                 or len(recorded) != len(journal)
-                or any(entry.identities != P7_TRACE_IDENTITIES for entry in entries)
+                or any(entry.identities != self._identities for entry in entries)
             ):
                 return False
             previous_digest = _observation_digest(self._broker._initial)
@@ -129,7 +186,7 @@ class P7PrivateTraceReceipt:
         try:
             self._recorder.append(
                 "arc.usage.reported",
-                P7_TRACE_IDENTITIES,
+                self._identities,
                 {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
@@ -167,7 +224,7 @@ class P7PrivateTraceReceipt:
                 raise ValueError
             self._recorder.append(
                 "arc.run.completed",
-                P7_TRACE_IDENTITIES,
+                self._identities,
                 {
                     "game_id": broker_receipt.game_id,
                     "seed": broker_receipt.seed,
@@ -257,4 +314,7 @@ class P7PrivateTraceReceipt:
 __all__ = (
     "P7PrivateTraceReceipt",
     "P7PrivateTraceReceiptError",
+    "P7_TRACE_IDENTITIES",
+    "are_p7_trace_identities",
+    "trace_identities_for",
 )

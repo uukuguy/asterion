@@ -557,6 +557,35 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             self.assertFalse(launch.extension_lease.closed)
             cast(AsterionPrimeRuntimeClient, runtime)._session.close()
 
+    def test_runtime_binding_rejects_a_launch_without_a_declared_selection(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            broker = ArcBroker(engine=_Engine())
+            launch, trace = self._launch(root, broker, declare_model=False)
+            ipython = PersistentIpythonHost(
+                worker=_Worker(), p7_client=p7_client_facade(broker)
+            )
+            context = RuntimeFactoryContext(
+                provider_id="prime-applications",
+                application_id="prime.arc-agi-3-solving",
+                application_version="1.0.0",
+                runtime_id="asterion.prime",
+                assembly_path=ASSEMBLY.resolve(),
+                options=p7_runtime_options(
+                    resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")})
+                ),
+                host_services={
+                    "prime.arc-broker": broker,
+                    "prime.ipython": ipython,
+                    "prime.launch": launch,
+                    "prime.private-trace": trace,
+                },
+            )
+
+            with self.assertRaises(RuntimeFactoryError):
+                asterion_prime_runtime_binding().factory(context)
+            self.assertTrue(launch.extension_lease.closed)
+
     def test_runtime_factory_accepts_only_consistently_recorded_active_prefix(self) -> None:
         from dataclasses import replace
         from asterion.applications.prime.p7.operator import _P7BrokerClient
@@ -843,7 +872,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
 
     @staticmethod
     def _launch(
-        root: Path, broker: ArcBroker
+        root: Path, broker: ArcBroker, *, declare_model: bool = True
     ) -> tuple[PrimeLaunch, P7PrivateTraceReceipt]:
         source = root / "prime_ipython.mjs"
         source.write_text("export default function extension() {}\n", encoding="utf-8")
@@ -855,7 +884,12 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             environment={},
         )
         lease = binding.preflight()
-        command = ("pi", "--mode", "rpc", *lease.command_args())
+        declaration = (
+            ("--provider", "openai-codex", "--model", "gpt-6-sol")
+            if declare_model
+            else ()
+        )
+        command = ("pi", "--mode", "rpc", *declaration, *lease.command_args())
         trace_root = root / "trace"
         trace_root.mkdir()
         return (

@@ -38,8 +38,8 @@ from asterion.applications.prime.p7.game import (
     resolve_game_selection,
 )
 from asterion.applications.prime.p7.gameplay_trace import (
-    GAMEPLAY_TRACE_IDENTITIES,
     PrimeGameplayTrace,
+    trace_identities_for as gameplay_trace_identities,
 )
 from asterion.applications.prime.p7.ipython_host import (
     PersistentIpythonHost,
@@ -47,9 +47,18 @@ from asterion.applications.prime.p7.ipython_host import (
     p7_client_facade,
 )
 from asterion.applications.prime.p7 import live
+from asterion.applications.prime.p7.model_selection import (
+    DEFAULT_MODEL,
+    DEFAULT_PROVIDER,
+    P7ModelSelectionError,
+    declared_model_selection,
+    resolve_model_selection,
+    valid_selection_name,
+)
 from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7_TRACE_IDENTITIES,
+    trace_identities_for as solve_trace_identities,
 )
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
@@ -71,8 +80,10 @@ from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 
 
 _RUNTIME_ID = "asterion.prime"
-_PROVIDER = "openai-codex"
-_MODEL = "gpt-6-sol"
+# The documented defaults. The operator environment may select another
+# provider/model; see ``p7.model_selection``.
+_PROVIDER = DEFAULT_PROVIDER
+_MODEL = DEFAULT_MODEL
 _MISSING = object()
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
@@ -736,7 +747,7 @@ def _seal_verified_partial_run(
         }
         evidence.runtime_recorder.append(
             "arc.run.partial",
-            P7_TRACE_IDENTITIES,
+            evidence.identities,
             payload,
         )
         evidence.runtime_recorder.seal()
@@ -781,7 +792,7 @@ def _seal_replay_verified_first_level_failure(
             return False
         evidence.runtime_recorder.append(
             "arc.run.failed",
-            P7_TRACE_IDENTITIES,
+            evidence.identities,
             {
                 "game_id": receipt.game_id,
                 "seed": receipt.seed,
@@ -811,8 +822,8 @@ class P7RuntimeSelection:
     def __post_init__(self) -> None:
         if (
             self.runtime_id != _RUNTIME_ID
-            or self.provider != _PROVIDER
-            or self.model != _MODEL
+            or not valid_selection_name(self.provider)
+            or not valid_selection_name(self.model)
             or type(self.max_actions) is not int
             or not 1 <= self.max_actions <= 5000
             or type(self.unbounded_first_round) is not bool
@@ -823,11 +834,18 @@ class P7RuntimeSelection:
             raise P7OperatorError("P7 runtime selection is invalid")
 
     @classmethod
-    def fixed(cls, game: P7GameSelection | ArcGameContract = DEFAULT_GAME) -> P7RuntimeSelection:
+    def fixed(
+        cls,
+        game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
+        provider: str = DEFAULT_PROVIDER,
+        model: str = DEFAULT_MODEL,
+    ) -> P7RuntimeSelection:
+        if not valid_selection_name(provider) or not valid_selection_name(model):
+            raise P7OperatorError("P7 runtime selection is invalid")
         value = object.__new__(cls)
         object.__setattr__(value, "runtime_id", _RUNTIME_ID)
-        object.__setattr__(value, "provider", _PROVIDER)
-        object.__setattr__(value, "model", _MODEL)
+        object.__setattr__(value, "provider", provider)
+        object.__setattr__(value, "model", model)
         object.__setattr__(value, "max_actions", game.action_cap)
         object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
@@ -875,28 +893,30 @@ class P7OperatorResources:
                     launch.extension_lease.close()
 
 
-def resolve_pi_provider(environment: Mapping[str, str], *, model: str) -> str:
-    """Resolve only the fixed Codex host from passed operator environment."""
+def resolve_pi_provider(
+    environment: Mapping[str, str], *, model: str | None = None
+) -> str:
+    """Resolve the operator-selected model host from its environment."""
 
     try:
-        available = (
-            isinstance(environment, Mapping)
-            and model == _MODEL
-            and live.resolve_pi_agent_dir(environment)
-        )
+        selection = resolve_model_selection(environment)
+        if model is not None and model != selection.model:
+            raise P7ModelSelectionError("P7 model selection is invalid")
     except Exception:
-        available = False
-    if not available:
         raise P7OperatorError("P7 model host is unavailable") from None
-    return _PROVIDER
+    return selection.provider
 
 
 def resolve_p7_runtime(
     environment: Mapping[str, str], game: P7GameSelection | ArcGameContract = DEFAULT_GAME
 ) -> P7RuntimeSelection:
-    """Resolve the one fixed model/runtime preset without exposing tuning knobs."""
+    """Resolve the operator-selected model/runtime preset without tuning knobs."""
 
-    provider = resolve_pi_provider(environment, model=_MODEL)
+    try:
+        selected = resolve_model_selection(environment)
+    except P7ModelSelectionError:
+        raise P7OperatorError("P7 model host is unavailable") from None
+    provider = selected.provider
     unbounded = UNBOUNDED_FIRST_ROUND_ENV in environment
     if unbounded and (
         environment[UNBOUNDED_FIRST_ROUND_ENV] != "1"
@@ -909,7 +929,7 @@ def resolve_p7_runtime(
     return P7RuntimeSelection(
         runtime_id=_RUNTIME_ID,
         provider=provider,
-        model=_MODEL,
+        model=selected.model,
         max_actions=game.action_cap,
         max_callbacks=None if unbounded else _MAX_CALLBACKS,
         deadline_ms=None if unbounded else _DEADLINE_MS,
@@ -925,7 +945,7 @@ def p7_runtime_options(
     if (
         type(selection) is not P7RuntimeSelection
         or selection != replace(
-            P7RuntimeSelection.fixed(game),
+            P7RuntimeSelection.fixed(game, selection.provider, selection.model),
             max_callbacks=None if selection.unbounded_first_round else _MAX_CALLBACKS,
             deadline_ms=None if selection.unbounded_first_round else _DEADLINE_MS,
             unbounded_first_round=selection.unbounded_first_round,
@@ -953,7 +973,7 @@ def _private_experiment(
     deadline = runtime_options.get("deadline_ms")
     return {
         "prediction_variant": variant,
-        "model": _MODEL,
+        "model": runtime_options.get("model", _MODEL),
         "game_id": game.game_id,
         "seed": game.seed,
         "target_level": game.target_level,
@@ -1070,10 +1090,15 @@ def build_p7_operator_resources(
             raise ValueError
         broker.bind_history(history_run_id)
         official = type(game) is ArcGameContract
+        identities = (
+            gameplay_trace_identities(selection.model)
+            if official
+            else solve_trace_identities(selection.model)
+        )
         prediction_client = _P7BrokerClient(
             broker,
             trace,
-            GAMEPLAY_TRACE_IDENTITIES if official else P7_TRACE_IDENTITIES,
+            identities,
             variant=variant,
         )
         ipython = PersistentIpythonHost(
@@ -1081,8 +1106,8 @@ def build_p7_operator_resources(
             p7_client=p7_client_facade(prediction_client),
         )
         private_trace = (
-            PrimeGameplayTrace(broker, trace, engine.guid)
-            if official else P7PrivateTraceReceipt(broker, trace)
+            PrimeGameplayTrace(broker, trace, engine.guid, identities)
+            if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
         bridge = _IpythonBridgeServer(parent, ipython)
         bridge.start()
@@ -1299,6 +1324,9 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             invocation.game.game_id,
             invocation.game.seed,
             max_level=invocation.game.target_level - 1,
+            expected_model_id=declared_model_selection(
+                invocation.environment
+            ).model,
         )
         if invocation.game.target_level > 1 else None
     )
@@ -1542,7 +1570,12 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     )
 
 
-def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
+def classify_live_result(
+    result: live.P7LiveExecution,
+    *,
+    provider: str | None = None,
+    model: str | None = None,
+) -> Mapping[str, object]:
     """Project one completed solve into the public receipt, or fail closed."""
 
     if result.completed_level_count != result.game.target_level:
@@ -1560,6 +1593,8 @@ def classify_live_result(result: live.P7LiveExecution) -> Mapping[str, object]:
     return _public_receipt(
         "PASS",
         result.run_id,
+        provider=provider,
+        model=model,
         receipt=result.receipt,
         completed_level_count=result.completed_level_count,
         primitive_action_count=result.primitive_action_count,
@@ -1587,6 +1622,8 @@ def _public_receipt(
     terminal_reason: str | None = None,
     game: P7GameSelection = DEFAULT_GAME,
     broker_replay_sha256: str | None = None,
+    provider: str | None = None,
+    model: str | None = None,
 ) -> Mapping[str, object]:
     """Build the one public receipt; private evidence never crosses this line."""
 
@@ -1595,8 +1632,8 @@ def _public_receipt(
         "schema": "asterion.prime.p7-live-receipt/v1",
         "application_id": "prime.arc-agi-3-solving",
         "runtime_id": "asterion.prime",
-        "provider": _PROVIDER,
-        "model": _MODEL,
+        "provider": provider or _PROVIDER,
+        "model": model or _MODEL,
         "game_id": game.game_id,
         "seed": game.seed,
         "target_level": game.target_level,
@@ -1665,7 +1702,19 @@ def main(argv: list[str] | None = None) -> int:
         return _reject(reason=preflight_reason)
     run_id = live.safe_run_id()
     try:
-        result = classify_live_result(asyncio.run(run_live(invocation, run_id)))
+        receipt_selection = declared_model_selection(
+            getattr(invocation, "environment", {})
+        )
+    except P7ModelSelectionError:
+        receipt_selection = None
+    receipt_provider = None if receipt_selection is None else receipt_selection.provider
+    receipt_model = None if receipt_selection is None else receipt_selection.model
+    try:
+        result = classify_live_result(
+            asyncio.run(run_live(invocation, run_id)),
+            provider=receipt_provider,
+            model=receipt_model,
+        )
     except KeyboardInterrupt:
         return 130
     except Exception as error:
@@ -1688,6 +1737,8 @@ def main(argv: list[str] | None = None) -> int:
             json.dumps(
                 _public_receipt(
                     "unsuccessful", run_id, reason=reason, game=invocation.game,
+                    provider=receipt_provider,
+                    model=receipt_model,
                     **failure_evidence,
                 ),
                 allow_nan=False,

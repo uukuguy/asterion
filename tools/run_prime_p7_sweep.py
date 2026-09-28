@@ -25,7 +25,7 @@ import time
 from typing import Any
 
 from asterion.applications.prime.p7.broker import ArcTransition
-from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
+from asterion.applications.prime.p7.private_trace import are_p7_trace_identities
 from asterion.applications.prime.p7.score import replay_sha256
 from asterion.applications.prime.p7.game import _read_catalog
 from asterion.applications.prime.p7.solutions import load_best_prefix
@@ -551,7 +551,7 @@ class SweepScheduler:
                 or summary["failure"].get("type") not in {"ApplicationRunError"}
                 or len(entries) < 3
                 or [row["kind"] for row in entries[-2:]] != ["arc.run.partial", "trace.sealed"]
-                or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                or any(not are_p7_trace_identities(row["identities"]) for row in entries)
                 or any(row["kind"] not in {"arc.action", "arc.usage.reported"} for row in entries[:-2])
                 or entries[-1]["payload"] != {"entry_count": len(entries) - 1, "final_sha256": entries[-2]["sha256"]}
             ):
@@ -659,7 +659,7 @@ class SweepScheduler:
                     or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
                     or seal["entry_count"] != len(entries)
                     or seal["final_sha256"] != entries[-1]["sha256"]
-                    or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                    or any(not are_p7_trace_identities(row["identities"]) for row in entries)
                 ):
                     continue
                 historical_actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
@@ -719,7 +719,7 @@ class SweepScheduler:
                 or type(receipt.get("stall_seconds")) is not int or receipt["stall_seconds"] < _ACTION_STALL_SECONDS
                 or receipt.get("trace_final_sha256") != entries[-1]["sha256"]
                 or entries[-1]["kind"] == "trace.sealed"
-                or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                or any(not are_p7_trace_identities(row["identities"]) for row in entries)
                 or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial"} for row in entries)
                 or sum(row["kind"] == "arc.action" for row in entries) != receipt["action_count"]
                 or _recorded_game_id(run, {game_id}) != game_id
