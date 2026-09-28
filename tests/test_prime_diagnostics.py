@@ -132,3 +132,19 @@ class TestFailureCodeDiagnostics(unittest.TestCase):
         record = sink.get(diagnostic_id)
         self.assertEqual(record.failure_code, "prime-native-callback")
         self.assertNotIn("PRIVATE-CALLBACK-PAYLOAD", repr(record))
+
+    def test_native_callback_rejection_reason_is_bounded(self) -> None:
+        sink = MemoryDiagnosticSink()
+        callback_rejected = type("_CallbackRejected", (Exception,), {})
+        error = callback_rejected()
+        error.failure_code = "Asterion-prime native event is invalid"
+        diagnostic_id = capture_failure(
+            sink,
+            stage="pi.prompt",
+            error=error,
+            subject_id="run-1",
+        )
+        assert diagnostic_id is not None
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.failure_code, "prime-native-event")
+        self.assertNotIn("Asterion-prime native event is invalid", repr(record))

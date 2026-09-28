@@ -77,6 +77,22 @@ def capture_failure(
 def _failure_code(error: Exception) -> str | None:
     """Classify known protocol failures without retaining their messages."""
 
+    native_message = getattr(error, "failure_code", None)
+    native_codes = {
+        "Asterion-prime native event is invalid": "prime-native-event",
+        "Asterion-prime model callback limit exceeded": "prime-model-callback-limit",
+        "Asterion-prime tool callback limit exceeded": "prime-tool-callback-limit",
+        "Asterion-prime tool call is invalid": "prime-tool-call",
+        "Asterion-prime tool result is invalid": "prime-tool-result",
+        "Asterion-prime emitted duplicate terminal event": "prime-duplicate-terminal",
+        "Asterion-prime native event type is invalid": "prime-event-type",
+        "Asterion-prime message update is malformed": "prime-message-update",
+        "Asterion-prime usage event is malformed": "prime-usage",
+        "Asterion-prime tool call is malformed": "prime-tool-call-malformed",
+        "Asterion-prime tool result is malformed": "prime-tool-result-malformed",
+    }
+    if type(native_message) is str:
+        return native_codes.get(native_message, "prime-native-callback")
     if type(error).__name__ == "_CallbackRejected":
         return "prime-native-callback"
     if type(error).__name__ != "ProtocolError":

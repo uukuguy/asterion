@@ -47,7 +47,9 @@ _DEFAULT_TOOL_NAMES = ("ipython",)
 
 
 class _CallbackRejected(Exception):
-    pass
+    def __init__(self, failure_code: str | None = None) -> None:
+        super().__init__()
+        self.failure_code = failure_code
 
 
 class _NativeDiagnostic(Enum):
@@ -537,7 +539,7 @@ class PrimeExecutionKernel:
                 trusted_event = _snapshot_native_event(event)
             except BaseException:
                 callback_failure = ProtocolError(_NATIVE_EVENT_ERROR)
-                raise _CallbackRejected from None
+                raise _CallbackRejected(_NATIVE_EVENT_ERROR) from None
             safe_failure: ProtocolError | None = None
             try:
                 consume_checked(trusted_event)
@@ -547,7 +549,7 @@ class PrimeExecutionKernel:
                 safe_failure = ProtocolError(_NATIVE_EVENT_ERROR)
             if safe_failure is not None:
                 callback_failure = safe_failure
-                raise _CallbackRejected from None
+                raise _CallbackRejected(str(safe_failure)) from None
 
         prompt = request.input_text
         round_index = 0
