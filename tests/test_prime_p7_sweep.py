@@ -44,7 +44,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
         self.assertFalse(_action_stall_reached(started, 399.0, 400.0))
 
     @staticmethod
-    def _execution_failure_fixture(root: Path):
+    def _execution_failure_fixture(root: Path, *, include_tool_call: bool = False):
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcTransition
         from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
@@ -69,6 +69,10 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 "sequence": item.sequence, "action": item.action,
                 "before_sha256": item.before_sha256, "after_sha256": item.after_sha256,
                 "levels_completed": item.levels_completed,
+            })
+        if include_tool_call:
+            recorder.append("arc.tool.call", P7_TRACE_IDENTITIES, {
+                "method": "observe",
             })
         recorder.append("arc.usage.reported", P7_TRACE_IDENTITIES, {"input_tokens": 10, "output_tokens": 2})
         recorder.append("arc.run.partial", P7_TRACE_IDENTITIES, prefix)
@@ -108,6 +112,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
                         changed = {**summary, key: value}
                         (run / "summary.json").write_text(json.dumps(changed), encoding="utf-8")
                         self.assertFalse(scheduler._campaign_entry_is_valid(entry))
+
                 for section, key, value in (
                     ("sweep", "target_level", 1), ("sweep", "run_action_cap", 40),
                     ("sweep", "level_action_cap", 39), ("sweep", "prefix_actions", 2),
@@ -133,6 +138,16 @@ class TestPrimeP7Sweep(unittest.TestCase):
             trace.write_text(trace.read_text().replace('"input_tokens":10', '"input_tokens":11'), encoding="utf-8")
             with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
                 self.assertFalse(scheduler._campaign_entry_is_valid(entry))
+
+    def test_second_round_execution_failure_accepts_tool_call_trace_events(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, _run, _summary, entry = self._execution_failure_fixture(
+                Path(directory), include_tool_call=True
+            )
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(levels_completed=1)):
+                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
 
     def test_second_round_execution_stall_uses_same_strict_partial_evidence(self) -> None:
         from types import SimpleNamespace

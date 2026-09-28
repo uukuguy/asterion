@@ -118,3 +118,17 @@ class TestFailureCodeDiagnostics(unittest.TestCase):
                 record = sink.get(diagnostic_id)
                 self.assertEqual(record.failure_code, expected)
                 self.assertNotIn(message, repr(record))
+
+    def test_native_callback_rejection_has_bounded_failure_code(self) -> None:
+        sink = MemoryDiagnosticSink()
+        callback_rejected = type("_CallbackRejected", (Exception,), {})
+        diagnostic_id = capture_failure(
+            sink,
+            stage="pi.prompt",
+            error=callback_rejected("PRIVATE-CALLBACK-PAYLOAD"),
+            subject_id="run-1",
+        )
+        assert diagnostic_id is not None
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.failure_code, "prime-native-callback")
+        self.assertNotIn("PRIVATE-CALLBACK-PAYLOAD", repr(record))

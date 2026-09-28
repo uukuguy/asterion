@@ -77,6 +77,8 @@ def capture_failure(
 def _failure_code(error: Exception) -> str | None:
     """Classify known protocol failures without retaining their messages."""
 
+    if type(error).__name__ == "_CallbackRejected":
+        return "prime-native-callback"
     if type(error).__name__ != "ProtocolError":
         return None
     message = str(error)

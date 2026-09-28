@@ -552,7 +552,7 @@ class SweepScheduler:
                 or len(entries) < 3
                 or [row["kind"] for row in entries[-2:]] != ["arc.run.partial", "trace.sealed"]
                 or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
-                or any(row["kind"] not in {"arc.action", "arc.usage.reported"} for row in entries[:-2])
+                or any(row["kind"] not in {"arc.action", "arc.tool.call", "arc.usage.reported"} for row in entries[:-2])
                 or entries[-1]["payload"] != {"entry_count": len(entries) - 1, "final_sha256": entries[-2]["sha256"]}
             ):
                 return False
