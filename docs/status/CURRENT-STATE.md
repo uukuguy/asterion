@@ -6,7 +6,7 @@ Updated 2026-09-29. This file is the structural snapshot; session handoff and ne
 
 - Project: Asterion composable multi-runtime agent framework
 - Current branch: `main`
-- Theme-level focus: Prime P7 native gameplay baseline with an operator-selected model
+- Theme-level focus: raising the BP35 official level score to the 115 cap under the operator-selected P7 model
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
 - Active work package: none
@@ -23,7 +23,8 @@ Updated 2026-09-29. This file is the structural snapshot; session handoff and ne
 ## Open Problems
 
 - No current P7 gameplay result is authorized or in flight.
-- No P7 run has been executed with a non-default model; only the `openai-codex / gpt-6-sol` default has live evidence.
+- No P7 run has been executed with a non-default model; only the `openai-codex / gpt-6-sol` default has live evidence, and only as trace identity (no game action).
+- The P7 level-witness path currently produces no game actions: the Pi model host restarts every ~15-25 s after starting. Observed 2026-09-29; cause undiagnosed.
 - Full-game P7 capability remains unverified beyond the historical evidence retained before the GPT-6-Sol migration.
 - Generated `.asterion-private` evidence may contain stale post-baseline runs and must not be treated as current source state.
 

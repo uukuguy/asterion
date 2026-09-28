@@ -3208,3 +3208,9 @@
 - 00:04 回退 main 至 GPT-6-Sol 迁移完成点 `d50897f7`，放弃其后全部 P7 试验与代码改动；无运行中进程。
 - 00:20 实测 P7 后端：openai-codex/gpt-6-sol 在 Mac 与 P7 目标 guest 均可调用（OAuth 凭据有效期至 2026-10-07）；确认 `.env` 的 ASTERION_PRIME_PROVIDER/MODEL 当时为死配置。
 - 01:03 决策 D-2026-09-29-01：P7 的 provider/model 改由 operator 环境选择，凭据+目录校验 fail closed，trace 身份跟随选择。 [e392577]
+- 01:11 用户给出官方卡片：BP35 L1 = 110.25（20 步 / baseline 21）；确认单关封顶 115，game score 2.22 受 1/45 完成度封顶。
+- 01:13 启动 BP35 L1 level-witness 运行 p7-live-20260928171314-be7c1fd04b02dadc007ac487（默认 openai-codex/gpt-6-sol）。
+- 01:35 该运行 0 动作即停止：pi-rpc 每 15-25s 重启一次，60 条 usage（45.6K in / 3.3K out），无 worker 目录、未封存；原因未定。
+- 01:35 该运行 trace 身份 = gpt-6-sol，为 e392577 的选择链路首个真实运行证据。
+- 01:36 停掉 2026-09-27 会话遗留的 /tmp/monitor_p7.sh（g50t）轮询进程。
+- 01:36 correction: 早前"重做 BP35 L1 不可能涨分"只对 game score 成立；LEVEL 列可达 115，需 ≤19 步。
