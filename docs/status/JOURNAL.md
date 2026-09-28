@@ -3219,3 +3219,4 @@
 - 01:48 BP35 L1 rerun ended unsuccessful: 128 usage events, 0 actions, summary sealed, no score change.
 - 02:07 Two post-selection BP35 L1 retries produced no tools/actions; removing selection vars from child did not change behavior.
 - 02:07 Added private Pi stderr diagnostics to P7 summaries; current stderr only has model-catalog warnings, extension failure remains unproven.
+- 02:07 Captured P7 Pi stderr and recorded three BP35 L1 no-action retries for root-cause diagnosis [619d98c6]
