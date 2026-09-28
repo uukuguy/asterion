@@ -11,7 +11,7 @@
 5. Run `p7-live-20260928071500-eb179a897f51290a0b9fb226` added only 6 L3 actions (6 mismatches, 1 error), so color deltas alone did not stabilize planning.
 6. `28da86c9` adds direct `progress_guidance` to observe/act_checked results; next bounded witness must measure whether this reduces early mismatch and reaches level 3.
 7. Run `p7-live-20260928072349-177a232e9b1db4d109bf9a78` had zero model rounds/actions after prefix replay; treat as startup variance and do not infer anything about guidance.
-8. Run `p7-live-20260928074135-39346a6b32de1f63cd6a328b` also stopped before the first model round (`checked_plans=0`, new actions=0); retry `p7-live-20260928074743-9073b1b03b2472744e81b76f` had zero token usage and `child-evidence-invalid`. These are runtime boundary evidence, not L3 strategy results.
+8. Runs `p7-live-20260928074135-39346a6b32de1f63cd6a328b`, `p7-live-20260928074743-9073b1b03b2472744e81b76f`, and `p7-live-20260928082138-3fcfc9fd11d1bd596714b3b6` all stopped before a model round; the third reached one `mechanics_prior` call, then failed at `capability.execute`. These are runtime boundary evidence, not L3 strategy results.
 
 ## 已验证事实
 
