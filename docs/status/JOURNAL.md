@@ -3270,3 +3270,4 @@
 - 08:52 提交 `ad71d5d5`：依据 L3 运行 41 次失配，将单步探针或 RESET 指导直接附加到 act_checked 返回。
 - 08:54 提交 `abc98feb`：记录完整 L3 输入/输出诊断，下一轮验证 act_checked 失配指导是否降低错误风暴。
 - 10:24 提交 `b2dff557`：为私有 ProtocolError 诊断增加枚举 failure_code，区分 provider、进程、JSONL、限额等原因且不保存原文。
+- 10:25 提交 `bb9bb78d`：同步两次首动作 ProtocolError 重试，明确零模型回合不能归因于 L3 提示或规划。
