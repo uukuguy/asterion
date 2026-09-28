@@ -3206,3 +3206,5 @@
 
 ## 2026-09-29
 - 00:04 回退 main 至 GPT-6-Sol 迁移完成点 `d50897f7`，放弃其后全部 P7 试验与代码改动；无运行中进程。
+- 00:20 实测 P7 后端：openai-codex/gpt-6-sol 在 Mac 与 P7 目标 guest 均可调用（OAuth 凭据有效期至 2026-10-07）；确认 `.env` 的 ASTERION_PRIME_PROVIDER/MODEL 当时为死配置。
+- 01:03 决策 D-2026-09-29-01：P7 的 provider/model 改由 operator 环境选择，凭据+目录校验 fail closed，trace 身份跟随选择。 [e392577]

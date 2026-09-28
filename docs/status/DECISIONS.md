@@ -29,6 +29,7 @@
 | D-2026-09-19-03 | 🔴 superseded | Former implicit-ack interpretation of `agent_settled`; disproved by delayed-settlement reproduction |
 | D-2026-09-22-01 | 🟢 active | Fence each Pi prompt on exact request acknowledgment and its own settlement barrier |
 | D-2026-09-22-02 | 🟢 active | P6 failed work with admitted effects requires verified inverse or recovery-required state |
+| D-2026-09-29-01 | 🟢 active | The operator environment selects the native P7 provider and model |
 
 ## D-2026-07-26-01 — Operator configuration root
 
@@ -784,3 +785,11 @@
 - Status: 🟢 active. Amends D-2026-09-19-02's claim that every cancellation or post-admission error can be represented as a completed rollback.
 - Decision: The existing `HarnessCoordinator` remains the sole revision and inverse authority. On cancellation or failure after candidate admission, the operator may attempt one exact authorized inverse against the current candidate revision. It records rolled-back effects only after the inverse succeeds and the baseline is restored. If the inverse fails or another revision intervenes, it records recovery-required and emits no successful receipt or artifact. The public `terminal_outcome` enum remains unchanged; unresolved effects are failure state, not an invented receipt outcome.
 - Evidence: 2026-09-22 P6 cancellation regression and focused coordinator/operator tests. Deterministic tests establish control semantics only, not live model capability.
+
+## D-2026-09-29-01 — The operator environment selects the native P7 provider and model
+
+- Status: 🟢 active. Supersedes the fixed-pair reading of the 2026-09-27 GPT-6-Sol migration.
+- Decision: `ASTERION_PRIME_PROVIDER` / `ASTERION_PRIME_MODEL` are the only model controls for native P7 and are read once, in `p7/model_selection.py`, from the operator environment (`.env` merged with the process environment; the process wins). Absent values default to `openai-codex` / `gpt-6-sol`. A selection is usable only when the provider exists in the Pi profile's `models-store.json`, the model is listed for it, and the provider has a credential in `auth.json` or in one of its declared operator environment variables; otherwise preflight fails closed with the body-free `P7 model host is unavailable`. The P7 runtime factories no longer carry the pair as a constant: `context.options` must agree exactly with the `--provider` / `--model` pair declared by the approved launch command.
+- Rationale: the operator environment file already promised to switch the model, but the pair was hardcoded in five modules, so the control was inert. An ignored control silently produces a different model than the operator asked for.
+- Consequence: the trace identity, the public receipt, the private experiment record, prefix reuse and the five P7 operator tools all follow the selected model. Prefix reuse stays strict on the runtime path (an explicitly expected model) and permissive for offline tooling, so traces recorded under another selection remain readable. No provider allowlist beyond the Pi catalog plus a declared credential; no hot swap.
+- Evidence: `e392577`; `tests/test_prime_p7_model_selection.py`; full P7 set 386 tests with two stale DeepSeek-era errors removed and no new failures. Live GPT-6-Sol reachability was probed separately from the macOS host and from the P7 OrbStack guest (both returned the sentinel reply).
