@@ -3267,3 +3267,4 @@
 - 07:58 提交 `5db4a62b`：依据最近 42 次 checked plan 中 31 次 mismatch，要求两次失配后改用单步探针或 RESET 重建假设。
 - 07:59 提交 `d7df32bc`：把 checked-plan mismatch 的新恢复边界写入跨会话状态，避免下一次重复批量失配。
 - 08:03 提交 `19170aaa`：明确新关卡后的 next tool call 必须是注册的 mechanics prior，并修复提示契约回归。
+- 08:52 提交 `ad71d5d5`：依据 L3 运行 41 次失配，将单步探针或 RESET 指导直接附加到 act_checked 返回。
