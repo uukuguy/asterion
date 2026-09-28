@@ -3291,3 +3291,6 @@
 - LS20 L3 run `p7-live-20260928071500-eb179a897f51290a0b9fb226`：颜色增量部署后仅新增 6 个 L3 动作，7 个 checked plans 中 6 mismatch、1 error，仍在 level 2；封存/回放/清理通过。
 - 提交 `28da86c9`：在 act_checked/observe 结果追加客观 `progress_guidance`，明确有 settled 变化继续假设、无变化才切换或 RESET，并同步注册工具描述。
 - LS20 L3 run `p7-live-20260928072349-177a232e9b1db4d109bf9a78`：回放到 L2 后零模型回合、零新动作，封存/回放/清理通过；属于运行启动波动，不能评价 progress_guidance。
+- `make promotion-check`：定向源码/资源检查前的隔离官方回归运行完成 3423 项，其中 5 failures、2 errors；失败发生在官方安装环境缺少 P7 host services，不能作为 L3 过关证据。
+- LS20 L3 witness `p7-live-20260928074135-39346a6b32de1f63cd6a328b`：94 步前缀回放成功，但首轮前即在 `capability.execute` 报 native `ProtocolError`，`checked_plans=0`、新增动作=0、`levels_completed=2`；封存/回放/清理通过，不能评价 L3 策略。
+- LS20 L3 retry `p7-live-20260928074743-9073b1b03b2472744e81b76f`：复用封存失败事实后仍只有 94 步前缀，`input/output_tokens=0`、`child-evidence-invalid`，无模型回合、无新增动作；记录为运行边界，不计入 L3 失败样本。

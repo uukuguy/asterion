@@ -11,11 +11,12 @@
 5. Run `p7-live-20260928071500-eb179a897f51290a0b9fb226` added only 6 L3 actions (6 mismatches, 1 error), so color deltas alone did not stabilize planning.
 6. `28da86c9` adds direct `progress_guidance` to observe/act_checked results; next bounded witness must measure whether this reduces early mismatch and reaches level 3.
 7. Run `p7-live-20260928072349-177a232e9b1db4d109bf9a78` had zero model rounds/actions after prefix replay; treat as startup variance and do not infer anything about guidance.
+8. Run `p7-live-20260928074135-39346a6b32de1f63cd6a328b` also stopped before the first model round (`checked_plans=0`, new actions=0); retry `p7-live-20260928074743-9073b1b03b2472744e81b76f` had zero token usage and `child-evidence-invalid`. These are runtime boundary evidence, not L3 strategy results.
 
 ## 已验证事实
 
 - Working tree is clean on `main` after the state-doc update; latest code commits are `35c8bfd4`, `33c2571b`, and `415b3bc3`.
-- Latest sealed LS20 L3 result is `p7-live-20260928043554-4ad46a32850f165e981a723e`: 94-action prefix replayed, 6 new L3 actions, still level 2, then `ProtocolError` at `capability.execute`. Private summary: 9 checked plans, 3 errors, 6 mismatches, recommendation `guidance-is-being-used`.
+- Latest sealed LS20 L3 run with actual model actions remains `p7-live-20260928065144-20547ddb73d8dbfda34b6213`: 53 new actions, still level 2, 0 invalid-plan errors, and objective color-cycle evidence. Later 74135/74743 runs had no model round and must not replace that gameplay evidence.
 - Earlier same-day negative evidence stays in force: feedback delivery (`p7-live-20260928032105-ccb913dde66198e3c11a8ee0`) and imperative wording (`p7-live-20260928035815-2ff240d231bcc08ea1d9b4dc`, 20/28 checked-plan errors) did not advance L3. Wording alone is not an accepted fix.
 - `src/asterion/services/diagnostics.py` maps known `ProtocolError` messages to bounded codes and falls back to `protocol-error`. Prime-native codes added in `35c8bfd4` sit beside the existing Pi codes (`pi-provider-execution`, `pi-process-ended`, `pi-invalid-jsonl`, `pi-invalid-jsonl-object`, `pi-output-limit`, `pi-turn-limit`, `pi-deadline`). Messages are not retained on the record.
 - Focused coverage for the new codes is `tests/test_prime_diagnostics.py::TestFailureCodeDiagnostics.test_prime_protocol_failure_codes_are_bounded` inside commit `35c8bfd4`. That commit was not followed by a live run.
