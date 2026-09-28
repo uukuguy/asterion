@@ -1,6 +1,13 @@
-# Next-Session Handoff
+# Recovered Session Checkpoint
 
-> Updated: 2026-09-29 01:36 CST. End of session.
+> Updated: 2026-09-29 02:12 CST. Active-session checkpoint; BP35 L1 rerun attempts remain unsuccessful.
+
+## Recovery note
+
+- The prior stale run `p7-live-20260928172624-bdc53d3bde5f4817d49` ended unsuccessful with 0 actions after 128 usage events.
+- Rerun `p7-live-20260928173825-49c54af3684db1fb7ea7495e` ended unsuccessful: 128 `arc.usage.reported`, 0 `arc.action`, `summary.json` present, `primitive_actions=0`, `worker_cell_count=0`, and no score change.
+- Diagnostic rerun `p7-live-20260928175322-94303411a27271c1cf7041f3` also ended unsuccessful with the same 128/0 pattern; its private summary captured only Pi model-catalog warnings.
+- A third hypothesis run `p7-live-20260928180225-04f44a7a9e877c5cfd02ace5` was stopped after 34 usage events and 0 actions; removing Asterion selection variables from the child environment did not change behavior.
 
 ## TL;DR
 
@@ -34,15 +41,16 @@
 ## Unfinished boundaries
 
 - The BP35 L1 ≤19-action goal is **not** attempted successfully; no new prefix, no new scorecard.
-- The model host's restart loop is unexplained; the current P7 witness path must be treated as **not runnable** until a logged rerun explains it.
+- The model host's restart loop is unexplained; the active logged rerun has not yet produced a game action.
 - Official re-submission (which is what makes the website show `115.00`) is a separate authorized action and was not performed.
 
 ## Next steps (immediate, action-level)
 
-1. Re-run with the console captured, so the failure is visible:
-   `make asterion-prime-p7-level-witness GAME=bp35-0a0ad940 LEVEL=1 > /tmp/bp35-l1.log 2>&1` (background), then `tail -f /tmp/bp35-l1.log` while watching `.asterion-private/prime-p7-live/<new-run>/trace/prime-trace.jsonl` for the first `arc.action`.
-2. If the host keeps restarting, capture `pi-rpc` stderr directly and identify the respawning layer (operator session vs. wrapper) before spending more.
+1. Diagnose why the Pi extension tool registry is absent after the 2026-09-29 native-selection change; use the captured private stderr and compare the exact RPC launch/registration path before another paid retry.
+2. If the active host keeps restarting, capture `pi-rpc` stderr directly and identify the respawning layer (operator session vs. wrapper) before spending more.
 3. On a successful L1 with ≤19 actions, verify the sealed run and then decide separately whether to authorize an official re-submission for BP35.
+
+If the active process exits without an action, inspect `/tmp/bp35-l1.log` and the run trace before considering another attempt.
 
 ## Don't go down these paths again (ruled out)
 
@@ -59,4 +67,4 @@ uv run python -m unittest tests.test_prime_p7_model_selection
 uv run python -c "from decimal import Decimal; print([(n, min(Decimal(115),(Decimal(21)/n)**2*100)) for n in (18,19,20,21)])"
 ```
 
-Run state: clean tree at `c0827a6d`; no P7 process running (a stale `/tmp/monitor_p7.sh g50t` poller from a 2026-09-27 session was stopped). The BP35 L1 selection uses the default `openai-codex / gpt-6-sol`; `ASTERION_PRIME_PROVIDER` / `ASTERION_PRIME_MODEL` in the operator environment override it (`p7/model_selection.py` is the only reader).
+Run state: no P7 process remains; code was at `c0827a6d` before diagnostic instrumentation. Latest full failed run: `p7-live-20260928175322-94303411a27271c1cf7041f3`; stopped hypothesis run: `p7-live-20260928180225-04f44a7a9e877c5cfd02ace5`. The BP35 L1 selection uses the default `openai-codex / gpt-6-sol`; `ASTERION_PRIME_PROVIDER` / `ASTERION_PRIME_MODEL` in the operator environment override it (`p7/model_selection.py` is the only reader).

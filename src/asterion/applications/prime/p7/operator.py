@@ -1376,6 +1376,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             "run_action_cap": invocation.game.action_cap,
         }
     broker_status = None
+    runtime: object | None = None
     completed_prefix: dict[str, object] | None = None
     try:
         if invocation.game.target_level > 1:
@@ -1497,8 +1498,19 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                         )
                     ):
                         sealed_trace = True
-            # The launch seam carries plain data only, so there is no live Pi
-            # session object left to read a failure or an stderr tail from.
+            # Keep the operator-only Pi stderr tail in private evidence. The
+            # public receipt remains body-free, but extension-registration
+            # failures otherwise collapse into an indistinguishable generic
+            # ApplicationRunError.
+            rpc_session = getattr(
+                getattr(runtime, "_session", None), "_rpc_session", None
+            )
+            stderr = getattr(rpc_session, "stderr", b"")
+            if type(stderr) is bytes:
+                diagnostics["pi_stderr"] = live.safe_stderr_summary(stderr)
+            last_failure = getattr(rpc_session, "last_failure", None)
+            if type(last_failure) is str and last_failure:
+                diagnostics["pi_last_failure"] = last_failure[:256]
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
             cleanup_failed = False
             try:

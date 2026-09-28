@@ -3214,3 +3214,8 @@
 - 01:35 该运行 trace 身份 = gpt-6-sol，为 e392577 的选择链路首个真实运行证据。
 - 01:36 停掉 2026-09-27 会话遗留的 /tmp/monitor_p7.sh（g50t）轮询进程。
 - 01:36 correction: 早前"重做 BP35 L1 不可能涨分"只对 game score 成立；LEVEL 列可达 115，需 ≤19 步。
+- 01:37 BP35 L1 witness stale run ended unsuccessful with 0 actions; rerun authorized by user.
+- 01:38 BP35 L1 rerun launched in pollable execution session; active run 49c54af3684db1fb7ea7495e.
+- 01:48 BP35 L1 rerun ended unsuccessful: 128 usage events, 0 actions, summary sealed, no score change.
+- 02:07 Two post-selection BP35 L1 retries produced no tools/actions; removing selection vars from child did not change behavior.
+- 02:07 Added private Pi stderr diagnostics to P7 summaries; current stderr only has model-catalog warnings, extension failure remains unproven.
