@@ -3277,3 +3277,4 @@
 - 提交 `22b7b3cb`：无效 checked plan 返回可执行修复指导，并记录 Prime 重构后的打包、promotion 和真实运行部署闭环。
 - LS20 L3 run `p7-live-20260928032105-ccb913dde66198e3c11a8ee0`：P7 反馈路径实跑 3 回合、24 个新动作后停滞；68 checked plans/44 errors/24 mismatches，清理完成但未封存。
 - 提交 `f380f8f1`：同步最新 LS20 L3 停滞证据与下一轮判断，避免将 P7 反馈送达误判为过关能力。
+- 提交 `c628fa87`：依据 44 次 checked-plan 错误，把 invalid-plan 反馈改为禁止批量重试并要求单项 probe/RESET。
