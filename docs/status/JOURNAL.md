@@ -3309,3 +3309,4 @@
 - 提交 `9355fe0e`：补记请求审计文档提交，保持轻量记忆提交链完整。
 - 诊断透传实现：PiRpcSession → PrimeExecutionKernel → AsterionPrimeSession → P7 private trace → `summary.json` 现在保留有界 `failure_code`；定向 Prime/P7 回归 143 项通过，尚未做真实 GPT-6-Sol witness 验证。
 - 提交 `f3adc300`：实现并测试 P7 模型失败诊断透传，下一步用真实 witness 验证 provider/协议分类。
+- 提交 `ef6d3280`：补记诊断透传提交，保持状态链可恢复。
