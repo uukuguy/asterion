@@ -641,6 +641,26 @@ class ArcBroker:
             result.append(entry)
         return result
 
+    def latest_progress(self) -> dict[str, object] | None:
+        """Return the latest bounded settled-frame change for model feedback."""
+        records = self._bound_history()
+        if len(records) < 2:
+            return None
+        previous, current = records[-2], records[-1]
+        return {
+            "action": current.action,
+            "sequence": current.sequence,
+            "changed_cell_count": current.changed_cell_count,
+            "changed_cells": [list(item) for item in current.changed_cells[:12]],
+            "changed_cells_omitted": max(
+                0, current.changed_cells_omitted + len(current.changed_cells) - 12
+            ),
+            "frame_changed": current.changed_cell_count > 0,
+            "level_advanced": current.levels_completed > previous.levels_completed,
+            "levels_completed": current.levels_completed,
+            "state": current.state,
+        }
+
     def last_outcome_summary(self, level: int | None = None) -> dict[str, object]:
         """Retrodict: per-action aggregate of attempts and no-effect outcomes."""
         attempts: dict[str, int] = {}

@@ -128,6 +128,14 @@ player's shape, color, rotation, or other target state. A shortest geometric
 route is not a valid plan when it misses a required controller or exhausts a
 resource; plan bounded route segments between resource resets and verify each
 state change from the settled frame.
+Every action response includes an application-supplied ``progress`` summary
+when a prior settled record exists. ``progress.frame_changed`` and a positive
+``changed_cell_count`` mean the action changed the settled grid even when
+``levels_completed`` did not increase: keep testing that hypothesis and use
+the changed-cell sample to identify the mechanism. A zero count is the
+objective no-effect signal; switch hypothesis, action, position, or RESET.
+Do not treat an unchanged level counter by itself as failure or as permission
+to abandon a visibly progressing action sequence.
 After every gameplay action, record the action, the changed object or region,
 the resource/state delta, and whether the objective moved closer. A changed
 frame is evidence even when it is a small local change. After RESET, call

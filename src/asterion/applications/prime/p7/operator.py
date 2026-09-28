@@ -578,9 +578,8 @@ class _P7BrokerClient:
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
-    @staticmethod
-    def _observation_view(observation: ArcObservation) -> dict[str, object]:
-        return {
+    def _observation_view(self, observation: ArcObservation) -> dict[str, object]:
+        view = {
             "available_actions": list(observation.available_actions),
             "frame": observation.frame,
             "frame_summary": summarize_frame(observation.frame),
@@ -588,6 +587,13 @@ class _P7BrokerClient:
             "state": observation.state,
             "win_levels": observation.win_levels,
         }
+        try:
+            progress = self._broker.latest_progress()
+        except Exception:
+            progress = None
+        if progress is not None:
+            view["progress"] = progress
+        return view
 
     def _status_view(self, status: ArcStatus) -> dict[str, object]:
         return {
@@ -624,6 +630,10 @@ class _P7BrokerClient:
         # position) without ever calling tried_actions().
         no_effects = self._broker.last_outcome_summary(observation.levels_completed)
         tried = self._broker.tried_actions(observation.levels_completed)
+        try:
+            progress = self._broker.latest_progress()
+        except Exception:
+            progress = None
         top_tried = sorted(
             tried,
             key=lambda item: (
@@ -631,7 +641,7 @@ class _P7BrokerClient:
                 item.get("action", ""),
             ),
         )[:5]
-        return {
+        result = {
             "available_actions": list(observation.available_actions),
             "frame": observation.frame,
             "frame_summary": summarize_frame(observation.frame),
@@ -648,6 +658,9 @@ class _P7BrokerClient:
                 "top_repeated": top_tried,
             },
         }
+        if progress is not None:
+            result["progress"] = progress
+        return result
 
 
     def status(self) -> Mapping[str, object]:

@@ -184,6 +184,10 @@ test("registers the ipython and P7 application tools", async () => {
     registered.find((tool) => tool.name === "p7_act_checked").description,
     /invalid-checked-plan.*one-item.*RESET/s,
   );
+  assert.match(
+    registered.find((tool) => tool.name === "p7_observe").description,
+    /progress.*changed_cell_count/s,
+  );
   assert.equal(registered[0].label, "ipython");
   assert.equal(
     registered[0].description,
