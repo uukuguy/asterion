@@ -186,7 +186,7 @@ test("registers the ipython and P7 application tools", async () => {
   );
   assert.match(
     registered.find((tool) => tool.name === "p7_observe").description,
-    /progress.*changed_cell_count/s,
+    /progress.*changed_cell_count.*color_count_delta/s,
   );
   assert.equal(registered[0].label, "ipython");
   assert.equal(

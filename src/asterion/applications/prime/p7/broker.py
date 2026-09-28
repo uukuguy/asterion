@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections import Counter
 import json
 from typing import Callable, Mapping, Protocol, cast
 
@@ -647,6 +648,13 @@ class ArcBroker:
         if len(records) < 2:
             return None
         previous, current = records[-2], records[-1]
+        previous_counts = Counter(value for row in previous.frame for value in row)
+        current_counts = Counter(value for row in current.frame for value in row)
+        color_count_delta = {
+            str(color): current_counts[color] - previous_counts[color]
+            for color in sorted(set(previous_counts) | set(current_counts))
+            if current_counts[color] != previous_counts[color]
+        }
         return {
             "action": current.action,
             "sequence": current.sequence,
@@ -656,6 +664,7 @@ class ArcBroker:
                 0, current.changed_cells_omitted + len(current.changed_cells) - 12
             ),
             "frame_changed": current.changed_cell_count > 0,
+            "color_count_delta": color_count_delta,
             "level_advanced": current.levels_completed > previous.levels_completed,
             "levels_completed": current.levels_completed,
             "state": current.state,

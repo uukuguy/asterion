@@ -132,8 +132,9 @@ Every action response includes an application-supplied ``progress`` summary
 when a prior settled record exists. ``progress.frame_changed`` and a positive
 ``changed_cell_count`` mean the action changed the settled grid even when
 ``levels_completed`` did not increase: keep testing that hypothesis and use
-the changed-cell sample to identify the mechanism. A zero count is the
-objective no-effect signal; switch hypothesis, action, position, or RESET.
+the changed-cell sample and ``color_count_delta`` to identify the mechanism.
+A zero count is the objective no-effect signal; switch hypothesis, action,
+position, or RESET.
 Do not treat an unchanged level counter by itself as failure or as permission
 to abandon a visibly progressing action sequence.
 After every gameplay action, record the action, the changed object or region,

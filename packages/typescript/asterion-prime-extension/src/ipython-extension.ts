@@ -426,7 +426,7 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_observe",
-      "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, frame_changed, and level_advanced) for the latest settled action. A positive changed_cell_count means the action changed the settled grid even when levels_completed did not increase; zero means objective no-effect. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
+      "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, color_count_delta, frame_changed, and level_advanced) for the latest settled action. A positive changed_cell_count means the action changed the settled grid even when levels_completed did not increase; use color_count_delta to detect monotonic or cyclic mechanisms. Zero means objective no-effect. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
       TypeObject({}, { additionalProperties: false }),
       "observe",
     ),
@@ -481,7 +481,7 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
       "p7_act_checked",
       "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
         + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
-        + "Read observation.progress in the result: a positive changed_cell_count is objective action progress even when the level counter is unchanged; "
+        + "Read observation.progress in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; "
         + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
         + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
       TypeObject(
