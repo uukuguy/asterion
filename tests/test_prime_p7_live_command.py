@@ -187,7 +187,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_checked_precheck_rejection_counts_only_unexecuted_items(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
-        from asterion.applications.prime.p7.operator import P7OperatorError, _P7BrokerClient
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
         from tests.test_prime_p7_native_broker import _HistoryEngine
 
         with tempfile.TemporaryDirectory() as directory:
@@ -200,8 +200,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"levels_completed": 0}},
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"state": "WIN"}},
             ]
-            with self.assertRaises(P7OperatorError):
-                client.act_checked(plan)
+            result = client.act_checked(plan)
+            self.assertEqual(result["stop_reason"], "invalid-checked-plan")
+            self.assertEqual(result["applied_count"], 0)
+            self.assertIn("No action was dispatched", result["checked_plan_guidance"])
             self.assertEqual(len(broker.journal), 0)
             accounting = client.private_accounting()
             self.assertEqual(accounting["checked_plans"], 1)

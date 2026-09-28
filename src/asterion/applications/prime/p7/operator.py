@@ -503,7 +503,7 @@ class _P7BrokerClient:
             dispatch_start = self._broker.status().primitive_actions
             try:
                 result = self._broker.act_checked(plan)
-            except Exception:
+            except Exception as error:
                 committed = len(self._broker.journal) - journal_start
                 if type(plan) is list and 1 <= len(plan) <= 20:
                     try:
@@ -516,6 +516,32 @@ class _P7BrokerClient:
                     self._count("matched_expectations", committed)
                     self._count("uncertain_items", dispatched - committed)
                     self._count("unexecuted_items", len(plan) - dispatched)
+                    if (
+                        isinstance(error, ArcBrokerError)
+                        and str(error) == "unavailable"
+                        and committed == 0
+                        and dispatched == 0
+                    ):
+                        observation = self._broker.observe()
+                        status = self._broker.status()
+                        return {
+                            "applied_count": 0,
+                            "stop_reason": "invalid-checked-plan",
+                            "mismatch": None,
+                            "unexecuted_count": len(plan),
+                            "checked_plan_guidance": (
+                                "No action was dispatched: the checked plan failed validation. "
+                                "Use a one-item plan with an available ACTION1-ACTION7 or RESET "
+                                "and one valid expect object; change the plan shape before retrying."
+                            ),
+                            "observation": self._observation_view(observation),
+                            "terminal": self._status_view(status),
+                            "batch": {
+                                "applied_count": 0,
+                                "levels_completed": observation.levels_completed,
+                                "transitions": [],
+                            },
+                        }
                 raise
             finally:
                 self._record_transitions(self._broker.journal[journal_start:])
