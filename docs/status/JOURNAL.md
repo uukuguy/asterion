@@ -3286,3 +3286,5 @@
 - 提交 `35c8bfd4`：为 Prime 原生结果、终端、传输和 continuation ProtocolError 增加有界私有诊断码，便于下一次实跑定位。
 - LS20 L3 run `p7-live-20260928054122-3404f72d04e738282ef11a06`：回放 94 步前缀后新增 10 个 L3 动作，仍停在 `levels_completed=2`；recording 显示每步 settled frame 均变化，手动停止后清理完成，未封存/未回放验证。
 - 提交 `415b3bc3`：把最近 settled action 的 changed-cell progress 直接追加到 P7 observe/act_checked，并同步注册工具描述，帮助模型区分“动作有效但尚未升级”和无效果。
+- LS20 L3 run `p7-live-20260928065144-20547ddb73d8dbfda34b6213`：新 progress 部署后新增 53 个 L3 动作，checked plans 10、mismatch 2、errors 0，仍未到 level 3；recording 显示颜色 11 每步递减 4，ACTION4 在阈值处触发周期重置，封存/回放/清理通过。
+- 提交 `35817e03`：在 settled progress 中追加有界 `color_count_delta`，把已观察到的单调/周期变化直接反馈给模型并同步注册工具说明。

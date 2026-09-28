@@ -5,9 +5,10 @@
 ## TL;DR
 
 1. Registered Pi `p7_act_checked` guidance reduced invalid checked plans on LS20 L3 (`p7-live-20260928043554-4ad46a32850f165e981a723e`: 3 errors / 9 plans), but L3 remains unverified.
-2. Run `p7-live-20260928054122-3404f72d04e738282ef11a06` added 10 L3 actions and stayed at level 2; recording proves every action changed the settled frame. It was manually stopped with cleanup complete and no sealed solve evidence.
-3. `415b3bc3` now returns bounded settled-action `progress` (`changed_cell_count`, sample, `frame_changed`, `level_advanced`) directly from P7 observe and checked-action results, and documents how to use it in the registered Pi tools.
-4. Next action: run one bounded LS20 L3 witness with this progress signal and measure whether the model continues an objectively progressing action hypothesis to level 3; inspect level advancement first, not ProtocolError classification.
+2. Run `p7-live-20260928054122-3404f72d04e738282ef11a06` added 10 L3 actions and stayed at level 2; recording proved every action changed the settled frame, then manual cleanup completed.
+3. Run `p7-live-20260928065144-20547ddb73d8dbfda34b6213` with `progress` added 53 L3 actions, 0 invalid-plan errors, and sealed/replay-verified evidence, but still stopped at level 2. Recording shows color 11 decreases by four per action and ACTION4 resets the cycle.
+4. `35817e03` adds bounded `color_count_delta` to the application-supplied progress object and registered descriptions.
+5. Next action: run one bounded LS20 L3 witness with color deltas, then verify whether the model recognizes the cycle and reaches level 3; gameplay advancement remains the primary metric.
 
 ## 已验证事实
 
