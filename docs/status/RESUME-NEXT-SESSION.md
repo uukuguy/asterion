@@ -26,6 +26,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - Required settled state is now appended by the application before the Pi session and on each continuation; only scenario-useful registered query/action tools remain exposed. Model-round private diagnostics retain hashes/signals only, and the sealed LS20 L3 run reports one action-producing round rather than the former read-only loop.
 - Continuations now also receive bounded `tried_summary` and an application-generated `action_guard`; unsealed recorder snapshots are merged with action diagnostics before the private summary is written. This is guidance and observability, not an engine-specific route or hard action stop.
 - The follow-up summary had 42 checked plans with 31 mismatches, so verified guidance now stops batching after two same-level mismatches and requires a one-item probe or RESET (`5db4a62b`).
+- Completed run `p7-live-20260928000722-c0ad73a972c21edd9c357bc0` replayed the 94-step L1/L2 prefix and added 44 L3 actions, but stayed at `levels_completed=2`; prefix replay, seal, replay verification, and cleanup passed before a native `ProtocolError` at `capability.execute` ended the application. Five model rounds carried the application state; 103 checked plans produced 41 mismatches, 59 errors, 3 matches, and 355 unexecuted items. The next run must verify the new in-band `checked_plan_guidance` from `ad71d5d5`.
 
 ## 当前判断
 
@@ -55,7 +56,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 
 ## 下一动作
 
-1. Use the sealed and unsealed action evidence to decide whether the next bounded attempt needs a model-session change or an action-level guard; do not add game-specific routes.
+1. Run one bounded L3 attempt to verify whether in-band `checked_plan_guidance` reduces repeated mismatches and checked-plan errors; do not add game-specific routes.
 2. Keep the FT09 pre-tool failures and LS20 L3 failures as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
 3. Run another bounded attempt only after an evidence-based prompt or model-session change, and track it at startup, first actions, and termination.
 
