@@ -3281,3 +3281,4 @@
 - LS20 follow-up `p7-live-20260928035815-2ff240d231bcc08ea1d9b4dc`：措辞加严后仍 20/28 checked-plan errors、8 个新动作、未进 L3，确认提示措辞不足以修复。
 - 提交 `cc2e0335`：记录加严反馈后的 LS20 对照结果，明确下一步转向模型会话/假设到动作连接。
 - 提交 `5f832734`：把 invalid-checked-plan 恢复规则写入真实 Pi 注册工具描述并同步打包资源，避免只靠 prompt 传达。
+- LS20 run `p7-live-20260928043554-4ad46a32850f165e981a723e`：注册描述生效后 checked-plan errors 降至 3/9，模型诊断为 guidance-is-being-used；随后 native ProtocolError 终止，封存回放通过。

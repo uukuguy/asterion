@@ -30,6 +30,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 - Retries `p7-live-20260928005634-caddcfa10b894019e77e9449` and `p7-live-20260928010922-24be5e8179381f438191716b` each replayed the prefix, made one L3 action, then failed at `capability.execute` with `ProtocolError`; both had zero model-round diagnostics, so they cannot evaluate prompt/output behavior. Private diagnostics now classify known protocol failure messages without retaining text (`b2dff557`).
 - Run `p7-live-20260928032105-ccb913dde66198e3c11a8ee0` exercised the new invalid checked-plan result. It replayed the 94-action prefix, made 24 L3 actions, stayed at level 2, and was manually stopped after about 31 minutes with cleanup complete. Private summary: 3 model rounds, 110 bridge calls, 68 checked plans, 44 checked-plan errors, 24 mismatches, `repeated_action_streak=7`, recommendation `reinforce-hypothesis-to-action-link`. This confirms P7-generated validation feedback reaches the model; it remains unsealed negative evidence.
 - Follow-up `p7-live-20260928035815-2ff240d231bcc08ea1d9b4dc` used imperative invalid-plan guidance. It replayed the prefix, made 8 L3 actions, stayed at level 2, and was stopped after a second-round stall with cleanup complete. Summary: 2 model rounds, 53 bridge calls, 28 checked plans, 20 errors, 8 mismatches, `repeated_action_streak=7`. Error ratio did not improve, so the wording change is not sufficient; keep the run as unsealed negative evidence.
+- Run `p7-live-20260928043554-4ad46a32850f165e981a723e` used the actual registered Pi tool description, replayed the prefix, and made 6 L3 actions before native `ProtocolError` at `capability.execute`. It sealed, replay-verified, and cleaned successfully. Private summary: 9 checked plans, 3 errors, 6 mismatches, `guidance-is-being-used`; the reduction from 20/28 and 44/68 confirms the registered description is useful. L3 remains unverified; investigate the native protocol boundary before another paid attempt.
 
 ## 当前判断
 
@@ -59,7 +60,7 @@ P7 now has a bounded structured cross-level mechanics prior and a real Pi regist
 
 ## 下一动作
 
-1. Treat both 2026092803 LS20 runs as a negative baseline: broker feedback and imperative wording were delivered, but invalid checked plans persisted and level 3 did not advance. Next change should target hypothesis-to-action linking or model session guidance, not more tool wording.
+1. Treat `p7-live-20260928043554-4ad46a32850f165e981a723e` as the current tool-guidance result: registered-description guidance reduced invalid plans, but native `capability.execute` ProtocolError stopped the run at L2. Diagnose that runtime boundary before another L3 attempt; do not revert the registered-tool change.
 2. Keep the FT09 pre-tool failures and LS20 L3 failures as bounded negative evidence; do not attribute them to the now-verified registered P7 tool path.
 3. Run another bounded attempt only after an evidence-based prompt or model-session change, and track it at startup, first actions, and termination.
 
