@@ -13,6 +13,7 @@ from asterion.agents.prime.execution import (
     PrimeExecutionKernel,
     PrimeRoundDiagnostic,
 )
+from asterion.services.diagnostics import FailureDiagnostic
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
@@ -61,6 +62,7 @@ class AsterionPrimeSession:
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
         round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
+        failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
@@ -90,6 +92,8 @@ class AsterionPrimeSession:
             raise ProtocolError("Asterion-prime continuation is invalid")
         if round_diagnostic is not None and not callable(round_diagnostic):
             raise ProtocolError("Asterion-prime round diagnostic is invalid")
+        if failure_diagnostic is not None and not callable(failure_diagnostic):
+            raise ProtocolError("Asterion-prime failure diagnostic is invalid")
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
         self._used_run_ids: set[str] = set()
@@ -105,11 +109,20 @@ class AsterionPrimeSession:
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
             round_diagnostic=round_diagnostic,
+            failure_diagnostic=failure_diagnostic,
             allowed_tool_names=allowed_tool_names,
         )
 
     def __repr__(self) -> str:
         return "<AsterionPrimeSession redacted>"
+
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        return self._kernel.last_diagnostic_id
+
+    @property
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        return self._kernel.last_diagnostic
 
     def close(self) -> None:
         """Release the owned single-run lease without invoking the transport."""

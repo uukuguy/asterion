@@ -34,6 +34,7 @@ from asterion.runtime.native_rpc import build_rpc_session
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.immutable import RedactedImmutableMapping
+from asterion.services.diagnostics import MemoryDiagnosticSink
 
 
 _HOST_CAPABILITIES = frozenset(
@@ -497,6 +498,7 @@ def build_p7_runtime(
         )
         if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
             raise RuntimeFactoryError(_ERROR)
+        diagnostic_sink = MemoryDiagnosticSink()
         rpc_session = build_rpc_session(
             command=launch.approved_command,
             cwd=launch.working_directory,
@@ -504,6 +506,7 @@ def build_p7_runtime(
             deadline_seconds=launch.deadline_seconds,
             inherited_fds=launch.extension_lease.inherited_fds,
             compact_events=launch.compact_events,
+            diagnostics=diagnostic_sink,
         )
         session = AsterionPrimeSession(
             rpc_session=rpc_session,
@@ -515,6 +518,7 @@ def build_p7_runtime(
             completion_predicate=lambda: _p7_terminal(broker),
             continuation_prompt=lambda round_index: _p7_continuation_prompt(broker, round_index),
             round_diagnostic=trace_adapter.record_model_round,
+            failure_diagnostic=trace_adapter.record_failure,
             allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
         launch = None

@@ -20,7 +20,11 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-from asterion.services.diagnostics import DiagnosticSink, capture_failure
+from asterion.services.diagnostics import (
+    DiagnosticSink,
+    FailureDiagnostic,
+    capture_failure,
+)
 
 
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
@@ -605,6 +609,20 @@ class PiRpcSession:
     @property
     def last_diagnostic_id(self) -> str | None:
         return self._last_diagnostic_id
+
+    @property
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        """Return the bounded private diagnostic for the last failed prompt."""
+
+        diagnostic_id = self._last_diagnostic_id
+        sink = self._diagnostics
+        if diagnostic_id is None or sink is None:
+            return None
+        try:
+            diagnostic = sink.get(diagnostic_id)  # type: ignore[attr-defined]
+        except (AttributeError, KeyError):
+            return None
+        return diagnostic if type(diagnostic) is FailureDiagnostic else None
 
     def next_id(self) -> str:
         self._request_id += 1

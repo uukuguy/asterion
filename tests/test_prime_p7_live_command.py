@@ -1211,19 +1211,32 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         class Worker:
             closed = False
 
+        evidence = None
+
         async def composed(*args: object, **kwargs: object) -> None:
             assert client is not None
+            assert evidence is not None
             client.act([{"name": "ACTION1", "data": {}}])
+            evidence.record_failure(FailureDiagnostic(
+                "pi-diagnostic-1",
+                "pi.prompt",
+                "RuntimeError",
+                "0" * 64,
+                None,
+                "pi-provider-execution",
+            ))
             raise RuntimeError("private model detail")
 
         with tempfile.TemporaryDirectory() as directory:
+            from asterion.services.diagnostics import FailureDiagnostic
+
             root = Path(directory)
             worker = Worker()
             broker = None
             client = None
 
             def build_resources(**kwargs: object) -> SimpleNamespace:
-                nonlocal broker, client
+                nonlocal broker, client, evidence
                 broker = ArcBroker(engine=kwargs["engine"])
                 evidence = P7PrivateTraceReceipt(
                     broker, PrimeTraceRecorder(kwargs["private_trace_root"])
@@ -1298,6 +1311,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(summary["broker"]["terminal_reason"], "game-over")
             self.assertTrue(summary["replay_verified"])
             self.assertTrue(summary["sealed_trace"])
+            self.assertEqual(
+                summary["diagnostics"]["application_failure"]["failure_code"],
+                "pi-provider-execution",
+            )
 
     def test_failed_later_level_seals_only_verified_completed_prefix(self) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder

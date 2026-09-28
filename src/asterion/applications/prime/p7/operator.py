@@ -1840,6 +1840,18 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                     failure = error
                     reason = "P7 live solve unsuccessful"
             cleanup_complete = worker.closed and not cleanup_failed
+            private_trace = resources_.host_services.get("prime.private-trace")
+            private_diagnostic = getattr(private_trace, "failure_diagnostic", None)
+            if failure is not None and private_diagnostic is not None:
+                diagnostics["application_failure"] = {
+                    "stage": private_diagnostic.stage,
+                    "exception_type": private_diagnostic.exception_type,
+                    **(
+                        {"failure_code": private_diagnostic.failure_code}
+                        if private_diagnostic.failure_code is not None
+                        else {}
+                    ),
+                }
         finally:
             live.write_summary(
                 root,

@@ -32,6 +32,7 @@ from asterion.runtimes.pi_rpc import (
     validate_pi_compact_result,
     normalize_pi_usage,
 )
+from asterion.services.diagnostics import FailureDiagnostic
 
 
 ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
@@ -261,6 +262,7 @@ class PrimeExecutionKernel:
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
         round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
+        failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         self._validate_launch_material(
@@ -279,7 +281,10 @@ class PrimeExecutionKernel:
         self._continuation_prompt = continuation_prompt
         if round_diagnostic is not None and not callable(round_diagnostic):
             raise ProtocolError("Asterion-prime round diagnostic is invalid")
+        if failure_diagnostic is not None and not callable(failure_diagnostic):
+            raise ProtocolError("Asterion-prime failure diagnostic is invalid")
         self._round_diagnostic = round_diagnostic
+        self._failure_diagnostic = failure_diagnostic
         if (
             type(allowed_tool_names) is not tuple
             or not allowed_tool_names
@@ -299,6 +304,16 @@ class PrimeExecutionKernel:
 
     def __repr__(self) -> str:
         return "<PrimeExecutionKernel redacted>"
+
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        value = getattr(self._rpc_session, "last_diagnostic_id", None)
+        return value if type(value) is str else None
+
+    @property
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        value = getattr(self._rpc_session, "last_diagnostic", None)
+        return value if type(value) is FailureDiagnostic else None
 
     async def invoke(
         self,
@@ -409,6 +424,17 @@ class PrimeExecutionKernel:
         round_start = 0
         round_terminal_seen = False
         callback_failure: ProtocolError | None = None
+
+        def report_failure() -> None:
+            if self._failure_diagnostic is None:
+                return
+            try:
+                self._failure_diagnostic(
+                    getattr(self._rpc_session, "last_diagnostic", None)
+                )
+            except Exception:
+                # Private diagnostics cannot alter the execution result.
+                pass
 
         def consume_checked(event: PiRpcEvent) -> None:
             nonlocal model_callbacks, round_terminal_seen
@@ -543,14 +569,17 @@ class PrimeExecutionKernel:
                     on_event=consume,
                 )
             except _CallbackRejected:
+                report_failure()
                 protocol_failure = callback_failure or ProtocolError(
                     _NATIVE_EVENT_ERROR
                 )
             except ProtocolError:
+                report_failure()
                 protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
             except asyncio.CancelledError:
                 raise
             except Exception:
+                report_failure()
                 if signal is not None and signal.cancelled:
                     emit("run.completed", {"status": "cancelled"})
                 else:

@@ -8,6 +8,7 @@ import re
 
 from asterion.agents.prime.execution import PrimeRoundDiagnostic
 from asterion.agents.prime.trace import PrimeTraceRecorder
+from asterion.services.diagnostics import FailureDiagnostic
 from asterion.applications.prime.p7.broker import (
     ArcBroker, ArcRunReceipt, ArcTransition, _observation_digest,
 )
@@ -48,6 +49,9 @@ class P7PrivateTraceReceipt:
     _recorder: PrimeTraceRecorder
     _identities: Mapping[str, str] = field(default_factory=lambda: dict(P7_TRACE_IDENTITIES))
     _accessed: bool = field(default=False, init=False, compare=False)
+    _failure_diagnostic: FailureDiagnostic | None = field(
+        default=None, init=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         if (
@@ -176,6 +180,21 @@ class P7PrivateTraceReceipt:
             raise P7PrivateTraceReceiptError(
                 "P7 model diagnostics are invalid"
             ) from None
+
+    def record_failure(self, diagnostic: FailureDiagnostic | None) -> None:
+        """Retain one bounded Pi failure diagnostic for the private summary."""
+
+        if self._accessed or (
+            diagnostic is not None and type(diagnostic) is not FailureDiagnostic
+        ):
+            raise P7PrivateTraceReceiptError("P7 failure diagnostics are invalid")
+        object.__setattr__(self, "_failure_diagnostic", diagnostic)
+
+    @property
+    def failure_diagnostic(self) -> FailureDiagnostic | None:
+        """Expose the retained private diagnostic to the owning operator only."""
+
+        return self._failure_diagnostic
 
     def close(self) -> None:
         """Release an unpublished trace and prevent later receipt access."""

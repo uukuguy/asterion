@@ -15,6 +15,7 @@ from asterion.runtime.host import (
     RuntimeManifest,
 )
 from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import FailureDiagnostic
 
 
 @runtime_checkable
@@ -54,6 +55,16 @@ class AsterionPrimeRuntimeClient:
             runtime_id="asterion.prime",
             capabilities=ASTERION_PRIME_CAPABILITIES,
         )
+
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        value = getattr(self._session, "last_diagnostic_id", None)
+        return value if type(value) is str else None
+
+    @property
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        value = getattr(self._session, "last_diagnostic", None)
+        return value if type(value) is FailureDiagnostic else None
 
     def run(
         self,

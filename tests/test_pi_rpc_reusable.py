@@ -264,6 +264,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
             diagnostic_id = rpc.last_diagnostic_id
             self.assertIsNotNone(diagnostic_id)
             record = sink.get(diagnostic_id)
+            self.assertIs(rpc.last_diagnostic, record)
             self.assertEqual(record.stage, "pi.prompt")
             self.assertNotIn("PRIVATE-ERROR", repr(record))
             self.assertNotIn("assistant-error", repr(record))

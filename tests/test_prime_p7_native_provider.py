@@ -14,6 +14,7 @@ from typing import AsyncIterator, cast
 
 from asterion.agents.prime.session import ASTERION_PRIME_LIMITS
 from asterion.agents.prime.trace import PrimeTraceRecorder
+from asterion.services.diagnostics import FailureDiagnostic
 from asterion.applications.discovery import (
     list_application_providers,
     load_application_provider,
@@ -176,6 +177,21 @@ class _CompletingRuntime:
 
 
 class TestPrimeP7NativeProvider(unittest.TestCase):
+    def test_private_trace_retains_bounded_failure_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            broker = ArcBroker(engine=_CompletingEngine())
+            adapter = P7PrivateTraceReceipt(
+                broker, PrimeTraceRecorder(Path(directory).resolve())
+            )
+            diagnostic = FailureDiagnostic(
+                "diagnostic-id", "pi.prompt", "RuntimeError", "subject", None,
+                "pi-provider-execution",
+            )
+
+            adapter.record_failure(diagnostic)
+
+            self.assertIs(adapter.failure_diagnostic, diagnostic)
+
     def test_p7_continuation_prompt_carries_current_state(self) -> None:
         from asterion.applications.prime.runtime_binding import _p7_continuation_prompt
         from asterion.applications.prime.p7.broker import ArcObservation, ArcStatus

@@ -27,7 +27,7 @@
 ## 当前判断
 
 - The blocking boundary is the native runtime `ProtocolError` at `capability.execute`, after the registered-tool description was shown to reduce invalid plans.
-- Before another paid witness, preserve the Pi private diagnostic category through runtime/P7 summary. Until then classify `0/0` usage plus `ProtocolError` as an incomplete model session, not as a confirmed GPT provider failure.
+- Diagnostic透传已实现：P7 将 Pi 私有 failure code 传到 `summary.json`，只保留 stage、exception type 和 bounded failure code。定向 Prime/P7 回归 143 项通过；下一步用一次有限 GPT-6-Sol witness 验证真实分类。`0/0` usage 在验证前仍只表示回合未完成。
 - The new codes are classification only. They do not explain the 04:35 run and do not authorize another paid attempt.
 - Cross-level mechanics prior and the registered P7 tool path remain connected. Live L3 improvement is still unverified.
 - Project route stays managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Active theme is the P7 LS20 L3 protocol boundary, not a new numbered phase.
