@@ -97,3 +97,24 @@ class TestFailureCodeDiagnostics(unittest.TestCase):
         record = sink.get(diagnostic_id)
         self.assertEqual(record.failure_code, "pi-provider-execution")
         self.assertNotIn("Pi runtime provider execution failed", repr(record))
+
+    def test_prime_protocol_failure_codes_are_bounded(self) -> None:
+        cases = {
+            "Asterion-prime transport protocol failed": "prime-transport-protocol",
+            "Asterion-prime native result is malformed": "prime-native-result",
+            "Asterion-prime native terminal is invalid": "prime-native-terminal",
+            "Asterion-prime continuation is invalid": "prime-continuation",
+        }
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                sink = MemoryDiagnosticSink()
+                diagnostic_id = capture_failure(
+                    sink,
+                    stage="capability.execute",
+                    error=ProtocolError(message),
+                    subject_id="run-1",
+                )
+                assert diagnostic_id is not None
+                record = sink.get(diagnostic_id)
+                self.assertEqual(record.failure_code, expected)
+                self.assertNotIn(message, repr(record))

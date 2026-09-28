@@ -88,6 +88,10 @@ def _failure_code(error: Exception) -> str | None:
         "Pi runtime output limit exceeded": "pi-output-limit",
         "Pi runtime turn limit exceeded": "pi-turn-limit",
         "Pi runtime request deadline expired": "pi-deadline",
+        "Asterion-prime transport protocol failed": "prime-transport-protocol",
+        "Asterion-prime native result is malformed": "prime-native-result",
+        "Asterion-prime native terminal is invalid": "prime-native-terminal",
+        "Asterion-prime continuation is invalid": "prime-continuation",
     }
     return known.get(message, "protocol-error")
 
