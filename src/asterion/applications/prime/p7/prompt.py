@@ -89,10 +89,12 @@ history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
 
 When a new level is entered after an authoritative LEVEL_ADVANCED response,
-call the registered p7_mechanics_prior tool once before the next probe. Do not
+the next tool call must be the registered p7_mechanics_prior tool, called once
+before the next probe. Do not
 call history, frame_at, act, or act_checked before this prior call. It summarizes bounded evidence from earlier levels:
 repeated action effects, no-effect counts, click-coordinate ranges, level
-advances, and candidate rules with confidence. Treat it as a prior over the
+advances, and candidate rules with confidence. The equivalent broker call is
+``p7_client.mechanics_prior()``. Treat it as a prior over the
 hidden action mechanics, never as a route or guaranteed action sequence. For
 each candidate rule, state the current-level observation that would support or
 contradict it, then choose the shortest distinguishing probe. After every
