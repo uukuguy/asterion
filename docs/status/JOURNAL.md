@@ -3268,3 +3268,4 @@
 - 07:59 提交 `d7df32bc`：把 checked-plan mismatch 的新恢复边界写入跨会话状态，避免下一次重复批量失配。
 - 08:03 提交 `19170aaa`：明确新关卡后的 next tool call 必须是注册的 mechanics prior，并修复提示契约回归。
 - 08:52 提交 `ad71d5d5`：依据 L3 运行 41 次失配，将单步探针或 RESET 指导直接附加到 act_checked 返回。
+- 08:54 提交 `abc98feb`：记录完整 L3 输入/输出诊断，下一轮验证 act_checked 失配指导是否降低错误风暴。
