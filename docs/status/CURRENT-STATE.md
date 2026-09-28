@@ -1,45 +1,53 @@
 # Current State
 
-Updated 2026-09-26. This file is the structural snapshot; the active session checkpoint and next actions are in `RESUME-NEXT-SESSION.md`. Historical decisions and receipts remain in `DECISIONS.md`, `JOURNAL.md`, and the named evidence files.
+Updated 2026-09-29. This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
 
-## Project and authority
+## Project Snapshot
 
-- Project route: managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Most recent work package: 2026-09-22 R1–R9 review remediation, integrated into main and not declared as a new numbered phase.
-- Asterion is a composable, multi-runtime research framework. The root wheel and `src/asterion/` are authoritative. DCI is a reference product; Pi, data, credentials, generated evidence, and the parent DCI baseline are external.
-- Python owns composition and orchestration, TypeScript validates shared contracts and Node integration, and Rust owns controlled execution. Framework modules remain product neutral. Applications select exact package and runtime bindings; runners execute an already resolved plan.
-- Protocols `asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, and `asterion.application-assembly/v1` remain closed. The 2026-09-22 remediation does not introduce protocol v2.
-- Host services and model configuration are operator owned and injected. Metadata listing, acceptance, preflight, and provider-free gates do not authorize Agent/Judge execution.
+- Project: Asterion composable multi-runtime agent framework
+- Current branch: `main`
+- Theme-level focus: Prime P7 native gameplay baseline on GPT-6-Sol
+- Project route: managed
+- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
+- Active work package: none
 
-## Active work
+## Current Architecture
 
-- The nine findings and priorities are recorded in `../reviews/2026-09-22-architecture-and-execution-review.md`. Their implementation is on main; `.worktrees/review-implementation` retains the reviewed source branch.
-- R1/R6 repair Pi prompt ownership through an exact request acknowledgment and settlement barrier, and normalize wire responses before optional event compaction. The Phase 10 shared-session draft is historical and must be corrected before implementation.
-- R2 connects Prime P3/P5/P6 selected assemblies to executable capabilities, injected hosts, and sealed receipts. The 2026-09-24 bounded live presets now exercise those composition paths with model-produced task content. P6 cancellation after admission must either complete a verified inverse or mark recovery required; it cannot label unverified effects rolled back.
-- R3/R4 bind composition to the validated package snapshot and reject self-consumed event/artifact cycles. R5 bounds Python/Rust executor cleanup. R7 adds private diagnostic correlation while retaining public redaction. R8 coalesces validated journal reads without changing the canonical journal. R9 narrows Prime inventory and module ownership.
+- Python owns orchestration, composition, application assembly, and execution.
+- TypeScript validates shared contracts and packages Pi application resources.
+- Rust owns controlled command execution.
+- P7 is an application-level native ARC-AGI-3 solving route using an operator-injected Pi host and fixed GPT-6-Sol selection.
+- Framework runtime modules remain domain-neutral; application bridges own P7 tools and state observations.
 
-## Evidence boundary
+## Open Problems
 
-- The native detachment program and its historical P1–P7 receipts remain documented. “Implemented” means code and entry point exist; it does not establish every application’s current end-to-end capability.
-- P1 has prior live receipts and a later real-model failure report. The repaired prompt boundary has focused simulated-producer tests and one bounded installed-wheel live completion on the reviewed branch. This is one preset run, not a reliability estimate.
-- P2 has local retrieval and oracle evidence; a zero-token operator witness alone does not prove model long-context performance.
-- P3/P5/P6 each completed one bounded local installed-wheel model run on 2026-09-24: P3 admitted child and root each used a separate Pi session; P5's first model proposal passed local semantic verification, so its live repair count is zero; P6 evaluated a model-proposed rule on untouched holdout values and explicitly promoted it at project scope. Their former deterministic runs remain under `-witness` targets. One passing preset is not a reliability estimate or general task capability.
-- P4 completed bounded local installed-wheel commit/recover pairs in separate processes. The new session consumed a verified checkpoint transcript and sealed generation 2. A simulated transient model failure now preserves generation 1 for same-root retry. This proves the fixed task-state recovery preset, not arbitrary IPython memory restoration or broad cross-session reliability.
-- P7 has a prior bounded LS20 Level-1 solve; a later TU93 attempt reached `GAME_OVER` after 50 actions without clearing Level 1. The local `p7-solve GAME=<id> [LEVEL=N]` selects a whole game or sequential target level; saved action prefixes are verified from private evidence and re-executed into a fresh game before the model continues. A later-level failure can retain the earlier completed levels in a separately sealed and replay-verified prefix; each run retains its own private directory. A GET-only sync fills the operator-owned 25-game official catalog. Official Competition support has a scoreless gameplay package, one-card selected-game coordinator, saved-action execution with initial and per-step verification, SDK result validation, and read-only closed-card recovery. One authorized LS20 submission created a real Competition card; the validated public result shows Level 1 completed in 20 actions and overall score 0.14285714285714285 across 25 games, with 24 unselected games at zero. This is a partial official score, not a complete LS20 game win. See the active checkpoint and `docs/guides/prime-p7-games-and-official-results.md` for commands and limits.
-- P7 本地 2026-09-25 首关轮次已完成：原有 LS20、AR25 两题首关前缀之外，23 题各尝试一次，15 题新增已验证首关，8 题到人类动作基准仍未解；25 题中现有 17 题具有首关前缀，整题通关数为 0。本轮 23 条独立运行的回放、封存和清理均通过检查，累计上报输入 41,713,134、输出 1,547,660 token，输入包含缓存，不能据此计算费用。逐题结果与命令在 `docs/guides/prime-p7-games-and-official-results.md`。
-- P7 已完成第二次官方 Competition 批量提交；最新本地 `closed-confirmed` 回执记载卡片 `403c8b05-ae64-4dd9-b6f6-1d22910a2e24`、官方总分 `6.498124098124098`、21 题实际执行、4 题未选零动作占位，整题通关数仍为 0。该卡包含 M0R0、VC33 的第 3 关，AR25、CN04、DC22、LS20、RE86、TU93 的第 2 关及其余已验证前缀。卡号和逐题官方成绩在 `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`；此前 17 题卡片保留为历史记录。
-- 官方批量卡关闭后，G50T 首关在独立 OFFLINE 重试中于 58/78 步通过，封存、回放和清理均校验完成。本地现有 22/25 题具已验证首关前缀；KA59、SK48、TN36 首关仍未解。G50T 本地网页保留动作回放和中文事实摘要；这次结果没有进入已关闭的 21 题官方卡。重试守卫和提示词在应用层处理同题已校验失败事实，能力包仍只校验 P7 输入边界。
-- The P7 gameplay package/assembly passed `make promotion-check` after its resource declaration was fixed: 25 isolated commands, zero provider operations. Full benchmarks and paper reproduction remain outside this work and require separate finite authorization.
-- P7 retry was refactored to remove pre-computed, game-specific advice that had been injected from past runs into the model prompt (`src/asterion/applications/prime/p7/failed_attempts.py` and `build_p7_retry_prompt` deleted, `P7_RETRY_MODE_ENV` and `ASTERION_PRIME_P7_RETRY_MODE` env vars removed). The retry tool now resolves a saved action prefix and runs the generic solve path; the stable-last-frame no-effect guard is always-on generic runtime observation (empty counter at run start, accumulates from current run only). The 5 retry runs before this refactor (BP35 L1 20/21, G50T L1 58/78, FT09 L2 19, SC25 L2 28, SB26 L2 41-failed) remain on disk with their `failed_attempt_advice` field as historical archive; their verified/failed outcomes cannot be attributed to the generic method and require a control rerun to confirm.
-- P7 5-retry outcomes against the original advice-injection path: 4 verified (BP35 L1, G50T L1, FT09 L2, SC25 L2) all at or near the human-baseline action cap; 1 failed (SB26 L2 exhausted 28 new actions without advancing). Local prefix coverage after breadth resweep + G50T retry + FT09 L2 + SC25 L2 + post-refactor control is 24/25 games (only SK48, TN36 first-pass still unsolved); ten games have L2 verified prefix (AR25, CN04, DC22, FT09, LS20, M0R0 L3, RE86, SC25, TU93, VC33 L3, WA30 L2). No additional official card submissions since the 2026-09-25 21-game `closed-confirmed` card `403c8b05-...` (score 6.498).
-- Post-refactor single-variable control: KA59 Level 1 was unsolved by breadth resweep (78/78 cap hit, no advice path) but the new generic mechanism (prefix replay + runtime guards, `failed_attempt_advice=null`) passed it in 36 actions under the same cap. Confirms that the pre-computed advice injection was not necessary for P7 Level-1 solve; the 5 pre-refactor retry passes are most parsimoniously explained by the same generic mechanism rather than the now-deleted advice field.
+- No current P7 gameplay result is authorized or in flight.
+- Full-game P7 capability remains unverified beyond the historical evidence retained before the GPT-6-Sol migration.
+- Generated `.asterion-private` evidence may contain stale post-baseline runs and must not be treated as current source state.
 
-## Key paths
+## Key Files
 
-- `src/asterion/applications/provider.py`, `src/asterion/applications/prime/` (note: `p7/failed_attempts.py` removed), `src/asterion/capability_packages/`, `src/asterion/capabilities/`, `src/asterion/runner/`, `src/asterion/runtimes/pi_rpc.py`, `src/asterion/services/`, and `packages/rust/controlled-executor/` contain the relevant boundaries.
-- `src/asterion/applications/prime/p7/prompt.py` exports only `P7_SOLVE_PROMPT` and `P7_LEGACY_SOLVE_PROMPT` (legacy variant for the explicit A/B control); retry guidance is no longer in a separate constant — generic principles are inside `P7_SOLVE_PROMPT`.
-- `tools/run_prime_p7_retry.py` is a thin wrapper over `run_prime_p7_sweep.SweepScheduler._attempt`; it writes a private manifest under `.asterion-private/prime-p7-live/retry-manifests/` and validates only the recorded prefix action count, never advice provenance.
-- `docs/status/INDEX.md` indexes active state and evidence. `docs/status/RESUME-NEXT-SESSION.md` records the current recovery point. `docs/status/ASTERION-PRIME-P7-EVIDENCE.md` contains the bounded P7 live evidence including the 5 pre-refactor retry receipts.
+### Loaded every session
 
-## Resume
+- `AGENTS.md`
+- `MEMORY.md`
 
-Read `AGENTS.md`, `INDEX.md`, `RESUME-NEXT-SESSION.md`, then inspect `git status --short` and recent commits in both worktrees. Promote claims only to the exact boundary supported by a named command or receipt.
+### State / handoff
+
+- `docs/status/RESUME-NEXT-SESSION.md` — current session baton
+- `docs/status/JOURNAL.md` — append-only event log
+- `docs/status/INDEX.md` — status-file index
+
+### Implementation entry points
+
+- `src/asterion/applications/prime/p7/operator.py` — P7 operator and host wiring
+- `src/asterion/applications/prime/p7/live.py` — Pi RPC live execution plumbing
+- `src/asterion/applications/prime/runtime_binding.py` — fixed Prime runtime selection
+- `Makefile` — provider-backed P7 presets
+
+## Resume Instructions
+
+1. Read this file and `RESUME-NEXT-SESSION.md`.
+2. Read the latest `JOURNAL.md` entries and `AGENTS.md`.
+3. Run `git status --short` and `git log --oneline -5`.
+4. Treat `d50897f7` as the code baseline unless the user authorizes a new change.
