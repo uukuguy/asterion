@@ -14,6 +14,7 @@
 8. Runs `p7-live-20260928074135-39346a6b32de1f63cd6a328b`, `p7-live-20260928074743-9073b1b03b2472744e81b76f`, and `p7-live-20260928082138-3fcfc9fd11d1bd596714b3b6` all stopped before a model round; the third reached one `mechanics_prior` call, then failed at `capability.execute`. SC25 L3 `p7-live-20260928090051-26d9c5dc70d9c4440b92075e` reproduced the same zero-action boundary after a 28-step prefix. These are runtime boundary evidence, not L3 strategy results.
 9. BP35 L2 then entered a real model loop: run `p7-live-20260928091036-3c259e093dcc7f9a14edca36` executed 23 actions and completed L1 at action 22, but produced 63 invalid plans out of 64 and was manually stopped before L2; it is useful gameplay progress but not a verified prefix.
 10. BP35 `p7-next` then replayed the verified 20-action L1 prefix but failed before its first L2 model round (`checked_plans=0`, new actions=0); do not treat it as an L2 strategy result.
+11. GPT-6-Sol audit for 2026-09-28: 19 runs, 9 with at least one completed `prime.model.round` (22 total), 10 with none; 9 failed runs ended after a `0/0` usage marker and generic `ProtocolError`, while one was manually stopped. This is not a provider failure rate because the current Pi/RPC chain drops the private failure category. BP35 `p7-live-20260928091036-3c259e093dcc7f9a14edca36` proves a successful model loop can still fail at planning: 4 rounds, 90 tool calls, 23 actions, L1 completed, then 63/64 invalid checked plans.
 
 ## 已验证事实
 
@@ -26,6 +27,7 @@
 ## 当前判断
 
 - The blocking boundary is the native runtime `ProtocolError` at `capability.execute`, after the registered-tool description was shown to reduce invalid plans.
+- Before another paid witness, preserve the Pi private diagnostic category through runtime/P7 summary. Until then classify `0/0` usage plus `ProtocolError` as an incomplete model session, not as a confirmed GPT provider failure.
 - The new codes are classification only. They do not explain the 04:35 run and do not authorize another paid attempt.
 - Cross-level mechanics prior and the registered P7 tool path remain connected. Live L3 improvement is still unverified.
 - Project route stays managed. Canonical historical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`. Active theme is the P7 LS20 L3 protocol boundary, not a new numbered phase.
