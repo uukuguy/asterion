@@ -204,6 +204,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(result["stop_reason"], "invalid-checked-plan")
             self.assertEqual(result["applied_count"], 0)
             self.assertIn("No action was dispatched", result["checked_plan_guidance"])
+            self.assertIn("Do not retry act_checked with another batch", result["checked_plan_guidance"])
             self.assertEqual(len(broker.journal), 0)
             accounting = client.private_accounting()
             self.assertEqual(accounting["checked_plans"], 1)

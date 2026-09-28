@@ -531,8 +531,9 @@ class _P7BrokerClient:
                             "unexecuted_count": len(plan),
                             "checked_plan_guidance": (
                                 "No action was dispatched: the checked plan failed validation. "
-                                "Use a one-item plan with an available ACTION1-ACTION7 or RESET "
-                                "and one valid expect object; change the plan shape before retrying."
+                                "Do not retry act_checked with another batch. Inspect the settled "
+                                "observation once, then use a one-item plan with an available "
+                                "ACTION1-ACTION7 or RESET and one valid expect object."
                             ),
                             "observation": self._observation_view(observation),
                             "terminal": self._status_view(status),
@@ -1550,7 +1551,9 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             "response also carries a no_effect_hint field with this same "
             "action and position plus a no-effect count; read it in-band "
             "instead of recomputing. A prediction mismatch also carries "
-            "checked_plan_guidance requiring a one-item probe or RESET."
+            "checked_plan_guidance requiring a one-item probe or RESET. If stop_reason is "
+            "'invalid-checked-plan', do not submit another batch: inspect the settled "
+            "observation once, then change the plan shape."
         ),
         signature=(
             "result['no_effect_hint'] or result['checked_plan_guidance']"
