@@ -157,6 +157,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 result["observation"]["progress"]["color_count_delta"],
                 {"0": -1, "1": 1},
             )
+            self.assertIn("continue the current hypothesis", result["progress_guidance"])
             self.assertEqual(len([entry for entry in recorder.snapshot() if entry.kind == "arc.action"]), 1)
             self.assertEqual(client.private_accounting(), {
                 "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,

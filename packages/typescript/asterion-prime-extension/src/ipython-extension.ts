@@ -481,7 +481,7 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
       "p7_act_checked",
       "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
         + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
-        + "Read observation.progress in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; "
+        + "Read observation.progress and progress_guidance in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; continue that hypothesis until its cycle is understood, while zero means switch or RESET. "
         + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
         + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
       TypeObject(

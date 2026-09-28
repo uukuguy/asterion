@@ -555,6 +555,10 @@ class _P7BrokerClient:
             batch = result["batch"]
             observation = result["observation"]
             terminal = result["terminal"]
+            try:
+                progress = self._broker.latest_progress()
+            except Exception:
+                progress = None
             checked_plan_guidance = (
                 "prediction mismatch: inspect the returned settled observation once, "
                 "then use a one-item probe or RESET; make it falsifiable and do not submit another batch"
@@ -566,6 +570,7 @@ class _P7BrokerClient:
                 "stop_reason": result["stop_reason"],
                 "mismatch": result["mismatch"],
                 "checked_plan_guidance": checked_plan_guidance,
+                "progress_guidance": self._progress_guidance(progress),
                 "unexecuted_count": result["unexecuted_count"],
                 "observation": self._observation_view(observation),
                 "terminal": self._status_view(terminal),
@@ -594,6 +599,22 @@ class _P7BrokerClient:
         if progress is not None:
             view["progress"] = progress
         return view
+
+    @staticmethod
+    def _progress_guidance(progress: Mapping[str, object] | None) -> str:
+        """Translate settled evidence into an objective next-step rule."""
+        if progress is None:
+            return "No prior settled action is available; make one falsifiable probe."
+        if progress.get("level_advanced") is True:
+            return "The action advanced the level; call mechanics_prior once before the next probe."
+        changed = progress.get("changed_cell_count")
+        if type(changed) is int and changed > 0:
+            return (
+                "The action changed the settled frame; continue the current hypothesis "
+                "and use color_count_delta to identify its monotonic or cyclic effect "
+                "before switching actions."
+            )
+        return "The action produced no settled-frame change; switch hypothesis, action, position, or RESET."
 
     def _status_view(self, status: ArcStatus) -> dict[str, object]:
         return {
@@ -660,6 +681,7 @@ class _P7BrokerClient:
         }
         if progress is not None:
             result["progress"] = progress
+            result["progress_guidance"] = self._progress_guidance(progress)
         return result
 
 
