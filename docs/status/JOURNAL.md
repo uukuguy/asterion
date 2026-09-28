@@ -3280,3 +3280,4 @@
 - 提交 `c628fa87`：依据 44 次 checked-plan 错误，把 invalid-plan 反馈改为禁止批量重试并要求单项 probe/RESET。
 - LS20 follow-up `p7-live-20260928035815-2ff240d231bcc08ea1d9b4dc`：措辞加严后仍 20/28 checked-plan errors、8 个新动作、未进 L3，确认提示措辞不足以修复。
 - 提交 `cc2e0335`：记录加严反馈后的 LS20 对照结果，明确下一步转向模型会话/假设到动作连接。
+- 提交 `5f832734`：把 invalid-checked-plan 恢复规则写入真实 Pi 注册工具描述并同步打包资源，避免只靠 prompt 传达。
