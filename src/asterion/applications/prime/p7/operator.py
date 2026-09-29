@@ -2344,8 +2344,6 @@ def classify_failure_cause(
         and isinstance(value, int)
         and value > 0
     }
-    if actual_failures:
-        return {"category": "tool_error", "evidence": {"method_failures": dict(failures)}}
     if (
         status.get("terminal_reason") == "human-baseline"
         and status.get("actions_remaining") == 0
@@ -2358,6 +2356,8 @@ def classify_failure_cause(
                 if key in status
             } | ({"output_size_warnings": output_warnings} if output_warnings else {}),
         }
+    if actual_failures:
+        return {"category": "tool_error", "evidence": {"method_failures": dict(failures)}}
     returncode = private.get("process_returncode")
     if isinstance(returncode, int) and returncode != 0:
         return {"category": "process_exit", "evidence": {"process_returncode": returncode}}

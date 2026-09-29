@@ -3289,3 +3289,4 @@
 - L2 广度熔断：BP35 action-cap、LF52 30 分钟超时、CD82 tool-error 连续三次非成功；暂停新关卡，先修通用工具反馈/效率机制。
 - CD82 分类复核：`*_output_too_large` 计数是桥接告警且调用仍可返回 ok，不应单独触发 `tool_error`；分类器现仅以实际方法异常计入 tool_error，并把输出告警保留在 evidence。此前三次熔断记录标记为需重算。
 - 历史边界修复：`ArcBroker.history` 对合法但超过 16 KiB 的历史页自动缩小返回页，保持序列连续；仅单条记录仍超硬上限时安全失败，避免大页把正常历史查询误报为工具失效。
+- CD82 复跑确认历史分页已生效：当前关卡 8/8 步、无 history 实际失败；新暴露的终止后 `status` 查询错误已归类为 action-cap，不再误报 tool_error。

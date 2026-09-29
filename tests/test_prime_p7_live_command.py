@@ -88,6 +88,16 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             )["category"],
             "action_cap",
         )
+        self.assertEqual(
+            classify_failure_cause(
+                failure=RuntimeError("terminal status query"),
+                broker_status={"terminal_reason": "human-baseline", "actions_remaining": 0},
+                pi_private={"error_events": [], "cancel_requested": False, "process_returncode": 0},
+                bridge_method_failures={"method_failures_status": 1},
+                cleanup_failed=False,
+            )["category"],
+            "action_cap",
+        )
 
     def test_partial_route_hint_does_not_claim_level_completion(self) -> None:
         from asterion.applications.prime.p7.optimizer import PlannerAction
