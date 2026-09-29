@@ -2328,7 +2328,23 @@ def classify_failure_cause(
             "evidence": {"error_event_count": len(error_events)},
         }
     failures = {} if bridge_method_failures is None else bridge_method_failures
-    if any(isinstance(value, int) and value > 0 for value in failures.values()):
+    actual_failures = {
+        key: value
+        for key, value in failures.items()
+        if key.startswith("method_failures_")
+        and key not in {"method_failures_total"}
+        and not key.endswith("_output_too_large")
+        and isinstance(value, int)
+        and value > 0
+    }
+    output_warnings = {
+        key: value
+        for key, value in failures.items()
+        if key.endswith("_output_too_large")
+        and isinstance(value, int)
+        and value > 0
+    }
+    if actual_failures:
         return {"category": "tool_error", "evidence": {"method_failures": dict(failures)}}
     if (
         status.get("terminal_reason") == "human-baseline"
@@ -2340,7 +2356,7 @@ def classify_failure_cause(
                 key: status[key]
                 for key in ("terminal_reason", "actions_remaining")
                 if key in status
-            },
+            } | ({"output_size_warnings": output_warnings} if output_warnings else {}),
         }
     returncode = private.get("process_returncode")
     if isinstance(returncode, int) and returncode != 0:

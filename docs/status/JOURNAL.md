@@ -3287,3 +3287,4 @@
 - 用户决策：新过关队列区分未尝试、尝试失败、已验证过关；失败记录仅在 identity/trace/replay/cleanup 严格验证后用于探索参考。
 - L2 广度队列首项 CD82：`p7-live-20260929192547-978ff069e4eb97caa04bd777` 当前关卡 **8/8 步**，仍 L1；RPC 正常，P7 工具失败 4 次（输出过大/历史查询），分类为 `tool_error`，未通关。
 - L2 广度熔断：BP35 action-cap、LF52 30 分钟超时、CD82 tool-error 连续三次非成功；暂停新关卡，先修通用工具反馈/效率机制。
+- CD82 分类复核：`*_output_too_large` 计数是桥接告警且调用仍可返回 ok，不应单独触发 `tool_error`；分类器现仅以实际方法异常计入 tool_error，并把输出告警保留在 evidence。此前三次熔断记录标记为需重算。
