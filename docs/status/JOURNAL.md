@@ -3311,3 +3311,4 @@
 - 07:18 计划区分路线回放与机制证书，加入通用声明式规则与单探测升级门 [a2cd2ad9]
 - 07:19 Playbook 完成同题私有持久化、原子写入、身份隔离与冲突分支，8项测试通过 [dd7e3ac1]
 - 07:24 Task 3 Playbook review 修复完成：严格递归 JSON 边界、闭合嵌套 schema、悬空 symlink 拒绝、元数据/证据上限、当前关卡边界与 malformed expectation 失败关闭；13 项聚焦测试通过 [1fd5d84c]
+- 07:29 Task 3 Playbook review 收口：补齐每级 fact 上限与 win_levels 跨字段边界，14 项聚焦测试通过 [a142b5b9]

@@ -333,3 +333,13 @@ tests/test_prime_p7_playbook.py`; and `git diff --check` all passed.
 - `8b9821a3` — follow-up digest-format validation and journal entry.
 - Subsequent level-boundary and per-level-cap fixes are appended after these
   historical entries; prior report sections remain preserved.
+
+## Task 3 review closeout — 2026-09-30
+
+Append-only closeout for the current Playbook review. The reviewed fix chain is
+`1fd5d84c`, `8b9821a3`, and `a142b5b9`; all three remain part of the current
+history. The final implementation adds per-level memory caps and validates all
+nested fact, route, and memory levels against `PlaybookKey.win_levels`.
+
+Verification: `uv run python -m unittest -v tests.test_prime_p7_playbook` —
+14 tests passed; Ruff and `git diff --check` passed.
