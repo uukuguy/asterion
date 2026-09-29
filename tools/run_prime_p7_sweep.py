@@ -87,6 +87,8 @@ class SweepConfig:
     # The legacy second round remains enabled by its existing flag for compatibility.
     action_stall_seconds: int | None = None
     validate_action_stall: bool = False
+    # Bound the guest/bootstrap phase separately from the solve deadline.
+    startup_timeout_seconds: float = 120.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -1048,7 +1050,10 @@ class SweepScheduler:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                process.communicate()
+                try:
+                    process.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    self._stop_reason = "child-cleanup-timeout"
             cleanup_guest()
 
         def monitor() -> None:
@@ -1112,6 +1117,18 @@ class SweepScheduler:
                 while True:
                     monitor()
                     if self._stop_reason != "completed":
+                        stop_child()
+                        break
+                    if (
+                        time.monotonic() - started_at >= self.config.startup_timeout_seconds
+                        and not any(
+                            (
+                                self.config.runs_root / run_id / "trace" / "prime-trace.jsonl"
+                            ).exists()
+                            for run_id in _run_names(self.config.runs_root) - before
+                        )
+                    ):
+                        self._stop_reason = "child-launch-timeout"
                         stop_child()
                         break
                     remaining = None if deadline is None else deadline - time.monotonic()

@@ -910,6 +910,19 @@ time.sleep(10)
         self.assertEqual(result.attempted, 1)
         self.assertEqual(result.stopped_reason, "child-evidence-missing")
 
+    def test_guest_launch_without_trace_hits_startup_timeout(self) -> None:
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            scheduler = SweepScheduler(SweepConfig(
+                arc_root=root / "arc", runs_root=root / "runs", repo_root=root,
+                command=("/bin/sh", "-c", "sleep 10"), guest_machine=None,
+                startup_timeout_seconds=0.05,
+            ))
+            scheduler._attempt("a-1", 1, 1)
+        self.assertEqual(scheduler._stop_reason, "child-launch-timeout")
+
     def test_unconfirmed_guest_cleanup_halts_sweep(self) -> None:
         import subprocess
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
