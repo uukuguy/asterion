@@ -793,3 +793,10 @@
 - Rationale: the operator environment file already promised to switch the model, but the pair was hardcoded in five modules, so the control was inert. An ignored control silently produces a different model than the operator asked for.
 - Consequence: the trace identity, the public receipt, the private experiment record, prefix reuse and the five P7 operator tools all follow the selected model. Prefix reuse stays strict on the runtime path (an explicitly expected model) and permissive for offline tooling, so traces recorded under another selection remain readable. No provider allowlist beyond the Pi catalog plus a declared credential; no hot swap.
 - Evidence: `e392577`; `tests/test_prime_p7_model_selection.py`; full P7 set 386 tests with two stale DeepSeek-era errors removed and no new failures. Live GPT-6-Sol reachability was probed separately from the macOS host and from the P7 OrbStack guest (both returned the sentinel reply).
+
+## D-2026-09-29-02 — Stop after three consecutive failed levels or a clear mechanism defect
+
+- Status: 🟢 active.
+- Decision: During live level-solving experiments, stop dispatching new levels after at most three consecutive non-success outcomes. Stop earlier whenever traces expose a reproducible mechanism defect or a concrete generic improvement opportunity. Repair and verify the mechanism before resuming level attempts.
+- Rationale: BP35 L2 and G50T L2 exposed repeated L2 long-reasoning, RESET, and timeout behavior without a sealed terminal result. Continuing blindly would spend budget without improving evidence or capability.
+- Consequence: Each attempt must be classified as verified success, verified non-success, or unverified evidence failure; only verified success advances the streak reset. Mechanism repair becomes the next task when the threshold or early-stop condition is reached.

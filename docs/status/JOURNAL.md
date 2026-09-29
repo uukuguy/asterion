@@ -3251,3 +3251,4 @@
 - 15:51 [fbeec248] 记录 BP35 L2 两次未验证尝试及停滞证据，避免后续误报通关。
 - 16:21 G50T L2 二级关卡验证：基于 58 步 replay-verified L1 前缀运行 30 分钟后超时；L2 产生 38 个动作、3 次 RESET、92 次 usage，未出现 level-completed，结果 `unverified/timed-out-unsealed`，无 summary 或 sealed trace，不计通关。
 - 16:21 [7abd4bf9] 记录 G50T L2 超时未验证，保留动作与 usage 证据，停止无效长推理消耗。
+- 16:25 采用通关实验熔断规则：连续最多三关未成功，或出现可复现机制缺陷/明确通用改进点，即停止跑关卡，先修复并验证机制。
