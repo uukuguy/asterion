@@ -3,11 +3,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import json
+import math
 import os
 from pathlib import Path
 import re
 import stat
 import tempfile
+from types import MappingProxyType
+from collections.abc import Mapping
 from typing import Any
 
 from .transition_model import ActionExpectation
@@ -16,6 +19,11 @@ from .world_model import WorldFact, WorldModelSnapshot
 SCHEMA = "asterion.prime.p7-playbook/v1"
 _MAX_BYTES = 256 * 1024
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_MAX_VALUE_BYTES = 4096
+_MAX_VALUE_DEPTH = 16
+_MAX_VALUE_ITEMS = 256
+_MAX_TEXT = 1024
+_MAX_RECORDS = 256
 
 
 def _id(value: str, name: str) -> str:
@@ -28,6 +36,61 @@ def _digest(value: object) -> str:
     if type(value) is not str or not re.fullmatch(r"sha256:[0-9a-f]{64}", value):
         raise ValueError("invalid evidence digest")
     return value
+
+
+def _canonical_value(value: Any, *, depth: int = 0) -> Any:
+    if depth > _MAX_VALUE_DEPTH:
+        raise ValueError("checked fact value too deep")
+    if value is None or type(value) in (str, bool, int):
+        if type(value) is str and len(value) > _MAX_TEXT:
+            raise ValueError("checked fact text exceeds cap")
+        return value
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("checked fact value must be finite")
+        return value
+    if type(value) is tuple:
+        value = list(value)
+    if type(value) is list:
+        if len(value) > _MAX_VALUE_ITEMS:
+            raise ValueError("checked fact array exceeds cap")
+        return [_canonical_value(item, depth=depth + 1) for item in value]
+    if isinstance(value, Mapping):
+        if len(value) > _MAX_VALUE_ITEMS or any(type(key) is not str for key in value):
+            raise ValueError("checked fact object is invalid")
+        return {key: _canonical_value(value[key], depth=depth + 1) for key in sorted(value)}
+    raise ValueError("checked fact value is not JSON-safe")
+
+
+def _validated_value(value: Any) -> Any:
+    detached = _canonical_value(value)
+    if len(json.dumps(detached, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()) > _MAX_VALUE_BYTES:
+        raise ValueError("checked fact value exceeds cap")
+    return detached
+
+
+def _freeze(value: Any) -> Any:
+    if type(value) is dict:
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if type(value) is list:
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if type(value) is tuple:
+        return [_thaw(item) for item in value]
+    return value
+
+
+def _unique_sorted(values: tuple[str, ...], name: str) -> tuple[str, ...]:
+    if type(values) is not tuple or any(type(x) is not str or not x or len(x) > _MAX_TEXT for x in values):
+        raise ValueError(f"invalid {name}")
+    if len(values) > _MAX_RECORDS or len(set(values)) != len(values):
+        raise ValueError(f"invalid {name}")
+    return tuple(sorted(values))
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +118,8 @@ class CheckedRoute:
             raise ValueError("invalid route level")
         if type(self.expectations) is not tuple or any(type(x) is not ActionExpectation for x in self.expectations):
             raise ValueError("invalid route expectations")
+        if len(self.expectations) > _MAX_RECORDS:
+            raise ValueError("invalid route expectations")
         _digest(self.evidence_digest)
 
 
@@ -66,6 +131,11 @@ class CheckedFact:
     level: int
     evidence_digests: tuple[str, ...]
 
+    def __getattribute__(self, name: str) -> Any:
+        if name == "value":
+            return _thaw(object.__getattribute__(self, "value"))
+        return object.__getattribute__(self, name)
+
     def __post_init__(self) -> None:
         if self.layer not in {"mechanics", "entities", "relations"} or _id(self.key, "fact key") != self.key:
             raise ValueError("invalid checked fact")
@@ -73,6 +143,10 @@ class CheckedFact:
             raise ValueError("invalid checked fact")
         if any(type(x) is not str or not re.fullmatch(r"[0-9a-fA-F]{16,128}", x) for x in self.evidence_digests):
             raise ValueError("invalid checked fact evidence")
+        if len(self.evidence_digests) > _MAX_RECORDS or len(set(self.evidence_digests)) != len(self.evidence_digests):
+            raise ValueError("invalid checked fact evidence")
+        object.__setattr__(self, "evidence_digests", tuple(sorted(self.evidence_digests)))
+        object.__setattr__(self, "value", _freeze(_validated_value(self.value)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,8 +160,11 @@ class LevelMemory:
             raise ValueError("invalid memory level")
         if type(self.checked_facts) is not tuple or any(type(x) is not CheckedFact for x in self.checked_facts):
             raise ValueError("invalid level facts")
-        if type(self.rejected_branches) is not tuple or any(type(x) is not str or not x for x in self.rejected_branches):
+        if type(self.rejected_branches) is not tuple or len(self.rejected_branches) > _MAX_RECORDS or any(type(x) is not str or not x or len(x) > _MAX_TEXT for x in self.rejected_branches):
             raise ValueError("invalid rejected branches")
+        if len(set(self.rejected_branches)) != len(self.rejected_branches):
+            raise ValueError("invalid rejected branches")
+        object.__setattr__(self, "rejected_branches", tuple(sorted(self.rejected_branches)))
 
 
 @dataclass(frozen=True, slots=True)
@@ -109,8 +186,17 @@ class PlaybookSnapshot:
                 raise ValueError(f"invalid {name}")
         for name in ("conflict_metadata", "evidence_index", "branch_reasons"):
             value = getattr(self, name)
-            if type(value) is not tuple or any(type(item) is not str or not item for item in value):
-                raise ValueError(f"invalid {name}")
+            normalized = _unique_sorted(value, name)
+            object.__setattr__(self, name, normalized)
+        if len(self.confirmed_facts) > _MAX_RECORDS or len(self.checked_routes) > _MAX_RECORDS or len(self.level_memory) > _MAX_RECORDS:
+            raise ValueError("playbook record cap exceeded")
+        for name, value, key in (("confirmed_facts", self.confirmed_facts, lambda x: (x.layer, x.key)),
+                                 ("checked_routes", self.checked_routes, lambda x: x.level),
+                                 ("level_memory", self.level_memory, lambda x: x.level)):
+            keys = [key(item) for item in value]
+            if len(set(keys)) != len(keys):
+                raise ValueError(f"duplicate {name}")
+            object.__setattr__(self, name, tuple(sorted(value, key=key)))
 
 
 def _expectation_json(item: ActionExpectation) -> dict[str, Any]:
@@ -184,13 +270,23 @@ def save_playbook(root: Path, snapshot: PlaybookSnapshot) -> None:
 def _parse_fact(value: Any) -> CheckedFact:
     if type(value) is not dict or set(value) != {"layer", "key", "value", "level", "evidence_digests"}:
         raise ValueError("invalid playbook fact")
+    if type(value["evidence_digests"]) is not list:
+        raise ValueError("invalid playbook fact")
     return CheckedFact(value["layer"], value["key"], value["value"], value["level"], tuple(value["evidence_digests"]))
+
+
+def _mapping(value: Any, keys: set[str]) -> dict[str, Any]:
+    if type(value) is not dict or set(value) != keys:
+        raise ValueError("invalid playbook schema")
+    return value
 
 
 def load_playbook(root: Path, key: PlaybookKey) -> PlaybookSnapshot | None:
     if type(key) is not PlaybookKey:
         raise ValueError("invalid key")
     path = _path(root, key)
+    if path.is_symlink():
+        raise ValueError("invalid playbook file")
     if not path.exists():
         return None
     if path.is_symlink() or not path.is_file() or not stat.S_ISREG(path.stat().st_mode):
@@ -201,21 +297,44 @@ def load_playbook(root: Path, key: PlaybookKey) -> PlaybookSnapshot | None:
         body = json.loads(path.read_bytes())
         if type(body) is not dict or body.get("schema") != SCHEMA or set(body) != {"schema", "key", "checked_model", "level_memory", "conflict_metadata", "evidence_index", "branch_reasons"}:
             raise ValueError
-        rawkey = body["key"]
+        rawkey = _mapping(body["key"], {"game_id", "seed", "win_levels"})
         actual = PlaybookKey(rawkey["game_id"], rawkey["seed"], rawkey["win_levels"])
         if actual != key:
             raise ValueError
-        model = body["checked_model"]
+        model = _mapping(body["checked_model"], {"confirmed_facts", "checked_routes"})
+        if type(model["confirmed_facts"]) is not list or type(model["checked_routes"]) is not list:
+            raise ValueError
         facts = tuple(_parse_fact(x) for x in model["confirmed_facts"])
         routes = []
         for route in model["checked_routes"]:
+            route = _mapping(route, {"level", "expectations", "evidence_digest"})
+            if type(route["expectations"]) is not list:
+                raise ValueError
             exps = []
             for e in route["expectations"]:
-                exps.append(ActionExpectation(e["action"], tuple((k, v) for k, v in e["data"].items()), e["prior_state_sha256"], e["after_state_sha256"], e["after_frame_sha256"], tuple(tuple(x) for x in e["changed_cells"]), e["levels_completed"], e["state"]))
+                e = _mapping(e, {"action", "data", "prior_state_sha256", "after_state_sha256", "after_frame_sha256", "changed_cells", "levels_completed", "state"})
+                if type(e["data"]) is not dict or type(e["changed_cells"]) is not list:
+                    raise ValueError
+                data = tuple((k, v) for k, v in e["data"].items())
+                if any(type(k) is not str or type(v) is not int for k, v in data):
+                    raise ValueError
+                cells = tuple(tuple(x) for x in e["changed_cells"])
+                exps.append(ActionExpectation(e["action"], data, e["prior_state_sha256"], e["after_state_sha256"], e["after_frame_sha256"], cells, e["levels_completed"], e["state"]))
             routes.append(CheckedRoute(route["level"], tuple(exps), route["evidence_digest"]))
-        memory = tuple(LevelMemory(x["level"], tuple(_parse_fact(f) for f in x["checked_facts"]), tuple(x["rejected_branches"])) for x in body["level_memory"])
+        if type(body["level_memory"]) is not list:
+            raise ValueError
+        memory_rows = []
+        for x in body["level_memory"]:
+            x = _mapping(x, {"level", "checked_facts", "rejected_branches"})
+            if type(x["checked_facts"]) is not list or type(x["rejected_branches"]) is not list:
+                raise ValueError
+            memory_rows.append(LevelMemory(x["level"], tuple(_parse_fact(f) for f in x["checked_facts"]), tuple(x["rejected_branches"])))
+        memory = tuple(memory_rows)
+        for name in ("conflict_metadata", "evidence_index", "branch_reasons"):
+            if type(body[name]) is not list:
+                raise ValueError
         return PlaybookSnapshot(actual, facts, tuple(routes), memory, tuple(body["conflict_metadata"]), tuple(body["evidence_index"]), tuple(body["branch_reasons"]))
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError, AttributeError):
         raise ValueError("playbook unavailable") from None
 
 
@@ -224,7 +343,8 @@ def append_checked_route(snapshot: PlaybookSnapshot, route: CheckedRoute) -> Pla
         raise ValueError("invalid playbook route")
     if route.level >= snapshot.key.win_levels:
         raise ValueError("invalid route level")
-    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, (*snapshot.checked_routes, route), snapshot.level_memory, snapshot.conflict_metadata, (*snapshot.evidence_index, route.evidence_digest), snapshot.branch_reasons)
+    evidence_index = tuple(dict.fromkeys((*snapshot.evidence_index, route.evidence_digest)))
+    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, (*snapshot.checked_routes, route), snapshot.level_memory, snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons)
 
 
 def branch_playbook(snapshot: PlaybookSnapshot, reason: str) -> PlaybookSnapshot:
@@ -236,17 +356,20 @@ def branch_playbook(snapshot: PlaybookSnapshot, reason: str) -> PlaybookSnapshot
 def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapshot, *, level: int) -> PlaybookSnapshot:
     if type(snapshot) is not PlaybookSnapshot or type(world) is not WorldModelSnapshot or (world.game_id, world.seed, world.win_levels) != (snapshot.key.game_id, snapshot.key.seed, snapshot.key.win_levels):
         raise ValueError("playbook identity mismatch")
+    if type(level) is not int or not 0 <= level < snapshot.key.win_levels or world.current_level != level:
+        raise ValueError("invalid completed level")
     facts = []
     for layer in ("mechanics", "entities", "relations"):
         for fact in getattr(world, layer).values():
             if type(fact) is not WorldFact or fact.status != "confirmed" or (layer != "mechanics" and fact.level != level):
                 continue
-            digests = tuple(ref.summary_hash for ref in fact.evidence if ref.summary_hash is not None)
-            if not digests or len(digests) != len(fact.evidence):
+            digests = tuple(sorted({ref.summary_hash for ref in fact.evidence if ref.summary_hash is not None}))
+            if not digests or any(ref.summary_hash is None for ref in fact.evidence):
                 raise ValueError("confirmed fact lacks evidence digest")
             facts.append(CheckedFact(layer, fact.key, fact.value, fact.level, digests))
     memory = LevelMemory(level, tuple(sorted(facts, key=lambda x: (x.layer, x.key))))
-    return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*snapshot.level_memory, memory), snapshot.conflict_metadata, (*snapshot.evidence_index, *(d for f in facts for d in f.evidence_digests)), snapshot.branch_reasons)
+    evidence_index = tuple(dict.fromkeys((*snapshot.evidence_index, *(d for f in facts for d in f.evidence_digests))))
+    return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*snapshot.level_memory, memory), snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons)
 
 
 __all__ = ["PlaybookKey", "PlaybookSnapshot", "CheckedRoute", "CheckedFact", "LevelMemory", "load_playbook", "save_playbook", "append_checked_route", "branch_playbook", "capture_completed_level"]

@@ -1,4 +1,8 @@
-# Task 3 report: exact host-resolved Pi extension bindings
+# Task 3 report (historical prior work): exact host-resolved Pi extension bindings
+
+> Historical report retained verbatim for prior Task 3 work. The current
+> same-game Playbook review fixes are appended below and do not replace this
+> history.
 
 Commit: `dde2bac1 feat: bind exact pi application extensions`
 
@@ -304,3 +308,21 @@ Verification:
 - `uv run python -m unittest -v tests.test_prime_p7_playbook` — 8 tests passed.
 - `uv run ruff check src/asterion/applications/prime/p7/playbook.py tests/test_prime_p7_playbook.py` — passed.
 - `git diff --check` — passed.
+
+## Task 3 current review fixes: bounded same-game Playbook persistence
+
+Commits: `dd7e3ac1` (original implementation), `f6d17374` (state journal),
+and the follow-up fix commit recorded by the integrator.
+
+This appended section records the review remediation: CheckedFact values now
+use bounded recursive JSON-safe validation with immutable internal storage and
+detached accessors; playbook loading rejects dangling symlinks before existence
+checks; every nested object has a closed key set and bounded canonical arrays;
+malformed route expectations fail closed; completion capture enforces the
+current in-range world level; metadata, evidence indexes, and branch reasons
+are bounded, digest-validated, and duplicate-free. Focused regressions cover
+each finding.
+
+Verification: `uv run python -m unittest -v tests.test_prime_p7_playbook`
+(13 tests passed); `uv run ruff check src/asterion/applications/prime/p7/playbook.py
+tests/test_prime_p7_playbook.py`; and `git diff --check` all passed.

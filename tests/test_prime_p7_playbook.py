@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 from asterion.applications.prime.p7.playbook import (
+    CheckedFact,
     CheckedRoute,
     PlaybookKey,
     PlaybookSnapshot,
@@ -66,6 +67,38 @@ class TestP7Playbook(unittest.TestCase):
         with self.assertRaises(ValueError):
             save_playbook(self.root, self.snapshot)
 
+    def test_rejects_dangling_symlink_before_exists_check(self) -> None:
+        path = self._path()
+        path.parent.mkdir(parents=True)
+        path.symlink_to(self.root / "missing")
+        with self.assertRaises(ValueError):
+            load_playbook(self.root, self.key)
+
+    def test_checked_fact_value_is_bounded_immutable_and_detached(self) -> None:
+        raw = {"nested": ["safe"]}
+        fact = CheckedFact("entities", "goal", raw, 0, ("a" * 64,))
+        raw["nested"].append("mutated")
+        view = fact.value
+        view["nested"].append("caller")
+        self.assertEqual(fact.value, {"nested": ["safe"]})
+        with self.assertRaises(ValueError):
+            CheckedFact("entities", "goal", {"x": object()}, 0, ("a" * 64,))
+        with self.assertRaises(ValueError):
+            CheckedFact("entities", "goal", {"x": "z" * 1025}, 0, ("a" * 64,))
+
+    def test_rejects_unknown_nested_schema_and_malformed_expectation(self) -> None:
+        save_playbook(self.root, self.snapshot)
+        path = self._path()
+        body = json.loads(path.read_text())
+        body["key"]["extra"] = 1
+        path.write_text(json.dumps(body))
+        with self.assertRaises(ValueError):
+            load_playbook(self.root, self.key)
+        body["key"].pop("extra")
+        body["checked_model"]["checked_routes"] = [{"level": 0, "expectations": [{"action": "A", "data": None}], "evidence_digest": _HASH}]
+        path.write_text(json.dumps(body))
+        with self.assertRaises(ValueError):
+            load_playbook(self.root, self.key)
     def test_rejects_non_regular_file_and_malformed_schema(self) -> None:
         path = self._path()
         path.parent.mkdir(parents=True)
@@ -113,6 +146,12 @@ class TestP7Playbook(unittest.TestCase):
         save_playbook(self.root, branched)
         self.assertEqual(load_playbook(self.root, self.key), branched)
 
+    def test_metadata_is_unique_and_bounded(self) -> None:
+        with self.assertRaises(ValueError):
+            PlaybookSnapshot(self.key, branch_reasons=("same", "same"))
+        with self.assertRaises(ValueError):
+            PlaybookSnapshot(self.key, conflict_metadata=("x" * 1025,))
+
     def test_completed_level_captures_checked_facts_before_refresh(self) -> None:
         world = WorldModelStore("game-1", 42, 3)
         evidence = EvidenceRef(summary_hash="a" * 64)
@@ -126,6 +165,13 @@ class TestP7Playbook(unittest.TestCase):
         self.assertEqual({fact.key for fact in captured.level_memory[0].checked_facts}, {"goal", "controls"})
         save_playbook(self.root, captured)
         self.assertEqual(load_playbook(self.root, self.key), captured)
+
+    def test_completed_level_requires_current_in_range_level(self) -> None:
+        world = WorldModelStore("game-1", 42, 3)
+        with self.assertRaises(ValueError):
+            capture_completed_level(self.snapshot, world.snapshot, level=3)
+        with self.assertRaises(ValueError):
+            capture_completed_level(self.snapshot, world.snapshot, level=1)
 
     def test_rejects_unchecked_facts_and_raw_evidence(self) -> None:
         world = WorldModelStore("game-1", 42, 3)
