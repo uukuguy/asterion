@@ -232,6 +232,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             optimize.call_args.kwargs["warmup"],
             (PlannerAction("ACTION4"), PlannerAction("ACTION3")),
         )
+        self.assertEqual(optimize.call_args.kwargs["time_budget_seconds"], 8.0)
 
     def test_generic_prompt_uses_feedback_and_has_no_game_route(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, P7_CONTINUE_PROMPT
