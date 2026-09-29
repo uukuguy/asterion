@@ -3260,3 +3260,4 @@
 - 17:24 [a6fcee79] 捕获 asyncio.CancelledError 并封存已验证前缀，修复 supervisor 超时 summary 有但 trace 未封存。
 - 17:48 BP35 L2 修复后重跑触发 66 总动作上限，L2 48 步仍停 L1；partial/replay/seal/cleanup 全通过，解题未通关。
 - 18:05 [e46032fc] 明确路线压缩证明设计与实施计划，覆盖删除、替换、重排、子序列折叠及 P7 反馈边界。
+- 18:32 [ac17be17] 将离线路线压缩扩展为联合删除/重排压缩证明，加入 ARC 状态 witness 并注入 P7 受约束提示。
