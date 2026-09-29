@@ -3263,3 +3263,4 @@
 - 18:32 [ac17be17] 将离线路线压缩扩展为联合删除/重排压缩证明，加入 ARC 状态 witness 并注入 P7 受约束提示。
 - 18:44 [commit pending] 压缩证明补充 target_level 与 warmup digest，防止跨关卡复用歧义。
 - 18:47 [pending] 压缩证明计划完成；聚焦测试 108 项通过、lint 通过，未启动新 live run。
+- 18:50 聚焦 P7 回归 108 项通过（1 skipped），compileall、ruff、diff-check 通过，工作树干净。
