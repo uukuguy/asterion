@@ -46,6 +46,7 @@ from asterion.applications.prime.p7.ipython_host import (
     RestrictedPersistentIpythonWorker,
     p7_client_facade,
 )
+from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
 from asterion.applications.prime.p7 import live
 from asterion.applications.prime.p7.model_selection import (
     DEFAULT_MODEL,
@@ -157,15 +158,35 @@ class _BridgeSignal:
 class _IpythonBridgeServer:
     """Operator-owned duplex adapter between the Pi extension and host."""
 
-    def __init__(self, channel: socket.socket, host: PersistentIpythonHost) -> None:
+    def __init__(
+        self,
+        channel: socket.socket,
+        host: PersistentIpythonHost,
+        client: object,
+    ) -> None:
         self._channel = channel
         self._host = host
+        self._client = p7_client_facade(client)
+        self._method_calls: dict[str, int] = {}
+        self._method_failures: dict[str, int] = {}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._started = False
 
     def __repr__(self) -> str:
         return "<_IpythonBridgeServer redacted>"
+
+    def private_accounting(self) -> dict[str, int]:
+        """Return bounded private counts for bridge dispatch diagnosis."""
+        return {
+            "method_calls_total": sum(self._method_calls.values()),
+            **{f"method_calls_{name}": count for name, count in self._method_calls.items()},
+            "method_failures_total": sum(self._method_failures.values()),
+            **{
+                f"method_failures_{name}": count
+                for name, count in self._method_failures.items()
+            },
+        }
 
     def start(self) -> None:
         self._thread.start()
@@ -234,13 +255,19 @@ class _IpythonBridgeServer:
                 }
             elif request_type == "method_call":
                 if (
-                    "method" not in value
+                    type(value.get("method")) is not str
+                    or (
+                        "params" not in value
+                        and value.get("method")
+                        not in {"observe", "status", "mechanics_prior"}
+                    )
                     or type(value["method"]) is not str
-                    or "params" not in value
                 ):
                     raise ValueError
                 response = self._dispatch_method_call(
-                    request_id, value["method"], value["params"]
+                    request_id,
+                    value["method"],
+                    value.get("params", {}),
                 )
             else:
                 raise ValueError
@@ -265,25 +292,92 @@ class _IpythonBridgeServer:
         "method_call"`` instead of going through the ipython cell-execution
         path.
         """
-        from .ipython_host import p7_client_facade
-        try:
-            facade = p7_client_facade(self._host.broker())
-            value = getattr(facade, method)(params)
-        except BaseException as exc:
+        self._method_calls[method] = min(5000, self._method_calls.get(method, 0) + 1)
+
+        def error_response() -> dict[str, object]:
             return {
+                "output": "",
                 "protocol": _BRIDGE_PROTOCOL,
                 "request_id": request_id,
                 "status": "error",
                 "type": "method_result",
-                "error": str(exc),
             }
-        return {
-            "protocol": _BRIDGE_PROTOCOL,
-            "request_id": request_id,
-            "status": "ok",
-            "type": "method_result",
-            "value": value,
-        }
+
+        def ok_response(result: object) -> dict[str, object]:
+            try:
+                output = json.dumps(
+                    result,
+                    allow_nan=False,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                )
+            except (TypeError, ValueError, OverflowError):
+                self._method_failures[method] = min(
+                    5000, self._method_failures.get(method, 0) + 1
+                )
+                return error_response()
+            if len(output.encode("utf-8")) > 120 * 1024:
+                self._method_failures[f"{method}_output_too_large"] = min(
+                    5000,
+                    self._method_failures.get(f"{method}_output_too_large", 0) + 1,
+                )
+            return {
+                "output": output,
+                "protocol": _BRIDGE_PROTOCOL,
+                "request_id": request_id,
+                "status": "ok",
+                "type": "method_result",
+            }
+
+        try:
+            facade = self._client
+            if method in {"observe", "status", "mechanics_prior"}:
+                if params is not None and (type(params) is not dict or params):
+                    return error_response()
+                value = getattr(facade, method)()
+            elif method in {"tried_actions", "last_outcome_summary"}:
+                if params is not None and (
+                    type(params) is not int or params < 0
+                ):
+                    return error_response()
+                value = getattr(facade, method)(params)
+            elif method == "history":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"start", "limit"}
+                    or type(params["start"]) is not int
+                    or params["start"] < 0
+                    or type(params["limit"]) is not int
+                    or params["limit"] < 1
+                ):
+                    return error_response()
+                value = facade.history(params["start"], params["limit"])
+            elif method == "frame_at":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"sequence"}
+                    or type(params["sequence"]) is not int
+                    or params["sequence"] < 0
+                ):
+                    return error_response()
+                value = facade.frame_at(params["sequence"])
+            elif method == "act_checked":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"plan"}
+                    or type(params["plan"]) is not list
+                ):
+                    return error_response()
+                value = facade.act_checked(params["plan"])
+            else:
+                return error_response()
+        except BaseException as exc:
+            self._method_failures[method] = min(
+                5000, self._method_failures.get(method, 0) + 1
+            )
+            return error_response()
+        return ok_response(value)
 
 
 class _P7BrokerClient:
@@ -327,6 +421,58 @@ class _P7BrokerClient:
             return page
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
+
+    def mechanics_prior(self) -> dict[str, object]:
+        """Return bounded, redacted mechanics evidence from broker history."""
+        try:
+            status = self._broker.status()
+            latest = status.primitive_actions
+            records: list[dict[str, object]] = []
+            start = 0
+            for _ in range(8):
+                page = self._broker.history(start, 32)
+                self._count("history_queries")
+                self._count("history_records_returned", len(page))
+                records.extend(json.loads(json.dumps(page, separators=(",", ":"))))
+                if not page or page[-1].get("sequence") >= latest or len(page) < 32:
+                    break
+                next_sequence = page[-1].get("sequence")
+                if type(next_sequence) is not int or next_sequence < start:
+                    raise ArcBrokerError("unavailable")
+                start = next_sequence + 1
+            result = build_mechanics_prior(records, current_level=status.levels_completed)
+            return self._cap_mechanics_prior(result)
+        except Exception:
+            try:
+                status = self._broker.status()
+            except Exception:
+                try:
+                    status = self._broker.terminal_snapshot().status
+                except Exception:
+                    status = ArcStatus(0, 0, 0, "unavailable")
+            return {
+                "available": False,
+                "reason": "history-unavailable",
+                **self._status_view(status),
+            }
+
+    @staticmethod
+    def _cap_mechanics_prior(result: dict[str, object]) -> dict[str, object]:
+        """Keep serialized evidence within the public host-service budget."""
+        if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode()) <= 16384:
+            return result
+        capped = dict(result)
+        for key in ("levels", "candidate_rules", "level_advances"):
+            value = capped.get(key)
+            if isinstance(value, list):
+                capped[key] = value[:8]
+            if len(json.dumps(capped, separators=(",", ":"), ensure_ascii=False).encode()) <= 16384:
+                return capped
+        return {
+            key: capped[key]
+            for key in ("available", "prefix_actions", "highest_verified_level", "current_level")
+            if key in capped
+        }
 
     def frame_at(self, sequence: int) -> list[list[int]]:
         try:
@@ -1160,7 +1306,7 @@ def build_p7_operator_resources(
             PrimeGameplayTrace(broker, trace, engine.guid, identities)
             if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
-        bridge = _IpythonBridgeServer(parent, ipython)
+        bridge = _IpythonBridgeServer(parent, ipython, prediction_client)
         bridge.start()
         parent = None
         return P7OperatorResources(
@@ -1575,6 +1721,10 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 diagnostics["native_event_summary"] = [
                     dict(item) for item in event_summary if isinstance(item, Mapping)
                 ]
+            bridge = getattr(resources_, "_bridge", None)
+            bridge_accounting = getattr(bridge, "private_accounting", None)
+            if callable(bridge_accounting):
+                diagnostics["bridge_method_failures"] = bridge_accounting()
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
             cleanup_failed = False
             try:

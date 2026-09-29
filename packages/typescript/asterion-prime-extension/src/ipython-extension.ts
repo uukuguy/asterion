@@ -16,8 +16,8 @@ import {
 export const PROTOCOL = "asterion.prime-ipython/v1";
 
 const DEFAULT_CODE_CAP = 16 * 1024;
-const DEFAULT_OUTPUT_CAP = 64 * 1024;
-const DEFAULT_LINE_CAP = 128 * 1024;
+const DEFAULT_OUTPUT_CAP = 512 * 1024;
+const DEFAULT_LINE_CAP = 1024 * 1024;
 const DEFAULT_DEADLINE_MS = 60_000;
 const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -236,7 +236,7 @@ export class IpythonBridge {
     );
     await writeAll(
       this.#descriptor,
-      Buffer.from(request, "utf8"),
+      Buffer.from(`${request}\n`, "utf8"),
     );
     const executeResult = await this.#withCancellation(
       this.#readResult(requestId),
@@ -382,6 +382,7 @@ interface MethodTool {
   name: string;
   description: string;
   parameters: unknown;
+  executionMode: "sequential";
   execute(
     id: string,
     input: unknown,
@@ -401,6 +402,7 @@ function makeMethodTool(
     name,
     description,
     parameters: inputType,
+    executionMode: "sequential",
     execute: async (
       id: string,
       input: unknown,

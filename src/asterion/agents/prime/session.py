@@ -121,6 +121,13 @@ class AsterionPrimeSession:
                 name = event.payload.get("toolName")
                 if type(name) is str:
                     item["tool_name"] = name
+            elif event.type == "tool_execution_end":
+                effect = event.payload.get("effect")
+                is_error = event.payload.get("isError")
+                if type(effect) is str:
+                    item["effect"] = effect
+                if type(is_error) is bool:
+                    item["is_error"] = is_error
             elif event.type == "message_end":
                 message = event.payload.get("message")
                 if isinstance(message, Mapping):
