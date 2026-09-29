@@ -41,6 +41,35 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_route_adoption_tracker_records_exact_follow_and_completion(self) -> None:
+        from asterion.applications.prime.p7.optimizer import PlannerAction
+        from asterion.applications.prime.p7.operator import RouteAdoptionTracker
+
+        tracker = RouteAdoptionTracker()
+        tracker.arm((PlannerAction("ACTION1"), PlannerAction("ACTION6", (("x", 2), ("y", 3)))), target_level=1)
+        tracker.record((SimpleNamespace(action="ACTION1", data=(), levels_completed=0),))
+        tracker.record((SimpleNamespace(action="ACTION6", data=(("x", 2), ("y", 3)), levels_completed=1),))
+        self.assertEqual(tracker.summary(), {
+            "armed": True,
+            "expected_actions": 2,
+            "followed_actions": 2,
+            "first_divergence": None,
+            "completed": True,
+            "target_level": 1,
+        })
+
+    def test_route_adoption_tracker_stops_at_first_divergence(self) -> None:
+        from asterion.applications.prime.p7.optimizer import PlannerAction
+        from asterion.applications.prime.p7.operator import RouteAdoptionTracker
+
+        tracker = RouteAdoptionTracker()
+        tracker.arm((PlannerAction("ACTION1"), PlannerAction("ACTION2")), target_level=1)
+        tracker.record((SimpleNamespace(action="ACTION3", data=(), levels_completed=0),))
+        tracker.record((SimpleNamespace(action="ACTION1", data=(), levels_completed=0),))
+        self.assertEqual(tracker.summary()["followed_actions"], 0)
+        self.assertEqual(tracker.summary()["first_divergence"], {"index": 0, "expected": "ACTION1", "actual": "ACTION3"})
+        self.assertFalse(tracker.summary()["completed"])
+
     def test_process_cancellation_signal_starts_clear_and_can_cancel(self) -> None:
         signal = live_module.ProcessCancellation()
         self.assertFalse(signal.cancelled)

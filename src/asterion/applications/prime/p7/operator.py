@@ -113,6 +113,56 @@ class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
 
 
+class RouteAdoptionTracker:
+    """Private evidence for whether P7 followed an injected route hypothesis."""
+
+    __slots__ = ("_expected", "_target_level", "_cursor", "_divergence")
+
+    def __init__(self) -> None:
+        self._expected: tuple[PlannerAction, ...] = ()
+        self._target_level = 0
+        self._cursor = 0
+        self._divergence: dict[str, object] | None = None
+
+    def arm(self, actions: tuple[PlannerAction, ...], *, target_level: int) -> None:
+        if type(actions) is not tuple or not all(type(item) is PlannerAction for item in actions):
+            raise ValueError("invalid route adoption actions")
+        self._expected = actions
+        self._target_level = target_level
+        self._cursor = 0
+        self._divergence = None
+
+    def record(self, transitions: tuple[object, ...]) -> None:
+        if not self._expected or self._divergence is not None:
+            return
+        for transition in transitions:
+            if self._cursor >= len(self._expected):
+                return
+            actual = PlannerAction(
+                getattr(transition, "action", ""),
+                tuple(getattr(transition, "data", ()) or ()),
+            )
+            expected = self._expected[self._cursor]
+            if actual != expected:
+                self._divergence = {
+                    "index": self._cursor,
+                    "expected": expected.name,
+                    "actual": actual.name,
+                }
+                return
+            self._cursor += 1
+
+    def summary(self) -> dict[str, object]:
+        return {
+            "armed": bool(self._expected),
+            "expected_actions": len(self._expected),
+            "followed_actions": self._cursor,
+            "first_divergence": None if self._divergence is None else dict(self._divergence),
+            "completed": bool(self._expected) and self._cursor == len(self._expected),
+            "target_level": self._target_level,
+        }
+
+
 def _resolve_history_variant(
     environment: Mapping[str, str], game: P7GameSelection | ArcGameContract
 ) -> str:
@@ -411,7 +461,7 @@ class _IpythonBridgeServer:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption")
 
     def __init__(
         self,
@@ -426,6 +476,7 @@ class _P7BrokerClient:
         self._recorder = recorder
         self._identities = identities
         self._variant = variant
+        self._route_adoption = RouteAdoptionTracker()
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
             "checked_plans": 0, "matched_expectations": 0, "mismatches": 0,
@@ -438,6 +489,14 @@ class _P7BrokerClient:
     def private_accounting(self) -> dict[str, int]:
         """Return bounded scalar diagnostics without exposing frames or predictions."""
         return {**self._counts, "first_sequence": 0, "last_sequence": len(self._broker.journal)}
+
+    def arm_route_adoption(
+        self, actions: tuple[PlannerAction, ...], *, target_level: int
+    ) -> None:
+        self._route_adoption.arm(actions, target_level=target_level)
+
+    def route_adoption(self) -> dict[str, object]:
+        return self._route_adoption.summary()
 
     def history(self, start: int, limit: int) -> list[dict[str, object]]:
         try:
@@ -591,6 +650,7 @@ class _P7BrokerClient:
         }
 
     def _record_transitions(self, transitions: tuple[ArcTransition, ...]) -> None:
+        self._route_adoption.record(transitions)
         for transition in transitions:
             self._recorder.append(
                 "arc.action", self._identities, self._transition_view(transition)
@@ -1044,6 +1104,7 @@ def _optimize_verified_route(
         "warmup_actions": len(warmup),
         "elapsed_seconds": 0.0,
         "timed_out": False,
+        "candidate_actions": [],
     }
     baseline_hint = _summarize_route_actions(baseline, target_level=target_level)
     if not baseline_hint:
@@ -1077,6 +1138,10 @@ def _optimize_verified_route(
                 candidate.actions, target_level=target_level, optimized=True
             )
             if optimized_hint:
+                metadata["candidate_actions"] = [
+                    {"name": action.name, "data": dict(action.data)}
+                    for action in candidate.actions
+                ]
                 proof_hint = _summarize_route_proofs(
                     candidate.proofs, target_level=target_level
                 )
@@ -1882,6 +1947,7 @@ async def run_live(
         }
     broker_status = None
     runtime: object | None = None
+    prediction_client: object | None = None
     completed_prefix: dict[str, object] | None = None
     try:
         if invocation.game.target_level > 1:
@@ -1901,6 +1967,26 @@ async def run_live(
                 if broker.status().levels_completed != prefix.levels_completed:
                     raise P7OperatorError("P7 saved prefix is unavailable")
         prediction_client = getattr(resources_, "_prediction_client", None)
+        if (
+            isinstance(prediction_client, _P7BrokerClient)
+            and route_optimization.get("status") == "optimized"
+        ):
+            candidate_actions = route_optimization.get("candidate_actions", [])
+            if isinstance(candidate_actions, list):
+                parsed_actions = tuple(
+                    PlannerAction(
+                        item["name"],
+                        tuple(sorted(item.get("data", {}).items())),
+                    )
+                    for item in candidate_actions
+                    if isinstance(item, Mapping)
+                    and type(item.get("name")) is str
+                    and isinstance(item.get("data", {}), dict)
+                )
+                if len(parsed_actions) == len(candidate_actions):
+                    prediction_client.arm_route_adoption(
+                        parsed_actions, target_level=invocation.game.target_level
+                    )
         if prediction_client is not None:
             prompt = prompt + "\n\n" + _initial_game_context(
                 prediction_client,
@@ -2038,6 +2124,11 @@ async def run_live(
             bridge_accounting = getattr(bridge, "private_accounting", None)
             if callable(bridge_accounting):
                 diagnostics["bridge_method_failures"] = bridge_accounting()
+            route_adoption = getattr(bridge, "route_adoption", None)
+            if callable(route_adoption):
+                diagnostics["route_adoption"] = route_adoption()
+            elif isinstance(prediction_client, _P7BrokerClient):
+                diagnostics["route_adoption"] = prediction_client.route_adoption()
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
             cleanup_failed = False
             try:
