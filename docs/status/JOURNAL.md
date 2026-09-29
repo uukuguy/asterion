@@ -3304,3 +3304,4 @@
 - 06:44 实现计划拆分世界模型、回放门、Playbook、Broker 接入和优化器验证 [f52ef9a4]
 - 06:45 计划明确唯一模型写入口为受限 hypothesis 提交，确认只能由动作证据升级 [bd3ed16f]
 - 07:00 WorldFact values recursively immutable; nested mutation regression and fix report recorded [c36482d6, ca1a7ec7]
+- 07:06 Task 2 report history restored from f0671e09; transition gate verification recorded [5ae4cc74]
