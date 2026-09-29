@@ -1225,6 +1225,10 @@ def _optimize_partial_attempt(
         "removed_indices": list(candidate.removed_indices),
         "proofs": [proof.kind for proof in candidate.proofs],
         "target_level": target_level,
+        "candidate_actions": [
+            {"name": action.name, "data": dict(action.data)}
+            for action in candidate.actions
+        ] if len(candidate.actions) < len(route) else [],
     }
     if not candidate.replay.replay_complete:
         return "", {**metadata, "status": "partial-replay-incomplete"}
@@ -2064,7 +2068,7 @@ async def run_live(
         prediction_client = getattr(resources_, "_prediction_client", None)
         if (
             isinstance(prediction_client, _P7BrokerClient)
-            and route_optimization.get("status") == "optimized"
+            and route_optimization.get("status") in {"optimized", "partial-optimized"}
         ):
             candidate_actions = route_optimization.get("candidate_actions", [])
             if isinstance(candidate_actions, list):

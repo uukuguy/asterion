@@ -108,6 +108,34 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertNotIn("selected level boundary", hint)
         self.assertNotIn("upper bound", hint)
 
+    def test_partial_optimizer_exports_candidate_for_live_adoption(self) -> None:
+        from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate, RouteResult
+        from asterion.applications.prime.p7.operator import _optimize_partial_attempt
+
+        prefix_action = SimpleNamespace(action="ACTION1", data=())
+        route_actions = tuple(SimpleNamespace(action="ACTION2", data=()) for _ in range(2))
+        candidate_action = PlannerAction("ACTION2")
+        replay = RouteResult(
+            success=False, action_count=1, terminal_state="NOT_FINISHED",
+            identity=("cd82-fb555c5d", 0), replay_complete=True,
+        )
+        candidate = RouteCandidate(
+            actions=(candidate_action,), replay=replay, removed_indices=(1,),
+            candidates_replayed=1, proofs=(),
+        )
+        prefix = SimpleNamespace(transitions=(prefix_action,))
+        attempt = SimpleNamespace(transitions=(prefix_action, *route_actions))
+        with mock.patch(
+            "asterion.applications.prime.p7.operator.optimize_arc_route",
+            return_value=candidate,
+        ):
+            _, metadata = _optimize_partial_attempt(
+                attempt, prefix=prefix, game=SimpleNamespace(),
+                arc_root=Path("/tmp"), target_level=3,
+            )
+        self.assertEqual(metadata["status"], "partial-optimized")
+        self.assertEqual(metadata["candidate_actions"], [{"name": "ACTION2", "data": {}}])
+
     def test_route_adoption_tracker_records_exact_follow_and_completion(self) -> None:
         from asterion.applications.prime.p7.optimizer import PlannerAction
         from asterion.applications.prime.p7.operator import RouteAdoptionTracker
