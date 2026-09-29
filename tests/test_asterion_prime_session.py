@@ -440,6 +440,20 @@ class TestAsterionPrimeSession(unittest.TestCase):
         public = asyncio.run(collect(session))
         self.assertEqual(public[-1].payload, {"status": "completed"})
 
+    def test_provider_auto_retry_marker_is_accepted(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(
+            ("agent_start", {}),
+            ("agent_end", {"willRetry": True}),
+            ("auto_retry_start", {}),
+            ("entry_appended", {}),
+            ("agent_start", {}),
+            ("agent_end", {}),
+            ("auto_retry_end", {}),
+            ("agent_settled", {}),
+        ))
+        public = asyncio.run(collect(session))
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+
     def test_default_agent_end_terminal_completes_without_public_payload(self) -> None:
         session, _rpc, _lease = self.fixture.make(
             native_events(("agent_end", {"messages": ["PRIVATE-ANSWER"]}))

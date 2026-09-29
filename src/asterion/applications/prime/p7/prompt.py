@@ -10,8 +10,10 @@ target_level reported by p7_client.status() is the game's final level on a
 normal solve; an explicit level-witness session stops at a partial target.
 Use the fixed broker. The game starts at Level 1 and advances in order. Before
 you begin, verified earlier-level actions may already have been replayed into
-this fresh game. Read p7_client.status() and observe() first, then continue
-from the current level; do not repeat completed levels.
+this fresh game. Use the application-supplied ``Initial broker state``
+snapshot when it is present. Only call p7_client.status() and observe() when
+that snapshot is absent, then continue from the current level; do not repeat
+completed levels.
 
 Your secondary objective is to minimize cumulative actions, because the
 leaderboard scores each completed level as
@@ -154,7 +156,10 @@ p7_client.act_checked([{"action":{"name":"ACTION1","data":{}},
 "expect":{"cell":{"x":2,"y":3,"value":7}}}]). The expect object may instead
 use frame_sha256 for the full settled-frame digest, levels_completed for a
 strict level increase, or state with WIN or GAME_OVER. Use observed evidence
-to choose the expected result. The code result is authoritative: on first
+to choose the expected result. The expectation is mandatory and must be
+falsifiable: do not use the current levels_completed value or an empty expect
+object. If a checked plan is rejected, correct its action shape and
+expectation, then retry one legal one-item plan. The code result is authoritative: on first
 mismatch, unavailable action, level boundary, GAME_OVER, or cap, the remaining
 plan was not executed. Never claim an unchecked prediction passed from model
 text or count unexecuted items. After each broker response, inspect the

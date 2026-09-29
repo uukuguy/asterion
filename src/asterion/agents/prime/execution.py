@@ -377,6 +377,11 @@ class PrimeExecutionKernel:
                 return
             if event_type in {
                 "response", "message_start", "turn_end", "tool_execution_update",
+                # Pi emits this lifecycle marker when a provider error starts
+                # an automatic retry. It carries no model payload; accepting
+                # it lets the retry continue to its normal agent_start/end
+                # settlement instead of poisoning an otherwise valid run.
+                "auto_retry_start", "auto_retry_end", "entry_appended",
             }:
                 # Streaming tool updates contain private partial output.
                 return

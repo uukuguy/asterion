@@ -62,7 +62,7 @@ class P7ClientFacade:
             not callable(getattr(client, name, None))
             for name in (
                 "observe", "status", "act", "history", "frame_at", "act_checked",
-                "tried_actions", "last_outcome_summary", "mechanics_prior",
+                "tried_actions", "last_outcome_summary",
             )
         ):
             raise P7ClientError()
@@ -87,6 +87,9 @@ class P7ClientFacade:
 
     def status(self) -> Mapping[str, object]:
         return cast(Mapping[str, object], self.__invoke("status"))
+
+    def mechanics_prior(self) -> Mapping[str, object]:
+        return cast(Mapping[str, object], self.__invoke("mechanics_prior"))
 
     def act(self, actions: Sequence[Mapping[str, object]]) -> Mapping[str, object]:
         if isinstance(actions, (str, bytes, bytearray)) or not isinstance(
@@ -130,7 +133,7 @@ class P7ClientFacade:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if (name in {"observe", "status", "act", "act_checked"} and type(value) is not dict) or (
+            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked"} and type(value) is not dict) or (
                 name in {"history", "frame_at"} and type(value) is not list
             ):
                 raise ValueError
@@ -589,13 +592,18 @@ def _valid_client_module(source: object) -> bool:
         else:
             return False
     if set(public) != {
-        "act", "observe", "status", "history", "frame_at", "act_checked",
+        "act", "observe", "status", "mechanics_prior", "history", "frame_at",
+        "act_checked", "tried_actions", "last_outcome_summary", "components",
+        "p7_act", "p7_observe", "p7_mechanics_prior", "p7_history",
+        "p7_frame_at", "p7_act_checked", "p7_tried_actions",
+        "p7_last_outcome_summary", "p7_components",
         "positions", "diff", "summary", "render", "act_and_observe",
     }:
         return False
     return (
         _exact_arguments(public["observe"], 0)
         and _exact_arguments(public["status"], 0)
+        and _exact_arguments(public["mechanics_prior"], 0)
         and _exact_arguments(public["act"], 1)
         and public["act"].args.args[0].arg == "actions"
         and _exact_arguments(public["history"], 2)
@@ -604,6 +612,9 @@ def _valid_client_module(source: object) -> bool:
         and public["frame_at"].args.args[0].arg == "sequence"
         and _exact_arguments(public["act_checked"], 1)
         and public["act_checked"].args.args[0].arg == "plan"
+        and _helper_arguments(public["tried_actions"], ("level",), (None,))
+        and _helper_arguments(public["last_outcome_summary"], ("level",), (None,))
+        and _helper_arguments(public["components"], ("level",), (None,))
         and _helper_arguments(public["positions"], ("values", "obs"), (None,))
         and _helper_arguments(public["diff"], ("before", "after"), ())
         and _helper_arguments(public["summary"], ("obs",), (None,))

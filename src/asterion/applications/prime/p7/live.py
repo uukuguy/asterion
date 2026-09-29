@@ -295,13 +295,13 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "act", "history", "frame_at", "act_checked"}
+                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary"}
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
-            if len(args) != {"observe": 0, "status": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1}[method]:
+            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1}[method]:
                 raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
@@ -639,6 +639,10 @@ def p7_observe():
     """
     return _call("observe")
 
+def p7_mechanics_prior():
+    """Read bounded mechanics evidence inferred from prior actions."""
+    return _call("mechanics_prior")
+
 def p7_history(start, limit):
     """Read a page of session history records starting at index `start` with up to `limit` records."""
     return _call("history", start, limit)
@@ -783,6 +787,38 @@ def p7_act(actions):
         "terminal": terminal,
         "batch": batch,
     }}
+
+# Stable worker-facing names used by the P7 prompt. The p7_* names above are
+# retained for the native tool documentation and share the same socket calls.
+def observe():
+    return p7_observe()
+
+def status():
+    return _call("status")
+
+def mechanics_prior():
+    return p7_mechanics_prior()
+
+def history(start, limit):
+    return p7_history(start, limit)
+
+def frame_at(sequence):
+    return p7_frame_at(sequence)
+
+def act_checked(plan):
+    return p7_act_checked(plan)
+
+def tried_actions(level=None):
+    return p7_tried_actions(level)
+
+def last_outcome_summary(level=None):
+    return p7_last_outcome_summary(level)
+
+def components(level=None):
+    return p7_components(level)
+
+def act(actions):
+    return p7_act(actions)
 '''
 
 

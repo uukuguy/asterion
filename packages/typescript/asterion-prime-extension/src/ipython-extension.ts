@@ -490,11 +490,49 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_act_checked",
-      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. The broker stops at first prediction mismatch / no-effect / unavailable action.",
+      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. Each action has a name and data object. Each expect must contain exactly one falsifiable prediction: cell, frame_sha256, a strictly higher levels_completed, or state WIN/GAME_OVER. Never send an empty expect or the current levels_completed value. The broker stops at first prediction mismatch / no-effect / unavailable action.",
       TypeObject(
         {
           plan: TypeArray(
-            TypeObject({ action: TypeObject({}), expect: TypeObject({}) }),
+            TypeObject({
+              action: TypeObject({
+                name: TypeString({ pattern: "^(RESET|ACTION[1-7])$" }),
+                data: TypeUnion([
+                  TypeObject({}, { additionalProperties: false }),
+                  TypeObject(
+                    {
+                      x: TypeNumber({ minimum: 0, maximum: 63 }),
+                      y: TypeNumber({ minimum: 0, maximum: 63 }),
+                    },
+                    { additionalProperties: false },
+                  ),
+                ]),
+              }),
+              expect: TypeUnion([
+                TypeObject(
+                  {
+                    cell: TypeObject({
+                      x: TypeNumber({ minimum: 0, maximum: 63 }),
+                      y: TypeNumber({ minimum: 0, maximum: 63 }),
+                      value: TypeNumber({ minimum: 0, maximum: 255 }),
+                    }),
+                  },
+                  { additionalProperties: false },
+                ),
+                TypeObject(
+                  { frame_sha256: TypeString({ minLength: 1 }) },
+                  { additionalProperties: false },
+                ),
+                TypeObject(
+                  { levels_completed: TypeNumber({ minimum: 1 }) },
+                  { additionalProperties: false },
+                ),
+                TypeObject(
+                  { state: TypeString({ pattern: "^(WIN|GAME_OVER)$" }) },
+                  { additionalProperties: false },
+                ),
+              ]),
+            }),
           ),
         },
         { additionalProperties: false },
