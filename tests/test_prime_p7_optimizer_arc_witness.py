@@ -41,6 +41,13 @@ class WitnessEngine:
 
 
 class TestArcReplayWitness(unittest.TestCase):
+    def test_incomplete_replay_is_marked_complete_only_after_all_actions(self) -> None:
+        oracle = ArcReplayOracle(game=GAME, engine_factory=WitnessEngine)
+        result = oracle.replay((A,))
+        self.assertFalse(result.success)
+        self.assertTrue(result.replay_complete)
+        self.assertEqual(result.action_count, 1)
+
     def test_witness_contains_initial_warmup_boundary_and_each_candidate_step(self) -> None:
         engines: list[WitnessEngine] = []
 

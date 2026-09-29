@@ -20,6 +20,7 @@ from .optimizer import (
     RouteCandidate,
     RouteResult,
     _route_digest,
+    optimize_partial_route,
     optimize_route,
 )
 from .replay import _step
@@ -133,11 +134,11 @@ class ArcReplayOracle:
                 and (not self.game.is_full_game or state == "WIN")
             )
             return RouteResult(
-                success, count, state, identity, tuple(observation_witness)
+                success, count, state, identity, tuple(observation_witness), True
             )
         except BaseException:
             return RouteResult(
-                False, count, state, identity, tuple(observation_witness)
+                False, count, state, identity, tuple(observation_witness), False
             )
         finally:
             if engine is not None:
@@ -159,6 +160,7 @@ def optimize_arc_route(
     replacements: tuple[PlannerAction, ...] = (),
     warmup: tuple[PlannerAction, ...] = (),
     time_budget_seconds: float | None = None,
+    preserve_terminal_observation: bool = False,
 ) -> RouteCandidate:
     """Explicit offline entry point; each candidate receives a fresh ARC SDK game."""
 
@@ -172,16 +174,22 @@ def optimize_arc_route(
                 game=game,
             )
 
-        return optimize_route(
+        optimizer = optimize_partial_route if preserve_terminal_observation else optimize_route
+        kwargs = {
+            "identity": (game.game_id, game.seed),
+            "candidate_budget": candidate_budget,
+            "max_removed": max_removed,
+            "replacements": replacements,
+            "time_budget_seconds": time_budget_seconds,
+            "target_level": game.target_level,
+            "warmup_digest": _route_digest(warmup),
+        }
+        if not preserve_terminal_observation:
+            return optimizer(route, ArcReplayOracle(game=game, engine_factory=create_engine, warmup=warmup), **kwargs)
+        return optimizer(
             route,
             ArcReplayOracle(game=game, engine_factory=create_engine, warmup=warmup),
-            identity=(game.game_id, game.seed),
-            candidate_budget=candidate_budget,
-            max_removed=max_removed,
-            replacements=replacements,
-            time_budget_seconds=time_budget_seconds,
-            target_level=game.target_level,
-            warmup_digest=_route_digest(warmup),
+            **kwargs,
         )
 
 

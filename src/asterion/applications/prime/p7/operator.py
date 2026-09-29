@@ -1164,6 +1164,52 @@ def _optimize_verified_route(
     return baseline_hint, metadata
 
 
+def _optimize_partial_attempt(
+    attempt: object,
+    *,
+    prefix: object,
+    game: object,
+    arc_root: Path,
+    target_level: int,
+) -> tuple[str, dict[str, object]]:
+    """Compress a verified failed attempt into an exploratory checkpoint hint."""
+    prefix_transitions = getattr(prefix, "transitions", ())
+    attempt_transitions = getattr(attempt, "transitions", ())
+    if not isinstance(prefix_transitions, tuple) or not isinstance(attempt_transitions, tuple):
+        return "", {"status": "no-partial-route"}
+    if len(attempt_transitions) <= len(prefix_transitions) or attempt_transitions[:len(prefix_transitions)] != prefix_transitions:
+        return "", {"status": "partial-prefix-mismatch"}
+    route = _planner_actions_from_transitions(attempt_transitions[len(prefix_transitions):])
+    warmup = _planner_actions_from_transitions(prefix_transitions)
+    if not route or not warmup:
+        return "", {"status": "no-partial-route"}
+    try:
+        candidate = optimize_arc_route(
+            game=game, arc_root=arc_root, route=route, warmup=warmup,
+            candidate_budget=_ROUTE_OPTIMIZER_CANDIDATE_BUDGET,
+            max_removed=_ROUTE_OPTIMIZER_MAX_REMOVED,
+            time_budget_seconds=_ROUTE_OPTIMIZER_TIME_BUDGET_SECONDS,
+            preserve_terminal_observation=True,
+        )
+    except Exception as error:
+        return "", {"status": "partial-optimizer-error", "error_type": type(error).__name__}
+    metadata = {
+        "status": "partial-optimized" if len(candidate.actions) < len(route) else "partial-baseline",
+        "baseline_actions": len(route), "optimized_actions": len(candidate.actions),
+        "candidates_replayed": candidate.candidates_replayed,
+        "removed_indices": list(candidate.removed_indices),
+        "proofs": [proof.kind for proof in candidate.proofs],
+        "target_level": target_level,
+    }
+    if not candidate.replay.replay_complete:
+        return "", {**metadata, "status": "partial-replay-incomplete"}
+    actions = candidate.actions if len(candidate.actions) < len(route) else route
+    hint = _summarize_route_actions(actions, target_level=target_level, optimized=True)
+    if not hint:
+        return "", metadata
+    return hint.replace("route hypothesis", "exploration checkpoint hypothesis"), metadata
+
+
 def _initial_game_context(client: object, *, include_prior: bool) -> str:
     """Inject one bounded broker snapshot before the model chooses tools."""
 
@@ -1812,7 +1858,7 @@ async def run_live(
     :mod:`asterion.applications.prime.p7.live`.
     """
 
-    from .solutions import load_best_prefix
+    from .solutions import load_best_prefix, load_verified_attempt
 
     variant = _resolve_history_variant(invocation.environment, invocation.game)
     run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
@@ -1909,6 +1955,22 @@ async def run_live(
             "elapsed_seconds": 0.0,
             "timed_out": False,
         }
+    if not route_hint and invocation.game.target_level > 1 and prefix is not None:
+        attempt = load_verified_attempt(
+            invocation.arc_root,
+            root / ".asterion-private" / "prime-p7-live",
+            invocation.game.game_id,
+            invocation.game.seed,
+            expected_model_id=declared_model_selection(invocation.environment).model,
+        )
+        if attempt is not None:
+            route_hint, route_optimization = _optimize_partial_attempt(
+                attempt,
+                prefix=prefix,
+                game=invocation.game,
+                arc_root=invocation.arc_root,
+                target_level=invocation.game.target_level,
+            )
     if route_hint:
         prompt = prompt + "\n\n" + route_hint
     if invocation.sweep_mode:

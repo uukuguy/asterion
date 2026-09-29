@@ -34,6 +34,7 @@ class RouteResult:
     terminal_state: str
     identity: tuple[str, int]
     observation_witness: tuple[ObservationWitness, ...] = ()
+    replay_complete: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -183,6 +184,7 @@ def optimize_route(
     def structurally_valid(result: RouteResult, actions: tuple[PlannerAction, ...]) -> bool:
         return (
             type(result) is RouteResult
+            and result.replay_complete is True
             and type(result.action_count) is int
             and result.action_count == len(actions)
             and result.identity == identity
