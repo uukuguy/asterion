@@ -3250,3 +3250,4 @@
 - 15:50 BP35 L2 二级关卡验证：两次基于 replay-verified L1 前缀（18 步）的 next-level 尝试均未形成终局；首轮 L2 执行 3 个动作后停滞，第二轮开启跟踪后执行 38 个动作、3 次 RESET、63 次 usage，仍停留在 L2，均为 `unverified`，不得计为通关。第二轮 run `p7-live-20260929073917-23204e9e0fb97c87b3e5b86c`，manifest `next-level-20260929073857-b788631e7db1bff7.json`。
 - 15:51 [fbeec248] 记录 BP35 L2 两次未验证尝试及停滞证据，避免后续误报通关。
 - 16:21 G50T L2 二级关卡验证：基于 58 步 replay-verified L1 前缀运行 30 分钟后超时；L2 产生 38 个动作、3 次 RESET、92 次 usage，未出现 level-completed，结果 `unverified/timed-out-unsealed`，无 summary 或 sealed trace，不计通关。
+- 16:21 [7abd4bf9] 记录 G50T L2 超时未验证，保留动作与 usage 证据，停止无效长推理消耗。
