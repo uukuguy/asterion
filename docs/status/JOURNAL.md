@@ -3303,3 +3303,4 @@
 - 06:39 同题世界模型设计加入 TransitionModel 回放门、Playbook 与动作预期，提交设计文档 [32abf2ea]
 - 06:44 实现计划拆分世界模型、回放门、Playbook、Broker 接入和优化器验证 [f52ef9a4]
 - 06:45 计划明确唯一模型写入口为受限 hypothesis 提交，确认只能由动作证据升级 [bd3ed16f]
+- 07:00 WorldFact values recursively immutable; nested mutation regression and fix report recorded [c36482d6, ca1a7ec7]
