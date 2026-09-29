@@ -209,6 +209,17 @@ class PlaybookSnapshot:
                 raise ValueError(f"duplicate {name}")
             object.__setattr__(self, name, tuple(sorted(value, key=key)))
 
+    def projection(self, max_bytes: int = 8192) -> dict[str, Any]:
+        """Return a detached bounded private working-memory projection."""
+
+        if type(max_bytes) is not int or max_bytes <= 0:
+            raise ValueError("invalid projection cap")
+        body = json.loads(_json(self).decode("utf-8"))
+        encoded = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        if len(encoded) > max_bytes:
+            raise ValueError("playbook projection exceeds cap")
+        return body
+
 
 def _expectation_json(item: ActionExpectation) -> dict[str, Any]:
     return {"action": item.action, "data": dict(item.data), "prior_state_sha256": item.prior_state_sha256,

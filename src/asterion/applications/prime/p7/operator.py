@@ -64,6 +64,13 @@ from asterion.applications.prime.p7.private_trace import (
     P7_TRACE_IDENTITIES,
     trace_identities_for as solve_trace_identities,
 )
+from asterion.applications.prime.p7.playbook import (
+    PlaybookKey,
+    PlaybookSnapshot,
+    branch_playbook,
+    load_playbook,
+    save_playbook,
+)
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.optimizer import (
@@ -1899,6 +1906,17 @@ async def run_live(
         raise P7OperatorError("P7 cancellation signal is unavailable")
 
     root = invocation.operator_root
+    playbook_snapshot: PlaybookSnapshot | None = None
+    playbook_loaded = False
+    playbook_saved = False
+    try:
+        playbook_snapshot = load_playbook(
+            root, PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels)
+        )
+        playbook_loaded = playbook_snapshot is not None
+    except (OSError, ValueError):
+        # A malformed private playbook cannot grant authority; use baseline.
+        playbook_snapshot = None
     # Build the application-level tool registry. The framework prompt
     # carries only general principles; this is where P7 surfaces its
     # own tools (retrodict query APIs, no-effect hint, etc.) to the model.
@@ -2029,6 +2047,13 @@ async def run_live(
         game=invocation.game,
         run_id=run_id,
     )
+    broker_for_playbook = resources_.host_services.get("prime.arc-broker")
+    if isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
+        try:
+            broker_for_playbook.set_playbook_projection(playbook_snapshot.projection())
+        except (OSError, ValueError, TypeError):
+            playbook_snapshot = None
+            playbook_loaded = False
     receipt: Mapping[str, object] = {}
     broker_receipt: ArcRunReceipt | None = None
     replay_verified = False
@@ -2040,6 +2065,8 @@ async def run_live(
     diagnostics: dict[str, object] = {}
     diagnostics["prediction_variant"] = variant
     diagnostics["route_optimization"] = route_optimization
+    diagnostics["playbook_loaded"] = playbook_loaded
+    diagnostics["playbook_saved"] = False
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",
@@ -2199,6 +2226,19 @@ async def run_live(
                         replay_verified = True
                     except Exception:
                         pass
+                if broker_receipt is not None and replay_verified and playbook_snapshot is not None:
+                    try:
+                        save_playbook(root, playbook_snapshot)
+                        playbook_saved = True
+                    except (OSError, ValueError):
+                        playbook_saved = False
+                elif failure is not None and playbook_snapshot is not None:
+                    try:
+                        save_playbook(root, branch_playbook(playbook_snapshot, "run-failed"))
+                        playbook_saved = True
+                    except (OSError, ValueError):
+                        playbook_saved = False
+                diagnostics["playbook_saved"] = playbook_saved
                 evidence_value = resources_.host_services.get("prime.private-trace")
                 if (
                     failure is not None

@@ -395,3 +395,9 @@ Verification: `uv run python -m unittest -v tests.test_prime_p7_native_broker.Te
 The broker now accepts an identity-checked `WorldModelStore`, records bounded transition evidence, exposes immutable world/transition/playbook projections, and returns bounded retrodiction/conflict fields from `act_checked`. The P7 operator injects the same-game store and emits scalar model diagnostics without private frames or fact values.
 
 Verification: 50 native broker tests plus WorldModel/TransitionModel/Playbook suites (77 total) passed; Ruff and `git diff --check` passed.
+
+## Task 4 operator Playbook lifecycle slice — 2026-09-30
+
+Added a bounded Playbook projection, same-game load before prompt construction, safe baseline fallback for malformed private state, and save/branch behavior limited to sealed or failed runs. Diagnostics expose only loaded/saved booleans.
+
+Verification: 64 focused broker/playbook/mechanism tests passed; Ruff and `py_compile` passed.
