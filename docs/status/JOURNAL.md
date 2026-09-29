@@ -3295,3 +3295,4 @@
 - DC22 L3 retry 诊断：离线候选确为 `partial-optimized`（67→66、`delete_span`），但 `route_adoption.armed=false`；根因是 partial 候选未导出 `candidate_actions`，且 arm 条件只接受完整 `optimized`，已修复并补回归测试。
 - 模型配置边界修复：`.env` 中 provider/model 覆盖旧终端导出；模型只做格式校验，provider 凭据与 provider 存在性仍预检，具体模型可用性交给 Pi 启动时返回；`gpt-6.1-sol` 本地解析已通过，76 项 P7 model/live 测试与 lint 通过。
 - 04:30 [d9cabbf0] 收拢 P7 host→Orb→systemd 的非敏感环境转发契约，避免 `.env` 的 provider/model 在 guest 白名单边界丢失；74 项 guest/make/sweep 回归与 lint 通过。
+- 04:34 [ad94bfb9] 让直接 `make` 入口也以 `.env` provider/model 覆盖旧终端导出，防止手工启动绕过调度器时再次选中旧模型；151 项聚焦回归与 lint 通过。
