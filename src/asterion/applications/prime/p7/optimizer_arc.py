@@ -19,6 +19,7 @@ from .optimizer import (
     PlannerAction,
     RouteCandidate,
     RouteResult,
+    _route_digest,
     optimize_route,
 )
 from .replay import _step
@@ -179,6 +180,8 @@ def optimize_arc_route(
             max_removed=max_removed,
             replacements=replacements,
             time_budget_seconds=time_budget_seconds,
+            target_level=game.target_level,
+            warmup_digest=_route_digest(warmup),
         )
 
 

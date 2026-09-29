@@ -54,6 +54,8 @@ class RouteCompressionProof:
     terminal_state: str
     baseline_witness: tuple[ObservationWitness, ...] = ()
     candidate_witness: tuple[ObservationWitness, ...] = ()
+    target_level: int = 0
+    warmup_digest: str = ""
 
 
 class ReplayOracle(Protocol):
@@ -86,6 +88,9 @@ def _compression_proof(
     baseline_result: RouteResult,
     replay: RouteResult,
     identity: tuple[str, int],
+    *,
+    target_level: int = 0,
+    warmup_digest: str = "",
 ) -> RouteCompressionProof | None:
     matcher = difflib.SequenceMatcher(a=baseline, b=candidate, autojunk=False)
     opcodes = matcher.get_opcodes()
@@ -127,6 +132,8 @@ def _compression_proof(
         terminal_state=replay.terminal_state,
         baseline_witness=baseline_result.observation_witness,
         candidate_witness=replay.observation_witness,
+        target_level=target_level,
+        warmup_digest=warmup_digest,
     )
 
 
@@ -139,6 +146,8 @@ def optimize_route(
     candidate_budget: int = 128,
     replacements: tuple[PlannerAction, ...] = (),
     time_budget_seconds: float | None = None,
+    target_level: int = 0,
+    warmup_digest: str = "",
 ) -> RouteCandidate:
     """Keep the shortest verified edit found within a finite replay budget.
 
@@ -264,7 +273,10 @@ def optimize_route(
         replayed += 1
         if valid(replay, candidate) and len(candidate) < len(best.actions):
             best = RouteCandidate(candidate, replay, removed, replayed)
-            proof = _compression_proof(route, candidate, baseline, replay, identity)
+            proof = _compression_proof(
+                route, candidate, baseline, replay, identity,
+                target_level=target_level, warmup_digest=warmup_digest,
+            )
             best_proofs = () if proof is None else (proof,)
     elapsed_seconds = (
         timeout_elapsed

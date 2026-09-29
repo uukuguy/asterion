@@ -983,6 +983,8 @@ def _summarize_route_proofs(
             "prefix_digest": proof.prefix_digest,
             "suffix_digest": proof.suffix_digest,
             "terminal_state": proof.terminal_state,
+            "target_level": proof.target_level,
+            "warmup_digest": proof.warmup_digest,
             "candidate_witness": [
                 {
                     "kind": witness.kind,
