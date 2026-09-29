@@ -3228,3 +3228,4 @@
 - 03:06 提交 `587b0172`：修复 P7 初始提示、checked-plan 合法性、Pi 重试生命周期与 IPython worker facade；聚焦 87 项测试通过。
 - 03:25 增加显式 `ASTERION_PRIME_DEBUG_TRANSCRIPT=1`：私有文件实时记录每轮 LLM 输入、native 决策与工具结果，默认关闭。
 - 11:49 追踪 BP35 L1 确认首轮动作后恢复回合仍被旧 continuation prompt 强制到 `ipython`；P7 runtime 改为续回合优先使用注册 broker 工具，并补充本地 worker 启动回归测试。
+- 11:50 P7 continuation rounds now prioritize registered broker tools after GPT-6-Sol initial actions; worker smoke test passes [0fde4b44]
