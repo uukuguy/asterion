@@ -806,3 +806,9 @@
 - Status: 🟢 active.
 - Decision: When no explicit per-game score or step target is active, solve breadth-first: establish replay-verified L1 prefixes across games, then advance those prefixes to L2 in the same queue order. Do not repeatedly deepen one game unless a generic mechanism defect or improvement is being tested.
 - Rationale: Broad coverage gives more independent evidence about framework and P7 capability while respecting the three-failure circuit breaker.
+
+## D-2026-09-30-02 — Separate new, attempted-failed, and verified routes
+
+- Status: 🟢 active.
+- Decision: The level queue distinguishes never-attempted games, attempted-but-failed games, and replay-verified completed prefixes. Prior failed attempts may inform exploration only after strict identity, trace, replay, and cleanup validation; invalid or ambiguous evidence is never reused as a route.
+- Rationale: Failed runs can contain useful partial routes, repeated-state evidence, timeout data, and tool/model diagnostics, but treating every historical action sequence as a trusted route would contaminate later attempts.
