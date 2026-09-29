@@ -45,8 +45,13 @@ name, or (3) switch to a different position. Do not dispatch the same
 The framework auto-injects a ``tried_summary`` field on every observe
 call; treat ``no_effect`` counts >= 2 as a stop-and-reflect signal.
 
-Use only the persistent ipython tool. Import only p7_client; do not inspect its
-source. The broker API is p7_client.observe(), p7_client.status(),
+Use the registered P7 application tools for broker operations whenever they
+are available: p7_observe, p7_status, p7_mechanics_prior, p7_tried_actions,
+p7_last_outcome_summary, p7_history, p7_frame_at, and p7_act_checked. Use
+the persistent ipython tool for bounded programmatic analysis or only as a
+fallback when a registered tool cannot express the query. Import only
+p7_client; do not inspect its source. The equivalent broker API is
+p7_client.observe(), p7_client.status(),
 p7_client.history(start, limit), p7_client.frame_at(sequence),
 p7_client.act(actions), and p7_client.act_checked(plan). act takes a list of action dictionaries such as
 {"name":"ACTION1","data":{}} and returns the complete post-batch view. The
@@ -75,6 +80,19 @@ count, and SDK state.
 Use p7_client.frame_at(sequence) only for a sequence already returned by
 history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
+
+When levels_completed is above 0, your next tool call MUST be the registered
+p7_mechanics_prior tool (or p7_client.mechanics_prior() through ipython only
+if that registered tool is unavailable). Do not call history, frame_at, act,
+or act_checked before this prior call. It summarizes bounded evidence from earlier levels:
+repeated action effects, no-effect counts, click-coordinate ranges, level
+advances, and candidate rules with confidence. Treat it as a prior over the
+hidden action mechanics, never as a route or guaranteed action sequence. For
+each candidate rule, state the current-level observation that would support or
+contradict it, then choose the shortest distinguishing probe. After every
+LEVEL_ADVANCED response, refresh mechanics_prior() and combine the refreshed
+evidence with the new settled frame; do not blindly replay an earlier route or
+discard a rule solely because the current level has different objects.
 
 Treat only broker observations and retained Python state as game information.
 Never inspect engine source, another game or run, network resources, credentials,
