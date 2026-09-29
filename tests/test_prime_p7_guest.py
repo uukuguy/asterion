@@ -42,7 +42,12 @@ class TestPrimeP7Guest(unittest.TestCase):
     def test_launch_contains_descendants_without_forwarding_credentials(self) -> None:
         with (
             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True),
-            patch.dict('os.environ', {'ASTERION_PRIME_P7_GAME_ID': 'a-1', 'SECRET_KEY': 'sentinel'}, clear=True),
+            patch.dict('os.environ', {
+                'ASTERION_PRIME_P7_GAME_ID': 'a-1',
+                'ASTERION_PRIME_PROVIDER': 'openai-codex',
+                'ASTERION_PRIME_MODEL': 'gpt-6.1-sol',
+                'SECRET_KEY': 'sentinel',
+            }, clear=True),
             patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as call,
         ):
             with self.assertRaises(SystemExit):
@@ -51,6 +56,8 @@ class TestPrimeP7Guest(unittest.TestCase):
         self.assertIn('--property=KillMode=control-group', args)
         self.assertIn('--property=RuntimeMaxSec=30s', args)
         self.assertIn('--setenv=ASTERION_PRIME_P7_GAME_ID=a-1', args)
+        self.assertIn('--setenv=ASTERION_PRIME_PROVIDER=openai-codex', args)
+        self.assertIn('--setenv=ASTERION_PRIME_MODEL=gpt-6.1-sol', args)
         self.assertNotIn('sentinel', ' '.join(args))
 
     def test_sweep_launch_forwards_history_variant_to_contained_operator(self) -> None:

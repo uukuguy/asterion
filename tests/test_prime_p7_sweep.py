@@ -657,12 +657,44 @@ class TestPrimeP7Sweep(unittest.TestCase):
         self.assertEqual(bounded_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "")
         self.assertEqual(bounded_environment["OPERATION_MODE"], "")
 
+    def test_attempt_forwards_dotenv_model_selection_over_stale_terminal_values(self) -> None:
+        from types import SimpleNamespace
+        from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
+
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ",
+            {
+                "ASTERION_PRIME_PROVIDER": "openai-codex",
+                "ASTERION_PRIME_MODEL": "gpt-6-sol",
+            },
+            clear=False,
+        ):
+            root = Path(directory)
+            (root / ".env").write_text(
+                "ASTERION_PRIME_PROVIDER=openai-codex\n"
+                "ASTERION_PRIME_MODEL=gpt-6.1-sol\n",
+                encoding="utf-8",
+            )
+            process = SimpleNamespace(returncode=1, communicate=lambda **_kwargs: ("", ""))
+            scheduler = SweepScheduler(SweepConfig(
+                root / "arc", root / "runs", command=("attempt",), guest_machine=None,
+                unbounded_second_round=True,
+            ))
+            with patch("tools.run_prime_p7_sweep.subprocess.Popen", return_value=process) as popen:
+                scheduler._attempt("a-1", 2, 30 * 60)
+            environment = popen.call_args.kwargs["env"]
+
+        self.assertEqual(environment["ASTERION_PRIME_PROVIDER"], "openai-codex")
+        self.assertEqual(environment["ASTERION_PRIME_MODEL"], "gpt-6.1-sol")
+
     def test_make_forwards_first_round_runtime_marker_and_offline_mode(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
         recipe = makefile.split("asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:\n", 1)[1]
-        self.assertIn("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", recipe)
-        self.assertIn("OPERATION_MODE", recipe)
-        self.assertIn("ASTERION_PRIME_P7_STRATEGY", recipe)
+        contract = (Path(__file__).resolve().parents[1] / "tools" / "p7_guest_environment.txt").read_text(encoding="utf-8")
+        self.assertIn("tools/p7_guest_environment.txt", recipe)
+        self.assertIn("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND\n", contract)
+        self.assertIn("OPERATION_MODE\n", contract)
+        self.assertIn("ASTERION_PRIME_P7_STRATEGY\n", contract)
 
     def test_unbounded_first_round_selects_only_unstarted_first_levels(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler

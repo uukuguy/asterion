@@ -59,6 +59,34 @@ _SECOND_ROUND_CAMPAIGN_FILE = "second-round-campaign.json"
 _SECOND_ROUND_CAMPAIGN_ID = re.compile(r"^second-round-[0-9a-f]{32}$")
 _ACTION_STALL_SECONDS = 5 * 60
 _STALL_RECEIPT_FILE = "stall-receipt.json"
+_MODEL_SELECTION_ENVIRONMENT = ("ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL")
+
+
+def _operator_model_selection_environment(repo_root: Path) -> dict[str, str]:
+    """Overlay only model-selection keys declared by the operator ``.env``.
+
+    The scheduler launches a host ``make`` process before the guest operator
+    can load its own environment. Forwarding these keys prevents a stale
+    terminal export from selecting a different model inside the guest.
+    """
+
+    path = repo_root / ".env"
+    if not path.is_file():
+        return {}
+    values: dict[str, str] = {}
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return {}
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        if key in _MODEL_SELECTION_ENVIRONMENT:
+            values[key] = value.strip().strip("'").strip('"')
+    return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -1098,7 +1126,8 @@ class SweepScheduler:
                 [*self.config.command, f"GAME={game_id}", f"LEVEL={level}",
                  *([f"PRIME_ORB_MACHINE={self.config.guest_machine}"] if self.config.guest_machine else [])],
                 cwd=self.config.repo_root,
-                env={**os.environ, "ASTERION_PRIME_P7_SEED": "0",
+                env={**os.environ, **_operator_model_selection_environment(self.config.repo_root),
+                     "ASTERION_PRIME_P7_SEED": "0",
                      "ASTERION_PRIME_P7_ATTEMPT_UNIT": unit,
                      "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "0" if timeout is None else str(min(
                          timeout + 30 if self._is_research_round(self.config) else timeout, 4 * 60 * 60)),

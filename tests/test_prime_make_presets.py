@@ -136,15 +136,14 @@ class TestPrimeMakePresets(unittest.TestCase):
             cwd=root, text=True, capture_output=True,
         )
         self.assertEqual(completed.returncode, 0)
-        self.assertIn('"1" = 1', completed.stdout)
         self.assertIn("ASTERION_PRIME_P7_TARGET_LEVEL", completed.stdout)
 
     def test_p7_routes_target_level_when_explicit(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        for target, args, explicit in (
-            ("asterion-prime-p7-solve", [], "0"),
-            ("asterion-prime-p7-solve", ["LEVEL=2"], "1"),
-            ("asterion-prime-p7-level-witness", ["LEVEL=2"], "1"),
+        for target, args in (
+            ("asterion-prime-p7-solve", []),
+            ("asterion-prime-p7-solve", ["LEVEL=2"]),
+            ("asterion-prime-p7-level-witness", ["LEVEL=2"]),
         ):
             with self.subTest(target=target, args=args):
                 completed = subprocess.run(
@@ -152,20 +151,26 @@ class TestPrimeMakePresets(unittest.TestCase):
                     cwd=root, text=True, capture_output=True, check=True,
                 )
                 self.assertIn("ORBENV", completed.stdout)
-                self.assertIn(
-                    f'[ "{explicit}" = 1 ]; then ORBENV="$ORBENV:ASTERION_PRIME_P7_TARGET_LEVEL"',
-                    completed.stdout,
-                )
+                self.assertIn("tools/p7_guest_environment.txt", completed.stdout)
+
+    def test_p7_guest_receives_configuration_selected_model_and_provider(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        makefile = (root / "Makefile").read_text()
+        recipe = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
+        contract = (root / "tools" / "p7_guest_environment.txt").read_text()
+        self.assertIn("tools/p7_guest_environment.txt", recipe)
+        self.assertIn('tr "\\\\n" ":"', recipe)
+        self.assertIn('tr "\\\\n" " "', recipe)
+        self.assertIn("ASTERION_PRIME_PROVIDER\n", contract)
+        self.assertIn("ASTERION_PRIME_MODEL\n", contract)
 
     def test_p7_history_variant_reaches_only_local_witness_and_sweep_guest(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text()
         local = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
         official = _recipe(makefile, "asterion-prime-p7-official-preflight asterion-prime-p7-official-submit asterion-prime-p7-official-live-eval")
-        self.assertIn(
-            'if [ "$@" = asterion-prime-p7-level-witness ] || [ "$@" = asterion-prime-p7-sweep-attempt ]; then ORBENV="$$ORBENV:ASTERION_PRIME_P7_HISTORY_VARIANT"; fi',
-            local,
-        )
+        self.assertIn("tools/p7_guest_environment.txt", local)
+        self.assertIn("ASTERION_PRIME_P7_HISTORY_VARIANT\n", (root / "tools" / "p7_guest_environment.txt").read_text())
         self.assertNotIn("ASTERION_PRIME_P7_HISTORY_VARIANT", official)
 
     def test_unknown_game_does_not_block_unrelated_make_targets(self) -> None:

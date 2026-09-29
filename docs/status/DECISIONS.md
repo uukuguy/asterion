@@ -812,3 +812,10 @@
 - Status: 🟢 active.
 - Decision: The level queue distinguishes never-attempted games, attempted-but-failed games, and replay-verified completed prefixes. Prior failed attempts may inform exploration only after strict identity, trace, replay, and cleanup validation; invalid or ambiguous evidence is never reused as a route.
 - Rationale: Failed runs can contain useful partial routes, repeated-state evidence, timeout data, and tool/model diagnostics, but treating every historical action sequence as a trusted route would contaminate later attempts.
+
+## D-2026-09-30-03 — Keep guest environment forwarding under one contract
+
+- Status: 🟢 active.
+- Decision: The non-sensitive variables allowed across the host, Orb, and systemd guest boundaries live in `tools/p7_guest_environment.txt`. Make's `ORBENV`, the guest export step, and `run_prime_p7_guest.py` all consume that file. Provider/model values are included in this contract; credentials remain excluded.
+- Rationale: Separate allowlists had drifted. The model switch reached the outer P7 summary but was lost at a later guest boundary, while the terminal still exported the old model. A single data source keeps the boundary auditable without requiring model names to be registered in code.
+- Consequence: Adding a non-sensitive runtime variable requires one contract-file change and one focused contract test. Official scorecard forwarding remains separate and does not inherit the P7 research contract.

@@ -11,17 +11,26 @@ import subprocess
 import sys
 
 _UNIT = re.compile(r"^asterion-p7-[0-9a-f]{32}\.service$")
-_ENVIRONMENT = (
-    "ASTERION_PRIME_OPERATOR_ROOT", "ASTERION_PRIME_ARC_ROOT",
-    "ASTERION_PRIME_PI_ENTRY", "ASTERION_PRIME_NODE",
-    "ASTERION_PRIME_PI_AGENT_DIR",
-    "ASTERION_PRIME_P7_GAME_ID", "ASTERION_PRIME_P7_SEED",
-    "ASTERION_PRIME_P7_RUN_MODE", "ASTERION_PRIME_P7_TARGET_LEVEL",
-    "ASTERION_PRIME_P7_HISTORY_VARIANT",
-    "ASTERION_PRIME_P7_RETRY_MODE",
-    "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", "OPERATION_MODE",
-)
+_ENVIRONMENT_FILE = Path(__file__).with_name("p7_guest_environment.txt")
 _UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
+
+
+def _environment_names() -> tuple[str, ...]:
+    """Read the single non-sensitive guest environment contract."""
+
+    try:
+        names = tuple(
+            line.strip()
+            for line in _ENVIRONMENT_FILE.read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+    except (OSError, UnicodeError):
+        raise ValueError("guest environment contract unavailable") from None
+    if not names or len(names) != len(set(names)) or any(
+        not re.fullmatch(r"[A-Z][A-Z0-9_]+", name) for name in names
+    ):
+        raise ValueError("guest environment contract invalid")
+    return names
 
 
 def _unit(value: str) -> str:
@@ -51,7 +60,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     ]
     if seconds is not None:
         args.append(f"--property=RuntimeMaxSec={seconds}s")
-    for name in _ENVIRONMENT:
+    for name in _environment_names():
         value = os.environ.get(name)
         if value is None:
             continue
