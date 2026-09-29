@@ -3297,3 +3297,4 @@
 - 04:30 [d9cabbf0] 收拢 P7 host→Orb→systemd 的非敏感环境转发契约，避免 `.env` 的 provider/model 在 guest 白名单边界丢失；74 项 guest/make/sweep 回归与 lint 通过。
 - 04:34 [ad94bfb9] 让直接 `make` 入口也以 `.env` provider/model 覆盖旧终端导出，防止手工启动绕过调度器时再次选中旧模型；151 项聚焦回归与 lint 通过。
 - 05:47 [04df3d3a] 修复 saved-prefix replay 使用默认旧模型 identity 导致新模型 runtime_ready 失败；回放改用当前选择模型身份，新增回归测试。
+- 06:12 DC22 L3 新模型身份修复后的完整实跑 `p7-live-20260929214754-39760f6b63c8501487a6b6af`：GPT-6.1-Sol trace 全部同源，实际模型 usage 181 条；当前关卡 67/67 步，仍 L2，human-baseline/action-cap，RPC 正常、无取消或进程错误。按用户要求暂停后续关卡，转入通用题目套路/规则记忆设计。
