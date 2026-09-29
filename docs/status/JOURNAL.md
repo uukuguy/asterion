@@ -3279,3 +3279,4 @@
 - LF52 切换运行 `p7-live-20260929172311-23d229dbc197a98a322844c5` 因 guest 并发等待由操作者中止；仅记录取消证据（CancelledError、returncode 143、无 RPC error），不计入解题失败统计。
 - failure taxonomy repair：operator 为失败运行写入互斥的 bounded `failure_classification`（external_cancel、model_rpc_error、tool_error、action_cap、process_exit、cleanup_failure、application_failure），139 项聚焦测试与 lint 通过。
 - 分类回归修正：取消与清理同时异常时保留 `external_cancel` 为主因，并在 evidence 标记 `cleanup_failed`；集成取消测试通过。
+- LF52 分类实证 `p7-live-20260929180202-15adfbd1aa4bb60931e4a844`：guest launch 无 trace，运行由操作者中止；summary 正确写出 `failure_classification=external_cancel`、returncode 143、无 RPC error，不计入 P7 解题结果。
