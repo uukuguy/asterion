@@ -372,7 +372,7 @@ class _IpythonBridgeServer:
                 value = facade.act_checked(params["plan"])
             else:
                 return error_response()
-        except BaseException as exc:
+        except BaseException:
             self._method_failures[method] = min(
                 5000, self._method_failures.get(method, 0) + 1
             )
