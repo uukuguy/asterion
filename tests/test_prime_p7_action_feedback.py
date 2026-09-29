@@ -71,3 +71,26 @@ class TestP7ActionFeedback(unittest.TestCase):
 
         self.assertEqual(result["feedback"][0]["changed_cells"], [[0, 0, 0, 1]])
         self.assertNotIn("frame", result["feedback"][0])
+
+    def test_feedback_keeps_committed_prefix_when_terminal_game_over_stops_plan(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from tests.test_prime_p7_native_broker import _Engine
+
+        broker = ArcBroker(engine=_Engine(game_over_after=1))
+        broker.bind_history("run-terminal-feedback")
+        result = broker.act_checked([
+            {
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"state": "GAME_OVER"},
+            },
+            {
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"state": "GAME_OVER"},
+            },
+        ])
+
+        self.assertEqual(result["stop_reason"], "game-over")
+        self.assertEqual(result["applied_count"], 1)
+        self.assertEqual(len(result["feedback"]), 1)
+        self.assertEqual(result["feedback"][0]["stop_reason"], "game-over")
+        self.assertTrue(result["feedback"][0]["changed_cell_count"] >= 0)
