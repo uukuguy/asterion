@@ -200,6 +200,23 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(metadata["baseline_actions"], 2)
         self.assertEqual(metadata["optimized_actions"], 1)
 
+    def test_route_compression_proof_prompt_is_bounded_and_generic(self) -> None:
+        from asterion.applications.prime.p7.operator import _summarize_route_proofs
+        from asterion.applications.prime.p7.optimizer import (
+            PlannerAction, RouteCompressionProof,
+        )
+
+        proof = RouteCompressionProof(
+            "delete_span", 1, 2, (PlannerAction("ACTION2"),), (), (1,),
+            ("aa11-bb22", 0), 3, 2, "sha256:source", "sha256:candidate",
+            "sha256:prefix", "sha256:suffix", "WIN",
+        )
+        prompt = _summarize_route_proofs((proof,), target_level=1)
+        self.assertIn("Route compression evidence", prompt)
+        self.assertIn("delete_span", prompt)
+        self.assertNotIn("bp35", prompt.lower())
+        self.assertLessEqual(len(prompt.encode()), 16384)
+
     def test_live_optimizer_falls_back_when_offline_replay_fails(self) -> None:
         from asterion.applications.prime.p7.operator import _optimize_verified_route
 

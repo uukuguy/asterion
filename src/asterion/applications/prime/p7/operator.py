@@ -65,7 +65,11 @@ from asterion.applications.prime.p7.private_trace import (
 )
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
-from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate
+from asterion.applications.prime.p7.optimizer import (
+    PlannerAction,
+    RouteCandidate,
+    RouteCompressionProof,
+)
 from asterion.applications.prime.p7.optimizer_arc import optimize_arc_route
 from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
@@ -947,6 +951,59 @@ def _summarize_route_actions(
     )
 
 
+def _summarize_route_proofs(
+    proofs: tuple[RouteCompressionProof, ...], *, target_level: int
+) -> str:
+    """Expose bounded, replay-only route edit evidence without semantic claims."""
+
+    if type(proofs) is not tuple or not proofs or len(proofs) > 8:
+        return ""
+    values: list[dict[str, object]] = []
+    for proof in proofs:
+        if type(proof) is not RouteCompressionProof:
+            return ""
+        values.append({
+            "kind": proof.kind,
+            "source_start": proof.source_start,
+            "source_end": proof.source_end,
+            "before": [
+                {"name": action.name, "data": dict(action.data)}
+                for action in proof.before
+            ],
+            "after": [
+                {"name": action.name, "data": dict(action.data)}
+                for action in proof.after
+            ],
+            "removed_indices": list(proof.removed_indices),
+            "identity": {"game_id": proof.identity[0], "seed": proof.identity[1]},
+            "baseline_action_count": proof.baseline_action_count,
+            "candidate_action_count": proof.candidate_action_count,
+            "source_digest": proof.source_digest,
+            "candidate_digest": proof.candidate_digest,
+            "prefix_digest": proof.prefix_digest,
+            "suffix_digest": proof.suffix_digest,
+            "terminal_state": proof.terminal_state,
+            "candidate_witness": [
+                {
+                    "kind": witness.kind,
+                    "action_index": witness.action_index,
+                    "observation_sha256": witness.observation_sha256,
+                    "levels_completed": witness.levels_completed,
+                    "state": witness.state,
+                }
+                for witness in proof.candidate_witness
+            ],
+        })
+    value = (
+        f"## Route compression evidence for L{target_level}\n"
+        "Each item is a joint route edit verified by fresh replay. It is not a semantic claim about any action. "
+        "Use only if the current state and identity match; dispatch one action at a time through p7_act_checked, "
+        "verify each observation, and abandon the edit on any mismatch.\n"
+        + json.dumps(values, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
+    return value if len(value.encode("utf-8")) <= 16384 else ""
+
+
 def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
     """Expose a replay-verified route as a bounded hypothesis for the model."""
     transitions = _verified_route_transitions(prefix, target_level=target_level)
@@ -981,6 +1038,7 @@ def _optimize_verified_route(
         "optimized_actions": len(baseline),
         "candidates_replayed": 0,
         "removed_indices": [],
+        "proofs": [],
         "warmup_actions": len(warmup),
         "elapsed_seconds": 0.0,
         "timed_out": False,
@@ -1002,6 +1060,7 @@ def _optimize_verified_route(
             raise ValueError("invalid optimizer result")
         metadata["candidates_replayed"] = candidate.candidates_replayed
         metadata["removed_indices"] = list(candidate.removed_indices)
+        metadata["proofs"] = [proof.kind for proof in candidate.proofs]
         metadata["elapsed_seconds"] = candidate.elapsed_seconds
         metadata["timed_out"] = candidate.timed_out
         if (
@@ -1016,9 +1075,14 @@ def _optimize_verified_route(
                 candidate.actions, target_level=target_level, optimized=True
             )
             if optimized_hint:
+                proof_hint = _summarize_route_proofs(
+                    candidate.proofs, target_level=target_level
+                )
                 metadata["status"] = "optimized"
                 metadata["optimized_actions"] = len(candidate.actions)
-                return optimized_hint, metadata
+                return "\n\n".join(
+                    item for item in (optimized_hint, proof_hint) if item
+                ), metadata
     except Exception as error:
         metadata["status"] = "fallback-error"
         metadata["error_type"] = type(error).__name__
@@ -1765,6 +1829,7 @@ async def run_live(
             "optimized_actions": 0,
             "candidates_replayed": 0,
             "removed_indices": [],
+            "proofs": [],
             "warmup_actions": 0,
             "elapsed_seconds": 0.0,
             "timed_out": False,

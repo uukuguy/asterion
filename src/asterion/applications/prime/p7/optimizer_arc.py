@@ -6,9 +6,21 @@ from collections.abc import Callable
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from .broker import ArcAction, _canonical_action, _engine_identity, _snapshot_observation
+from .broker import (
+    ArcAction,
+    _canonical_action,
+    _engine_identity,
+    _observation_digest,
+    _snapshot_observation,
+)
 from .game import P7GameSelection
-from .optimizer import PlannerAction, RouteResult, RouteCandidate, optimize_route
+from .optimizer import (
+    ObservationWitness,
+    PlannerAction,
+    RouteCandidate,
+    RouteResult,
+    optimize_route,
+)
 from .replay import _step
 
 
@@ -37,6 +49,7 @@ class ArcReplayOracle:
         identity = (self.game.game_id, self.game.seed)
         count = 0
         state = "UNAVAILABLE"
+        observation_witness: list[ObservationWitness] = []
         engine = None
         try:
             if (
@@ -48,6 +61,12 @@ class ArcReplayOracle:
             _engine_identity(engine, self.game)
             current = _snapshot_observation(engine.observe(), win_levels=self.game.win_levels)
             state = current.state
+            observation_witness.append(
+                ObservationWitness(
+                    "initial", 0, _observation_digest(current),
+                    current.levels_completed, current.state,
+                )
+            )
             if current.levels_completed != 0 or state != "NOT_FINISHED":
                 raise ValueError
             level_actions = 0
@@ -65,6 +84,12 @@ class ArcReplayOracle:
                 )
                 if count_action:
                     count += 1
+                    observation_witness.append(
+                        ObservationWitness(
+                            "candidate", count, _observation_digest(current),
+                            current.levels_completed, current.state,
+                        )
+                    )
                 state = current.state
                 if canonical.name == "RESET":
                     if level_actions == 0 or current.levels_completed != previous.levels_completed or state != "NOT_FINISHED":
@@ -81,6 +106,13 @@ class ArcReplayOracle:
 
             for action in self.warmup:
                 apply(action, count_action=False)
+            if self.warmup:
+                observation_witness.append(
+                    ObservationWitness(
+                        "warmup-boundary", 0, _observation_digest(current),
+                        current.levels_completed, current.state,
+                    )
+                )
             if (
                 self.warmup
                 and current.levels_completed != self.game.target_level - 1
@@ -99,9 +131,13 @@ class ArcReplayOracle:
                 and state != "GAME_OVER"
                 and (not self.game.is_full_game or state == "WIN")
             )
-            return RouteResult(success, count, state, identity)
+            return RouteResult(
+                success, count, state, identity, tuple(observation_witness)
+            )
         except BaseException:
-            return RouteResult(False, count, state, identity)
+            return RouteResult(
+                False, count, state, identity, tuple(observation_witness)
+            )
         finally:
             if engine is not None:
                 try:

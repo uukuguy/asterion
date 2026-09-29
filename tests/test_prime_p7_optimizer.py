@@ -9,6 +9,7 @@ from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.optimizer import (
     PlannerAction,
     RouteResult,
+    RouteCompressionProof,
     optimize_route,
 )
 from asterion.applications.prime.p7.optimizer_arc import ArcReplayOracle
@@ -83,6 +84,36 @@ class MultiLevelFakeEngine:
 
 
 class TestRouteOptimizer(unittest.TestCase):
+    def test_route_compression_proof_for_joint_delete(self) -> None:
+        route = (A, C, B)
+        oracle = TableOracle({route, (A, B)})
+        result = optimize_route(route, oracle, identity=(GAME.game_id, GAME.seed), candidate_budget=8)
+        self.assertEqual(len(result.proofs), 1)
+        proof = result.proofs[0]
+        self.assertIsInstance(proof, RouteCompressionProof)
+        self.assertEqual(proof.kind, "delete_span")
+        self.assertEqual(proof.removed_indices, (1,))
+        self.assertEqual(proof.baseline_action_count, 3)
+        self.assertEqual(proof.candidate_action_count, 2)
+        self.assertEqual(proof.identity, (GAME.game_id, GAME.seed))
+
+    def test_route_compression_proof_classifies_noncontiguous_delete_as_composite(self) -> None:
+        route = (A, B, C, PlannerAction("ACTION4"))
+        candidate = (B, C)
+        oracle = TableOracle({route, candidate})
+        result = optimize_route(route, oracle, identity=(GAME.game_id, GAME.seed), candidate_budget=32, max_removed=2)
+        self.assertEqual(result.actions, candidate)
+        self.assertEqual(result.proofs[0].kind, "composite")
+        self.assertEqual(result.proofs[0].removed_indices, (0, 3))
+
+    def test_optimizer_can_find_adjacent_reorder_with_deletion(self) -> None:
+        route = (A, B, C)
+        candidate = (B, A)
+        oracle = TableOracle({route, candidate})
+        result = optimize_route(route, oracle, identity=(GAME.game_id, GAME.seed), candidate_budget=64, max_removed=1)
+        self.assertEqual(result.actions, candidate)
+        self.assertEqual(result.proofs[0].kind, "composite")
+
     def test_finds_shorter_route_after_fresh_verification(self) -> None:
         route = (A, C, B)
         oracle = TableOracle({route, (A, B)})
@@ -206,7 +237,17 @@ class TestRouteOptimizer(unittest.TestCase):
             warmup=(PlannerAction("ACTION1"),),
         )
         result = oracle.replay((PlannerAction("ACTION2"),))
-        self.assertEqual(result, RouteResult(True, 1, "WIN", (game.game_id, game.seed)))
+        self.assertTrue(result.success)
+        self.assertEqual(
+            result,
+            RouteResult(
+                True, 1, "WIN", (game.game_id, game.seed), result.observation_witness
+            ),
+        )
+        self.assertEqual(
+            tuple(item.kind for item in result.observation_witness),
+            ("initial", "warmup-boundary", "candidate"),
+        )
         self.assertTrue(engines[0].closed)
 
     def test_arc_oracle_counts_warmup_against_total_action_cap(self) -> None:

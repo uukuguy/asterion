@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
+import difflib
+import hashlib
+import json
 import math
 import time
 from typing import Protocol
@@ -16,11 +19,41 @@ class PlannerAction:
 
 
 @dataclass(frozen=True, slots=True)
+class ObservationWitness:
+    kind: str
+    action_index: int
+    observation_sha256: str
+    levels_completed: int
+    state: str
+
+
+@dataclass(frozen=True, slots=True)
 class RouteResult:
     success: bool
     action_count: int
     terminal_state: str
     identity: tuple[str, int]
+    observation_witness: tuple[ObservationWitness, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class RouteCompressionProof:
+    kind: str
+    source_start: int
+    source_end: int
+    before: tuple[PlannerAction, ...]
+    after: tuple[PlannerAction, ...]
+    removed_indices: tuple[int, ...]
+    identity: tuple[str, int]
+    baseline_action_count: int
+    candidate_action_count: int
+    source_digest: str
+    candidate_digest: str
+    prefix_digest: str
+    suffix_digest: str
+    terminal_state: str
+    baseline_witness: tuple[ObservationWitness, ...] = ()
+    candidate_witness: tuple[ObservationWitness, ...] = ()
 
 
 class ReplayOracle(Protocol):
@@ -35,6 +68,66 @@ class RouteCandidate:
     candidates_replayed: int
     elapsed_seconds: float = 0.0
     timed_out: bool = False
+    proofs: tuple[RouteCompressionProof, ...] = ()
+
+
+def _route_digest(actions: tuple[PlannerAction, ...]) -> str:
+    encoded = [
+        {"name": action.name, "data": dict(action.data)} for action in actions
+    ]
+    return "sha256:" + hashlib.sha256(
+        json.dumps(encoded, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _compression_proof(
+    baseline: tuple[PlannerAction, ...],
+    candidate: tuple[PlannerAction, ...],
+    baseline_result: RouteResult,
+    replay: RouteResult,
+    identity: tuple[str, int],
+) -> RouteCompressionProof | None:
+    matcher = difflib.SequenceMatcher(a=baseline, b=candidate, autojunk=False)
+    opcodes = matcher.get_opcodes()
+    changed = [opcode for opcode in opcodes if opcode[0] != "equal"]
+    if not changed:
+        return None
+    removed = tuple(
+        index
+        for tag, start, end, _new_start, _new_end in changed
+        if tag in {"delete", "replace"}
+        for index in range(start, end)
+    )
+    if not removed:
+        return None
+    spans = [(start, end) for _tag, start, end, _ns, _ne in changed]
+    kind = "delete_span" if all(tag == "delete" for tag, *_rest in changed) and len(spans) == 1 else "composite"
+    first_start = min(start for start, _end in spans)
+    last_end = max(end for _start, end in spans)
+    prefix = baseline[:first_start]
+    suffix = baseline[last_end:]
+    return RouteCompressionProof(
+        kind=kind,
+        source_start=first_start,
+        source_end=last_end,
+        before=baseline[first_start:last_end],
+        after=tuple(
+            action
+            for _tag, start, end, new_start, new_end in changed
+            for action in candidate[new_start:new_end]
+        ),
+        removed_indices=removed,
+        identity=identity,
+        baseline_action_count=len(baseline),
+        candidate_action_count=len(candidate),
+        source_digest=_route_digest(baseline),
+        candidate_digest=_route_digest(candidate),
+        prefix_digest=_route_digest(prefix),
+        suffix_digest=_route_digest(suffix),
+        terminal_state=replay.terminal_state,
+        baseline_witness=baseline_result.observation_witness,
+        candidate_witness=replay.observation_witness,
+    )
 
 
 def optimize_route(
@@ -91,6 +184,7 @@ def optimize_route(
     if not valid(baseline, route):
         raise ValueError("verified baseline is unavailable")
     best = RouteCandidate(route, baseline, (), 1)
+    best_proofs: tuple[RouteCompressionProof, ...] = ()
     replayed = 1
     seen = {route}
 
@@ -116,6 +210,7 @@ def optimize_route(
             replayed,
             timeout_elapsed if timeout_elapsed is not None else 0.0,
             True,
+            best_proofs,
         )
 
     def candidates():
@@ -142,6 +237,19 @@ def optimize_route(
                                 for offset, (_source, item) in enumerate(remaining)
                             )
                             yield candidate, removed
+        # Adjacent reorder combined with one deletion.  This is deliberately
+        # structural: the replay oracle, not action names, decides validity.
+        for index in range(len(route) - 1):
+            swapped = list(route)
+            swapped[index], swapped[index + 1] = swapped[index + 1], swapped[index]
+            for removed in combinations(
+                (item for item in range(len(route)) if item not in {index, index + 1}),
+                1,
+            ):
+                candidate = tuple(
+                    action for position, action in enumerate(swapped) if position not in removed
+                )
+                yield candidate, removed
 
     for candidate, removed in candidates():
         if replayed >= candidate_budget:
@@ -156,6 +264,8 @@ def optimize_route(
         replayed += 1
         if valid(replay, candidate) and len(candidate) < len(best.actions):
             best = RouteCandidate(candidate, replay, removed, replayed)
+            proof = _compression_proof(route, candidate, baseline, replay, identity)
+            best_proofs = () if proof is None else (proof,)
     elapsed_seconds = (
         timeout_elapsed
         if timeout_elapsed is not None
@@ -168,7 +278,11 @@ def optimize_route(
         replayed,
         elapsed_seconds,
         budget_exhausted,
+        best_proofs,
     )
 
 
-__all__ = ("PlannerAction", "ReplayOracle", "RouteCandidate", "RouteResult", "optimize_route")
+__all__ = (
+    "ObservationWitness", "PlannerAction", "ReplayOracle", "RouteCandidate",
+    "RouteCompressionProof", "RouteResult", "optimize_route",
+)
