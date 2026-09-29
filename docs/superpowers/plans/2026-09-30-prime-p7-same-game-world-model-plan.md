@@ -142,6 +142,7 @@
 **Files:**
 - Modify: `src/asterion/applications/prime/p7/ipython_host.py`
 - Modify: `src/asterion/applications/prime/p7/live.py`
+- Modify: `src/asterion/applications/prime/resources/ipython-extension.mjs`
 - Modify: `src/asterion/applications/prime/p7/operator.py`
 - Modify: `src/asterion/applications/prime/p7/prompt.py`
 - Modify: `tests/test_prime_p7_bridge_dispatch.py`
@@ -154,10 +155,10 @@
 
 - [ ] **Step 1: Add failing bridge tests** for successful typed dispatch, unknown arguments, oversized projections, and worker-facing alias behavior.
 - [ ] **Step 2: Run** `uv run python -m unittest -v tests.test_prime_p7_bridge_dispatch tests.test_prime_p7_live_command`; expect failures.
-- [ ] **Step 3: Implement** sealed facade methods, live RPC allow-list/arity checks, generated helper functions, and operator tool registration. Cap each serialized section before the 16 KiB host boundary.
+- [ ] **Step 3: Implement** sealed facade methods, live RPC allow-list/arity checks, generated helper functions, and operator tool registration. Register every new tool in the P7 application chain: `P7ToolRegistry`, `P7_APPLICATION_TOOL_NAMES`, `ipython_host.py`, `live.py`, and `resources/ipython-extension.mjs`. Cap each serialized section before the 16 KiB host boundary.
 - [ ] **Step 4: Replace the prompt’s fixed ACTION1–ACTION7 meanings** with instructions to infer mappings from `available_actions`, confirmed mechanics, and action feedback. Keep generic examples using symbolic action names only.
 - [ ] **Step 5: Update prompt tests** to require retrodiction before batch use, confirmed-vs-hypothesis language, first-conflict stop behavior, same-game Playbook reuse, and absence of BP35/DC22-specific text.
-- [ ] **Step 6: Run** focused bridge/live tests and commit `git add src/asterion/applications/prime/p7/ipython_host.py src/asterion/applications/prime/p7/live.py src/asterion/applications/prime/p7/operator.py src/asterion/applications/prime/p7/prompt.py tests/test_prime_p7_bridge_dispatch.py tests/test_prime_p7_live_command.py && git commit -m "feat(p7): expose bounded world model context"`.
+- [ ] **Step 6: Run** focused bridge/live/extension tests and commit `git add src/asterion/applications/prime/p7/ipython_host.py src/asterion/applications/prime/p7/live.py src/asterion/applications/prime/resources/ipython-extension.mjs src/asterion/applications/prime/p7/operator.py src/asterion/applications/prime/p7/prompt.py tests/test_prime_p7_bridge_dispatch.py tests/test_prime_p7_live_command.py && git commit -m "feat(p7): expose bounded world model context"`.
 
 ### Task 6: Gate offline optimizer candidates with retrodiction and expectations
 
