@@ -3305,3 +3305,4 @@
 - 06:45 计划明确唯一模型写入口为受限 hypothesis 提交，确认只能由动作证据升级 [bd3ed16f]
 - 07:00 WorldFact values recursively immutable; nested mutation regression and fix report recorded [c36482d6, ca1a7ec7]
 - 07:06 Task 2 report history restored from f0671e09; transition gate verification recorded [5ae4cc74]
+- 07:13 TransitionModel 回放门补齐 after-state 摘要与严格 action/cell 校验，拒绝篡改证据 [ae5baa76]
