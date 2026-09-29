@@ -285,3 +285,22 @@ and validates import/export dependency grammar independently of whitespace.
 - Independent scoped review reproduced the dependency matrix and returned
   CLEAN, with no correctness, security, regression, or maintainability
   findings.
+
+## Task 3: bounded same-game Playbook persistence
+
+Implemented `src/asterion/applications/prime/p7/playbook.py` and focused tests in
+`tests/test_prime_p7_playbook.py`.
+
+- Added exact `PlaybookKey` identity, immutable `PlaybookSnapshot`, checked routes,
+  level memory, evidence digest index, and isolated branch records.
+- Added completion capture that copies confirmed facts before per-level world state
+  refresh; raw frame/action evidence and unchecked hypotheses are rejected.
+- Added canonical bounded JSON under `.asterion-private/prime-p7-live/playbooks`,
+  regular-file and symlink checks, `0600` permissions, fsynced temporary sibling
+  writes with atomic replacement, deterministic ordering, and exact identity checks.
+
+Verification:
+
+- `uv run python -m unittest -v tests.test_prime_p7_playbook` — 8 tests passed.
+- `uv run ruff check src/asterion/applications/prime/p7/playbook.py tests/test_prime_p7_playbook.py` — passed.
+- `git diff --check` — passed.
