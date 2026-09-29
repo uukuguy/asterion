@@ -389,3 +389,9 @@ task-cancellation propagation.
 Commit `5f6e8455` added the bounded declarative mechanism model. The follow-up fix keeps mapping and array values distinct during immutable storage, allows an empty rule set to return `unknown`, caps rules/guards/effects/spec bytes, validates prediction deltas, and prevents directly constructed certificates from becoming planner-eligible without broker issuance.
 
 Verification: `uv run python -m unittest -v tests.test_prime_p7_native_broker.TestP7MechanismModel` — 4 tests passed; Ruff and `git diff --check` passed.
+
+## Task 4 broker lifecycle slice — 2026-09-30
+
+The broker now accepts an identity-checked `WorldModelStore`, records bounded transition evidence, exposes immutable world/transition/playbook projections, and returns bounded retrodiction/conflict fields from `act_checked`. The P7 operator injects the same-game store and emits scalar model diagnostics without private frames or fact values.
+
+Verification: 50 native broker tests plus WorldModel/TransitionModel/Playbook suites (77 total) passed; Ruff and `git diff --check` passed.

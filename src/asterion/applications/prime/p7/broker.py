@@ -8,7 +8,9 @@ from typing import Callable, Mapping, Protocol, cast
 
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
+from .transition_model import TransitionModel
 from .verified_history import ArcHistoryRecord, ArcPredictionError, validate_history_query, validate_prediction
+from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
 
 
 class ArcBrokerError(RuntimeError):
@@ -228,6 +230,7 @@ class ArcBroker:
         *,
         engine: object,
         game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
+        world_model: WorldModelStore | None = None,
     ) -> None:
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
@@ -245,6 +248,17 @@ class ArcBroker:
             raise ArcBrokerError("unavailable") from None
         self._engine = typed_engine
         self._game = game
+        if world_model is not None and (
+            type(world_model) is not WorldModelStore
+            or world_model.snapshot.game_id != game.game_id
+            or world_model.snapshot.seed != game.seed
+            or world_model.snapshot.win_levels != game.win_levels
+        ):
+            raise ArcBrokerError("unavailable")
+        self._world_model = world_model
+        self._transition_model: TransitionModel | None = None
+        self._playbook_projection: dict[str, object] = {}
+        self._world_evidence: list[EvidenceRef] = []
         self._initial = initial
         self._current = initial
         self._journal: list[ArcTransition] = []
@@ -272,6 +286,51 @@ class ArcBroker:
     @property
     def game(self) -> P7GameSelection | ArcGameContract:
         return self._game
+
+    def world_model(self) -> WorldModelSnapshot | None:
+        """Return the immutable private model snapshot for application wiring."""
+
+        return None if self._world_model is None else self._world_model.snapshot
+
+    def transition_model(self) -> TransitionModel | None:
+        """Return the last replay-validated transition model, if available."""
+
+        return self._transition_model
+
+    def world_evidence(self) -> tuple[EvidenceRef, ...]:
+        """Return immutable evidence references recorded for accepted transitions."""
+
+        return tuple(self._world_evidence)
+
+    def playbook_projection(self) -> dict[str, object]:
+        """Return a detached bounded playbook projection."""
+
+        return json.loads(json.dumps(self._playbook_projection, separators=(",", ":")))
+
+    def set_playbook_projection(self, projection: Mapping[str, object]) -> None:
+        """Install an application-owned bounded projection without exposing mutability."""
+
+        if not isinstance(projection, Mapping):
+            raise ArcBrokerError("unavailable")
+        encoded = json.dumps(dict(projection), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > 8192:
+            raise ArcBrokerError("unavailable")
+        self._playbook_projection = json.loads(encoded)
+
+    def _record_world_evidence(self, record: ArcHistoryRecord) -> None:
+        if self._world_model is None:
+            return
+        try:
+            self._world_evidence.append(EvidenceRef(
+                frame_id=f"frame-{record.sequence}",
+                action_id=None if record.action is None else f"action-{record.sequence}",
+                source_run=record.run_id,
+                summary_hash=record.after_state_sha256.removeprefix("sha256:"),
+            ))
+            self._world_model.refresh_level(min(record.levels_completed, self._game.win_levels - 1))
+            self._transition_model = TransitionModel.from_history(self._bound_history(), world=self._world_model.snapshot)
+        except (ArcPredictionError, ValueError):
+            self._transition_model = None
 
     def bind_history(self, run_id: str) -> None:
         if (
@@ -439,6 +498,11 @@ class ArcBroker:
             "batch": result,
             "feedback": feedback,
             "unexecuted_count": len(plan) - result.applied_count,
+            "retrodiction": {
+                "status": "verified" if self._transition_model is not None else "unavailable",
+                "records_checked": len(records),
+            },
+            "conflict": mismatch,
         }
 
     def _require_open(self) -> None:
@@ -557,6 +621,7 @@ class ArcBroker:
                     self._terminal_reason = "engine-invalid"
                     raise ArcBrokerError("unavailable") from None
                 self._history.append(record)
+                self._record_world_evidence(record)
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after

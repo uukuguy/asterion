@@ -131,6 +131,26 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_world_model_and_transition_model_are_updated_after_bound_transition(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine()
+        world = WorldModelStore(engine.game_id, engine.seed, engine.win_levels)
+        broker = ArcBroker(engine=engine, world_model=world)
+        broker.bind_history("run-1")
+        result = broker.act_checked([
+            {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
+        ])
+        self.assertEqual(result["applied_count"], 1)
+        self.assertEqual(result["retrodiction"]["status"], "verified")
+        self.assertIsNotNone(broker.world_model())
+        self.assertIsNotNone(broker.transition_model())
+        self.assertEqual(len(broker.world_evidence()), 1)
+        projection = broker.playbook_projection()
+        projection["mutated"] = True
+        self.assertNotIn("mutated", broker.playbook_projection())
+
     def test_retry_guard_stops_checked_batch_on_settled_no_effect(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
 

@@ -49,6 +49,7 @@ from asterion.applications.prime.p7.ipython_host import (
     p7_client_facade,
 )
 from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
+from asterion.applications.prime.p7.world_model import WorldModelStore
 from asterion.applications.prime.p7 import live
 from asterion.applications.prime.p7.model_selection import (
     DEFAULT_MODEL,
@@ -1690,6 +1691,7 @@ def build_p7_operator_resources(
         broker = ArcBroker(
             engine=engine,
             game=game,
+            world_model=WorldModelStore(game.game_id, game.seed, game.win_levels),
         )
         history_run_id = private_trace_root.parent.name
         if (
@@ -2165,6 +2167,19 @@ async def run_live(
                         "target_level": invocation.game.target_level,
                         "terminal_reason": status.terminal_reason,
                     }
+                    world_snapshot = broker_value.world_model()
+                    transition_model = broker_value.transition_model()
+                    diagnostics["world_model_version"] = (
+                        None if world_snapshot is None else world_snapshot.version
+                    )
+                    diagnostics["retrodiction_status"] = (
+                        "verified" if transition_model is not None else "unavailable"
+                    )
+                    diagnostics["conflict_count"] = (
+                        0 if world_snapshot is None else len(world_snapshot.conflicts)
+                    )
+                    diagnostics.setdefault("playbook_loaded", False)
+                    diagnostics.setdefault("playbook_saved", False)
                 except Exception:
                     pass
                 if broker_receipt is None:
