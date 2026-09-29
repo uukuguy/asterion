@@ -3258,3 +3258,4 @@
 - 16:48 [d07d2c75] 修正 warm-start replay 的总 action cap 计数，防止前缀与候选合计越界。
 - 17:02 [12f5885c] 修复优化候选计数、防止软预算误报，并要求多级路线与实际 live 前缀同源。
 - 17:24 [a6fcee79] 捕获 asyncio.CancelledError 并封存已验证前缀，修复 supervisor 超时 summary 有但 trace 未封存。
+- 17:48 BP35 L2 修复后重跑触发 66 总动作上限，L2 48 步仍停 L1；partial/replay/seal/cleanup 全通过，解题未通关。
