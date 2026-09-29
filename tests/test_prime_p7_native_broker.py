@@ -781,3 +781,78 @@ class TestP7ToolRegistry(unittest.TestCase):
 class P7ToolRegistry_shim:
     def render_section(self) -> str:
         return ""
+
+
+class TestP7MechanismModel(unittest.TestCase):
+    def test_declarative_cell_rule_predicts_and_certifies_full_history(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction
+        from asterion.applications.prime.p7.mechanism_model import (
+            MechanismRule,
+            MechanismSpec,
+            ModelCertificate,
+            validate_mechanism,
+        )
+        from asterion.applications.prime.p7.score import digest
+        from asterion.applications.prime.p7.verified_history import ArcHistoryRecord
+
+        initial = ArcHistoryRecord.initial(
+            game_id="game",
+            seed=1,
+            run_id="run",
+            frame=((0,),),
+            levels_completed=0,
+            state="NOT_FINISHED",
+            after_state_sha256=digest("before"),
+        )
+        record = ArcHistoryRecord.following(
+            initial,
+            action=ArcAction("ACTION1"),
+            before_state_sha256=initial.after_state_sha256,
+            after_state_sha256=digest("after"),
+            frame=((1,),),
+            levels_completed=0,
+            state="NOT_FINISHED",
+        )
+        spec = MechanismSpec(
+            game_id="game",
+            seed=1,
+            win_levels=2,
+            rules=(
+                MechanismRule(
+                    action="ACTION1",
+                    guards=(
+                        ("state_is", "NOT_FINISHED"),
+                        ("level_is", 0),
+                        ("cell_equals", {"x": 0, "y": 0, "value": 0}),
+                    ),
+                    effects=(("set_cell", {"x": 0, "y": 0, "value": 1}),),
+                ),
+            ),
+        )
+
+        prediction = spec.predict(
+            frame=((0,),),
+            action=ArcAction("ACTION1"),
+            level=0,
+            state="NOT_FINISHED",
+        )
+        self.assertEqual(prediction.status, "predicted")
+        self.assertEqual(prediction.frame, ((1,),))
+        certificate = validate_mechanism(spec, (initial, record))
+        self.assertIsInstance(certificate, ModelCertificate)
+        self.assertEqual(certificate.coverage, "mechanism-retrodicted")
+
+    def test_mechanism_rules_are_canonical_bounded_and_reject_code_like_effects(self) -> None:
+        from asterion.applications.prime.p7.mechanism_model import MechanismRule, MechanismSpec
+
+        rule = MechanismRule(
+            action="ACTION1",
+            guards=(("cell_in_bounds", {"x": 0, "y": 0}),),
+            effects=(("toggle_cell", {"x": 0, "y": 0, "values": (0, 1)}),),
+        )
+        spec = MechanismSpec("game", 1, 2, (rule,))
+        self.assertEqual(spec.to_json(), spec.to_json())
+        with self.assertRaises(ValueError):
+            MechanismRule("ACTION1", (("eval", "1 + 1"),), ())
+        with self.assertRaises(ValueError):
+            MechanismSpec("game", 1, 2, tuple(rule for _ in range(129)))
