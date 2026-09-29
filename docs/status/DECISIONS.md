@@ -800,3 +800,9 @@
 - Decision: During live level-solving experiments, stop dispatching new levels after at most three consecutive non-success outcomes. Stop earlier whenever traces expose a reproducible mechanism defect or a concrete generic improvement opportunity. Repair and verify the mechanism before resuming level attempts.
 - Rationale: BP35 L2 and G50T L2 exposed repeated L2 long-reasoning, RESET, and timeout behavior without a sealed terminal result. Continuing blindly would spend budget without improving evidence or capability.
 - Consequence: Each attempt must be classified as verified success, verified non-success, or unverified evidence failure; only verified success advances the streak reset. Mechanism repair becomes the next task when the threshold or early-stop condition is reached.
+
+## D-2026-09-30-01 — Default to breadth-first level progression
+
+- Status: 🟢 active.
+- Decision: When no explicit per-game score or step target is active, solve breadth-first: establish replay-verified L1 prefixes across games, then advance those prefixes to L2 in the same queue order. Do not repeatedly deepen one game unless a generic mechanism defect or improvement is being tested.
+- Rationale: Broad coverage gives more independent evidence about framework and P7 capability while respecting the three-failure circuit breaker.
