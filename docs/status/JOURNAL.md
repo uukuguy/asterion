@@ -3269,3 +3269,5 @@
 - 19:22 BP35 L1 路线采用实跑：`p7-live-20260929103636-7b835a931990133730125d01` PASS，18 步已验证路线经 fresh ARC 优化为 16 步；P7 实际 16/16 跟随、首个偏离为空、达到 L1，replay/seal/cleanup 全通过。
 - 19:34 [78ead160] 增加通用未通关路线压缩：仅当候选重放保持相同终态 observation witness 才接受，结果标记为 partial hypothesis，不冒充成功路线；优化器测试与 lint 通过。
 - 19:45 BP35 L2 next-level 运行：复用 16 步 L1 前缀，L2 新动作 25 个、总动作 41 个，仍停留 L1；Pi RPC 异常退出后 trace/replay/seal/cleanup 完成，但 next-level manifest 为 `execution-stalled-evidence-invalid`，未计通关。
+- 19:52 [1260e6f9] 新增 VerifiedAttempt 加载器，严格验证失败路线的封存、身份、录制一致性与 fresh replay，避免误用为通关前缀。
+- 20:01 [ae620678] 将 VerifiedAttempt 接入通用 P7 探索提示，并为 fresh replay 增加 replay_complete 边界；92 项聚焦测试、compileall、ruff、diff-check 通过。
