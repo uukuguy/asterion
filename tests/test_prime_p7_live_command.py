@@ -606,6 +606,27 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual([entry.kind for entry in recorder.snapshot()], ["arc.action"])
             recorder.close()
 
+    def test_terminal_status_and_observe_are_readable_after_action_cap(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(
+                engine=_HistoryEngine(),
+                game=P7GameSelection("ls20-9607627b", 0, 1, action_cap_override=1),
+            )
+            broker.bind_history("run-1")
+            client = _P7BrokerClient(broker, recorder)
+            client.act([{"name": "ACTION1", "data": {}}])
+            with self.assertRaises(ArcBrokerError):
+                broker.status()
+            self.assertEqual(client.status()["terminal_reason"], "human-baseline")
+            self.assertEqual(client.observe()["terminal_reason"], "human-baseline")
+            recorder.close()
+
     def test_socket_returns_multiframe_action_result_over_history_page_cap(self) -> None:
         from asterion.applications.prime.p7.ipython_host import p7_client_facade
 

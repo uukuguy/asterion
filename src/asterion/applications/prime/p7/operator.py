@@ -506,6 +506,14 @@ class _P7BrokerClient:
     def route_adoption(self) -> dict[str, object]:
         return self._route_adoption.summary()
 
+    def _observation_and_status(self) -> tuple[ArcObservation, ArcStatus]:
+        """Serve the final immutable broker snapshot after terminal closure."""
+        try:
+            return self._broker.observe(), self._broker.status()
+        except ArcBrokerError:
+            snapshot = self._broker.terminal_snapshot()
+            return snapshot.observation, snapshot.status
+
     def history(self, start: int, limit: int) -> list[dict[str, object]]:
         try:
             if type(start) is not int or type(limit) is not int:
@@ -665,8 +673,7 @@ class _P7BrokerClient:
             )
 
     def observe(self) -> Mapping[str, object]:
-        observation = self._broker.observe()
-        status = self._broker.status()
+        observation, status = self._observation_and_status()
         # Auto-inject tried-summary so the model can see no-effect state on
         # every observe call, not only inside act_checked responses. Targets
         # the L3 failure mode where the model loops on the same (action,
@@ -699,7 +706,7 @@ class _P7BrokerClient:
 
 
     def status(self) -> Mapping[str, object]:
-        status = self._broker.status()
+        _, status = self._observation_and_status()
         return {
             "actions_remaining": status.actions_remaining,
             "levels_completed": status.levels_completed,
