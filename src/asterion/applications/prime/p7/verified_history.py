@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 from typing import TYPE_CHECKING
+import copy
 
 from .score import digest
 
@@ -304,3 +305,24 @@ class ArcHistoryRecord:
             "levels_completed": self.levels_completed,
             "state": self.state,
         }
+
+
+def transition_observation(record: ArcHistoryRecord) -> dict[str, object]:
+    """Return a detached, private observation for the retrodiction evaluator."""
+    if type(record) is not ArcHistoryRecord:
+        raise ArcPredictionError
+    return {
+        "sequence": record.sequence,
+        "action": record.action,
+        "data": tuple(record.data),
+        "before_state_sha256": record.before_state_sha256,
+        "after_state_sha256": record.after_state_sha256,
+        "before_frame_sha256": record.before_frame_sha256,
+        "after_frame_sha256": record.after_frame_sha256,
+        "frame": copy.deepcopy(record.frame),
+        "changed_cell_count": record.changed_cell_count,
+        "changed_cells": tuple(record.changed_cells),
+        "changed_cells_omitted": record.changed_cells_omitted,
+        "levels_completed": record.levels_completed,
+        "state": record.state,
+    }
