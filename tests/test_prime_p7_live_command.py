@@ -1422,6 +1422,97 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             assert prefix is not None
             self.assertEqual((prefix.levels_completed, len(prefix.transitions)), (1, 2))
 
+    def test_run_live_cancellation_seals_completed_prefix(self) -> None:
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import (
+            P7Invocation, P7LiveAttemptFailure, _P7BrokerClient, run_live,
+        )
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+        from tests.test_prime_p7_solutions import _Engine
+
+        class Worker:
+            closed = False
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            game = P7GameSelection("ls20-9607627b", 0, 7)
+            worker = Worker()
+            client = None
+
+            def build_resources(**kwargs: object) -> SimpleNamespace:
+                nonlocal client
+                broker = ArcBroker(engine=kwargs["engine"], game=game)
+                evidence = P7PrivateTraceReceipt(
+                    broker, PrimeTraceRecorder(kwargs["private_trace_root"])
+                )
+                client = _P7BrokerClient(broker, evidence.runtime_recorder, variant="legacy")
+
+                async def close_resources() -> None:
+                    evidence.close()
+                    worker.closed = True
+
+                return SimpleNamespace(
+                    runtime_options={},
+                    host_services={
+                        "prime.arc-broker": broker,
+                        "prime.private-trace": evidence,
+                    },
+                    close=close_resources,
+                )
+
+            async def composed(*args: object, **kwargs: object) -> None:
+                assert client is not None
+                client.act([{"name": "ACTION1", "data": {}}] * 2)
+                client.act([{"name": "ACTION1", "data": {}}])
+                raise asyncio.CancelledError("supervisor timeout")
+
+            assembly = SimpleNamespace(
+                runtime_binding=SimpleNamespace(factory=lambda context: object()),
+                path=root,
+                plan=object(),
+            )
+            application = SimpleNamespace(assemblies=[assembly], implementations=())
+            invocation = P7Invocation(root, {}, root, (), root, game)
+            with (
+                mock.patch(
+                    "asterion.applications.prime.p7.operator.live.SubprocessPythonWorker",
+                    return_value=worker,
+                ),
+                mock.patch(
+                    "asterion.applications.prime.p7.operator.live.ArcadeEngine",
+                    side_effect=lambda **_: _Engine(),
+                ),
+                mock.patch(
+                    "asterion.applications.prime.p7.operator.build_p7_operator_resources",
+                    side_effect=build_resources,
+                ),
+                mock.patch(
+                    "asterion.applications.prime.p7.operator._resolve_p7_application",
+                    return_value=application,
+                ),
+                mock.patch(
+                    "asterion.applications.prime.p7.operator.run_composed_application",
+                    new_callable=mock.AsyncMock,
+                    side_effect=composed,
+                ),
+                mock.patch(
+                    "asterion.applications.prime.p7.operator.live.worker_cell_count",
+                    return_value=0,
+                ),
+                contextlib.redirect_stderr(io.StringIO()),
+            ):
+                with self.assertRaises(P7LiveAttemptFailure) as caught:
+                    asyncio.run(run_live(invocation, "p7-live-cancelled"))
+
+            failure = caught.exception
+            self.assertTrue(failure.sealed_trace)
+            run = root / ".asterion-private/prime-p7-live/p7-live-cancelled"
+            summary = json.loads((run / "summary.json").read_text())
+            self.assertTrue(summary["sealed_trace"])
+            self.assertEqual(summary["completed_prefix"]["levels_completed"], 1)
+
     def test_safe_run_id_keeps_utc_timestamp_and_separates_same_second_retries(
         self,
     ) -> None:

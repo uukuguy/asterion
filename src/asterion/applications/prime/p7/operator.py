@@ -1879,6 +1879,11 @@ async def run_live(
         analyze_trace(live.read_trace_entries(trace_root))
         sealed_trace = True
         comparison_report = live.compare_if_available(root, trace_root, private)
+    except asyncio.CancelledError as error:
+        # asyncio.CancelledError inherits BaseException, so handle supervisor
+        # cancellation explicitly to let the finally block seal verified work.
+        failure = error
+        reason = "P7 live solve cancelled"
     except Exception as error:
         failure = error
         reason = (
