@@ -116,13 +116,14 @@ class P7OperatorError(RuntimeError):
 class RouteAdoptionTracker:
     """Private evidence for whether P7 followed an injected route hypothesis."""
 
-    __slots__ = ("_expected", "_target_level", "_cursor", "_divergence")
+    __slots__ = ("_expected", "_target_level", "_cursor", "_divergence", "_reached_target")
 
     def __init__(self) -> None:
         self._expected: tuple[PlannerAction, ...] = ()
         self._target_level = 0
         self._cursor = 0
         self._divergence: dict[str, object] | None = None
+        self._reached_target = False
 
     def arm(self, actions: tuple[PlannerAction, ...], *, target_level: int) -> None:
         if type(actions) is not tuple or not all(type(item) is PlannerAction for item in actions):
@@ -131,11 +132,15 @@ class RouteAdoptionTracker:
         self._target_level = target_level
         self._cursor = 0
         self._divergence = None
+        self._reached_target = False
 
     def record(self, transitions: tuple[object, ...]) -> None:
         if not self._expected or self._divergence is not None:
             return
         for transition in transitions:
+            levels_completed = getattr(transition, "levels_completed", 0)
+            if type(levels_completed) is int and levels_completed >= self._target_level:
+                self._reached_target = True
             if self._cursor >= len(self._expected):
                 return
             actual = PlannerAction(
@@ -158,7 +163,10 @@ class RouteAdoptionTracker:
             "expected_actions": len(self._expected),
             "followed_actions": self._cursor,
             "first_divergence": None if self._divergence is None else dict(self._divergence),
-            "completed": bool(self._expected) and self._cursor == len(self._expected),
+            "reached_target": self._reached_target,
+            "completed": bool(self._expected)
+            and self._cursor == len(self._expected)
+            and self._reached_target,
             "target_level": self._target_level,
         }
 

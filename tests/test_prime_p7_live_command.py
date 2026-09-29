@@ -54,6 +54,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             "expected_actions": 2,
             "followed_actions": 2,
             "first_divergence": None,
+            "reached_target": True,
             "completed": True,
             "target_level": 1,
         })
@@ -69,6 +70,16 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(tracker.summary()["followed_actions"], 0)
         self.assertEqual(tracker.summary()["first_divergence"], {"index": 0, "expected": "ACTION1", "actual": "ACTION3"})
         self.assertFalse(tracker.summary()["completed"])
+
+    def test_route_adoption_tracker_does_not_call_action_prefix_a_win(self) -> None:
+        from asterion.applications.prime.p7.optimizer import PlannerAction
+        from asterion.applications.prime.p7.operator import RouteAdoptionTracker
+
+        tracker = RouteAdoptionTracker()
+        tracker.arm((PlannerAction("ACTION1"),), target_level=1)
+        tracker.record((SimpleNamespace(action="ACTION1", data=(), levels_completed=0),))
+        self.assertFalse(tracker.summary()["completed"])
+        self.assertFalse(tracker.summary()["reached_target"])
 
     def test_process_cancellation_signal_starts_clear_and_can_cancel(self) -> None:
         signal = live_module.ProcessCancellation()
