@@ -149,7 +149,7 @@
 
 **Interfaces:**
 - Add read-only worker methods `p7_world_model()` and `p7_playbook(level=None)`; both return capped projections and accept no raw-frame arguments.
-- If hypothesis submission is needed, expose `p7_record_hypothesis(layer, key, value)` only; the application attaches the current evidence sequence and never accepts a caller-supplied confirmation.
+- Expose `p7_record_hypothesis(layer, key, value)` as the sole model-write method; the application attaches the current evidence sequence and never accepts a caller-supplied confirmation.
 - Register tools as `world_model`, `playbook`, and `retrodiction_status`; keep old aliases and RPC argument counts compatible.
 
 - [ ] **Step 1: Add failing bridge tests** for successful typed dispatch, unknown arguments, oversized projections, and worker-facing alias behavior.
