@@ -64,6 +64,7 @@ from asterion.applications.prime.p7.private_trace import (
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.prompt import (
+    P7_BP35_L1_ROUTE_HINT,
     P7_LEGACY_SOLVE_PROMPT,
     build_solve_prompt,
 )
@@ -836,6 +837,34 @@ def _summarize_prefix_mechanics(prefix: object) -> str:
     return "\n".join(bullets)
 
 
+def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
+    """Expose a replay-verified route as a bounded hypothesis for the model."""
+
+    if target_level != 1 or getattr(prefix, "levels_completed", 0) < target_level:
+        return ""
+    transitions = getattr(prefix, "transitions", ())
+    if not isinstance(transitions, tuple) or not transitions:
+        return ""
+    actions: list[str] = []
+    for transition in transitions:
+        action = getattr(transition, "action", None)
+        if type(action) is not str:
+            return ""
+        data = dict(getattr(transition, "data", ()))
+        if data:
+            actions.append(json.dumps({"name": action, "data": data}, sort_keys=True))
+        else:
+            actions.append(json.dumps({"name": action, "data": {}}, sort_keys=True))
+    return (
+        "## Replay-verified L1 route hypothesis\n"
+        "A prior sealed local run replayed this exact route to LEVEL_SOLVED. "
+        "Use it as an evidence-backed candidate: dispatch one item at a time "
+        "through p7_act_checked, verify each returned observation, and replan "
+        "if the current state contradicts it.\n"
+        + " -> ".join(actions)
+    )
+
+
 def _initial_game_context(client: object, *, include_prior: bool) -> str:
     """Inject one bounded broker snapshot before the model chooses tools."""
 
@@ -1519,23 +1548,27 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         category="retrodict",
     ))
     prompt = _prompt_for_variant(variant, tool_registry)
-    prefix = (
-        load_best_prefix(
-            invocation.arc_root,
-            root / ".asterion-private" / "prime-p7-live",
-            invocation.game.game_id,
-            invocation.game.seed,
-            max_level=invocation.game.target_level - 1,
-            expected_model_id=declared_model_selection(
-                invocation.environment
-            ).model,
-        )
-        if invocation.game.target_level > 1 else None
+    prefix = load_best_prefix(
+        invocation.arc_root,
+        root / ".asterion-private" / "prime-p7-live",
+        invocation.game.game_id,
+        invocation.game.seed,
+        max_level=invocation.game.target_level - 1
+        if invocation.game.target_level > 1
+        else None,
+        expected_model_id=declared_model_selection(invocation.environment).model,
     )
     if prefix is not None and len(prefix.transitions) > 0:
         summary = _summarize_prefix_mechanics(prefix)
         if summary:
             prompt = prompt + "\n\n" + summary
+    route_hint = _summarize_verified_route(
+        prefix, target_level=invocation.game.target_level
+    )
+    if route_hint:
+        prompt = prompt + "\n\n" + route_hint
+    if invocation.game.game_id == "bp35-0a0ad940" and invocation.game.target_level == 1:
+        prompt = prompt + "\n\n" + P7_BP35_L1_ROUTE_HINT
     if invocation.sweep_mode:
         invocation = replace(invocation, game=_sweep_game(invocation.game, prefix))
     private = live.private_root(root, run_id)

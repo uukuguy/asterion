@@ -189,6 +189,16 @@ Continue until the target level is completed or the broker reports a terminal
 state; a text response alone is not success."""
 
 
+P7_BP35_L1_ROUTE_HINT = """## Replay-verified BP35 L1 candidate
+A prior sealed BP35 L1 run reached LEVEL_SOLVED in 20 primitive actions. Treat
+this as a candidate route, verify the returned observation after each item, and
+stop or replan if the current state contradicts it:
+ACTION4, ACTION4, ACTION4, ACTION4, ACTION4, ACTION3, ACTION4,
+ACTION6(x=45,y=33), ACTION3, ACTION6(x=27,y=33), ACTION6(x=27,y=39),
+ACTION3, ACTION3, ACTION3, ACTION6(x=33,y=15), ACTION3, ACTION4,
+ACTION4, ACTION3, ACTION3."""
+
+
 # Tool surface is rendered at run start from the application's
 # P7ToolRegistry. The base prompt carries no game-specific or tool-specific
 # content; the operator passes the registry to build_solve_prompt when

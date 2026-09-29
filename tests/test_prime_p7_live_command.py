@@ -105,6 +105,23 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("p7_observe", tools)
         self.assertIn("p7_act_checked", tools)
 
+    def test_verified_l1_route_hint_is_bounded_and_replayable(self) -> None:
+        from asterion.applications.prime.p7.operator import _summarize_verified_route
+
+        prefix = SimpleNamespace(
+            levels_completed=1,
+            transitions=(
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=0),
+                SimpleNamespace(
+                    action="ACTION6", data=(("x", 45), ("y", 33)), levels_completed=1
+                ),
+            ),
+        )
+        hint = _summarize_verified_route(prefix, target_level=1)
+        self.assertIn("Replay-verified L1 route hypothesis", hint)
+        self.assertIn('"name": "ACTION6"', hint)
+        self.assertEqual(_summarize_verified_route(prefix, target_level=2), "")
+
     def test_retry_replan_required_is_returned_without_trace_dispatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient
