@@ -10,7 +10,8 @@ and the trace identities cannot drift apart.
 Validation is fail closed:
 
 * the provider must exist in the Pi profile's ``models-store.json`` catalog;
-* the model must be listed for that provider;
+* model availability is checked by the Pi backend at launch, so catalog
+  refresh is not required for a configuration-only model switch;
 * the provider must have a credential in the profile's ``auth.json`` or in one
   of its declared operator environment variables.
 
@@ -107,8 +108,7 @@ def resolve_model_selection(environment: Mapping[str, str]) -> P7ModelSelection:
     try:
         agent_dir = _agent_dir(environment)
         catalog = _catalog(agent_dir)
-        models = _provider_models(catalog, selection.provider)
-        if selection.model not in models:
+        if not isinstance(catalog.get(selection.provider), Mapping):
             raise P7ModelSelectionError("P7 model selection is unlisted")
         if not _has_credential(agent_dir, environment, selection.provider):
             raise P7ModelSelectionError("P7 model selection is unauthenticated")
@@ -139,24 +139,6 @@ def _catalog(agent_dir: Path) -> Mapping[str, Any]:
     if not isinstance(raw, Mapping):
         raise P7ModelSelectionError("P7 model selection is unavailable")
     return raw
-
-
-def _provider_models(catalog: Mapping[str, Any], provider: str) -> tuple[str, ...]:
-    """Return the model ids the catalog lists for one provider."""
-
-    entry = catalog.get(provider)
-    if not isinstance(entry, Mapping):
-        raise P7ModelSelectionError("P7 model selection is unlisted")
-    models = entry.get("models", ())
-    identifiers: list[str] = []
-    if isinstance(models, Mapping):
-        identifiers = [name for name in models if valid_selection_name(name)]
-    elif isinstance(models, (list, tuple)):
-        for item in models:
-            identifier = item.get("id") if isinstance(item, Mapping) else item
-            if valid_selection_name(identifier):
-                identifiers.append(identifier)
-    return tuple(identifiers)
 
 
 def _has_credential(

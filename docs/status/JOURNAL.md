@@ -3293,3 +3293,4 @@
 - 终止读取修复：P7 `observe/status` 在 broker 达到终止边界后读取不可变 terminal snapshot，避免模型收口查询制造 method failure；新增 action-cap 回归测试。
 - DC22 后续级别实证：通用 next-level 调度发现已存在可重放 L2 前缀，自动推进 L3；当前关卡 68/68 步，仍 L2，`human-baseline` action-cap，RPC 正常且分类正确，无通关证据。
 - DC22 L3 retry 诊断：离线候选确为 `partial-optimized`（67→66、`delete_span`），但 `route_adoption.armed=false`；根因是 partial 候选未导出 `candidate_actions`，且 arm 条件只接受完整 `optimized`，已修复并补回归测试。
+- 模型配置边界修复：`.env` 中 provider/model 覆盖旧终端导出；模型只做格式校验，provider 凭据与 provider 存在性仍预检，具体模型可用性交给 Pi 启动时返回；`gpt-6.1-sol` 本地解析已通过，76 项 P7 model/live 测试与 lint 通过。

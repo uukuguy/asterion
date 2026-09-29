@@ -82,6 +82,18 @@ class TestP7ModelSelection(unittest.TestCase):
             selection = resolve_model_selection(environment)
         self.assertEqual((selection.provider, selection.model), ("deepseek", "deepseek-flash"))
 
+    def test_well_formed_model_can_be_selected_before_profile_catalog_refresh(self) -> None:
+        from asterion.applications.prime.p7.model_selection import resolve_model_selection
+
+        environment = {
+            "ASTERION_PRIME_PROVIDER": "openai-codex",
+            "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            environment["ASTERION_PRIME_PI_AGENT_DIR"] = _profile(directory)
+            selection = resolve_model_selection(environment)
+        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6.1-sol"))
+
     def test_trace_identities_follow_the_selected_model(self) -> None:
         from asterion.applications.prime.p7.gameplay_trace import (
             GAMEPLAY_TRACE_IDENTITIES,
@@ -143,7 +155,6 @@ class TestP7ModelSelection(unittest.TestCase):
         cases = (
             ("missing-profile", None),
             ("blank-profile", {"ASTERION_PRIME_PI_AGENT_DIR": "   "}),
-            ("unlisted-model", {"ASTERION_PRIME_MODEL": "gpt-9-nebula"}),
             ("unlisted-provider", {"ASTERION_PRIME_PROVIDER": "mystery"}),
             ("unauthenticated", {"ASTERION_PRIME_MODEL": "gpt-6-astra"}),
             ("malformed-model", {"ASTERION_PRIME_MODEL": "bad name"}),

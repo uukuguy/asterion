@@ -856,13 +856,19 @@ def _dotenv_values(path: Path) -> Mapping[str, str]:
 def load_operator_environment(operator_root: Path) -> Mapping[str, str]:
     """Merge operator-owned configuration with the process environment.
 
-    The preset exports the operator-owned values, so the process environment
-    wins over the file. ``ASTERION_PRIME_PI_AGENT_DIR`` is required here so
-    the operator rejects an invocation without an authenticated Pi profile
-    before it starts any process.
+    The process environment supplies runtime paths and credentials. Model
+    selection is configuration-owned: when the operator file declares a
+    provider or model, it wins over stale exported values from the terminal.
+    ``ASTERION_PRIME_PI_AGENT_DIR`` is required here so the operator rejects
+    an invocation without an authenticated Pi profile before it starts any
+    process.
     """
 
-    values = {**_dotenv_values(operator_root / ".env"), **os.environ}
+    dotenv = _dotenv_values(operator_root / ".env")
+    values = {**dotenv, **os.environ}
+    for key in ("ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL"):
+        if key in dotenv:
+            values[key] = dotenv[key]
     if not values.get(PI_AGENT_DIR_ENV, "").strip():
         raise P7LiveSolveError("Pi agent profile is unavailable")
     return values

@@ -1209,6 +1209,26 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             with self.assertRaises(Exception):
                 _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "sweep"}, resolved, root)
 
+    def test_dotenv_model_selection_overrides_stale_terminal_model(self) -> None:
+        import os
+
+        with tempfile.TemporaryDirectory() as temporary, mock.patch.dict(
+            os.environ,
+            {
+                "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
+                "ASTERION_PRIME_PROVIDER": "openai-codex",
+                "ASTERION_PRIME_MODEL": "gpt-6-sol",
+            },
+            clear=True,
+        ):
+            root = Path(temporary)
+            (root / ".env").write_text(
+                "ASTERION_PRIME_PROVIDER=openai-codex\nASTERION_PRIME_MODEL=gpt-6.1-sol\n",
+                encoding="utf-8",
+            )
+            resolved = live_module.load_operator_environment(root)
+        self.assertEqual(resolved["ASTERION_PRIME_MODEL"], "gpt-6.1-sol")
+
     def test_sweep_budget_counts_saved_prefix_and_current_human_baseline(self) -> None:
         from asterion.applications.prime.p7.game import P7GameSelection
         from asterion.applications.prime.p7.operator import P7OperatorError, _sweep_game, resolve_p7_runtime
