@@ -3271,3 +3271,4 @@
 - 19:45 BP35 L2 next-level 运行：复用 16 步 L1 前缀，L2 新动作 25 个、总动作 41 个，仍停留 L1；Pi RPC 异常退出后 trace/replay/seal/cleanup 完成，但 next-level manifest 为 `execution-stalled-evidence-invalid`，未计通关。
 - 19:52 [1260e6f9] 新增 VerifiedAttempt 加载器，严格验证失败路线的封存、身份、录制一致性与 fresh replay，避免误用为通关前缀。
 - 20:01 [ae620678] 将 VerifiedAttempt 接入通用 P7 探索提示，并为 fresh replay 增加 replay_complete 边界；92 项聚焦测试、compileall、ruff、diff-check 通过。
+- 21:45 LF52 L2 通用实证：`p7-live-20260929133238-64bc9ddc37c6de8dc2208c78` 使用 28 步 L1 前缀，partial route baseline 81 步、候选重放 16 次，P7 收到探索起点；未找到更短候选，随后 Pi RPC 重试失败，L2 未通关，replay/seal/cleanup 完成。
