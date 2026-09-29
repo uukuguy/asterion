@@ -1104,8 +1104,12 @@ class SweepScheduler:
                          timeout + 30 if self._is_research_round(self.config) else timeout, 4 * 60 * 60)),
                      "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1" if self._is_research_round(self.config) else "",
                      "OPERATION_MODE": "offline" if self._is_research_round(self.config) else ""},
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                # Do not pipe the supervisor's stdout/stderr: orb/guest
+                # descendants may inherit those descriptors and keep
+                # communicate() blocked after the supervisor exits. Run
+                # evidence is collected from the private trace tree instead.
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 text=True,
                 start_new_session=True,
             )

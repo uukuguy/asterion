@@ -3281,3 +3281,4 @@
 - 分类回归修正：取消与清理同时异常时保留 `external_cancel` 为主因，并在 evidence 标记 `cleanup_failed`；集成取消测试通过。
 - LF52 分类实证 `p7-live-20260929180202-15adfbd1aa4bb60931e4a844`：guest launch 无 trace，运行由操作者中止；summary 正确写出 `failure_classification=external_cancel`、returncode 143、无 RPC error，不计入 P7 解题结果。
 - guest 启动边界修复：SweepScheduler 增加默认 120 秒无 trace 的 `child-launch-timeout`，并为 SIGKILL 后的子进程清理增加 2 秒上限；54 项 sweep/next-level 测试、lint 通过。
+- guest supervisor 修复：不再把 stdout/stderr 管道传给 orb 子孙进程，避免远端后代持有管道导致 `communicate()` 无限等待；运行证据仍只从私有 trace 读取。sweep/next-level 测试 53 项通过。
