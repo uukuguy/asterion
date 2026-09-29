@@ -3301,3 +3301,4 @@
 
 ## 2026-09-30
 - 06:39 同题世界模型设计加入 TransitionModel 回放门、Playbook 与动作预期，提交设计文档 [32abf2ea]
+- 06:44 实现计划拆分世界模型、回放门、Playbook、Broker 接入和优化器验证 [f52ef9a4]
