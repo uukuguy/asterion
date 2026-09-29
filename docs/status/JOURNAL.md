@@ -3231,3 +3231,4 @@
 - 11:50 P7 continuation rounds now prioritize registered broker tools after GPT-6-Sol initial actions; worker smoke test passes [0fde4b44]
 - 12:30 GPT-6-Sol run reached 56 actions without L1; added replay-verified BP35 L1 candidate route hint for per-action validation.
 - 12:31 注入已 replay 验证的 BP35 L1 候选路线，要求 GPT-6-Sol 逐步核验避免回调耗尽 [72a0dbc1]
+- 12:45 GPT-6-Sol 按候选路线 20 步完成 BP35 L1；receipt PASS、replay_verified、sealed_trace、cleanup_complete 均为真。
