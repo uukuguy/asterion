@@ -37,6 +37,21 @@ class WorldModelTests(unittest.TestCase):
         self.assertEqual(store.confirm("mechanics", "move", evidence=self.ev).status, "confirmed")
         self.assertIn("move", store.mechanics)
 
+    def test_nested_mutation_through_returned_fact_cannot_change_store_or_snapshot(self):
+        store = WorldModelStore("game", 1, 2)
+        fact = store.record_hypothesis(
+            "entities", "player", {"inventory": [{"name": "key"}]}, level=0, evidence=self.ev
+        )
+        before = store.snapshot
+
+        fact.value["inventory"][0]["name"] = "cursed-key"
+        fact.value["inventory"].append({"name": "coin"})
+
+        self.assertEqual(store.snapshot.hypotheses["entities:player"].value,
+                         {"inventory": [{"name": "key"}]})
+        self.assertEqual(before.hypotheses["entities:player"].value,
+                         {"inventory": [{"name": "key"}]})
+
     def test_refresh_keeps_mechanics_and_removes_only_old_level_local_facts(self):
         store = WorldModelStore("game", 1, 3)
         store.record_hypothesis("mechanics", "rules", "x", level=0, evidence=self.ev)

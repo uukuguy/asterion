@@ -46,6 +46,24 @@ def _validated_value(value: Any) -> Any:
     return detached
 
 
+def _freeze(value: Any) -> Any:
+    """Recursively convert validated JSON values to immutable containers."""
+    if type(value) is dict:
+        return MappingProxyType({key: _freeze(item) for key, item in value.items()})
+    if type(value) is list:
+        return tuple(_freeze(item) for item in value)
+    return value
+
+
+def _thaw(value: Any) -> Any:
+    """Return a detached, JSON-shaped copy for the public value accessor."""
+    if isinstance(value, Mapping):
+        return {key: _thaw(item) for key, item in value.items()}
+    if type(value) is tuple:
+        return [_thaw(item) for item in value]
+    return value
+
+
 def _valid_level(level: int, win_levels: int) -> int:
     if type(level) is not int or not 0 <= level < win_levels:
         raise ValueError("invalid level")
@@ -79,6 +97,14 @@ class WorldFact:
     evidence: tuple[EvidenceRef, ...]
     status: str = "hypothesis"
 
+    def __getattribute__(self, name: str) -> Any:
+        # Keep the stored value recursively immutable while preserving the
+        # existing JSON-shaped accessor contract for callers.
+        value = object.__getattribute__(self, "value") if name == "value" else None
+        if name == "value":
+            return _thaw(value)
+        return object.__getattribute__(self, name)
+
     def __post_init__(self) -> None:
         if self.layer not in _LAYER_SET:
             raise ValueError("unknown world model layer")
@@ -89,7 +115,7 @@ class WorldFact:
             raise ValueError("invalid fact status")
         if not self.evidence or any(not isinstance(ref, EvidenceRef) for ref in self.evidence):
             raise ValueError("fact requires evidence")
-        object.__setattr__(self, "value", _validated_value(self.value))
+        object.__setattr__(self, "value", _freeze(_validated_value(self.value)))
         object.__setattr__(self, "evidence", tuple(self.evidence))
 
     def confirmed(self, evidence: Sequence[EvidenceRef]) -> "WorldFact":
