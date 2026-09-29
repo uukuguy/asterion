@@ -3264,3 +3264,4 @@
 - 18:44 [commit pending] 压缩证明补充 target_level 与 warmup digest，防止跨关卡复用歧义。
 - 18:47 [pending] 压缩证明计划完成；聚焦测试 108 项通过、lint 通过，未启动新 live run。
 - 18:50 聚焦 P7 回归 108 项通过（1 skipped），compileall、ruff、diff-check 通过，工作树干净。
+- 18:56 [d271fdc4] 为优化候选接入通用路线采用跟踪，记录 P7 跟随步数、首个偏离与完整采用状态；110 项聚焦回归通过。
