@@ -65,7 +65,9 @@ from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
+    P7_EXPLORE_APPENDIX,
     build_solve_prompt,
+    build_strategy_prompt,
 )
 from asterion.applications.prime.runtime_binding import PrimeLaunch
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
@@ -88,6 +90,7 @@ _MODEL = DEFAULT_MODEL
 _MISSING = object()
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
+P7_STRATEGY_ENV = "ASTERION_PRIME_P7_STRATEGY"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
@@ -116,6 +119,20 @@ def _prompt_for_variant(variant: str, tool_registry: object = None) -> str:
     if variant == "legacy":
         return P7_LEGACY_SOLVE_PROMPT
     raise P7OperatorError("P7 history variant is unavailable")
+
+
+def _resolve_strategy(environment: Mapping[str, str]) -> str:
+    strategy = environment.get(P7_STRATEGY_ENV, "replay")
+    if strategy not in {"replay", "explore"}:
+        raise P7OperatorError("P7 route strategy is unavailable")
+    return strategy
+
+
+def _prompt_for_strategy(strategy: str, tool_registry: object = None) -> str:
+    try:
+        return build_strategy_prompt(tool_registry, strategy)
+    except ValueError:
+        raise P7OperatorError("P7 route strategy is unavailable") from None
 
 
 class P7LiveAttemptFailure(live.P7LiveSolveError):
@@ -1254,7 +1271,10 @@ def build_p7_operator_resources(
         # subprocess needs the model host key, never the scorecard key.
         provider_environment = {
             name: value for name, value in environment.items()
-            if name not in {"ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE", P7_HISTORY_VARIANT_ENV}
+            if name not in {
+                "ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE",
+                P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
+            }
         }
         if environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT") == "1":
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT"] = "1"
@@ -1444,6 +1464,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
+        if P7_STRATEGY_ENV in environment:
+            resolved[P7_STRATEGY_ENV] = _resolve_strategy(environment)
         agent_dir = live.resolve_pi_agent_dir(resolved)
         resolved[PI_CODING_AGENT_DIR] = str(agent_dir)
         resolved.pop(UNBOUNDED_FIRST_ROUND_ENV, None)
@@ -1566,7 +1588,13 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         signature="result['no_effect_hint'] (when stop_reason='observation-no-change')",
         category="retrodict",
     ))
-    prompt = _prompt_for_variant(variant, tool_registry)
+    strategy = _resolve_strategy(invocation.environment)
+    if variant == "legacy":
+        prompt = _prompt_for_variant(variant, tool_registry)
+        if strategy == "explore":
+            prompt += P7_EXPLORE_APPENDIX
+    else:
+        prompt = _prompt_for_strategy(strategy, tool_registry)
     prefix = load_best_prefix(
         invocation.arc_root,
         root / ".asterion-private" / "prime-p7-live",

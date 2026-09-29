@@ -200,6 +200,12 @@ Continue until the target level is completed or the broker reports a terminal
 state; a text response alone is not success. Once the target or terminal state
 is reported, stop querying broker tools and return the result."""
 
+P7_EXPLORE_APPENDIX = """\n\nExploration strategy is explicitly enabled for this run. A replay-verified
+candidate route is an action upper bound, never authority. You may test a
+shorter route, but only publish or reuse it after the complete candidate has
+passed offline replay verification. Keep probes bounded and preserve the
+verified route as the fallback when a shorter hypothesis is contradicted."""
+
 
 # Tool surface is rendered at run start from the application's
 # P7ToolRegistry. The base prompt carries no game-specific or tool-specific
@@ -225,6 +231,19 @@ def build_solve_prompt(tool_registry: object) -> str:
     if not section:
         return _P7_SOLVE_PROMPT_TEMPLATE
     return _P7_SOLVE_PROMPT_TEMPLATE + "\n\n" + section + "\n"
+
+
+def build_strategy_prompt(tool_registry: object, strategy: str = "replay") -> str:
+    """Render the generic prompt with the operator-selected route strategy."""
+    if strategy not in {"replay", "explore"}:
+        raise ValueError("unsupported P7 strategy")
+    prompt = build_solve_prompt(tool_registry)
+    if strategy == "explore":
+        return prompt + P7_EXPLORE_APPENDIX
+    return prompt + (
+        "\n\nRoute strategy: replay. Prefer the replay-verified candidate as "
+        "the upper-bound route and verify it incrementally."
+    )
 
 
 # Frozen pre-history guidance for the explicit local A/B control.

@@ -613,6 +613,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
         recipe = makefile.split("asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:\n", 1)[1]
         self.assertIn("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", recipe)
         self.assertIn("OPERATION_MODE", recipe)
+        self.assertIn("ASTERION_PRIME_P7_STRATEGY", recipe)
 
     def test_unbounded_first_round_selects_only_unstarted_first_levels(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler

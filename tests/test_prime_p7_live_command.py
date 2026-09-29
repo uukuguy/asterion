@@ -601,6 +601,36 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             "legacy",
         )
 
+    def test_strategy_defaults_to_replay_and_rejects_unknown_values(self) -> None:
+        from asterion.applications.prime.p7.operator import (
+            P7_STRATEGY_ENV, P7OperatorError, _resolve_strategy,
+        )
+
+        self.assertEqual(_resolve_strategy({}), "replay")
+        self.assertEqual(_resolve_strategy({P7_STRATEGY_ENV: "replay"}), "replay")
+        self.assertEqual(_resolve_strategy({P7_STRATEGY_ENV: "explore"}), "explore")
+        for value in ("Replay", "", "sweep", "1"):
+            with self.subTest(value=value), self.assertRaises(P7OperatorError):
+                _resolve_strategy({P7_STRATEGY_ENV: value})
+
+    def test_explore_prompt_is_explicit_and_replay_prompt_is_conservative(self) -> None:
+        from asterion.applications.prime.p7.operator import _prompt_for_strategy
+
+        replay = _prompt_for_strategy("replay")
+        explore = _prompt_for_strategy("explore")
+        self.assertIn("replay-verified", replay.lower())
+        self.assertIn("shorter", explore.lower())
+        self.assertIn("offline replay", explore.lower())
+        self.assertNotEqual(replay, explore)
+        with self.assertRaises(Exception):
+            _prompt_for_strategy("unknown")
+
+    def test_strategy_does_not_replace_legacy_history_prompt(self) -> None:
+        from asterion.applications.prime.p7.operator import _prompt_for_variant
+        from asterion.applications.prime.p7.prompt import P7_LEGACY_SOLVE_PROMPT
+
+        self.assertEqual(_prompt_for_variant("legacy"), P7_LEGACY_SOLVE_PROMPT)
+
     def test_legacy_prompt_selection_preserves_old_batch_guidance(self) -> None:
         from asterion.applications.prime.p7.operator import _prompt_for_variant
         from asterion.applications.prime.p7.prompt import P7_LEGACY_SOLVE_PROMPT, P7_SOLVE_PROMPT
