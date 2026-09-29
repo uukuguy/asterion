@@ -41,6 +41,16 @@ make asterion-prime-p7-solve GAME=ls20 LEVEL=2
 make asterion-prime-p7-level-witness GAME=ls20 LEVEL=2
 ```
 
+### 路线策略
+
+默认使用 `replay`：已有验证路线只作为逐步核验的上界。研究更短路线时显式启用通用 `explore`：
+
+```bash
+ASTERION_PRIME_P7_STRATEGY=explore make asterion-prime-p7-solve GAME=ls20 LEVEL=2
+```
+
+探索候选必须经过离线 fresh replay、身份和终态校验后才能复用；策略变量不会传给模型后端。
+
 每次调用都会创建独立的 UTC 时间戳 `run_id` 目录，不会覆盖之前的尝试。一个经过验证的运行包含封存 trace、动作前后状态摘要、动作哈希链和 summary；清单只读这些记录，不运行题目源码。续解或官方提交前会再用新本地游戏严格重放校验。
 
 如果整题尝试在后面的关卡失败，只要前面关卡的动作能够独立重放并通过校验，已完成关卡仍会作为可复用前缀保留；失败关卡的动作不会被当作已解答案。每个关卡的边界从同一条逐动作记录中截取，不覆盖原始记录。
