@@ -383,3 +383,9 @@ Independent focused re-review returned CLEAN/APPROVE. Direct probes confirmed
 fixed/context-free errors for hostile returned events, retained trusted
 mismatch diagnostics, no post-snapshot attacker access, and unchanged real
 task-cancellation propagation.
+
+## Task 4 pure mechanism model review closeout — 2026-09-30
+
+Commit `5f6e8455` added the bounded declarative mechanism model. The follow-up fix keeps mapping and array values distinct during immutable storage, allows an empty rule set to return `unknown`, caps rules/guards/effects/spec bytes, validates prediction deltas, and prevents directly constructed certificates from becoming planner-eligible without broker issuance.
+
+Verification: `uv run python -m unittest -v tests.test_prime_p7_native_broker.TestP7MechanismModel` — 4 tests passed; Ruff and `git diff --check` passed.

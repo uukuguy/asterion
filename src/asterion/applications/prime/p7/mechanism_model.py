@@ -8,7 +8,7 @@ filesystem, or network services.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import json
 import re
@@ -39,11 +39,23 @@ _EFFECTS = frozenset(
         "increment_level",
     }
 )
-_MAX_RULES = 128
-_MAX_GUARDS = 16
-_MAX_EFFECTS = 16
+_MAX_RULES = 64
+_MAX_GUARDS = 8
+_MAX_EFFECTS = 8
 _MAX_VALUE_BYTES = 8192
+_MAX_SPEC_BYTES = 65536
 _MAX_FRAME_CELLS = 4096
+_HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+@dataclass(frozen=True, slots=True)
+class _FrozenMap:
+    items: tuple[tuple[str, Any], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class _FrozenSeq:
+    items: tuple[Any, ...]
 
 
 def _id(value: object, name: str) -> str:
@@ -81,19 +93,17 @@ def _json_value(value: Any, *, path: str = "value", depth: int = 0) -> Any:
 
 def _freeze(value: Any) -> Any:
     if type(value) is dict:
-        return tuple((key, _freeze(item)) for key, item in value.items())
+        return _FrozenMap(tuple((key, _freeze(item)) for key, item in value.items()))
     if type(value) is list:
-        return tuple(_freeze(item) for item in value)
+        return _FrozenSeq(tuple(_freeze(item) for item in value))
     return value
 
 
 def _thaw(value: Any) -> Any:
-    if type(value) is tuple:
-        # A mapping is represented by sorted key/value pairs; ordinary arrays
-        # are represented as tuples of non-pair values.
-        if all(type(item) is tuple and len(item) == 2 and type(item[0]) is str for item in value):
-            return {key: _thaw(item) for key, item in value}
-        return [_thaw(item) for item in value]
+    if isinstance(value, _FrozenMap):
+        return {key: _thaw(item) for key, item in value.items}
+    if isinstance(value, _FrozenSeq):
+        return [_thaw(item) for item in value.items]
     return value
 
 
@@ -314,7 +324,7 @@ class MechanismPrediction:
     rule_count: int = 0
 
     def __post_init__(self) -> None:
-        if self.status not in {"predicted", "unknown", "conflict"}:
+        if type(self.status) is not str or self.status not in {"predicted", "unknown", "conflict"}:
             raise ValueError("invalid prediction status")
         if self.frame is not None:
             object.__setattr__(self, "frame", _frame(self.frame))
@@ -322,6 +332,29 @@ class MechanismPrediction:
             raise ValueError("invalid prediction level")
         if self.state is not None and (type(self.state) is not str or not self.state):
             raise ValueError("invalid prediction state")
+        if type(self.changed_cells) is not tuple or len(self.changed_cells) > 80:
+            raise ValueError("invalid prediction changed cells")
+        for item in self.changed_cells:
+            if (
+                type(item) is not tuple
+                or len(item) != 4
+                or any(type(part) is not int for part in item)
+                or not 0 <= item[0] <= 63
+                or not 0 <= item[1] <= 63
+                or not 0 <= item[2] <= 255
+                or not 0 <= item[3] <= 255
+                or item[2] == item[3]
+            ):
+                raise ValueError("invalid prediction changed cells")
+        coordinates = tuple((item[1], item[0]) for item in self.changed_cells)
+        if coordinates != tuple(sorted(set(coordinates))):
+            raise ValueError("invalid prediction changed cells")
+        if self.reason is not None and (
+            type(self.reason) is not str or not self.reason or len(self.reason) > 128
+        ):
+            raise ValueError("invalid prediction reason")
+        if type(self.rule_count) is not int or not 0 <= self.rule_count <= _MAX_RULES:
+            raise ValueError("invalid prediction rule count")
 
 
 @dataclass(frozen=True, slots=True)
@@ -340,12 +373,27 @@ class MechanismSpec:
             raise ValueError("invalid win_levels")
         if type(self.revision) is not int or self.revision < 0:
             raise ValueError("invalid revision")
-        if type(self.rules) is not tuple or not self.rules or len(self.rules) > _MAX_RULES:
+        if type(self.rules) is not tuple or len(self.rules) > _MAX_RULES:
             raise ValueError("invalid mechanism rules")
         if any(type(rule) is not MechanismRule for rule in self.rules):
             raise ValueError("invalid mechanism rules")
         normalized = tuple(sorted(self.rules, key=lambda rule: json.dumps(rule.mapping(), sort_keys=True, separators=(",", ":"))))
         object.__setattr__(self, "rules", normalized)
+        encoded = json.dumps(
+            {
+                "schema": "asterion.prime.p7-mechanism/v1",
+                "game_id": self.game_id,
+                "seed": self.seed,
+                "win_levels": self.win_levels,
+                "revision": self.revision,
+                "rules": [rule.mapping() for rule in normalized],
+            },
+            ensure_ascii=True,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        if len(encoded) > _MAX_SPEC_BYTES:
+            raise ValueError("mechanism spec exceeds cap")
 
     def to_mapping(self) -> dict[str, object]:
         return {
@@ -358,7 +406,10 @@ class MechanismSpec:
         }
 
     def to_json(self) -> str:
-        return json.dumps(self.to_mapping(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        encoded = json.dumps(self.to_mapping(), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > _MAX_SPEC_BYTES:
+            raise ValueError("mechanism spec exceeds cap")
+        return encoded
 
     @property
     def digest(self) -> str:
@@ -519,19 +570,42 @@ class ModelCertificate:
     sequence_start: int
     sequence_end: int
     coverage: str = "mechanism-retrodicted"
+    _validated: bool = field(default=False, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         _id(self.game_id, "game_id")
-        if type(self.seed) is not int or self.seed < 0 or type(self.win_levels) is not int or self.win_levels <= 0:
+        if (
+            type(self.seed) is not int
+            or self.seed < 0
+            or type(self.win_levels) is not int
+            or self.win_levels <= 0
+            or type(self.revision) is not int
+            or self.revision < 0
+            or type(self.model_digest) is not str
+            or _HASH.fullmatch(self.model_digest) is None
+        ):
             raise ValueError("invalid certificate identity")
-        if self.coverage != "mechanism-retrodicted":
+        if type(self.coverage) is not str or self.coverage != "mechanism-retrodicted":
             raise ValueError("invalid certificate coverage")
-        if type(self.record_count) is not int or self.record_count < 2 or self.sequence_start != 0 or self.sequence_end != self.record_count - 1:
+        if (
+            type(self.record_count) is not int
+            or self.record_count < 2
+            or type(self.sequence_start) is not int
+            or type(self.sequence_end) is not int
+            or self.sequence_start != 0
+            or self.sequence_end != self.record_count - 1
+        ):
             raise ValueError("invalid certificate coverage")
+
+    @classmethod
+    def _issued(cls, *args: object) -> "ModelCertificate":
+        certificate = cls(*args)
+        object.__setattr__(certificate, "_validated", True)
+        return certificate
 
     @property
     def planner_eligible(self) -> bool:
-        return self.coverage == "mechanism-retrodicted"
+        return self._validated is True and self.coverage == "mechanism-retrodicted"
 
 
 def validate_mechanism(
@@ -587,7 +661,7 @@ def validate_mechanism(
             or prediction.changed_cells != cells
         ):
             return None
-    return ModelCertificate(
+    return ModelCertificate._issued(
         spec.game_id,
         spec.seed,
         spec.win_levels,

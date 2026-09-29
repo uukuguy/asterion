@@ -856,3 +856,31 @@ class TestP7MechanismModel(unittest.TestCase):
             MechanismRule("ACTION1", (("eval", "1 + 1"),), ())
         with self.assertRaises(ValueError):
             MechanismSpec("game", 1, 2, tuple(rule for _ in range(129)))
+
+    def test_mechanism_preserves_empty_and_pair_shaped_arrays(self) -> None:
+        from asterion.applications.prime.p7.mechanism_model import MechanismRule, MechanismSpec
+
+        rule = MechanismRule(
+            action="ACTION1",
+            effects=(
+                ("translate_cells", {"dx": 0, "dy": 0, "cells": []}),
+            ),
+        )
+        spec = MechanismSpec("game", 1, 2, (rule,))
+        prediction = spec.predict(frame=((1,),), action="ACTION1", level=0, state="NOT_FINISHED")
+        self.assertEqual(prediction.status, "predicted")
+        self.assertEqual(prediction.frame, ((1,),))
+        self.assertEqual(spec.to_mapping()["rules"][0]["effects"][0]["args"]["cells"], [])
+
+    def test_empty_spec_is_unknown_and_direct_certificate_is_not_eligible(self) -> None:
+        from asterion.applications.prime.p7.mechanism_model import MechanismSpec, ModelCertificate
+
+        spec = MechanismSpec("game", 1, 2, ())
+        self.assertEqual(
+            spec.predict(frame=((0,),), action="ACTION1", level=0, state="NOT_FINISHED").status,
+            "unknown",
+        )
+        certificate = ModelCertificate(
+            "game", 1, 2, 0, "sha256:" + "0" * 64, 2, 0, 1,
+        )
+        self.assertFalse(certificate.planner_eligible)
