@@ -29,8 +29,10 @@
 - `src/asterion/applications/prime/p7/world_model.py` — validated facts, evidence references, immutable snapshots, and same-game model merge/branch operations.
 - `src/asterion/applications/prime/p7/playbook.py` — private JSON persistence and capped projections for checked mechanics, level memory, and evidence index.
 - `src/asterion/applications/prime/p7/transition_model.py` — declarative transition expectations and the retrodiction gate over `ArcHistoryRecord` history.
+- `src/asterion/applications/prime/p7/mechanism_model.py` — independent generic mechanism rules, bounded prediction, and mechanism-retrodicted certificates; route transcripts must not satisfy this contract.
 - `tests/test_prime_p7_world_model.py` — unit tests for validation, confirmation, level refresh, conflicts, and redaction.
 - `tests/test_prime_p7_transition_model.py` — retrodiction acceptance/rejection and expected-action derivation tests.
+- `tests/test_prime_p7_mechanism_model.py` — generic guard/effect prediction, ambiguity rejection, and full-history certificate tests.
 - `tests/test_prime_p7_playbook.py` — exact-game storage, atomic writes, symlink rejection, caps, and branch tests.
 
 ### Existing files to modify
@@ -120,6 +122,7 @@
 **Files:**
 - Modify: `src/asterion/applications/prime/p7/broker.py`
 - Modify: `src/asterion/applications/prime/p7/operator.py`
+- Create: `src/asterion/applications/prime/p7/mechanism_model.py`
 - Modify: `tests/test_prime_p7_native_broker.py`
 - Modify: `tests/test_prime_p7_action_feedback.py`
 - Modify: `tests/test_prime_p7_diagnostics.py`
@@ -128,12 +131,15 @@
 - `ArcBroker` accepts an injected `WorldModelStore | None` and exposes `world_model()`, `transition_model()`, and `playbook_projection()` as read-only application methods.
 - After each accepted transition, the broker records an evidence reference; after a level advance it snapshots checked facts before `_clear_no_effect_level` runs.
 - `act_checked` returns bounded `retrodiction` status and `conflict` metadata on the first mismatch, while preserving existing `stop_reason`, `feedback`, and `unexecuted_count` fields.
+- Mechanism hypotheses use a separate `MechanismSpec`/`MechanismRule` contract. Supported guards are `state_is`, `level_is`, `cell_equals`, `cell_in_bounds`, `action_data_equals`, and `entity_attr_equals`; supported effects are `set_cell`, `toggle_cell`, `translate_cells`, `set_state`, and `increment_level`. Rules are canonical JSON, bounded, deterministic, and cannot execute code or access files/network.
+- `validate_mechanism(spec, records)` returns a `ModelCertificate` only when every recorded transition is predicted with exact identity, sequence, before/after frame, changed cells, level, and state coverage. A route-replay certificate cannot arm a mechanism planner.
 - Operator loads the exact Playbook before prompt construction and saves only after sealed/replay-verified evidence; failed or interrupted runs write a branch record, not a checked route.
 
 - [ ] **Step 1: Add failing broker tests** for a model projection, model update after a transition, snapshot-before-clear on level advance, first mismatch conflict branch, and unchanged legacy public receipt.
 - [ ] **Step 2: Run** `uv run python -m unittest -v tests.test_prime_p7_native_broker tests.test_prime_p7_action_feedback`; expect failures.
 - [ ] **Step 3: Wire** the new store into `ArcBroker`, convert each private history record into evidence, call the pure retrodiction service before arming a checked route, and keep safe fallback behavior when the Playbook is unavailable.
 - [ ] **Step 4: Add operator diagnostics** with counts/status only: `world_model_version`, `retrodiction_status`, `conflict_count`, `playbook_loaded`, `playbook_saved`; never include prompts, frames, or fact values in public receipts.
+- [ ] **Step 4: Add mechanism promotion bookkeeping**: a hypothesis carries one distinguishing probe and dependencies; the broker assigns current identity/sequence/before digest, reserves one probe per `(game, level, key, revision)`, consumes it after the matching committed record, and promotes only a fully validated mechanism certificate. Failed/inconclusive probes create a conflict branch and consume the token.
 - [ ] **Step 5: Add tests** for sealed success saving a checked route, failed runs saving only conflict metadata, and malformed Playbook load falling back to baseline without dispatching extra actions.
 - [ ] **Step 6: Run** the focused broker/action/diagnostics files and commit `git add src/asterion/applications/prime/p7/broker.py src/asterion/applications/prime/p7/operator.py tests/test_prime_p7_native_broker.py tests/test_prime_p7_action_feedback.py tests/test_prime_p7_diagnostics.py && git commit -m "feat(p7): connect world model to broker lifecycle"`.
 
@@ -174,6 +180,7 @@
 - `ArcReplayOracle.replay` produces one expectation per candidate action from fresh-engine observation witnesses.
 - `_optimize_verified_route` and `_optimize_partial_attempt` pass candidates through `retrodict` and publish `candidate_expectations` only when the candidate is shorter and fully verified.
 - `arm_route_adoption` accepts both `PlannerAction` values and their expectations; adoption stops on the first expected mismatch and falls back to normal model control.
+- Route adoption additionally requires an exact mechanism `ModelCertificate` matching game/seed, model/world version, start-observation digest, action/expectation digests, and certificate coverage. A route-only transcript never authorizes mechanism-based planning.
 
 - [ ] **Step 1: Add failing optimizer tests** for expectation derivation, candidate rejection when a witness is missing, retrodiction failure fallback, and preserving baseline route metadata.
 - [ ] **Step 2: Run** `uv run python -m unittest -v tests.test_prime_p7_optimizer tests.test_prime_p7_optimizer_arc_witness`; expect failures.
