@@ -18,6 +18,9 @@ from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcSession
 
 
+_DEFAULT_TOOL_NAMES = ("ipython",)
+
+
 _CONTINUE_PROMPT = (
     "Continue solving the same interactive puzzle from the current Python "
     "state. Use only the ipython tool, check p7_client.status() and "
@@ -56,6 +59,7 @@ class AsterionPrimeSession:
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
             if limits not in (ASTERION_PRIME_LIMITS, AsterionPrimeLimits(None, None, None)):
@@ -96,6 +100,7 @@ class AsterionPrimeSession:
             limits=limits,
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
+            allowed_tool_names=allowed_tool_names,
         )
 
     def __repr__(self) -> str:

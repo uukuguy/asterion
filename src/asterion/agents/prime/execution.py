@@ -41,6 +41,7 @@ _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
 _NATIVE_EVENT_ERROR = "Asterion-prime native event is invalid"
+_DEFAULT_TOOL_NAMES = ("ipython",)
 
 
 class _CallbackRejected(Exception):
@@ -211,6 +212,7 @@ class PrimeExecutionKernel:
         reusable: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         self._validate_launch_material(
             rpc_session,
@@ -226,6 +228,17 @@ class PrimeExecutionKernel:
         self._reusable = reusable
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
+        if (
+            type(allowed_tool_names) is not tuple
+            or not allowed_tool_names
+            or any(
+                type(name) is not str or not name or not name.isascii()
+                for name in allowed_tool_names
+            )
+            or len(set(allowed_tool_names)) != len(allowed_tool_names)
+        ):
+            raise ProtocolError("Asterion-prime launch material is invalid")
+        self._allowed_tool_names = allowed_tool_names
         self.model_callbacks = 0
         self.tool_callbacks = 0
         self._sequence = 0
@@ -563,8 +576,7 @@ class PrimeExecutionKernel:
         if type(assistant.get("delta")) is not str:
             raise _NativeEventRejected(_NativeDiagnostic.MESSAGE_UPDATE_MALFORMED)
 
-    @staticmethod
-    def _tool_call(payload: Mapping[str, object]) -> PrimeToolCall:
+    def _tool_call(self, payload: Mapping[str, object]) -> PrimeToolCall:
         call_id = payload.get("toolCallId")
         name = payload.get("toolName")
         arguments = payload.get("args")
@@ -572,7 +584,7 @@ class PrimeExecutionKernel:
             type(call_id) is not str
             or not call_id
             or type(name) is not str
-            or name != "ipython"
+            or name not in self._allowed_tool_names
             or not isinstance(arguments, Mapping)
         ):
             raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALL_MALFORMED)
