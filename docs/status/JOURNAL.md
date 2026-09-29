@@ -3225,3 +3225,4 @@
 - 09:20 诊断确认 P7 GPT-6 零动作发生在模型首轮工具回调之前；移植注册工具 allowlist、完整扩展资源、GPT-6 工具提示与初始 broker context，聚焦测试通过，但三次端到端验证仍未产生动作，暂不宣称修复完成 [b9510d3f,2297d8c8,f8ed7d44,a1d44cd2]
 - 02:10 定位并修复 P7 0 动作根因：扩展 method_call 漏换行、Python bridge 参数签名错误、应用工具并发竞争；恢复后 BP35 L1 trace 已出现 1 个 arc.action，43 个聚焦测试与 TypeScript typecheck 通过 [c89fe21c]
 - 03:04 修复 P7 初始提示冲突、checked-plan schema、Pi 自动重试事件及 IPython worker facade；复跑动作恢复，未完成 L1 [pending]
+- 03:06 提交 `587b0172`：修复 P7 初始提示、checked-plan 合法性、Pi 重试生命周期与 IPython worker facade；聚焦 87 项测试通过。
