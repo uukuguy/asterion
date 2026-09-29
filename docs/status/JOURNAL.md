@@ -3283,3 +3283,4 @@
 - guest 启动边界修复：SweepScheduler 增加默认 120 秒无 trace 的 `child-launch-timeout`，并为 SIGKILL 后的子进程清理增加 2 秒上限；54 项 sweep/next-level 测试、lint 通过。
 - guest supervisor 修复：不再把 stdout/stderr 管道传给 orb 子孙进程，避免远端后代持有管道导致 `communicate()` 无限等待；运行证据仍只从私有 trace 读取。sweep/next-level 测试 53 项通过。
 - 用户决策：无明确单关卡目标时采用广度优先，先建立各关卡 L1 replay-verified 前缀，再按队列推进 L2；单关卡不重复深挖，除非验证通用机制改进。
+- 用户要求特别记录效率风险：LF52 L2 本次当前关卡进度为 64/81 步，运行达到 30 分钟超时；超时与普通解题失败分开统计。官方存在 baseline 约 244 步的关卡，后续在广度优先证据显示效率瓶颈时再启动通用解题效率优化。
