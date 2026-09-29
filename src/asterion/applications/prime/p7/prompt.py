@@ -179,6 +179,16 @@ response is not success. Do not assume a known map, object identity, target
 coordinate, or action sequence."""
 
 
+P7_CONTINUE_PROMPT = """Continue solving the same interactive puzzle from the
+current retained broker state. Use the registered P7 tools when available:
+p7_observe or p7_status to refresh state, then p7_act_checked for the next
+falsifiable action. Use p7_tried_actions or p7_last_outcome_summary before a
+new probe when prior attempts may constrain it. Use the persistent ipython tool
+only for bounded analysis when a registered P7 tool cannot express the query.
+Continue until the target level is completed or the broker reports a terminal
+state; a text response alone is not success."""
+
+
 # Tool surface is rendered at run start from the application's
 # P7ToolRegistry. The base prompt carries no game-specific or tool-specific
 # content; the operator passes the registry to build_solve_prompt when

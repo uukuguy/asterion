@@ -14,6 +14,7 @@ from unittest import mock
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7 import live as live_module
+from asterion.applications.prime.p7.ipython_host import p7_client_facade
 from tools.compare_prime_p7_runs import build_parser as build_compare_parser
 from tools.compare_prime_p7_runs import main as compare_main
 
@@ -40,6 +41,61 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_subprocess_worker_bootstraps_from_live_client_facade(self) -> None:
+        """The local worker must use the operator socket, not module-source mode."""
+
+        class _Client:
+            def observe(self):
+                return {
+                    "available_actions": [6],
+                    "frame": [[0]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"levels_completed": 0}
+
+            def mechanics_prior(self):
+                return {}
+
+            def act(self, actions):
+                return {}
+
+            def history(self, start, limit):
+                return []
+
+            def frame_at(self, sequence):
+                return [[0]]
+
+            def act_checked(self, plan):
+                return {}
+
+            def tried_actions(self, level):
+                return []
+
+            def last_outcome_summary(self, level):
+                return {}
+
+        async def exercise() -> str:
+            with tempfile.TemporaryDirectory() as directory:
+                worker = live_module.SubprocessPythonWorker(root=Path(directory))
+                signal = SimpleNamespace(cancelled=False)
+                await worker.start(
+                    p7_client_facade(_Client()), signal=signal
+                )
+                try:
+                    result = await worker.execute_cell(
+                        "import p7_client\nprint(p7_client.status())",
+                        signal=signal,
+                    )
+                    return result.output
+                finally:
+                    await worker.close()
+
+        self.assertIn("levels_completed", asyncio.run(exercise()))
+
     def test_pi_command_allows_registered_p7_application_tools(self) -> None:
         command = live_module.pi_base_command(
             node=Path("/usr/bin/node"), pi_entry=Path("/tmp/rpc-entry.js")
