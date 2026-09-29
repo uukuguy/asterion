@@ -47,6 +47,15 @@ name, or (3) switch to a different position. Do not dispatch the same
 The framework auto-injects a ``tried_summary`` field on every observe
 call; treat ``no_effect`` counts >= 2 as a stop-and-reflect signal.
 
+After every ``p7_act_checked`` response, inspect its bounded ``feedback``
+items before planning the next action. ``changed_cell_count`` and
+``changed_cells`` describe settled-frame evidence only; ``no_effect`` means
+the settled frame did not change. A frame change is not objective progress:
+only an increased ``levels_completed`` value or an authoritative terminal
+state proves progress. Use ``before_frame_sha256`` and
+``after_frame_sha256`` to distinguish repeated states without requesting a
+full frame again.
+
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_tried_actions,
 p7_last_outcome_summary, p7_history, p7_frame_at, and p7_act_checked. Use
@@ -176,7 +185,9 @@ or the fixed callback/deadline limit ends the attempt. If no evidence-based
 recovery plan remains, report the failed attempt rather than repeating a losing
 sequence. A final text
 response is not success. Do not assume a known map, object identity, target
-coordinate, or action sequence."""
+coordinate, or action sequence. Once an act response reaches the target level
+or an authoritative terminal state, stop querying broker tools and return the
+result; do not call observe, status, or history after the terminal boundary."""
 
 
 P7_CONTINUE_PROMPT = """Continue solving the same interactive puzzle from the
@@ -186,17 +197,8 @@ falsifiable action. Use p7_tried_actions or p7_last_outcome_summary before a
 new probe when prior attempts may constrain it. Use the persistent ipython tool
 only for bounded analysis when a registered P7 tool cannot express the query.
 Continue until the target level is completed or the broker reports a terminal
-state; a text response alone is not success."""
-
-
-P7_BP35_L1_ROUTE_HINT = """## Replay-verified BP35 L1 candidate
-A prior sealed BP35 L1 run reached LEVEL_SOLVED in 20 primitive actions. Treat
-this as a candidate route, verify the returned observation after each item, and
-stop or replan if the current state contradicts it:
-ACTION4, ACTION4, ACTION4, ACTION4, ACTION4, ACTION3, ACTION4,
-ACTION6(x=45,y=33), ACTION3, ACTION6(x=27,y=33), ACTION6(x=27,y=39),
-ACTION3, ACTION3, ACTION3, ACTION6(x=33,y=15), ACTION3, ACTION4,
-ACTION4, ACTION3, ACTION3."""
+state; a text response alone is not success. Once the target or terminal state
+is reported, stop querying broker tools and return the result."""
 
 
 # Tool surface is rendered at run start from the application's

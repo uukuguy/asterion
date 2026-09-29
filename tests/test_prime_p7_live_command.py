@@ -122,6 +122,32 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn('"name": "ACTION6"', hint)
         self.assertEqual(_summarize_verified_route(prefix, target_level=2), "")
 
+    def test_verified_route_hint_selects_only_requested_level(self) -> None:
+        from asterion.applications.prime.p7.operator import _summarize_verified_route
+
+        prefix = SimpleNamespace(
+            levels_completed=2,
+            transitions=(
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=0),
+                SimpleNamespace(action="ACTION3", data=(), levels_completed=1),
+                SimpleNamespace(action="ACTION6", data=(("x", 7), ("y", 9)), levels_completed=1),
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=2),
+            ),
+        )
+        hint = _summarize_verified_route(prefix, target_level=2)
+        self.assertIn("Replay-verified L2 route hypothesis", hint)
+        self.assertIn('"name": "ACTION6"', hint)
+        self.assertIn('"name": "ACTION4"', hint)
+        self.assertNotIn('"name": "ACTION3"', hint)
+
+    def test_generic_prompt_uses_feedback_and_has_no_game_route(self) -> None:
+        from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, P7_CONTINUE_PROMPT
+
+        self.assertIn("changed_cell_count", P7_SOLVE_PROMPT)
+        self.assertIn("stop querying", P7_SOLVE_PROMPT)
+        self.assertIn("stop querying", P7_CONTINUE_PROMPT)
+        self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
+
     def test_retry_replan_required_is_returned_without_trace_dispatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient

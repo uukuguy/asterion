@@ -323,6 +323,23 @@ class ArcBroker:
         except ArcPredictionError:
             raise ArcBrokerError("unavailable") from None
         transitions: list[ArcTransition] = []
+        feedback: list[dict[str, object]] = []
+
+        def append_feedback(record: ArcHistoryRecord, item_stop_reason: str) -> None:
+            # Project only bounded delta evidence; never include the settled
+            # frame itself in a checked-action result.
+            feedback.append({
+                "changed_cell_count": record.changed_cell_count,
+                "changed_cells": [list(item) for item in record.changed_cells],
+                "changed_cells_omitted": record.changed_cells_omitted,
+                "before_frame_sha256": record.before_frame_sha256,
+                "after_frame_sha256": record.after_frame_sha256,
+                "levels_completed": record.levels_completed,
+                "state": record.state,
+                "no_effect": record.changed_cell_count == 0,
+                "stop_reason": item_stop_reason,
+            })
+
         stop_reason = "matched"
         mismatch: dict[str, object] | None = None
         for name, data, expected in checked:
@@ -363,12 +380,15 @@ class ArcBroker:
                     mismatch = {**(mismatch or {}), key: expected[key]}
             if mismatch is not None:
                 stop_reason = "prediction-mismatch"
+                append_feedback(record, stop_reason)
                 break
             if name == "RESET":
                 stop_reason = "reset-applied"
+                append_feedback(record, stop_reason)
                 break
             if record.levels_completed > previous_levels:
                 stop_reason = "level-advanced"
+                append_feedback(record, stop_reason)
                 break
             if self._no_effect_guard and self._settled_grid_unchanged(record):
                 stop_reason = "observation-no-change"
@@ -388,13 +408,17 @@ class ArcBroker:
                             if k[0] == previous_levels
                         ),
                 }
+                append_feedback(record, stop_reason)
                 break
             if record.state == "GAME_OVER":
                 stop_reason = "game-over"
+                append_feedback(record, stop_reason)
                 break
             if self._primitive_actions >= self._game.action_cap:
                 stop_reason = "action-cap"
+                append_feedback(record, stop_reason)
                 break
+            append_feedback(record, "matched")
         result = ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
         return {
             "applied_count": result.applied_count,
@@ -403,6 +427,7 @@ class ArcBroker:
             "observation": self._current,
             "terminal": self._status(),
             "batch": result,
+            "feedback": feedback,
             "unexecuted_count": len(plan) - result.applied_count,
         }
 

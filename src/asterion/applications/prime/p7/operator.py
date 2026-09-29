@@ -64,7 +64,6 @@ from asterion.applications.prime.p7.private_trace import (
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.prompt import (
-    P7_BP35_L1_ROUTE_HINT,
     P7_LEGACY_SOLVE_PROMPT,
     build_solve_prompt,
 )
@@ -521,6 +520,7 @@ class _P7BrokerClient:
                 "stop_reason": result["stop_reason"],
                 "mismatch": result["mismatch"],
                 "unexecuted_count": result["unexecuted_count"],
+                "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
                 "terminal": self._status_view(terminal),
                 "batch": {
@@ -840,13 +840,31 @@ def _summarize_prefix_mechanics(prefix: object) -> str:
 def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
     """Expose a replay-verified route as a bounded hypothesis for the model."""
 
-    if target_level != 1 or getattr(prefix, "levels_completed", 0) < target_level:
+    if target_level < 1 or getattr(prefix, "levels_completed", 0) < target_level:
         return ""
     transitions = getattr(prefix, "transitions", ())
     if not isinstance(transitions, tuple) or not transitions:
         return ""
+    start = 0
+    if target_level > 1:
+        for index, transition in enumerate(transitions):
+            if getattr(transition, "levels_completed", None) == target_level - 1:
+                start = index + 1
+                break
+        else:
+            return ""
+    selected: list[object] = []
+    for transition in transitions[start:]:
+        levels = getattr(transition, "levels_completed", None)
+        if type(levels) is not int or levels not in (target_level - 1, target_level):
+            return ""
+        selected.append(transition)
+        if levels == target_level:
+            break
+    if not selected or getattr(selected[-1], "levels_completed", None) != target_level or len(selected) > 64:
+        return ""
     actions: list[str] = []
-    for transition in transitions:
+    for transition in selected:
         action = getattr(transition, "action", None)
         if type(action) is not str:
             return ""
@@ -856,9 +874,10 @@ def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
         else:
             actions.append(json.dumps({"name": action, "data": {}}, sort_keys=True))
     return (
-        "## Replay-verified L1 route hypothesis\n"
-        "A prior sealed local run replayed this exact route to LEVEL_SOLVED. "
-        "Use it as an evidence-backed candidate: dispatch one item at a time "
+        f"## Replay-verified L{target_level} route hypothesis\n"
+        "A prior sealed local run replayed this route to the selected level boundary. "
+        "Treat its action count as an upper bound. Seek a shorter verified route "
+        "when exploration is requested; otherwise dispatch one item at a time "
         "through p7_act_checked, verify each returned observation, and replan "
         "if the current state contradicts it.\n"
         + " -> ".join(actions)
@@ -1562,13 +1581,17 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         summary = _summarize_prefix_mechanics(prefix)
         if summary:
             prompt = prompt + "\n\n" + summary
-    route_hint = _summarize_verified_route(
-        prefix, target_level=invocation.game.target_level
+    route_source = load_best_prefix(
+        invocation.arc_root,
+        root / ".asterion-private" / "prime-p7-live",
+        invocation.game.game_id,
+        invocation.game.seed,
+        max_level=invocation.game.target_level,
+        expected_model_id=declared_model_selection(invocation.environment).model,
     )
+    route_hint = _summarize_verified_route(route_source, target_level=invocation.game.target_level)
     if route_hint:
         prompt = prompt + "\n\n" + route_hint
-    if invocation.game.game_id == "bp35-0a0ad940" and invocation.game.target_level == 1:
-        prompt = prompt + "\n\n" + P7_BP35_L1_ROUTE_HINT
     if invocation.sweep_mode:
         invocation = replace(invocation, game=_sweep_game(invocation.game, prefix))
     private = live.private_root(root, run_id)
