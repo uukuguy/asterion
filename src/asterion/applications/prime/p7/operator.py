@@ -1568,6 +1568,13 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             last_failure = getattr(rpc_session, "last_failure", None)
             if type(last_failure) is str and last_failure:
                 diagnostics["pi_last_failure"] = last_failure[:256]
+            event_summary = getattr(
+                getattr(runtime, "_session", None), "native_event_summary", ()
+            )
+            if type(event_summary) is tuple:
+                diagnostics["native_event_summary"] = [
+                    dict(item) for item in event_summary if isinstance(item, Mapping)
+                ]
             diagnostics["worker_cell_count"] = live.worker_cell_count(private)
             cleanup_failed = False
             try:

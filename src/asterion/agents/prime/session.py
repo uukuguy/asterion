@@ -106,6 +106,24 @@ class AsterionPrimeSession:
     def __repr__(self) -> str:
         return "<AsterionPrimeSession redacted>"
 
+    @property
+    def native_event_summary(self) -> tuple[dict[str, object], ...]:
+        """Return private, payload-free native event diagnostics."""
+
+        events = getattr(self._kernel, "_native_events", ())
+        summary: list[dict[str, object]] = []
+        for event in events[-64:]:
+            item: dict[str, object] = {
+                "sequence": event.sequence,
+                "type": event.type,
+            }
+            if event.type == "tool_execution_start":
+                name = event.payload.get("toolName")
+                if type(name) is str:
+                    item["tool_name"] = name
+            summary.append(item)
+        return tuple(summary)
+
     def close(self) -> None:
         """Release the owned single-run lease without invoking the transport."""
 
