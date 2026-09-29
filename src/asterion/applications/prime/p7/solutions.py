@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from collections.abc import Mapping
 import json
 from pathlib import Path
@@ -56,6 +56,61 @@ class VerifiedPrefix:
     transitions: tuple[ArcTransition, ...]
     source_run_id: str
     replay_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class VerifiedAttempt:
+    """A sealed, replay-verified attempt that did not reach the target.
+
+    Attempts are diagnostic exploration evidence.  They intentionally have a
+    separate type from :class:`VerifiedPrefix`, so callers cannot accidentally
+    use a failed route as an official or progress prefix.
+    """
+
+    game_id: str
+    seed: int
+    win_levels: int
+    levels_completed: int
+    transitions: tuple[ArcTransition, ...]
+    source_run_id: str
+    terminal_reason: str
+    replay_sha256: str
+
+
+def load_verified_attempt(
+    arc_root: Path,
+    runs_root: Path,
+    game_id: str,
+    seed: int,
+    *,
+    expected_model_id: str | None = None,
+) -> VerifiedAttempt | None:
+    """Load one exact, failed run as exploratory route evidence.
+
+    Only a sealed failed trace with the complete action journal is accepted.
+    A ``partial`` marker is accepted only when the trace also contains the
+    complete failed route and a terminal broker status.  This loader never
+    returns a ``VerifiedPrefix``; callers must opt into treating the result as
+    a failed attempt explicitly.
+    """
+
+    candidates: list[VerifiedAttempt] = []
+    try:
+        if runs_root.is_symlink() or not runs_root.is_dir() or type(seed) is not int:
+            return None
+        for run in sorted(runs_root.iterdir(), key=lambda item: item.name):
+            if run.is_symlink() or not run.is_dir():
+                continue
+            attempt = _load_attempt_one(
+                arc_root, run, game_id, seed, expected_model_id
+            )
+            if attempt is not None:
+                candidates.append(attempt)
+    except OSError:
+        return None
+    if not candidates:
+        return None
+    return min(candidates, key=lambda value: (len(value.transitions), value.source_run_id))
 
 
 def _fresh_engine(arc_root: Path, game: P7GameSelection, recordings: Path) -> object:
@@ -220,6 +275,156 @@ def _load_one(
         return None
 
 
+def _load_attempt_one(
+    arc_root: Path,
+    run: Path,
+    expected_game_id: str,
+    seed: int,
+    expected_model_id: str | None = None,
+) -> VerifiedAttempt | None:
+    """Validate a complete failed trace without promoting its progress."""
+
+    try:
+        summary_path = _private_path(run, "summary.json")
+        trace_root = _private_path(run, "trace")
+        trace_path = _private_path(run, "trace", "prime-trace.jsonl")
+        seal_path = _private_path(run, "trace", "prime-trace.seal.json")
+        if not all(path.is_file() for path in (summary_path, trace_path, seal_path)):
+            return None
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if (
+            type(summary) is not dict
+            or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+            or summary.get("replay_verified") is not True
+            or summary.get("sealed_trace") is not True
+            or summary.get("cleanup_complete") is not True
+            or summary.get("run_id") != run.name
+        ):
+            return None
+        entries = read_trace_entries(trace_root)
+        if not entries or not _known_trace_identities(
+            entries[0].identities, expected_model_id
+        ):
+            return None
+        if any(entry.identities != entries[0].identities for entry in entries):
+            return None
+        seal = json.loads(seal_path.read_text(encoding="utf-8"))
+        if (
+            type(seal) is not dict
+            or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
+            or seal.get("entry_count") != len(entries)
+            or seal.get("final_sha256") != entries[-1].sha256
+            or type(seal.get("sealed_at")) is not str
+        ):
+            return None
+        failed = tuple(entry.payload for entry in entries if entry.kind == "arc.run.failed")
+        partial = tuple(entry.payload for entry in entries if entry.kind == "arc.run.partial")
+        if len(failed) + len(partial) != 1 or any(
+            entry.kind == "arc.run.completed" for entry in entries
+        ):
+            return None
+        is_partial = bool(partial)
+        evidence = failed[0] if failed else partial[0]
+        if not isinstance(evidence, Mapping):
+            return None
+        required = {
+            "game_id", "seed", "win_levels", "levels_completed",
+            "primitive_actions", "replay_sha256", "terminal_reason",
+        }
+        if is_partial:
+            values = _prefix_values(
+                evidence, expected_game_id, seed, evidence.get("win_levels"), is_partial=True
+            ) if type(evidence.get("win_levels")) is int else None
+            if values is None or not _partial_summary_matches(summary, evidence):
+                return None
+            # A partial marker describes the completed prefix.  The complete
+            # failed route's terminal receipt is carried by diagnostics.
+            diagnostics = summary.get("diagnostics")
+            broker_status = diagnostics.get("broker_status") if type(diagnostics) is dict else None
+            terminal = (
+                broker_status.get("terminal_reason")
+                if type(broker_status) is dict else summary.get("terminal_reason")
+            )
+            if type(terminal) is not str or terminal not in {"action-cap", "game-over", "human-baseline"}:
+                return None
+        elif set(evidence) != required:
+            return None
+        if (
+            evidence.get("game_id") != expected_game_id
+            or evidence.get("seed") != seed
+            or type(evidence.get("win_levels")) is not int
+        ):
+            return None
+        win_levels = evidence["win_levels"]
+        levels = evidence["levels_completed"]
+        actions = evidence["primitive_actions"]
+        if not is_partial:
+            terminal = evidence["terminal_reason"]
+            digest = evidence["replay_sha256"]
+        else:
+            digest = ""
+        if (
+            type(levels) is not int
+            or not 0 <= levels < win_levels
+            or type(actions) is not int
+            or actions < 1
+            or type(terminal) is not str
+            or terminal not in {"action-cap", "game-over", "human-baseline"}
+            or (not is_partial and type(digest) is not str)
+        ):
+            return None
+        transitions = _transitions(entries)
+        if is_partial:
+            actions = len(transitions)
+            levels = max(item.levels_completed for item in transitions)
+            digest = replay_sha256(transitions, terminal_reason=terminal)
+            if levels >= win_levels:
+                return None
+        if len(transitions) != actions:
+            return None
+        if any(item.levels_completed > levels for item in transitions):
+            return None
+        identity = _recording_identity(run, transitions)
+        if identity != (expected_game_id, win_levels):
+            return None
+        if replay_sha256(transitions, terminal_reason=terminal) != digest:
+            return None
+        game = resolve_game_selection(
+            {
+                GAME_ID_ENV: expected_game_id,
+                SEED_ENV: str(seed),
+                TARGET_LEVEL_ENV: str(win_levels),
+            },
+            arc_root,
+        )
+        if game.win_levels != win_levels or game.target_level != win_levels:
+            return None
+        if terminal == "human-baseline":
+            game = replace(game, action_cap_override=actions)
+        receipt = ArcRunReceipt(
+            expected_game_id, seed, actions, levels, terminal, digest
+        )
+        with tempfile.TemporaryDirectory(prefix="asterion-p7-attempt-") as directory:
+            replay_arc_run(
+                transitions,
+                receipt,
+                lambda: _fresh_engine(arc_root, game, Path(directory)),
+                game=game,
+            )
+        return VerifiedAttempt(
+            expected_game_id,
+            seed,
+            win_levels,
+            levels,
+            transitions,
+            run.name,
+            terminal,
+            digest,
+        )
+    except Exception:
+        return None
+
+
 def _transitions(entries: tuple[object, ...]) -> tuple[ArcTransition, ...]:
     values: list[ArcTransition] = []
     for entry in entries:
@@ -361,4 +566,10 @@ def _partial_summary_matches(summary: dict[object, object], evidence: Mapping[ob
     )
 
 
-__all__ = ("VerifiedPrefix", "list_verified_prefixes", "load_best_prefix")
+__all__ = (
+    "VerifiedAttempt",
+    "VerifiedPrefix",
+    "list_verified_prefixes",
+    "load_best_prefix",
+    "load_verified_attempt",
+)
