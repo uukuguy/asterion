@@ -41,6 +41,15 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_partial_route_hint_does_not_claim_level_completion(self) -> None:
+        from asterion.applications.prime.p7.optimizer import PlannerAction
+        from asterion.applications.prime.p7.operator import _summarize_partial_route_actions
+
+        hint = _summarize_partial_route_actions((PlannerAction("ACTION1"),), target_level=2)
+        self.assertIn("incomplete", hint.lower())
+        self.assertNotIn("selected level boundary", hint)
+        self.assertNotIn("upper bound", hint)
+
     def test_route_adoption_tracker_records_exact_follow_and_completion(self) -> None:
         from asterion.applications.prime.p7.optimizer import PlannerAction
         from asterion.applications.prime.p7.operator import RouteAdoptionTracker

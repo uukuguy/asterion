@@ -3273,3 +3273,5 @@
 - 20:01 [ae620678] 将 VerifiedAttempt 接入通用 P7 探索提示，并为 fresh replay 增加 replay_complete 边界；92 项聚焦测试、compileall、ruff、diff-check 通过。
 - 21:45 LF52 L2 通用实证：`p7-live-20260929133238-64bc9ddc37c6de8dc2208c78` 使用 28 步 L1 前缀，partial route baseline 81 步、候选重放 16 次，P7 收到探索起点；未找到更短候选，随后 Pi RPC 重试失败，L2 未通关，replay/seal/cleanup 完成。
 - 21:55 LP85 L2 通用实证：`p7-live-20260929134600-633e6188fd9b99a5f5d1d922` 复用 9 步 L1 前缀，仅产生 1 个 L2 动作；Pi RPC 进程异常退出，trace/replay/seal/cleanup 完成但 evidence-invalid，未通关。连续三次 L2 失败触发熔断，停止继续跑关。
+- 00:12 [afd72bbc] 允许 replay 验证的 sealed stalled partial evidence，修复协作取消后误判 evidence-invalid。
+- 00:20 runtime evidence repair：Pi RPC 在 compact 前保存有界私有错误摘要（stop reason、错误摘要哈希、失败响应）及取消/进程退出状态；operator 将其写入私有 diagnostics，未暴露原始 provider 文本。聚焦 RPC、P7、sweep 测试 174 项通过，lint/diff-check 通过。

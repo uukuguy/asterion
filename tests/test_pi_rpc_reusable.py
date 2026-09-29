@@ -271,6 +271,25 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await rpc.close()
 
+    async def test_private_diagnostics_preserve_bounded_error_metadata(self) -> None:
+        rpc = self.make_session(deadline_seconds=0.3, compact_events=True)
+        await rpc.open(signal=NeverCancelled())
+        try:
+            with self.assertRaises(RuntimeError):
+                await rpc.prompt(
+                    "assistant-error", signal=NeverCancelled(), on_event=lambda _event: None
+                )
+            diagnostics = rpc.private_diagnostics()
+            self.assertEqual(diagnostics["lifecycle_poisoned"], True)
+            errors = diagnostics["error_events"]
+            self.assertEqual(len(errors), 1)
+            self.assertEqual(errors[0]["stop_reason"], "error")
+            self.assertIn("error_digest", errors[0])
+            self.assertNotIn("PRIVATE-ERROR", repr(diagnostics))
+            self.assertNotIn("errorMessage", repr(diagnostics))
+        finally:
+            await rpc.close()
+
     async def test_compact_semantics_match_in_both_projection_modes(self) -> None:
         for compact_events in (False, True):
             for prompt in ("normal", "reject-compact"):

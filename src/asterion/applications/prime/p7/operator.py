@@ -1019,6 +1019,24 @@ def _summarize_route_actions(
     )
 
 
+def _summarize_partial_route_actions(
+    actions: tuple[PlannerAction, ...], *, target_level: int
+) -> str:
+    """Describe a replayed incomplete route without suggesting it solves a level."""
+    if not actions or len(actions) > 64:
+        return ""
+    encoded = " -> ".join(
+        json.dumps({"name": item.name, "data": dict(item.data)}, sort_keys=True)
+        for item in actions
+    )
+    return (
+        f"## Incomplete L{target_level} exploration checkpoint\n"
+        "A prior incomplete attempt reached the same observed checkpoint after fresh replay. "
+        "This route has not completed the level. Use it only as evidence for exploration; "
+        "verify each observation and replan on mismatch.\n" + encoded
+    )
+
+
 def _summarize_route_proofs(
     proofs: tuple[RouteCompressionProof, ...], *, target_level: int
 ) -> str:
@@ -1204,10 +1222,10 @@ def _optimize_partial_attempt(
     if not candidate.replay.replay_complete:
         return "", {**metadata, "status": "partial-replay-incomplete"}
     actions = candidate.actions if len(candidate.actions) < len(route) else route
-    hint = _summarize_route_actions(actions, target_level=target_level, optimized=True)
+    hint = _summarize_partial_route_actions(actions, target_level=target_level)
     if not hint:
         return "", metadata
-    return hint.replace("route hypothesis", "exploration checkpoint hypothesis"), metadata
+    return hint, metadata
 
 
 def _initial_game_context(client: object, *, include_prior: bool) -> str:
@@ -2183,6 +2201,9 @@ async def run_live(
             last_failure = getattr(rpc_session, "last_failure", None)
             if type(last_failure) is str and last_failure:
                 diagnostics["pi_last_failure"] = last_failure[:256]
+            private_diagnostics = getattr(rpc_session, "private_diagnostics", None)
+            if callable(private_diagnostics):
+                diagnostics["pi_rpc_private"] = private_diagnostics()
             event_summary = getattr(
                 getattr(runtime, "_session", None), "native_event_summary", ()
             )
