@@ -3234,3 +3234,6 @@
 - 12:45 GPT-6-Sol 按候选路线 20 步完成 BP35 L1；receipt PASS、replay_verified、sealed_trace、cleanup_complete 均为真。
 - 12:46 记录成功通关证据与私有 transcript 路径，供后续 resume 检索 [98735be1]
 - 12:55 提交通用 P7 动作反馈与离线路线优化设计，避免 BP35 专用机制并保留 broker primitive 计数 [07af64cd]
+- 13:05 添加通用离线路线优化器与 fresh ARC replay 适配器，验证有限预算、身份、终态和动作数 [ba562419]
+- 13:12 修正离线 replay 的 RESET 计数与边界校验，支持跨关卡通用路线 [a8dda31d]
+- 13:16 补充终态 GAME_OVER 的通用动作反馈边界测试，确认已提交动作保留 bounded delta [5ea0d9f0]
