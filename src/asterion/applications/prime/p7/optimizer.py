@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
+import math
+import time
 from typing import Protocol
 
 
@@ -31,6 +33,8 @@ class RouteCandidate:
     replay: RouteResult
     removed_indices: tuple[int, ...]
     candidates_replayed: int
+    elapsed_seconds: float = 0.0
+    timed_out: bool = False
 
 
 def optimize_route(
@@ -41,6 +45,7 @@ def optimize_route(
     max_removed: int = 3,
     candidate_budget: int = 128,
     replacements: tuple[PlannerAction, ...] = (),
+    time_budget_seconds: float | None = None,
 ) -> RouteCandidate:
     """Keep the shortest verified edit found within a finite replay budget.
 
@@ -57,8 +62,19 @@ def optimize_route(
         or type(candidate_budget) is not int or candidate_budget < 1
         or type(replacements) is not tuple
         or any(type(action) is not PlannerAction for action in replacements)
+        or (
+            time_budget_seconds is not None
+            and (
+                type(time_budget_seconds) not in (int, float)
+                or isinstance(time_budget_seconds, bool)
+                or not math.isfinite(time_budget_seconds)
+                or time_budget_seconds < 0
+            )
+        )
     ):
         raise ValueError("route optimization is unavailable")
+
+    started_at = time.monotonic()
 
     def valid(result: RouteResult, actions: tuple[PlannerAction, ...]) -> bool:
         return (
@@ -77,6 +93,28 @@ def optimize_route(
     best = RouteCandidate(route, baseline, (), 1)
     replayed = 1
     seen = {route}
+
+    timeout_elapsed: float | None = None
+
+    def timed_out() -> bool:
+        nonlocal timeout_elapsed
+        if time_budget_seconds is None:
+            return False
+        elapsed = max(0.0, time.monotonic() - started_at)
+        if elapsed >= time_budget_seconds:
+            timeout_elapsed = elapsed
+            return True
+        return False
+
+    if timed_out():
+        return RouteCandidate(
+            best.actions,
+            best.replay,
+            best.removed_indices,
+            replayed,
+            timeout_elapsed if timeout_elapsed is not None else 0.0,
+            True,
+        )
 
     def candidates():
         for count in range(1, min(max_removed, len(route)) + 1):
@@ -106,6 +144,8 @@ def optimize_route(
     for candidate, removed in candidates():
         if replayed >= candidate_budget:
             break
+        if timed_out():
+            break
         if candidate in seen:
             continue
         seen.add(candidate)
@@ -113,7 +153,19 @@ def optimize_route(
         replayed += 1
         if valid(replay, candidate) and len(candidate) < len(best.actions):
             best = RouteCandidate(candidate, replay, removed, replayed)
-    return RouteCandidate(best.actions, best.replay, best.removed_indices, replayed)
+    elapsed_seconds = (
+        timeout_elapsed
+        if timeout_elapsed is not None
+        else max(0.0, time.monotonic() - started_at)
+    )
+    return RouteCandidate(
+        best.actions,
+        best.replay,
+        best.removed_indices,
+        replayed,
+        elapsed_seconds,
+        time_budget_seconds is not None and elapsed_seconds >= time_budget_seconds,
+    )
 
 
 __all__ = ("PlannerAction", "ReplayOracle", "RouteCandidate", "RouteResult", "optimize_route")

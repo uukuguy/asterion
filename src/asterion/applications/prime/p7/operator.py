@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
+import signal as signal_module
 import socket
 import sys
 import threading
@@ -99,6 +100,7 @@ _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
 _ROUTE_OPTIMIZER_CANDIDATE_BUDGET = 64
 _ROUTE_OPTIMIZER_MAX_REMOVED = 3
+_ROUTE_OPTIMIZER_TIME_BUDGET_SECONDS = 8.0
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
@@ -938,12 +940,29 @@ def _optimize_verified_route(
     """Best-effort fresh-ARC shortening with a verified-route fallback."""
     transitions = _verified_route_transitions(prefix, target_level=target_level)
     baseline = _planner_actions_from_transitions(transitions)
+    warmup: tuple[PlannerAction, ...] = ()
+    if target_level > 1:
+        all_transitions = getattr(prefix, "transitions", ())
+        if isinstance(all_transitions, tuple):
+            boundary = next(
+                (
+                    index + 1
+                    for index, transition in enumerate(all_transitions)
+                    if getattr(transition, "levels_completed", None) == target_level - 1
+                ),
+                None,
+            )
+            if boundary is not None:
+                warmup = _planner_actions_from_transitions(all_transitions[:boundary])
     metadata: dict[str, object] = {
         "status": "no-route" if not baseline else "baseline-only",
         "baseline_actions": len(baseline),
         "optimized_actions": len(baseline),
         "candidates_replayed": 0,
         "removed_indices": [],
+        "warmup_actions": len(warmup),
+        "elapsed_seconds": 0.0,
+        "timed_out": False,
     }
     baseline_hint = _summarize_route_actions(baseline, target_level=target_level)
     if not baseline_hint:
@@ -955,11 +974,15 @@ def _optimize_verified_route(
             route=baseline,
             candidate_budget=_ROUTE_OPTIMIZER_CANDIDATE_BUDGET,
             max_removed=_ROUTE_OPTIMIZER_MAX_REMOVED,
+            warmup=warmup,
+            time_budget_seconds=_ROUTE_OPTIMIZER_TIME_BUDGET_SECONDS,
         )
         if not isinstance(candidate, RouteCandidate):
             raise ValueError("invalid optimizer result")
         metadata["candidates_replayed"] = candidate.candidates_replayed
         metadata["removed_indices"] = list(candidate.removed_indices)
+        metadata["elapsed_seconds"] = candidate.elapsed_seconds
+        metadata["timed_out"] = candidate.timed_out
         if (
             candidate.replay.success
             and len(candidate.actions) < len(baseline)
@@ -1611,7 +1634,12 @@ def _sweep_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
     return replace(game, action_cap_override=action_cap)
 
 
-async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
+async def run_live(
+    invocation: P7Invocation,
+    run_id: str,
+    *,
+    cancellation_signal: object | None = None,
+) -> live.P7LiveExecution:
     """Run the one fixed solve and seal its private evidence.
 
     Recovered from the removed driver's live body, with the orchestration order
@@ -1624,6 +1652,9 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     from .solutions import load_best_prefix
 
     variant = _resolve_history_variant(invocation.environment, invocation.game)
+    run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
+    if type(getattr(run_signal, "cancelled", None)) is not bool:
+        raise P7OperatorError("P7 cancellation signal is unavailable")
 
     root = invocation.operator_root
     # Build the application-level tool registry. The framework prompt
@@ -1792,7 +1823,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
             input_text=prompt,
             host_services=resources_.host_services,
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
-            signal=live.NeverCancelled(),
+            signal=run_signal,
         )
         receipt = live.receipt_value(result.artifacts)
         broker = resources_.host_services["prime.arc-broker"]
@@ -2082,6 +2113,26 @@ def _reject(*, reason: str | None = None) -> int:
     return 2
 
 
+def _run_live_with_process_signals(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
+    """Translate supervisor termination into cooperative evidence-preserving cancellation."""
+
+    cancellation = live.ProcessCancellation()
+    previous: dict[int, object] = {}
+
+    def request_cancel(_signum: int, _frame: object) -> None:
+        cancellation.cancel()
+
+    try:
+        for signum in (signal_module.SIGTERM, signal_module.SIGINT):
+            previous[signum] = signal_module.signal(signum, request_cancel)
+        return asyncio.run(
+            run_live(invocation, run_id, cancellation_signal=cancellation)
+        )
+    finally:
+        for signum, handler in previous.items():
+            signal_module.signal(signum, handler)
+
+
 def main(argv: list[str] | None = None) -> int:
     """The only external input is the literal Make preset invocation."""
 
@@ -2109,7 +2160,7 @@ def main(argv: list[str] | None = None) -> int:
     receipt_model = None if receipt_selection is None else receipt_selection.model
     try:
         result = classify_live_result(
-            asyncio.run(run_live(invocation, run_id)),
+            _run_live_with_process_signals(invocation, run_id),
             provider=receipt_provider,
             model=receipt_model,
         )

@@ -41,6 +41,12 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_process_cancellation_signal_starts_clear_and_can_cancel(self) -> None:
+        signal = live_module.ProcessCancellation()
+        self.assertFalse(signal.cancelled)
+        signal.cancel()
+        self.assertTrue(signal.cancelled)
+
     def test_subprocess_worker_bootstraps_from_live_client_facade(self) -> None:
         """The local worker must use the operator socket, not module-source mode."""
 
@@ -194,6 +200,38 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn('"name": "ACTION3"', hint)
         self.assertEqual(metadata["status"], "fallback-error")
         self.assertEqual(metadata["optimized_actions"], 2)
+
+    def test_live_optimizer_passes_verified_prefix_to_later_level_replay(self) -> None:
+        from asterion.applications.prime.p7.operator import _optimize_verified_route
+        from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate, RouteResult
+
+        prefix = SimpleNamespace(
+            levels_completed=2,
+            transitions=(
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=0),
+                SimpleNamespace(action="ACTION3", data=(), levels_completed=1),
+                SimpleNamespace(action="ACTION6", data=(("x", 7), ("y", 9)), levels_completed=1),
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=2),
+            ),
+        )
+        game = SimpleNamespace(game_id="aa11-bb22", seed=0, target_level=2)
+        optimized = RouteCandidate(
+            actions=(PlannerAction("ACTION4"),),
+            replay=RouteResult(True, 1, "NOT_FINISHED", ("aa11-bb22", 0)),
+            removed_indices=(1,),
+            candidates_replayed=4,
+        )
+        with mock.patch(
+            "asterion.applications.prime.p7.operator.optimize_arc_route",
+            return_value=optimized,
+        ) as optimize:
+            _optimize_verified_route(
+                prefix, game=game, arc_root=Path("/tmp/arc"), target_level=2
+            )
+        self.assertEqual(
+            optimize.call_args.kwargs["warmup"],
+            (PlannerAction("ACTION4"), PlannerAction("ACTION3")),
+        )
 
     def test_generic_prompt_uses_feedback_and_has_no_game_route(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, P7_CONTINUE_PROMPT

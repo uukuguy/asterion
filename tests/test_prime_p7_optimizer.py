@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest import mock
 
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.optimizer import (
@@ -54,6 +55,33 @@ class FakeEngine:
         self.closed = True
 
 
+class MultiLevelFakeEngine:
+    def __init__(self) -> None:
+        self.game_id = "aa11-bb22"
+        self.seed = 0
+        self.level = 0
+        self.actions: list[str] = []
+        self.closed = False
+
+    def observe(self) -> dict[str, object]:
+        return {
+            "available_actions": [1, 2],
+            "frame": [[[self.level, len(self.actions)]]],
+            "levels_completed": self.level,
+            "state": "WIN" if self.level == 2 else "NOT_FINISHED",
+            "win_levels": 2,
+        }
+
+    def step(self, name: str) -> dict[str, object]:
+        self.actions.append(name)
+        if (self.level, name) in {(0, "ACTION1"), (1, "ACTION2")}:
+            self.level += 1
+        return self.observe()
+
+    def close(self) -> None:
+        self.closed = True
+
+
 class TestRouteOptimizer(unittest.TestCase):
     def test_finds_shorter_route_after_fresh_verification(self) -> None:
         route = (A, C, B)
@@ -89,6 +117,24 @@ class TestRouteOptimizer(unittest.TestCase):
         result = optimize_route(route, oracle, identity=(GAME.game_id, GAME.seed), candidate_budget=1)
         self.assertEqual(result.actions, route)
         self.assertEqual(oracle.calls, [route])
+
+    def test_stops_candidate_search_when_time_budget_expires(self) -> None:
+        route = (A, C, B)
+        oracle = TableOracle({route, (A, B)})
+        with mock.patch(
+            "asterion.applications.prime.p7.optimizer.time.monotonic",
+            side_effect=(0.0, 0.0, 2.0),
+        ):
+            result = optimize_route(
+                route,
+                oracle,
+                identity=(GAME.game_id, GAME.seed),
+                candidate_budget=8,
+                time_budget_seconds=1.0,
+            )
+        self.assertEqual(result.actions, route)
+        self.assertTrue(result.timed_out)
+        self.assertEqual(result.candidates_replayed, 1)
 
     def test_replacement_can_combine_with_deletion_to_shorten_route(self) -> None:
         replacement = PlannerAction("ACTION4")
@@ -127,6 +173,24 @@ class TestRouteOptimizer(unittest.TestCase):
         result = oracle.replay((PlannerAction("RESET"), A, B))
         self.assertFalse(result.success)
         self.assertTrue(engine.closed)
+
+    def test_arc_oracle_warm_starts_target_level_from_verified_prefix(self) -> None:
+        game = P7GameSelection("aa11-bb22", 0, 2, (5, 5), 2)
+        engines: list[MultiLevelFakeEngine] = []
+
+        def make() -> MultiLevelFakeEngine:
+            engine = MultiLevelFakeEngine()
+            engines.append(engine)
+            return engine
+
+        oracle = ArcReplayOracle(
+            game=game,
+            engine_factory=make,
+            warmup=(PlannerAction("ACTION1"),),
+        )
+        result = oracle.replay((PlannerAction("ACTION2"),))
+        self.assertEqual(result, RouteResult(True, 1, "WIN", (game.game_id, game.seed)))
+        self.assertTrue(engines[0].closed)
 
 
 if __name__ == "__main__":

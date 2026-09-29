@@ -21,6 +21,7 @@ class TestPrimeP7Guest(unittest.TestCase):
                 launch('asterion-p7-' + 'a' * 32 + '.service', 0, ['python3', '-V'])
         args = call.call_args.args[1]
         self.assertIn('--property=KillMode=control-group', args)
+        self.assertIn('--property=TimeoutStopSec=20s', args)
         self.assertIn('--setenv=ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND=1', args)
         self.assertFalse(any(arg.startswith('--property=RuntimeMaxSec=') for arg in args))
 

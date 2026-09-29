@@ -45,7 +45,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     args = [
         "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
         "--service-type=exec", f"--unit={unit}",
-        "--property=KillMode=control-group", "--property=TimeoutStopSec=5s",
+        "--property=KillMode=control-group", "--property=TimeoutStopSec=20s",
         "--property=SendSIGKILL=yes",
         "--property=WorkingDirectory=/tmp",
     ]

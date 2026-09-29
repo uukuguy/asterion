@@ -125,6 +125,22 @@ class NeverCancelled:
         return False
 
 
+class ProcessCancellation:
+    """Mutable cancellation state used to let supervisor signals seal evidence."""
+
+    __slots__ = ("_cancelled",)
+
+    def __init__(self) -> None:
+        self._cancelled = False
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+
 class ArcadeEngine:
     """The ARC-AGI-3 adapter the broker and the replay share.
 
@@ -1159,6 +1175,7 @@ __all__ = (
     "WORKER_PROTOCOL",
     "ArcadeEngine",
     "NeverCancelled",
+    "ProcessCancellation",
     "P7ClientServer",
     "P7LiveExecution",
     "P7LiveSolveError",

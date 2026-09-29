@@ -15,11 +15,23 @@ from .replay import _step
 class ArcReplayOracle:
     """Replay each candidate in a newly created engine, closing it on failure."""
 
-    def __init__(self, *, game: P7GameSelection, engine_factory: Callable[[], object]) -> None:
-        if type(game) is not P7GameSelection or not callable(engine_factory):
+    def __init__(
+        self,
+        *,
+        game: P7GameSelection,
+        engine_factory: Callable[[], object],
+        warmup: tuple[PlannerAction, ...] = (),
+    ) -> None:
+        if (
+            type(game) is not P7GameSelection
+            or not callable(engine_factory)
+            or type(warmup) is not tuple
+            or any(type(action) is not PlannerAction for action in warmup)
+        ):
             raise ValueError("offline replay is unavailable")
         self.game = game
         self.engine_factory = engine_factory
+        self.warmup = warmup
 
     def replay(self, actions: tuple[PlannerAction, ...]) -> RouteResult:
         identity = (self.game.game_id, self.game.seed)
@@ -36,7 +48,9 @@ class ArcReplayOracle:
             if current.levels_completed != 0 or state != "NOT_FINISHED":
                 raise ValueError
             level_actions = 0
-            for action in actions:
+
+            def apply(action: PlannerAction, *, count_action: bool) -> None:
+                nonlocal current, count, state, level_actions
                 if type(action) is not PlannerAction:
                     raise ValueError
                 canonical = _canonical_action(ArcAction(action.name, action.data))
@@ -46,13 +60,14 @@ class ArcReplayOracle:
                 current = _snapshot_observation(
                     _step(engine, canonical), win_levels=self.game.win_levels
                 )
-                count += 1
+                if count_action:
+                    count += 1
                 state = current.state
                 if canonical.name == "RESET":
                     if level_actions == 0 or current.levels_completed != previous.levels_completed or state != "NOT_FINISHED":
                         raise ValueError
                     level_actions = 0
-                    continue
+                    return
                 if not previous.levels_completed <= current.levels_completed <= previous.levels_completed + 1:
                     raise ValueError
                 level_actions += 1
@@ -60,6 +75,16 @@ class ArcReplayOracle:
                     level_actions = 0
                 if state == "WIN" and current.levels_completed != self.game.win_levels:
                     raise ValueError
+
+            for action in self.warmup:
+                apply(action, count_action=False)
+            if (
+                self.warmup
+                and current.levels_completed != self.game.target_level - 1
+            ):
+                raise ValueError
+            for action in actions:
+                apply(action, count_action=True)
                 if count != len(actions) and (
                     current.levels_completed >= self.game.target_level
                     or state in {"WIN", "GAME_OVER"}
@@ -92,6 +117,8 @@ def optimize_arc_route(
     candidate_budget: int = 128,
     max_removed: int = 3,
     replacements: tuple[PlannerAction, ...] = (),
+    warmup: tuple[PlannerAction, ...] = (),
+    time_budget_seconds: float | None = None,
 ) -> RouteCandidate:
     """Explicit offline entry point; each candidate receives a fresh ARC SDK game."""
 
@@ -107,11 +134,12 @@ def optimize_arc_route(
 
         return optimize_route(
             route,
-            ArcReplayOracle(game=game, engine_factory=create_engine),
+            ArcReplayOracle(game=game, engine_factory=create_engine, warmup=warmup),
             identity=(game.game_id, game.seed),
             candidate_budget=candidate_budget,
             max_removed=max_removed,
             replacements=replacements,
+            time_budget_seconds=time_budget_seconds,
         )
 
 
