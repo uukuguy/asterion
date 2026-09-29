@@ -423,6 +423,7 @@ class _P7BrokerClient:
 
     def observe(self) -> Mapping[str, object]:
         observation = self._broker.observe()
+        status = self._broker.status()
         # Auto-inject tried-summary so the model can see no-effect state on
         # every observe call, not only inside act_checked responses. Targets
         # the L3 failure mode where the model loops on the same (action,
@@ -442,6 +443,10 @@ class _P7BrokerClient:
             "levels_completed": observation.levels_completed,
             "state": observation.state,
             "win_levels": observation.win_levels,
+            "actions_remaining": status.actions_remaining,
+            "primitive_actions": status.primitive_actions,
+            "target_level": self._broker.game.target_level,
+            "terminal_reason": status.terminal_reason,
             "tried_summary": {
                 "attempts": no_effects.get("attempts", {}),
                 "no_effect": no_effects.get("no_effect", {}),
@@ -683,6 +688,52 @@ def _summarize_prefix_mechanics(prefix: object) -> str:
             f"- L{level}: {total} actions. Top: {items}"
         )
     return "\n".join(bullets)
+
+
+def _initial_game_context(client: object, *, include_prior: bool) -> str:
+    """Inject one bounded broker snapshot before the model chooses tools."""
+
+    observe = getattr(client, "observe", None)
+    status = getattr(client, "status", None)
+    if not callable(observe) or not callable(status):
+        raise P7OperatorError("P7 host services are unavailable")
+    observation = observe()
+    broker_status = status()
+    if not isinstance(observation, Mapping) or not isinstance(broker_status, Mapping):
+        raise P7OperatorError("P7 host services are unavailable")
+    state = {
+        "available_actions": observation.get("available_actions", ()),
+        "frame_summary": observation.get("frame_summary", {}),
+        "levels_completed": observation.get("levels_completed"),
+        "state": observation.get("state"),
+        "win_levels": observation.get("win_levels"),
+        "tried_summary": observation.get("tried_summary", {}),
+        "actions_remaining": broker_status.get("actions_remaining"),
+        "primitive_actions": broker_status.get("primitive_actions"),
+        "target_level": broker_status.get("target_level"),
+        "terminal_reason": broker_status.get("terminal_reason"),
+    }
+    sections = [
+        "## Initial broker state (application supplied; already observed)",
+        "Use this snapshot as the starting fact set. Do not spend a tool call rereading it.",
+        json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+    ]
+    if include_prior:
+        mechanics_prior = getattr(client, "mechanics_prior", None)
+        if not callable(mechanics_prior):
+            raise P7OperatorError("P7 host services are unavailable")
+        prior = mechanics_prior()
+        if not isinstance(prior, Mapping):
+            raise P7OperatorError("P7 host services are unavailable")
+        sections.extend([
+            "## Cross-level mechanics evidence (application supplied; use as a prior)",
+            "Treat this as evidence for a distinguishing probe, not as a route.",
+            json.dumps(dict(prior), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ])
+    value = "\n".join(sections)
+    if len(value.encode("utf-8")) > 16384:
+        raise P7OperatorError("P7 host services are unavailable")
+    return value
 
 
 def _seal_verified_partial_run(
@@ -1395,6 +1446,12 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
                 _apply_saved_prefix(broker, evidence.runtime_recorder, prefix.transitions)
                 if broker.status().levels_completed != prefix.levels_completed:
                     raise P7OperatorError("P7 saved prefix is unavailable")
+        prediction_client = getattr(resources_, "_prediction_client", None)
+        if prediction_client is not None:
+            prompt = prompt + "\n\n" + _initial_game_context(
+                prediction_client,
+                include_prior=prefix is not None and prefix.levels_completed > 0,
+            )
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
