@@ -300,12 +300,22 @@ class ArcBroker:
         records = self._bound_history()
         try:
             validate_history_query(start=start, limit=limit, latest_sequence=len(records) - 1)
-            page = [record.public_view() for record in records[start:start + limit]]
-            if len(json.dumps(page, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 16384:
-                raise ArcPredictionError
+            # A history request is a bounded page, not a promise that all 32
+            # records fit in one transport frame.  Large changed-cell samples
+            # can make a valid page exceed the worker budget, so shrink the
+            # page while preserving sequence order.  The caller can continue
+            # from the last returned sequence.
+            page_size = limit
+            while page_size >= 1:
+                page = [record.public_view() for record in records[start:start + page_size]]
+                if len(json.dumps(page, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) <= 16384:
+                    return page
+                if page_size == 1:
+                    raise ArcPredictionError
+                page_size = max(1, page_size // 2)
         except ArcPredictionError:
             raise ArcBrokerError("unavailable") from None
-        return page
+        raise ArcBrokerError("unavailable")
 
     def frame_at(self, sequence: int) -> list[list[int]]:
         records = self._bound_history()

@@ -345,8 +345,8 @@ class TestNativeP7Broker(unittest.TestCase):
         with self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
             broker.bind_history("run-1")
 
-    def test_oversized_history_page_is_rejected_without_losing_records(self) -> None:
-        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+    def test_oversized_history_page_is_bounded_without_losing_records(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
 
         class LargeHistoryEngine(_HistoryEngine):
             def observe(self) -> dict[str, object]:
@@ -358,8 +358,10 @@ class TestNativeP7Broker(unittest.TestCase):
         broker.bind_history("run-1")
         for _ in range(32):
             broker.act(("ACTION1",))
-        with self.assertRaisesRegex(ArcBrokerError, "^unavailable$"):
-            broker.history(0, 32)
+        page = broker.history(0, 32)
+        self.assertGreaterEqual(len(page), 1)
+        self.assertLess(len(page), 32)
+        self.assertLessEqual(len(__import__("json").dumps(page, separators=(",", ":")).encode()), 16384)
         self.assertEqual(broker.history(32, 1)[0]["sequence"], 32)
 
 
