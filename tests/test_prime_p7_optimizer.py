@@ -8,6 +8,7 @@ from unittest import mock
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.optimizer import (
     PlannerAction,
+    ObservationWitness,
     RouteResult,
     RouteCompressionProof,
     optimize_route,
@@ -127,6 +128,37 @@ class TestRouteOptimizer(unittest.TestCase):
         oracle = TableOracle({route})
         result = optimize_route(route, oracle, identity=(GAME.game_id, GAME.seed), candidate_budget=8)
         self.assertEqual(result.actions, route)
+
+    def test_partial_route_can_preserve_terminal_observation_without_success(self) -> None:
+        route = (A, B, C)
+
+        class PartialOracle:
+            def replay(self, actions):
+                witness = ObservationWitness(
+                    "terminal", len(actions), "sha256:same", 0, "NOT_FINISHED"
+                )
+                return RouteResult(False, len(actions), "NOT_FINISHED", (GAME.game_id, GAME.seed), (witness,))
+
+        result = optimize_route(
+            route, PartialOracle(), identity=(GAME.game_id, GAME.seed),
+            candidate_budget=8, preserve_terminal_observation=True,
+        )
+        self.assertFalse(result.replay.success)
+        self.assertLess(len(result.actions), len(route))
+        self.assertEqual(result.replay.observation_witness[-1].observation_sha256, "sha256:same")
+
+    def test_partial_route_requires_terminal_observation_witness(self) -> None:
+        route = (A, B)
+
+        class NoWitnessOracle:
+            def replay(self, actions):
+                return RouteResult(False, len(actions), "NOT_FINISHED", (GAME.game_id, GAME.seed))
+
+        with self.assertRaises(ValueError):
+            optimize_route(
+                route, NoWitnessOracle(), identity=(GAME.game_id, GAME.seed),
+                preserve_terminal_observation=True,
+            )
 
     def test_accepts_an_empty_verified_route(self) -> None:
         oracle = TableOracle({()})

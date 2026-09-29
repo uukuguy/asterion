@@ -148,6 +148,7 @@ def optimize_route(
     time_budget_seconds: float | None = None,
     target_level: int = 0,
     warmup_digest: str = "",
+    preserve_terminal_observation: bool = False,
 ) -> RouteCandidate:
     """Keep the shortest verified edit found within a finite replay budget.
 
@@ -164,6 +165,7 @@ def optimize_route(
         or type(candidate_budget) is not int or candidate_budget < 1
         or type(replacements) is not tuple
         or any(type(action) is not PlannerAction for action in replacements)
+        or type(preserve_terminal_observation) is not bool
         or (
             time_budget_seconds is not None
             and (
@@ -178,15 +180,35 @@ def optimize_route(
 
     started_at = time.monotonic()
 
-    def valid(result: RouteResult, actions: tuple[PlannerAction, ...]) -> bool:
+    def structurally_valid(result: RouteResult, actions: tuple[PlannerAction, ...]) -> bool:
         return (
             type(result) is RouteResult
-            and result.success is True
             and type(result.action_count) is int
             and result.action_count == len(actions)
             and result.identity == identity
             and type(result.terminal_state) is str
             and bool(result.terminal_state)
+        )
+
+    def valid(
+        result: RouteResult,
+        actions: tuple[PlannerAction, ...],
+        baseline_result: RouteResult | None = None,
+    ) -> bool:
+        if not structurally_valid(result, actions):
+            return False
+        if not preserve_terminal_observation:
+            return result.success is True
+        if not result.observation_witness:
+            return False
+        if baseline_result is None or not baseline_result.observation_witness:
+            return True
+        expected = baseline_result.observation_witness[-1]
+        actual = result.observation_witness[-1]
+        return (
+            actual.observation_sha256 == expected.observation_sha256
+            and actual.levels_completed == expected.levels_completed
+            and actual.state == expected.state
         )
 
     baseline = oracle.replay(route)
@@ -271,7 +293,7 @@ def optimize_route(
         seen.add(candidate)
         replay = oracle.replay(candidate)
         replayed += 1
-        if valid(replay, candidate) and len(candidate) < len(best.actions):
+        if valid(replay, candidate, baseline) and len(candidate) < len(best.actions):
             best = RouteCandidate(candidate, replay, removed, replayed)
             proof = _compression_proof(
                 route, candidate, baseline, replay, identity,
@@ -294,7 +316,35 @@ def optimize_route(
     )
 
 
+def optimize_partial_route(
+    route: tuple[PlannerAction, ...],
+    oracle: ReplayOracle,
+    *,
+    identity: tuple[str, int],
+    max_removed: int = 3,
+    candidate_budget: int = 128,
+    replacements: tuple[PlannerAction, ...] = (),
+    time_budget_seconds: float | None = None,
+    target_level: int = 0,
+    warmup_digest: str = "",
+) -> RouteCandidate:
+    """Shorten an incomplete route only when its terminal observation is preserved."""
+
+    return optimize_route(
+        route,
+        oracle,
+        identity=identity,
+        max_removed=max_removed,
+        candidate_budget=candidate_budget,
+        replacements=replacements,
+        time_budget_seconds=time_budget_seconds,
+        target_level=target_level,
+        warmup_digest=warmup_digest,
+        preserve_terminal_observation=True,
+    )
+
+
 __all__ = (
     "ObservationWitness", "PlannerAction", "ReplayOracle", "RouteCandidate",
-    "RouteCompressionProof", "RouteResult", "optimize_route",
+    "RouteCompressionProof", "RouteResult", "optimize_partial_route", "optimize_route",
 )
