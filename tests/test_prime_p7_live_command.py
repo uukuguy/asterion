@@ -1612,6 +1612,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             summary = json.loads((run / "summary.json").read_text())
             self.assertTrue(summary["sealed_trace"])
             self.assertEqual(summary["completed_prefix"]["levels_completed"], 1)
+            self.assertEqual(
+                summary["diagnostics"]["failure_classification"]["category"],
+                "external_cancel",
+            )
 
     def test_safe_run_id_keeps_utc_timestamp_and_separates_same_second_retries(
         self,

@@ -2310,15 +2310,17 @@ def classify_failure_cause(
     status = {} if broker_status is None else dict(broker_status)
     private = {} if pi_private is None else dict(pi_private)
     evidence: dict[str, object] = {}
-    if cleanup_failed:
-        return {"category": "cleanup_failure", "evidence": {"cleanup_failed": True}}
     if isinstance(failure, asyncio.CancelledError):
         evidence = {
             key: private[key]
             for key in ("cancel_requested", "process_returncode")
             if key in private
         }
+        if cleanup_failed:
+            evidence["cleanup_failed"] = True
         return {"category": "external_cancel", "evidence": evidence}
+    if cleanup_failed:
+        return {"category": "cleanup_failure", "evidence": {"cleanup_failed": True}}
     error_events = private.get("error_events")
     if isinstance(error_events, list) and error_events:
         return {
