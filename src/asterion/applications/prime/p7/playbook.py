@@ -162,7 +162,7 @@ class LevelMemory:
     def __post_init__(self) -> None:
         if type(self.level) is not int or self.level < 0:
             raise ValueError("invalid memory level")
-        if type(self.checked_facts) is not tuple or any(type(x) is not CheckedFact for x in self.checked_facts):
+        if type(self.checked_facts) is not tuple or len(self.checked_facts) > _MAX_RECORDS or any(type(x) is not CheckedFact for x in self.checked_facts):
             raise ValueError("invalid level facts")
         if type(self.rejected_branches) is not tuple or len(self.rejected_branches) > _MAX_RECORDS or any(type(x) is not str or not x or len(x) > _MAX_TEXT for x in self.rejected_branches):
             raise ValueError("invalid rejected branches")
@@ -194,6 +194,13 @@ class PlaybookSnapshot:
             object.__setattr__(self, name, normalized)
         if len(self.confirmed_facts) > _MAX_RECORDS or len(self.checked_routes) > _MAX_RECORDS or len(self.level_memory) > _MAX_RECORDS:
             raise ValueError("playbook record cap exceeded")
+        if any(f.level >= self.key.win_levels for f in self.confirmed_facts):
+            raise ValueError("confirmed fact level out of range")
+        if any(route.level >= self.key.win_levels for route in self.checked_routes):
+            raise ValueError("route level out of range")
+        if any(memory.level >= self.key.win_levels or any(f.level >= self.key.win_levels for f in memory.checked_facts)
+               for memory in self.level_memory):
+            raise ValueError("memory level out of range")
         for name, value, key in (("confirmed_facts", self.confirmed_facts, lambda x: (x.layer, x.key)),
                                  ("checked_routes", self.checked_routes, lambda x: x.level),
                                  ("level_memory", self.level_memory, lambda x: x.level)):

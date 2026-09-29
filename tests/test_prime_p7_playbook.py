@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from asterion.applications.prime.p7.playbook import (
     CheckedFact,
+    LevelMemory,
     CheckedRoute,
     PlaybookKey,
     PlaybookSnapshot,
@@ -151,6 +152,18 @@ class TestP7Playbook(unittest.TestCase):
             PlaybookSnapshot(self.key, branch_reasons=("same", "same"))
         with self.assertRaises(ValueError):
             PlaybookSnapshot(self.key, conflict_metadata=("x" * 1025,))
+
+    def test_level_memory_and_nested_levels_are_bounded(self) -> None:
+        facts = tuple(CheckedFact("entities", f"f{i}", None, 0, ("a" * 64,)) for i in range(257))
+        with self.assertRaises(ValueError):
+            LevelMemory(0, facts)
+        fact = CheckedFact("entities", "late", None, 3, ("a" * 64,))
+        with self.assertRaises(ValueError):
+            PlaybookSnapshot(self.key, confirmed_facts=(fact,))
+        with self.assertRaises(ValueError):
+            PlaybookSnapshot(self.key, level_memory=(LevelMemory(3),))
+        with self.assertRaises(ValueError):
+            PlaybookSnapshot(self.key, checked_routes=(CheckedRoute(3, (), _HASH),))
 
     def test_completed_level_captures_checked_facts_before_refresh(self) -> None:
         world = WorldModelStore("game-1", 42, 3)

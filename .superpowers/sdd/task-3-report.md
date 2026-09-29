@@ -326,3 +326,10 @@ each finding.
 Verification: `uv run python -m unittest -v tests.test_prime_p7_playbook`
 (13 tests passed); `uv run ruff check src/asterion/applications/prime/p7/playbook.py
 tests/test_prime_p7_playbook.py`; and `git diff --check` all passed.
+
+### Current fix index
+
+- `1fd5d84c` — review hardening and focused regressions.
+- `8b9821a3` — follow-up digest-format validation and journal entry.
+- Subsequent level-boundary and per-level-cap fixes are appended after these
+  historical entries; prior report sections remain preserved.
