@@ -192,6 +192,16 @@ class TestRouteOptimizer(unittest.TestCase):
         self.assertEqual(result, RouteResult(True, 1, "WIN", (game.game_id, game.seed)))
         self.assertTrue(engines[0].closed)
 
+    def test_arc_oracle_counts_warmup_against_total_action_cap(self) -> None:
+        game = P7GameSelection("aa11-bb22", 0, 2, (5, 5), 2, 1)
+        oracle = ArcReplayOracle(
+            game=game,
+            engine_factory=MultiLevelFakeEngine,
+            warmup=(PlannerAction("ACTION1"),),
+        )
+        result = oracle.replay((PlannerAction("ACTION2"),))
+        self.assertFalse(result.success)
+
 
 if __name__ == "__main__":
     unittest.main()

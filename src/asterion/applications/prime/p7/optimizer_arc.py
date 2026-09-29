@@ -39,7 +39,10 @@ class ArcReplayOracle:
         state = "UNAVAILABLE"
         engine = None
         try:
-            if type(actions) is not tuple or len(actions) > self.game.action_cap:
+            if (
+                type(actions) is not tuple
+                or len(self.warmup) + len(actions) > self.game.action_cap
+            ):
                 raise ValueError
             engine = self.engine_factory()
             _engine_identity(engine, self.game)
