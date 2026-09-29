@@ -140,6 +140,61 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn('"name": "ACTION4"', hint)
         self.assertNotIn('"name": "ACTION3"', hint)
 
+    def test_live_optimizer_replaces_verified_route_only_when_shorter(self) -> None:
+        from asterion.applications.prime.p7.operator import _optimize_verified_route
+        from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate, RouteResult
+
+        prefix = SimpleNamespace(
+            levels_completed=1,
+            transitions=(
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=0),
+                SimpleNamespace(action="ACTION3", data=(), levels_completed=1),
+            ),
+        )
+        game = SimpleNamespace(game_id="aa11-bb22", seed=0, target_level=1)
+        optimized = RouteCandidate(
+            actions=(PlannerAction("ACTION4"),),
+            replay=RouteResult(True, 1, "NOT_FINISHED", ("aa11-bb22", 0)),
+            removed_indices=(1,),
+            candidates_replayed=4,
+        )
+        with mock.patch(
+            "asterion.applications.prime.p7.operator.optimize_arc_route",
+            return_value=optimized,
+        ) as optimize:
+            hint, metadata = _optimize_verified_route(
+                prefix, game=game, arc_root=Path("/tmp/arc"), target_level=1
+            )
+        optimize.assert_called_once()
+        self.assertIn('"name": "ACTION4"', hint)
+        self.assertNotIn('"name": "ACTION3"', hint)
+        self.assertEqual(metadata["status"], "optimized")
+        self.assertEqual(metadata["baseline_actions"], 2)
+        self.assertEqual(metadata["optimized_actions"], 1)
+
+    def test_live_optimizer_falls_back_when_offline_replay_fails(self) -> None:
+        from asterion.applications.prime.p7.operator import _optimize_verified_route
+
+        prefix = SimpleNamespace(
+            levels_completed=1,
+            transitions=(
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=0),
+                SimpleNamespace(action="ACTION3", data=(), levels_completed=1),
+            ),
+        )
+        game = SimpleNamespace(game_id="aa11-bb22", seed=0, target_level=1)
+        with mock.patch(
+            "asterion.applications.prime.p7.operator.optimize_arc_route",
+            side_effect=RuntimeError("offline unavailable"),
+        ):
+            hint, metadata = _optimize_verified_route(
+                prefix, game=game, arc_root=Path("/tmp/arc"), target_level=1
+            )
+        self.assertIn('"name": "ACTION4"', hint)
+        self.assertIn('"name": "ACTION3"', hint)
+        self.assertEqual(metadata["status"], "fallback-error")
+        self.assertEqual(metadata["optimized_actions"], 2)
+
     def test_generic_prompt_uses_feedback_and_has_no_game_route(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, P7_CONTINUE_PROMPT
 

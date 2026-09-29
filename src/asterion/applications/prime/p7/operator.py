@@ -26,6 +26,7 @@ from asterion.applications.prime.p7.broker import (
     ArcTransition,
     P7ToolRegistry,
     Tool,
+    _canonical_action,
     _observation_digest,
 )
 from asterion.applications.prime.p7.diagnostics import analyze_trace
@@ -63,6 +64,8 @@ from asterion.applications.prime.p7.private_trace import (
 )
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
+from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate
+from asterion.applications.prime.p7.optimizer_arc import optimize_arc_route
 from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
     P7_EXPLORE_APPENDIX,
@@ -94,6 +97,8 @@ P7_STRATEGY_ENV = "ASTERION_PRIME_P7_STRATEGY"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
+_ROUTE_OPTIMIZER_CANDIDATE_BUDGET = 64
+_ROUTE_OPTIMIZER_MAX_REMOVED = 3
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
@@ -854,14 +859,13 @@ def _summarize_prefix_mechanics(prefix: object) -> str:
     return "\n".join(bullets)
 
 
-def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
-    """Expose a replay-verified route as a bounded hypothesis for the model."""
-
+def _verified_route_transitions(prefix: object, *, target_level: int) -> tuple[object, ...]:
+    """Select only the verified transitions that reach the requested level."""
     if target_level < 1 or getattr(prefix, "levels_completed", 0) < target_level:
-        return ""
+        return ()
     transitions = getattr(prefix, "transitions", ())
     if not isinstance(transitions, tuple) or not transitions:
-        return ""
+        return ()
     start = 0
     if target_level > 1:
         for index, transition in enumerate(transitions):
@@ -869,36 +873,109 @@ def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
                 start = index + 1
                 break
         else:
-            return ""
+            return ()
     selected: list[object] = []
     for transition in transitions[start:]:
         levels = getattr(transition, "levels_completed", None)
         if type(levels) is not int or levels not in (target_level - 1, target_level):
-            return ""
+            return ()
         selected.append(transition)
         if levels == target_level:
             break
     if not selected or getattr(selected[-1], "levels_completed", None) != target_level or len(selected) > 64:
-        return ""
-    actions: list[str] = []
-    for transition in selected:
+        return ()
+    return tuple(selected)
+
+
+def _planner_actions_from_transitions(transitions: tuple[object, ...]) -> tuple[PlannerAction, ...]:
+    """Convert sealed transitions to immutable, canonical optimizer actions."""
+    actions: list[PlannerAction] = []
+    for transition in transitions:
         action = getattr(transition, "action", None)
-        if type(action) is not str:
-            return ""
-        data = dict(getattr(transition, "data", ()))
-        if data:
-            actions.append(json.dumps({"name": action, "data": data}, sort_keys=True))
-        else:
-            actions.append(json.dumps({"name": action, "data": {}}, sort_keys=True))
+        data = getattr(transition, "data", ())
+        if type(action) is not str or type(data) is not tuple:
+            return ()
+        try:
+            canonical = _canonical_action(ArcAction(action, tuple(sorted(dict(data).items()))))
+        except (TypeError, ValueError):
+            return ()
+        actions.append(PlannerAction(canonical.name, canonical.data))
+    return tuple(actions)
+
+
+def _summarize_route_actions(
+    actions: tuple[PlannerAction, ...], *, target_level: int, optimized: bool = False
+) -> str:
+    """Expose a bounded, generic route hypothesis for the model."""
+    if not actions or len(actions) > 64:
+        return ""
+    encoded_actions: list[str] = []
+    for item in actions:
+        encoded_actions.append(json.dumps({"name": item.name, "data": dict(item.data)}, sort_keys=True))
+    provenance = "Offline fresh-ARC replay verified" if optimized else "A prior sealed local run replayed"
     return (
         f"## Replay-verified L{target_level} route hypothesis\n"
-        "A prior sealed local run replayed this route to the selected level boundary. "
+        f"{provenance} this route to the selected level boundary. "
         "Treat its action count as an upper bound. Seek a shorter verified route "
         "when exploration is requested; otherwise dispatch one item at a time "
         "through p7_act_checked, verify each returned observation, and replan "
         "if the current state contradicts it.\n"
-        + " -> ".join(actions)
+        + " -> ".join(encoded_actions)
     )
+
+
+def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
+    """Expose a replay-verified route as a bounded hypothesis for the model."""
+    transitions = _verified_route_transitions(prefix, target_level=target_level)
+    return _summarize_route_actions(
+        _planner_actions_from_transitions(transitions), target_level=target_level
+    )
+
+
+def _optimize_verified_route(
+    prefix: object, *, game: object, arc_root: Path, target_level: int
+) -> tuple[str, dict[str, object]]:
+    """Best-effort fresh-ARC shortening with a verified-route fallback."""
+    transitions = _verified_route_transitions(prefix, target_level=target_level)
+    baseline = _planner_actions_from_transitions(transitions)
+    metadata: dict[str, object] = {
+        "status": "no-route" if not baseline else "baseline-only",
+        "baseline_actions": len(baseline),
+        "optimized_actions": len(baseline),
+        "candidates_replayed": 0,
+        "removed_indices": [],
+    }
+    baseline_hint = _summarize_route_actions(baseline, target_level=target_level)
+    if not baseline_hint:
+        return "", metadata
+    try:
+        candidate = optimize_arc_route(
+            game=game,
+            arc_root=arc_root,
+            route=baseline,
+            candidate_budget=_ROUTE_OPTIMIZER_CANDIDATE_BUDGET,
+            max_removed=_ROUTE_OPTIMIZER_MAX_REMOVED,
+        )
+        if not isinstance(candidate, RouteCandidate):
+            raise ValueError("invalid optimizer result")
+        metadata["candidates_replayed"] = candidate.candidates_replayed
+        metadata["removed_indices"] = list(candidate.removed_indices)
+        if (
+            candidate.replay.success
+            and len(candidate.actions) < len(baseline)
+            and candidate.replay.identity == (game.game_id, game.seed)
+        ):
+            optimized_hint = _summarize_route_actions(
+                candidate.actions, target_level=target_level, optimized=True
+            )
+            if optimized_hint:
+                metadata["status"] = "optimized"
+                metadata["optimized_actions"] = len(candidate.actions)
+                return optimized_hint, metadata
+    except Exception as error:
+        metadata["status"] = "fallback-error"
+        metadata["error_type"] = type(error).__name__
+    return baseline_hint, metadata
 
 
 def _initial_game_context(client: object, *, include_prior: bool) -> str:
@@ -1617,7 +1694,12 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
         max_level=invocation.game.target_level,
         expected_model_id=declared_model_selection(invocation.environment).model,
     )
-    route_hint = _summarize_verified_route(route_source, target_level=invocation.game.target_level)
+    route_hint, route_optimization = _optimize_verified_route(
+        route_source,
+        game=invocation.game,
+        arc_root=invocation.arc_root,
+        target_level=invocation.game.target_level,
+    )
     if route_hint:
         prompt = prompt + "\n\n" + route_hint
     if invocation.sweep_mode:
@@ -1653,6 +1735,7 @@ async def run_live(invocation: P7Invocation, run_id: str) -> live.P7LiveExecutio
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
     diagnostics["prediction_variant"] = variant
+    diagnostics["route_optimization"] = route_optimization
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",
