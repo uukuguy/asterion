@@ -3220,3 +3220,4 @@
 - 02:07 Two post-selection BP35 L1 retries produced no tools/actions; removing selection vars from child did not change behavior.
 - 02:07 Added private Pi stderr diagnostics to P7 summaries; current stderr only has model-catalog warnings, extension failure remains unproven.
 - 02:07 Captured P7 Pi stderr and recorded three BP35 L1 no-action retries for root-cause diagnosis [619d98c6]
+- 08:53 修复 P7 注册工具未进入 Pi allowlist、内核仍只接受 `ipython` 的 GPT-6-Sol 零动作回归；补充工具回调与命令 allowlist 测试 [b9510d3f]
