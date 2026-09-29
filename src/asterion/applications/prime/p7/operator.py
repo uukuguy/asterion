@@ -860,6 +860,8 @@ def _apply_saved_prefix(
     broker: ArcBroker,
     recorder: PrimeTraceRecorder,
     transitions: tuple[ArcTransition, ...],
+    *,
+    identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
 ) -> None:
     """Re-execute a verified prefix into this run's broker and private trace."""
 
@@ -868,7 +870,7 @@ def _apply_saved_prefix(
     try:
         if len(broker.history(0, 1)) != 1 or broker.history(0, 1)[0]["sequence"] != 0:
             raise ValueError
-        client = _P7BrokerClient(broker, recorder, variant="verified")
+        client = _P7BrokerClient(broker, recorder, identities, variant="verified")
         for expected in transitions:
             if (
                 expected.sequence != len(broker.journal) + 1
@@ -2062,7 +2064,10 @@ async def run_live(
                     or not 0 < prefix.levels_completed < invocation.game.target_level
                 ):
                     raise P7OperatorError("P7 saved prefix is unavailable")
-                _apply_saved_prefix(broker, evidence.runtime_recorder, prefix.transitions)
+                _apply_saved_prefix(
+                    broker, evidence.runtime_recorder, prefix.transitions,
+                    identities=evidence.identities,
+                )
                 if broker.status().levels_completed != prefix.levels_completed:
                     raise P7OperatorError("P7 saved prefix is unavailable")
         prediction_client = getattr(resources_, "_prediction_client", None)

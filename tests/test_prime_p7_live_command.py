@@ -898,6 +898,31 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(engine.calls, [])
             recorder.close()
 
+    def test_saved_prefix_records_current_run_model_identity(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.operator import _apply_saved_prefix
+        from asterion.applications.prime.p7.private_trace import (
+            P7PrivateTraceReceipt, trace_identities_for,
+        )
+        from tests.test_prime_p7_native_broker import _FullGameEngine
+
+        game = P7GameSelection("ls20-9607627b", 0, 2)
+        source = ArcBroker(engine=_FullGameEngine(), game=game)
+        source.act(("ACTION1",))
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_FullGameEngine(), game=game)
+            broker.bind_history("run-model-switch")
+            identities = trace_identities_for("gpt-6.1-sol")
+            evidence = P7PrivateTraceReceipt(broker, recorder, identities)
+            try:
+                _apply_saved_prefix(broker, recorder, source.journal, identities=identities)
+                self.assertEqual(recorder.snapshot()[0].identities, identities)
+                self.assertTrue(evidence.runtime_ready())
+            finally:
+                recorder.close()
+
     def test_history_variant_defaults_verified_and_accepts_explicit_local_research(self) -> None:
         from asterion.applications.prime.p7.operator import (
             P7OperatorError, P7_HISTORY_VARIANT_ENV, _resolve_history_variant,
