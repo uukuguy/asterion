@@ -344,3 +344,26 @@ The implementation adds declarative transition rules, history retrodiction, orde
 ### Concern
 
 The evaluator is intentionally bounded: it compares only declared scalar, hash, and sample fields and does not execute model-provided code or infer rules beyond the supplied history.
+
+## Review-fix follow-up (state digest binding and strict rule validation)
+
+Resolved both Task 2 blockers. Declarative `TransitionRule` and
+`ActionExpectation` now carry and validate both prior and after state SHA-256
+digests; `retrodict` compares those digests against every observed transition,
+so after-state tampering fails closed. Direct rule and expectation construction
+now reuses canonical action validation and enforces bounded cell tuple shape,
+coordinate/value ranges, changed-value semantics, and sorted unique cells.
+The unused `transition_observation` import was removed from the evaluator.
+
+Added regressions for after-state digest tampering and malformed rule data/cell
+construction.
+
+Verification:
+
+```text
+uv run python -m unittest -v tests.test_prime_p7_transition_model tests.test_prime_p7_verified_history tests.test_prime_p7_native_broker.TestNativeP7Broker
+Ran 55 tests ... OK
+
+git diff --check
+PASS
+```

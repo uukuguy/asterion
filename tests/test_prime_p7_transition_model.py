@@ -44,7 +44,8 @@ class TransitionModelTests(unittest.TestCase):
     def test_model_rule_mismatch_is_reported(self):
         from asterion.applications.prime.p7.transition_model import TransitionModel, TransitionRule, retrodict
         model = TransitionModel((TransitionRule(
-            action="ACTION1", data=(), prior_level=0, prior_state="NOT_FINISHED",
+            action="ACTION1", data=(), prior_state_sha256=self.records[0].after_state_sha256,
+            after_state_sha256=digest("wrong-state"), prior_level=0, prior_state="NOT_FINISHED",
             prior_frame_sha256=self.records[0].after_frame_sha256,
             after_frame_sha256=digest("wrong"), changed_cells=(), levels_completed=0,
             state="NOT_FINISHED",
@@ -52,6 +53,27 @@ class TransitionModelTests(unittest.TestCase):
         report = retrodict(model, self.records)
         self.assertFalse(report.ok)
         self.assertIn("expectation:frame", report.failures)
+
+    def test_after_state_hash_tampering_is_rejected(self):
+        from asterion.applications.prime.p7.transition_model import TransitionModel, retrodict
+        model = TransitionModel.from_history(self.records, world=self.world)
+        tampered = replace(self.records[1], after_state_sha256=digest("tampered"))
+        report = retrodict(model, (self.records[0], tampered))
+        self.assertFalse(report.ok)
+        self.assertIn("expectation:state_hash", report.failures)
+
+    def test_malformed_rule_is_rejected_at_construction(self):
+        from asterion.applications.prime.p7.transition_model import TransitionModel, TransitionRule
+        with self.assertRaises(ArcPredictionError):
+            TransitionModel((TransitionRule(
+                action="ACTION1", data=(("bad", "value"),),
+                prior_state_sha256=self.records[0].after_state_sha256,
+                after_state_sha256=self.records[1].after_state_sha256,
+                prior_level=0, prior_state="NOT_FINISHED",
+                prior_frame_sha256=self.records[0].after_frame_sha256,
+                after_frame_sha256=self.records[1].after_frame_sha256,
+                changed_cells=((64, 0, 0, 1),), levels_completed=0, state="NOT_FINISHED",
+            ),))
 
     def test_state_and_level_mismatch_are_reported(self):
         from asterion.applications.prime.p7.transition_model import TransitionModel, retrodict
