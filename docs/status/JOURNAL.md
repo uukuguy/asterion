@@ -3291,3 +3291,4 @@
 - 历史边界修复：`ArcBroker.history` 对合法但超过 16 KiB 的历史页自动缩小返回页，保持序列连续；仅单条记录仍超硬上限时安全失败，避免大页把正常历史查询误报为工具失效。
 - CD82 复跑确认历史分页已生效：当前关卡 8/8 步、无 history 实际失败；新暴露的终止后 `status` 查询错误已归类为 action-cap，不再误报 tool_error。
 - 终止读取修复：P7 `observe/status` 在 broker 达到终止边界后读取不可变 terminal snapshot，避免模型收口查询制造 method failure；新增 action-cap 回归测试。
+- DC22 后续级别实证：通用 next-level 调度发现已存在可重放 L2 前缀，自动推进 L3；当前关卡 68/68 步，仍 L2，`human-baseline` action-cap，RPC 正常且分类正确，无通关证据。
