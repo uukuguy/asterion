@@ -88,6 +88,10 @@ def _thaw(value: Any) -> Any:
 def _unique_sorted(values: tuple[str, ...], name: str) -> tuple[str, ...]:
     if type(values) is not tuple or any(type(x) is not str or not x or len(x) > _MAX_TEXT for x in values):
         raise ValueError(f"invalid {name}")
+    if any(any(ord(char) < 0x20 or ord(char) == 0x7f for char in item) for item in values):
+        raise ValueError(f"invalid {name}")
+    if name == "evidence_index" and any(re.fullmatch(r"(?:sha256:[0-9a-f]{64}|[0-9a-fA-F]{16,128})", item) is None for item in values):
+        raise ValueError(f"invalid {name}")
     if len(values) > _MAX_RECORDS or len(set(values)) != len(values):
         raise ValueError(f"invalid {name}")
     return tuple(sorted(values))
