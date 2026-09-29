@@ -49,7 +49,7 @@ def optimize_route(
     """
 
     if (
-        type(route) is not tuple or not route
+        type(route) is not tuple
         or any(type(action) is not PlannerAction for action in route)
         or type(identity) is not tuple or len(identity) != 2
         or type(identity[0]) is not str or type(identity[1]) is not int

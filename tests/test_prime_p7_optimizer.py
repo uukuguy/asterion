@@ -69,6 +69,12 @@ class TestRouteOptimizer(unittest.TestCase):
         result = optimize_route(route, oracle, identity=(GAME.game_id, GAME.seed), candidate_budget=8)
         self.assertEqual(result.actions, route)
 
+    def test_accepts_an_empty_verified_route(self) -> None:
+        oracle = TableOracle({()})
+        result = optimize_route((), oracle, identity=(GAME.game_id, GAME.seed))
+        self.assertEqual(result.actions, ())
+        self.assertEqual(result.replay.action_count, 0)
+
     def test_rejects_mismatched_identity_and_action_count(self) -> None:
         class BadOracle:
             def replay(self, route: tuple[PlannerAction, ...]) -> RouteResult:
