@@ -164,6 +164,26 @@ class TestPrimeMakePresets(unittest.TestCase):
         self.assertIn("ASTERION_PRIME_PROVIDER\n", contract)
         self.assertIn("ASTERION_PRIME_MODEL\n", contract)
 
+    def test_make_model_selection_overrides_stale_terminal_export(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        dotenv = {}
+        for line in (root / ".env").read_text().splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                key, value = line.split("=", 1)
+                if key in {"ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL"}:
+                    dotenv[key] = value.strip().strip("'\"")
+        self.assertIn("ASTERION_PRIME_MODEL", dotenv)
+        probe = "p7-model-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_PROVIDER):$(ASTERION_PRIME_MODEL)'\n"
+        completed = subprocess.run(
+            ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-",
+             "p7-model-probe", "ASTERION_PRIME_PROVIDER=stale", "ASTERION_PRIME_MODEL=gpt-6-sol"],
+            cwd=root, text=True, input=probe, capture_output=True, check=True,
+        )
+        self.assertEqual(
+            completed.stdout.strip(),
+            f"{dotenv['ASTERION_PRIME_PROVIDER']}:{dotenv['ASTERION_PRIME_MODEL']}",
+        )
+
     def test_p7_history_variant_reaches_only_local_witness_and_sweep_guest(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text()

@@ -65,6 +65,15 @@ PRIME_ORB_MACHINE ?= ubuntu
 ASTERION_PRIME_PI_ENTRY ?= /mnt/mac/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/rpc-entry.js
 ASTERION_PRIME_PI_AGENT_DIR ?= /mnt/mac$(HOME)/.pi/agent
 ASTERION_PRIME_OPERATOR_ROOT ?= $(CURDIR)
+ASTERION_PRIME_PROVIDER_FROM_DOTENV := $(shell sed -n 's/^ASTERION_PRIME_PROVIDER=//p' "$(CURDIR)/.env" 2>/dev/null | tail -1 | sed -e "s/^['\"]//" -e "s/['\"]$$//")
+ASTERION_PRIME_MODEL_FROM_DOTENV := $(shell sed -n 's/^ASTERION_PRIME_MODEL=//p' "$(CURDIR)/.env" 2>/dev/null | tail -1 | sed -e "s/^['\"]//" -e "s/['\"]$$//")
+ifneq ($(strip $(ASTERION_PRIME_PROVIDER_FROM_DOTENV)),)
+override ASTERION_PRIME_PROVIDER := $(ASTERION_PRIME_PROVIDER_FROM_DOTENV)
+endif
+ifneq ($(strip $(ASTERION_PRIME_MODEL_FROM_DOTENV)),)
+override ASTERION_PRIME_MODEL := $(ASTERION_PRIME_MODEL_FROM_DOTENV)
+endif
+export ASTERION_PRIME_PROVIDER ASTERION_PRIME_MODEL
 ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
 ASTERION_PRIME_ARC_ROOT := $(abspath $(CURDIR)/../external-prime/arc-agi-3)
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
