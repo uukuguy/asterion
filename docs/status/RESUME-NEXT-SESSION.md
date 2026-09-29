@@ -1,70 +1,37 @@
-# Recovered Session Checkpoint
+# Live Session Checkpoint
 
-> Updated: 2026-09-29 02:12 CST. Active-session checkpoint; BP35 L1 rerun attempts remain unsuccessful.
+> Updated: 2026-09-30 07:16. **Session remains active — not a final handoff.**
 
-## Recovery note
+## 已验证事实
 
-- The prior stale run `p7-live-20260928172624-bdc53d3bde5f4817d49` ended unsuccessful with 0 actions after 128 usage events.
-- Rerun `p7-live-20260928173825-49c54af3684db1fb7ea7495e` ended unsuccessful: 128 `arc.usage.reported`, 0 `arc.action`, `summary.json` present, `primitive_actions=0`, `worker_cell_count=0`, and no score change.
-- Diagnostic rerun `p7-live-20260928175322-94303411a27271c1cf7041f3` also ended unsuccessful with the same 128/0 pattern; its private summary captured only Pi model-catalog warnings.
-- A third hypothesis run `p7-live-20260928180225-04f44a7a9e877c5cfd02ace5` was stopped after 34 usage events and 0 actions; removing Asterion selection variables from the child environment did not change behavior.
+- 用户确认同题 WorldModel / TransitionModel / Playbook 设计与实现计划，选择 Subagent-Driven 并授权连续实现全部任务。
+- 设计：`docs/superpowers/specs/2026-09-30-prime-p7-same-game-world-model-design.md` (`32abf2ea`)。
+- 计划：`docs/superpowers/plans/2026-09-30-prime-p7-same-game-world-model-plan.md` (`f52ef9a4`, `bd3ed16f`)。
+- Task 1 完成：WorldModel 类型与不可变值；实现 `4501b625`，修复 `c36482d6`；6 项聚焦测试和独立复审通过。
+- Task 2 完成：历史转移与 retrodiction 比较；实现 `f06921da`，修复 `ae5baa76`；55 项 transition/history/broker 测试和独立复审通过。状态日志到 `32b81e7a`。
+- Task 3 正在实现 playbook.py 与 tests/test_prime_p7_playbook.py，代理 `/root/p7_task3_impl`；未完成，不要重复派发。
+- 最近 DC22 L3 运行已经结束：本关 67/67 动作，仍完成到 L2，human-baseline/action_cap，RPC 正常。用户要求暂停新关运行研究通关机制。
+- .env 模型配置为 gpt-6.1-sol；模型身份、旧环境优先级问题已修，不要恢复旧 checkpoint 的无动作故障判断。
 
-## TL;DR
+## 当前判断
 
-1. **Target clarified:** raise BP35's official scorecard **LEVEL** row to the `115.00` cap by completing L1 in **≤19 actions**. It currently shows `110.25` (20 actions, baseline 21). The game score `2.22` cannot move for a 1-of-9-level result.
-2. **The L1 attempt made no progress:** run `p7-live-20260928171314-be7c1fd04b02dadc007ac487` produced **0 game actions** in ~20 minutes. The Pi model host (`pi-rpc`) was restarted every ~15-25 s. Stopped at closeout; cause **not diagnosed**.
-3. `e392577` (operator-selected P7 provider/model) is confirmed working in a live run: that run's trace carries `model_id: gpt-6-sol`, produced by the default `openai-codex / gpt-6-sol` selection.
+- Tasks 4–6 要形成真实的学习/复用/执行闭环，不能把复制历史动作后自检解释为学习到了可泛化机制。
+- `/root/p7_integration_contract_review` 正在只读审查这一集成风险；结果写 `/tmp/p7-world-model-integration-review.md`。
+- 新工具接入须同步 `resources/ipython-extension.mjs`、live.py、ipython_host.py 和 operator.py；不只改提示词。
 
-## Verified facts
+## 历史归档
 
-- Official scoring (matches `p7/score.py` and the live card exactly): `level_score = (baseline/actions)² × 100`, per-level cap **115**; game score = weighted average with weight = level index, capped by completed weight. For BP35 at 1/9 levels the game cap is `1/45 = 2.222222`.
-- BP35 baselines are `(21, 48, 44, 38, 33, 87, 86, 131, 163)` over 9 levels (`environment_files/bp35/0a0ad940/metadata.json`). L1 baseline is **21**, not 22.
-- BP35 L1 action → level score: `18→115.00`, `19→115.00`, `20→110.25`, `21→100.00`. The official card reports exactly `110.25 / 20 actions / baseline 21` and `2.2222222222222223` for the game.
-- The recorded BP35 success is run `p7-live-20260925150342-922a463cdccb12142fc3bdba`: 20 actions, 1 level, `replay_verified`/`sealed_trace`/`cleanup_complete` all true, trace identity `deepseek-v4-flash`.
-- A single-level witness gets `action_cap = 500` and the standard 1-hour deadline / 128 callbacks.
-- The failed attempt's trace: 60 `arc.usage.reported` entries (45,641 input / 3,259 output tokens), **0 `arc.action`**, no `worker/` directory, no `worker-cells.jsonl`, no `summary.json` (never sealed). Each model call was only ~500-750 input tokens, far below a P7 solve prompt, so every cycle died early.
-- Guest `pi-rpc` PIDs changed within 90 s: `97903 → 97941 → 97972 → 98008` (each 8-25 s old), parented by the operator process.
+- 原恢复文件关于 BP35 零动作循环、gpt-6-sol 未有效运行等判断已过时；最近实际结果与修复见 JOURNAL。
+- 旧 `.superpowers/sdd/task-N-report.md` 是跟踪文件，含其它任务历史，不得覆盖。Task 2 历史已恢复；后续报告使用独立文件或追加。
 
-## Current judgment (not proven)
+## 未完成边界
 
-- The restart loop is most plausibly the model host failing during startup/handshake and something respawning it, but **which layer restarts it, and why, is unproven**. The operator's stdout/stderr was invisible this session (the background job reported no incremental output), which is why the failure could not be diagnosed live.
-- Guest memory looked healthy (64 GB total, 18 GB used). `dmesg` shows an old `VM_FAULT_OOM leaked out to the #PF handler` burst whose kernel timestamp (~15.3 days) does not match the current boot (2 d 18 h), so it is **not** attributed to this run.
-- `gpt-6-sol` remains unexercised on BP35 in a way that produces actions.
+- 仅 Tasks 1–2 通过局部测试；尚未接入 P7 实际运行，不能声称世界模型提高通关率。
+- Tasks 3–7 尚未完成。无新关实测、无官方提交。
+- 进度表 `.superpowers/sdd/progress.md`：Task1/2 complete；Task3 pending（进行中），Task4–7 pending。
 
-## Historical archive (do not reopen)
+## 下一动作
 
-- The previous checkpoint's claim that a BP35 L1 rerun cannot change any reported score is **wrong for the LEVEL column** — it holds only for the game score. The user's target is the LEVEL column cap.
-- `load_best_prefix` returning `None` from the host venv is expected: `arcengine` is not importable there. Prefix loading must run where the ARC wheels are installed (the guest / isolated wheel env). This is not a regression from the prefix changes.
-- `/tmp/asterion-p7-pi-rpc.err` (2026-09-27) records a `MODULE_NOT_FOUND` for `rpc-entry.js` under node v24 — a resolved migration-era issue, unrelated to this failure.
-- `make asterion-prime-p7-breadth-preflight` spends minutes in `uv --isolated` resolution and proves less than a direct model probe.
-
-## Unfinished boundaries
-
-- The BP35 L1 ≤19-action goal is **not** attempted successfully; no new prefix, no new scorecard.
-- The model host's restart loop is unexplained; the active logged rerun has not yet produced a game action.
-- Official re-submission (which is what makes the website show `115.00`) is a separate authorized action and was not performed.
-
-## Next steps (immediate, action-level)
-
-1. Diagnose why the Pi extension tool registry is absent after the 2026-09-29 native-selection change; use the captured private stderr and compare the exact RPC launch/registration path before another paid retry.
-2. If the active host keeps restarting, capture `pi-rpc` stderr directly and identify the respawning layer (operator session vs. wrapper) before spending more.
-3. On a successful L1 with ≤19 actions, verify the sealed run and then decide separately whether to authorize an official re-submission for BP35.
-
-If the active process exits without an action, inspect `/tmp/bp35-l1.log` and the run trace before considering another attempt.
-
-## Don't go down these paths again (ruled out)
-
-- Do not chase the BP35 game score with an L1 rerun: `2.222222` is the 1/9-level ceiling.
-- Do not read `.asterion-private` runs from 2026-09-28 17:13 or earlier post-baseline timestamps as current evidence.
-- Do not assume the operator's console output is visible through a backgrounded `make` job; redirect it to a file.
-
-## Ready-to-paste commands / configs
-
-```bash
-git log --oneline -4
-make asterion-prime-p7-games                 # provider-free progress ledger
-uv run python -m unittest tests.test_prime_p7_model_selection
-uv run python -c "from decimal import Decimal; print([(n, min(Decimal(115),(Decimal(21)/n)**2*100)) for n in (18,19,20,21)])"
-```
-
-Run state: no P7 process remains; code was at `c0827a6d` before diagnostic instrumentation. Latest full failed run: `p7-live-20260928175322-94303411a27271c1cf7041f3`; stopped hypothesis run: `p7-live-20260928180225-04f44a7a9e877c5cfd02ace5`. The BP35 L1 selection uses the default `openai-codex / gpt-6-sol`; `ASTERION_PRIME_PROVIDER` / `ASTERION_PRIME_MODEL` in the operator environment override it (`p7/model_selection.py` is the only reader).
+1. 接收 Task3 报告并独立复审；修复实质问题后继续 Tasks4–7，不要再请求已授权的实施确认。
+2. 结合集成审查补全模型验证凭据、机制更新和完整工具调用链。
+3. 聚焦回归与最终代码复审后如实报告实现和未实测边界。
