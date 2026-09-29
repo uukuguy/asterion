@@ -121,6 +121,25 @@ class AsterionPrimeSession:
                 name = event.payload.get("toolName")
                 if type(name) is str:
                     item["tool_name"] = name
+            elif event.type == "message_end":
+                message = event.payload.get("message")
+                if isinstance(message, Mapping):
+                    role = message.get("role")
+                    stop_reason = message.get("stopReason")
+                    if type(role) is str:
+                        item["role"] = role
+                    if type(stop_reason) is str:
+                        item["stop_reason"] = stop_reason
+                    content = message.get("content")
+                    if isinstance(content, (list, tuple)):
+                        item["content_items"] = len(content)
+                        item["tool_call_names"] = tuple(
+                            block.get("name")
+                            for block in content
+                            if isinstance(block, Mapping)
+                            and block.get("type") == "toolCall"
+                            and type(block.get("name")) is str
+                        )
             summary.append(item)
         return tuple(summary)
 
