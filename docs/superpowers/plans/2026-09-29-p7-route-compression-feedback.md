@@ -20,6 +20,8 @@
 
 ### Task 1: Define compression proof data and candidate edit metadata
 
+**Status:** Complete in `ac17be17`.
+
 **Files:**
 - Modify: `src/asterion/applications/prime/p7/optimizer.py`
 - Test: `tests/test_prime_p7_optimizer.py`
@@ -35,6 +37,8 @@
 - [ ] Commit: `feat(p7): add verified route compression proof records`.
 
 ### Task 2: Generate generic delete, replace, reorder, and collapse candidates
+
+**Status:** Complete in `ac17be17`; structural proof labels intentionally avoid unsupported semantic claims.
 
 **Files:**
 - Modify: `src/asterion/applications/prime/p7/optimizer.py`
@@ -53,6 +57,8 @@
 
 ### Task 3: Capture fresh ARC state evidence for proofs
 
+**Status:** Complete in `ac17be17`; target and warmup identity completed in `1f9f545a`.
+
 **Files:**
 - Modify: `src/asterion/applications/prime/p7/optimizer_arc.py`
 - Test: `tests/test_prime_p7_optimizer.py`
@@ -68,6 +74,8 @@
 - [ ] Commit: `feat(p7): bind compression proofs to fresh replay identity`.
 
 ### Task 4: Serialize bounded proofs into generic P7 guidance
+
+**Status:** Complete in `ac17be17` and `1f9f545a`.
 
 **Files:**
 - Modify: `src/asterion/applications/prime/p7/operator.py`
@@ -86,6 +94,8 @@
 
 ### Task 5: Verify formal-score separation and regression boundaries
 
+**Status:** Boundary retained and covered by existing official saved-submit contracts; no official submission was run.
+
 **Files:**
 - Modify: `docs/superpowers/specs/2026-09-29-p7-route-causal-feedback-design.md` only if implementation wording needs correction
 - Test: `tests/test_prime_p7_official.py`, `tests/test_prime_p7_solutions.py`, `tests/test_prime_p7_next_level.py`
@@ -101,6 +111,8 @@
 - [ ] Commit: `test(p7): verify compression proof and score boundaries`.
 
 ### Task 6: Record evidence and prepare one controlled validation run
+
+**Status:** Implementation verification complete. A real ARC replay requires the isolated external ARC wheel environment; no new live run was started after this mechanism change.
 
 **Files:**
 - Modify: `docs/status/JOURNAL.md`
