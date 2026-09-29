@@ -83,10 +83,25 @@ def optimize_route(
             for removed in combinations(range(len(route)), count):
                 excluded = set(removed)
                 yield tuple(action for index, action in enumerate(route) if index not in excluded), removed
-        for index in range(len(route)):
-            for action in replacements:
-                if action != route[index]:
-                    yield route[:index] + (action,) + route[index + 1 :], ()
+        # Replacement edits may be combined with deletion edits.  This lets a
+        # harmless action be removed while a neighboring action is corrected,
+        # still within the same finite candidate budget.
+        for count in range(0, min(max_removed, len(route) - 1) + 1):
+            for removed in combinations(range(len(route)), count):
+                excluded = set(removed)
+                remaining = tuple(
+                    (index, action)
+                    for index, action in enumerate(route)
+                    if index not in excluded
+                )
+                for position, (index, original) in enumerate(remaining):
+                    for action in replacements:
+                        if action != original:
+                            candidate = tuple(
+                                action if offset == position else item
+                                for offset, (_source, item) in enumerate(remaining)
+                            )
+                            yield candidate, removed
 
     for candidate, removed in candidates():
         if replayed >= candidate_budget:

@@ -84,6 +84,16 @@ class TestRouteOptimizer(unittest.TestCase):
         self.assertEqual(result.actions, route)
         self.assertEqual(oracle.calls, [route])
 
+    def test_replacement_can_combine_with_deletion_to_shorten_route(self) -> None:
+        replacement = PlannerAction("ACTION4")
+        route = (A, C, B)
+        oracle = TableOracle({route, (A, replacement)})
+        result = optimize_route(
+            route, oracle, identity=(GAME.game_id, GAME.seed),
+            candidate_budget=32, max_removed=1, replacements=(replacement,),
+        )
+        self.assertEqual(result.actions, (A, replacement))
+
     def test_arc_oracle_fresh_engine_per_replay_and_closes(self) -> None:
         engines: list[FakeEngine] = []
 
