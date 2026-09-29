@@ -3223,3 +3223,4 @@
 - 08:53 修复 P7 注册工具未进入 Pi allowlist、内核仍只接受 `ipython` 的 GPT-6-Sol 零动作回归；补充工具回调与命令 allowlist 测试 [b9510d3f]
 - 08:54 提交 P7 工具 allowlist 修复的恢复日志，保持诊断与代码提交可追溯 [0fc912dd]
 - 09:20 诊断确认 P7 GPT-6 零动作发生在模型首轮工具回调之前；移植注册工具 allowlist、完整扩展资源、GPT-6 工具提示与初始 broker context，聚焦测试通过，但三次端到端验证仍未产生动作，暂不宣称修复完成 [b9510d3f,2297d8c8,f8ed7d44,a1d44cd2]
+- 02:10 定位并修复 P7 0 动作根因：扩展 method_call 漏换行、Python bridge 参数签名错误、应用工具并发竞争；恢复后 BP35 L1 trace 已出现 1 个 arc.action，43 个聚焦测试与 TypeScript typecheck 通过 [c89fe21c]
