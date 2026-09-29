@@ -3247,3 +3247,4 @@
 - 14:00 状态日志收口提交 `c7861854`，保持 BP35 L1 运行证据与恢复索引可检索。
 - 14:06 显式运行通用 fresh ARC 优化器：同一 20 步基线重放 64 个候选，验证出 18 步成功路线；确认优化器未自动接入 live-run。
 - 14:32 接入优化器后的 GPT-6-Sol BP35 L1：fresh ARC 候选 64 个，20→18 步，在线实际执行 18 步并 PASS；replay/seal/cleanup 全通过。
+- 15:50 BP35 L2 二级关卡验证：两次基于 replay-verified L1 前缀（18 步）的 next-level 尝试均未形成终局；首轮 L2 执行 3 个动作后停滞，第二轮开启跟踪后执行 38 个动作、3 次 RESET、63 次 usage，仍停留在 L2，均为 `unverified`，不得计为通关。第二轮 run `p7-live-20260929073917-23204e9e0fb97c87b3e5b86c`，manifest `next-level-20260929073857-b788631e7db1bff7.json`。
