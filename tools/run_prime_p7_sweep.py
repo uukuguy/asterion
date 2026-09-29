@@ -202,7 +202,7 @@ def _write_stall_receipt(
         return False
     try:
         entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
-        if not entries or entries[-1]["kind"] == "trace.sealed":
+        if not entries:
             return False
         payload = {
             "schema": "asterion.prime.p7-stall-receipt/v1",
@@ -694,7 +694,7 @@ class SweepScheduler:
         self, run_id: str, game_id: str, *, target_level: int = 2,
         allow_later_progress: bool = False,
     ) -> bool:
-        """Admit a supervisor stall with a hash-valid unsealed trace and receipt."""
+        """Admit a supervisor stall with bounded sealed or unsealed evidence."""
 
         if (
             not (self.config.unbounded_second_round or self.config.validate_action_stall)
@@ -710,6 +710,90 @@ class SweepScheduler:
                 return False
             receipt = _read_json(run / _STALL_RECEIPT_FILE)
             entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
+            sealed = bool(entries) and entries[-1]["kind"] == "trace.sealed"
+            if sealed:
+                # Cooperative cancellation can now finish replay and seal a
+                # verified completed-level prefix before the supervisor writes
+                # its stall receipt. Keep this path stricter than the legacy
+                # unsealed observation: require the exact partial marker,
+                # summary identity, seal sidecar, and replay-verified prefix.
+                summary = _read_json(run / "summary.json")
+                seal = _read_json(run / "trace" / "prime-trace.seal.json")
+                partial_rows = [row for row in entries if row["kind"] == "arc.run.partial"]
+                actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
+                if (
+                    not summary
+                    or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                    or summary.get("run_id") != run_id
+                    or any(summary.get(key) is not True for key in ("replay_verified", "sealed_trace", "cleanup_complete"))
+                    or type(summary.get("failure")) is not dict or not summary["failure"]
+                    or type(summary.get("broker")) is not dict
+                    or summary["broker"].get("game_id") != game_id
+                    or summary["broker"].get("seed") != 0
+                    or type(summary["broker"].get("primitive_actions")) is not int
+                    or summary["broker"]["primitive_actions"] != len(actions)
+                    or len(partial_rows) != 1
+                    or summary.get("completed_prefix") != partial_rows[0]["payload"]
+                    or not seal
+                    or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
+                    or seal.get("entry_count") != len(entries)
+                    or seal.get("final_sha256") != entries[-1]["sha256"]
+                ):
+                    return False
+                try:
+                    if (
+                        not receipt
+                        or set(receipt) != {"schema", "game_id", "run_id", "seed", "action_count", "stall_seconds", "cleanup_complete", "trace_final_sha256"}
+                        or receipt.get("schema") != "asterion.prime.p7-stall-receipt/v1"
+                        or receipt.get("game_id") != game_id or receipt.get("run_id") != run_id
+                        or receipt.get("seed") != 0 or receipt.get("cleanup_complete") is not True
+                        or type(receipt.get("action_count")) is not int or receipt["action_count"] <= 0
+                        or receipt["action_count"] != len(actions)
+                        or type(receipt.get("stall_seconds")) is not int or receipt["stall_seconds"] < _ACTION_STALL_SECONDS
+                        or receipt.get("trace_final_sha256") != entries[-1]["sha256"]
+                        or any(not are_p7_trace_identities(row["identities"]) for row in entries)
+                        or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial", "trace.sealed"} for row in entries)
+                        or _recorded_game_id(run, {game_id}) != game_id
+                        or target_level != 2
+                    ):
+                        return False
+                    usage = read_run_usage(run)
+                    if usage[2] or usage[3]:
+                        return False
+                    metadata = self._metadata()[game_id]
+                    baselines = metadata.get("baseline_actions")
+                    if type(baselines) is not tuple or len(baselines) < 2 or len(actions) > sum(baselines[:2]):
+                        return False
+                    previous_level = 0
+                    transitions: list[ArcTransition] = []
+                    for sequence, action in enumerate(actions, 1):
+                        level = action.get("levels_completed")
+                        if (
+                            action.get("sequence") != sequence
+                            or type(level) is not int or not previous_level <= level <= 1
+                            or any(type(action.get(key)) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", action[key]) is None for key in ("before_sha256", "after_sha256"))
+                            or (sequence > 1 and action.get("before_sha256") != actions[sequence - 2].get("after_sha256"))
+                        ):
+                            return False
+                        transitions.append(ArcTransition(sequence, action["action"], action["before_sha256"], action["after_sha256"], level, tuple(sorted(action.get("data", {}).items()))))
+                        previous_level = level
+                    partial = partial_rows[0]["payload"]
+                    first_level = next((index for index, action in enumerate(actions) if action["levels_completed"] >= 1), None)
+                    prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
+                    if (
+                        first_level is None
+                        or first_level + 1 != partial.get("primitive_actions")
+                        or partial.get("levels_completed") != 1
+                        or not prefix or prefix.levels_completed < 1
+                        or len(prefix.transitions) != first_level + 1
+                        or tuple(transitions[:first_level + 1]) != prefix.transitions
+                        or partial.get("replay_sha256") != replay_sha256(transitions[:first_level + 1], terminal_reason="level-completed")
+                        or len(actions) - first_level - 1 > baselines[1]
+                    ):
+                        return False
+                    return allow_later_progress or prefix.levels_completed == target_level - 1
+                except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
+                    return False
             if (
                 not receipt or set(receipt) != {"schema", "game_id", "run_id", "seed", "action_count", "stall_seconds", "cleanup_complete", "trace_final_sha256"}
                 or receipt.get("schema") != "asterion.prime.p7-stall-receipt/v1"

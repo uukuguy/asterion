@@ -177,6 +177,55 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 receipt_path.symlink_to(moved.name)
                 self.assertFalse(scheduler._campaign_entry_is_valid(entry))
 
+    def test_execution_stall_accepts_sealed_replay_verified_partial(self) -> None:
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, run, summary, entry = self._execution_failure_fixture(Path(directory))
+            summary = {
+                **summary,
+                "failure": {"type": "CancelledError", "message": "P7 live solve cancelled"},
+                "broker": {
+                    "game_id": entry["game_id"], "seed": 0, "win_levels": 8,
+                    "levels_completed": 1, "primitive_actions": 2,
+                    "terminal_reason": "active", "replay_sha256": None,
+                },
+            }
+            (run / "summary.json").write_text(json.dumps(summary), encoding="utf-8")
+            (run / "recordings").mkdir()
+            (run / "recordings" / f"{entry['game_id']}-fixture.jsonl").write_text("{}\n", encoding="utf-8")
+            (run / "stall-receipt.json").write_text(json.dumps({
+                "schema": "asterion.prime.p7-stall-receipt/v1",
+                "game_id": entry["game_id"], "run_id": entry["run_id"], "seed": 0,
+                "action_count": 2, "stall_seconds": 300,
+                "cleanup_complete": True,
+                "trace_final_sha256": json.loads(
+                    (run / "trace" / "prime-trace.jsonl").read_text().splitlines()[-1]
+                )["sha256"],
+            }), encoding="utf-8")
+            from asterion.applications.prime.p7.broker import ArcTransition
+            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(
+                levels_completed=1, primitive_actions=1,
+                transitions=(ArcTransition(1, "ACTION1", "sha256:" + "0" * 64, "sha256:" + "1" * 64, 1),),
+            )):
+                entry["outcome"] = "execution-stalled"
+                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
+
+    def test_write_stall_receipt_allows_sealed_trace(self) -> None:
+        from tools.run_prime_p7_sweep import _write_stall_receipt
+
+        with tempfile.TemporaryDirectory() as directory:
+            scheduler, run, _summary, _entry = self._execution_failure_fixture(Path(directory))
+            trace = run / "trace" / "prime-trace.jsonl"
+            final = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
+            self.assertTrue(_write_stall_receipt(
+                run, game_id="lp85-305b61c3", run_id="fixture-failed",
+                action_count=2, expected_action_count=2, stall_seconds=300,
+                cleanup_complete=True,
+            ))
+            receipt = json.loads((run / "stall-receipt.json").read_text(encoding="utf-8"))
+            self.assertEqual(receipt["trace_final_sha256"], final["sha256"])
+
     def test_next_level_stall_requires_exact_verified_multi_level_prefix(self) -> None:
         from types import SimpleNamespace
 
