@@ -95,6 +95,7 @@ def optimize_route(
     seen = {route}
 
     timeout_elapsed: float | None = None
+    budget_exhausted = False
 
     def timed_out() -> bool:
         nonlocal timeout_elapsed
@@ -106,7 +107,8 @@ def optimize_route(
             return True
         return False
 
-    if timed_out():
+    if replayed < candidate_budget and timed_out():
+        budget_exhausted = True
         return RouteCandidate(
             best.actions,
             best.replay,
@@ -145,6 +147,7 @@ def optimize_route(
         if replayed >= candidate_budget:
             break
         if timed_out():
+            budget_exhausted = True
             break
         if candidate in seen:
             continue
@@ -164,7 +167,7 @@ def optimize_route(
         best.removed_indices,
         replayed,
         elapsed_seconds,
-        time_budget_seconds is not None and elapsed_seconds >= time_budget_seconds,
+        budget_exhausted,
     )
 
 

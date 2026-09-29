@@ -118,6 +118,23 @@ class TestRouteOptimizer(unittest.TestCase):
         self.assertEqual(result.actions, route)
         self.assertEqual(oracle.calls, [route])
 
+    def test_exhausting_candidate_budget_is_not_reported_as_timeout(self) -> None:
+        route = (A, C, B)
+        oracle = TableOracle({route})
+        with mock.patch(
+            "asterion.applications.prime.p7.optimizer.time.monotonic",
+            side_effect=(0.0, 2.0),
+        ):
+            result = optimize_route(
+                route,
+                oracle,
+                identity=(GAME.game_id, GAME.seed),
+                candidate_budget=1,
+                time_budget_seconds=1.0,
+            )
+        self.assertFalse(result.timed_out)
+        self.assertEqual(result.candidates_replayed, 1)
+
     def test_stops_candidate_search_when_time_budget_expires(self) -> None:
         route = (A, C, B)
         oracle = TableOracle({route, (A, B)})

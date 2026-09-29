@@ -905,6 +905,27 @@ def _planner_actions_from_transitions(transitions: tuple[object, ...]) -> tuple[
     return tuple(actions)
 
 
+def _route_source_matches_prefix(
+    route_source: object, prefix: object, *, target_level: int
+) -> bool:
+    """Allow multi-level optimization only when its replay prefix is the live prefix."""
+
+    if target_level <= 1:
+        return route_source is not None
+    if route_source is None or prefix is None:
+        return False
+    if getattr(route_source, "source_run_id", None) != getattr(prefix, "source_run_id", None):
+        return False
+    expected = getattr(prefix, "transitions", ())
+    actual = getattr(route_source, "transitions", ())
+    return (
+        type(expected) is tuple
+        and type(actual) is tuple
+        and len(actual) >= len(expected)
+        and actual[: len(expected)] == expected
+    )
+
+
 def _summarize_route_actions(
     actions: tuple[PlannerAction, ...], *, target_level: int, optimized: bool = False
 ) -> str:
@@ -984,7 +1005,10 @@ def _optimize_verified_route(
         metadata["elapsed_seconds"] = candidate.elapsed_seconds
         metadata["timed_out"] = candidate.timed_out
         if (
-            candidate.replay.success
+            type(candidate.actions) is tuple
+            and all(type(action) is PlannerAction for action in candidate.actions)
+            and candidate.replay.success
+            and candidate.replay.action_count == len(candidate.actions)
             and len(candidate.actions) < len(baseline)
             and candidate.replay.identity == (game.game_id, game.seed)
         ):
@@ -1725,12 +1749,26 @@ async def run_live(
         max_level=invocation.game.target_level,
         expected_model_id=declared_model_selection(invocation.environment).model,
     )
-    route_hint, route_optimization = _optimize_verified_route(
-        route_source,
-        game=invocation.game,
-        arc_root=invocation.arc_root,
-        target_level=invocation.game.target_level,
-    )
+    if _route_source_matches_prefix(
+        route_source, prefix, target_level=invocation.game.target_level
+    ):
+        route_hint, route_optimization = _optimize_verified_route(
+            route_source,
+            game=invocation.game,
+            arc_root=invocation.arc_root,
+            target_level=invocation.game.target_level,
+        )
+    else:
+        route_hint, route_optimization = "", {
+            "status": "prefix-mismatch",
+            "baseline_actions": 0,
+            "optimized_actions": 0,
+            "candidates_replayed": 0,
+            "removed_indices": [],
+            "warmup_actions": 0,
+            "elapsed_seconds": 0.0,
+            "timed_out": False,
+        }
     if route_hint:
         prompt = prompt + "\n\n" + route_hint
     if invocation.sweep_mode:

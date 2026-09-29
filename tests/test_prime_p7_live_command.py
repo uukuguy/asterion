@@ -146,6 +146,28 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn('"name": "ACTION4"', hint)
         self.assertNotIn('"name": "ACTION3"', hint)
 
+    def test_multilevel_optimizer_requires_route_source_to_match_live_prefix(self) -> None:
+        from asterion.applications.prime.p7.operator import _route_source_matches_prefix
+
+        prefix = SimpleNamespace(
+            source_run_id="run-a",
+            transitions=(SimpleNamespace(action="ACTION4"),),
+        )
+        matching = SimpleNamespace(
+            source_run_id="run-a",
+            transitions=(SimpleNamespace(action="ACTION4"), SimpleNamespace(action="ACTION3")),
+        )
+        divergent = SimpleNamespace(
+            source_run_id="run-b",
+            transitions=(SimpleNamespace(action="ACTION9"), SimpleNamespace(action="ACTION3")),
+        )
+        self.assertTrue(
+            _route_source_matches_prefix(matching, prefix, target_level=2)
+        )
+        self.assertFalse(
+            _route_source_matches_prefix(divergent, prefix, target_level=2)
+        )
+
     def test_live_optimizer_replaces_verified_route_only_when_shorter(self) -> None:
         from asterion.applications.prime.p7.operator import _optimize_verified_route
         from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate, RouteResult
@@ -200,6 +222,34 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn('"name": "ACTION3"', hint)
         self.assertEqual(metadata["status"], "fallback-error")
         self.assertEqual(metadata["optimized_actions"], 2)
+
+    def test_live_optimizer_rejects_candidate_with_wrong_action_count(self) -> None:
+        from asterion.applications.prime.p7.operator import _optimize_verified_route
+        from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate, RouteResult
+
+        prefix = SimpleNamespace(
+            levels_completed=1,
+            transitions=(
+                SimpleNamespace(action="ACTION4", data=(), levels_completed=0),
+                SimpleNamespace(action="ACTION3", data=(), levels_completed=1),
+            ),
+        )
+        game = SimpleNamespace(game_id="aa11-bb22", seed=0, target_level=1)
+        malformed = RouteCandidate(
+            actions=(PlannerAction("ACTION4"),),
+            replay=RouteResult(True, 99, "NOT_FINISHED", ("aa11-bb22", 0)),
+            removed_indices=(1,),
+            candidates_replayed=4,
+        )
+        with mock.patch(
+            "asterion.applications.prime.p7.operator.optimize_arc_route",
+            return_value=malformed,
+        ):
+            hint, metadata = _optimize_verified_route(
+                prefix, game=game, arc_root=Path("/tmp/arc"), target_level=1
+            )
+        self.assertIn('"name": "ACTION3"', hint)
+        self.assertEqual(metadata["status"], "baseline-only")
 
     def test_live_optimizer_passes_verified_prefix_to_later_level_replay(self) -> None:
         from asterion.applications.prime.p7.operator import _optimize_verified_route
