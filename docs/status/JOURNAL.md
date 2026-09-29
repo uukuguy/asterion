@@ -3226,3 +3226,4 @@
 - 02:10 定位并修复 P7 0 动作根因：扩展 method_call 漏换行、Python bridge 参数签名错误、应用工具并发竞争；恢复后 BP35 L1 trace 已出现 1 个 arc.action，43 个聚焦测试与 TypeScript typecheck 通过 [c89fe21c]
 - 03:04 修复 P7 初始提示冲突、checked-plan schema、Pi 自动重试事件及 IPython worker facade；复跑动作恢复，未完成 L1 [pending]
 - 03:06 提交 `587b0172`：修复 P7 初始提示、checked-plan 合法性、Pi 重试生命周期与 IPython worker facade；聚焦 87 项测试通过。
+- 03:25 增加显式 `ASTERION_PRIME_DEBUG_TRANSCRIPT=1`：私有文件实时记录每轮 LLM 输入、native 决策与工具结果，默认关闭。

@@ -1208,6 +1208,11 @@ def build_p7_operator_resources(
             name: value for name, value in environment.items()
             if name not in {"ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE", P7_HISTORY_VARIANT_ENV}
         }
+        if environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT") == "1":
+            provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT"] = "1"
+            provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH"] = str(
+                private_trace_root.parent / "debug-transcript.jsonl"
+            )
         if (
             type(pi_base_command) is not tuple
             or not pi_base_command

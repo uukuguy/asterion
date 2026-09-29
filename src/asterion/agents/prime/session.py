@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+from pathlib import Path
 import weakref
 from collections.abc import AsyncIterator, Callable, Mapping
 
@@ -43,6 +46,7 @@ class AsterionPrimeSession:
         "_limits",
         "_completion_predicate",
         "_continuation_prompt",
+        "_debug_transcript_path",
         "_rpc_session",
         "_used_run_ids",
         "__weakref__",
@@ -88,6 +92,9 @@ class AsterionPrimeSession:
             raise ProtocolError("Asterion-prime continuation is invalid")
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
+        self._debug_transcript_path = self._resolve_debug_transcript_path(
+            approved_environment
+        )
         self._used_run_ids: set[str] = set()
         self._active = False
         self._consumed = False
@@ -101,10 +108,55 @@ class AsterionPrimeSession:
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
             allowed_tool_names=allowed_tool_names,
+            debug_sink=self._debug_record,
         )
 
     def __repr__(self) -> str:
         return "<AsterionPrimeSession redacted>"
+
+    @staticmethod
+    def _resolve_debug_transcript_path(
+        approved_environment: Mapping[str, str] | None,
+    ) -> Path | None:
+        if not approved_environment or approved_environment.get(
+            "ASTERION_PRIME_DEBUG_TRANSCRIPT"
+        ) != "1":
+            return None
+        raw = approved_environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH", "")
+        if not raw:
+            raise ProtocolError("Asterion-prime debug transcript is unavailable")
+        path = Path(raw)
+        if not path.is_absolute() or "\x00" in raw:
+            raise ProtocolError("Asterion-prime debug transcript is unavailable")
+        return path
+
+    def _debug_record(self, kind: str, payload: Mapping[str, object]) -> None:
+        path = self._debug_transcript_path
+        if path is None:
+            return
+        try:
+            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            record = {
+                "kind": kind,
+                "payload": self._debug_json_value(payload),
+            }
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":"), default=str))
+                handle.write("\n")
+            os.chmod(path, 0o600)
+        except Exception:
+            # Diagnostic capture must never change game execution semantics.
+            return
+
+    @classmethod
+    def _debug_json_value(cls, value: object) -> object:
+        if isinstance(value, Mapping):
+            return {str(key): cls._debug_json_value(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [cls._debug_json_value(item) for item in value]
+        if value is None or type(value) in {bool, int, float, str}:
+            return value
+        return str(value)
 
     @property
     def native_event_summary(self) -> tuple[dict[str, object], ...]:
@@ -176,6 +228,7 @@ class AsterionPrimeSession:
         self._active = True
         self._consumed = True
         self._used_run_ids.add(request.run_id)
+        self._debug_record("run_start", {"run_id": request.run_id})
         public: list[RunEvent] = []
         pending: asyncio.Queue[RunEvent] = asyncio.Queue()
 

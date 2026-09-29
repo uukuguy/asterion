@@ -213,6 +213,7 @@ class PrimeExecutionKernel:
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
+        debug_sink: Callable[[str, Mapping[str, object]], None] | None = None,
     ) -> None:
         self._validate_launch_material(
             rpc_session,
@@ -228,6 +229,7 @@ class PrimeExecutionKernel:
         self._reusable = reusable
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
+        self._debug_sink = debug_sink
         if (
             type(allowed_tool_names) is not tuple
             or not allowed_tool_names
@@ -465,6 +467,18 @@ class PrimeExecutionKernel:
             except BaseException:
                 callback_failure = ProtocolError(_NATIVE_EVENT_ERROR)
                 raise _CallbackRejected from None
+            if self._debug_sink is not None:
+                try:
+                    self._debug_sink(
+                        "native_event",
+                        {
+                            "sequence": trusted_event.sequence,
+                            "type": trusted_event.type,
+                            "payload": trusted_event.payload,
+                        },
+                    )
+                except Exception:
+                    pass
             safe_failure: ProtocolError | None = None
             try:
                 consume_checked(trusted_event)
@@ -484,6 +498,14 @@ class PrimeExecutionKernel:
             round_start = len(native)
             round_terminal_seen = False
             try:
+                if self._debug_sink is not None:
+                    try:
+                        self._debug_sink(
+                            "model_input",
+                            {"round": round_index, "input_text": prompt},
+                        )
+                    except Exception:
+                        pass
                 self._extension_lease.validate_launch()
                 driver = (
                     self._rpc_session.prompt
