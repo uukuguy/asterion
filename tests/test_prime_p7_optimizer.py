@@ -105,6 +105,13 @@ class TestRouteOptimizer(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertTrue(engine.closed)
 
+    def test_arc_oracle_rejects_reset_before_gameplay(self) -> None:
+        engine = FakeEngine()
+        oracle = ArcReplayOracle(game=GAME, engine_factory=lambda: engine)
+        result = oracle.replay((PlannerAction("RESET"), A, B))
+        self.assertFalse(result.success)
+        self.assertTrue(engine.closed)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,11 +35,12 @@ class ArcReplayOracle:
             state = current.state
             if current.levels_completed != 0 or state != "NOT_FINISHED":
                 raise ValueError
+            level_actions = 0
             for action in actions:
                 if type(action) is not PlannerAction:
                     raise ValueError
                 canonical = _canonical_action(ArcAction(action.name, action.data))
-                if canonical.name == "RESET" or canonical.name not in current.available_actions:
+                if canonical.name != "RESET" and canonical.name not in current.available_actions:
                     raise ValueError
                 previous = current
                 current = _snapshot_observation(
@@ -47,8 +48,16 @@ class ArcReplayOracle:
                 )
                 count += 1
                 state = current.state
+                if canonical.name == "RESET":
+                    if level_actions == 0 or current.levels_completed != previous.levels_completed or state != "NOT_FINISHED":
+                        raise ValueError
+                    level_actions = 0
+                    continue
                 if not previous.levels_completed <= current.levels_completed <= previous.levels_completed + 1:
                     raise ValueError
+                level_actions += 1
+                if current.levels_completed > previous.levels_completed:
+                    level_actions = 0
                 if state == "WIN" and current.levels_completed != self.game.win_levels:
                     raise ValueError
                 if count != len(actions) and (
