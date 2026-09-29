@@ -3245,3 +3245,4 @@
 - 13:58 GPT-6-Sol BP35 L1 跟踪运行：通用 `explore` 在一次 provider 自动重试后重新 RESET，累计 21 个原语动作仍未完成；保留失败 summary、debug-transcript 与 trace。随后同一通用框架切换 `replay`，沿已验证路线逐步提交 20 个动作，`status=PASS`、`replay_verified=true`、`sealed_trace=true`、`cleanup_complete=true`，receipt `c1ee9e39909d8f940615419023234a202f4a69eb9349be32bea84693e58240cb` [pending]
 - 13:59 更正：上述 BP35 L1 跟踪结果已由状态提交 `63f6eb7d` 固化。
 - 14:00 状态日志收口提交 `c7861854`，保持 BP35 L1 运行证据与恢复索引可检索。
+- 14:06 显式运行通用 fresh ARC 优化器：同一 20 步基线重放 64 个候选，验证出 18 步成功路线；确认优化器未自动接入 live-run。
