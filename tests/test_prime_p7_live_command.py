@@ -41,6 +41,40 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_failure_classification_is_explicit_and_evidence_backed(self) -> None:
+        from asterion.applications.prime.p7.operator import classify_failure_cause
+
+        self.assertEqual(
+            classify_failure_cause(
+                failure=RuntimeError("incomplete"),
+                broker_status={"terminal_reason": "human-baseline", "actions_remaining": 0},
+                pi_private={"error_events": [], "cancel_requested": False, "process_returncode": 0},
+                bridge_method_failures={},
+                cleanup_failed=False,
+            ),
+            {"category": "action_cap", "evidence": {"terminal_reason": "human-baseline", "actions_remaining": 0}},
+        )
+        self.assertEqual(
+            classify_failure_cause(
+                failure=asyncio.CancelledError(),
+                broker_status={"terminal_reason": "active"},
+                pi_private={"error_events": [], "cancel_requested": False, "process_returncode": 143},
+                bridge_method_failures={},
+                cleanup_failed=False,
+            )["category"],
+            "external_cancel",
+        )
+        self.assertEqual(
+            classify_failure_cause(
+                failure=RuntimeError("failed"),
+                broker_status={"terminal_reason": "active"},
+                pi_private={"error_events": [{"type": "message_end", "stop_reason": "error"}], "cancel_requested": False, "process_returncode": 0},
+                bridge_method_failures={},
+                cleanup_failed=False,
+            )["category"],
+            "model_rpc_error",
+        )
+
     def test_partial_route_hint_does_not_claim_level_completion(self) -> None:
         from asterion.applications.prime.p7.optimizer import PlannerAction
         from asterion.applications.prime.p7.operator import _summarize_partial_route_actions

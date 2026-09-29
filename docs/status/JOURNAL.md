@@ -3277,3 +3277,4 @@
 - 00:20 runtime evidence repair：Pi RPC 在 compact 前保存有界私有错误摘要（stop reason、错误摘要哈希、失败响应）及取消/进程退出状态；operator 将其写入私有 diagnostics，未暴露原始 provider 文本。聚焦 RPC、P7、sweep 测试 174 项通过，lint/diff-check 通过。
 - BP35 L2 修复后实证 `p7-live-20260929165715-472b8d9c2fe517d22827e0ba`：前缀 16 + 新动作 48，满 64 action cap，仍仅 L1；`pi_rpc_private` 无 error/cancel，进程 returncode 0。运行时故障排除，通用 L2 策略仍未通关，按约定转下一关。
 - LF52 切换运行 `p7-live-20260929172311-23d229dbc197a98a322844c5` 因 guest 并发等待由操作者中止；仅记录取消证据（CancelledError、returncode 143、无 RPC error），不计入解题失败统计。
+- failure taxonomy repair：operator 为失败运行写入互斥的 bounded `failure_classification`（external_cancel、model_rpc_error、tool_error、action_cap、process_exit、cleanup_failure、application_failure），139 项聚焦测试与 lint 通过。

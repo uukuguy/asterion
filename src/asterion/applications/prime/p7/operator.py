@@ -2237,6 +2237,13 @@ async def run_live(
                     failure = error
                     reason = "P7 live solve unsuccessful"
             cleanup_complete = worker.closed and not cleanup_failed
+            diagnostics["failure_classification"] = classify_failure_cause(
+                failure=failure,
+                broker_status=diagnostics.get("broker_status"),
+                pi_private=diagnostics.get("pi_rpc_private"),
+                bridge_method_failures=diagnostics.get("bridge_method_failures"),
+                cleanup_failed=cleanup_failed,
+            )
         finally:
             live.write_summary(
                 root,
@@ -2289,6 +2296,54 @@ async def run_live(
         broker_replay_sha256=broker_receipt.replay_sha256,
         terminal_reason=broker_receipt.terminal_reason,
     )
+
+
+def classify_failure_cause(
+    *,
+    failure: BaseException | None,
+    broker_status: Mapping[str, object] | None,
+    pi_private: Mapping[str, object] | None,
+    bridge_method_failures: Mapping[str, object] | None,
+    cleanup_failed: bool,
+) -> Mapping[str, object]:
+    """Classify one failed live run using only bounded private evidence."""
+    status = {} if broker_status is None else dict(broker_status)
+    private = {} if pi_private is None else dict(pi_private)
+    evidence: dict[str, object] = {}
+    if cleanup_failed:
+        return {"category": "cleanup_failure", "evidence": {"cleanup_failed": True}}
+    if isinstance(failure, asyncio.CancelledError):
+        evidence = {
+            key: private[key]
+            for key in ("cancel_requested", "process_returncode")
+            if key in private
+        }
+        return {"category": "external_cancel", "evidence": evidence}
+    error_events = private.get("error_events")
+    if isinstance(error_events, list) and error_events:
+        return {
+            "category": "model_rpc_error",
+            "evidence": {"error_event_count": len(error_events)},
+        }
+    failures = {} if bridge_method_failures is None else bridge_method_failures
+    if any(isinstance(value, int) and value > 0 for value in failures.values()):
+        return {"category": "tool_error", "evidence": {"method_failures": dict(failures)}}
+    if (
+        status.get("terminal_reason") == "human-baseline"
+        and status.get("actions_remaining") == 0
+    ):
+        return {
+            "category": "action_cap",
+            "evidence": {
+                key: status[key]
+                for key in ("terminal_reason", "actions_remaining")
+                if key in status
+            },
+        }
+    returncode = private.get("process_returncode")
+    if isinstance(returncode, int) and returncode != 0:
+        return {"category": "process_exit", "evidence": {"process_returncode": returncode}}
+    return {"category": "application_failure", "evidence": {}}
 
 
 def classify_live_result(
