@@ -3232,3 +3232,4 @@
 - 12:30 GPT-6-Sol run reached 56 actions without L1; added replay-verified BP35 L1 candidate route hint for per-action validation.
 - 12:31 注入已 replay 验证的 BP35 L1 候选路线，要求 GPT-6-Sol 逐步核验避免回调耗尽 [72a0dbc1]
 - 12:45 GPT-6-Sol 按候选路线 20 步完成 BP35 L1；receipt PASS、replay_verified、sealed_trace、cleanup_complete 均为真。
+- 12:46 记录成功通关证据与私有 transcript 路径，供后续 resume 检索 [98735be1]
