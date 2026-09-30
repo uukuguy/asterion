@@ -33,7 +33,9 @@ from exploration to the most likely winning sequence.
 
 Before dispatching a probe you are unsure about, call
 p7_client.tried_actions(level) or p7_client.last_outcome_summary(level) to
-check what you have already tried at this level. If the same
+check what you have already tried at this level. On entering a level after a
+replayed prefix, call p7_client.tried_actions(None) once; entries from lower
+levels are prefix evidence and must not be reused as current-level probes. If the same
 ``(action, position)`` tuple already has a non-zero count at this level,
 the broker has already observed its outcome. Cluster-clicking the same
 ``x,y`` column 4+ times, repeating one direction key 15+ times, or
