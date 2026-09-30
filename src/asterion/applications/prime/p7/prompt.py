@@ -90,7 +90,18 @@ p7_client.act(actions), and p7_client.act_checked(plan). act takes a list of act
 {"name":"ACTION1","data":{}} and returns the complete post-batch view. The
 equivalent model query is p7_client.model_search(); it never dispatches an
 action and its returned checked plan is advisory until act_checked verifies
-it. The
+it.
+To submit a mechanism hypothesis, first read p7_world_model for the exact
+game identity. The value passed to p7_record_hypothesis must contain a
+`mechanism` object with schema `asterion.prime.p7-mechanism/v1`, that identity,
+`revision`, and a bounded list of rules. Each rule has an action, pure guards
+(`state_is`, `level_is`, `cell_equals`, `action_data_equals`, or a confirmed
+`entity_attr_equals`), and pure effects (`set_cell`, `toggle_cell`,
+`translate_cells`, `set_state`, or `increment_level`). Include one probe for
+the current action whose expected cell/frame/level/state differs from the
+current observation, plus only already confirmed fact keys in `dependencies`.
+The broker retrodicts the complete history; do not claim a mechanism is
+verified from model reasoning alone.
 If ``p7_playbook`` returns a non-empty ``checked_plan``, prefer submitting
 that plan to ``p7_act_checked`` unchanged; its per-action frame expectations
 bridge offline replay evidence to live execution. A route expectation
