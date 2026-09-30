@@ -7,6 +7,7 @@ from pathlib import Path
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.operator import _P7BrokerClient
+from asterion.applications.prime.p7.ipython_host import p7_client_facade
 from asterion.applications.prime.p7.playbook import load_playbook, save_playbook
 
 
@@ -105,6 +106,15 @@ class ExperienceEndToEndTests(unittest.TestCase):
             self.assertEqual(persisted[0]["status"], "stale")
             self.assertEqual(fresh.simulator_status()["confirmed_model"], False)
             self.assertEqual(engine2.calls, [])
+
+    def test_ipython_facade_exposes_induction_queries(self) -> None:
+        broker = ArcBroker(engine=_TranslationEngine())
+        broker.bind_history("learning-run")
+        facade = p7_client_facade(_P7BrokerClient(broker, None))
+        self.assertIsInstance(facade.action_effects(), list)
+        self.assertIsInstance(facade.mechanism_candidates(), list)
+        self.assertIsInstance(facade.probe_plan(), dict)
+        self.assertIsInstance(facade.simulator_status(), dict)
 
 
 if __name__ == "__main__":

@@ -133,6 +133,18 @@ class P7ClientFacade:
     def cognition(self) -> Mapping[str, object]:
         return cast(Mapping[str, object], self.__invoke("cognition"))
 
+    def action_effects(self) -> list[dict[str, object]]:
+        return cast(list[dict[str, object]], self.__invoke("action_effects"))
+
+    def mechanism_candidates(self) -> list[dict[str, object]]:
+        return cast(list[dict[str, object]], self.__invoke("mechanism_candidates"))
+
+    def probe_plan(self) -> Mapping[str, object]:
+        return cast(Mapping[str, object], self.__invoke("probe_plan"))
+
+    def simulator_status(self) -> Mapping[str, object]:
+        return cast(Mapping[str, object], self.__invoke("simulator_status"))
+
     def playbook(self, level: int | None = None) -> Mapping[str, object]:
         return cast(Mapping[str, object], self.__invoke("playbook", level))
 
@@ -158,8 +170,8 @@ class P7ClientFacade:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "cognition", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"} and type(value) is not dict) or (
-                name in {"history", "frame_at"} and type(value) is not list
+            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "cognition", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"} and type(value) is not dict) or (
+                name in {"history", "frame_at", "action_effects", "mechanism_candidates"} and type(value) is not list
             ):
                 raise ValueError
             return value
