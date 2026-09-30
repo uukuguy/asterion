@@ -3332,3 +3332,4 @@
 - 10:08 Committed generic visual priors, bounded world-model diagnostics, and VC33 submission-status correction [704f51cb]
 - 10:09 Correction: implementation commit hash is 95d71058; earlier 704f51cb was superseded by amend.
 - 10:13 Recorded VC33 L1 route adoption, world-model usage, and hash-mismatch analysis before L2 retry [adb84891]
+- 10:37 Persisted bounded same-game visual hypotheses in Playbook so later levels can read prior map candidates [82480d30]
