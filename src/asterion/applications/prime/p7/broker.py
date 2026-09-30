@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from typing import Callable, Mapping, Protocol, cast
 
+from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
+from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
 from .transition_model import TransitionModel
@@ -257,8 +259,15 @@ class ArcBroker:
             raise ArcBrokerError("unavailable")
         self._world_model = world_model
         self._transition_model: TransitionModel | None = None
+        self._retrodiction_status = "unavailable"
         self._playbook_projection: dict[str, object] = {}
         self._world_evidence: list[EvidenceRef] = []
+        self._playbook = PlaybookSnapshot(PlaybookKey(game.game_id, game.seed, game.win_levels))
+        self._model_conflicts: list[str] = []
+        self._pending_probe: dict[str, object] | None = None
+        self._probe_tokens: set[tuple[int, str, str, int]] = set()
+        self._mechanism_certificate: ModelCertificate | None = None
+        self._mechanism_spec: MechanismSpec | None = None
         self._initial = initial
         self._current = initial
         self._journal: list[ArcTransition] = []
@@ -297,40 +306,154 @@ class ArcBroker:
 
         return self._transition_model
 
+    def retrodiction_status(self) -> dict[str, object]:
+        return {
+            "status": self._retrodiction_status,
+            "records_checked": len(self._history or ()),
+        }
+
     def world_evidence(self) -> tuple[EvidenceRef, ...]:
         """Return immutable evidence references recorded for accepted transitions."""
 
         return tuple(self._world_evidence)
 
     def playbook_projection(self) -> dict[str, object]:
-        """Return a detached bounded playbook projection."""
+        return self._playbook.projection()
 
-        return json.loads(json.dumps(self._playbook_projection, separators=(",", ":")))
-
-    def set_playbook_projection(self, projection: Mapping[str, object]) -> None:
-        """Install an application-owned bounded projection without exposing mutability."""
-
-        if not isinstance(projection, Mapping):
+    def load_playbook(self, snapshot: PlaybookSnapshot) -> None:
+        if type(snapshot) is not PlaybookSnapshot or snapshot.key != self._playbook.key or self._journal:
             raise ArcBrokerError("unavailable")
-        encoded = json.dumps(dict(projection), ensure_ascii=True, sort_keys=True, separators=(",", ":"))
-        if len(encoded.encode("utf-8")) > 8192:
-            raise ArcBrokerError("unavailable")
-        self._playbook_projection = json.loads(encoded)
+        self._playbook = snapshot
+        if self._world_model is not None:
+            for fact in snapshot.confirmed_facts:
+                if fact.layer != "mechanics" and fact.level != self._world_model.current_level:
+                    continue
+                refs = tuple(EvidenceRef(summary_hash=d) for d in fact.evidence_digests)
+                self._world_model.record_hypothesis(fact.layer, fact.key, fact.value, level=fact.level, evidence=refs)
+                self._world_model.confirm(fact.layer, fact.key, evidence=refs, observed_value=fact.value)
+
+    def export_playbook(self, *, successful: bool) -> PlaybookSnapshot:
+        snapshot = self._playbook
+        if not successful:
+            return branch_playbook(snapshot, "run-failed")
+        if self._transition_model is not None:
+            # Split at level boundaries: each route contains only its own level.
+            grouped: dict[int, list] = {}
+            for rule in self._transition_model.rules:
+                grouped.setdefault(rule.prior_level, []).append(rule.expectation())
+            for level, expectations in grouped.items():
+                if expectations[-1].levels_completed <= level:
+                    continue
+                old = next((r for r in snapshot.checked_routes if r.level == level), None)
+                if old is not None and len(old.expectations) <= len(expectations):
+                    continue
+                snapshot = replace(snapshot, checked_routes=tuple(r for r in snapshot.checked_routes if r.level != level))
+                snapshot = append_checked_route(snapshot, CheckedRoute(level, tuple(expectations), digest([e.after_state_sha256 for e in expectations])))
+        return snapshot
+
+    def _record_model_conflict(self, sequence: int, reason: str) -> dict[str, object]:
+        code = f"sequence-{sequence}:{reason}"
+        self._model_conflicts = [*self._model_conflicts[-63:], code]
+        self._playbook = replace(self._playbook, conflict_metadata=tuple(sorted(set((*self._playbook.conflict_metadata[-63:], code)))))
+        self._retrodiction_status = "conflict"
+        return {"sequence": sequence, "reason": reason, "replan_required": True}
+
+    def record_hypothesis(self, layer: str, key: str, value: object) -> dict[str, object]:
+        """Reserve one falsifiable mechanism probe; callers cannot confirm facts."""
+        self._require_open()
+        records = self._bound_history()
+        world = self._world_model
+        try:
+            if world is None or self._pending_probe is not None or len(self._probe_tokens) >= 256:
+                raise ValueError
+            if type(value) is not dict or set(value) != {"mechanism", "probe", "dependencies"}:
+                raise ValueError
+            spec = MechanismSpec.from_mapping(value["mechanism"])
+            if (spec.game_id, spec.seed, spec.win_levels) != (self._game.game_id, self._game.seed, self._game.win_levels):
+                raise ValueError
+            dependencies = value["dependencies"]
+            if type(dependencies) is not list or len(dependencies) > 32 or any(type(x) is not str for x in dependencies):
+                raise ValueError
+            known = {f"{name}:{k}" for name in ("mechanics", "entities", "relations") for k in getattr(world.snapshot, name)}
+            if len(set(dependencies)) != len(dependencies) or not set(dependencies) <= known:
+                raise ValueError
+            name, data, expected = validate_prediction(value["probe"], current_levels=self._current.levels_completed)
+            prediction = spec.predict(frame=records[-1].frame, action=ArcAction(name, data), level=records[-1].levels_completed, state=records[-1].state)
+            if prediction.status != "predicted" or not self._guard_probe_distinguishes(expected):
+                raise ValueError
+            # Bind the probe to the full predicted successor, never a free-text claim.
+            if "frame_sha256" in expected and expected["frame_sha256"] != digest(prediction.frame):
+                raise ValueError
+            if "cell" in expected:
+                cell = expected["cell"]
+                if prediction.frame[cell["y"]][cell["x"]] != cell["value"]:
+                    raise ValueError
+            if "levels_completed" in expected and prediction.level != expected["levels_completed"]:
+                raise ValueError
+            if "state" in expected and prediction.state != expected["state"]:
+                raise ValueError
+            token = (world.current_level, layer, key, spec.revision)
+            if token in self._probe_tokens:
+                raise ValueError
+            previous = records[-1]
+            ref = EvidenceRef(frame_id=f"frame-{previous.sequence}", source_run=previous.run_id, summary_hash=previous.after_state_sha256.removeprefix("sha256:"))
+            world.record_hypothesis(layer, key, spec.to_mapping(), level=world.current_level, evidence=ref)
+            self._probe_tokens.add(token)
+            self._pending_probe = {"layer": layer, "key": key, "spec": spec, "action": name, "data": data, "sequence": previous.sequence + 1, "before": previous.after_state_sha256}
+            self._retrodiction_status = "hypothesis"
+            return {"status": "hypothesis", "probe_sequence": previous.sequence + 1, "probes_remaining": 1}
+        except (ValueError, TypeError, ArcPredictionError):
+            raise ArcBrokerError("unavailable") from None
+
+    def _consume_probe(self, record: ArcHistoryRecord, ref: EvidenceRef) -> None:
+        pending = self._pending_probe
+        if pending is None or self._world_model is None:
+            return
+        self._pending_probe = None
+        matches = (record.sequence == pending["sequence"] and record.before_state_sha256 == pending["before"] and record.action == pending["action"] and record.data == pending["data"])
+        certificate = validate_mechanism(pending["spec"], self._bound_history()) if matches else None
+        if certificate is not None and certificate.planner_eligible:
+            self._world_model.confirm(pending["layer"], pending["key"], evidence=ref, observed_value=pending["spec"].to_mapping())
+            self._mechanism_certificate = certificate
+            self._mechanism_spec = pending["spec"]
+            self._retrodiction_status = "verified"
+        else:
+            self._world_model.conflict(pending["layer"], pending["key"], observed_value={"reason": "probe-contradicted"}, evidence=ref)
+            self._record_model_conflict(record.sequence, "probe-contradicted" if matches else "probe-expired")
 
     def _record_world_evidence(self, record: ArcHistoryRecord) -> None:
         if self._world_model is None:
             return
         try:
-            self._world_evidence.append(EvidenceRef(
+            ref = EvidenceRef(
                 frame_id=f"frame-{record.sequence}",
                 action_id=None if record.action is None else f"action-{record.sequence}",
                 source_run=record.run_id,
                 summary_hash=record.after_state_sha256.removeprefix("sha256:"),
-            ))
-            self._world_model.refresh_level(min(record.levels_completed, self._game.win_levels - 1))
+            )
+            self._world_evidence.append(ref)
+            self._consume_probe(record, ref)
+            if self._mechanism_spec is not None:
+                certificate = validate_mechanism(self._mechanism_spec, self._bound_history())
+                if certificate is None:
+                    self._mechanism_certificate = None
+                    self._mechanism_spec = None
+                    self._record_model_conflict(record.sequence, "mechanism-contradicted")
+                else:
+                    self._mechanism_certificate = certificate
+            level = self._world_model.current_level
+            if record.levels_completed > level:
+                self._playbook = capture_completed_level(self._playbook, self._world_model.snapshot, level=level)
+                if record.levels_completed < self._game.win_levels:
+                    self._world_model.refresh_level(record.levels_completed)
             self._transition_model = TransitionModel.from_history(self._bound_history(), world=self._world_model.snapshot)
+            # TransitionModel.from_history is a checked transcript, not a
+            # generalized mechanism certificate.  Do not call this verified.
+            if self._retrodiction_status not in {"verified", "conflict", "hypothesis"}:
+                self._retrodiction_status = "observed"
         except (ArcPredictionError, ValueError):
             self._transition_model = None
+            self._retrodiction_status = "unavailable"
 
     def bind_history(self, run_id: str) -> None:
         if (
@@ -411,6 +534,7 @@ class ArcBroker:
 
         stop_reason = "matched"
         mismatch: dict[str, object] | None = None
+        conflict: dict[str, object] | None = None
         for name, data, expected in checked:
             if (
                 self._primitive_actions >= self._game.action_cap
@@ -447,8 +571,14 @@ class ArcBroker:
             ):
                 if key in expected and expected[key] != actual:
                     mismatch = {**(mismatch or {}), key: expected[key]}
+            if self._model_conflicts and self._model_conflicts[-1].startswith(f"sequence-{record.sequence}:"):
+                stop_reason = "model-conflict"
+                conflict = {"sequence": record.sequence, "reason": "model-conflict", "replan_required": True}
+                append_feedback(record, stop_reason)
+                break
             if mismatch is not None:
                 stop_reason = "prediction-mismatch"
+                conflict = self._record_model_conflict(record.sequence, "prediction-mismatch")
                 append_feedback(record, stop_reason)
                 break
             if name == "RESET":
@@ -499,10 +629,9 @@ class ArcBroker:
             "feedback": feedback,
             "unexecuted_count": len(plan) - result.applied_count,
             "retrodiction": {
-                "status": "verified" if self._transition_model is not None else "unavailable",
-                "records_checked": len(records),
+                **self.retrodiction_status(),
             },
-            "conflict": mismatch,
+            "conflict": conflict,
         }
 
     def _require_open(self) -> None:

@@ -66,6 +66,10 @@ P7_APPLICATION_TOOL_NAMES = (
     "p7_history",
     "p7_frame_at",
     "p7_act_checked",
+    "p7_world_model",
+    "p7_playbook",
+    "p7_retrodiction_status",
+    "p7_record_hypothesis",
 )
 
 # The fixed Pi RPC contract this application launches. It is the same mode
@@ -311,13 +315,13 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary"}
+                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "playbook", "retrodiction_status", "record_hypothesis"}
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
-            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1}[method]:
+            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "playbook": 1, "retrodiction_status": 0, "record_hypothesis": 3}[method]:
                 raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
@@ -704,6 +708,22 @@ def p7_last_outcome_summary(level=None):
     """
     return _call("last_outcome_summary", level)
 
+def p7_world_model():
+    """Read the bounded same-game confirmed model projection."""
+    return _call("world_model")
+
+def p7_playbook(level=None):
+    """Read the bounded same-game Playbook projection."""
+    return _call("playbook", level)
+
+def p7_retrodiction_status():
+    """Read scalar transition-model verification status."""
+    return _call("retrodiction_status")
+
+def p7_record_hypothesis(layer, key, value):
+    """Submit one bounded hypothesis with an application-owned probe."""
+    return _call("record_hypothesis", layer, key, value)
+
 def p7_components(level=None):
     """Return connected-component analysis of the current settled grid.
 
@@ -829,6 +849,18 @@ def tried_actions(level=None):
 
 def last_outcome_summary(level=None):
     return p7_last_outcome_summary(level)
+
+def world_model():
+    return p7_world_model()
+
+def playbook(level=None):
+    return p7_playbook(level)
+
+def retrodiction_status():
+    return p7_retrodiction_status()
+
+def record_hypothesis(layer, key, value):
+    return p7_record_hypothesis(layer, key, value)
 
 def components(level=None):
     return p7_components(level)

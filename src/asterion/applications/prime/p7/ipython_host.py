@@ -127,13 +127,27 @@ class P7ClientFacade:
             self.__invoke("last_outcome_summary", level),
         )
 
+    def world_model(self) -> Mapping[str, object]:
+        return cast(Mapping[str, object], self.__invoke("world_model"))
+
+    def playbook(self, level: int | None = None) -> Mapping[str, object]:
+        return cast(Mapping[str, object], self.__invoke("playbook", level))
+
+    def retrodiction_status(self) -> Mapping[str, object]:
+        return cast(Mapping[str, object], self.__invoke("retrodiction_status"))
+
+    def record_hypothesis(self, layer: str, key: str, value: Mapping[str, object]) -> Mapping[str, object]:
+        if type(layer) is not str or type(key) is not str or not isinstance(value, Mapping):
+            raise P7ClientError()
+        return cast(Mapping[str, object], self.__invoke("record_hypothesis", layer, key, dict(value)))
+
     def __invoke(self, name: str, *args: object) -> object:
         try:
             if self.__client is None:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked"} and type(value) is not dict) or (
+            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "playbook", "retrodiction_status", "record_hypothesis"} and type(value) is not dict) or (
                 name in {"history", "frame_at"} and type(value) is not list
             ):
                 raise ValueError
@@ -597,6 +611,9 @@ def _valid_client_module(source: object) -> bool:
         "p7_act", "p7_observe", "p7_mechanics_prior", "p7_history",
         "p7_frame_at", "p7_act_checked", "p7_tried_actions",
         "p7_last_outcome_summary", "p7_components",
+        "p7_world_model", "p7_playbook", "p7_retrodiction_status",
+        "world_model", "playbook", "retrodiction_status",
+        "p7_record_hypothesis", "record_hypothesis",
         "positions", "diff", "summary", "render", "act_and_observe",
     }:
         return False
@@ -614,6 +631,10 @@ def _valid_client_module(source: object) -> bool:
         and public["act_checked"].args.args[0].arg == "plan"
         and _helper_arguments(public["tried_actions"], ("level",), (None,))
         and _helper_arguments(public["last_outcome_summary"], ("level",), (None,))
+        and _exact_arguments(public["world_model"], 0)
+        and _helper_arguments(public["playbook"], ("level",), (None,))
+        and _exact_arguments(public["retrodiction_status"], 0)
+        and _helper_arguments(public["record_hypothesis"], ("layer", "key", "value"), ())
         and _helper_arguments(public["components"], ("level",), (None,))
         and _helper_arguments(public["positions"], ("values", "obs"), (None,))
         and _helper_arguments(public["diff"], ("before", "after"), ())

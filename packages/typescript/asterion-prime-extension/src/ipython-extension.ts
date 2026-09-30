@@ -358,7 +358,12 @@ export function createIpythonBridge(
 }
 
 export function toolNames(): string[] {
-  return ["ipython", "p7_observe", "p7_act_checked"];
+  return [
+    "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
+    "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
+    "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
+    "p7_record_hypothesis",
+  ];
 }
 
 interface MethodToolInput {
@@ -431,6 +436,13 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
       "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason.",
       TypeObject({}, { additionalProperties: false }),
       "status",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_mechanics_prior",
+      "Read bounded mechanics evidence inferred from prior actions.",
+      TypeObject({}, { additionalProperties: false }),
+      "mechanics_prior",
     ),
     makeMethodTool(
       bridge,
@@ -538,6 +550,39 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
         { additionalProperties: false },
       ),
       "act_checked",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_world_model",
+      "Read the bounded same-game world model projection.",
+      TypeObject({}, { additionalProperties: false }),
+      "world_model",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_playbook",
+      "Read the bounded same-game Playbook projection.",
+      TypeObject({ level: TypeUnion([TypeNumber({ minimum: 0 }), TypeNull()]) }, { additionalProperties: false }),
+      "playbook",
+      "level",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_retrodiction_status",
+      "Read scalar transition-model verification status.",
+      TypeObject({}, { additionalProperties: false }),
+      "retrodiction_status",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_record_hypothesis",
+      "Submit one canonical mechanism hypothesis and one distinguishing probe.",
+      TypeObject({
+        layer: TypeString({ minLength: 1 }),
+        key: TypeString({ minLength: 1 }),
+        value: TypeObject({}, { additionalProperties: true }),
+      }, { additionalProperties: false }),
+      "record_hypothesis",
     ),
   ];
 }

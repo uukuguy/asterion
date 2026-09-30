@@ -353,7 +353,7 @@ class _IpythonBridgeServer:
                     or (
                         "params" not in value
                         and value.get("method")
-                        not in {"observe", "status", "mechanics_prior"}
+                        not in {"observe", "status", "mechanics_prior", "world_model", "retrodiction_status"}
                     )
                     or type(value["method"]) is not str
                 ):
@@ -430,6 +430,24 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
+            elif method in {"world_model", "retrodiction_status"}:
+                if params is not None and (type(params) is not dict or params):
+                    return error_response()
+                value = getattr(facade, method)()
+            elif method == "playbook":
+                if params is not None and (type(params) is not int or params < 0):
+                    return error_response()
+                value = facade.playbook(params)
+            elif method == "record_hypothesis":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"layer", "key", "value"}
+                    or type(params["layer"]) is not str
+                    or type(params["key"]) is not str
+                    or not isinstance(params["value"], dict)
+                ):
+                    return error_response()
+                value = facade.record_hypothesis(params["layer"], params["key"], params["value"])
             elif method in {"tried_actions", "last_outcome_summary"}:
                 if params is not None and (
                     type(params) is not int or params < 0
@@ -595,6 +613,38 @@ class _P7BrokerClient:
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
+    def world_model(self) -> dict[str, object]:
+        try:
+            snapshot = self._broker.world_model()
+            if snapshot is None:
+                return {"status": "unavailable"}
+            return snapshot.projection(max_bytes=8192)
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def playbook(self, level: int | None = None) -> dict[str, object]:
+        if level is not None and (type(level) is not int or level < 0):
+            raise P7OperatorError("P7 host services are unavailable")
+        try:
+            value = self._broker.playbook_projection()
+            if level is None:
+                return value
+            return {"level": level, "memory": [m for m in value.get("level_memory", []) if m["level"] == level]}
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def retrodiction_status(self) -> dict[str, object]:
+        snapshot = self._broker.world_model()
+        result = self._broker.retrodiction_status()
+        return {
+            **result,
+            "world_model_version": None if snapshot is None else snapshot.version,
+            "conflict_count": 0 if snapshot is None else len(snapshot.conflicts),
+        }
+
+    def record_hypothesis(self, layer: str, key: str, value: dict[str, object]) -> dict[str, object]:
+        return self._broker.record_hypothesis(layer, key, value)
+
     def act_checked(self, plan: object) -> Mapping[str, object]:
         try:
             journal_start = len(self._broker.journal)
@@ -630,6 +680,8 @@ class _P7BrokerClient:
                 "applied_count": result["applied_count"],
                 "stop_reason": result["stop_reason"],
                 "mismatch": result["mismatch"],
+                "conflict": result.get("conflict"),
+                "retrodiction": result.get("retrodiction", self._broker.retrodiction_status()),
                 "unexecuted_count": result["unexecuted_count"],
                 "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
@@ -1956,6 +2008,30 @@ async def run_live(
         signature="result['no_effect_hint'] (when stop_reason='observation-no-change')",
         category="retrodict",
     ))
+    tool_registry.register(Tool(
+        name="world_model",
+        description="Read the bounded same-game confirmed model projection; hypotheses remain unconfirmed until action evidence promotes them.",
+        signature="p7_client.world_model()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="playbook",
+        description="Read the bounded same-game Playbook projection and level memory; malformed private state falls back to baseline.",
+        signature="p7_client.playbook(level=None)",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="retrodiction_status",
+        description="Read scalar transition-model verification status before using a batch or route hypothesis.",
+        signature="p7_client.retrodiction_status()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="record_hypothesis",
+        description="Submit one canonical mechanism hypothesis and exactly one distinguishing probe; the broker attaches current evidence and controls promotion.",
+        signature="p7_client.record_hypothesis(layer, key, value)",
+        category="model",
+    ))
     strategy = _resolve_strategy(invocation.environment)
     if variant == "legacy":
         prompt = _prompt_for_variant(variant, tool_registry)
@@ -2050,7 +2126,7 @@ async def run_live(
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
         try:
-            broker_for_playbook.set_playbook_projection(playbook_snapshot.projection())
+            broker_for_playbook.load_playbook(playbook_snapshot)
         except (OSError, ValueError, TypeError):
             playbook_snapshot = None
             playbook_loaded = False
@@ -2195,13 +2271,11 @@ async def run_live(
                         "terminal_reason": status.terminal_reason,
                     }
                     world_snapshot = broker_value.world_model()
-                    transition_model = broker_value.transition_model()
+                    retrodiction = broker_value.retrodiction_status()
                     diagnostics["world_model_version"] = (
                         None if world_snapshot is None else world_snapshot.version
                     )
-                    diagnostics["retrodiction_status"] = (
-                        "verified" if transition_model is not None else "unavailable"
-                    )
+                    diagnostics["retrodiction_status"] = retrodiction["status"]
                     diagnostics["conflict_count"] = (
                         0 if world_snapshot is None else len(world_snapshot.conflicts)
                     )
@@ -2226,19 +2300,6 @@ async def run_live(
                         replay_verified = True
                     except Exception:
                         pass
-                if broker_receipt is not None and replay_verified and playbook_snapshot is not None:
-                    try:
-                        save_playbook(root, playbook_snapshot)
-                        playbook_saved = True
-                    except (OSError, ValueError):
-                        playbook_saved = False
-                elif failure is not None and playbook_snapshot is not None:
-                    try:
-                        save_playbook(root, branch_playbook(playbook_snapshot, "run-failed"))
-                        playbook_saved = True
-                    except (OSError, ValueError):
-                        playbook_saved = False
-                diagnostics["playbook_saved"] = playbook_saved
                 evidence_value = resources_.host_services.get("prime.private-trace")
                 if (
                     failure is not None
@@ -2259,6 +2320,21 @@ async def run_live(
                         )
                     ):
                         sealed_trace = True
+                if sealed_trace and replay_verified:
+                    try:
+                        snapshot = broker_value.export_playbook(successful=failure is None)
+                        save_playbook(root, snapshot)
+                        playbook_saved = True
+                    except (OSError, ValueError):
+                        playbook_saved = False
+                elif failure is not None:
+                    try:
+                        baseline = playbook_snapshot or PlaybookSnapshot(PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels))
+                        save_playbook(root, branch_playbook(baseline, "run-unverified"))
+                        playbook_saved = True
+                    except (OSError, ValueError):
+                        playbook_saved = False
+                diagnostics["playbook_saved"] = playbook_saved
             # Keep the operator-only Pi stderr tail in private evidence. The
             # public receipt remains body-free, but extension-registration
             # failures otherwise collapse into an indistinguishable generic

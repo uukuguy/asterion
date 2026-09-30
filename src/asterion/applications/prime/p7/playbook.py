@@ -372,7 +372,7 @@ def append_checked_route(snapshot: PlaybookSnapshot, route: CheckedRoute) -> Pla
 def branch_playbook(snapshot: PlaybookSnapshot, reason: str) -> PlaybookSnapshot:
     if type(snapshot) is not PlaybookSnapshot or type(reason) is not str or not reason or len(reason) > 256:
         raise ValueError("invalid branch")
-    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, snapshot.checked_routes, snapshot.level_memory, snapshot.conflict_metadata, snapshot.evidence_index, (*snapshot.branch_reasons, reason))
+    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, snapshot.checked_routes, snapshot.level_memory, snapshot.conflict_metadata, snapshot.evidence_index, tuple(sorted(set((*snapshot.branch_reasons, reason)))))
 
 
 def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapshot, *, level: int) -> PlaybookSnapshot:
@@ -391,7 +391,7 @@ def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapsho
             facts.append(CheckedFact(layer, fact.key, fact.value, fact.level, digests))
     memory = LevelMemory(level, tuple(sorted(facts, key=lambda x: (x.layer, x.key))))
     evidence_index = tuple(dict.fromkeys((*snapshot.evidence_index, *(d for f in facts for d in f.evidence_digests))))
-    return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*snapshot.level_memory, memory), snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons)
+    return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*tuple(m for m in snapshot.level_memory if m.level != level), memory), snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons)
 
 
 __all__ = ["PlaybookKey", "PlaybookSnapshot", "CheckedRoute", "CheckedFact", "LevelMemory", "load_playbook", "save_playbook", "append_checked_route", "branch_playbook", "capture_completed_level"]

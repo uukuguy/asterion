@@ -168,8 +168,14 @@ test("registers exactly the ipython tool", async () => {
   const registered = [];
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
   register({ registerTool: (tool) => registered.push(tool) });
-  assert.deepEqual(toolNames(), ["ipython"]);
-  assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
+  const expectedTools = [
+    "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
+    "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
+    "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
+    "p7_record_hypothesis",
+  ];
+  assert.deepEqual(toolNames(), expectedTools);
+  assert.deepEqual(registered.map((tool) => tool.name), expectedTools);
   assert.equal(registered[0].label, "ipython");
   assert.equal(
     registered[0].description,
@@ -435,7 +441,12 @@ test("built artifact is comment-free and loads through the pinned loader", async
     writeFileSync(loaderCopy, readFileSync(loaderPath));
     const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
     await loader.default({ registerTool: (tool) => registered.push(tool) });
-    assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
+    assert.deepEqual(registered.map((tool) => tool.name), [
+      "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
+      "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
+      "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
+      "p7_record_hypothesis",
+    ]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

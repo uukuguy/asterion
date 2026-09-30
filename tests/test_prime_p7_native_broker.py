@@ -143,13 +143,44 @@ class TestNativeP7Broker(unittest.TestCase):
             {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
         ])
         self.assertEqual(result["applied_count"], 1)
-        self.assertEqual(result["retrodiction"]["status"], "verified")
+        self.assertEqual(result["retrodiction"]["status"], "observed")
         self.assertIsNotNone(broker.world_model())
         self.assertIsNotNone(broker.transition_model())
         self.assertEqual(len(broker.world_evidence()), 1)
         projection = broker.playbook_projection()
         projection["mutated"] = True
         self.assertNotIn("mutated", broker.playbook_projection())
+
+    def test_mechanism_probe_promotes_only_after_matching_transition(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine()
+        broker = ArcBroker(
+            engine=engine,
+            world_model=WorldModelStore(engine.game_id, engine.seed, engine.win_levels),
+        )
+        broker.bind_history("run-1")
+        mechanism = {
+            "schema": "asterion.prime.p7-mechanism/v1",
+            "game_id": engine.game_id,
+            "seed": 0,
+            "win_levels": 7,
+            "revision": 0,
+            "rules": [{
+                "action": "ACTION1",
+                "guards": [{"op": "state_is", "args": {"value": "NOT_FINISHED"}}, {"op": "cell_equals", "args": {"x": 0, "y": 0, "value": 0}}],
+                "effects": [{"op": "set_cell", "args": {"x": 0, "y": 0, "value": 1}}],
+            }],
+        }
+        broker.record_hypothesis("mechanics", "move", {
+            "mechanism": mechanism,
+            "probe": {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
+            "dependencies": [],
+        })
+        result = broker.act_checked([{"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}}])
+        self.assertEqual(result["retrodiction"]["status"], "verified")
+        self.assertEqual(broker.world_model().mechanics["move"].status, "confirmed")
 
     def test_retry_guard_stops_checked_batch_on_settled_no_effect(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker

@@ -20,6 +20,18 @@ class _Facade:
     def last_outcome_summary(self, level=None):
         return {"attempts": {}, "no_effect": {}}
 
+    def world_model(self):
+        return {"version": 1}
+
+    def playbook(self, level=None):
+        return {"level": level}
+
+    def retrodiction_status(self):
+        return {"status": "observed"}
+
+    def record_hypothesis(self, layer, key, value):
+        return {"layer": layer, "key": key, "value": value}
+
     def history(self, start, limit):
         return [{"sequence": start, "limit": limit}]
 
@@ -38,11 +50,17 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.bridge._method_failures = {}
 
     def test_no_argument_tools_do_not_receive_empty_object(self):
-        for method in ("observe", "status", "mechanics_prior"):
+        for method in ("observe", "status", "mechanics_prior", "world_model", "retrodiction_status"):
             with self.subTest(method=method):
                 response = self.bridge._dispatch_method_call("request", method, {})
                 self.assertEqual(response["status"], "ok")
-                self.assertEqual(response["type"], "method_result")
+            self.assertEqual(response["type"], "method_result")
+
+    def test_model_tools_receive_typed_parameters(self):
+        for method, params in (("playbook", 0), ("record_hypothesis", {"layer": "mechanics", "key": "x", "value": {}})):
+            with self.subTest(method=method):
+                response = self.bridge._dispatch_method_call("request", method, params)
+                self.assertEqual(response["status"], "ok")
 
     def test_structured_tools_receive_typed_parameters(self):
         cases = {

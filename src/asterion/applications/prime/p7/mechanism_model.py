@@ -13,7 +13,7 @@ import hashlib
 import json
 import re
 from collections.abc import Mapping, Sequence
-from typing import Any
+from typing import Any, cast
 
 from .score import digest
 from .verified_history import ArcHistoryRecord, ArcPredictionError, stable_changed_cells
@@ -125,8 +125,9 @@ def _operation(value: object, allowed: frozenset[str], name: str) -> tuple[str, 
             kind, args = value["op"], value["value"]
         else:
             raise ValueError(f"invalid {name}")
-    elif type(value) in (tuple, list) and len(value) == 2:
-        kind, args = value
+    elif type(value) in (tuple, list) and len(cast(Sequence[object], value)) == 2:
+        pair = cast(Sequence[object], value)
+        kind, args = pair[0], pair[1]
     else:
         raise ValueError(f"invalid {name}")
     if type(kind) is not str or kind not in allowed:
@@ -225,7 +226,8 @@ class MechanismRule:
     effects: tuple[object, ...] = ()
 
     def __post_init__(self) -> None:
-        _action(self.action)
+        if type(self.action) is not str or self.action not in _ACTIONS:
+            raise ValueError("invalid action")
         if type(self.guards) is not tuple or len(self.guards) > _MAX_GUARDS:
             raise ValueError("mechanism guard cap exceeded")
         if type(self.effects) is not tuple or len(self.effects) > _MAX_EFFECTS:
@@ -247,8 +249,8 @@ class MechanismRule:
     def mapping(self) -> dict[str, object]:
         return {
             "action": self.action,
-            "guards": [{"op": op, "args": _thaw(args)} for op, args in self.guards],
-            "effects": [{"op": op, "args": _thaw(args)} for op, args in self.effects],
+            "guards": [{"op": cast(tuple[str, Any], item)[0], "args": _thaw(cast(tuple[str, Any], item)[1])} for item in self.guards],
+            "effects": [{"op": cast(tuple[str, Any], item)[0], "args": _thaw(cast(tuple[str, Any], item)[1])} for item in self.effects],
         }
 
 
@@ -395,6 +397,21 @@ class MechanismSpec:
         if len(encoded) > _MAX_SPEC_BYTES:
             raise ValueError("mechanism spec exceeds cap")
 
+    @classmethod
+    def from_mapping(cls, value: object) -> "MechanismSpec":
+        if type(value) is not dict or set(value) != {"schema", "game_id", "seed", "win_levels", "revision", "rules"}:
+            raise ValueError("invalid mechanism schema")
+        if value["schema"] != "asterion.prime.p7-mechanism/v1" or type(value["rules"]) is not list:
+            raise ValueError("invalid mechanism schema")
+        rules = []
+        for item in value["rules"]:
+            if type(item) is not dict or set(item) != {"action", "guards", "effects"}:
+                raise ValueError("invalid mechanism rule")
+            if type(item["guards"]) is not list or type(item["effects"]) is not list:
+                raise ValueError("invalid mechanism operations")
+            rules.append(MechanismRule(item["action"], tuple(item["guards"]), tuple(item["effects"])))
+        return cls(value["game_id"], value["seed"], value["win_levels"], tuple(rules), value["revision"])
+
     def to_mapping(self) -> dict[str, object]:
         return {
             "schema": "asterion.prime.p7-mechanism/v1",
@@ -439,7 +456,7 @@ class MechanismSpec:
         for rule in self.rules:
             if rule.action != action_name:
                 continue
-            if _guards_match(rule.guards, stable, action_data, level, state, entities or {}):
+            if _guards_match(cast(tuple[tuple[str, Any], ...], rule.guards), stable, action_data, level, state, entities or {}):
                 matches.append(rule)
         if not matches:
             return MechanismPrediction("unknown", frame=stable, level=level, state=state, reason="no-rule")
@@ -450,7 +467,7 @@ class MechanismSpec:
             )
         try:
             after, after_level, after_state = _apply_effects(
-                stable, level, state, matches[0].effects, self.win_levels
+                stable, level, state, cast(tuple[tuple[str, Any], ...], matches[0].effects), self.win_levels
             )
             count, changed, _ = stable_changed_cells(stable, after)
             if count > 80:
@@ -598,8 +615,11 @@ class ModelCertificate:
             raise ValueError("invalid certificate coverage")
 
     @classmethod
-    def _issued(cls, *args: object) -> "ModelCertificate":
-        certificate = cls(*args)
+    def _issued(
+        cls, game_id: str, seed: int, win_levels: int, revision: int,
+        model_digest: str, record_count: int, sequence_start: int, sequence_end: int,
+    ) -> "ModelCertificate":
+        certificate = cls(game_id, seed, win_levels, revision, model_digest, record_count, sequence_start, sequence_end)
         object.__setattr__(certificate, "_validated", True)
         return certificate
 

@@ -401,3 +401,9 @@ Verification: 50 native broker tests plus WorldModel/TransitionModel/Playbook su
 Added a bounded Playbook projection, same-game load before prompt construction, safe baseline fallback for malformed private state, and save/branch behavior limited to sealed or failed runs. Diagnostics expose only loaded/saved booleans.
 
 Verification: 64 focused broker/playbook/mechanism tests passed; Ruff and `py_compile` passed.
+
+## Task 4 review remediation — 2026-09-30
+
+The first lifecycle slice overstated `retrodiction=verified`: an observed transcript is now reported as `observed` until a broker-issued mechanism certificate is promoted. Worker `act_checked` now preserves bounded `retrodiction` and `conflict` fields. Playbook saves now derive checked routes from sealed broker evidence, require a successful run for success-route persistence, and write a branch for failed/unverified runs. Mechanism hypotheses are accepted only with one canonical distinguishing probe; matching evidence promotes a validated certificate, while contradiction consumes the probe and records a conflict.
+
+P7 application tools are registered through `P7ToolRegistry` and mirrored through the typed Python bridge, generated worker module, TypeScript extension source, and built extension resource. Python focused suites: 149 tests passed; mechanism model Pyright: 0 errors; TypeScript typecheck/build and focused extension tests passed (one context-witness test remains environment-limited by its missing peer harness).
