@@ -638,6 +638,20 @@ class ArcBroker:
                 stop_reason = "action-unavailable"
                 unavailable_action = name
                 break
+            if witness is None and self._prefix_coordinate_reuse(ArcAction(name, data), expected):
+                stop_reason = "prefix-action-reuse"
+                unavailable_action = name
+                mismatch = {
+                    "prefix_action_reuse": {
+                        "level": self._current.levels_completed,
+                        "action": name,
+                        "position": {
+                            key: value for key, value in self._position_key(ArcAction(name, data)) or ()
+                        },
+                        "requires": "current-level-cell-or-frame-evidence",
+                    },
+                }
+                break
             previous_levels = self._current.levels_completed
             distinguishing = len(plan) == 1 and self._guard_probe_distinguishes(expected)
             try:
@@ -915,6 +929,56 @@ class ArcBroker:
         if "state" in expected and expected["state"] != self._current.state:
             return True
         return False
+
+    def _prefix_coordinate_reuse(
+        self, action: ArcAction, expected: Mapping[str, object]
+    ) -> bool:
+        """Reject an ungrounded click copied from a replayed prior-level prefix."""
+
+        if self._current.levels_completed <= 0 or action.name != "ACTION6":
+            return False
+        position = self._position_key(action)
+        if position is None:
+            return False
+        prior_positions = self._prior_level_positions(self._current.levels_completed, action.name)
+        if position not in prior_positions:
+            return False
+        return not self._visual_probe_distinguishes(expected)
+
+    def _visual_probe_distinguishes(self, expected: Mapping[str, object]) -> bool:
+        """Require a cell or frame change prediction for a reused prefix click."""
+
+        if "cell" in expected:
+            cell = cast(dict[str, int], expected["cell"])
+            x, y = cell["x"], cell["y"]
+            current = self._current.frame[-1]
+            if y < len(current) and x < len(current[0]) and current[y][x] != cell["value"]:
+                return True
+        if "frame_sha256" in expected and expected["frame_sha256"] != digest(self._current.frame[-1]):
+            return True
+        return False
+
+    def _prior_level_positions(
+        self, level: int, action_name: str
+    ) -> set[tuple[tuple[str, int], ...]]:
+        """Return click positions used before the current level began."""
+
+        if self._history is None or level <= 0:
+            return set()
+        positions: set[tuple[tuple[str, int], ...]] = set()
+        records = self._history
+        for index, record in enumerate(records):
+            if record.action != action_name:
+                continue
+            action_level = record.levels_completed
+            if index > 0 and records[index - 1].levels_completed < record.levels_completed:
+                action_level -= 1
+            if action_level >= level:
+                continue
+            position = self._position_key(ArcAction(record.action, record.data))
+            if position is not None:
+                positions.add(position)
+        return positions
 
     def _record_no_effect(self, action: ArcAction, level: int) -> None:
         key = (level, action.name)

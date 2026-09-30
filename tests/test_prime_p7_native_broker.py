@@ -808,6 +808,54 @@ class TestRetrodictTrialTracking(unittest.TestCase):
         self.assertEqual(summary["attempts"]["ACTION1"], 3)
         self.assertEqual(summary["no_effect"]["ACTION1"], 3)
 
+    def test_checked_click_reuse_from_replayed_prefix_requires_current_level_evidence(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
+        from asterion.applications.prime.p7.game import ArcGameContract
+
+        class _TwoLevelClickEngine:
+            game_id = "ls20-9607627b"
+            seed = 0
+            win_levels = 2
+
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict[str, int]]] = []
+                self.levels_completed = 0
+
+            def observe(self) -> dict[str, object]:
+                return {
+                    "available_actions": ["ACTION6"],
+                    "frame": [[[len(self.calls)]]],
+                    "levels_completed": self.levels_completed,
+                    "state": "NOT_FINISHED",
+                    "win_levels": self.win_levels,
+                }
+
+            def step(self, action: str, data: dict[str, int] | None = None) -> dict[str, object]:
+                self.calls.append((action, data or {}))
+                if len(self.calls) == 3:
+                    self.levels_completed = 1
+                return self.observe()
+
+        engine = _TwoLevelClickEngine()
+        broker = ArcBroker(
+            engine=engine,
+            game=ArcGameContract(engine.game_id, engine.win_levels, action_cap=1000),
+        )
+        broker.bind_history("run-prefix-reuse")
+        for _ in range(3):
+            broker.act((ArcAction("ACTION6", (("x", 61), ("y", 33))),))
+
+        result = broker.act_checked([
+            {
+                "action": {"name": "ACTION6", "data": {"x": 61, "y": 33}},
+                "expect": {"levels_completed": 2},
+            },
+        ])
+        self.assertEqual(result["stop_reason"], "prefix-action-reuse")
+        self.assertEqual(result["applied_count"], 0)
+        self.assertEqual(len(engine.calls), 3)
+        self.assertEqual(result["invalid_action"], "ACTION6")
+
 
 class TestP7ToolRegistry(unittest.TestCase):
     """P7ToolRegistry renders an application-level tool section for the

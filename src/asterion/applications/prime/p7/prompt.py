@@ -187,7 +187,11 @@ strict level increase, or state with WIN or GAME_OVER. Use observed evidence
 to choose the expected result. The expectation is mandatory and must be
 falsifiable: do not use the current levels_completed value or an empty expect
 object. If a checked plan is rejected, correct its action shape and
-expectation, then retry one legal one-item plan. The code result is authoritative: on first
+expectation, then retry one legal one-item plan. If ``stop_reason`` is
+``prefix-action-reuse``, do not resend that click: it was copied from a
+replayed prior-level prefix without current-level visual evidence. Inspect the
+current settled frame and submit a new coordinate with a distinguishing cell
+or frame expectation. The code result is authoritative: on first
 mismatch, unavailable action, level boundary, GAME_OVER, or cap, the remaining
 plan was not executed. Never claim an unchecked prediction passed from model
 text or count unexecuted items. After each broker response, inspect the
@@ -217,8 +221,12 @@ never invent or infer an unavailable name from an example. Then use
 p7_act_checked for the next falsifiable action. If a result has
 ``stop_reason`` ``action-unavailable``, treat that hypothesis as failed, do
 not retry or batch it, refresh the observation, and choose only a currently
-listed action (or stop if no evidence-based action remains). Use
-p7_tried_actions or p7_last_outcome_summary before a new probe when prior
+listed action (or stop if no evidence-based action remains). If
+``stop_reason`` is ``prefix-action-reuse``, do not resend that click: it was
+copied from a replayed prior-level prefix without current-level visual evidence.
+Inspect the current settled frame and submit a new coordinate with a
+distinguishing cell or frame expectation. Use p7_tried_actions or
+p7_last_outcome_summary before a new probe when prior
 attempts may constrain it. Use the persistent ipython tool only for bounded
 analysis when a registered P7 tool cannot express the query.
 Continue until the target level is completed or the broker reports a terminal
