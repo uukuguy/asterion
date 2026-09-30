@@ -1,14 +1,16 @@
 # P7 通用游戏经验归纳与持久化设计
 
 **日期：** 2026-10-01  
-**状态：** 已实现，待全量门禁与纯 P7 实战验证  
+**状态：** 已实现并通过全量门禁；纯 P7 实战已验证采集边界，机制升级仍待改进  
 **范围：** P7 纯能力运行中的通用游戏经验学习，不包含具体关卡路线注入
 
 > 实施基线：代码已落在 `experience_induction.py`、`mechanism_model.py`、
 > `model_search.py`、P7 Broker/Playbook 与四个只读应用工具中；合成端到端
 > 测试覆盖 effect → candidate → probe → simulator → Playbook 重载边界。
 > 当前仍保留两个有意边界：候选编译只接受可证明的受限规则子集，且探测计划
-> 只建议不自动派发。纯 P7 能力须用真实运行继续验证，不能由单元测试替代。
+> 只建议不自动派发。全量 `make test` 已通过；SP80 L2 纯 P7 实战证明
+> effects/candidates 能持久化，但本轮 `confirmed=0`、simulator=`absent`，
+> 所以“采集经验”已经实现，“从经验形成可搜索机制”仍是当前待改进边界。
 
 ## 1. 目标
 
