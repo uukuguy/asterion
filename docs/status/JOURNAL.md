@@ -3338,3 +3338,4 @@
 - 10:43 Recorded VC33 L1 complete local submission evidence and explicit L2 boundary [4ea365c6]
 - 10:50 [a19162a7] 修复 P7 Playbook 视觉先验在大路线/级别过滤下丢失，并按已验证路线计算当前级别 witness 上限，避免重复计入前缀。
 - 11:02 [37cb3b4a] 允许同题已验证级别后缀在新建前缀上 fresh replay，并按当前前缀计算 witness 预算，支持显式重做关卡。
+- 11:20 [COMMIT] 修正 witness 预算读取：当前前缀只取目标前一级，完整路线仅作后缀候选，避免旧前缀污染总上限。
