@@ -2046,16 +2046,17 @@ def _select_game_for_mode(
                     max_level=game.target_level - 1,
                     expected_model_id=expected_model,
                 )
-                route_source = load_best_prefix(
-                    arc_root,
-                    Path(resolved_environment[live.OPERATOR_ROOT_ENV])
-                    / ".asterion-private"
-                    / "prime-p7-live",
-                    game.game_id,
-                    game.seed,
-                    max_level=game.target_level,
-                    expected_model_id=expected_model,
-                )
+                if _offline_optimization_enabled(resolved_environment):
+                    route_source = load_best_prefix(
+                        arc_root,
+                        Path(resolved_environment[live.OPERATOR_ROOT_ENV])
+                        / ".asterion-private"
+                        / "prime-p7-live",
+                        game.game_id,
+                        game.seed,
+                        max_level=game.target_level,
+                        expected_model_id=expected_model,
+                    )
             except (KeyError, OSError, P7ModelSelectionError):
                 prefix = None
                 route_source = None
@@ -2105,8 +2106,6 @@ def _bound_witness_level_actions(
         route_source if route_source is not None else prefix,
         game.target_level,
     )
-    if current is None:
-        return replace(game, action_cap_override=sum(game.baseline_actions[: game.target_level]))
     transitions = getattr(prefix, "transitions", ())
     prefix_actions = len(transitions)
     if any(
@@ -2118,6 +2117,13 @@ def _bound_witness_level_actions(
             for index, transition in enumerate(transitions, start=1)
             if getattr(transition, "levels_completed", -1) >= game.target_level - 1
         )
+    if current is None:
+        if prefix_actions > 0:
+            return replace(
+                game,
+                action_cap_override=prefix_actions + game.baseline_actions[game.target_level - 1],
+            )
+        return replace(game, action_cap_override=sum(game.baseline_actions[: game.target_level]))
     if prefix_actions == 0:
         source_transitions = getattr(route_source, "transitions", ())
         prefix_actions = next(

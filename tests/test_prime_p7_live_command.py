@@ -333,6 +333,28 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(bounded.baseline_actions, (7, 14))
         self.assertEqual(bounded.action_cap, 17)
 
+    def test_witness_without_route_source_keeps_official_baseline(self) -> None:
+        from asterion.applications.prime.p7.operator import _bound_witness_level_actions
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection(
+            "vc33-5430563c", 0, 2,
+            _metadata_baseline_actions=(7, 18),
+            _metadata_win_levels=2,
+        )
+        prefix = SimpleNamespace(
+            transitions=(
+                SimpleNamespace(levels_completed=0),
+                SimpleNamespace(levels_completed=0),
+                SimpleNamespace(levels_completed=1),
+            )
+        )
+
+        bounded = _bound_witness_level_actions(game, prefix)
+
+        self.assertEqual(bounded.baseline_actions, (7, 18))
+        self.assertEqual(bounded.action_cap, 21)
+
     def test_subprocess_worker_bootstraps_from_live_client_facade(self) -> None:
         """The local worker must use the operator socket, not module-source mode."""
 
