@@ -3397,3 +3397,4 @@
 - 2026-10-01 SP80 L2 pure-P7 run p7-live-20260930191902-d0ad69f1eb7e640c51d6d3ca stopped after 46 current-level actions (52 total, one RESET): sealed/replay/cleanup true, external_cancel, offline=false; persisted effects=50 and candidates=13 but confirmed=0 and simulator=absent.
 - 2026-10-01 Updated experience-induction spec status after full 3554-test pass and SP80 L2 live evidence: collection persists, mechanism promotion remains unverified.
 - 03:48 Added full-frame effect induction, reusable component translation, and bounded simulator predictions so repeated movement can form generic candidates [b1e74a6a]
+- 03:49 Persisted the repair event in the append-only project journal for recovery continuity [7093d0c4]
