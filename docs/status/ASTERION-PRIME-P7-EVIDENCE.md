@@ -753,3 +753,15 @@ The successful receipt does not mean that the model's per-action predictions wer
 - `_optimize_verified_route` returns the old route hint after a fresh replay exception or non-shortening result, while leaving candidate expectations empty. That fallback is a latent provenance defect when a rebuilt prefix differs: the hint is an older route, not a freshly verified route for the current prefix, and should be labeled as unverified or withheld.
 
 These findings were recorded after the pass; no code fix is claimed by this audit.
+
+## 2026-09-30 correction — VC33 L2 is not a pure P7 solve
+
+The previous wording treated the offline-assisted run as a P7 capability result. That classification is withdrawn. The optimizer searched 64 local ARC replays, found a 7-action route, and the live model was given that route for execution. Under the pure P7 evaluation standard (the model must choose actions from online observations), this is **route-injection assistance and therefore disqualified as a P7 solve result**.
+
+The run remains valid only as:
+
+- an offline route-replay witness;
+- a saved-prefix and broker integration test; and
+- evidence that the route can be executed by the runtime.
+
+It must not be used as evidence that GPT-6.1-Sol independently solved VC33 L2 in 7 actions, and it must not be promoted as a P7 capability score. A clean capability result requires a new L2 run with offline route hints and route-adoption injection disabled; the optimizer may be used afterward for analysis only.
