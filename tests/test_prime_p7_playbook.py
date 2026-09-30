@@ -179,6 +179,21 @@ class TestP7Playbook(unittest.TestCase):
         save_playbook(self.root, captured)
         self.assertEqual(load_playbook(self.root, self.key), captured)
 
+    def test_completed_level_persists_bounded_visual_hypotheses_for_same_game(self) -> None:
+        world = WorldModelStore("game-1", 42, 3)
+        evidence = EvidenceRef(summary_hash="a" * 64)
+        world.record_hypothesis(
+            "entities", "visual.level.0.palette",
+            {"source": "visual-regularity", "colors": [0, 3]},
+            level=0, evidence=evidence,
+        )
+        captured = capture_completed_level(self.snapshot, world.snapshot, level=0)
+        self.assertEqual([fact.key for fact in captured.visual_hypotheses], ["visual.level.0.palette"])
+        save_playbook(self.root, captured)
+        loaded = load_playbook(self.root, self.key)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.visual_hypotheses, captured.visual_hypotheses)
+
     def test_completed_level_requires_current_in_range_level(self) -> None:
         world = WorldModelStore("game-1", 42, 3)
         with self.assertRaises(ValueError):

@@ -2154,7 +2154,7 @@ async def run_live(
     ))
     tool_registry.register(Tool(
         name="playbook",
-        description="Read the bounded same-game Playbook projection and level memory; malformed private state falls back to baseline.",
+        description="Read the bounded same-game Playbook projection, persisted visual hypotheses, and level memory; hypotheses remain unconfirmed and malformed private state falls back to baseline.",
         signature="p7_client.playbook(level=None)",
         category="model",
     ))
