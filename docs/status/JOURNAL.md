@@ -3411,3 +3411,4 @@
 - 05:39 Clarified certificates as simulator trust labels and made candidate probes optional so ordinary exploration never waits [ef2dbff6]
 - 05:40 Corrected the status journal hash for the advisory certificate boundary commit [bbeafb22]
 - 05:54 Moved bounded learning hints before large frame payloads so WorldMap evidence survives bridge truncation [028da690]
+- 06:02 Prioritized current induced bundles before stale candidates so bounded output preserves reusable WorldMap evidence [95045f1f]
