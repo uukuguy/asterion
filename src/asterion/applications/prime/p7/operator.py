@@ -418,7 +418,7 @@ class _IpythonBridgeServer:
                     or (
                         "params" not in value
                         and value.get("method")
-                        not in {"observe", "status", "mechanics_prior", "world_model", "cognition", "retrodiction_status"}
+                        not in {"observe", "status", "mechanics_prior", "world_model", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status"}
                     )
                     or type(value["method"]) is not str
                 ):
@@ -495,7 +495,7 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
-            elif method in {"world_model", "cognition", "retrodiction_status", "model_search"}:
+            elif method in {"world_model", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status", "model_search"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
@@ -705,6 +705,37 @@ class _P7BrokerClient:
 
         try:
             return self._broker.cognition_projection()
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def action_effects(self) -> list[dict[str, object]]:
+        try:
+            value = list(self._broker.action_effects())
+            encoded = json.dumps(value, separators=(",", ":"), ensure_ascii=False)
+            if len(encoded.encode()) > 8192:
+                return value[-8:]
+            return value
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def mechanism_candidates(self) -> list[dict[str, object]]:
+        try:
+            value = list(self._broker.mechanism_candidates())
+            if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
+                return value[-16:]
+            return value
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def probe_plan(self) -> dict[str, object]:
+        try:
+            return self._broker.probe_plan()
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def simulator_status(self) -> dict[str, object]:
+        try:
+            return self._broker.simulator_status()
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -2382,6 +2413,30 @@ async def run_live(
             "and observations are checked. This query never grants route execution authority."
         ),
         signature="p7_client.cognition()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="action_effects",
+        description="Read bounded effects extracted from settled transitions in this run; this is evidence, not a route or execution authority.",
+        signature="p7_client.action_effects()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="mechanism_candidates",
+        description="Read automatically induced mechanism candidates, support evidence, and conflict status.",
+        signature="p7_client.mechanism_candidates()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="probe_plan",
+        description="Suggest one current-state information-bearing probe without dispatching it; stale coordinates are rejected.",
+        signature="p7_client.probe_plan()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="simulator_status",
+        description="Read simulator effect coverage, unknown diagnostics, and certificate status.",
+        signature="p7_client.simulator_status()",
         category="model",
     ))
     tool_registry.register(Tool(

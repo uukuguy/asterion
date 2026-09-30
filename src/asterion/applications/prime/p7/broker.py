@@ -8,6 +8,7 @@ from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
 from .model_search import search_model
+from .experience_induction import ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
 from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
@@ -306,6 +307,7 @@ class ArcBroker:
         # click actions and None for direction/interact actions. The model
         # can query this through the broker API to avoid repeating probes.
         self._tried_actions: dict[tuple[int, str, tuple[tuple[str, int], ...] | None], int] = {}
+        self._experience_inducer = ExperienceInducer(win_levels=game.win_levels)
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -366,6 +368,81 @@ class ArcBroker:
         """Return the last replay-validated transition model, if available."""
 
         return self._transition_model
+
+    def action_effects(self) -> tuple[dict[str, object], ...]:
+        """Return bounded learned effect summaries for this run."""
+
+        return tuple({
+            "sequence": effect.sequence,
+            "level": effect.level,
+            "action": {"name": effect.action, "data": dict(effect.data)},
+            "outcome": effect.outcome,
+            "changed_cell_count": effect.changed_cell_count,
+            "changed_cells": [list(cell) for cell in effect.changed_cells],
+            "changed_cells_omitted": effect.changed_cells_omitted,
+            "state": effect.state,
+            "after_frame_sha256": effect.after_frame_sha256,
+        } for effect in self._experience_inducer.effects())
+
+    def mechanism_candidates(self) -> tuple[dict[str, object], ...]:
+        """Return candidate lifecycle and evidence without execution authority."""
+
+        return tuple({
+            "key": candidate.key,
+            "level": candidate.level,
+            "action_family": candidate.action_family,
+            "action": {"name": candidate.action, "data": dict(candidate.data)},
+            "signature": candidate.signature,
+            "status": candidate.status,
+            "support_count": candidate.support_count,
+            "evidence_sequences": list(candidate.evidence_sequences),
+            "conflict_sequences": list(candidate.conflict_sequences),
+        } for candidate in self._experience_inducer.candidates())
+
+    def probe_plan(self) -> dict[str, object]:
+        """Suggest one current-state probe; never dispatch it."""
+
+        try:
+            current = SimState.from_observation(
+                frame=self._current.frame[-1], level=self._current.levels_completed,
+                state=self._current.state, available_actions=self._current.available_actions,
+            )
+            tried = tuple(
+                (action, data or ())
+                for (level, action, data), _count in self._tried_actions.items()
+                if level == self._current.levels_completed
+            )
+            plan = ExperienceInducer.probe_plan(
+                current, self._experience_inducer.candidates(), tried_actions=tried,
+            )
+            return {
+                "status": plan.status,
+                "reason": plan.reason,
+                "action": None if plan.action is None else {
+                    "name": plan.action, "data": dict(plan.data),
+                },
+                "candidate_keys": list(plan.candidate_keys),
+                "expected_signatures": list(plan.expected_signatures),
+                "rejected_candidates": list(plan.rejected_candidates),
+            }
+        except (TypeError, ValueError):
+            return {"status": "unknown", "reason": "current-state-unavailable"}
+
+    def simulator_status(self) -> dict[str, object]:
+        """Expose simulator coverage without granting planner authority."""
+
+        certificate = self._mechanism_certificate
+        return {
+            "status": "verified" if certificate is not None and certificate.planner_eligible else (
+                "hypothesis" if self._mechanism_spec is not None else "absent"
+            ),
+            "effects": len(self._experience_inducer.effects()),
+            "candidates": len(self._experience_inducer.candidates()),
+            "confirmed_model": certificate is not None and certificate.planner_eligible,
+            "model_digest": None if certificate is None else certificate.model_digest,
+            "certificate_records": 0 if certificate is None else certificate.record_count,
+            "unknown_reasons": list(self._retrodiction_reasons[-16:]),
+        }
 
     def retrodiction_status(self) -> dict[str, object]:
         certificate = self._mechanism_certificate
@@ -737,9 +814,13 @@ class ArcBroker:
             self._record_model_conflict(record.sequence, "probe-contradicted" if matches else "probe-expired")
 
     def _record_world_evidence(self, record: ArcHistoryRecord) -> None:
-        if self._world_model is None:
-            return
         try:
+            records = self._bound_history()
+            if len(records) >= 2:
+                effect = extract_action_effect(records[-2], record)
+                self._experience_inducer.observe(effect)
+            if self._world_model is None:
+                return
             ref = EvidenceRef(
                 frame_id=f"frame-{record.sequence}",
                 action_id=None if record.action is None else f"action-{record.sequence}",

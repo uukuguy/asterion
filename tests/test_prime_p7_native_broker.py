@@ -155,6 +155,19 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_action_effects_and_candidates_are_learned_without_dispatching(self) -> None:
+        broker, engine = _broker()
+        broker.bind_history("run-effects")
+        broker.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 0, "y": 0, "value": 1}},
+        }])
+        self.assertEqual(len(broker.action_effects()), 1)
+        self.assertEqual(broker.action_effects()[0]["outcome"], "changed")
+        self.assertEqual(len(broker.mechanism_candidates()), 1)
+        self.assertEqual(broker.probe_plan()["status"], "no-discriminating-probe")
+        self.assertEqual(engine.calls, ["ACTION1"])
+
     def test_world_model_and_transition_model_are_updated_after_bound_transition(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.world_model import WorldModelStore

@@ -66,7 +66,8 @@ full frame again.
 
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
-p7_cognition,
+p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
+p7_simulator_status,
 p7_playbook, p7_retrodiction_status, p7_tried_actions,
 p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked,
 p7_record_hypothesis, p7_promote_hypothesis, and p7_model_search. Read the same-game model and Playbook before proposing a
