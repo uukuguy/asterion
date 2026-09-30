@@ -3377,3 +3377,4 @@
 - 2026-10-01 [4decbb82] 持久化类型认知与具体游戏经验，接入 P7 只读认知工具，并将执行权限收窄为身份与 checked witness 边界。
 - 2026-10-01 纯 P7 SP80 L1 现场验证 `p7-live-20260930174531-72d55dc672bc34f8481c3f8a`：当前关卡 6 步，`gpt-6.1-sol`，offline optimization=false，replay/seal/cleanup 全通过；worker cells=13，world_model_version=22，confirmed facts=0，hypotheses=12。诊断保留 3 次 prediction-mismatch 与 1 次可恢复的 oversized act_checked 告警，不能据此宣称长期学习已生效。
 - 2026-10-01 修复 cognition 计数语义：`primitive_actions` 保持历史最佳，新增 `current_primitive_actions` 表示最近一次观察；先写回归测试观察红灯，再实现并通过 cognition focused tests。
+- 01:55 cognition current/best action semantics fixed and documented [7301dfa5]
