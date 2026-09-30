@@ -3303,6 +3303,7 @@
 
 - 09:30 更新 P7 安装夹具和旧提示断言，适配完整应用工具注册并保持隔离模型 profile 可验证 [cc9c991e]
 - 08:59 将 replay expectations 接入 P7 checked route 执行，首个 witness 冲突停止批量动作 [56948081]
+- 09:01 收口 P7 回放边界与全仓 gate 结果，保留唯一离线 npm-ci 环境失败 [1a6800c3]
 - 06:39 同题世界模型设计加入 TransitionModel 回放门、Playbook 与动作预期，提交设计文档 [32abf2ea]
 - 06:44 实现计划拆分世界模型、回放门、Playbook、Broker 接入和优化器验证 [f52ef9a4]
 - 06:45 计划明确唯一模型写入口为受限 hypothesis 提交，确认只能由动作证据升级 [bd3ed16f]
