@@ -18,6 +18,7 @@
 - Post-pass audit: the first six live action expectations used replay state digests in the `frame_sha256` field, producing 6 false `prediction-mismatch` conflicts while the independent route witness still followed 7/7. The run is a valid L2 pass, but prediction diagnostics are not clean.
 - Post-pass audit: final confirmed world-model facts are 0/0/0 with 21 hypotheses; the pass does not demonstrate mechanism learning. The summary also labels `failure=null` as `application_failure`, and the debug transcript omits all message bodies/tool-result bodies.
 - Classification correction: because the 7-action candidate was found offline and injected into P7, the VC33 L2 run is not a pure P7 capability result. Keep it only as an offline replay/integration witness; do not claim GPT-6.1-Sol independently solved L2 in 7 actions.
+- Scope correction: this applies to the entire world-model VC33 phase. L1/L2 successes (`7→4`, `4→3`, `14→11`, `10→7`) all carried route hypotheses; even the baseline-only L1 rerun carried the prior exact route. Clean P7 capability passes in this phase: 0.
 
 ## 历史归档
 

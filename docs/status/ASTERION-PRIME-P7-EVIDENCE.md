@@ -765,3 +765,5 @@ The run remains valid only as:
 - evidence that the route can be executed by the runtime.
 
 It must not be used as evidence that GPT-6.1-Sol independently solved VC33 L2 in 7 actions, and it must not be promoted as a P7 capability score. A clean capability result requires a new L2 run with offline route hints and route-adoption injection disabled; the optimizer may be used afterward for analysis only.
+
+This correction applies to the whole world-model VC33 phase, not only the final L2 run. The successful L1/L2 records were L1 `7→4`, L1 `4→3`, L2 `14→11`, and L2 `10→7`; each had a route hypothesis in the model context. The L1 `baseline-only` 3-action rerun did not find a shorter candidate, but its model input still contained the prior exact route, so it is also not a pure capability result. Therefore the world-model phase currently has **zero clean P7 capability passes**.

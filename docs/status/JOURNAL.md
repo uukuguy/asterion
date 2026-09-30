@@ -3345,3 +3345,4 @@
 - 11:44 复核 VC33 L2 PASS：独立路线证据 7/7 跟随且回放通过，但前 6 次 `p7_act_checked` 把 `after_state_sha256` 填入 `frame_sha256`，形成 6 个假 `prediction-mismatch` 与 `retrodiction_status=conflict`；世界模型 confirmed 仍为 0/0/0，最终摘要还把 `failure=null` 分类成 `application_failure`。已写入 P7 evidence 与 resume，待通用修复。
 - 11:44 [e83d8498] 持久化 VC33 L2 post-pass 缺陷审计，确保后续修复从可验证事实继续，而不是把 PASS 当成机制完成。
 - 11:46 更正结果分类：VC33 L2 的 7 步路线由离线搜索后注入 P7，按纯 P7 能力标准属于路线注入辅助，不能算 GPT-6.1-Sol 独立解题；仅保留为离线回放/集成验证证据。
+- 11:49 范围复核：world model 启用后的 VC33 L1/L2 阶段所有成功记录都带路线提示（含 baseline-only 重做），因此该阶段纯 P7 能力过关数为 0。
