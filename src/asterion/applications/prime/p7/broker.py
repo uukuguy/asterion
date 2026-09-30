@@ -449,6 +449,59 @@ class ArcBroker:
         except (ValueError, TypeError, ArcPredictionError):
             raise ArcBrokerError("unavailable") from None
 
+    def promote_hypothesis(self, key: str, evidence_kind: str) -> dict[str, object]:
+        """Confirm one visual candidate after broker-verified action evidence.
+
+        Visual priors are intentionally hypotheses.  This narrow promotion
+        path accepts only a current-level entity component whose bounding box
+        intersects a changed settled cell from the most recent action.  The
+        model cannot self-report evidence, and a no-effect or truncated delta
+        therefore never promotes a candidate.
+        """
+        self._require_open()
+        world = self._world_model
+        records = self._bound_history()
+        try:
+            if world is None or type(key) is not str or type(evidence_kind) is not str:
+                raise ValueError
+            if key.startswith("entities:"):
+                key = key.removeprefix("entities:")
+            if evidence_kind != "changed_cell_in_bounds" or len(records) < 2:
+                raise ValueError
+            latest = records[-1]
+            if latest.action is None or latest.changed_cell_count == 0 or latest.changed_cells_omitted:
+                raise ValueError
+            fact = world.snapshot.hypotheses.get(f"entities:{key}")
+            if fact is None or fact.level != world.current_level:
+                raise ValueError
+            value = fact.value
+            if not isinstance(value, Mapping):
+                raise ValueError
+            bounds = tuple(value.get(name) for name in ("min_x", "max_x", "min_y", "max_y"))
+            if any(type(item) is not int for item in bounds):
+                raise ValueError
+            min_x, max_x, min_y, max_y = cast(tuple[int, int, int, int], bounds)
+            if min_x > max_x or min_y > max_y:
+                raise ValueError
+            if not any(min_x <= cell[0] <= max_x and min_y <= cell[1] <= max_y for cell in latest.changed_cells):
+                raise ValueError
+            ref = EvidenceRef(
+                frame_id=f"frame-{latest.sequence}",
+                action_id=f"action-{latest.sequence}",
+                source_run=latest.run_id,
+                summary_hash=latest.after_state_sha256.removeprefix("sha256:"),
+            )
+            fact = world.confirm("entities", key, evidence=ref, observed_value=fact.value)
+            return {
+                "status": fact.status,
+                "layer": fact.layer,
+                "key": fact.key,
+                "evidence_kind": evidence_kind,
+                "sequence": latest.sequence,
+            }
+        except (ValueError, TypeError):
+            raise ArcBrokerError("unavailable") from None
+
     def _consume_probe(self, record: ArcHistoryRecord, ref: EvidenceRef) -> None:
         pending = self._pending_probe
         if pending is None or self._world_model is None:

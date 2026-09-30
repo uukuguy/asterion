@@ -315,13 +315,13 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "playbook", "retrodiction_status", "record_hypothesis"}
+                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "playbook", "retrodiction_status", "record_hypothesis", "promote_hypothesis"}
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
-            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "playbook": 1, "retrodiction_status": 0, "record_hypothesis": 3}[method]:
+            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "playbook": 1, "retrodiction_status": 0, "record_hypothesis": 3, "promote_hypothesis": 2}[method]:
                 raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
@@ -724,6 +724,10 @@ def p7_record_hypothesis(layer, key, value):
     """Submit one bounded hypothesis with an application-owned probe."""
     return _call("record_hypothesis", layer, key, value)
 
+def p7_promote_hypothesis(key, evidence_kind):
+    """Promote a visual candidate only after broker-verified action evidence."""
+    return _call("promote_hypothesis", key, evidence_kind)
+
 def p7_components(level=None):
     """Return connected-component analysis of the current settled grid.
 
@@ -861,6 +865,9 @@ def retrodiction_status():
 
 def record_hypothesis(layer, key, value):
     return p7_record_hypothesis(layer, key, value)
+
+def promote_hypothesis(key, evidence_kind):
+    return p7_promote_hypothesis(key, evidence_kind)
 
 def components(level=None):
     return p7_components(level)

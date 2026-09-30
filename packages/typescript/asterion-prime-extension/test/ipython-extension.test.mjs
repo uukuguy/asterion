@@ -174,7 +174,7 @@ test("registers exactly the ipython tool", async () => {
     "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
     "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
     "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
-    "p7_record_hypothesis",
+    "p7_record_hypothesis", "p7_promote_hypothesis",
   ];
   assert.deepEqual(toolNames(), expectedTools);
   assert.deepEqual(registered.map((tool) => tool.name), expectedTools);
@@ -472,7 +472,7 @@ test("built artifact is comment-free and loads through the pinned loader", async
       "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
       "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
       "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
-      "p7_record_hypothesis",
+      "p7_record_hypothesis", "p7_promote_hypothesis",
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

@@ -364,7 +364,7 @@ export function toolNames(): string[] {
     "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
     "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
     "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
-    "p7_record_hypothesis",
+    "p7_record_hypothesis", "p7_promote_hypothesis",
   ];
 }
 
@@ -585,6 +585,16 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
         value: TypeObject({}, { additionalProperties: true }),
       }, { additionalProperties: false }),
       "record_hypothesis",
+    ),
+    makeMethodTool(
+      bridge,
+      "p7_promote_hypothesis",
+      "Promote a current-level visual component only after the latest action changed a settled cell inside its recorded bounds.",
+      TypeObject({
+        key: TypeString({ minLength: 1 }),
+        evidence_kind: TypeString({ pattern: "^changed_cell_in_bounds$" }),
+      }, { additionalProperties: false }),
+      "promote_hypothesis",
     ),
   ];
 }

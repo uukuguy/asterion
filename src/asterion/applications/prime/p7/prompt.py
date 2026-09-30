@@ -65,12 +65,15 @@ full frame again.
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
 p7_playbook, p7_retrodiction_status, p7_tried_actions,
-p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked, and
-p7_record_hypothesis. Read the same-game model and Playbook before proposing a
+p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked,
+p7_record_hypothesis, and p7_promote_hypothesis. Read the same-game model and Playbook before proposing a
 route; confirmed mechanics may be reused, while level-local visual hypotheses
 require one distinguishing probe only when the current settled frame supports
 the same candidate. Do not carry prior-level visual coordinates into a new
-level. Check retrodiction status before batching. Use the
+level. After that probe, call p7_promote_hypothesis(key,
+evidence_kind='changed_cell_in_bounds') only when the returned changed_cells
+intersect the candidate component bounds. No-effect or truncated deltas are
+not promotion evidence. Check retrodiction status before batching. Use the
 persistent ipython tool for bounded programmatic analysis or only as a
 fallback when a registered tool cannot express the query. Import only
 p7_client; do not inspect its source. The equivalent broker API is

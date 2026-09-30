@@ -173,6 +173,34 @@ class TestNativeP7Broker(unittest.TestCase):
         hypotheses = json.loads(json.dumps(projection))["hypotheses"]
         self.assertIn("candidate_roles", hypotheses["entities:visual.level.0.palette"]["value"]["colors"][0])
 
+    def test_visual_hypothesis_promotes_only_after_changed_cell_evidence(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine()
+        world = WorldModelStore(engine.game_id, engine.seed, engine.win_levels)
+        broker = ArcBroker(engine=engine, world_model=world)
+        broker.bind_history("run-visual-promotion")
+        world.record_hypothesis(
+            "entities", "visual.component.test",
+            {"source": "visual-regularity", "color": 0, "min_x": 0, "max_x": 0, "min_y": 0, "max_y": 0},
+            level=0,
+            evidence=world.snapshot.hypotheses["entities:visual.level.0.palette"].evidence[0],
+        )
+
+        with self.assertRaises(ArcBrokerError):
+            broker.promote_hypothesis("visual.component.test", "changed_cell_in_bounds")
+
+        broker.act_checked([
+            {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
+        ])
+        result = broker.promote_hypothesis("visual.component.test", "changed_cell_in_bounds")
+        self.assertEqual(result["status"], "confirmed")
+        self.assertEqual(broker.world_model().entities["visual.component.test"].status, "confirmed")
+
+        with self.assertRaises(ArcBrokerError):
+            broker.promote_hypothesis("visual.component.test", "changed_cell_in_bounds")
+
     def test_retrodiction_conflict_exposes_machine_readable_reason(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.transition_model import ActionExpectation

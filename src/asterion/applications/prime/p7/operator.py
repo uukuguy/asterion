@@ -512,6 +512,15 @@ class _IpythonBridgeServer:
                 ):
                     return error_response()
                 value = facade.record_hypothesis(params["layer"], params["key"], params["value"])
+            elif method == "promote_hypothesis":
+                if (
+                    type(params) is not dict
+                    or set(params) != {"key", "evidence_kind"}
+                    or type(params["key"]) is not str
+                    or type(params["evidence_kind"]) is not str
+                ):
+                    return error_response()
+                value = facade.promote_hypothesis(params["key"], params["evidence_kind"])
             elif method in {"tried_actions", "last_outcome_summary"}:
                 if params is not None and (
                     type(params) is not int or params < 0
@@ -733,6 +742,9 @@ class _P7BrokerClient:
 
     def record_hypothesis(self, layer: str, key: str, value: dict[str, object]) -> dict[str, object]:
         return self._broker.record_hypothesis(layer, key, value)
+
+    def promote_hypothesis(self, key: str, evidence_kind: str) -> dict[str, object]:
+        return self._broker.promote_hypothesis(key, evidence_kind)
 
     def act_checked(self, plan: object) -> Mapping[str, object]:
         try:
@@ -2325,6 +2337,15 @@ async def run_live(
         name="record_hypothesis",
         description="Submit one canonical mechanism hypothesis and exactly one distinguishing probe; the broker attaches current evidence and controls promotion.",
         signature="p7_client.record_hypothesis(layer, key, value)",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="promote_hypothesis",
+        description=(
+            "Promote a current-level visual component hypothesis only after the latest action changed a settled cell inside its recorded bounds. "
+            "Use evidence_kind='changed_cell_in_bounds'; failed or no-effect probes are rejected."
+        ),
+        signature="p7_client.promote_hypothesis(key, evidence_kind)",
         category="model",
     ))
     strategy = _resolve_strategy(invocation.environment)
