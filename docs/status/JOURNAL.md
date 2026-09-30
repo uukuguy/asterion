@@ -3374,3 +3374,4 @@
 - 2026-10-01 P7 WorldMap upgraded with certificate-gated declarative simulator search, model_search tool, planner status, no-effect hint repair, entity-guard evidence, and visual hypothesis rehydration; 143 focused tests, lint, and docs-check passed.
 - 2026-10-01 Clarified P7 prompt with generic MechanismSpec construction/probe guidance so the model can form certificate-backed hypotheses before invoking model_search.
 - 2026-10-01 [6f453b38] Added persistent type cognition and exact-game experience for P7; exposed advisory `p7_cognition`, kept ordinary exploration unblocked, and documented narrow execution-authority boundaries. Focused 147-test suite and lint pass.
+- 2026-10-01 [4decbb82] 持久化类型认知与具体游戏经验，接入 P7 只读认知工具，并将执行权限收窄为身份与 checked witness 边界。
