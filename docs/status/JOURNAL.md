@@ -3416,3 +3416,4 @@
 - 06:31 Filtered learning hints to current-level hypotheses so replayed prior-level rules cannot trigger stale probes [ef717caa]
 - 06:49 Preserved complete object motion when only one edge timer cell changes, enabling dynamic effect induction without hiding real boundary deltas [38e85a17]
 - 2026-10-01 Static review fixed prior-level click coordinates entering model search and preserved semantic Playbook experience across runs; 161 focused tests, lint, and docs-check pass.
+- 2026-10-01 Recorded the static-versus-runtime review boundary and current 3571-test full-gate evidence; live semantic reuse remains unverified.
