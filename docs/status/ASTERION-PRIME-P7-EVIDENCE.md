@@ -711,3 +711,22 @@ The current summary contains **2** prediction mismatches and 1 matched expectati
 ## 2026-09-30 VC33 L1 rerun — visual hypothesis persistence verified
 
 Run `p7-live-20260930023720-e2494802da5241461a4b3086` used explicit `LEVEL=1` with the exploration strategy and completed L1 in 3 actions. Its sealed summary reports replay verification, cleanup, model `gpt-6.1-sol`, and partial score `3.571429`. The run's final in-memory model had 15 hypotheses after the level refresh; the completed-level capture persisted the 12 L0 hypotheses that existed before refresh into the Playbook, alongside the 3-action checked route. Confirmed facts remain zero. This proves persistence and identity boundaries, but L2 consumption of the persisted hypotheses still requires a separate explicit `LEVEL=2` run.
+
+## 2026-09-30 VC33 L2 — rebuilt-prefix suffix replay and final pass
+
+The first post-persistence L2 attempt exposed a generic reuse bug: the saved 14-action L2 suffix was tied to an older 7-action L1 prefix and was rejected when the current 3-action L1 prefix differed. The fix separates the current verified prefix from the same-game later-level route source, then fresh-replays the suffix after the current prefix. A second fix makes the witness cap use the current prefix only.
+
+### 已验证事实
+
+- `p7-live-20260930032535-f1d60eab0c3283257408d346` explicitly targeted `LEVEL=2` with model `gpt-6.1-sol`.
+- PASS, sealed trace, replay verified, cleanup complete; `levels_completed=2`, total primitive actions 10, therefore **7 current L2 actions** after the 3-action L1 prefix.
+- The final witness budget was `action_cap=13` (3 replayed L1 actions + the now verified 10-action L2 route source); `level_baseline=10`. The offline optimizer then produced and replay-verified a 7-action L2 candidate, which P7 followed 7/7 with no route divergence.
+- The model successfully called `p7_world_model()` and `p7_playbook(level=1)` before acting. The initial model input contained the same-game world-model projection and the persisted visual-prior tool was available. The transcript proves tool consumption, but does not prove that visual hypotheses alone caused the route choice; the decisive route evidence was the fresh-replayed checked plan.
+- The prior run `p7-live-20260930030817-784271c0b556c4ab6de07da8` also passed L2 in 10 current actions, but its cap was 21 because the prefix/route-source distinction had not yet been corrected; it remains valid route evidence and is superseded for budget diagnostics.
+- `p7-live-20260930032021-96a7180549dca708e75759fd` stopped at 3 current L2 actions after three model RPC WebSocket retries. It was sealed/replay-verified but unsuccessful for infrastructure reasons, not a game-action failure.
+
+### 当前判断与未完成边界
+
+- Same-game verified level suffix reuse now works across a rebuilt prefix without accepting an unverified route: fresh ARC replay is the gate, and live `act_checked` expectations remain authoritative.
+- The world-model/Playbook tools are now actually reachable during L2. This run still does not isolate a causal score improvement from visual hypotheses versus the checked route supplied by offline replay.
+- This is a level-witness PASS through L2, not a full-game SDK WIN or an official external submission.
