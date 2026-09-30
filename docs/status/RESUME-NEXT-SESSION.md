@@ -4,6 +4,8 @@
 
 ## 最新现场验证（2026-10-01）
 
+- 纯 P7 `SP80` L2 推进 run `p7-live-20260930191902-d0ad69f1eb7e640c51d6d3ca` 使用同一 6 步 L1 replay 前缀、`gpt-6.1-sol`、`offline_optimization_enabled=false`；L2 实际执行到 **46 步**（总 primitive 52，含 1 次 RESET），`levels_completed=1`，未通关。因超过 10 分钟仍未完成而停止；`sealed_trace=true`、`replay_verified=true`、`cleanup_complete=true`，分类为 `external_cancel`，无运行时错误。Experience snapshot 持久化 `effects=50`、`candidates=13`，但 `confirmed=0`、simulator=`absent`，并记录 6 次 `act_checked_output_too_large`、多次 prediction mismatch；这证明经验采集/持久化生效，但当前候选仍无法升级为可搜索机制。
+
 - 纯 P7 `SP80` L1（实际别名 `sp80`）运行 `p7-live-20260930174531-72d55dc672bc34f8481c3f8a` 已通过：当前关卡 **6 步**，`levels_completed=1`，`replay_verified=true`、`sealed_trace=true`、`cleanup_complete=true`；模型为 `gpt-6.1-sol`，`offline_optimization_enabled=false`，没有路线注入。
 - 运行期间可观察到 13 个 worker cell、逐次 `status/history` 和动作后的 changed-cell 证据；`ACTION4` 连续动作各产生 34 个变化单元，后续 `ACTION1` 产生 163/2 个变化单元，说明决策输入与动作结果可在运行中追踪。
 - `world_model_version=22`，最终 `confirmed` mechanics/entities/relations 仍为 0/0/0，hypotheses=12；因此本次只能证明 worldmap 被读取、更新和保存，不能证明已形成可复用机制。

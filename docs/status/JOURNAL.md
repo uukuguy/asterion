@@ -3394,3 +3394,4 @@
 - 2026-10-01 Closed P7 experience feedback regressions: safe status fallback, conditional promotion feedback, opaque action prompt contract; disabled npm update notifier in closed offline promotion and marked the design implemented pending full/live verification.
 - 2026-10-01 Commits 3073ca96 and 771a7413 close P7 experience feedback compatibility and document the implemented design boundary.
 - 2026-10-01 Preserved both generic action contract assertions while adding opaque-action caution and explicit click syntax; full suite retry required.
+- 2026-10-01 SP80 L2 pure-P7 run p7-live-20260930191902-d0ad69f1eb7e640c51d6d3ca stopped after 46 current-level actions (52 total, one RESET): sealed/replay/cleanup true, external_cancel, offline=false; persisted effects=50 and candidates=13 but confirmed=0 and simulator=absent.
