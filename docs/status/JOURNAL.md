@@ -3400,3 +3400,4 @@
 - 03:49 Persisted the repair event in the append-only project journal for recovery continuity [7093d0c4]
 - 03:57 Full test gate passed after motion repair: 3558 tests OK, 5 skipped, promotion quick PASS [b1e74a6a]
 - 04:12 Surface bounded compiled learning hints in P7 observations so models can use induced mechanisms without route authority [757e0eda]
+- 04:20 Keep distinct keyboard actions in separate induction candidates so reusable motion rules can compile and certify [a537bda8]
