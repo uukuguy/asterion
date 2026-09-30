@@ -345,15 +345,16 @@ class ArcBroker:
                 levels_completed=self._current.levels_completed,
                 primitive_actions=self._actions_dispatched,
             )
-            certificate = self._mechanism_certificate
-            self._cognition_store.record_experience(
-                game_id=self._game.game_id,
-                seed=self._game.seed,
-                win_levels=self._game.win_levels,
-                levels_completed=self._current.levels_completed,
-                primitive_actions=self._actions_dispatched,
-                model_digest=None if certificate is None else certificate.model_digest,
-            )
+            if self._current.levels_completed >= self._game.target_level:
+                certificate = self._mechanism_certificate
+                self._cognition_store.record_experience(
+                    game_id=self._game.game_id,
+                    seed=self._game.seed,
+                    win_levels=self._game.win_levels,
+                    levels_completed=self._current.levels_completed,
+                    primitive_actions=self._actions_dispatched,
+                    model_digest=None if certificate is None else certificate.model_digest,
+                )
         except (OSError, TypeError, ValueError):
             # Cognition is an advisory learning cache.  A cache failure must
             # never prevent normal exploration or a valid action dispatch.

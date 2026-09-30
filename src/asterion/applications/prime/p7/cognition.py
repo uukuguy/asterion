@@ -124,6 +124,14 @@ class GameCognitionStore:
                 or any(type(value) is not dict for value in games.values())
             ):
                 return _empty()
+            for game in games.values():
+                # v1 wrote the minimum observed action count before a level
+                # was solved. It is not verified experience for later runs.
+                if game.get("experience_verified") is not True:
+                    game["primitive_actions"] = None
+                    game.pop("model_digest", None)
+                if "current_primitive_actions" not in game:
+                    game["current_primitive_actions"] = 0
             return {"schema": SCHEMA, "type_profiles": profiles, "games": games}
         except (OSError, ValueError, TypeError, json.JSONDecodeError):
             return _empty()
@@ -183,6 +191,7 @@ class GameCognitionStore:
                 "levels_completed": 0,
                 "primitive_actions": None,
                 "current_primitive_actions": 0,
+                "experience_verified": False,
             }
         kind = _merge_input_kind(game.get("input_kind"), kind)
         game["input_kind"] = kind
@@ -193,9 +202,6 @@ class GameCognitionStore:
         game["observations"] = min(_counter(game.get("observations")) + 1, 1_000_000)
         game["levels_completed"] = max(_counter(game.get("levels_completed")), levels)
         game["current_primitive_actions"] = actions
-        previous_actions = game.get("primitive_actions")
-        if previous_actions is None or _counter(previous_actions) == 0 or (actions > 0 and actions < _counter(previous_actions)):
-            game["primitive_actions"] = actions
         games[key] = game
         if len(games) > _MAX_GAMES:
             oldest = next(iter(games))
@@ -232,7 +238,7 @@ class GameCognitionStore:
             raise ValueError("invalid model_digest")
         game = self._state["games"].get(key)
         if not isinstance(game, dict):
-            game = {"game_id": game_id, "seed": seed, "win_levels": win_levels, "input_kind": "unknown", "action_names": [], "observations": 0, "levels_completed": 0, "primitive_actions": None, "current_primitive_actions": 0}
+            game = {"game_id": game_id, "seed": seed, "win_levels": win_levels, "input_kind": "unknown", "action_names": [], "observations": 0, "levels_completed": 0, "primitive_actions": None, "current_primitive_actions": 0, "experience_verified": False}
         game["levels_completed"] = max(_counter(game.get("levels_completed")), levels_completed)
         game["current_primitive_actions"] = primitive_actions
         previous = game.get("primitive_actions")
@@ -240,6 +246,7 @@ class GameCognitionStore:
             game["primitive_actions"] = primitive_actions
         if model_digest is not None:
             game["model_digest"] = model_digest
+        game["experience_verified"] = True
         self._state["games"][key] = game
         self._persist()
 
@@ -269,6 +276,7 @@ class GameCognitionStore:
                 "levels_completed": _counter(game.get("levels_completed")) if game else 0,
                 "primitive_actions": game.get("primitive_actions") if game else None,
                 "current_primitive_actions": _counter(game.get("current_primitive_actions", game.get("primitive_actions"))) if game else 0,
+                "best_route_verified": bool(game and game.get("experience_verified") is True),
                 "model_digest": game.get("model_digest") if game else None,
             },
         }

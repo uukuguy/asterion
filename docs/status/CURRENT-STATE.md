@@ -59,6 +59,7 @@ Updated 2026-10-01 01:55 (Asia/Shanghai). This file is the structural snapshot; 
 - `GameCognitionStore` persists input-type profiles and exact-game progress under `.asterion-private/prime-p7-live/cognition.json` and exposes them through `p7_cognition()` / `p7_client.cognition()`.
 - Type profiles are `prior-only`; exact-game memory is advisory until the current prefix and evidence are checked. Cache writes never gate normal exploration.
 - Experience now distinguishes `primitive_actions` (historical best) from `current_primitive_actions` (latest observed run), so a shorter prior route cannot masquerade as current progress.
+- Best action counts are now recorded only after the selected target level completes; legacy unverified counts are discarded on load.
 - Success-path diagnostics now emit `failure_classification.category=none`; `application_failure` is reserved for runs with an actual failure.
 - Execution authority is narrow: only identity or checked-witness mismatches stop a batch. Ordinary probes, single-step exploration, and certified model search remain available. See `docs/architecture/prime-p7-cognition-and-experience.md`.
 

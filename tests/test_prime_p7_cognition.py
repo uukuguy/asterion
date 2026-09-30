@@ -47,6 +47,7 @@ class TestP7Cognition(unittest.TestCase):
         self.assertEqual(projection["type_profile"]["games_seen"], 1)
         self.assertEqual(projection["game_experience"]["levels_completed"], 1)
         self.assertEqual(projection["game_experience"]["primitive_actions"], 4)
+        self.assertTrue(projection["game_experience"]["best_route_verified"])
 
     def test_type_profile_is_prior_only_and_does_not_expose_routes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -95,7 +96,7 @@ class TestP7Cognition(unittest.TestCase):
                 game_id=engine.game_id, seed=engine.seed, win_levels=7
             )
 
-        self.assertEqual(projection["game_experience"]["primitive_actions"], 1)
+        self.assertIsNone(projection["game_experience"]["primitive_actions"])
         self.assertEqual(projection["game_experience"]["current_primitive_actions"], 1)
         self.assertEqual(projection["input_kind"], "keyboard")
 
@@ -115,8 +116,28 @@ class TestP7Cognition(unittest.TestCase):
                 game_id="sp80-589a99af", seed=0, win_levels=6
             )
 
-        self.assertEqual(projection["game_experience"]["primitive_actions"], 3)
+        self.assertIsNone(projection["game_experience"]["primitive_actions"])
         self.assertEqual(projection["game_experience"]["current_primitive_actions"], 3)
+
+    def test_legacy_unverified_best_count_is_not_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / ".asterion-private" / "prime-p7-live" / "cognition.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                '{"schema":"asterion.prime.p7-cognition/v1",'
+                '"type_profiles":{},"games":{'
+                '"sp80-589a99af|0|6":{"game_id":"sp80-589a99af",'
+                '"seed":0,"win_levels":6,"input_kind":"keyboard_click",'
+                '"action_names":["ACTION1","ACTION6"],"observations":7,'
+                '"levels_completed":1,"primitive_actions":1}}}',
+                encoding="utf-8",
+            )
+            projection = GameCognitionStore(root).projection(
+                game_id="sp80-589a99af", seed=0, win_levels=6
+            )
+
+        self.assertIsNone(projection["game_experience"]["primitive_actions"])
 
 
 if __name__ == "__main__":
