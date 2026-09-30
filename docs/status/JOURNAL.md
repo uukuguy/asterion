@@ -3414,3 +3414,4 @@
 - 06:02 Prioritized current induced bundles before stale candidates so bounded output preserves reusable WorldMap evidence [95045f1f]
 - 06:16 Told P7 to stop unsupported coordinate guesses after no probe and ground every click in same-level evidence [c8e45c2d]
 - 06:31 Filtered learning hints to current-level hypotheses so replayed prior-level rules cannot trigger stale probes [ef717caa]
+- 06:49 Preserved complete object motion when only one edge timer cell changes, enabling dynamic effect induction without hiding real boundary deltas [38e85a17]
