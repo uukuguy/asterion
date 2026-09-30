@@ -275,6 +275,57 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         signal.cancel()
         self.assertTrue(signal.cancelled)
 
+    def test_playbook_prior_visuals_survive_level_filter_and_large_route(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from asterion.applications.prime.p7.playbook import CheckedFact, CheckedRoute, PlaybookKey, PlaybookSnapshot
+        from asterion.applications.prime.p7.transition_model import ActionExpectation
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        engine = _HistoryEngine()
+        witness = ActionExpectation("ACTION1", (), "sha256:" + "a" * 64,
+                                    "sha256:" + "b" * 64, "sha256:" + "c" * 64,
+                                    (), 1, "NOT_FINISHED")
+        prior = CheckedFact("entities", "visual.level.0.palette",
+                            {"candidate_roles": ["floor_or_background"]}, 0, ("a" * 64,))
+        book = PlaybookSnapshot(PlaybookKey(engine.game_id, 0, 7),
+                               checked_routes=(CheckedRoute(0, (witness,) * 40, "sha256:" + "a" * 64),),
+                               visual_hypotheses=(prior,))
+        with tempfile.TemporaryDirectory() as directory:
+            broker = ArcBroker(engine=engine)
+            broker.load_playbook(book)
+            recorder = PrimeTraceRecorder(Path(directory))
+            client = _P7BrokerClient(broker, recorder)
+            for level in (None, 1):
+                with self.subTest(level=level):
+                    value = client.playbook(level)
+                    self.assertEqual(value["prior_visual_hypotheses"][0]["key"], prior.key)
+                    self.assertEqual(value["prior_visual_hypotheses"][0]["status"], "hypothesis")
+                    self.assertLessEqual(len(json.dumps(value).encode()), 8192)
+            recorder.close()
+
+    def test_witness_level_cap_excludes_replayed_prefix(self) -> None:
+        from asterion.applications.prime.p7.operator import _bound_witness_level_actions
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection(
+            "vc33-5430563c", 0, 2,
+            _metadata_baseline_actions=(7, 18),
+            _metadata_win_levels=2,
+        )
+        prefix = SimpleNamespace(
+            transitions=(
+                SimpleNamespace(levels_completed=0),
+                SimpleNamespace(levels_completed=0),
+                SimpleNamespace(levels_completed=1),
+                *([SimpleNamespace(levels_completed=1)] * 13),
+                SimpleNamespace(levels_completed=2),
+            )
+        )
+        bounded = _bound_witness_level_actions(game, prefix)
+        self.assertEqual(bounded.baseline_actions, (7, 14))
+        self.assertEqual(bounded.action_cap, 17)
+
     def test_subprocess_worker_bootstraps_from_live_client_facade(self) -> None:
         """The local worker must use the operator socket, not module-source mode."""
 

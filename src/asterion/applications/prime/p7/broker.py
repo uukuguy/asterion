@@ -333,6 +333,27 @@ class ArcBroker:
     def playbook_projection(self) -> dict[str, object]:
         return self._playbook.projection()
 
+    def playbook_visual_hypotheses(self) -> tuple[dict[str, object], ...]:
+        """Return the bounded visual candidates without requiring route replay data.
+
+        A checked route can be larger than the model tool's 8 KiB response
+        budget.  Visual candidates are still useful in that case, so expose
+        this narrow projection separately instead of making callers inspect
+        the mutable Playbook object.
+        """
+
+        return tuple(
+            {
+                "layer": fact.layer,
+                "key": fact.key,
+                "value": fact.value,
+                "level": fact.level,
+                "evidence_digests": list(fact.evidence_digests),
+                "status": "hypothesis",
+            }
+            for fact in self._playbook.visual_hypotheses
+        )
+
     def load_playbook(self, snapshot: PlaybookSnapshot) -> None:
         if type(snapshot) is not PlaybookSnapshot or snapshot.key != self._playbook.key or self._journal:
             raise ArcBrokerError("unavailable")

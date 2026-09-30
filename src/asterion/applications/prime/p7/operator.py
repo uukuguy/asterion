@@ -681,12 +681,30 @@ class _P7BrokerClient:
         if level is not None and (type(level) is not int or level < 0):
             raise P7OperatorError("P7 host services are unavailable")
         try:
-            value = self._broker.playbook_projection()
+            try:
+                projection = self._broker.playbook_projection()
+            except (ArcBrokerError, ValueError):
+                projection = {}
+            visual = list(self._broker.playbook_visual_hypotheses())
             if level is not None:
-                value = {"level": level, "memory": [m for m in value.get("level_memory", []) if m["level"] == level]}
+                visual = [item for item in visual if item["level"] < level]
+                value = {
+                    "level": level,
+                    "memory": [m for m in projection.get("level_memory", []) if m["level"] == level],
+                }
+            else:
+                value = projection
+            value["prior_visual_hypotheses"] = visual
             value["checked_plan"] = self._route_adoption.checked_plan()
             if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
-                value = {"status": "projection-capped", "checked_plan": value["checked_plan"]}
+                value = {
+                    "status": "projection-capped",
+                    "level": level,
+                    "prior_visual_hypotheses": visual,
+                    "checked_plan": value["checked_plan"],
+                }
+                while len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()) > 8192 and visual:
+                    visual.pop()
             return value
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
@@ -1976,11 +1994,79 @@ def _select_game_for_mode(
         # far beyond the level's useful budget and obscured the real stop
         # reason.  Full solves and the separately supervised sweep keep their
         # own caps.
-        game = replace(
-            game,
-            action_cap_override=sum(game.baseline_actions[: game.target_level]),
-        )
+        prefix = None
+        if game.target_level > 1:
+            from .solutions import load_best_prefix
+
+            try:
+                expected_model = declared_model_selection(resolved_environment).model
+                prefix = load_best_prefix(
+                    arc_root,
+                    Path(resolved_environment[live.OPERATOR_ROOT_ENV])
+                    / ".asterion-private"
+                    / "prime-p7-live",
+                    game.game_id,
+                    game.seed,
+                    max_level=game.target_level,
+                    expected_model_id=expected_model,
+                )
+            except (KeyError, OSError, P7ModelSelectionError):
+                prefix = None
+        game = _bound_witness_level_actions(game, prefix)
     return game
+
+
+def _verified_level_action_count(prefix: object, target_level: int) -> int | None:
+    """Return the actions in one level of a verified prefix, if complete."""
+
+    transitions = getattr(prefix, "transitions", None)
+    if type(target_level) is not int or target_level <= 1 or not isinstance(transitions, tuple):
+        return None
+    start = next(
+        (
+            index
+            for index, transition in enumerate(transitions, start=1)
+            if getattr(transition, "levels_completed", -1) >= target_level - 1
+        ),
+        None,
+    )
+    boundary = next(
+        (
+            index
+            for index, transition in enumerate(transitions, start=1)
+            if getattr(transition, "levels_completed", -1) >= target_level
+        ),
+        None,
+    )
+    if start is None or boundary is None or boundary <= start:
+        return None
+    count = boundary - start
+    return count if count > 0 else None
+
+
+def _bound_witness_level_actions(
+    game: P7GameSelection, prefix: object | None
+) -> P7GameSelection:
+    """Bound a witness to the current level, excluding replayed prior levels."""
+
+    if type(game) is not P7GameSelection or game.action_cap_override is not None:
+        raise P7OperatorError("P7 witness selection is unavailable")
+    current = _verified_level_action_count(prefix, game.target_level)
+    if current is None:
+        return replace(game, action_cap_override=sum(game.baseline_actions[: game.target_level]))
+    transitions = getattr(prefix, "transitions")
+    prefix_actions = next(
+        index
+        for index, transition in enumerate(transitions, start=1)
+        if getattr(transition, "levels_completed", -1) >= game.target_level - 1
+    )
+    baselines = list(game.baseline_actions)
+    baselines[game.target_level - 1] = current
+    return replace(
+        game,
+        _metadata_baseline_actions=tuple(baselines),
+        action_cap_override=prefix_actions + current,
+    )
 
 
 def _preflight(environment: Mapping[str, str]) -> P7Invocation:
