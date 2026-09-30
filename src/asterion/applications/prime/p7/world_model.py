@@ -247,6 +247,39 @@ class WorldModelStore:
         self._version += 1
         return fact
 
+    def record_visual_candidates(
+        self,
+        candidates: Sequence[tuple[str, Any]],
+        *,
+        level: int,
+        evidence: EvidenceRef | Sequence[EvidenceRef],
+    ) -> int:
+        """Store bounded visual regularities as entity hypotheses.
+
+        Candidate facts are deliberately kept out of ``mechanics`` and are
+        never confirmed by this method.  Re-observing a level is idempotent;
+        action evidence or the explicit hypothesis API is still required to
+        promote a candidate into a confirmed fact.
+        """
+
+        level = _valid_level(level, self._win_levels)
+        if type(candidates) not in (tuple, list):
+            raise ValueError("visual candidates must be a sequence")
+        refs = self._refs(evidence)
+        added = 0
+        for key, value in candidates[:32]:
+            if type(key) is not str or not key:
+                raise ValueError("invalid visual candidate key")
+            suffix = key.removeprefix("visual.")
+            base_key = key if key.startswith("visual.level.") else f"visual.level.{level}.{suffix}"
+            if type(base_key) is not str or not base_key.startswith(f"visual.level.{level}."):
+                raise ValueError("invalid visual candidate key")
+            if base_key in self._layers["entities"] or ("entities", base_key) in self._hypotheses:
+                continue
+            self.record_hypothesis("entities", base_key, value, level=level, evidence=refs)
+            added += 1
+        return added
+
     def confirm(self, layer: str, key: str, *, evidence: EvidenceRef | Sequence[EvidenceRef],
                 observed_value: Any = None) -> WorldFact:
         if layer not in _LAYER_SET:

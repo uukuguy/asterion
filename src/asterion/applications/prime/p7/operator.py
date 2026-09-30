@@ -1445,6 +1445,16 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
         "Use this snapshot as the starting fact set. Do not spend a tool call rereading it.",
         json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
     ]
+    world_model = getattr(client, "world_model", None)
+    if callable(world_model):
+        model_projection = world_model()
+        if not isinstance(model_projection, Mapping):
+            raise P7OperatorError("P7 host services are unavailable")
+        sections.extend([
+            "## Same-game world model (visual candidates are hypotheses)",
+            "Use confirmed facts directly. Treat visual candidates as observations to test; do not treat a candidate role as a confirmed wall, floor, object, or goal.",
+            json.dumps(dict(model_projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ])
     if include_prior:
         mechanics_prior = getattr(client, "mechanics_prior", None)
         if not callable(mechanics_prior):
@@ -2416,9 +2426,21 @@ async def run_live(
                         None if world_snapshot is None else world_snapshot.version
                     )
                     diagnostics["retrodiction_status"] = retrodiction["status"]
+                    diagnostics["retrodiction_reasons"] = list(retrodiction.get("reasons", ()))
                     diagnostics["conflict_count"] = (
                         0 if world_snapshot is None else len(world_snapshot.conflicts)
                     )
+                    if world_snapshot is not None:
+                        diagnostics["world_model_facts"] = {
+                            "current_level": world_snapshot.current_level,
+                            "version": world_snapshot.version,
+                            "confirmed": {
+                                layer: len(getattr(world_snapshot, layer))
+                                for layer in ("mechanics", "entities", "relations")
+                            },
+                            "hypotheses": len(world_snapshot.hypotheses),
+                            "conflicts": len(world_snapshot.conflicts),
+                        }
                     diagnostics.setdefault("playbook_loaded", False)
                     diagnostics.setdefault("playbook_saved", False)
                 except Exception:

@@ -13,6 +13,7 @@ from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
 from .transition_model import ActionExpectation, TransitionModel
 from .verified_history import ArcHistoryRecord, ArcPredictionError, validate_history_query, validate_prediction
 from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
+from .visual_priors import derive_visual_candidates
 
 
 class ArcBrokerError(RuntimeError):
@@ -270,6 +271,7 @@ class ArcBroker:
         self._world_model = world_model
         self._transition_model: TransitionModel | None = None
         self._retrodiction_status = "unavailable"
+        self._retrodiction_reasons: list[str] = []
         self._playbook_projection: dict[str, object] = {}
         self._world_evidence: list[EvidenceRef] = []
         self._playbook = PlaybookSnapshot(PlaybookKey(game.game_id, game.seed, game.win_levels))
@@ -320,6 +322,7 @@ class ArcBroker:
         return {
             "status": self._retrodiction_status,
             "records_checked": len(self._history or ()),
+            "reasons": list(self._retrodiction_reasons[-16:]),
         }
 
     def world_evidence(self) -> tuple[EvidenceRef, ...]:
@@ -364,6 +367,7 @@ class ArcBroker:
     def _record_model_conflict(self, sequence: int, reason: str) -> dict[str, object]:
         code = f"sequence-{sequence}:{reason}"
         self._model_conflicts = [*self._model_conflicts[-63:], code]
+        self._retrodiction_reasons = [*self._retrodiction_reasons[-15:], reason]
         self._playbook = replace(self._playbook, conflict_metadata=tuple(sorted(set((*self._playbook.conflict_metadata[-63:], code)))))
         self._retrodiction_status = "conflict"
         return {"sequence": sequence, "reason": reason, "replan_required": True}
@@ -465,6 +469,11 @@ class ArcBroker:
                 self._playbook = capture_completed_level(self._playbook, self._world_model.snapshot, level=level)
                 if record.levels_completed < self._game.win_levels:
                     self._world_model.refresh_level(record.levels_completed)
+                    self._world_model.record_visual_candidates(
+                        derive_visual_candidates(record.frame),
+                        level=record.levels_completed,
+                        evidence=ref,
+                    )
             self._transition_model = TransitionModel.from_history(self._bound_history(), world=self._world_model.snapshot)
             # TransitionModel.from_history is a checked transcript, not a
             # generalized mechanism certificate.  Do not call this verified.
@@ -473,6 +482,9 @@ class ArcBroker:
         except (ArcPredictionError, ValueError):
             self._transition_model = None
             self._retrodiction_status = "unavailable"
+            self._retrodiction_reasons = [
+                *self._retrodiction_reasons[-15:], "history-validation-failed"
+            ]
 
     def bind_history(self, run_id: str) -> None:
         if (
@@ -491,6 +503,23 @@ class ArcBroker:
         except ArcPredictionError:
             raise ArcBrokerError("unavailable") from None
         self._history = [initial]
+        if self._world_model is not None:
+            try:
+                self._world_model.record_visual_candidates(
+                    derive_visual_candidates(self._initial.frame[-1]),
+                    level=0,
+                    evidence=EvidenceRef(
+                        frame_id="frame-0",
+                        source_run=run_id,
+                        summary_hash=initial.after_state_sha256.removeprefix("sha256:"),
+                    ),
+                )
+            except (TypeError, ValueError):
+                # Visual priors are advisory and cannot make the game
+                # unavailable when a candidate projection is rejected.
+                self._retrodiction_reasons = [
+                    *self._retrodiction_reasons[-15:], "visual-prior-unavailable"
+                ]
 
     def _bound_history(self) -> list[ArcHistoryRecord]:
         if self._history is None:

@@ -7,6 +7,9 @@
 - 同题 WorldModel、TransitionModel、Playbook、声明式机制证书和 replay expectation gate 已实现；设计与计划见 `docs/superpowers/specs/2026-09-30-prime-p7-same-game-world-model-design.md` 与对应 plan。
 - P7 应用级工具链已注册到 `P7ToolRegistry`，并同步 Python bridge、worker RPC、TypeScript extension 与打包资源；工具包括 world model、Playbook、retrodiction 和 hypothesis writer。
 - 活动提示已移除固定 `ACTION1` 到 `ACTION7` 语义，要求按当前游戏证据推断动作槽位，并在批量动作前读取同题模型与 retrodiction 状态。
+- VC33 L1 已完成可提交的部分关卡前缀：3 个当前关卡动作，baseline/action cap 7，sealed trace 与 replay verified 均为真；`promotion=unpromoted` 不否定部分提交资格。
+- 初始帧视觉先验已接入：每次运行最多记录 32 个候选，作为 `entities` 层 hypothesis 注入同题上下文；不会自动确认墙、地板、物品或终点。
+- retrodiction 诊断现在暴露机器可读 `reasons`；VC33 记录到三次 `prediction-mismatch`，但路线采用仍 3/3 完成，说明“模型预测冲突”和“回放路线成功”需要在后续机制中分层处理。
 - 离线 ARC fresh-engine replay 为每个候选动作生成 bounded expectation；在线采用候选前要求期望数量完整，首个 action 或 expectation mismatch 即停止采用。
 - 223 个组合 P7 测试通过；`make lint`、`make docs-check`、变更模型模块 Pyright 和 `git diff --check` 通过。
 - 完整仓库 gate 跑完 3509 项测试，唯一失败是 `test_full_promotion_python_environment_keeps_real_npm_ci_offline` 观察到一次网络请求；这是环境 gate 失败，不是 P7 回归。
@@ -26,9 +29,10 @@
 
 - 完整仓库 gate 已完成，但离线 npm-ci 环境测试失败，后续若需发布必须单独修复或复现实验环境。
 - TU93 L1 受控练手运行已执行但由操作者主动取消：当前关卡 18 个动作、0 关完成；external_cancel，未封存/未回放验证，不计通关。离线候选 19→18 步，但 P7 首动作偏离候选 ACTION4，route adoption 跟随 0；世界模型版本 0，说明在线机制事实没有建立。
+- VC33 的视觉 hypothesis 尚未进入 Playbook 持久化；当前 Playbook 仍只保存 confirmed facts、checked routes、level memory 和冲突/分支元数据。这是后续同题持久化设计边界，不应把运行内 hypothesis 误报为已学习事实。
 
 ## 下一动作
 
-1. 提交并验证 level-witness baseline 动作上限修复；当前 VC33 L1 baseline 为 7，下一次优先用 VC33 练手。
-2. 丰富私有在线跟踪：记录世界模型版本/事实计数、工具返回安全摘要、冲突原因与模型动作选择上下文；不得记录 prompt、凭据或原始帧。
-3. 用 VC33 L1 做一次受控 live 验证，报告当前关卡动作数与 30 分钟/基线停止原因。
+1. 将 `prediction-mismatch` 与 replay witness 成功分层：模型期望错误不能抹掉已验证路线，仍须记录为可诊断的模型冲突。
+2. 设计并测试 bounded visual hypothesis 的同题 Playbook 持久化，保持 hypothesis 只能被动作证据升级，不能直接授权复用。
+3. 用新的分层诊断在下一个低 baseline L1 做一次受控 live 验证，报告当前关卡动作数、提交资格、模型/工具异常与 30 分钟/基线停止原因。

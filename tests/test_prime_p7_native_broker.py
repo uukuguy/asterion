@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
+import json
 import unittest
 
 
@@ -150,6 +151,50 @@ class TestNativeP7Broker(unittest.TestCase):
         projection = broker.playbook_projection()
         projection["mutated"] = True
         self.assertNotIn("mutated", broker.playbook_projection())
+
+    def test_initial_frame_generates_bounded_visual_hypotheses(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine()
+        world = WorldModelStore(engine.game_id, engine.seed, engine.win_levels)
+        broker = ArcBroker(engine=engine, world_model=world)
+        broker.bind_history("run-visual")
+
+        snapshot = broker.world_model()
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertGreater(snapshot.version, 0)
+        self.assertGreater(len(snapshot.hypotheses), 0)
+        self.assertEqual(len(snapshot.mechanics), 0)
+        self.assertEqual(len(snapshot.entities), 0)
+        self.assertTrue(all(fact.status == "hypothesis" for fact in snapshot.hypotheses.values()))
+        projection = snapshot.projection()
+        hypotheses = json.loads(json.dumps(projection))["hypotheses"]
+        self.assertIn("candidate_roles", hypotheses["entities:visual.level.0.palette"]["value"]["colors"][0])
+
+    def test_retrodiction_conflict_exposes_machine_readable_reason(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.transition_model import ActionExpectation
+
+        engine = _HistoryEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-conflict")
+        expectation = ActionExpectation(
+            action="ACTION1", data=(),
+            prior_state_sha256="sha256:" + "1" * 64,
+            after_state_sha256="sha256:" + "2" * 64,
+            after_frame_sha256="sha256:" + "3" * 64,
+            changed_cells=(), levels_completed=0, state="NOT_FINISHED",
+        )
+        result = broker.act_checked(
+            [{"action": {"name": "ACTION1", "data": {}}, "expect": {"frame_sha256": "sha256:" + "4" * 64}}],
+            replay_expectations=(expectation,),
+        )
+        self.assertEqual(result["stop_reason"], "route-expectation-mismatch")
+        status = broker.retrodiction_status()
+        self.assertEqual(status["status"], "conflict")
+        self.assertIn("route-before-state", status["reasons"])
 
     def test_mechanism_probe_promotes_only_after_matching_transition(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
