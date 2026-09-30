@@ -3350,3 +3350,4 @@
 - 12:00 用户要求关闭离线优化，纯 P7 使用同题持久化 worldmap 重做 VC33 L1；本次运行需区分路由注入与世界模型能力
 - 12:05 [cd489499] P7 默认关闭离线优化与精确路线注入；仅显式 integration 模式可启用，保留 wordmap/Playbook 读取
 - 12:45 VC33 L1 纯 worldmap 重做 `p7-live-20260930043047-7fc39f2e5eaf3d3361ea3a15`：当前 7 步，0 关完成，human-baseline 封存；offline=false、route adoption 未 arm、Playbook 预载 12 条视觉假设，最终保存 27 条假设，confirmed 0，replay/cleanup 通过
+- 12:47 [e11441cd] 更新恢复检查点：VC33 纯 worldmap L1 未过关，下一步分析 prediction-mismatch 与模型使用
