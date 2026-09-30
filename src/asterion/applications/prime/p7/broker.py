@@ -437,8 +437,18 @@ class ArcBroker:
         observation without turning it into a route or planner certificate.
         """
 
+        candidates = self._experience_inducer.candidates()
         compiled_candidates: list[dict[str, object]] = []
-        for candidate in self._experience_inducer.candidates():
+        candidate_previews: list[dict[str, object]] = []
+        for candidate in candidates:
+            candidate_previews.append({
+                "action": {"name": candidate.action, "data": dict(candidate.data)},
+                "status": candidate.status,
+                "support_count": candidate.support_count,
+                "evidence_sequences": list(candidate.evidence_sequences[-4:]),
+                "motion_complete": bool(candidate.template and candidate.template.motion_complete),
+                "changed_cell_count": int(candidate.template.changed_cell_count) if candidate.template else 0,
+            })
             compiled = compile_effect_hypothesis(candidate)
             if compiled is None:
                 continue
@@ -452,16 +462,20 @@ class ArcBroker:
         compiled_candidates.sort(
             key=lambda item: (-int(item["support_count"]), str(item["key"]))
         )
+        candidate_previews.sort(
+            key=lambda item: (-int(item["support_count"]), str(item["action"]))
+        )
         if compiled_candidates:
             recommendation = "inspect_candidate_and_probe"
-        elif self._experience_inducer.candidates():
+        elif candidates:
             recommendation = "inspect_candidates"
         else:
             recommendation = "ordinary_exploration"
         simulator = self.simulator_status()
         return {
             "recommendation": recommendation,
-            "candidate_count": len(self._experience_inducer.candidates()),
+            "candidate_count": len(candidates),
+            "candidate_previews": candidate_previews[:4],
             "compiled_candidates": compiled_candidates[:4],
             "simulator": {
                 "status": simulator["status"],

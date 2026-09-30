@@ -107,13 +107,18 @@ Call p7_cognition before a long deliberation. Its type profile is a prior-only
 hint about the input surface, and its exact-game experience is progress memory,
 not an executable route. Normal exploration and single-step probes remain
 available; only an identity or evidence mismatch should stop a checked batch.
-When ``p7_mechanism_candidates`` exposes a ``compiled_mechanism`` supported by
-at least two effects, treat it as a declarative proposal: check its current
-frame prediction, construct one distinguishing probe, and submit it through
+When ``learning_hint.recommendation`` is ``inspect_candidates`` or
+``inspect_candidate_and_probe``, call ``p7_mechanism_candidates`` before another
+long batch. If it exposes a ``compiled_mechanism`` supported by at least two
+effects, treat it as a declarative proposal: check its current frame
+prediction, construct one distinguishing probe, and submit it through
 ``p7_record_hypothesis``. A compiled proposal is not a certificate or a route;
-do not dispatch it until the broker accepts the probe. ``translate_components``
-is a bounded semantic effect for repeated object motion and may be used only
-when the candidate's full-frame evidence supports it.
+do not dispatch it until the broker accepts the probe. Candidates marked
+``contradicted`` or with incomplete motion evidence are diagnostics only; keep
+exploring until a falsifiable current-level probe is available.
+``translate_components`` is a bounded semantic effect for repeated object
+motion and may be used only when the candidate's full-frame evidence supports
+it.
 To submit a mechanism hypothesis, first read p7_world_model for the exact
 game identity. The value passed to p7_record_hypothesis must contain a
 `mechanism` object with schema `asterion.prime.p7-mechanism/v1`, that identity,
