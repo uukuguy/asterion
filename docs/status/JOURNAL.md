@@ -3381,3 +3381,4 @@
 - 01:56 success-path failure classification corrected to `none`; regression, 148 focused tests, lint, and docs-check passed [pending]
 - 01:57 correction: success-path classifier fix committed and documented [4673abcc]
 - 02:00 修复 cognition 将未完成动作当作最佳经验：仅目标级别完成后记录最佳步数，旧未验证计数加载时清除；新增迁移回归测试。
+- 02:01 cognition now persists only verified completion experience [07a65865]
