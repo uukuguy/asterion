@@ -3417,3 +3417,4 @@
 - 06:49 Preserved complete object motion when only one edge timer cell changes, enabling dynamic effect induction without hiding real boundary deltas [38e85a17]
 - 2026-10-01 Static review fixed prior-level click coordinates entering model search and preserved semantic Playbook experience across runs; 161 focused tests, lint, and docs-check pass.
 - 2026-10-01 Recorded the static-versus-runtime review boundary and current 3571-test full-gate evidence; live semantic reuse remains unverified.
+- 07:10 P7 模型诊断边界修复：历史页归一化、未来 cursor 空页、超大动画保留 settled 帧并显式标记，避免推理因传输错误中断 [767a7022]
