@@ -3419,3 +3419,4 @@
 - 2026-10-01 Recorded the static-versus-runtime review boundary and current 3571-test full-gate evidence; live semantic reuse remains unverified.
 - 07:10 P7 模型诊断边界修复：历史页归一化、未来 cursor 空页、超大动画保留 settled 帧并显式标记，避免推理因传输错误中断 [767a7022]
 - 07:25 SP80 L2 实跑确认边界平移的 changed-cell 数差异错误拆分候选；移除 motion.count 签名维度并通过 148 项 P7 回归 [1926ba66]
+- 07:45 SP80 L2 纯 P7 复测：当前级别 9 步后按 10 分钟停止；transport/权限错误为 0，模型复用前缀并识别 ACTION2 连续下移，但目标接触条件推理失败，WorldMap 仍无 confirmed/simulator；判定为运行时解题能力不足，非已定位代码异常。
