@@ -3393,3 +3393,4 @@
 - 03:16 合成端到端验证真实 transition 学习、失败 Playbook 重载和 stale 边界；无效果候选不进入规划 [ae49f7e7]
 - 2026-10-01 Closed P7 experience feedback regressions: safe status fallback, conditional promotion feedback, opaque action prompt contract; disabled npm update notifier in closed offline promotion and marked the design implemented pending full/live verification.
 - 2026-10-01 Commits 3073ca96 and 771a7413 close P7 experience feedback compatibility and document the implemented design boundary.
+- 2026-10-01 Preserved both generic action contract assertions while adding opaque-action caution and explicit click syntax; full suite retry required.
