@@ -3331,3 +3331,4 @@
 - 10:06 Added generic visual-prior extraction and bounded online diagnostics for P7 (`visual_priors.py`, world-model candidate recording, retrodiction reasons, operator diagnostics); 136 focused P7 tests and lint pass. Visual hypotheses are currently advisory and run-local; confirmed facts/routes remain the persisted Playbook boundary.
 - 10:08 Committed generic visual priors, bounded world-model diagnostics, and VC33 submission-status correction [704f51cb]
 - 10:09 Correction: implementation commit hash is 95d71058; earlier 704f51cb was superseded by amend.
+- 10:13 Recorded VC33 L1 route adoption, world-model usage, and hash-mismatch analysis before L2 retry [adb84891]
