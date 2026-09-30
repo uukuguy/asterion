@@ -70,7 +70,12 @@ p7_client.observe(), p7_client.status(),
 p7_client.history(start, limit), p7_client.frame_at(sequence),
 p7_client.act(actions), and p7_client.act_checked(plan). act takes a list of action dictionaries such as
 {"name":"ACTION1","data":{}} and returns the complete post-batch view. The
-optional summary(), render(), diff(), positions(), and act_and_observe() helpers
+If ``p7_playbook`` returns a non-empty ``checked_plan``, prefer submitting
+that plan to ``p7_act_checked`` unchanged; its per-action frame expectations
+bridge offline replay evidence to live execution. A route expectation
+mismatch stops the plan, so inspect the returned observation and replan
+instead of resending the remaining items.
+The optional summary(), render(), diff(), positions(), and act_and_observe() helpers
 only analyze or wrap broker operations. act_and_observe returns exactly
 act, diff, and summary entries; call observe separately for a full frame.
 Frame semantics: an observation may retain an animation as a list of 2-D

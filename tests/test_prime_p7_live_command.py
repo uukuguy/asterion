@@ -202,6 +202,73 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             {"index": 0, "expected": "ACTION1", "actual": "ACTION1", "reason": "expectation-mismatch"},
         )
 
+    def test_adopted_route_enforces_full_witness_before_next_dispatch(self) -> None:
+        from dataclasses import replace
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from asterion.applications.prime.p7.optimizer import PlannerAction
+        from asterion.applications.prime.p7.transition_model import TransitionModel
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        reference = _HistoryEngine()
+        source = ArcBroker(engine=reference, world_model=WorldModelStore(reference.game_id, 0, 7))
+        source.bind_history("reference")
+        source.act(("ACTION1", "ACTION1"))
+        expectations = TransitionModel.from_history(source._bound_history(), world=source.world_model()).expectations()
+        for change, expected_count in (("after", 1), ("before", 0), ("none", 2)):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                engine = _HistoryEngine()
+                broker = ArcBroker(engine=engine)
+                broker.bind_history("live")
+                recorder = PrimeTraceRecorder(Path(directory))
+                client = _P7BrokerClient(broker, recorder)
+                modified = expectations
+                if change != "none":
+                    field = "after_state_sha256" if change == "after" else "prior_state_sha256"
+                    modified = (replace(expectations[0], **{field: "sha256:" + "9" * 64}), expectations[1])
+                client.arm_route_adoption((PlannerAction("ACTION1"),) * 2, target_level=1, expectations=modified)
+                # A weaker caller cell prediction matches; the replay witness
+                # must still stop the batch when another part of state differs.
+                result = client.act_checked([
+                    {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": n}}}
+                    for n in (1, 2)
+                ])
+                self.assertEqual(result["applied_count"], expected_count)
+                self.assertEqual(len(engine.calls), expected_count)
+                self.assertEqual(result["unexecuted_count"], 2 - expected_count)
+                if change != "none":
+                    self.assertEqual(result["stop_reason"], "route-expectation-mismatch")
+                recorder.close()
+
+    def test_replay_route_exposes_bounded_checked_plan_through_registered_playbook(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from asterion.applications.prime.p7.optimizer import PlannerAction
+        from asterion.applications.prime.p7.transition_model import TransitionModel
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        engine = _HistoryEngine()
+        source = ArcBroker(engine=engine, world_model=WorldModelStore(engine.game_id, 0, 7))
+        source.bind_history("reference")
+        source.act(("ACTION1", "ACTION1"))
+        expectations = TransitionModel.from_history(source._bound_history(), world=source.world_model()).expectations()
+        with tempfile.TemporaryDirectory() as directory:
+            broker = ArcBroker(engine=_HistoryEngine())
+            broker.bind_history("live")
+            recorder = PrimeTraceRecorder(Path(directory))
+            client = _P7BrokerClient(broker, recorder)
+            client.arm_route_adoption((PlannerAction("ACTION1"),) * 2, target_level=1, expectations=expectations)
+            projection = client.playbook()
+            plan = projection["checked_plan"]
+            self.assertEqual(plan[0]["expect"]["frame_sha256"], expectations[0].after_frame_sha256)
+            self.assertLess(len(json.dumps(projection).encode()), 8192)
+            result = client.act_checked(plan[:1])
+            self.assertEqual(result["applied_count"], 1)
+            self.assertEqual(len(client.playbook()["checked_plan"]), 1)
+            recorder.close()
+
     def test_process_cancellation_signal_starts_clear_and_can_cancel(self) -> None:
         signal = live_module.ProcessCancellation()
         self.assertFalse(signal.cancelled)

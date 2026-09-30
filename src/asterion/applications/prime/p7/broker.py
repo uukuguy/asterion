@@ -10,7 +10,7 @@ from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
 from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
-from .transition_model import TransitionModel
+from .transition_model import ActionExpectation, TransitionModel
 from .verified_history import ArcHistoryRecord, ArcPredictionError, validate_history_query, validate_prediction
 from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
 
@@ -524,7 +524,9 @@ class ArcBroker:
             raise ArcBrokerError("unavailable")
         return [list(row) for row in records[sequence].frame]
 
-    def act_checked(self, plan: object) -> dict[str, object]:
+    def act_checked(
+        self, plan: object, *, replay_expectations: tuple[ActionExpectation, ...] = ()
+    ) -> dict[str, object]:
         records = self._bound_history()
         self._require_open()
         if type(plan) is not list or not 1 <= len(plan) <= 20:
@@ -533,6 +535,13 @@ class ArcBroker:
             checked = [validate_prediction(item, current_levels=self._current.levels_completed) for item in plan]
         except ArcPredictionError:
             raise ArcBrokerError("unavailable") from None
+        if type(replay_expectations) is not tuple or any(type(item) is not ActionExpectation for item in replay_expectations):
+            raise ArcBrokerError("unavailable")
+        if replay_expectations and (
+            len(replay_expectations) > len(checked)
+            or any((name, data) != (w.action, w.data) for (name, data, _), w in zip(checked, replay_expectations))
+        ):
+            raise ArcBrokerError("unavailable")
         transitions: list[ArcTransition] = []
         feedback: list[dict[str, object]] = []
 
@@ -554,7 +563,16 @@ class ArcBroker:
         stop_reason = "matched"
         mismatch: dict[str, object] | None = None
         conflict: dict[str, object] | None = None
-        for name, data, expected in checked:
+        for index, (name, data, expected) in enumerate(checked):
+            witness = replay_expectations[index] if index < len(replay_expectations) else None
+            if replay_expectations and witness is None:
+                stop_reason = "route-plan-diverged"
+                break
+            if witness is not None and records[-1].after_state_sha256 != witness.prior_state_sha256:
+                stop_reason = "route-expectation-mismatch"
+                mismatch = {"route": "before-state"}
+                conflict = self._record_model_conflict(records[-1].sequence, "route-before-state")
+                break
             if (
                 self._primitive_actions >= self._game.action_cap
                 or (name == "RESET" and self._level_gameplay_actions == 0)
@@ -590,6 +608,18 @@ class ArcBroker:
             ):
                 if key in expected and expected[key] != actual:
                     mismatch = {**(mismatch or {}), key: expected[key]}
+            if witness is not None and (
+                record.after_state_sha256 != witness.after_state_sha256
+                or record.after_frame_sha256 != witness.after_frame_sha256
+                or record.changed_cells != witness.changed_cells
+                or record.levels_completed != witness.levels_completed
+                or record.state != witness.state
+            ):
+                stop_reason = "route-expectation-mismatch"
+                mismatch = {"route": "after-state"}
+                conflict = self._record_model_conflict(record.sequence, "route-after-state")
+                append_feedback(record, stop_reason)
+                break
             if self._model_conflicts and self._model_conflicts[-1].startswith(f"sequence-{record.sequence}:"):
                 stop_reason = "model-conflict"
                 conflict = {"sequence": record.sequence, "reason": "model-conflict", "replan_required": True}

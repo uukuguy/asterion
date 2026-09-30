@@ -391,6 +391,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "ipython",
             "hypotheses",
             "shortest useful test",
+            "checked_plan",
+            "offline replay evidence to live execution",
             "before/after",
             "no-ops",
             "death paths",

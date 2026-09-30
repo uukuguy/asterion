@@ -193,6 +193,29 @@ class RouteAdoptionTracker:
                     return
             self._cursor += 1
 
+    def reject_witness(self) -> None:
+        if self._divergence is None and self._cursor < len(self._expected):
+            name = self._expected[self._cursor].name
+            self._divergence = {"index": self._cursor, "expected": name, "actual": name, "reason": "expectation-mismatch"}
+
+    def witnesses_for_plan(self, plan: object) -> tuple[ActionExpectation, ...]:
+        if not self._expectations or self._divergence is not None or type(plan) is not list:
+            return ()
+        witnesses: list[ActionExpectation] = []
+        for item, action, witness in zip(plan, self._expected[self._cursor:], self._expectations[self._cursor:]):
+            if type(item) is not dict or item.get("action") != {"name": action.name, "data": dict(action.data)}:
+                break
+            witnesses.append(witness)
+        return tuple(witnesses)
+
+    def checked_plan(self) -> list[dict[str, object]]:
+        if self._divergence is not None or not self._expectations:
+            return []
+        return [
+            {"action": {"name": w.action, "data": dict(w.data)}, "expect": {"frame_sha256": w.after_frame_sha256}}
+            for w in self._expectations[self._cursor:self._cursor + 20]
+        ]
+
     def summary(self) -> dict[str, object]:
         return {
             "armed": bool(self._expected),
@@ -659,9 +682,12 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable")
         try:
             value = self._broker.playbook_projection()
-            if level is None:
-                return value
-            return {"level": level, "memory": [m for m in value.get("level_memory", []) if m["level"] == level]}
+            if level is not None:
+                value = {"level": level, "memory": [m for m in value.get("level_memory", []) if m["level"] == level]}
+            value["checked_plan"] = self._route_adoption.checked_plan()
+            if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
+                value = {"status": "projection-capped", "checked_plan": value["checked_plan"]}
+            return value
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -682,7 +708,9 @@ class _P7BrokerClient:
             journal_start = len(self._broker.journal)
             dispatch_start = self._broker.status().primitive_actions
             try:
-                result = self._broker.act_checked(plan)
+                result = self._broker.act_checked(
+                    plan, replay_expectations=self._route_adoption.witnesses_for_plan(plan)
+                )
             except Exception:
                 committed = len(self._broker.journal) - journal_start
                 if type(plan) is list and 1 <= len(plan) <= 20:
@@ -699,11 +727,13 @@ class _P7BrokerClient:
                 raise
             finally:
                 self._record_transitions(self._broker.journal[journal_start:])
+            if result["stop_reason"] == "route-expectation-mismatch":
+                self._route_adoption.reject_witness()
             self._count("checked_plans")
             self._count("matched_expectations", result["applied_count"])
             if result["mismatch"] is not None:
                 self._count("mismatches")
-                self._counts["matched_expectations"] -= 1
+                self._counts["matched_expectations"] -= min(1, result["applied_count"])
             self._count("unexecuted_items", result["unexecuted_count"])
             batch = result["batch"]
             observation = result["observation"]
