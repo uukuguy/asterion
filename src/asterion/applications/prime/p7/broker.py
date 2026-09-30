@@ -576,9 +576,14 @@ class ArcBroker:
         """Expose simulator coverage without granting planner authority."""
 
         certificate = self._mechanism_certificate
+        # A submitted hypothesis is already a simulator model under test even
+        # though it has no planner authority until its distinguishing probe
+        # and complete history replay succeed.  Expose that intermediate
+        # lifecycle state instead of reporting the simulator as absent.
+        hypothesis_present = self._mechanism_spec is not None or self._pending_probe is not None
         return {
             "status": "verified" if certificate is not None and certificate.planner_eligible else (
-                "hypothesis" if self._mechanism_spec is not None else "absent"
+                "hypothesis" if hypothesis_present else "absent"
             ),
             "effects": len(self._experience_inducer.effects()),
             "candidates": len(self._experience_inducer.candidates()),
@@ -590,8 +595,9 @@ class ArcBroker:
 
     def retrodiction_status(self) -> dict[str, object]:
         certificate = self._mechanism_certificate
+        hypothesis_present = self._mechanism_spec is not None or self._pending_probe is not None
         if certificate is None:
-            model_status = "hypothesis" if self._mechanism_spec is not None else "absent"
+            model_status = "hypothesis" if hypothesis_present else "absent"
         elif certificate.planner_eligible:
             model_status = "verified"
         else:
@@ -750,8 +756,26 @@ class ArcBroker:
                 if fact.layer != "mechanics" and fact.level != self._world_model.current_level:
                     continue
                 refs = tuple(EvidenceRef(summary_hash=d) for d in fact.evidence_digests)
-                self._world_model.record_hypothesis(fact.layer, fact.key, fact.value, level=fact.level, evidence=refs)
-                self._world_model.confirm(fact.layer, fact.key, evidence=refs, observed_value=fact.value)
+                current = self._world_model.snapshot
+                existing_fact = getattr(current, fact.layer).get(fact.key)
+                existing_hypothesis = current.hypotheses.get(f"{fact.layer}:{fact.key}")
+                if existing_fact is not None:
+                    if existing_fact.value != fact.value:
+                        raise ArcBrokerError("unavailable")
+                    # Loading the same snapshot twice is intentionally
+                    # idempotent; the current confirmed fact already carries
+                    # an equivalent value and needs no duplicate record.
+                elif existing_hypothesis is not None:
+                    if existing_hypothesis.value != fact.value:
+                        raise ArcBrokerError("unavailable")
+                    self._world_model.confirm(
+                        fact.layer, fact.key, evidence=refs, observed_value=fact.value,
+                    )
+                else:
+                    self._world_model.record_hypothesis(
+                        fact.layer, fact.key, fact.value, level=fact.level, evidence=refs,
+                    )
+                    self._world_model.confirm(fact.layer, fact.key, evidence=refs, observed_value=fact.value)
                 if fact.layer == "mechanics" and self._mechanism_spec is None:
                     try:
                         candidate = MechanismSpec.from_mapping(fact.value)
@@ -772,6 +796,16 @@ class ArcBroker:
             # them before any promotion attempt.
             for fact in snapshot.visual_hypotheses:
                 if fact.level != self._world_model.current_level:
+                    continue
+                current = self._world_model.snapshot
+                if (
+                    getattr(current, fact.layer).get(fact.key) is not None
+                    or current.hypotheses.get(f"{fact.layer}:{fact.key}") is not None
+                ):
+                    # bind_history already projected the current frame's
+                    # visual priors.  They are advisory and level-local, so
+                    # retaining the live observation is preferable to
+                    # inserting a duplicate or replacing it with stale data.
                     continue
                 refs = tuple(EvidenceRef(summary_hash=d) for d in fact.evidence_digests)
                 self._world_model.record_hypothesis(

@@ -140,10 +140,13 @@ def validate_prediction(
         checked["levels_completed"] = level
         distinguishing = True
     if "state" in expect:
-        if expect["state"] not in ("WIN", "GAME_OVER"):
+        if expect["state"] not in ("NOT_FINISHED", "WIN", "GAME_OVER"):
             raise ArcPredictionError
         checked["state"] = expect["state"]
-        distinguishing = True
+        # NOT_FINISHED is a valid state witness when paired with a frame or
+        # level expectation, but by itself it does not distinguish a probe.
+        if expect["state"] != "NOT_FINISHED":
+            distinguishing = True
     if not distinguishing:
         raise ArcPredictionError
     return name, data, checked
