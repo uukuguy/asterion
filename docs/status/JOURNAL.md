@@ -3413,3 +3413,4 @@
 - 05:54 Moved bounded learning hints before large frame payloads so WorldMap evidence survives bridge truncation [028da690]
 - 06:02 Prioritized current induced bundles before stale candidates so bounded output preserves reusable WorldMap evidence [95045f1f]
 - 06:16 Told P7 to stop unsupported coordinate guesses after no probe and ground every click in same-level evidence [c8e45c2d]
+- 06:31 Filtered learning hints to current-level hypotheses so replayed prior-level rules cannot trigger stale probes [ef717caa]
