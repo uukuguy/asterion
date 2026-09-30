@@ -427,7 +427,66 @@ class ArcBroker:
             if not isinstance(value, Mapping) or value.get("key") in seen:
                 continue
             current.append({**value, "status": "stale", "source": "playbook"})
+        bundle = self._compiled_induced_mechanism()
+        if bundle is not None:
+            current.append({
+                "key": "experience.induced.bundle",
+                "level": self._current.levels_completed,
+                "action_family": "mixed",
+                "action": {"name": "MODEL", "data": {}},
+                "status": "hypothesis",
+                "support_count": sum(
+                    candidate.support_count
+                    for candidate in self._experience_inducer.candidates()
+                    if candidate.status == "hypothesis" and compile_effect_hypothesis(candidate) is not None
+                ),
+                "evidence_sequences": sorted({
+                    sequence
+                    for candidate in self._experience_inducer.candidates()
+                    if candidate.status == "hypothesis" and compile_effect_hypothesis(candidate) is not None
+                    for sequence in candidate.evidence_sequences
+                })[-32:],
+                "compiled_mechanism": bundle.to_mapping(),
+                "source": "induced-bundle",
+            })
         return tuple(current[-256:])
+
+    def _compiled_induced_mechanism(self) -> MechanismSpec | None:
+        """Combine non-conflicting induced rules into one advisory model."""
+
+        by_action: dict[tuple[str, tuple[tuple[str, int], ...]], object] = {}
+        for candidate in self._experience_inducer.candidates():
+            if candidate.status != "hypothesis":
+                continue
+            compiled = compile_effect_hypothesis(candidate)
+            if compiled is None or len(compiled.rules) != 1:
+                continue
+            rule = compiled.rules[0]
+            action_key = (rule.action, candidate.data)
+            prior = by_action.get(action_key)
+            if prior is False:
+                continue
+            if prior is not None and prior.mapping() != rule.mapping():
+                # Two different rules for one action remain ambiguous; do not
+                # synthesize a conflicting model merely to make it visible.
+                by_action.pop(action_key, None)
+                by_action[action_key] = False
+                continue
+            if prior is not False:
+                by_action[action_key] = rule
+        rules = tuple(
+            value for value in by_action.values()
+            if value is not False
+        )
+        if not rules:
+            return None
+        try:
+            return MechanismSpec(
+                self._game.game_id, self._game.seed, self._game.win_levels,
+                tuple(rules), revision=0,
+            )
+        except (TypeError, ValueError):
+            return None
 
     def learning_hint(self) -> dict[str, object]:
         """Return a small advisory induction summary for the next model turn.

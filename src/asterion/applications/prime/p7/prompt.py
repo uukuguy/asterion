@@ -110,7 +110,8 @@ available; only an identity or evidence mismatch should stop a checked batch.
 When ``learning_hint.recommendation`` is ``inspect_candidates`` or
 ``inspect_candidate_and_probe``, call ``p7_mechanism_candidates`` before another
 long batch. If it exposes a ``compiled_mechanism`` supported by at least two
-effects, treat it as a declarative proposal: check its current frame
+effects, prefer the ``experience.induced.bundle`` entry when present so all
+compatible action rules are retrodicted together. Treat it as a declarative proposal: check its current frame
 prediction, construct one distinguishing probe, and submit it through
 ``p7_record_hypothesis``. A compiled proposal is not a certificate or a route;
 do not dispatch it until the broker accepts the probe. Candidates marked

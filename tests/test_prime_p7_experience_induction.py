@@ -231,6 +231,25 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertTrue(candidates[0].template is not None)
         self.assertTrue(candidates[0].template.motions)
 
+    def test_extracts_motion_when_independent_boundary_delta_is_present(self) -> None:
+        before = (
+            (0, 0, 0, 0, 0, 0),
+            (0, 7, 7, 0, 0, 0),
+            (0, 0, 0, 0, 0, 0),
+            (14, 14, 14, 14, 14, 14),
+        )
+        after = (
+            (0, 0, 0, 0, 0, 0),
+            (0, 0, 7, 7, 0, 0),
+            (0, 0, 0, 0, 0, 0),
+            (0, 0, 14, 14, 14, 14),
+        )
+        first, second = records(action=ArcAction("ACTION1"), before=before, after=after)
+        effect = extract_action_effect(first, second)
+        self.assertFalse(effect.motion_complete)
+        self.assertEqual(len(effect.motions), 1)
+        self.assertEqual((effect.motions[0].dx, effect.motions[0].dy), (1, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

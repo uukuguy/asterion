@@ -154,7 +154,7 @@
 
 ### 6.2 模型合成与版本
 
-归纳器从第 4 节的 ActionEffect 合成受限规则库，先支持局部 cell edit、组件平移、周期变化、边界无效、state/level 转换。规则使用相对对象/局部条件表达可迁移效果；不可解释的绝对坐标、单次过关序列和自由文本结论不能编译为规则。对象及关系若尚无可预测的更新语义，仍保持 advisory，不应假装模拟器已经完整支持它们。
+归纳器从第 4 节的 ActionEffect 合成受限规则库，先支持局部 cell edit、组件平移、独立边界单元的有序清除、周期变化、边界无效、state/level 转换。规则使用相对对象/局部条件表达可迁移效果；不可解释的绝对坐标、单次过关序列和自由文本结论不能编译为规则。对象及关系若尚无可预测的更新语义，仍保持 advisory，不应假装模拟器已经完整支持它们。
 
 一组 `MechanismSpec` 形成一个不可变模型版本，包含精确游戏身份、规则摘要、依赖的 confirmed fact keys、WorldMap 版本和证据覆盖范围。候选可有多个版本；冲突后旧版本标记 stale/retired，不继续参与搜索。模型更新不修改已经保存的历史证据。
 
@@ -224,7 +224,7 @@
 3. 让候选规则编译为现有 `MechanismSpec` 的受限子集，并建立 `SimState`、unknown/partial-prediction 合同；不支持的对象生命周期保持 unknown；
 4. 增加候选模型的逐历史 retrodiction、拟合外 probe、证书版本与失效逻辑；
 5. 扩展 `model_search` 的证书/当前起点检查、完整 witness、节点/深度/时间预算及失败状态；
-6. 增加 P7 只读工具展示 candidates/effects/probe plan/模拟器覆盖和搜索结果，保留现有 hypothesis/probe 验证入口；
+6. 增加 P7 只读工具展示 candidates/effects/probe plan/模拟器覆盖和搜索结果，提供由无冲突候选组成的 `experience.induced.bundle`，保留现有 hypothesis/probe 验证入口；
 7. 扩展 Playbook schema 保存 candidate/effect/retired evidence 与模型证书，完善同题 rehydration；
 8. 将 frame/state digest 字段强类型化，避免 prediction mismatch 污染语义学习；
 9. 维持 pure/integration 模式隔离，禁止 route hint 进入能力评估。

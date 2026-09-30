@@ -144,6 +144,40 @@ class ExperienceSimulatorTests(unittest.TestCase):
         self.assertEqual(prediction.status, "predicted")
         self.assertEqual(prediction.next_state.frame[2][5:8], (0, 7, 7))
 
+    def test_partial_motion_candidate_compiles_independent_clear_delta(self) -> None:
+        inducer = ExperienceInducer()
+        for sequence, start_x, clear_x in ((1, 1, 0), (2, 3, 1)):
+            before_rows = [[0 for _ in range(8)] for _ in range(5)]
+            after_rows = [[0 for _ in range(8)] for _ in range(5)]
+            before_rows[1][start_x:start_x + 2] = [7, 7]
+            after_rows[1][start_x + 1:start_x + 3] = [7, 7]
+            before_rows[4] = [14] * 8
+            after_rows[4] = [14] * 8
+            after_rows[4][clear_x] = 0
+            first = ArcHistoryRecord.initial(
+                game_id="game", seed=1, run_id="run",
+                frame=tuple(tuple(row) for row in before_rows),
+                levels_completed=0, state="NOT_FINISHED", after_state_sha256=digest(("s0", sequence)),
+            )
+            second = ArcHistoryRecord.following(
+                first, action=ArcAction("ACTION1"),
+                before_state_sha256=first.after_state_sha256,
+                after_state_sha256=digest(("s1", sequence)),
+                frame=tuple(tuple(row) for row in after_rows),
+                levels_completed=0, state="NOT_FINISHED",
+            )
+            inducer.observe(replace(extract_action_effect(first, second), sequence=sequence))
+        spec = compile_effect_hypothesis(inducer.candidates()[0])
+        self.assertIsNotNone(spec)
+        state = SimState.from_observation(
+            frame=((0,) * 8, (0, 0, 7, 7, 0, 0, 0, 0), (0,) * 8, (0,) * 8, (14,) * 8),
+            level=0, state="NOT_FINISHED", available_actions=["ACTION1"],
+        )
+        prediction = simulate_step(spec, state, "ACTION1")
+        self.assertEqual(prediction.status, "predicted")
+        self.assertEqual(prediction.next_state.frame[1], (0, 0, 0, 7, 7, 0, 0, 0))
+        self.assertEqual(prediction.next_state.frame[4][0], 0)
+
     def test_large_translation_prediction_keeps_bounded_sample_and_omitted_count(self) -> None:
         spec = MechanismSpec(
             "game", 1, 1,
@@ -163,6 +197,24 @@ class ExperienceSimulatorTests(unittest.TestCase):
         self.assertEqual(prediction.status, "predicted")
         self.assertEqual(len(prediction.changed_cells), 80)
         self.assertGreater(prediction.changed_cells_omitted, 0)
+
+    def test_clear_cells_consumes_a_bounded_ordered_source(self) -> None:
+        spec = MechanismSpec(
+            "game", 1, 1,
+            (MechanismRule(
+                "ACTION1",
+                effects=({"op": "clear_cells", "args": {
+                    "value": 14, "clear": 0, "count": 2, "axis": "x",
+                }},),
+            ),),
+        )
+        state = SimState.from_observation(
+            frame=((14, 14, 14, 0),), level=0, state="NOT_FINISHED",
+            available_actions=["ACTION1"],
+        )
+        prediction = simulate_step(spec, state, "ACTION1")
+        self.assertEqual(prediction.status, "predicted")
+        self.assertEqual(prediction.next_state.frame, ((0, 0, 14, 0),))
 
 
 if __name__ == "__main__":

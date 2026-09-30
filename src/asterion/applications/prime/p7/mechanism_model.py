@@ -33,6 +33,7 @@ _GUARDS = frozenset(
 _EFFECTS = frozenset(
     {
         "set_cell",
+        "clear_cells",
         "toggle_cell",
         "translate_cells",
         "translate_components",
@@ -285,6 +286,18 @@ def _validate_effect(kind: str, args: Mapping[str, Any]) -> None:
         values = _mapping_args(args, {"x", "y", "value"})
         _coordinate(values)
         _value_byte(values["value"])
+    elif kind == "clear_cells":
+        values = _mapping_args(args, {"value", "clear", "count"}, {"axis", "direction"})
+        _value_byte(values["value"])
+        _value_byte(values["clear"])
+        if values["value"] == values["clear"]:
+            raise ValueError("clear_cells source equals clear")
+        if type(values["count"]) is not int or not 1 <= values["count"] <= 64:
+            raise ValueError("invalid clear_cells count")
+        if values.get("axis", "x") not in {"x", "y", "scan"}:
+            raise ValueError("invalid clear_cells axis")
+        if values.get("direction", "ascending") not in {"ascending", "descending"}:
+            raise ValueError("invalid clear_cells direction")
     elif kind == "toggle_cell":
         values = _mapping_args(args, {"x", "y", "values"})
         _coordinate(values)
@@ -571,7 +584,7 @@ def compile_effect_hypothesis(hypothesis: object) -> MechanismSpec | None:
     if template.data:
         guards.append({"op": "action_data_equals", "args": {"value": dict(template.data)}})
     effects: list[object] = []
-    if template.motion_complete and template.motions:
+    if template.motions:
         for motion in template.motions:
             pattern = [
                 [x, y, motion.source_value]
@@ -583,6 +596,44 @@ def compile_effect_hypothesis(hypothesis: object) -> MechanismSpec | None:
                 "dx": motion.dx,
                 "dy": motion.dy,
                 "count": motion.count,
+            }})
+        # A frame delta can contain an independently changing boundary in
+        # addition to the translated component.  Encode a deterministic
+        # bounded consumption of that source colour so the complete witness
+        # remains replayable instead of discarding the residual change.
+        used_pairs = {
+            (motion.source_value, motion.clear_value)
+            for motion in template.motions
+        } | {
+            (motion.clear_value, motion.source_value)
+            for motion in template.motions
+        }
+        residual = [
+            change for change in template.full_changed_cells
+            if (change[2], change[3]) not in used_pairs
+        ]
+        by_residual: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        for x, y, old, new in residual:
+            by_residual.setdefault((old, new), []).append((x, y))
+        for (old, new), cells in sorted(by_residual.items()):
+            if not cells:
+                continue
+            if any((old, other_new) != (old, new) for _x, _y, _old, other_new in residual):
+                return None
+            axis = "x" if len({y for _x, y in cells}) == 1 else (
+                "y" if len({x for x, _y in cells}) == 1 else "scan"
+            )
+            direction = "ascending"
+            if axis == "x" and len(cells) > 1 and cells[0][0] > cells[-1][0]:
+                direction = "descending"
+            if axis == "y" and len(cells) > 1 and cells[0][1] > cells[-1][1]:
+                direction = "descending"
+            effects.append({"op": "clear_cells", "args": {
+                "value": old,
+                "clear": new,
+                "count": len(cells),
+                "axis": axis,
+                "direction": direction,
             }})
     else:
         if template.changed_cells_omitted:
@@ -700,6 +751,28 @@ def _apply_effects(
             if y >= len(rows) or x >= len(rows[0]):
                 raise ValueError
             rows[y][x] = args["value"]
+        elif kind == "clear_cells":
+            source = args["value"]
+            clear = args["clear"]
+            positions = [
+                (x, y)
+                for y, row in enumerate(rows)
+                for x, value in enumerate(row)
+                if value == source
+            ]
+            axis = args.get("axis", "x")
+            if axis == "x":
+                positions.sort(key=lambda item: (item[0], item[1]))
+            elif axis == "y":
+                positions.sort(key=lambda item: (item[1], item[0]))
+            else:
+                positions.sort(key=lambda item: (item[1], item[0]))
+            if args.get("direction", "ascending") == "descending":
+                positions.reverse()
+            if len(positions) < args["count"]:
+                raise ValueError
+            for x, y in positions[:args["count"]]:
+                rows[y][x] = clear
         elif kind == "toggle_cell":
             x, y = _coordinate(args)
             if y >= len(rows) or x >= len(rows[0]):

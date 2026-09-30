@@ -245,6 +245,31 @@ def _motions(
                     valid = any(translated == item for item in destination_sets)
                 if valid:
                     matches.append(offset)
+            if len(set(matches)) != 1 and before is not None and after is not None:
+                # Unchanged cells of the same colour can join the changed
+                # component in a full-frame connected-component view.  Fall
+                # back to the changed source/destination sets; this still
+                # requires an exact translated shape and therefore does not
+                # guess through an incomplete delta.
+                source_components = _connected_cells(source_cells)
+                destination_components = _connected_cells(destination_cells)
+                destination_sets = [set(item) for item in destination_components]
+                matches = []
+                for fallback_component in source_components:
+                    component_set = set(fallback_component)
+                    candidate_offsets = sorted(
+                        (dx - fallback_component[0][0], dy - fallback_component[0][1])
+                        for dx, dy in destination_cells
+                    )
+                    local_matches = []
+                    for offset in candidate_offsets:
+                        translated = {(x + offset[0], y + offset[1]) for x, y in component_set}
+                        if any(translated == set(item) for item in destination_components):
+                            local_matches.append(offset)
+                    if len(set(local_matches)) == 1:
+                        matches = local_matches
+                        component = fallback_component
+                        break
             if len(set(matches)) != 1:
                 continue
             dx, dy = matches[0]
