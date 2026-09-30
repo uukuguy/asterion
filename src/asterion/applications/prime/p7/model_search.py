@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import heapq
 from itertools import count
 from collections.abc import Mapping, Sequence
-from .mechanism_model import MechanismSpec
+from .mechanism_model import MechanismSpec, ModelCertificate
 from .score import digest
 
 _ACTIONS = frozenset({f"ACTION{i}" for i in range(1, 8)} | {"RESET"})
@@ -141,6 +141,8 @@ def search_model(
     max_nodes: int = 512,
     max_depth: int = 24,
     strategy: str = "astar",
+    certificate: ModelCertificate | None = None,
+    sim_state: object | None = None,
 ) -> SearchResult:
     """Search a verified mechanism without dispatching any live action.
 
@@ -152,7 +154,29 @@ def search_model(
     try:
         if type(spec) is not MechanismSpec:
             raise ValueError
+        if sim_state is not None:
+            from .experience_induction import SimState
+            if not isinstance(sim_state, SimState):
+                raise ValueError
+            frame = sim_state.frame
+            level = sim_state.level
+            state = sim_state.state
+            if entities is None:
+                entities = dict(sim_state.entities)
+            if not actions:
+                actions = sim_state.available_actions
         stable = _frame(frame)
+        if certificate is not None:
+            if (
+                type(certificate) is not ModelCertificate
+                or not certificate.planner_eligible
+                or certificate.game_id != spec.game_id
+                or certificate.seed != spec.seed
+                or certificate.win_levels != spec.win_levels
+                or certificate.model_digest != spec.digest
+                or certificate.current_frame_sha256 != digest(stable)
+            ):
+                return SearchResult("model-unavailable", reason="stale-certificate")
         if type(level) is not int or level < 0 or level > spec.win_levels:
             raise ValueError
         if type(state) is not str or not state:

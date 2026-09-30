@@ -81,6 +81,8 @@ class EffectHypothesis:
     status: str
     evidence_sequences: tuple[int, ...]
     conflict_sequences: tuple[int, ...]
+    template: ActionEffect | None = None
+    win_levels: int = 1
 
     @property
     def support_count(self) -> int:
@@ -208,10 +210,13 @@ def _signature(effect: ActionEffect) -> str:
 class ExperienceInducer:
     """Accumulate effects and form/reconcile small mechanism candidates."""
 
-    def __init__(self, *, max_effects: int = 128) -> None:
+    def __init__(self, *, max_effects: int = 128, win_levels: int = 1) -> None:
         if type(max_effects) is not int or not 1 <= max_effects <= 1024:
             raise ValueError("max_effects must be between 1 and 1024")
+        if type(win_levels) is not int or win_levels <= 0:
+            raise ValueError("win_levels must be positive")
         self._max_effects = max_effects
+        self._win_levels = win_levels
         self._effects: list[ActionEffect] = []
         self._candidates: dict[str, EffectHypothesis] = {}
 
@@ -247,6 +252,7 @@ class ExperienceInducer:
                 level=effect.level, action_family=family, action=effect.action,
                 data=effect.data, signature=signature, status="hypothesis",
                 evidence_sequences=(effect.sequence,), conflict_sequences=(),
+                template=effect, win_levels=self._win_levels,
             )
             if broad:
                 # A second incompatible delta for the same action family is

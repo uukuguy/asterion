@@ -360,6 +360,38 @@ class MechanismPrediction:
 
 
 @dataclass(frozen=True, slots=True)
+class SimPrediction:
+    """Pure simulator result with explicit unknown/conflict outcomes."""
+
+    status: str
+    next_state: object | None = None
+    changed_cells: tuple[tuple[int, int, int, int], ...] = ()
+    rule_ids: tuple[str, ...] = ()
+    reason: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.status not in {"predicted", "unknown", "conflict"}:
+            raise ValueError("invalid simulation status")
+        if self.status == "predicted" and self.next_state is None:
+            raise ValueError("predicted simulation needs a next state")
+        if self.status != "predicted" and self.next_state is not None:
+            raise ValueError("unknown/conflict cannot expose a next state")
+        if type(self.changed_cells) is not tuple or len(self.changed_cells) > 80:
+            raise ValueError("invalid simulation changed cells")
+        if any(
+            type(item) is not tuple or len(item) != 4
+            or any(type(part) is not int for part in item)
+            or not 0 <= item[0] <= 63 or not 0 <= item[1] <= 63
+            or not 0 <= item[2] <= 255 or not 0 <= item[3] <= 255
+            or item[2] == item[3]
+            for item in self.changed_cells
+        ):
+            raise ValueError("invalid simulation changed cells")
+        if self.reason is not None and (type(self.reason) is not str or not self.reason):
+            raise ValueError("invalid simulation reason")
+
+
+@dataclass(frozen=True, slots=True)
 class MechanismSpec:
     game_id: str
     seed: int
@@ -487,6 +519,98 @@ class MechanismSpec:
             return MechanismPrediction("unknown", frame=stable, level=level, state=state, reason="effect")
 
 
+def compile_effect_hypothesis(hypothesis: object) -> MechanismSpec | None:
+    """Compile one conservative effect candidate into the pure rule subset.
+
+    Candidates with unsupported or incomplete evidence stay hypotheses.  The
+    resulting spec is not a certificate; callers must still retrodict history
+    and verify a separate probe before using it for planning.
+    """
+
+    from .experience_induction import EffectHypothesis
+
+    if not isinstance(hypothesis, EffectHypothesis):
+        return None
+    if hypothesis.status != "hypothesis" or hypothesis.template is None:
+        return None
+    template = hypothesis.template
+    if (
+        hypothesis.support_count < 2
+        and template.outcome not in {"level-transition", "game-over"}
+    ):
+        return None
+    guards: list[object] = [{"op": "level_is", "args": {"value": template.level}}]
+    if template.data:
+        guards.append({"op": "action_data_equals", "args": {"value": dict(template.data)}})
+    effects: list[object] = []
+    if template.changed_cells_omitted:
+        return None
+    for x, y, old, new in template.changed_cells:
+        guards.append({"op": "cell_equals", "args": {"x": x, "y": y, "value": old}})
+        effects.append({"op": "set_cell", "args": {"x": x, "y": y, "value": new}})
+    if template.levels_completed > template.level:
+        effects.append({
+            "op": "increment_level",
+            "args": {"value": template.levels_completed - template.level},
+        })
+    if template.state in {"WIN", "GAME_OVER"}:
+        effects.append({"op": "set_state", "args": {"value": template.state}})
+    try:
+        return MechanismSpec(
+            hypothesis.game_id, hypothesis.seed, hypothesis.win_levels,
+            (MechanismRule(template.action, tuple(guards), tuple(effects)),),
+            revision=0,
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def simulate_step(spec: MechanismSpec, sim_state: object, action: object) -> SimPrediction:
+    """Apply one pure declarative step to a :class:`SimState`.
+
+    Unknown hidden entity state is never treated as a default value.  This is
+    intentionally a thin adapter around :meth:`MechanismSpec.predict`, so the
+    simulator and checked-history validator share exactly one effect algebra.
+    """
+
+    from .experience_induction import SimState
+
+    if not isinstance(spec, MechanismSpec) or not isinstance(sim_state, SimState):
+        return SimPrediction("unknown", reason="invalid-input")
+    if sim_state.unknown_fields and any(
+        kind == "entity_attr_equals"
+        for rule in spec.rules
+        for kind, _ in cast(tuple[tuple[str, Any], ...], rule.guards)
+    ):
+        return SimPrediction("unknown", reason="unknown-hidden-state")
+    entities = dict(sim_state.entities)
+    prediction = spec.predict(
+        frame=sim_state.frame,
+        action=action,
+        level=sim_state.level,
+        state=sim_state.state,
+        entities=entities,
+    )
+    if prediction.status != "predicted" or prediction.frame is None or prediction.level is None or prediction.state is None:
+        return SimPrediction(prediction.status, reason=prediction.reason)
+    try:
+        next_state = SimState.from_observation(
+            frame=prediction.frame,
+            level=prediction.level,
+            state=prediction.state,
+            available_actions=sim_state.available_actions,
+            entities=entities,
+            unknown_fields=sim_state.unknown_fields,
+        )
+    except (TypeError, ValueError):
+        return SimPrediction("unknown", reason="next-state")
+    return SimPrediction(
+        "predicted", next_state=next_state,
+        changed_cells=prediction.changed_cells,
+        rule_ids=(f"rule:{prediction.rule_count}",),
+    )
+
+
 def _guards_match(
     guards: tuple[tuple[str, Any], ...],
     frame: tuple[tuple[int, ...], ...],
@@ -587,6 +711,8 @@ class ModelCertificate:
     sequence_start: int
     sequence_end: int
     coverage: str = "mechanism-retrodicted"
+    current_frame_sha256: str | None = None
+    world_model_version: int | None = None
     _validated: bool = field(default=False, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -604,6 +730,12 @@ class ModelCertificate:
             raise ValueError("invalid certificate identity")
         if type(self.coverage) is not str or self.coverage != "mechanism-retrodicted":
             raise ValueError("invalid certificate coverage")
+        if self.current_frame_sha256 is not None and _HASH.fullmatch(self.current_frame_sha256) is None:
+            raise ValueError("invalid certificate current frame")
+        if self.world_model_version is not None and (
+            type(self.world_model_version) is not int or self.world_model_version < 0
+        ):
+            raise ValueError("invalid certificate world revision")
         if (
             type(self.record_count) is not int
             or self.record_count < 2
@@ -618,8 +750,13 @@ class ModelCertificate:
     def _issued(
         cls, game_id: str, seed: int, win_levels: int, revision: int,
         model_digest: str, record_count: int, sequence_start: int, sequence_end: int,
+        *, current_frame_sha256: str | None = None, world_model_version: int | None = None,
     ) -> "ModelCertificate":
-        certificate = cls(game_id, seed, win_levels, revision, model_digest, record_count, sequence_start, sequence_end)
+        certificate = cls(
+            game_id, seed, win_levels, revision, model_digest, record_count,
+            sequence_start, sequence_end, current_frame_sha256=current_frame_sha256,
+            world_model_version=world_model_version,
+        )
         object.__setattr__(certificate, "_validated", True)
         return certificate
 
@@ -693,6 +830,7 @@ def validate_mechanism(
         len(rows),
         rows[0].sequence,
         rows[-1].sequence,
+        current_frame_sha256=digest(rows[-1].frame),
     )
 
 
@@ -701,5 +839,8 @@ __all__ = (
     "MechanismRule",
     "MechanismSpec",
     "ModelCertificate",
+    "SimPrediction",
+    "compile_effect_hypothesis",
+    "simulate_step",
     "validate_mechanism",
 )

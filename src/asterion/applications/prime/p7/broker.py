@@ -432,6 +432,7 @@ class ArcBroker:
                 max_nodes=max_nodes,
                 max_depth=max_depth,
                 strategy=strategy,
+                certificate=certificate,
             )
         except (TypeError, ValueError):
             return {
