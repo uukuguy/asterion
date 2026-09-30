@@ -3351,3 +3351,5 @@
 - 12:05 [cd489499] P7 默认关闭离线优化与精确路线注入；仅显式 integration 模式可启用，保留 wordmap/Playbook 读取
 - 12:45 VC33 L1 纯 worldmap 重做 `p7-live-20260930043047-7fc39f2e5eaf3d3361ea3a15`：当前 7 步，0 关完成，human-baseline 封存；offline=false、route adoption 未 arm、Playbook 预载 12 条视觉假设，最终保存 27 条假设，confirmed 0，replay/cleanup 通过
 - 12:47 [e11441cd] 更新恢复检查点：VC33 纯 worldmap L1 未过关，下一步分析 prediction-mismatch 与模型使用
+- 14:14 P7 修复续推理动作白名单漂移并暴露非法动作反馈；174 项 P7 回归测试与 lint 通过 [b37121be]
+- 14:14 VC33 L2 纯 P7 重跑仍失败：当前级别 7 步、levels_completed=1；未再出现 ACTION1–ACTION7 幻觉，但未找到通关路线
