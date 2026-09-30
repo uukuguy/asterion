@@ -10,6 +10,11 @@ from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.mechanism_model import MechanismSpec
 from asterion.applications.prime.p7.playbook import PlaybookKey, load_playbook, save_playbook
 from asterion.applications.prime.p7.world_model import WorldModelStore
+from asterion.applications.prime.p7.experience_induction import (
+    ActionEffect,
+    EffectMotion,
+    ExperienceInducer,
+)
 
 
 class _LearningEngine:
@@ -72,6 +77,39 @@ def _move_expectation(x: int) -> dict[str, object]:
 
 
 class ExperienceLearningTests(unittest.TestCase):
+    def test_translation_candidate_survives_bounded_edge_delta_variation(self) -> None:
+        def effect(sequence: int, count: int) -> ActionEffect:
+            return ActionEffect(
+                game_id="edge-motion",
+                seed=0,
+                run_id="edge-motion-run",
+                sequence=sequence,
+                level=0,
+                levels_completed=0,
+                state="NOT_FINISHED",
+                action="ACTION2",
+                data=(),
+                before_state_sha256=f"state-{sequence}",
+                after_state_sha256=f"state-after-{sequence}",
+                before_frame_sha256=f"frame-{sequence}",
+                after_frame_sha256=f"frame-after-{sequence}",
+                changed_cell_count=count + 1,
+                changed_cells=(),
+                changed_cells_omitted=count + 1,
+                outcome="changed",
+                components=(),
+                motions=(EffectMotion(9, 12, ((0, 0), (1, 0)), 0, 4, count),),
+                motion_complete=True,
+            )
+
+        inducer = ExperienceInducer(win_levels=1)
+        inducer.observe(effect(1, 160))
+        inducer.observe(effect(2, 161))
+        candidates = inducer.candidates()
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].status, "hypothesis")
+        self.assertEqual(candidates[0].support_count, 2)
+
     def _collect_two_effects(self, *, contradict_probe: bool = False) -> tuple[ArcBroker, _LearningEngine]:
         engine = _LearningEngine(contradict_probe=contradict_probe)
         broker = ArcBroker(engine=engine, game=_game(), world_model=_world())

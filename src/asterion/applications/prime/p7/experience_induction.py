@@ -394,7 +394,7 @@ def _signature(effect: ActionEffect) -> str:
             "translation", effect.outcome, effect.state, effect.levels_completed,
             tuple((
                 motion.source_value, motion.clear_value, motion.shape,
-                motion.dx, motion.dy, motion.count,
+                motion.dx, motion.dy,
             ) for motion in effect.motions),
         ))
 
