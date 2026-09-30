@@ -3408,3 +3408,4 @@
 - 05:03 Documented the repaired worker-facade integration boundary and retained the honest live-verification limit [faa5becc]
 - 05:18 Infer component motion despite independent boundary deltas, add ordered clear-cell effects, and expose a non-conflicting induced mechanism bundle [73d6e0a2]
 - 05:31 Added synthetic semantic-learning lifecycle coverage, allowed nonterminal search witnesses, and made Playbook rehydration idempotent [96da1c66]
+- 05:39 Clarified certificates as simulator trust labels and made candidate probes optional so ordinary exploration never waits [COMMIT]
