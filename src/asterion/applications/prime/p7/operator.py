@@ -2888,6 +2888,8 @@ def classify_failure_cause(
     status = {} if broker_status is None else dict(broker_status)
     private = {} if pi_private is None else dict(pi_private)
     evidence: dict[str, object] = {}
+    if failure is None:
+        return {"category": "none", "evidence": {}}
     if isinstance(failure, asyncio.CancelledError):
         evidence = {
             key: private[key]

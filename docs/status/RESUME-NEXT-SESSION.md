@@ -9,6 +9,7 @@
 - `world_model_version=22`，最终 `confirmed` mechanics/entities/relations 仍为 0/0/0，hypotheses=12；因此本次只能证明 worldmap 被读取、更新和保存，不能证明已形成可复用机制。
 - 诊断记录 3 次 `prediction-mismatch`，以及一次 `act_checked_output_too_large` 告警；实际动作仍成功完成，`pi_rpc_private.error_events=[]`、returncode=0。后续要检查预测证据填充和大输出降级是否进一步影响长推理。
 - 现场发现认知快照把历史最佳步数写入 `primitive_actions`，在运行中可能把 1 步误读为当前进度 6 步。已新增 `current_primitive_actions` 并用回归测试固定语义；`primitive_actions` 继续表示历史最佳值。
+- 同一现场还暴露成功摘要把 `failure=null` 分类为 `application_failure`；已补成功分支并固定为 `category=none`，旧 SP80 摘要保留为修复前证据。
 
 ## 已验证事实
 
