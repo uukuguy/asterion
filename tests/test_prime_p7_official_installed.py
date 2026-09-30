@@ -104,6 +104,10 @@ _RUNNER = textwrap.dedent(
 
     async def main():
         root = Path.cwd()
+        profile = root / "pi-profile"
+        profile.mkdir(exist_ok=True)
+        (profile / "auth.json").write_text(json.dumps({"deepseek": {"token": "fixture-only"}}))
+        (profile / "models-store.json").write_text(json.dumps({"deepseek": {"models": [{"id": "deepseek-flash"}]}}))
         marker = root / "closed"
         evidence = root / "evidence"
         evidence.mkdir()
@@ -112,7 +116,12 @@ _RUNNER = textwrap.dedent(
         ))).resolve()
         invocation = OfficialInvocation(
             root,
-            {"DEEPSEEK_API_KEY": "fixture-only"},
+            {
+                "ASTERION_PRIME_PROVIDER": "deepseek",
+                "ASTERION_PRIME_MODEL": "deepseek-flash",
+                "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
+                "DEEPSEEK_API_KEY": "fixture-only",
+            },
             (sys.executable, str(root / "fake_pi_rpc.py"), str(Path(sys.argv[1]).resolve())),
             extension,
             "arc-fixture-only",

@@ -168,6 +168,10 @@ class Worker:
 
 async def main():
     root = Path.cwd()
+    profile = root / "pi-profile"
+    profile.mkdir(exist_ok=True)
+    (profile / "auth.json").write_text(json.dumps({"deepseek": {"token": "fixture-only"}}))
+    (profile / "models-store.json").write_text(json.dumps({"deepseek": {"models": [{"id": "deepseek-flash"}]}}))
     catalog = root / "arc" / "environment_files" / "zx42" / "abc123"
     catalog.mkdir(parents=True, exist_ok=True)
     (catalog / "zx42.py").write_text("# fixture source is never imported\\n")
@@ -183,7 +187,12 @@ async def main():
     worker.target_level = target_level
     engine = Engine()
     resources_ = build_p7_operator_resources(
-        environment={"DEEPSEEK_API_KEY": "fixture-only"},
+        environment={
+            "ASTERION_PRIME_PROVIDER": "deepseek",
+            "ASTERION_PRIME_MODEL": "deepseek-flash",
+            "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
+            "DEEPSEEK_API_KEY": "fixture-only",
+        },
         pi_base_command=(sys.executable, str(root / "fake_pi_rpc.py"), "__NODE__"),
         extension_path=extension,
         working_directory=root,

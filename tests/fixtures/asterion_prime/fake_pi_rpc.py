@@ -25,7 +25,7 @@ def _run_extension(loader: str, node: str) -> None:
     script = """
 let tool;
 const loader = await import(process.argv[1]);
-await loader.default({registerTool(value) { tool = value; }});
+await loader.default({registerTool(value) { if (value.name === 'ipython') tool = value; }});
 if (!tool || tool.name !== 'ipython') process.exit(2);
 const result = await tool.execute('fixture-call-1', {code: 'fixture.solve()'});
 if (!Array.isArray(result.content) || result.content[0]?.text !== 'completed') process.exit(3);

@@ -395,7 +395,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "no-ops",
             "death paths",
             "target_level",
-            "action1 is up",
+            "action names are opaque per-game slots",
             "reset_required",
             "reset the current level",
             "never use python or shell loops to submit actions",
@@ -417,6 +417,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "or action sequence",
             lowered,
         )
+        self.assertIn("never assume that action1 means up", lowered)
 
     def test_operator_selection_is_fixed_and_runtime_options_are_immutable(
         self,
