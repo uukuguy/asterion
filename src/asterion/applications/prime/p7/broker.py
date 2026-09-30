@@ -426,7 +426,15 @@ class ArcBroker:
             value = fact.value
             if not isinstance(value, Mapping) or value.get("key") in seen:
                 continue
-            current.append({**value, "status": "stale", "source": "playbook"})
+            level = value.get("level")
+            same_level = type(level) is int and level == self._current.levels_completed
+            status = value.get("status")
+            # A persisted candidate is still only a hypothesis.  Reclassify a
+            # same-level hypothesis as probe-eligible so the next run can
+            # validate it against the fresh frame; it never grants execution
+            # authority or bypasses record_hypothesis/retrodiction.
+            restored_status = "hypothesis" if same_level and status == "hypothesis" else "stale"
+            current.append({**value, "status": restored_status, "source": "playbook"})
         bundle = self._compiled_induced_mechanism()
         bundle_item: dict[str, object] | None = None
         if bundle is not None:
@@ -457,6 +465,36 @@ class ArcBroker:
         live = [item for item in current if item.get("source") != "playbook"]
         ordered = ([] if bundle_item is None else [bundle_item]) + live + stale
         return tuple(ordered[:64])
+
+    def _persisted_candidates(self) -> tuple[dict[str, object], ...]:
+        """Return bounded same-game candidate priors from the loaded Playbook.
+
+        Candidate summaries are semantic experience, not routes.  Only a
+        hypothesis recorded for the current level is exposed as a reusable
+        prior; all other summaries remain diagnostics and are counted as
+        stale.  The caller still needs a fresh distinguishing probe before
+        any mechanism can become planner-eligible.
+        """
+
+        result: list[dict[str, object]] = []
+        for fact in self._playbook.candidate_summaries:
+            value = fact.value
+            if not isinstance(value, Mapping):
+                continue
+            key = value.get("key")
+            level = value.get("level")
+            status = value.get("status")
+            if type(key) is not str or type(level) is not int or type(status) is not str:
+                continue
+            if status != "hypothesis":
+                continue
+            item = dict(value)
+            item["status"] = (
+                "hypothesis" if level == self._current.levels_completed else "stale"
+            )
+            item["source"] = "playbook"
+            result.append(item)
+        return tuple(result)
 
     def _compiled_induced_mechanism(self) -> MechanismSpec | None:
         """Combine non-conflicting induced rules into one advisory model."""
@@ -513,6 +551,23 @@ class ArcBroker:
             candidate for candidate in current_candidates
             if candidate.status == "hypothesis"
         )
+        persisted_candidates = self._persisted_candidates()
+        persisted_current = tuple(
+            item for item in persisted_candidates
+            if item.get("level") == current_level and item.get("status") == "hypothesis"
+        )
+        current_keys = {candidate.key for candidate in current_candidates}
+        persisted_current = tuple(
+            item for item in persisted_current
+            if item.get("key") not in current_keys
+        )
+        all_candidate_keys = {
+            candidate.key for candidate in candidates
+        } | {
+            item["key"] for item in persisted_candidates
+            if type(item.get("key")) is str
+        }
+        current_candidate_total = len(current_candidates) + len(persisted_current)
         compiled_candidates: list[dict[str, object]] = []
         candidate_previews: list[dict[str, object]] = []
         # Level-local hypotheses are the only candidates that can guide a
@@ -538,24 +593,47 @@ class ArcBroker:
                 "evidence_sequences": list(candidate.evidence_sequences[-8:]),
                 "compiled_mechanism": compiled.to_mapping(),
             })
+        for item in persisted_current:
+            action = item.get("action")
+            if not isinstance(action, Mapping):
+                continue
+            candidate_previews.append({
+                "action": dict(action),
+                "status": "hypothesis",
+                "support_count": item.get("support_count", 0),
+                "evidence_sequences": list(item.get("evidence_sequences", ())),
+                "motion_complete": False,
+                "changed_cell_count": 0,
+                "source": "playbook",
+            })
+            compiled = item.get("compiled_mechanism")
+            if isinstance(compiled, Mapping):
+                compiled_candidates.append({
+                    "key": item["key"],
+                    "action": dict(action),
+                    "support_count": item.get("support_count", 0),
+                    "evidence_sequences": list(item.get("evidence_sequences", ())),
+                    "compiled_mechanism": dict(compiled),
+                    "source": "playbook",
+                })
         compiled_candidates.sort(
             key=lambda item: (-int(item["support_count"]), str(item["key"]))
         )
         candidate_previews.sort(
             key=lambda item: (-int(item["support_count"]), str(item["action"]))
         )
-        if any(compile_effect_hypothesis(candidate) is not None for candidate in current_hypotheses):
+        if compiled_candidates:
             recommendation = "inspect_candidate_and_probe"
-        elif current_candidates:
+        elif current_candidates or persisted_current:
             recommendation = "inspect_candidates"
         else:
             recommendation = "ordinary_exploration"
         simulator = self.simulator_status()
         return {
             "recommendation": recommendation,
-            "candidate_count": len(candidates),
-            "current_candidate_count": len(current_candidates),
-            "stale_candidate_count": len(candidates) - len(current_candidates),
+            "candidate_count": len(all_candidate_keys),
+            "current_candidate_count": current_candidate_total,
+            "stale_candidate_count": len(all_candidate_keys) - current_candidate_total,
             "candidate_previews": candidate_previews[:4],
             "compiled_candidates": compiled_candidates[:4],
             "simulator": {

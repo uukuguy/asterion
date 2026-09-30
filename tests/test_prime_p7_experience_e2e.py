@@ -9,6 +9,7 @@ from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.ipython_host import p7_client_facade
 from asterion.applications.prime.p7.playbook import load_playbook, save_playbook
+from asterion.applications.prime.p7.world_model import WorldModelStore
 
 
 class _LearningEngine:
@@ -153,9 +154,75 @@ class ExperienceEndToEndTests(unittest.TestCase):
             fresh.load_playbook(loaded)
             persisted = fresh.mechanism_candidates()
             self.assertEqual(len(persisted), 1)
-            self.assertEqual(persisted[0]["status"], "stale")
+            self.assertEqual(persisted[0]["status"], "hypothesis")
             self.assertEqual(fresh.simulator_status()["confirmed_model"], False)
             self.assertEqual(engine2.calls, [])
+
+    def test_reloaded_same_level_candidate_is_a_reusable_probe_prior(self) -> None:
+        source = ArcBroker(engine=_TranslationEngine())
+        source.bind_history("learning-run")
+        for expected_x in (1, 2):
+            source.act_checked([{
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"cell": {"x": expected_x, "y": 0, "value": 7}},
+            }])
+        snapshot = source.export_playbook(successful=False)
+
+        fresh = ArcBroker(
+            engine=_TranslationEngine(),
+            world_model=WorldModelStore(_TranslationEngine.game_id, 0, _TranslationEngine.win_levels),
+        )
+        fresh.bind_history("new-run")
+        fresh.load_playbook(snapshot)
+
+        hint = fresh.learning_hint()
+        self.assertEqual(hint["current_candidate_count"], 1)
+        self.assertEqual(hint["stale_candidate_count"], 0)
+        self.assertEqual(hint["recommendation"], "inspect_candidate_and_probe")
+        self.assertTrue(hint["compiled_candidates"])
+        candidate = fresh.mechanism_candidates()[0]
+        self.assertEqual(candidate["source"], "playbook")
+        self.assertEqual(candidate["status"], "hypothesis")
+        self.assertIn("compiled_mechanism", candidate)
+
+    def test_reloaded_candidate_can_be_retro_verified_without_route_injection(self) -> None:
+        source = ArcBroker(engine=_TranslationEngine())
+        source.bind_history("learning-run")
+        for expected_x in (1, 2):
+            source.act_checked([{
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"cell": {"x": expected_x, "y": 0, "value": 7}},
+            }])
+        snapshot = source.export_playbook(successful=False)
+
+        fresh = ArcBroker(
+            engine=_TranslationEngine(),
+            world_model=WorldModelStore(_TranslationEngine.game_id, 0, _TranslationEngine.win_levels),
+        )
+        fresh.bind_history("new-run")
+        fresh.load_playbook(snapshot)
+        candidate = fresh.mechanism_candidates()[0]
+        mechanism = dict(candidate["compiled_mechanism"])
+        mechanism["revision"] = 1
+        fresh.record_hypothesis(
+            "mechanics",
+            "persisted-controls",
+            {
+                "mechanism": mechanism,
+                "probe": {
+                    "action": {"name": "ACTION1", "data": {}},
+                    "expect": {"cell": {"x": 1, "y": 0, "value": 7}},
+                },
+                "dependencies": [],
+            },
+        )
+        result = fresh.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 1, "y": 0, "value": 7}},
+        }])
+        self.assertEqual(result["stop_reason"], "matched")
+        self.assertEqual(fresh.simulator_status()["status"], "verified")
+        self.assertTrue(fresh.retrodiction_status()["planner"]["eligible"])
 
     def test_export_playbook_preserves_prior_experience_across_runs(self) -> None:
         source = ArcBroker(engine=_TranslationEngine())
