@@ -629,6 +629,13 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("stop querying", P7_CONTINUE_PROMPT)
         self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
 
+    def test_offline_optimization_is_disabled_without_explicit_integration_mode(self) -> None:
+        from asterion.applications.prime.p7.operator import _offline_optimization_enabled
+
+        self.assertFalse(_offline_optimization_enabled({}))
+        self.assertFalse(_offline_optimization_enabled({"ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION": "diagnostic"}))
+        self.assertTrue(_offline_optimization_enabled({"ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION": "integration"}))
+
     def test_retry_replan_required_is_returned_without_trace_dispatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient

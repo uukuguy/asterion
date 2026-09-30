@@ -108,6 +108,7 @@ _MISSING = object()
 UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
 P7_STRATEGY_ENV = "ASTERION_PRIME_P7_STRATEGY"
+P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
@@ -239,6 +240,18 @@ def _resolve_history_variant(
     if variant == "legacy" and type(game) is ArcGameContract:
         raise P7OperatorError("P7 history variant is unavailable")
     return variant
+
+
+def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
+    """Allow exact-route replay only for an explicit integration experiment.
+
+    Capability runs default to pure P7 planning.  The optimizer remains
+    available for separately-labelled replay/integration checks, but an absent
+    or unknown value cannot enable route injection accidentally.
+    """
+
+    value = environment.get(P7_OFFLINE_OPTIMIZATION_ENV, "").strip().lower()
+    return value in {"integration", "enabled", "true", "1"}
 
 
 def _prompt_for_variant(variant: str, tool_registry: object = None) -> str:
@@ -2327,27 +2340,57 @@ async def run_live(
         summary = _summarize_prefix_mechanics(prefix)
         if summary:
             prompt = prompt + "\n\n" + summary
-    route_source = load_best_prefix(
-        invocation.arc_root,
-        root / ".asterion-private" / "prime-p7-live",
-        invocation.game.game_id,
-        invocation.game.seed,
-        max_level=invocation.game.target_level,
-        expected_model_id=declared_model_selection(invocation.environment).model,
-    )
-    if _route_source_matches_prefix(
-        route_source, prefix, target_level=invocation.game.target_level
-    ):
-        route_hint, route_optimization = _optimize_verified_route(
-            route_source,
-            game=invocation.game,
-            arc_root=invocation.arc_root,
-            target_level=invocation.game.target_level,
-            warmup_prefix=prefix,
+    offline_optimization_enabled = _offline_optimization_enabled(invocation.environment)
+    if offline_optimization_enabled:
+        route_source = load_best_prefix(
+            invocation.arc_root,
+            root / ".asterion-private" / "prime-p7-live",
+            invocation.game.game_id,
+            invocation.game.seed,
+            max_level=invocation.game.target_level,
+            expected_model_id=declared_model_selection(invocation.environment).model,
         )
+        if _route_source_matches_prefix(
+            route_source, prefix, target_level=invocation.game.target_level
+        ):
+            route_hint, route_optimization = _optimize_verified_route(
+                route_source,
+                game=invocation.game,
+                arc_root=invocation.arc_root,
+                target_level=invocation.game.target_level,
+                warmup_prefix=prefix,
+            )
+        else:
+            route_hint, route_optimization = "", {
+                "status": "prefix-mismatch",
+                "baseline_actions": 0,
+                "optimized_actions": 0,
+                "candidates_replayed": 0,
+                "removed_indices": [],
+                "proofs": [],
+                "warmup_actions": 0,
+                "elapsed_seconds": 0.0,
+                "timed_out": False,
+            }
+        if not route_hint and invocation.game.target_level > 1 and prefix is not None:
+            attempt = load_verified_attempt(
+                invocation.arc_root,
+                root / ".asterion-private" / "prime-p7-live",
+                invocation.game.game_id,
+                invocation.game.seed,
+                expected_model_id=declared_model_selection(invocation.environment).model,
+            )
+            if attempt is not None:
+                route_hint, route_optimization = _optimize_partial_attempt(
+                    attempt,
+                    prefix=prefix,
+                    game=invocation.game,
+                    arc_root=invocation.arc_root,
+                    target_level=invocation.game.target_level,
+                )
     else:
         route_hint, route_optimization = "", {
-            "status": "prefix-mismatch",
+            "status": "disabled",
             "baseline_actions": 0,
             "optimized_actions": 0,
             "candidates_replayed": 0,
@@ -2357,22 +2400,6 @@ async def run_live(
             "elapsed_seconds": 0.0,
             "timed_out": False,
         }
-    if not route_hint and invocation.game.target_level > 1 and prefix is not None:
-        attempt = load_verified_attempt(
-            invocation.arc_root,
-            root / ".asterion-private" / "prime-p7-live",
-            invocation.game.game_id,
-            invocation.game.seed,
-            expected_model_id=declared_model_selection(invocation.environment).model,
-        )
-        if attempt is not None:
-            route_hint, route_optimization = _optimize_partial_attempt(
-                attempt,
-                prefix=prefix,
-                game=invocation.game,
-                arc_root=invocation.arc_root,
-                target_level=invocation.game.target_level,
-            )
     if route_hint:
         prompt = prompt + "\n\n" + route_hint
     if invocation.sweep_mode:
@@ -2421,6 +2448,7 @@ async def run_live(
         "action_cap": invocation.game.action_cap,
     }
     diagnostics["route_optimization"] = route_optimization
+    diagnostics["offline_optimization_enabled"] = offline_optimization_enabled
     diagnostics["playbook_loaded"] = playbook_loaded
     diagnostics["playbook_saved"] = False
     if invocation.sweep_mode:
@@ -2458,6 +2486,7 @@ async def run_live(
         prediction_client = getattr(resources_, "_prediction_client", None)
         if (
             isinstance(prediction_client, _P7BrokerClient)
+            and offline_optimization_enabled
             and route_optimization.get("status") in {"optimized", "partial-optimized"}
         ):
             candidate_actions = route_optimization.get("candidate_actions", [])
