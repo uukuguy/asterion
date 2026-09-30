@@ -82,9 +82,10 @@ class ExperienceEndToEndTests(unittest.TestCase):
         observed = _P7BrokerClient(broker, None).observe()
         self.assertEqual(next(iter(observed)), "learning_hint")
         candidates = broker.mechanism_candidates()
-        self.assertEqual(candidates[-1]["key"], "experience.induced.bundle")
-        self.assertEqual(candidates[-1]["source"], "induced-bundle")
-        self.assertNotIn("plan", candidates[-1]["compiled_mechanism"])
+        bundle = next(item for item in candidates if item["key"] == "experience.induced.bundle")
+        self.assertEqual(candidates[0]["key"], "experience.induced.bundle")
+        self.assertEqual(bundle["source"], "induced-bundle")
+        self.assertNotIn("plan", bundle["compiled_mechanism"])
 
     def test_learning_evidence_survives_playbook_reload_without_planner_authority(self) -> None:
         engine = _LearningEngine()

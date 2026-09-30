@@ -428,8 +428,9 @@ class ArcBroker:
                 continue
             current.append({**value, "status": "stale", "source": "playbook"})
         bundle = self._compiled_induced_mechanism()
+        bundle_item: dict[str, object] | None = None
         if bundle is not None:
-            current.append({
+            bundle_item = {
                 "key": "experience.induced.bundle",
                 "level": self._current.levels_completed,
                 "action_family": "mixed",
@@ -448,8 +449,14 @@ class ArcBroker:
                 })[-32:],
                 "compiled_mechanism": bundle.to_mapping(),
                 "source": "induced-bundle",
-            })
-        return tuple(current[-256:])
+            }
+        # Put the compact, current induced bundle first.  A candidate response
+        # may share the worker's bounded output budget with large evidence
+        # fields; the reusable summary must not be hidden at the tail.
+        stale = [item for item in current if item.get("source") == "playbook"]
+        live = [item for item in current if item.get("source") != "playbook"]
+        ordered = ([] if bundle_item is None else [bundle_item]) + live + stale
+        return tuple(ordered[:64])
 
     def _compiled_induced_mechanism(self) -> MechanismSpec | None:
         """Combine non-conflicting induced rules into one advisory model."""
