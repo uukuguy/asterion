@@ -181,11 +181,14 @@ class PlaybookSnapshot:
     evidence_index: tuple[str, ...] = ()
     branch_reasons: tuple[str, ...] = ()
     visual_hypotheses: tuple[CheckedFact, ...] = ()
+    effect_summaries: tuple[CheckedFact, ...] = ()
+    candidate_summaries: tuple[CheckedFact, ...] = ()
+    simulator_summaries: tuple[CheckedFact, ...] = ()
 
     def __post_init__(self) -> None:
         if type(self.key) is not PlaybookKey:
             raise ValueError("invalid playbook key")
-        for name, typ in (("confirmed_facts", CheckedFact), ("checked_routes", CheckedRoute), ("level_memory", LevelMemory), ("visual_hypotheses", CheckedFact)):
+        for name, typ in (("confirmed_facts", CheckedFact), ("checked_routes", CheckedRoute), ("level_memory", LevelMemory), ("visual_hypotheses", CheckedFact), ("effect_summaries", CheckedFact), ("candidate_summaries", CheckedFact), ("simulator_summaries", CheckedFact)):
             value = getattr(self, name)
             if type(value) is not tuple or any(type(item) is not typ for item in value):
                 raise ValueError(f"invalid {name}")
@@ -193,10 +196,12 @@ class PlaybookSnapshot:
             value = getattr(self, name)
             normalized = _unique_sorted(value, name)
             object.__setattr__(self, name, normalized)
-        if len(self.confirmed_facts) > _MAX_RECORDS or len(self.checked_routes) > _MAX_RECORDS or len(self.level_memory) > _MAX_RECORDS or len(self.visual_hypotheses) > _MAX_RECORDS:
+        if any(len(getattr(self, name)) > _MAX_RECORDS for name in ("confirmed_facts", "checked_routes", "level_memory", "visual_hypotheses", "effect_summaries", "candidate_summaries", "simulator_summaries")):
             raise ValueError("playbook record cap exceeded")
         if any(f.level >= self.key.win_levels for f in self.confirmed_facts):
             raise ValueError("confirmed fact level out of range")
+        if any(f.level >= self.key.win_levels for f in (*self.effect_summaries, *self.candidate_summaries, *self.simulator_summaries)):
+            raise ValueError("experience fact level out of range")
         if any(route.level >= self.key.win_levels for route in self.checked_routes):
             raise ValueError("route level out of range")
         if any(memory.level >= self.key.win_levels or any(f.level >= self.key.win_levels for f in memory.checked_facts)
@@ -207,7 +212,10 @@ class PlaybookSnapshot:
         for name, value, key in (("confirmed_facts", self.confirmed_facts, lambda x: (x.layer, x.key)),
                                  ("checked_routes", self.checked_routes, lambda x: x.level),
                                  ("level_memory", self.level_memory, lambda x: x.level),
-                                 ("visual_hypotheses", self.visual_hypotheses, lambda x: (x.layer, x.key))):
+                                 ("visual_hypotheses", self.visual_hypotheses, lambda x: (x.layer, x.key)),
+                                 ("effect_summaries", self.effect_summaries, lambda x: (x.layer, x.key)),
+                                 ("candidate_summaries", self.candidate_summaries, lambda x: (x.layer, x.key)),
+                                 ("simulator_summaries", self.simulator_summaries, lambda x: (x.layer, x.key))):
             keys = [key(item) for item in value]
             if len(set(keys)) != len(keys):
                 raise ValueError(f"duplicate {name}")
@@ -241,6 +249,11 @@ def _json(snapshot: PlaybookSnapshot) -> bytes:
             "checked_model": {"confirmed_facts": [_fact_json(x) for x in sorted(snapshot.confirmed_facts, key=lambda x: (x.layer, x.key))],
                 "checked_routes": [{"level": x.level, "expectations": [_expectation_json(e) for e in x.expectations], "evidence_digest": x.evidence_digest} for x in sorted(snapshot.checked_routes, key=lambda x: x.level)],
                 "visual_hypotheses": [_fact_json(x) for x in sorted(snapshot.visual_hypotheses, key=lambda x: (x.layer, x.key))]},
+            "experience_model": {
+                "effects": [_fact_json(x) for x in sorted(snapshot.effect_summaries, key=lambda x: (x.layer, x.key))],
+                "candidates": [_fact_json(x) for x in sorted(snapshot.candidate_summaries, key=lambda x: (x.layer, x.key))],
+                "simulator": [_fact_json(x) for x in sorted(snapshot.simulator_summaries, key=lambda x: (x.layer, x.key))],
+            },
             "level_memory": [{"level": x.level, "checked_facts": [_fact_json(f) for f in sorted(x.checked_facts, key=lambda f: (f.layer, f.key))], "rejected_branches": sorted(x.rejected_branches)} for x in sorted(snapshot.level_memory, key=lambda x: x.level)],
             "conflict_metadata": sorted(snapshot.conflict_metadata), "evidence_index": sorted(snapshot.evidence_index), "branch_reasons": list(snapshot.branch_reasons)}
     encoded = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
@@ -322,7 +335,7 @@ def load_playbook(root: Path, key: PlaybookKey) -> PlaybookSnapshot | None:
         raise ValueError("playbook exceeds size cap")
     try:
         body = json.loads(path.read_bytes())
-        if type(body) is not dict or body.get("schema") != SCHEMA or set(body) != {"schema", "key", "checked_model", "level_memory", "conflict_metadata", "evidence_index", "branch_reasons"}:
+        if type(body) is not dict or body.get("schema") != SCHEMA or set(body) not in ({"schema", "key", "checked_model", "level_memory", "conflict_metadata", "evidence_index", "branch_reasons"}, {"schema", "key", "checked_model", "experience_model", "level_memory", "conflict_metadata", "evidence_index", "branch_reasons"}):
             raise ValueError
         rawkey = _mapping(body["key"], {"game_id", "seed", "win_levels"})
         actual = PlaybookKey(rawkey["game_id"], rawkey["seed"], rawkey["win_levels"])
@@ -336,6 +349,12 @@ def load_playbook(root: Path, key: PlaybookKey) -> PlaybookSnapshot | None:
             raise ValueError
         facts = tuple(_parse_fact(x) for x in model["confirmed_facts"])
         visual_hypotheses = tuple(_parse_fact(x) for x in model.get("visual_hypotheses", []))
+        experience = body.get("experience_model", {})
+        if type(experience) is not dict or set(experience) not in ({"effects", "candidates", "simulator"}, set()):
+            raise ValueError("invalid experience model")
+        effect_summaries = tuple(_parse_fact(x) for x in experience.get("effects", []))
+        candidate_summaries = tuple(_parse_fact(x) for x in experience.get("candidates", []))
+        simulator_summaries = tuple(_parse_fact(x) for x in experience.get("simulator", []))
         routes = []
         for route in model["checked_routes"]:
             route = _mapping(route, {"level", "expectations", "evidence_digest"})
@@ -364,7 +383,7 @@ def load_playbook(root: Path, key: PlaybookKey) -> PlaybookSnapshot | None:
         for name in ("conflict_metadata", "evidence_index", "branch_reasons"):
             if type(body[name]) is not list:
                 raise ValueError
-        return PlaybookSnapshot(actual, facts, tuple(routes), memory, tuple(body["conflict_metadata"]), tuple(body["evidence_index"]), tuple(body["branch_reasons"]), visual_hypotheses)
+        return PlaybookSnapshot(actual, facts, tuple(routes), memory, tuple(body["conflict_metadata"]), tuple(body["evidence_index"]), tuple(body["branch_reasons"]), visual_hypotheses, effect_summaries, candidate_summaries, simulator_summaries)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError, AttributeError):
         raise ValueError("playbook unavailable") from None
 
@@ -375,13 +394,13 @@ def append_checked_route(snapshot: PlaybookSnapshot, route: CheckedRoute) -> Pla
     if route.level >= snapshot.key.win_levels:
         raise ValueError("invalid route level")
     evidence_index = tuple(dict.fromkeys((*snapshot.evidence_index, route.evidence_digest)))
-    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, (*snapshot.checked_routes, route), snapshot.level_memory, snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons, snapshot.visual_hypotheses)
+    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, (*snapshot.checked_routes, route), snapshot.level_memory, snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons, snapshot.visual_hypotheses, snapshot.effect_summaries, snapshot.candidate_summaries, snapshot.simulator_summaries)
 
 
 def branch_playbook(snapshot: PlaybookSnapshot, reason: str) -> PlaybookSnapshot:
     if type(snapshot) is not PlaybookSnapshot or type(reason) is not str or not reason or len(reason) > 256:
         raise ValueError("invalid branch")
-    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, snapshot.checked_routes, snapshot.level_memory, snapshot.conflict_metadata, snapshot.evidence_index, tuple(sorted(set((*snapshot.branch_reasons, reason)))), snapshot.visual_hypotheses)
+    return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, snapshot.checked_routes, snapshot.level_memory, snapshot.conflict_metadata, snapshot.evidence_index, tuple(sorted(set((*snapshot.branch_reasons, reason)))), snapshot.visual_hypotheses, snapshot.effect_summaries, snapshot.candidate_summaries, snapshot.simulator_summaries)
 
 
 def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapshot, *, level: int) -> PlaybookSnapshot:
@@ -408,7 +427,7 @@ def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapsho
             raise ValueError("visual hypothesis lacks evidence digest")
         visual_hypotheses.append(CheckedFact(fact.layer, fact.key, fact.value, fact.level, digests))
     evidence_index = tuple(dict.fromkeys((*snapshot.evidence_index, *(d for f in (*facts, *visual_hypotheses) for d in f.evidence_digests))))
-    return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*tuple(m for m in snapshot.level_memory if m.level != level), memory), snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.visual_hypotheses, *visual_hypotheses)}.values(), key=lambda x: (x.layer, x.key))))
+    return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*tuple(m for m in snapshot.level_memory if m.level != level), memory), snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.visual_hypotheses, *visual_hypotheses)}.values(), key=lambda x: (x.layer, x.key))), snapshot.effect_summaries, snapshot.candidate_summaries, snapshot.simulator_summaries)
 
 
 __all__ = ["PlaybookKey", "PlaybookSnapshot", "CheckedRoute", "CheckedFact", "LevelMemory", "load_playbook", "save_playbook", "append_checked_route", "branch_playbook", "capture_completed_level"]

@@ -194,6 +194,30 @@ class TestP7Playbook(unittest.TestCase):
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded.visual_hypotheses, captured.visual_hypotheses)
 
+    def test_experience_summaries_round_trip_as_advisory_records(self) -> None:
+        effect = CheckedFact(
+            "mechanics", "experience.effect.1", {"sequence": 1, "outcome": "changed"},
+            0, ("a" * 64,),
+        )
+        candidate = CheckedFact(
+            "mechanics", "experience.candidate.abc", {"status": "hypothesis"},
+            0, ("b" * 64,),
+        )
+        simulator = CheckedFact(
+            "mechanics", "experience.simulator.status", {"status": "absent"},
+            0, ("c" * 64,),
+        )
+        snapshot = PlaybookSnapshot(
+            self.key, effect_summaries=(effect,), candidate_summaries=(candidate,),
+            simulator_summaries=(simulator,),
+        )
+        save_playbook(self.root, snapshot)
+        loaded = load_playbook(self.root, self.key)
+        self.assertIsNotNone(loaded)
+        self.assertEqual(loaded.effect_summaries, (effect,))
+        self.assertEqual(loaded.candidate_summaries, (candidate,))
+        self.assertEqual(loaded.simulator_summaries, (simulator,))
+
     def test_completed_level_requires_current_in_range_level(self) -> None:
         world = WorldModelStore("game-1", 42, 3)
         with self.assertRaises(ValueError):

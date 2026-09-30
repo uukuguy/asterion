@@ -10,7 +10,7 @@ from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
 from .model_search import search_model
 from .experience_induction import ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
-from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
+from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
 from .transition_model import ActionExpectation, TransitionModel
@@ -371,8 +371,7 @@ class ArcBroker:
 
     def action_effects(self) -> tuple[dict[str, object], ...]:
         """Return bounded learned effect summaries for this run."""
-
-        return tuple({
+        current = [{
             "sequence": effect.sequence,
             "level": effect.level,
             "action": {"name": effect.action, "data": dict(effect.data)},
@@ -382,12 +381,18 @@ class ArcBroker:
             "changed_cells_omitted": effect.changed_cells_omitted,
             "state": effect.state,
             "after_frame_sha256": effect.after_frame_sha256,
-        } for effect in self._experience_inducer.effects())
+        } for effect in self._experience_inducer.effects()]
+        seen = {item["sequence"] for item in current}
+        for fact in self._playbook.effect_summaries:
+            value = fact.value
+            if isinstance(value, Mapping) and value.get("sequence") not in seen:
+                current.append({**value, "source": "playbook", "status": "stale"})
+        return tuple(current[-256:])
 
     def mechanism_candidates(self) -> tuple[dict[str, object], ...]:
         """Return candidate lifecycle and evidence without execution authority."""
 
-        return tuple({
+        current = [{
             "key": candidate.key,
             "level": candidate.level,
             "action_family": candidate.action_family,
@@ -397,7 +402,14 @@ class ArcBroker:
             "support_count": candidate.support_count,
             "evidence_sequences": list(candidate.evidence_sequences),
             "conflict_sequences": list(candidate.conflict_sequences),
-        } for candidate in self._experience_inducer.candidates())
+        } for candidate in self._experience_inducer.candidates()]
+        seen = {item["key"] for item in current}
+        for fact in self._playbook.candidate_summaries:
+            value = fact.value
+            if not isinstance(value, Mapping) or value.get("key") in seen:
+                continue
+            current.append({**value, "status": "stale", "source": "playbook"})
+        return tuple(current[-256:])
 
     def probe_plan(self) -> dict[str, object]:
         """Suggest one current-state probe; never dispatch it."""
@@ -640,6 +652,51 @@ class ArcBroker:
 
     def export_playbook(self, *, successful: bool) -> PlaybookSnapshot:
         snapshot = self._playbook
+        effect_facts: list[CheckedFact] = []
+        for effect in self._experience_inducer.effects()[-256:]:
+            evidence = effect.after_frame_sha256.removeprefix("sha256:")
+            level = min(effect.level, self._game.win_levels - 1)
+            effect_facts.append(CheckedFact(
+                "mechanics", f"experience.effect.{effect.sequence}", {
+                    "sequence": effect.sequence,
+                    "level": effect.level,
+                    "action": {"name": effect.action, "data": dict(effect.data)},
+                    "outcome": effect.outcome,
+                    "changed_cell_count": effect.changed_cell_count,
+                    "changed_cells": [list(cell) for cell in effect.changed_cells],
+                    "changed_cells_omitted": effect.changed_cells_omitted,
+                    "state": effect.state,
+                    "after_frame_sha256": effect.after_frame_sha256,
+                }, level, (evidence,),
+            ))
+        candidate_facts: list[CheckedFact] = []
+        for candidate in self._experience_inducer.candidates()[-256:]:
+            evidence = digest(candidate.key).removeprefix("sha256:")
+            level = min(candidate.level, self._game.win_levels - 1)
+            candidate_facts.append(CheckedFact(
+                "mechanics", f"experience.candidate.{evidence[:32]}", {
+                    "key": candidate.key,
+                    "level": candidate.level,
+                    "action_family": candidate.action_family,
+                    "action": {"name": candidate.action, "data": dict(candidate.data)},
+                    "signature": candidate.signature,
+                    "status": candidate.status,
+                    "support_count": candidate.support_count,
+                    "evidence_sequences": list(candidate.evidence_sequences),
+                    "conflict_sequences": list(candidate.conflict_sequences),
+                }, level, (evidence,),
+            ))
+        simulator_fact = CheckedFact(
+            "mechanics", "experience.simulator.status", self.simulator_status(),
+            min(self._current.levels_completed, self._game.win_levels - 1),
+            (digest(self.simulator_status()).removeprefix("sha256:"),),
+        )
+        snapshot = replace(
+            snapshot,
+            effect_summaries=tuple(effect_facts),
+            candidate_summaries=tuple(candidate_facts),
+            simulator_summaries=(simulator_fact,),
+        )
         if not successful:
             return branch_playbook(snapshot, "run-failed")
         if self._transition_model is not None:

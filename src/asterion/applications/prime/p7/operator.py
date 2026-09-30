@@ -2815,8 +2815,12 @@ async def run_live(
                         playbook_saved = False
                 elif failure is not None:
                     try:
-                        baseline = playbook_snapshot or PlaybookSnapshot(PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels))
-                        save_playbook(root, branch_playbook(baseline, "run-unverified"))
+                        if isinstance(broker_value, ArcBroker):
+                            baseline = broker_value.export_playbook(successful=False)
+                        else:
+                            baseline = playbook_snapshot or PlaybookSnapshot(PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels))
+                            baseline = branch_playbook(baseline, "run-unverified")
+                        save_playbook(root, baseline)
                         playbook_saved = True
                     except (OSError, ValueError):
                         playbook_saved = False
