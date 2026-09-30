@@ -1132,21 +1132,27 @@ def _planner_actions_from_transitions(transitions: tuple[object, ...]) -> tuple[
 def _route_source_matches_prefix(
     route_source: object, prefix: object, *, target_level: int
 ) -> bool:
-    """Allow multi-level optimization only when its replay prefix is the live prefix."""
+    """Allow exact prefixes or same-game suffixes that will be freshly replayed."""
 
     if target_level <= 1:
         return route_source is not None
     if route_source is None or prefix is None:
         return False
-    if getattr(route_source, "source_run_id", None) != getattr(prefix, "source_run_id", None):
-        return False
     expected = getattr(prefix, "transitions", ())
     actual = getattr(route_source, "transitions", ())
-    return (
+    if (
         type(expected) is tuple
         and type(actual) is tuple
         and len(actual) >= len(expected)
         and actual[: len(expected)] == expected
+    ):
+        return True
+    return (
+        getattr(route_source, "game_id", None) == getattr(prefix, "game_id", None)
+        and getattr(route_source, "seed", None) == getattr(prefix, "seed", None)
+        and getattr(route_source, "win_levels", None) == getattr(prefix, "win_levels", None)
+        and getattr(prefix, "levels_completed", 0) >= target_level - 1
+        and getattr(route_source, "levels_completed", 0) >= target_level
     )
 
 
@@ -1299,14 +1305,28 @@ def _expectations_from_metadata(value: object) -> tuple[ActionExpectation, ...]:
 
 
 def _optimize_verified_route(
-    prefix: object, *, game: object, arc_root: Path, target_level: int
+    prefix: object,
+    *,
+    game: object,
+    arc_root: Path,
+    target_level: int,
+    warmup_prefix: object | None = None,
 ) -> tuple[str, dict[str, object]]:
-    """Best-effort fresh-ARC shortening with a verified-route fallback."""
+    """Best-effort fresh-ARC shortening with a verified-route fallback.
+
+    A route from an older sealed run may have a different completed-level
+    prefix.  Its selected-level suffix is still a candidate, but the current
+    prefix is always the warmup used by the fresh replay oracle.
+    """
     transitions = _verified_route_transitions(prefix, target_level=target_level)
     baseline = _planner_actions_from_transitions(transitions)
     warmup: tuple[PlannerAction, ...] = ()
     if target_level > 1:
-        all_transitions = getattr(prefix, "transitions", ())
+        all_transitions = getattr(
+            warmup_prefix if warmup_prefix is not None else prefix,
+            "transitions",
+            (),
+        )
         if isinstance(all_transitions, tuple):
             boundary = next(
                 (
@@ -1995,6 +2015,7 @@ def _select_game_for_mode(
         # reason.  Full solves and the separately supervised sweep keep their
         # own caps.
         prefix = None
+        route_source = None
         if game.target_level > 1:
             from .solutions import load_best_prefix
 
@@ -2010,9 +2031,20 @@ def _select_game_for_mode(
                     max_level=game.target_level,
                     expected_model_id=expected_model,
                 )
+                route_source = load_best_prefix(
+                    arc_root,
+                    Path(resolved_environment[live.OPERATOR_ROOT_ENV])
+                    / ".asterion-private"
+                    / "prime-p7-live",
+                    game.game_id,
+                    game.seed,
+                    max_level=game.target_level,
+                    expected_model_id=expected_model,
+                )
             except (KeyError, OSError, P7ModelSelectionError):
                 prefix = None
-        game = _bound_witness_level_actions(game, prefix)
+                route_source = None
+        game = _bound_witness_level_actions(game, prefix, route_source=route_source)
     return game
 
 
@@ -2045,21 +2077,39 @@ def _verified_level_action_count(prefix: object, target_level: int) -> int | Non
 
 
 def _bound_witness_level_actions(
-    game: P7GameSelection, prefix: object | None
+    game: P7GameSelection,
+    prefix: object | None,
+    *,
+    route_source: object | None = None,
 ) -> P7GameSelection:
     """Bound a witness to the current level, excluding replayed prior levels."""
 
     if type(game) is not P7GameSelection or game.action_cap_override is not None:
         raise P7OperatorError("P7 witness selection is unavailable")
-    current = _verified_level_action_count(prefix, game.target_level)
+    current = _verified_level_action_count(
+        route_source if route_source is not None else prefix,
+        game.target_level,
+    )
     if current is None:
         return replace(game, action_cap_override=sum(game.baseline_actions[: game.target_level]))
-    transitions = getattr(prefix, "transitions")
-    prefix_actions = next(
-        index
-        for index, transition in enumerate(transitions, start=1)
-        if getattr(transition, "levels_completed", -1) >= game.target_level - 1
-    )
+    transitions = getattr(prefix, "transitions", ())
+    prefix_actions = len(transitions)
+    if any(
+        getattr(transition, "levels_completed", -1) >= game.target_level
+        for transition in transitions
+    ):
+        prefix_actions = next(
+            index
+            for index, transition in enumerate(transitions, start=1)
+            if getattr(transition, "levels_completed", -1) >= game.target_level - 1
+        )
+    if prefix_actions == 0:
+        source_transitions = getattr(route_source, "transitions", ())
+        prefix_actions = next(
+            index
+            for index, transition in enumerate(source_transitions, start=1)
+            if getattr(transition, "levels_completed", -1) >= game.target_level - 1
+        )
     baselines = list(game.baseline_actions)
     baselines[game.target_level - 1] = current
     return replace(
@@ -2293,6 +2343,7 @@ async def run_live(
             game=invocation.game,
             arc_root=invocation.arc_root,
             target_level=invocation.game.target_level,
+            warmup_prefix=prefix,
         )
     else:
         route_hint, route_optimization = "", {

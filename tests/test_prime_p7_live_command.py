@@ -447,6 +447,21 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             _route_source_matches_prefix(divergent, prefix, target_level=2)
         )
 
+    def test_multilevel_optimizer_replays_same_game_suffix_after_new_prefix(self) -> None:
+        from asterion.applications.prime.p7.operator import _route_source_matches_prefix
+
+        prefix = SimpleNamespace(
+            game_id="aa11-bb22", seed=0, win_levels=3, levels_completed=1,
+            source_run_id="new-run",
+            transitions=(SimpleNamespace(action="ACTION4"),),
+        )
+        older_route = SimpleNamespace(
+            game_id="aa11-bb22", seed=0, win_levels=3, levels_completed=2,
+            source_run_id="old-run",
+            transitions=(SimpleNamespace(action="ACTION9"), SimpleNamespace(action="ACTION3")),
+        )
+        self.assertTrue(_route_source_matches_prefix(older_route, prefix, target_level=2))
+
     def test_live_optimizer_replaces_verified_route_only_when_shorter(self) -> None:
         from asterion.applications.prime.p7.operator import _optimize_verified_route
         from asterion.applications.prime.p7.optimizer import ActionExpectation, PlannerAction, RouteCandidate, RouteResult
