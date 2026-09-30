@@ -3326,3 +3326,4 @@
 - 09:35 TU93 L1 练手运行被主动取消：18 个当前关卡动作、0 关完成；external_cancel，未封存/未回放验证；优化候选 19→18 步但 P7 首动作偏离，世界模型版本仍 0。
 - 09:37 修复 level-witness 动作预算：显式 witness 按目标关卡 baseline 总和封顶，状态输出增加 level_baseline/action_cap，避免非完整 solve 固定 500 步。
 - 09:40 [fc8abdf0] witness 按 L1/L2 baseline 封顶并输出 level_baseline/action_cap，避免非完整关卡统一使用 500 动作。
+- 09:41 correction: witness baseline cap change is committed as 3ca180b1; prior 09:40 hash placeholder superseded.
