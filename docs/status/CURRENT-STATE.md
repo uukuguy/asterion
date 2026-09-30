@@ -1,6 +1,6 @@
 # Current State
 
-Updated 2026-10-01. This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
+Updated 2026-10-01 01:55 (Asia/Shanghai). This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
 
 ## Project Snapshot
 
@@ -23,7 +23,8 @@ Updated 2026-10-01. This file is the structural snapshot; session handoff and ne
 ## Open Problems
 
 - `WorldModelStore` persists mechanics/entities/relations and level-local visual hypotheses. `MechanismSpec` plus `ModelCertificate` now provide a safe executable model only after complete current-history retrodiction; `p7_model_search` exposes bounded BFS/A* plans with checked frame/state expectations. Design and limits are documented in `docs/architecture/prime-p7-world-model-simulator.md`.
-- The model-search path is covered by synthetic mechanism tests and P7 bridge regressions. No live game run has yet proven that GPT-6.1-Sol can form a useful mechanism hypothesis, certify it, and complete a new level without a route hint.
+- The model-search path is covered by synthetic mechanism tests and P7 bridge regressions. The first pure live verification after cognition integration completed SP80 L1, but did not yet prove that GPT-6.1-Sol forms a useful mechanism hypothesis, certifies it, or improves a later replay without a route hint.
+- Pure SP80 L1 run `p7-live-20260930174531-72d55dc672bc34f8481c3f8a` completed the current level in 6 actions with `offline_optimization_enabled=false`, `replay_verified=true`, `sealed_trace=true`, and `cleanup_complete=true`; the selected model was `gpt-6.1-sol`. The trace exposed 3 retrodiction prediction mismatches and one recoverable oversized `act_checked` warning while still completing normally.
 - A controlled TU93 L1 witness was run after the replay-gated route changes, then operator-cancelled at 18 current-level actions with zero completed levels; it is external-cancel evidence only, not a verified result. Focused tests do not prove improved game-solving capability.
 - Explicit level-witness runs now use the selected level's human baseline sum as their action cap; the old non-full-solve fallback of 500 remains only on the unmodified selection object and is no longer used by the witness entry point.
 - The full repository gate completed 3509 tests with one promotion-environment failure because an offline npm-ci test observed one network request; `make lint`, `make docs-check`, Pyright on changed model modules, and the combined 223-test P7 suite passed.
@@ -57,6 +58,7 @@ Updated 2026-10-01. This file is the structural snapshot; session handoff and ne
 
 - `GameCognitionStore` persists input-type profiles and exact-game progress under `.asterion-private/prime-p7-live/cognition.json` and exposes them through `p7_cognition()` / `p7_client.cognition()`.
 - Type profiles are `prior-only`; exact-game memory is advisory until the current prefix and evidence are checked. Cache writes never gate normal exploration.
+- Experience now distinguishes `primitive_actions` (historical best) from `current_primitive_actions` (latest observed run), so a shorter prior route cannot masquerade as current progress.
 - Execution authority is narrow: only identity or checked-witness mismatches stop a batch. Ordinary probes, single-step exploration, and certified model search remain available. See `docs/architecture/prime-p7-cognition-and-experience.md`.
 
 ## Resume Instructions

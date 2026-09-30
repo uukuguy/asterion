@@ -182,6 +182,7 @@ class GameCognitionStore:
                 "observations": 0,
                 "levels_completed": 0,
                 "primitive_actions": None,
+                "current_primitive_actions": 0,
             }
         kind = _merge_input_kind(game.get("input_kind"), kind)
         game["input_kind"] = kind
@@ -191,6 +192,7 @@ class GameCognitionStore:
         game["action_names"] = sorted(set(item for item in old_names if type(item) is str) | set(names))[:_MAX_ACTIONS]
         game["observations"] = min(_counter(game.get("observations")) + 1, 1_000_000)
         game["levels_completed"] = max(_counter(game.get("levels_completed")), levels)
+        game["current_primitive_actions"] = actions
         previous_actions = game.get("primitive_actions")
         if previous_actions is None or _counter(previous_actions) == 0 or (actions > 0 and actions < _counter(previous_actions)):
             game["primitive_actions"] = actions
@@ -230,8 +232,9 @@ class GameCognitionStore:
             raise ValueError("invalid model_digest")
         game = self._state["games"].get(key)
         if not isinstance(game, dict):
-            game = {"game_id": game_id, "seed": seed, "win_levels": win_levels, "input_kind": "unknown", "action_names": [], "observations": 0, "levels_completed": 0, "primitive_actions": None}
+            game = {"game_id": game_id, "seed": seed, "win_levels": win_levels, "input_kind": "unknown", "action_names": [], "observations": 0, "levels_completed": 0, "primitive_actions": None, "current_primitive_actions": 0}
         game["levels_completed"] = max(_counter(game.get("levels_completed")), levels_completed)
+        game["current_primitive_actions"] = primitive_actions
         previous = game.get("primitive_actions")
         if previous is None or _counter(previous) == 0 or (primitive_actions > 0 and primitive_actions < _counter(previous)):
             game["primitive_actions"] = primitive_actions
@@ -265,6 +268,7 @@ class GameCognitionStore:
                 "observations": _counter(game.get("observations")) if game else 0,
                 "levels_completed": _counter(game.get("levels_completed")) if game else 0,
                 "primitive_actions": game.get("primitive_actions") if game else None,
+                "current_primitive_actions": _counter(game.get("current_primitive_actions", game.get("primitive_actions"))) if game else 0,
                 "model_digest": game.get("model_digest") if game else None,
             },
         }

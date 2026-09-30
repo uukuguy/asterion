@@ -96,7 +96,27 @@ class TestP7Cognition(unittest.TestCase):
             )
 
         self.assertEqual(projection["game_experience"]["primitive_actions"], 1)
+        self.assertEqual(projection["game_experience"]["current_primitive_actions"], 1)
         self.assertEqual(projection["input_kind"], "keyboard")
+
+    def test_projection_separates_best_and_current_action_counts(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = GameCognitionStore(Path(directory))
+            for actions in (0, 6, 3):
+                store.observe(
+                    game_id="sp80-589a99af",
+                    seed=0,
+                    win_levels=6,
+                    available_actions=("ACTION1", "ACTION6"),
+                    levels_completed=0,
+                    primitive_actions=actions,
+                )
+            projection = store.projection(
+                game_id="sp80-589a99af", seed=0, win_levels=6
+            )
+
+        self.assertEqual(projection["game_experience"]["primitive_actions"], 3)
+        self.assertEqual(projection["game_experience"]["current_primitive_actions"], 3)
 
 
 if __name__ == "__main__":
