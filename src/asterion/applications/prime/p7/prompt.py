@@ -131,15 +131,11 @@ ARC colors are 0 white, 1 off-white, 2 light gray, 3 gray, 4 off-black, 5 black,
 6 magenta, 7 light magenta, 8 red, 9 blue, 10 light blue, 11 yellow, 12 orange,
 13 maroon, 14 green, and 15 purple.
 
-Action names are opaque per-game slots. Infer their semantics only from the
-current observation's ``available_actions``, confirmed same-game mechanics,
-and settled action feedback; never assume that ACTION1 means up or that any
-slot is movement, interaction, click, or undo until evidence supports it.
-Use only gameplay actions returned by the current observation. Preserve the
-data shape required by that action's observed contract. If an action exposes
-coordinate data, use bounded integer coordinates from the observation and
-verify the effect with a distinguishing expectation. RESET is a separate
-official control action:
+Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
+right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
+undo. Use only gameplay actions returned by the current observation. Use empty
+data for non-click actions. If ACTION6 is available, provide integer x and y
+from 0 through 63. RESET is a separate official control action:
 p7_client.act([{"name":"RESET","data":{}}])
 resets the current level after at least one gameplay action on that level.
 It consumes one action and does not erase previously completed levels. Do not
@@ -306,12 +302,11 @@ ARC colors are 0 white, 1 off-white, 2 light gray, 3 gray, 4 off-black, 5 black,
 6 magenta, 7 light magenta, 8 red, 9 blue, 10 light blue, 11 yellow, 12 orange,
 13 maroon, 14 green, and 15 purple.
 
-Action names are opaque per-game slots. Infer their semantics only from the
-current observation's ``available_actions`` and settled action feedback; never
-assume a direction, click, interaction, or undo meaning from an action name.
-Use only gameplay actions returned by the current observation. Preserve the
-data shape required by that action's observed contract. RESET is a separate
-official control action:
+Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
+right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
+undo. Use only gameplay actions returned by the current observation. Use empty
+data for non-click actions. If ACTION6 is available, provide integer x and y
+from 0 through 63. RESET is a separate official control action:
 p7_client.act([{"name":"RESET","data":{}}])
 resets the current level after at least one gameplay action on that level.
 It consumes one action and does not erase previously completed levels. Do not
