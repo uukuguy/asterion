@@ -6,6 +6,7 @@ import unittest
 from pathlib import Path
 
 from asterion.applications.prime.p7.broker import ArcBroker
+from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.playbook import load_playbook, save_playbook
 
 
@@ -72,6 +73,9 @@ class ExperienceEndToEndTests(unittest.TestCase):
         self.assertTrue(hint["compiled_candidates"])
         self.assertLessEqual(len(json.dumps(hint).encode()), 1024)
         self.assertNotIn("plan", hint["compiled_candidates"][0])
+
+        status = _P7BrokerClient(broker, None).status()
+        self.assertEqual(status["learning_hint"]["recommendation"], "inspect_candidate_and_probe")
 
     def test_learning_evidence_survives_playbook_reload_without_planner_authority(self) -> None:
         engine = _LearningEngine()

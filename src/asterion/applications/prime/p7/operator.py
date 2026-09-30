@@ -958,7 +958,12 @@ class _P7BrokerClient:
 
     def status(self) -> Mapping[str, object]:
         _, status = self._observation_and_status()
-        return self._status_view(status)
+        return {
+            **self._status_view(status),
+            # Keep the advisory learning signal on the small status surface;
+            # an animated observe frame can exceed the bridge response cap.
+            "learning_hint": self._broker.learning_hint(),
+        }
 
     def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
         return self._broker.tried_actions(level)
