@@ -23,6 +23,9 @@ class _Facade:
     def world_model(self):
         return {"version": 1}
 
+    def cognition(self):
+        return {"input_kind": "keyboard", "type_profile": {"authority": "prior-only"}}
+
     def playbook(self, level=None):
         return {"level": level}
 
@@ -50,7 +53,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.bridge._method_failures = {}
 
     def test_no_argument_tools_do_not_receive_empty_object(self):
-        for method in ("observe", "status", "mechanics_prior", "world_model", "retrodiction_status"):
+        for method in ("observe", "status", "mechanics_prior", "world_model", "cognition", "retrodiction_status"):
             with self.subTest(method=method):
                 response = self.bridge._dispatch_method_call("request", method, {})
                 self.assertEqual(response["status"], "ok")

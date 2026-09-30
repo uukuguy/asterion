@@ -4,6 +4,11 @@
 
 ## 已验证事实
 
+- 新增 `GameCognitionStore`：按 `keyboard`、`click`、`keyboard_click`、`unknown` 汇总类型先验，并按精确 `game_id + seed + win_levels` 持久化游戏经验；通过 `p7_cognition()` / `p7_client.cognition()` 只读暴露。
+- 类型认知固定为 `prior-only`，经验不含可执行路线；Broker 每次绑定历史和动作后持续更新缓存，缓存异常不会阻断探索。
+- 执行权限边界已收窄为身份/当前前缀/checked witness 不匹配才停批；普通探索、单步 probe、受证模型搜索都保持可用。设计见 `docs/architecture/prime-p7-cognition-and-experience.md`。
+- 认知持久化与 Broker 集成测试通过；定向 P7 回归 147 项通过，`make lint` 通过。
+
 - `b37121be` 修复 P7 续推理的动作白名单漂移：每次续推理先刷新 `available_actions`；`p7_act_checked` 顶层返回 `available_actions` 与 `invalid_action`。
 - 修复前 VC33 L2 运行 `p7-live-20260930054039-85d4a123e7fc09e7e57a5904` 在首轮预测失败后反复构造 `ACTION1–ACTION7`，最终被取消；摘要记录 `retrodiction_status=conflict`、7 次 prediction mismatch。
 - 修复后纯 P7 VC33 L2 重跑 `p7-live-20260930060858-fd59b7d7a32f682b92e51468` 曾被错误历史路线源压成当前 7 步；该记录不能作为正式 L2 baseline 或能力结果。

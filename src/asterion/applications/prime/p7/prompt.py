@@ -66,6 +66,7 @@ full frame again.
 
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
+p7_cognition,
 p7_playbook, p7_retrodiction_status, p7_tried_actions,
 p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked,
 p7_record_hypothesis, p7_promote_hypothesis, and p7_model_search. Read the same-game model and Playbook before proposing a
@@ -91,6 +92,10 @@ p7_client.act(actions), and p7_client.act_checked(plan). act takes a list of act
 equivalent model query is p7_client.model_search(); it never dispatches an
 action and its returned checked plan is advisory until act_checked verifies
 it.
+Call p7_cognition before a long deliberation. Its type profile is a prior-only
+hint about the input surface, and its exact-game experience is progress memory,
+not an executable route. Normal exploration and single-step probes remain
+available; only an identity or evidence mismatch should stop a checked batch.
 To submit a mechanism hypothesis, first read p7_world_model for the exact
 game identity. The value passed to p7_record_hypothesis must contain a
 `mechanism` object with schema `asterion.prime.p7-mechanism/v1`, that identity,

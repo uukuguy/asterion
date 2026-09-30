@@ -8,6 +8,7 @@ from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
 from .model_search import search_model
+from .cognition import GameCognitionStore
 from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
@@ -245,6 +246,7 @@ class ArcBroker:
         engine: object,
         game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
         world_model: WorldModelStore | None = None,
+        cognition_store: GameCognitionStore | None = None,
     ) -> None:
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
@@ -270,6 +272,9 @@ class ArcBroker:
         ):
             raise ArcBrokerError("unavailable")
         self._world_model = world_model
+        if cognition_store is not None and type(cognition_store) is not GameCognitionStore:
+            raise ArcBrokerError("unavailable")
+        self._cognition_store = cognition_store
         self._transition_model: TransitionModel | None = None
         self._retrodiction_status = "unavailable"
         self._retrodiction_reasons: list[str] = []
@@ -314,6 +319,47 @@ class ArcBroker:
         """Return the immutable private model snapshot for application wiring."""
 
         return None if self._world_model is None else self._world_model.snapshot
+
+    def cognition_projection(self) -> dict[str, object]:
+        """Return advisory type cognition and exact-game progress memory."""
+
+        if self._cognition_store is None:
+            return {"status": "unavailable"}
+        return self._cognition_store.projection(
+            game_id=self._game.game_id,
+            seed=self._game.seed,
+            win_levels=self._game.win_levels,
+        )
+
+    def _record_cognition(self) -> None:
+        """Persist bounded progress without making persistence a run gate."""
+
+        if self._cognition_store is None:
+            return
+        try:
+            self._cognition_store.observe(
+                game_id=self._game.game_id,
+                seed=self._game.seed,
+                win_levels=self._game.win_levels,
+                available_actions=self._current.available_actions,
+                levels_completed=self._current.levels_completed,
+                primitive_actions=self._actions_dispatched,
+            )
+            certificate = self._mechanism_certificate
+            self._cognition_store.record_experience(
+                game_id=self._game.game_id,
+                seed=self._game.seed,
+                win_levels=self._game.win_levels,
+                levels_completed=self._current.levels_completed,
+                primitive_actions=self._actions_dispatched,
+                model_digest=None if certificate is None else certificate.model_digest,
+            )
+        except (OSError, TypeError, ValueError):
+            # Cognition is an advisory learning cache.  A cache failure must
+            # never prevent normal exploration or a valid action dispatch.
+            self._retrodiction_reasons = [
+                *self._retrodiction_reasons[-15:], "cognition-persistence-unavailable"
+            ]
 
     def transition_model(self) -> TransitionModel | None:
         """Return the last replay-validated transition model, if available."""
@@ -768,6 +814,7 @@ class ArcBroker:
                 self._retrodiction_reasons = [
                     *self._retrodiction_reasons[-15:], "visual-prior-unavailable"
                 ]
+        self._record_cognition()
 
     def _bound_history(self) -> list[ArcHistoryRecord]:
         if self._history is None:
@@ -1128,6 +1175,7 @@ class ArcBroker:
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after
+            self._record_cognition()
             if action.name == "RESET" or after.levels_completed > before.levels_completed:
                 self._clear_no_effect_level(before.levels_completed)
                 self._level_gameplay_actions = 0

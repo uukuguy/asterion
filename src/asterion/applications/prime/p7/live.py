@@ -67,6 +67,7 @@ P7_APPLICATION_TOOL_NAMES = (
     "p7_frame_at",
     "p7_act_checked",
     "p7_world_model",
+    "p7_cognition",
     "p7_playbook",
     "p7_retrodiction_status",
     "p7_record_hypothesis",
@@ -316,13 +317,13 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"}
+                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "cognition", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"}
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
-            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "playbook": 1, "retrodiction_status": 0, "model_search": 0, "record_hypothesis": 3, "promote_hypothesis": 2}[method]:
+            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "cognition": 0, "playbook": 1, "retrodiction_status": 0, "model_search": 0, "record_hypothesis": 3, "promote_hypothesis": 2}[method]:
                 raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
@@ -713,6 +714,10 @@ def p7_world_model():
     """Read the bounded same-game confirmed model projection."""
     return _call("world_model")
 
+def p7_cognition():
+    """Read advisory type cognition and exact-game experience."""
+    return _call("cognition")
+
 def p7_playbook(level=None):
     """Read the bounded same-game Playbook projection."""
     return _call("playbook", level)
@@ -861,6 +866,9 @@ def last_outcome_summary(level=None):
 
 def world_model():
     return p7_world_model()
+
+def cognition():
+    return p7_cognition()
 
 def playbook(level=None):
     return p7_playbook(level)

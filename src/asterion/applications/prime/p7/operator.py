@@ -30,6 +30,7 @@ from asterion.applications.prime.p7.broker import (
     _canonical_action,
     _observation_digest,
 )
+from asterion.applications.prime.p7.cognition import GameCognitionStore
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
     ArcGameContract,
@@ -417,7 +418,7 @@ class _IpythonBridgeServer:
                     or (
                         "params" not in value
                         and value.get("method")
-                        not in {"observe", "status", "mechanics_prior", "world_model", "retrodiction_status"}
+                        not in {"observe", "status", "mechanics_prior", "world_model", "cognition", "retrodiction_status"}
                     )
                     or type(value["method"]) is not str
                 ):
@@ -494,7 +495,7 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
-            elif method in {"world_model", "retrodiction_status", "model_search"}:
+            elif method in {"world_model", "cognition", "retrodiction_status", "model_search"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
@@ -696,6 +697,14 @@ class _P7BrokerClient:
             if snapshot is None:
                 return {"status": "unavailable"}
             return snapshot.projection(max_bytes=8192)
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def cognition(self) -> dict[str, object]:
+        """Read advisory type cognition and exact-game experience."""
+
+        try:
+            return self._broker.cognition_projection()
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -1552,6 +1561,16 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
             "Use confirmed facts directly. Treat visual candidates as observations to test; do not treat a candidate role as a confirmed wall, floor, object, or goal.",
             json.dumps(dict(model_projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         ])
+    cognition = getattr(client, "cognition", None)
+    if callable(cognition):
+        cognition_projection = cognition()
+        if not isinstance(cognition_projection, Mapping):
+            raise P7OperatorError("P7 host services are unavailable")
+        sections.extend([
+            "## Persistent game cognition (advisory; no execution authority)",
+            "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
+            json.dumps(dict(cognition_projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ])
     if include_prior:
         mechanics_prior = getattr(client, "mechanics_prior", None)
         if not callable(mechanics_prior):
@@ -1879,6 +1898,7 @@ def build_p7_operator_resources(
     private_trace_root: Path,
     game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
     run_id: str | None = None,
+    cognition_store: GameCognitionStore | None = None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -1974,6 +1994,7 @@ def build_p7_operator_resources(
             engine=engine,
             game=game,
             world_model=WorldModelStore(game.game_id, game.seed, game.win_levels),
+            cognition_store=cognition_store,
         )
         history_run_id = private_trace_root.parent.name
         if (
@@ -2354,6 +2375,16 @@ async def run_live(
         category="model",
     ))
     tool_registry.register(Tool(
+        name="cognition",
+        description=(
+            "Read persistent game-type priors and exact-game experience. Type priors are "
+            "advisory only; exact-game memory is reusable only after the current prefix "
+            "and observations are checked. This query never grants route execution authority."
+        ),
+        signature="p7_client.cognition()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
         name="playbook",
         description="Read the bounded same-game Playbook projection, persisted visual hypotheses, and level memory; hypotheses remain unconfirmed and malformed private state falls back to baseline.",
         signature="p7_client.playbook(level=None)",
@@ -2495,6 +2526,7 @@ async def run_live(
         private_trace_root=trace_root,
         game=invocation.game,
         run_id=run_id,
+        cognition_store=GameCognitionStore(root),
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:

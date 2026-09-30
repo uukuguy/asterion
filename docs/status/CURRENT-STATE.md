@@ -6,7 +6,7 @@ Updated 2026-10-01. This file is the structural snapshot; session handoff and ne
 
 - Project: Asterion composable multi-runtime agent framework
 - Current branch: `main`
-- Theme-level focus: make native P7 accumulate and use a verified same-game world model instead of restarting visual exploration on every level
+- Theme-level focus: make native P7 accumulate type cognition, exact-game experience, and a verified same-game world model instead of restarting visual exploration on every level
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
 - Active work package: P7 same-game world model, retrodicted declarative simulator, and bounded model search; implementation is in place, live capability remains unverified.
@@ -48,9 +48,16 @@ Updated 2026-10-01. This file is the structural snapshot; session handoff and ne
 - `src/asterion/applications/prime/p7/model_search.py` — certificate-gated bounded simulator search
 - `src/asterion/applications/prime/p7/mechanism_model.py` — safe declarative transition model and certificate
 - `src/asterion/applications/prime/p7/model_selection.py` — the only reader of the P7 model selection
+- `src/asterion/applications/prime/p7/cognition.py` — bounded persistent type priors and exact-game experience
 - `src/asterion/applications/prime/p7/live.py` — Pi RPC live execution plumbing
 - `src/asterion/applications/prime/runtime_binding.py` — fixed Prime runtime selection
 - `Makefile` — provider-backed P7 presets
+
+## Cognition and execution boundary
+
+- `GameCognitionStore` persists input-type profiles and exact-game progress under `.asterion-private/prime-p7-live/cognition.json` and exposes them through `p7_cognition()` / `p7_client.cognition()`.
+- Type profiles are `prior-only`; exact-game memory is advisory until the current prefix and evidence are checked. Cache writes never gate normal exploration.
+- Execution authority is narrow: only identity or checked-witness mismatches stop a batch. Ordinary probes, single-step exploration, and certified model search remain available. See `docs/architecture/prime-p7-cognition-and-experience.md`.
 
 ## Resume Instructions
 

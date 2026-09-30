@@ -856,3 +856,11 @@
 - Repair loop: (1) run pure P7; (2) if the trigger fires, run offline analysis; (3) convert the result into a generic mechanism hypothesis or compression rule without coordinates or action sequence; (4) repair the generic P7 mechanism; (5) rerun pure P7 and compare capability evidence. Offline replay and route execution remain separately labeled integration tests and are never promoted as P7 capability results.
 - Rationale: Injecting a shorter route lets the runtime execute the optimizer's solution and cannot measure P7's ability to discover or reason about that route. Offline optimization is valuable only when it explains the missing mechanism and leads to an independent P7 solve.
 - Consequence: The current world-model VC33 L1/L2 runs are route-assisted evidence with zero clean P7 capability passes. No new level run should start until the default route-injection path is disabled or isolated behind an explicitly non-capability experiment mode.
+
+## D-2026-10-01-02 — Persist type cognition and exact-game experience without broad execution authority
+
+- Status: 🟢 active.
+- Decision: Maintain two persistent learning scopes. Type cognition aggregates only transferable input and observation priors and is always `prior-only`; exact-game experience is keyed by `game_id + seed + win_levels` and stores bounded progress and verified-model summaries. Neither store grants route execution authority.
+- Execution boundary: stop only when a checked batch has an identity, current-prefix, frame/state/level witness, or terminal mismatch. Ordinary exploration, single-step probes, current-observation planning, and bounded certified model search remain available. Cache read/write failures do not block valid action dispatch.
+- Rationale: A permission layer that blocks normal hypothesis testing prevents the model from learning. The boundary must prevent route injection and stale evidence from silently executing while leaving the exploratory loop intact.
+- Evidence: `src/asterion/applications/prime/p7/cognition.py`, broker/operator/live/IPython integration, `docs/architecture/prime-p7-cognition-and-experience.md`, and 147 focused P7 tests plus `make lint`.
