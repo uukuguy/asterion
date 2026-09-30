@@ -3409,3 +3409,4 @@
 - 05:18 Infer component motion despite independent boundary deltas, add ordered clear-cell effects, and expose a non-conflicting induced mechanism bundle [73d6e0a2]
 - 05:31 Added synthetic semantic-learning lifecycle coverage, allowed nonterminal search witnesses, and made Playbook rehydration idempotent [96da1c66]
 - 05:39 Clarified certificates as simulator trust labels and made candidate probes optional so ordinary exploration never waits [ef2dbff6]
+- 05:40 Corrected the status journal hash for the advisory certificate boundary commit [bbeafb22]
