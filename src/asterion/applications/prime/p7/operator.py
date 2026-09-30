@@ -494,7 +494,7 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
-            elif method in {"world_model", "retrodiction_status"}:
+            elif method in {"world_model", "retrodiction_status", "model_search"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
@@ -740,6 +740,37 @@ class _P7BrokerClient:
             "conflict_count": 0 if snapshot is None else len(snapshot.conflicts),
         }
 
+    def model_search(
+        self,
+        max_nodes: int = 512,
+        max_depth: int = 24,
+        strategy: str = "astar",
+    ) -> dict[str, object]:
+        if (
+            type(max_nodes) is not int or type(max_depth) is not int
+            or type(strategy) is not str
+        ):
+            raise P7OperatorError("P7 host services are unavailable")
+        try:
+            result = self._broker.model_search(
+                max_nodes=max_nodes,
+                max_depth=max_depth,
+                strategy=strategy,
+            )
+            if len(json.dumps(result, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
+                return {
+                    "status": result.get("status", "unavailable"),
+                    "reason": result.get("reason"),
+                    "expanded_nodes": result.get("expanded_nodes", 0),
+                    "generated_nodes": result.get("generated_nodes", 0),
+                    "target_level": result.get("target_level"),
+                    "candidate_action_count": result.get("candidate_action_count", 0),
+                    "plan": [],
+                }
+            return result
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
     def record_hypothesis(self, layer: str, key: str, value: dict[str, object]) -> dict[str, object]:
         return self._broker.record_hypothesis(layer, key, value)
 
@@ -787,6 +818,7 @@ class _P7BrokerClient:
                 "mismatch": result["mismatch"],
                 "conflict": result.get("conflict"),
                 "retrodiction": result.get("retrodiction", self._broker.retrodiction_status()),
+                "no_effect_hint": result.get("no_effect_hint"),
                 "unexecuted_count": result["unexecuted_count"],
                 "available_actions": result["available_actions"],
                 "invalid_action": result["invalid_action"],
@@ -2331,6 +2363,16 @@ async def run_live(
         name="retrodiction_status",
         description="Read scalar transition-model verification status before using a batch or route hypothesis.",
         signature="p7_client.retrodiction_status()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="model_search",
+        description=(
+            "Run bounded BFS/A* over the same-game mechanism only after it has been "
+            "retrodicted and certified. Returns a checked plan but never dispatches "
+            "actions; pass that plan unchanged to p7_client.act_checked."
+        ),
+        signature="p7_client.model_search()",
         category="model",
     ))
     tool_registry.register(Tool(

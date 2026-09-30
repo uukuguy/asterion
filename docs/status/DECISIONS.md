@@ -30,6 +30,27 @@
 | D-2026-09-22-01 | 🟢 active | Fence each Pi prompt on exact request acknowledgment and its own settlement barrier |
 | D-2026-09-22-02 | 🟢 active | P6 failed work with admitted effects requires verified inverse or recovery-required state |
 | D-2026-09-29-01 | 🟢 active | The operator environment selects the native P7 provider and model |
+| D-2026-10-01-01 | 🟢 active | WorldMap may plan only through a current-history-certified declarative simulator |
+
+## D-2026-10-01-01 — Certificate-gated same-game simulator
+
+- Status: 🟢 active
+- Decision: Keep confirmed same-game mechanics and level memory in the
+  Playbook, but expose them to a bounded BFS/A* planner only after a
+  `MechanismSpec` has retrodicted every current-run transition and received a
+  `ModelCertificate`. The planner returns checked expectations and never
+  dispatches actions. Unknown models fall back to ordinary falsifiable P7
+  exploration.
+- Rationale: WorldMap is meant to make P7 improve through experience. A fact
+  store alone cannot predict futures, while an unverified simulator recreates
+  route injection and false-success failures. The certificate and
+  `act_checked` gate preserve evidence while enabling long-horizon planning.
+- Consequence: prior confirmed mechanics can warm-start a new level/run, but
+  current history must revalidate them before planning. Visual hypotheses and
+  prior-level coordinates remain advisory and level-local.
+- Evidence: `docs/architecture/prime-p7-world-model-simulator.md`,
+  `src/asterion/applications/prime/p7/model_search.py`, focused P7 model-search
+  tests, and the Tycho/Retrodict references recorded in that design.
 
 ## D-2026-07-26-01 — Operator configuration root
 

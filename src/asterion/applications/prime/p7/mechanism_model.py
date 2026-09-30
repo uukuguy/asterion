@@ -631,6 +631,8 @@ class ModelCertificate:
 def validate_mechanism(
     spec: MechanismSpec,
     records: Sequence[ArcHistoryRecord],
+    *,
+    entities: Mapping[str, object] | None = None,
 ) -> ModelCertificate | None:
     """Return a certificate only when the mechanism explains every record."""
 
@@ -667,6 +669,7 @@ def validate_mechanism(
             data=record.data,
             level=previous.levels_completed,
             state=previous.state,
+            entities=entities or {},
         )
         if prediction.status != "predicted" or prediction.frame != record.frame or prediction.level != record.levels_completed or prediction.state != record.state:
             return None

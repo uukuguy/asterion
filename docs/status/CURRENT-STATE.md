@@ -1,15 +1,15 @@
 # Current State
 
-Updated 2026-09-30. This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
+Updated 2026-10-01. This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
 
 ## Project Snapshot
 
 - Project: Asterion composable multi-runtime agent framework
 - Current branch: `main`
-- Theme-level focus: raising the BP35 official level score to the 115 cap under the operator-selected P7 model
+- Theme-level focus: make native P7 accumulate and use a verified same-game world model instead of restarting visual exploration on every level
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: P7 same-game world model and replay-gated route adoption; implementation complete, repository gate pending.
+- Active work package: P7 same-game world model, retrodicted declarative simulator, and bounded model search; implementation is in place, live capability remains unverified.
 
 ## Current Architecture
 
@@ -22,7 +22,8 @@ Updated 2026-09-30. This file is the structural snapshot; session handoff and ne
 
 ## Open Problems
 
-- The same-game WorldModel, TransitionModel, Playbook, declarative mechanism certificates, P7 application tool registry, and replay expectation gate are implemented and covered by focused tests.
+- `WorldModelStore` persists mechanics/entities/relations and level-local visual hypotheses. `MechanismSpec` plus `ModelCertificate` now provide a safe executable model only after complete current-history retrodiction; `p7_model_search` exposes bounded BFS/A* plans with checked frame/state expectations. Design and limits are documented in `docs/architecture/prime-p7-world-model-simulator.md`.
+- The model-search path is covered by synthetic mechanism tests and P7 bridge regressions. No live game run has yet proven that GPT-6.1-Sol can form a useful mechanism hypothesis, certify it, and complete a new level without a route hint.
 - A controlled TU93 L1 witness was run after the replay-gated route changes, then operator-cancelled at 18 current-level actions with zero completed levels; it is external-cancel evidence only, not a verified result. Focused tests do not prove improved game-solving capability.
 - Explicit level-witness runs now use the selected level's human baseline sum as their action cap; the old non-full-solve fallback of 500 remains only on the unmodified selection object and is no longer used by the witness entry point.
 - The full repository gate completed 3509 tests with one promotion-environment failure because an offline npm-ci test observed one network request; `make lint`, `make docs-check`, Pyright on changed model modules, and the combined 223-test P7 suite passed.
@@ -44,6 +45,8 @@ Updated 2026-09-30. This file is the structural snapshot; session handoff and ne
 ### Implementation entry points
 
 - `src/asterion/applications/prime/p7/operator.py` — P7 operator and host wiring
+- `src/asterion/applications/prime/p7/model_search.py` — certificate-gated bounded simulator search
+- `src/asterion/applications/prime/p7/mechanism_model.py` — safe declarative transition model and certificate
 - `src/asterion/applications/prime/p7/model_selection.py` — the only reader of the P7 model selection
 - `src/asterion/applications/prime/p7/live.py` — Pi RPC live execution plumbing
 - `src/asterion/applications/prime/runtime_binding.py` — fixed Prime runtime selection

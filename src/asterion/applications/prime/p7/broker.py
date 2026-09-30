@@ -7,6 +7,7 @@ import json
 from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
+from .model_search import search_model
 from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
@@ -294,6 +295,7 @@ class ArcBroker:
         # It starts empty and accumulates only from the current run.
         self._no_effect_guard = True
         self._no_effect_counts: dict[tuple[int, str], int] = {}
+        self._retrodict_no_effect_hint: dict[str, object] | None = None
         # Retrodict: track every (level, action, position) tuple the model
         # has tried this run, with counts. Position is the (x, y) tuple for
         # click actions and None for direction/interact actions. The model
@@ -319,11 +321,127 @@ class ArcBroker:
         return self._transition_model
 
     def retrodiction_status(self) -> dict[str, object]:
+        certificate = self._mechanism_certificate
+        if certificate is None:
+            model_status = "hypothesis" if self._mechanism_spec is not None else "absent"
+        elif certificate.planner_eligible:
+            model_status = "verified"
+        else:
+            model_status = "stale"
         return {
             "status": self._retrodiction_status,
             "records_checked": len(self._history or ()),
             "reasons": list(self._retrodiction_reasons[-16:]),
+            "planner": {
+                "status": model_status,
+                "eligible": bool(certificate is not None and certificate.planner_eligible),
+                "model_digest": None if certificate is None else certificate.model_digest,
+                "records_certified": 0 if certificate is None else certificate.record_count,
+            },
         }
+
+    def model_search(
+        self,
+        *,
+        max_nodes: int = 512,
+        max_depth: int = 24,
+        strategy: str = "astar",
+    ) -> dict[str, object]:
+        """Search the current state with the verified same-game mechanism.
+
+        This is a planning query only.  It never dispatches an action.  The
+        caller must explicitly pass the returned checked plan to
+        :meth:`act_checked`, which will stop on the first divergence.
+        """
+
+        self._require_open()
+        certificate = self._mechanism_certificate
+        spec = self._mechanism_spec
+        if spec is None or certificate is None or not certificate.planner_eligible:
+            return {
+                "status": "model-unavailable",
+                "reason": "no-planner-certificate",
+                "plan": [],
+                "expanded_nodes": 0,
+                "generated_nodes": 0,
+                "start": None,
+            }
+        try:
+            actions = self._model_search_actions()
+            world = self._world_model.snapshot if self._world_model is not None else None
+            entities = (
+                {key: fact.value for key, fact in world.entities.items()}
+                if world is not None
+                else {}
+            )
+            result = search_model(
+                spec,
+                frame=self._current.frame[-1],
+                level=self._current.levels_completed,
+                state=self._current.state,
+                actions=actions,
+                target_level=self._game.target_level,
+                entities=entities,
+                max_nodes=max_nodes,
+                max_depth=max_depth,
+                strategy=strategy,
+            )
+        except (TypeError, ValueError):
+            return {
+                "status": "model-unavailable",
+                "reason": "invalid-search-request",
+                "plan": [],
+                "expanded_nodes": 0,
+                "generated_nodes": 0,
+                "start": None,
+            }
+        projection = result.projection()
+        projection.update({
+            "model_digest": certificate.model_digest,
+            "certificate_records": certificate.record_count,
+            "certificate_coverage": certificate.coverage,
+            "target_level": self._game.target_level,
+            "candidate_action_count": len(actions),
+        })
+        return projection
+
+    def _model_search_actions(self) -> tuple[dict[str, object], ...]:
+        """Build a bounded, evidence-backed action set for model search."""
+
+        records = self._bound_history()
+        candidates: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
+        click_positions: set[tuple[int, int]] = set()
+        for record in records:
+            if record.action is not None and record.action in self._current.available_actions:
+                candidates.add((record.action, record.data))
+            if record.action == "ACTION6" and len(record.data) == 2:
+                data = dict(record.data)
+                if set(data) == {"x", "y"}:
+                    click_positions.add((data["x"], data["y"]))
+            for x, y, _, _ in record.changed_cells:
+                click_positions.add((x, y))
+        world = self._world_model.snapshot if self._world_model is not None else None
+        if world is not None:
+            for fact in (*world.entities.values(), *world.hypotheses.values()):
+                value = fact.value
+                if not isinstance(value, Mapping):
+                    continue
+                bounds = tuple(value.get(name) for name in ("min_x", "max_x", "min_y", "max_y"))
+                if any(type(item) is not int for item in bounds):
+                    continue
+                min_x, max_x, min_y, max_y = cast(tuple[int, int, int, int], bounds)
+                if min_x <= max_x and min_y <= max_y:
+                    click_positions.add(((min_x + max_x) // 2, (min_y + max_y) // 2))
+        for name in self._current.available_actions:
+            if name != "ACTION6":
+                candidates.add((name, ()))
+        if "ACTION6" in self._current.available_actions:
+            for x, y in sorted(click_positions)[:32]:
+                candidates.add(("ACTION6", (("x", x), ("y", y))))
+        return tuple(
+            {"name": name, "data": dict(data)}
+            for name, data in sorted(candidates, key=lambda item: (item[0], item[1]))
+        )
 
     def world_evidence(self) -> tuple[EvidenceRef, ...]:
         """Return immutable evidence references recorded for accepted transitions."""
@@ -365,6 +483,35 @@ class ArcBroker:
                 refs = tuple(EvidenceRef(summary_hash=d) for d in fact.evidence_digests)
                 self._world_model.record_hypothesis(fact.layer, fact.key, fact.value, level=fact.level, evidence=refs)
                 self._world_model.confirm(fact.layer, fact.key, evidence=refs, observed_value=fact.value)
+                if fact.layer == "mechanics" and self._mechanism_spec is None:
+                    try:
+                        candidate = MechanismSpec.from_mapping(fact.value)
+                    except (TypeError, ValueError):
+                        continue
+                    if (
+                        candidate.game_id,
+                        candidate.seed,
+                        candidate.win_levels,
+                    ) == (
+                        self._game.game_id,
+                        self._game.seed,
+                        self._game.win_levels,
+                    ):
+                        self._mechanism_spec = candidate
+            # Visual candidates are advisory and level-local.  Rehydrate only
+            # the broker's current level so a later prefix replay can refresh
+            # them before any promotion attempt.
+            for fact in snapshot.visual_hypotheses:
+                if fact.level != self._world_model.current_level:
+                    continue
+                refs = tuple(EvidenceRef(summary_hash=d) for d in fact.evidence_digests)
+                self._world_model.record_hypothesis(
+                    fact.layer,
+                    fact.key,
+                    fact.value,
+                    level=fact.level,
+                    evidence=refs,
+                )
 
     def export_playbook(self, *, successful: bool) -> PlaybookSnapshot:
         snapshot = self._playbook
@@ -393,6 +540,15 @@ class ArcBroker:
         self._retrodiction_status = "conflict"
         return {"sequence": sequence, "reason": reason, "replan_required": True}
 
+    def _confirmed_entity_values(self) -> dict[str, object]:
+        if self._world_model is None:
+            return {}
+        return {
+            key: fact.value
+            for key, fact in self._world_model.snapshot.entities.items()
+            if fact.status == "confirmed"
+        }
+
     def record_hypothesis(self, layer: str, key: str, value: object) -> dict[str, object]:
         """Reserve one falsifiable mechanism probe; callers cannot confirm facts."""
         self._require_open()
@@ -413,7 +569,13 @@ class ArcBroker:
             if len(set(dependencies)) != len(dependencies) or not set(dependencies) <= known:
                 raise ValueError
             name, data, expected = validate_prediction(value["probe"], current_levels=self._current.levels_completed)
-            prediction = spec.predict(frame=records[-1].frame, action=ArcAction(name, data), level=records[-1].levels_completed, state=records[-1].state)
+            prediction = spec.predict(
+                frame=records[-1].frame,
+                action=ArcAction(name, data),
+                level=records[-1].levels_completed,
+                state=records[-1].state,
+                entities=self._confirmed_entity_values(),
+            )
             if prediction.status != "predicted" or not self._guard_probe_distinguishes(expected):
                 raise ValueError
             # Bind the probe to the full predicted successor, never a free-text claim.
@@ -508,7 +670,15 @@ class ArcBroker:
             return
         self._pending_probe = None
         matches = (record.sequence == pending["sequence"] and record.before_state_sha256 == pending["before"] and record.action == pending["action"] and record.data == pending["data"])
-        certificate = validate_mechanism(pending["spec"], self._bound_history()) if matches else None
+        certificate = (
+            validate_mechanism(
+                pending["spec"],
+                self._bound_history(),
+                entities=self._confirmed_entity_values(),
+            )
+            if matches
+            else None
+        )
         if certificate is not None and certificate.planner_eligible:
             self._world_model.confirm(pending["layer"], pending["key"], evidence=ref, observed_value=pending["spec"].to_mapping())
             self._mechanism_certificate = certificate
@@ -531,7 +701,11 @@ class ArcBroker:
             self._world_evidence.append(ref)
             self._consume_probe(record, ref)
             if self._mechanism_spec is not None:
-                certificate = validate_mechanism(self._mechanism_spec, self._bound_history())
+                certificate = validate_mechanism(
+                    self._mechanism_spec,
+                    self._bound_history(),
+                    entities=self._confirmed_entity_values(),
+                )
                 if certificate is None:
                     self._mechanism_certificate = None
                     self._mechanism_spec = None
@@ -671,6 +845,7 @@ class ArcBroker:
             raise ArcBrokerError("unavailable")
         transitions: list[ArcTransition] = []
         feedback: list[dict[str, object]] = []
+        self._retrodict_no_effect_hint = None
 
         def append_feedback(record: ArcHistoryRecord, item_stop_reason: str) -> None:
             # Project only bounded delta evidence; never include the settled
@@ -790,7 +965,7 @@ class ArcBroker:
                 # Retrodict: attach a small no-effect summary so the model can
                 # see, in-band, which (action, position) tuples it has already
                 # tried at this level. Generic — no game-specific content.
-                this_action_pos = dict(plan[0].get("action", {}).get("data", {})) if plan else {}
+                this_action_pos = dict(plan[index].get("action", {}).get("data", {})) if index < len(plan) else {}
                 self._retrodict_no_effect_hint = {
                     "action": name,
                     "position": this_action_pos or None,
@@ -823,6 +998,7 @@ class ArcBroker:
             "terminal": self._status(),
             "batch": result,
             "feedback": feedback,
+            "no_effect_hint": self._retrodict_no_effect_hint,
             "unexecuted_count": len(plan) - result.applied_count,
             "available_actions": list(self._current.available_actions),
             "invalid_action": unavailable_action,

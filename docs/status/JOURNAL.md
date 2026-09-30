@@ -3371,3 +3371,4 @@
 - 2026-10-01 b71c3936 P7 视觉候选仅在动作变化证据下晋级，打通分析到世界模型复用链路。
 - 2026-10-01 VC33 L2 纯 P7 重跑按用户要求约10分钟停止：5动作含3步前缀，20个分析单元，未晋级且未通关。
 - 2026-10-01 P7 动作反馈新增证据相交的视觉候选 key，避免模型仅分析不触发晋级。
+- 2026-10-01 P7 WorldMap upgraded with certificate-gated declarative simulator search, model_search tool, planner status, no-effect hint repair, entity-guard evidence, and visual hypothesis rehydration; 143 focused tests, lint, and docs-check passed.

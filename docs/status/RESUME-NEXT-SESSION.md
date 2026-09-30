@@ -17,6 +17,10 @@
 - VC33 L2 纯 P7 重跑 `p7-live-20260930074625-ef0bc3c614461a31088ed5c7`：L1 3 步完成；L2 当前步数 9（总 primitive 12），动作坐标为 `(0,0),(32,32),(16,16),(32,16),(32,48),(16,32),(48,32),(32,32)`；未复用 `(61,33)`，未通关，因长时间推理手动取消。
 - 来源澄清：上述 L1 3 步是已验证前缀回放，不是本轮纯 P7 重新解题；L2 退化与本轮 IPython 分析工具失败同时出现。
 - `1d536fc9` 修复 Pi tool call ID 含 `|` 时 IPython 桥接拒绝请求的问题；旧 transcript 中 `print('test')` 失败、worker_cell_count=0，说明模型分析代码未执行。
+- 新增 `model_search.py`：只接受已由当前历史完整 retrodict 的 `MechanismSpec`，执行有界 BFS/A*，返回每步 frame hash/level/state 预期；不会自动派发动作。
+- `ArcBroker.model_search()`、P7 operator、worker bridge、live RPC 和 prompt 已接入 `p7_model_search()`；`retrodiction_status()` 增加 planner `absent/hypothesis/verified/stale` 与证书摘要。
+- 已验证：3 个 simulator 单元测试、certified broker search、139 项 native/live/bridge/model-search 回归通过；`compileall` 通过。尚未跑完整 `make check`。
+- 正式设计在 `docs/architecture/prime-p7-world-model-simulator.md`，明确 WorldMap 三层记忆、模型生命周期、Tycho/Retrodict 采纳边界和当前限制。
 
 ## 当前判断
 
@@ -33,6 +37,7 @@
 
 - 尚未完成通用机制：如何把视觉候选（稀有颜色/组件/重复变化）转成有信息增益的 `ACTION6` 探测点与次数策略。
 - 尚未重新验证同一题内持久化 WorldMap 在 L2 中能否产生 confirmed 关系。
+- 尚未进行 live 能力验证：需要一次纯 P7 运行观察 GPT-6.1-Sol 是否主动提交机制假设、得到 verified planner 状态并使用 `p7_model_search`；不得注入离线路线。
 
 ## 下一动作
 

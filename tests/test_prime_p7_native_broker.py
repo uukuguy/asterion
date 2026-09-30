@@ -115,6 +115,29 @@ class _HistoryEngine(_Engine):
         return value
 
 
+class _ModelEngine:
+    game_id = "ls20-9607627b"
+    seed = 0
+
+    def __init__(self) -> None:
+        self.levels_completed = 0
+
+    def observe(self) -> dict[str, object]:
+        return {
+            "available_actions": ["ACTION1"],
+            "frame": [[[0]]],
+            "levels_completed": self.levels_completed,
+            "state": "NOT_FINISHED",
+            "win_levels": 2,
+        }
+
+    def step(self, action: str) -> dict[str, object]:
+        if action != "ACTION1":
+            raise RuntimeError("unexpected action")
+        self.levels_completed += 1
+        return self.observe()
+
+
 class _SettledNoEffectEngine(_Engine):
     """The engine's state digest changes while the settled grid stays put."""
 
@@ -152,6 +175,79 @@ class TestNativeP7Broker(unittest.TestCase):
         projection["mutated"] = True
         self.assertNotIn("mutated", broker.playbook_projection())
 
+    def test_model_search_requires_a_retrodicted_mechanism_certificate(self) -> None:
+        broker, _ = _broker()
+        broker.bind_history("run-search-gate")
+
+        result = broker.model_search()
+
+        self.assertEqual(result["status"], "model-unavailable")
+        self.assertEqual(result["reason"], "no-planner-certificate")
+
+    def test_model_search_returns_plan_only_after_probe_is_retrodicted(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _ModelEngine()
+        game = P7GameSelection(
+            engine.game_id,
+            engine.seed,
+            target_level=2,
+            _metadata_baseline_actions=(1, 1),
+            _metadata_win_levels=2,
+        )
+        world = WorldModelStore(engine.game_id, engine.seed, 2)
+        broker = ArcBroker(engine=engine, game=game, world_model=world)
+        broker.bind_history("run-search-certified")
+        mechanism = {
+            "schema": "asterion.prime.p7-mechanism/v1",
+            "game_id": engine.game_id,
+            "seed": engine.seed,
+            "win_levels": 2,
+            "revision": 1,
+            "rules": [{
+                "action": "ACTION1",
+                "guards": [],
+                "effects": [{"op": "increment_level", "args": {"value": 1}}],
+            }],
+        }
+        broker.record_hypothesis(
+            "mechanics", "controls", {
+                "mechanism": mechanism,
+                "probe": {
+                    "action": {"name": "ACTION1", "data": {}},
+                    "expect": {"levels_completed": 1},
+                },
+                "dependencies": [],
+            },
+        )
+        broker.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"levels_completed": 1},
+        }])
+
+        result = broker.model_search()
+
+        self.assertEqual(result["status"], "found")
+        self.assertEqual(result["plan"][0]["expect"]["levels_completed"], 2)
+
+    def test_checked_no_effect_returns_the_current_action_hint(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        engine = _SettledNoEffectEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("run-no-effect-hint")
+
+        result = broker.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 0, "y": 0, "value": 7}},
+        }])
+
+        self.assertEqual(result["stop_reason"], "observation-no-change")
+        self.assertEqual(result["no_effect_hint"]["action"], "ACTION1")
+        self.assertIsNone(result["no_effect_hint"]["position"])
+
     def test_initial_frame_generates_bounded_visual_hypotheses(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.world_model import WorldModelStore
@@ -172,6 +268,31 @@ class TestNativeP7Broker(unittest.TestCase):
         projection = snapshot.projection()
         hypotheses = json.loads(json.dumps(projection))["hypotheses"]
         self.assertIn("candidate_roles", hypotheses["entities:visual.level.0.palette"]["value"]["colors"][0])
+
+    def test_load_playbook_rehydrates_current_level_visual_hypotheses(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.playbook import CheckedFact, PlaybookKey, PlaybookSnapshot
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine()
+        world = WorldModelStore(engine.game_id, engine.seed, engine.win_levels)
+        broker = ArcBroker(engine=engine, world_model=world)
+        fact = CheckedFact(
+            "entities",
+            "visual.level.0.component.7.0",
+            {"min_x": 1, "max_x": 1, "min_y": 2, "max_y": 2},
+            0,
+            ("a" * 16,),
+        )
+        broker.load_playbook(PlaybookSnapshot(
+            PlaybookKey(engine.game_id, engine.seed, engine.win_levels),
+            visual_hypotheses=(fact,),
+        ))
+
+        snapshot = broker.world_model()
+        self.assertIsNotNone(snapshot)
+        assert snapshot is not None
+        self.assertIn("entities:visual.level.0.component.7.0", snapshot.hypotheses)
 
     def test_visual_hypothesis_promotes_only_after_changed_cell_evidence(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
@@ -1014,6 +1135,39 @@ class TestP7MechanismModel(unittest.TestCase):
         certificate = validate_mechanism(spec, (initial, record))
         self.assertIsInstance(certificate, ModelCertificate)
         self.assertEqual(certificate.coverage, "mechanism-retrodicted")
+
+    def test_entity_guard_is_used_during_history_certificate(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction
+        from asterion.applications.prime.p7.mechanism_model import (
+            MechanismRule,
+            MechanismSpec,
+            validate_mechanism,
+        )
+        from asterion.applications.prime.p7.score import digest
+        from asterion.applications.prime.p7.verified_history import ArcHistoryRecord
+
+        initial = ArcHistoryRecord.initial(
+            game_id="game", seed=1, run_id="run", frame=((0,),),
+            levels_completed=0, state="NOT_FINISHED", after_state_sha256=digest("before"),
+        )
+        record = ArcHistoryRecord.following(
+            initial, action=ArcAction("ACTION1"),
+            before_state_sha256=initial.after_state_sha256,
+            after_state_sha256=digest("after"), frame=((0,),),
+            levels_completed=1, state="NOT_FINISHED",
+        )
+        spec = MechanismSpec(
+            game_id="game", seed=1, win_levels=2,
+            rules=(MechanismRule(
+                "ACTION1",
+                guards=(("entity_attr_equals", {"entity": "door", "attr": "open", "value": True}),),
+                effects=(("increment_level", {"value": 1}),),
+            ),),
+        )
+
+        certificate = validate_mechanism(spec, (initial, record), entities={"door": {"open": True}})
+
+        self.assertIsNotNone(certificate)
 
     def test_mechanism_rules_are_canonical_bounded_and_reject_code_like_effects(self) -> None:
         from asterion.applications.prime.p7.mechanism_model import MechanismRule, MechanismSpec
