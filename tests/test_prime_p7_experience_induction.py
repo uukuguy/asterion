@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 import unittest
 
 from asterion.applications.prime.p7.broker import ArcAction
@@ -109,12 +109,25 @@ class ExperienceInductionTests(unittest.TestCase):
                 action=ArcAction("ACTION1"), before=before,
                 after=((value, 0), (0, 0)),
             )
-            inducer.observe(extract_action_effect(first, second))
+            effect = extract_action_effect(first, second)
+            inducer.observe(effect if value == 7 and not inducer.effects() else replace(effect, sequence=2))
         candidates = inducer.candidates()
         self.assertEqual(len(candidates), 1)
         self.assertEqual(candidates[0].support_count, 2)
         self.assertEqual(candidates[0].status, "hypothesis")
-        self.assertEqual(candidates[0].evidence_sequences, (1, 1))
+        self.assertEqual(candidates[0].evidence_sequences, (1, 2))
+
+    def test_repeated_no_effect_stays_a_boundary_and_is_not_probeable(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(action=ArcAction("ACTION1"), before=((4,),), after=((4,),))
+        effect = extract_action_effect(first, second)
+        inducer.observe(effect)
+        inducer.observe(replace(effect, sequence=2))
+        self.assertEqual(inducer.candidates()[0].status, "boundary")
+        current = SimState.from_observation(
+            frame=((4,),), level=0, state="NOT_FINISHED", available_actions=["ACTION1"],
+        )
+        self.assertEqual(ExperienceInducer.probe_plan(current, inducer.candidates()).status, "no-discriminating-probe")
 
     def test_contradictory_delta_retires_prior_candidate(self) -> None:
         inducer = ExperienceInducer()

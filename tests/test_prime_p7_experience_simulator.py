@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from dataclasses import replace
 
 from asterion.applications.prime.p7.broker import ArcAction
 from asterion.applications.prime.p7.experience_induction import (
@@ -39,7 +40,7 @@ class ExperienceSimulatorTests(unittest.TestCase):
         inducer = ExperienceInducer(win_levels=1)
         effect = effect_for(7)
         inducer.observe(effect)
-        inducer.observe(effect)
+        inducer.observe(replace(effect, sequence=2))
         spec = compile_effect_hypothesis(inducer.candidates()[0])
         self.assertIsNotNone(spec)
         state = SimState.from_observation(

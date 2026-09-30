@@ -250,7 +250,8 @@ class ExperienceInducer:
             candidate = EffectHypothesis(
                 key=key, game_id=effect.game_id, seed=effect.seed,
                 level=effect.level, action_family=family, action=effect.action,
-                data=effect.data, signature=signature, status="hypothesis",
+                data=effect.data, signature=signature,
+                status="boundary" if effect.outcome == "no-effect" else "hypothesis",
                 evidence_sequences=(effect.sequence,), conflict_sequences=(),
                 template=effect, win_levels=self._win_levels,
             )
@@ -273,6 +274,8 @@ class ExperienceInducer:
             self._candidates[key] = candidate
             touched.append(candidate)
         else:
+            if effect.sequence in candidate.evidence_sequences:
+                return (candidate,)
             candidate = replace(
                 candidate,
                 evidence_sequences=candidate.evidence_sequences + (effect.sequence,),
