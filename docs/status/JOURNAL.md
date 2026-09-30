@@ -3355,3 +3355,4 @@
 - 14:14 VC33 L2 纯 P7 重跑仍失败：当前级别 7 步、levels_completed=1；未再出现 ACTION1–ACTION7 幻觉，但未找到通关路线
 - 14:36 [42a8a921] 修复纯 P7 witness 误用历史路线 7 步上限；无显式离线路线时恢复官方 L2 baseline 18，并保留 14 步路线仅作证据。
 - 14:42 [ef1e3fb6] 更正恢复检查点：VC33 L2 baseline 18、已知路线 14；重跑按总上限 21，区分纯 P7 能力与路线证据。
+- 14:58 [0f33947c] 修复 worldmap 接入后的动作语义回归：恢复通用 ACTION1-7 契约，避免模型因 available_actions 无语义而猜错动作。
