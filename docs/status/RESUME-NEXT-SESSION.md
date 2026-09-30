@@ -33,6 +33,7 @@
 - The causal contribution of visual priors versus replay-verified route evidence remains unisolated.
 - Digest field disambiguation, success-path failure classification, clean retrodiction accounting, and current-prefix fallback provenance remain unresolved implementation work.
 - A pure capability rerun must disable offline route hints and route-adoption injection; offline optimization can run only after the online attempt for analysis.
+- Decision now fixed: offline optimization is diagnostic only, triggered by prolonged non-success or near-baseline low-score completion. Its output must become a generic mechanism hypothesis; exact candidate routes cannot enter a capability run.
 
 ## 下一动作
 

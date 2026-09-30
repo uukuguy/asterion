@@ -827,3 +827,11 @@
 - Rationale: A shorter offline route is useful for the same level only when P7 can test each step against fresh evidence. A route transcript alone must not masquerade as a general mechanism or silently inject an unchecked sequence into live play.
 - Consequence: Confirmed same-game facts can be reused without repeating probes, hypotheses receive at most one distinguishing probe, conflicts branch locally, and raw frames/prompts/private facts remain outside public receipts. This is a generic application mechanism and cannot encode BP35-specific action meanings.
 - Evidence: `docs/superpowers/specs/2026-09-30-prime-p7-same-game-world-model-design.md`; commits `248cd524`, `a47aa65b`, `8c58db5e`, and `cc9c991e`; combined focused P7 suite of 221 passing tests.
+
+## D-2026-09-30-05 — Offline optimization is a diagnostic, not a default P7 solver
+
+- Status: 🟢 active. Supersedes the live-adoption portion of D-2026-09-30-04.
+- Decision: A normal P7 attempt must run without offline route hints, `candidate_actions`, candidate expectations, or route-adoption injection. Use offline optimization only after a long-running non-success or a completed level whose action count is too close to the human baseline to receive the intended score. The optimizer may analyze the prior trace and produce generic compression/mechanism evidence, but it must not pass the exact candidate route into the next live attempt.
+- Repair loop: (1) run pure P7; (2) if the trigger fires, run offline analysis; (3) convert the result into a generic mechanism hypothesis or compression rule without coordinates or action sequence; (4) repair the generic P7 mechanism; (5) rerun pure P7 and compare capability evidence. Offline replay and route execution remain separately labeled integration tests and are never promoted as P7 capability results.
+- Rationale: Injecting a shorter route lets the runtime execute the optimizer's solution and cannot measure P7's ability to discover or reason about that route. Offline optimization is valuable only when it explains the missing mechanism and leads to an independent P7 solve.
+- Consequence: The current world-model VC33 L1/L2 runs are route-assisted evidence with zero clean P7 capability passes. No new level run should start until the default route-injection path is disabled or isolated behind an explicitly non-capability experiment mode.
