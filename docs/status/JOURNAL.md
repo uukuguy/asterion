@@ -3391,3 +3391,4 @@
 - 02:55 Broker 自动记录 ActionEffect/候选并注册四个只读 P7 诊断工具，普通探索仍不受阻断 [65017681]
 - 03:05 Playbook 持久化 effects/candidates/simulator 摘要，重载候选保持 stale advisory，失败运行也保留学习证据 [16a1cffd]
 - 03:16 合成端到端验证真实 transition 学习、失败 Playbook 重载和 stale 边界；无效果候选不进入规划 [ae49f7e7]
+- 2026-10-01 Closed P7 experience feedback regressions: safe status fallback, conditional promotion feedback, opaque action prompt contract; disabled npm update notifier in closed offline promotion and marked the design implemented pending full/live verification.
