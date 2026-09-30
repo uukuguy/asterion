@@ -1,4 +1,5 @@
 import { closeSync, read, write } from "node:fs";
+import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
@@ -21,6 +22,7 @@ const DEFAULT_LINE_CAP = 1024 * 1024;
 const DEFAULT_DEADLINE_MS = 60_000;
 const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+const PROVIDER_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]*\|[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const RESULT_KEYS = ["output", "protocol", "request_id", "status", "type"];
 const REQUEST_KEYS = ["code", "protocol", "request_id", "type"];
 const METHOD_RESULT_KEYS = ["error", "params", "protocol", "request_id", "status", "type", "value"];
@@ -600,7 +602,12 @@ export function createIpythonTool(bridge: IpythonBridge) {
       signal?: AbortSignal,
     ): Promise<IpythonToolResult> => {
       try {
-        return await bridge.execute(id, input.code, signal);
+        // Provider IDs are opaque. Keep the internal bridge's canonical ID
+        // contract while adapting compound Responses API tool identifiers.
+        const requestId = typeof id === "string" && id.length <= 256 && PROVIDER_IDENTIFIER.test(id)
+          ? "tool-" + createHash("sha256").update(id).digest("hex")
+          : id;
+        return await bridge.execute(requestId, input.code, signal);
       } catch {
         throw unavailable();
       }
