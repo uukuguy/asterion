@@ -646,6 +646,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("p7_world_model", P7_SOLVE_PROMPT)
         self.assertIn("p7_retrodiction_status", P7_SOLVE_PROMPT)
         self.assertIn("Do not carry prior-level visual coordinates", P7_SOLVE_PROMPT)
+        self.assertIn("Replayed prefix actions are evidence of prior levels", P7_SOLVE_PROMPT)
         self.assertIn("Action semantics are fixed", P7_SOLVE_PROMPT)
         self.assertIn("ACTION1 is up", P7_SOLVE_PROMPT)
         self.assertIn("ACTION6 a click at column x and row y", P7_SOLVE_PROMPT)

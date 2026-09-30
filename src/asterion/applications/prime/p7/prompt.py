@@ -94,8 +94,10 @@ First save the status() values levels_completed and primitive_actions. If
 levels_completed is 0, this run is still at Level 1: use observe() and plan
 from the current game; do not wait for a nonexistent Level 1 history boundary.
 If levels_completed is above 0, inspect the replayed prefix with
-p7_client.history(0, 32), but make no more than three startup history calls
-before forming one legal, falsifiable probe from the current settled frame.
+p7_client.history(0, 32), but make no more than three startup history calls.
+Replayed prefix actions are evidence of prior levels, not a route for the
+current level; derive the next coordinate from the current settled frame.
+Before forming one legal, falsifiable probe from the current settled frame.
 An unavailable page counts as a call; retry with a smaller limit such as
 16, 8, 4, 2, or 1. A valid page can exceed the 16 KiB limit. Do not wait to
 finish paging the prefix before acting. Further history may be inspected after
