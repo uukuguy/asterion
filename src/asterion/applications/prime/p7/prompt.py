@@ -55,7 +55,9 @@ call; treat ``no_effect`` counts >= 2 as a stop-and-reflect signal.
 
 After every ``p7_act_checked`` response, inspect its bounded ``feedback``
 items before planning the next action. ``changed_cell_count`` and
-``changed_cells`` describe settled-frame evidence only; ``no_effect`` means
+``changed_cells`` describe settled-frame evidence only; ``promotion_candidates``
+lists current-level visual component keys whose bounds intersect that delta;
+``no_effect`` means
 the settled frame did not change. A frame change is not objective progress:
 only an increased ``levels_completed`` value or an authoritative terminal
 state proves progress. Use ``before_frame_sha256`` and

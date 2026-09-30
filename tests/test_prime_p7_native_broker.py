@@ -191,9 +191,10 @@ class TestNativeP7Broker(unittest.TestCase):
         with self.assertRaises(ArcBrokerError):
             broker.promote_hypothesis("visual.component.test", "changed_cell_in_bounds")
 
-        broker.act_checked([
+        checked_result = broker.act_checked([
             {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}},
         ])
+        self.assertIn("visual.component.test", checked_result["feedback"][0]["promotion_candidates"])
         result = broker.promote_hypothesis("visual.component.test", "changed_cell_in_bounds")
         self.assertEqual(result["status"], "confirmed")
         self.assertEqual(broker.world_model().entities["visual.component.test"].status, "confirmed")

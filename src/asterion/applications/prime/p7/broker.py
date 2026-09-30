@@ -627,6 +627,30 @@ class ArcBroker:
             raise ArcBrokerError("unavailable")
         return [list(row) for row in records[sequence].frame]
 
+    def _visual_promotion_candidates(self, record: ArcHistoryRecord) -> list[str]:
+        """List candidate keys whose recorded bounds intersect this delta."""
+        world = self._world_model
+        if world is None or record.changed_cell_count == 0 or record.changed_cells_omitted:
+            return []
+        candidates: list[str] = []
+        for qualified, fact in world.snapshot.hypotheses.items():
+            layer, key = qualified.split(":", 1)
+            if layer != "entities" or fact.level != world.current_level or ".component." not in key:
+                continue
+            value = fact.value
+            if not isinstance(value, Mapping):
+                continue
+            bounds = tuple(value.get(name) for name in ("min_x", "max_x", "min_y", "max_y"))
+            if any(type(item) is not int for item in bounds):
+                continue
+            min_x, max_x, min_y, max_y = cast(tuple[int, int, int, int], bounds)
+            if min_x <= max_x and min_y <= max_y and any(
+                min_x <= cell[0] <= max_x and min_y <= cell[1] <= max_y
+                for cell in record.changed_cells
+            ):
+                candidates.append(key)
+        return sorted(candidates)[:16]
+
     def act_checked(
         self, plan: object, *, replay_expectations: tuple[ActionExpectation, ...] = ()
     ) -> dict[str, object]:
@@ -660,6 +684,7 @@ class ArcBroker:
                 "levels_completed": record.levels_completed,
                 "state": record.state,
                 "no_effect": record.changed_cell_count == 0,
+                "promotion_candidates": self._visual_promotion_candidates(record),
                 "stop_reason": item_stop_reason,
             })
 
