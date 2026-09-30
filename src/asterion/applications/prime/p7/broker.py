@@ -708,15 +708,25 @@ class ArcBroker:
         records = self._bound_history()
         candidates: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
         click_positions: set[tuple[int, int]] = set()
-        for record in records:
+        for index, record in enumerate(records):
+            # A transition record is labelled with its successor level, while
+            # its action was performed on the preceding level.  Search may
+            # reuse generic keyboard names from any history, but click data
+            # and changed-cell coordinates are only valid when their action
+            # was observed on the current level.
+            action_level = record.levels_completed
+            if index > 0 and records[index - 1].levels_completed < record.levels_completed:
+                action_level -= 1
             if record.action is not None and record.action in self._current.available_actions:
-                candidates.add((record.action, record.data))
-            if record.action == "ACTION6" and len(record.data) == 2:
+                if record.action != "ACTION6" or action_level == self._current.levels_completed:
+                    candidates.add((record.action, record.data))
+            if record.action == "ACTION6" and action_level == self._current.levels_completed and len(record.data) == 2:
                 data = dict(record.data)
                 if set(data) == {"x", "y"}:
                     click_positions.add((data["x"], data["y"]))
-            for x, y, _, _ in record.changed_cells:
-                click_positions.add((x, y))
+            if action_level == self._current.levels_completed:
+                for x, y, _, _ in record.changed_cells:
+                    click_positions.add((x, y))
         world = self._world_model.snapshot if self._world_model is not None else None
         if world is not None:
             for fact in (*world.entities.values(), *world.hypotheses.values()):
@@ -840,12 +850,23 @@ class ArcBroker:
 
     def export_playbook(self, *, successful: bool) -> PlaybookSnapshot:
         snapshot = self._playbook
+        def merge_facts(
+            previous: tuple[CheckedFact, ...],
+            current: tuple[CheckedFact, ...],
+        ) -> tuple[CheckedFact, ...]:
+            # A broker is normally short lived, while a Playbook spans many
+            # runs.  Export must update facts learned this run without
+            # discarding semantic evidence from earlier runs.
+            merged = {(fact.layer, fact.key): fact for fact in previous}
+            merged.update({(fact.layer, fact.key): fact for fact in current})
+            return tuple(merged.values())
+
         effect_facts: list[CheckedFact] = []
         for effect in self._experience_inducer.effects()[-256:]:
             evidence = effect.after_frame_sha256.removeprefix("sha256:")
             level = min(effect.level, self._game.win_levels - 1)
             effect_facts.append(CheckedFact(
-                "mechanics", f"experience.effect.{effect.sequence}", {
+                "mechanics", f"experience.effect.{digest((effect.run_id, effect.sequence, effect.after_frame_sha256)).removeprefix('sha256:')[:32]}", {
                     "sequence": effect.sequence,
                     "level": effect.level,
                     "action": {"name": effect.action, "data": dict(effect.data)},
@@ -892,9 +913,9 @@ class ArcBroker:
         )
         snapshot = replace(
             snapshot,
-            effect_summaries=tuple(effect_facts),
-            candidate_summaries=tuple(candidate_facts),
-            simulator_summaries=(simulator_fact,),
+            effect_summaries=merge_facts(snapshot.effect_summaries, tuple(effect_facts)),
+            candidate_summaries=merge_facts(snapshot.candidate_summaries, tuple(candidate_facts)),
+            simulator_summaries=merge_facts(snapshot.simulator_summaries, (simulator_fact,)),
         )
         if not successful:
             return branch_playbook(snapshot, "run-failed")

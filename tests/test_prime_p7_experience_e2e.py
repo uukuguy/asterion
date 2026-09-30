@@ -157,6 +157,27 @@ class ExperienceEndToEndTests(unittest.TestCase):
             self.assertEqual(fresh.simulator_status()["confirmed_model"], False)
             self.assertEqual(engine2.calls, [])
 
+    def test_export_playbook_preserves_prior_experience_across_runs(self) -> None:
+        source = ArcBroker(engine=_TranslationEngine())
+        source.bind_history("learning-run-1")
+        source.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 1, "y": 0, "value": 7}},
+        }])
+        first = source.export_playbook(successful=False)
+
+        resumed = ArcBroker(engine=_TranslationEngine())
+        resumed.bind_history("learning-run-2")
+        resumed.load_playbook(first)
+        resumed.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 1, "y": 0, "value": 7}},
+        }])
+        second = resumed.export_playbook(successful=False)
+
+        self.assertGreaterEqual(len(second.effect_summaries), 2)
+        self.assertGreaterEqual(len(second.candidate_summaries), 1)
+
     def test_ipython_facade_exposes_induction_queries(self) -> None:
         broker = ArcBroker(engine=_TranslationEngine())
         broker.bind_history("learning-run")

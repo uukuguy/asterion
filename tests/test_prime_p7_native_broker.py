@@ -138,6 +138,31 @@ class _ModelEngine:
         return self.observe()
 
 
+class _LevelClickEngine:
+    game_id = "ls20-9607627b"
+    seed = 0
+    win_levels = 2
+
+    def __init__(self) -> None:
+        self.levels_completed = 0
+
+    def observe(self) -> dict[str, object]:
+        size = 16
+        return {
+            "available_actions": ["ACTION1", "ACTION6"],
+            "frame": [[[0 for _ in range(size)] for _ in range(size)]],
+            "levels_completed": self.levels_completed,
+            "state": "NOT_FINISHED",
+            "win_levels": self.win_levels,
+        }
+
+    def step(self, action: str, data: dict[str, int] | None = None) -> dict[str, object]:
+        if action != "ACTION6":
+            raise RuntimeError(action)
+        self.levels_completed = 1
+        return self.observe()
+
+
 class _SettledNoEffectEngine(_Engine):
     """The engine's state digest changes while the settled grid stays put."""
 
@@ -155,6 +180,25 @@ def _broker(*, level_after: int | None = None, raises_on: int | None = None):
 
 
 class TestNativeP7Broker(unittest.TestCase):
+    def test_model_search_does_not_reuse_prior_level_click_coordinates(self) -> None:
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
+
+        engine = _LevelClickEngine()
+        game = P7GameSelection(
+            engine.game_id, engine.seed, target_level=2,
+            _metadata_baseline_actions=(1, 1), _metadata_win_levels=2,
+        )
+        broker = ArcBroker(engine=engine, game=game)
+        broker.bind_history("level-click-search")
+        broker.act((ArcAction("ACTION6", (("x", 9), ("y", 9))),))
+
+        actions = broker._model_search_actions()
+
+        self.assertNotIn(
+            {"name": "ACTION6", "data": {"x": 9, "y": 9}},
+            actions,
+        )
     def test_action_effects_and_candidates_are_learned_without_dispatching(self) -> None:
         broker, engine = _broker()
         broker.bind_history("run-effects")
