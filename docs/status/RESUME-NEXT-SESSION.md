@@ -9,7 +9,8 @@
 - 活动提示已移除固定 `ACTION1` 到 `ACTION7` 语义，要求按当前游戏证据推断动作槽位，并在批量动作前读取同题模型与 retrodiction 状态。
 - VC33 L1 已完成可提交的部分关卡前缀：3 个当前关卡动作，baseline/action cap 7，sealed trace 与 replay verified 均为真；`promotion=unpromoted` 不否定部分提交资格。
 - 初始帧视觉先验已接入：每次运行最多记录 32 个候选，作为 `entities` 层 hypothesis 注入同题上下文；不会自动确认墙、地板、物品或终点。
-- retrodiction 诊断现在暴露机器可读 `reasons`；VC33 记录到三次 `prediction-mismatch`，但路线采用仍 3/3 完成，说明“模型预测冲突”和“回放路线成功”需要在后续机制中分层处理。
+- retrodiction 诊断现在暴露机器可读 `reasons`；VC33 本次为两次 `prediction-mismatch`、第三步预期匹配，路线采用 3/3 完成。根因是前两步把 state hash 填入 frame hash 字段；Playbook 的三条 conflict 包含历史元数据，不能当作本次计数。
+- VC33 初始模型为 12 个视觉 hypothesis；通关后刷新为下一级的 15 个，版本 28 = 12 + 刷新 1 + 15。无 hypothesis/probe 写调用，0 confirmed facts；本次证明路线执行有效，未证明规则学习有效。完整复盘见 `ASTERION-PRIME-P7-EVIDENCE.md` 的 2026-09-30 节。
 - 离线 ARC fresh-engine replay 为每个候选动作生成 bounded expectation；在线采用候选前要求期望数量完整，首个 action 或 expectation mismatch 即停止采用。
 - 223 个组合 P7 测试通过；`make lint`、`make docs-check`、变更模型模块 Pyright 和 `git diff --check` 通过。
 - 完整仓库 gate 跑完 3509 项测试，唯一失败是 `test_full_promotion_python_environment_keeps_real_npm_ci_offline` 观察到一次网络请求；这是环境 gate 失败，不是 P7 回归。
@@ -33,6 +34,6 @@
 
 ## 下一动作
 
-1. 将 `prediction-mismatch` 与 replay witness 成功分层：模型期望错误不能抹掉已验证路线，仍须记录为可诊断的模型冲突。
+1. 防止 checked plan 的 state/frame hash 混用，并将 caller prediction mismatch、replay witness 成功、确认机制冲突和历史 Playbook 元数据分层。修复成功 summary 中残留的 application_failure 分类。
 2. 设计并测试 bounded visual hypothesis 的同题 Playbook 持久化，保持 hypothesis 只能被动作证据升级，不能直接授权复用。
 3. 用新的分层诊断在下一个低 baseline L1 做一次受控 live 验证，报告当前关卡动作数、提交资格、模型/工具异常与 30 分钟/基线停止原因。

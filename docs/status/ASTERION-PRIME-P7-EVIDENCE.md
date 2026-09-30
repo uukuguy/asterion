@@ -677,3 +677,33 @@ L3+ retry queue exhausted:
 - Total gain: +39.05 game score, +1.56 overall after re-submit
 
 Recommendation: re-submit official card 4b77cf7f with updated prefixes.
+
+## 2026-09-30 VC33 L1 — 3-action replay adoption and world-model diagnosis
+
+Evidence: private run `p7-live-20260930015559-1ff941b4507b3fbeebe2c318`, its sealed trace, summary, debug event transcript, and same-game Playbook. This is a valid partial submission candidate, with one completed level, 3 current-level actions, L1 baseline/action cap 7, replay verified and cleanup complete. No external submission was made in this diagnostic run.
+
+### 已验证事实
+
+The offline optimizer removed the source route's first click, reducing 4 actions to 3 after 8 fresh replay candidates (approximately 0.115 seconds). The removed click was ACTION6 at (55,46); the retained route was ACTION6 at (61,33) three times. This is a `delete_span` route proof, not a proof that the removed action is universally useless or that the solver understands the game mechanism. P7 executed the three retained actions in order, with levels completed 0 → 0 → 1; route adoption reports 3/3 followed, no divergence, target reached.
+
+| Stage | World-model / execution evidence | Interpretation |
+|---|---|---|
+| Initial context | World-model version 12, 12 visual hypotheses, 0 confirmed facts | Candidate palette/components were supplied to the LLM |
+| Before actions | Calls to Playbook, retrodiction status and tried actions | Prior evidence tools were read; no world-model hypothesis writer was called |
+| First two actions | Correct route actions; state digests submitted as `frame_sha256` | Two model prediction mismatches; route witnesses themselves match |
+| Between actions | One failed IPython call to obtain outcome feedback | Tool error did not consume a game action; broker method failures remain 0 |
+| Third action | Expected one completed level; actual one completed level | Model expectation matched and L1 completed |
+| Level refresh | World-model version 28, current level 1, 15 visual hypotheses, 0 confirmed facts | Old local candidates were refreshed for the next level; no rule was learned |
+| Saved Playbook | One checked 3-action L1 route, 0 confirmed facts | Route persisted; visual hypotheses were not persisted |
+
+The version arithmetic is 12 initial hypotheses + 1 level refresh + 15 next-level hypotheses = 28. Therefore, a higher version here measures candidate creation and level refresh, not semantic learning. Action evidence and TransitionModel were updated, but no mechanism/entity/relation fact was confirmed.
+
+The current summary contains **2** prediction mismatches and 1 matched expectation. The Playbook contains three conflict strings because historical metadata was loaded and retained. Earlier reporting of three mismatches in this run is superseded by this evidence. The first two requested `frame_sha256` values exactly equal the corresponding replay **state** hashes rather than the distinct replay frame hashes. This identifies the immediate mismatch cause without interpreting hidden model reasoning.
+
+### 当前判断与未完成边界
+
+- This run demonstrates that an offline route improvement can become a P7 online completion. It does not isolate a world-model contribution: the model received candidates, but its actions followed a supplied route and it made no hypothesis/probe call.
+- World-model input delivery, visual candidate construction, level refresh, transition recording and checked-route persistence worked. Mechanism acquisition, visual-hypothesis persistence and later-level reuse were not demonstrated.
+- Hash fields in route evidence are easy to confuse. A canonical checked plan should carry the correct frame expectation, and diagnostics should distinguish caller prediction errors, verified route execution, confirmed-mechanism contradictions and historical Playbook conflicts.
+- The summary has `failure=null` alongside `failure_classification.category=application_failure`; this is inconsistent diagnostic labeling, not a failed level. It needs a separate success-path regression.
+- No loop of repeated game actions or long retry was observed: three actions, one failed non-action tool call, six model usage events (45,794 summed input tokens including repeated/cache context and 1,919 output tokens). This does not establish efficiency on a fresh unsolved level.
