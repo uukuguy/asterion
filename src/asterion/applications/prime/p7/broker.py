@@ -504,9 +504,22 @@ class ArcBroker:
         """
 
         candidates = self._experience_inducer.candidates()
+        current_level = self._current.levels_completed
+        current_candidates = tuple(
+            candidate for candidate in candidates
+            if candidate.level == current_level
+        )
+        current_hypotheses = tuple(
+            candidate for candidate in current_candidates
+            if candidate.status == "hypothesis"
+        )
         compiled_candidates: list[dict[str, object]] = []
         candidate_previews: list[dict[str, object]] = []
-        for candidate in candidates:
+        # Level-local hypotheses are the only candidates that can guide a
+        # current probe.  Prior-level candidates remain available through the
+        # full mechanism-candidate tool, but must not make a replayed level
+        # look probe-ready in this bounded hint.
+        for candidate in current_candidates:
             candidate_previews.append({
                 "action": {"name": candidate.action, "data": dict(candidate.data)},
                 "status": candidate.status,
@@ -531,9 +544,9 @@ class ArcBroker:
         candidate_previews.sort(
             key=lambda item: (-int(item["support_count"]), str(item["action"]))
         )
-        if compiled_candidates:
+        if any(compile_effect_hypothesis(candidate) is not None for candidate in current_hypotheses):
             recommendation = "inspect_candidate_and_probe"
-        elif candidates:
+        elif current_candidates:
             recommendation = "inspect_candidates"
         else:
             recommendation = "ordinary_exploration"
@@ -541,6 +554,8 @@ class ArcBroker:
         return {
             "recommendation": recommendation,
             "candidate_count": len(candidates),
+            "current_candidate_count": len(current_candidates),
+            "stale_candidate_count": len(candidates) - len(current_candidates),
             "candidate_previews": candidate_previews[:4],
             "compiled_candidates": compiled_candidates[:4],
             "simulator": {

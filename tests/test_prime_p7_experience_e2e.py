@@ -59,7 +59,48 @@ class _TranslationEngine:
         return self.observe()
 
 
+class _TransitionTranslationEngine(_TranslationEngine):
+    def __init__(self) -> None:
+        super().__init__()
+        self.level = 0
+
+    def observe(self) -> dict[str, object]:
+        observation = super().observe()
+        observation["levels_completed"] = self.level
+        return observation
+
+    def step(self, action: str) -> dict[str, object]:
+        observation = super().step(action)
+        self.level = 1
+        observation["levels_completed"] = self.level
+        return observation
+
+
 class ExperienceEndToEndTests(unittest.TestCase):
+    def test_learning_hint_does_not_recommend_stale_level_candidates(self) -> None:
+        source = ArcBroker(engine=_TranslationEngine())
+        source.bind_history("learning-run")
+        source.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 1, "y": 0, "value": 7}},
+        }])
+        snapshot = source.export_playbook(successful=False)
+
+        broker = ArcBroker(engine=_TransitionTranslationEngine())
+        broker.bind_history("level-one-run")
+        broker.load_playbook(snapshot)
+        broker.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"levels_completed": 1},
+        }])
+        hint = broker.learning_hint()
+
+        self.assertEqual(hint["recommendation"], "ordinary_exploration")
+        self.assertEqual(hint["compiled_candidates"], [])
+        self.assertEqual(hint["current_candidate_count"], 0)
+        self.assertGreater(hint["stale_candidate_count"], 0)
+        self.assertEqual(hint["candidate_previews"], [])
+
     def test_observation_surfaces_compiled_learning_hint_without_route_authority(self) -> None:
         broker = ArcBroker(engine=_TranslationEngine())
         broker.bind_history("learning-run")
