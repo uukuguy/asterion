@@ -77,6 +77,10 @@ class ExperienceEndToEndTests(unittest.TestCase):
 
         status = _P7BrokerClient(broker, None).status()
         self.assertEqual(status["learning_hint"]["recommendation"], "inspect_candidate_and_probe")
+        # The bridge may truncate a large frame response.  The bounded hint
+        # must therefore precede the frame-bearing fields in the wire mapping.
+        observed = _P7BrokerClient(broker, None).observe()
+        self.assertEqual(next(iter(observed)), "learning_hint")
         candidates = broker.mechanism_candidates()
         self.assertEqual(candidates[-1]["key"], "experience.induced.bundle")
         self.assertEqual(candidates[-1]["source"], "induced-bundle")

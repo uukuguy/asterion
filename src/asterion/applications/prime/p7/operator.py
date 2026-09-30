@@ -852,7 +852,11 @@ class _P7BrokerClient:
             batch = result["batch"]
             observation = result["observation"]
             terminal = result["terminal"]
+            learning_hint = self._broker.learning_hint()
             return {
+                # Put the bounded cue before the full observation frame; the
+                # worker output cap may truncate the latter.
+                "learning_hint": learning_hint,
                 "applied_count": result["applied_count"],
                 "stop_reason": result["stop_reason"],
                 "mismatch": result["mismatch"],
@@ -864,7 +868,6 @@ class _P7BrokerClient:
                 "invalid_action": result["invalid_action"],
                 "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
-                "learning_hint": self._broker.learning_hint(),
                 "terminal": self._status_view(terminal),
                 "batch": {
                     "applied_count": batch.applied_count,
@@ -935,7 +938,12 @@ class _P7BrokerClient:
                 item.get("action", ""),
             ),
         )[:5]
+        learning_hint = self._broker.learning_hint()
         return {
+            # Keep the bounded semantic signal before the potentially large
+            # frame so the worker bridge cannot truncate the only reusable
+            # learning cue.
+            "learning_hint": learning_hint,
             "available_actions": list(observation.available_actions),
             "frame": observation.frame,
             "levels_completed": observation.levels_completed,
@@ -952,7 +960,6 @@ class _P7BrokerClient:
                 "no_effect": no_effects.get("no_effect", {}),
                 "top_repeated": top_tried,
             },
-            "learning_hint": self._broker.learning_hint(),
         }
 
 
