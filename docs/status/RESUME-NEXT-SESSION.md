@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-30 15:00. **Session remains active — not a final handoff.**
+> Updated: 2026-09-30 16:10. **Session remains active — not a final handoff.**
 
 ## 已验证事实
 
@@ -13,11 +13,13 @@
 - 修复后重跑 `p7-live-20260930065824-a70c98390eca57b41fc5dc85` 验证到 L2 第 1 步：模型重复 L1 坐标 `(61,33)` 后转入无效探测，未产生最终 summary；这是未确认跨级视觉候选的隔离问题，不能宣称能力已恢复。
 - 修复后动作全为当前白名单 `ACTION6`，没有再出现非法 `ACTION1–ACTION7`；模型尝试 `(61,33)`、`(28,41)`、`(9,54)`、`(11,54)`、`(29,42)`、`(8,52)`，未形成 L2 过关。
 - 修复后 P7 回归测试 174 项通过，`make lint` 通过。
+- `6e537239` 增加通用前缀坐标保护：当前级别复用前级 ACTION6 坐标且没有当前帧 cell/frame 证据时，Broker 不派发并返回 `prefix-action-reuse`；130 项 native/live 回归与 lint 通过。
+- VC33 L2 纯 P7 重跑 `p7-live-20260930074625-ef0bc3c614461a31088ed5c7`：L1 3 步完成；L2 当前步数 9（总 primitive 12），动作坐标为 `(0,0),(32,32),(16,16),(32,16),(32,48),(16,32),(48,32),(32,32)`；未复用 `(61,33)`，未通关，因长时间推理手动取消。
 
 ## 当前判断
 
 - 动作接口与续推理的非法动作循环已修复；本次仍失败不再归因于动作名漂移。
-- WorldMap/Playbook 已被读取，但仍只有视觉 hypotheses，confirmed mechanics/entities/relations 为 0；模型没有从候选稀有对象推导出可验证的通用点击机制。
+- WorldMap/Playbook 已被读取，但本轮结束时 confirmed mechanics/entities/relations 仍为 0；模型执行分散点击，未从候选稀有对象建立可验证通用点击机制。
 - 纯 P7 VC33 L2 尚未证明可独立过关；历史 7 步 L2 路线仍属于路线证据，不得当作能力结果。
 
 ## 历史归档
@@ -32,5 +34,5 @@
 
 ## 下一动作
 
-1. 用恢复固定动作语义后的代码重跑纯 P7 VC33 L2，确认是否恢复 worldmap 前的解题能力；不得启用 `ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION`。
-2. 对比重跑的每次 ACTION6 坐标、反馈和当前 L2 步数；把动作语义回归与 worldmap 推理负担分开评估。
+1. 优先修复/验证 P7 决策跟踪：开启受控 debug transcript，关联每个 `p7_act_checked` 的输入、expect 与 feedback，定位连续 prediction-mismatch 的通用原因。
+2. 再重跑纯 P7 VC33 L2；不得启用 `ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION`，按当前 L2 步数报告，不混淆总动作数。
