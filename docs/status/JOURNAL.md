@@ -3300,6 +3300,9 @@
 - 06:12 DC22 L3 新模型身份修复后的完整实跑 `p7-live-20260929214754-39760f6b63c8501487a6b6af`：GPT-6.1-Sol trace 全部同源，实际模型 usage 181 条；当前关卡 67/67 步，仍 L2，human-baseline/action-cap，RPC 正常、无取消或进程错误。按用户要求暂停后续关卡，转入通用题目套路/规则记忆设计。
 
 ## 2026-09-30
+
+- 09:30 更新 P7 安装夹具和旧提示断言，适配完整应用工具注册并保持隔离模型 profile 可验证 [cc9c991e]
+- 08:59 将 replay expectations 接入 P7 checked route 执行，首个 witness 冲突停止批量动作 [56948081]
 - 06:39 同题世界模型设计加入 TransitionModel 回放门、Playbook 与动作预期，提交设计文档 [32abf2ea]
 - 06:44 实现计划拆分世界模型、回放门、Playbook、Broker 接入和优化器验证 [f52ef9a4]
 - 06:45 计划明确唯一模型写入口为受限 hypothesis 提交，确认只能由动作证据升级 [bd3ed16f]

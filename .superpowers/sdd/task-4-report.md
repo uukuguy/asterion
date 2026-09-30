@@ -435,3 +435,35 @@ Verification: optimizer, ARC witness, live-command, and full P7 model/replay
 focused suites passed (199 tests in the combined run); optimizer, broker, and
 mechanism modules pass Pyright with zero errors; Ruff and `git diff --check`
 pass.
+
+## Task 7 replay/public evidence closeout — 2026-09-30
+
+The replay, official replay, diagnostics, installed-wheel, provider, bridge,
+optimizer, and same-game model suites now pass together (221 tests). The
+installed fixtures declare an explicit temporary provider profile and select
+the ipython tool by name, so the full P7 application registry is exercised
+without relying on registration order or the operator's host profile. The
+prompt regression asserts opaque per-game action slots and rejects the old
+fixed ACTION1 direction claim.
+
+Verification: `uv run python -m unittest -q` over the combined P7 suite — 221
+tests passed; `make lint` and `make docs-check` passed earlier in this
+closeout. A repository-wide `make check` run was interrupted by the session
+model switch after the Python suite had progressed through most packages; it
+must be rerun before claiming the repository gate.
+
+## Online replay-witness adoption closeout — 2026-09-30
+
+Commit `56948081` closes the offline-to-live gap. `ArcBroker.act_checked` now
+accepts the private replay expectations and checks the prior state, settled
+frame, state, level, and changed cells before allowing each candidate action.
+The first mismatch stops the batch and records a replan conflict. The P7
+Playbook projection exposes at most twenty checked actions with falsifiable
+frame expectations, and the prompt tells the model to submit that plan through
+`p7_act_checked` unchanged.
+
+Verification: the combined P7 suite passed 223 tests after this change; the
+90 prompt/live tests and model-module Pyright passed. The full repository gate
+completed 3509 tests with one existing promotion-environment failure: the
+offline npm-ci test observed one network request. It is recorded as a
+repository-gate failure, not a P7 regression.

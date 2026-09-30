@@ -1,6 +1,6 @@
 # Current State
 
-Updated 2026-09-29. This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
+Updated 2026-09-30. This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
 
 ## Project Snapshot
 
@@ -9,7 +9,7 @@ Updated 2026-09-29. This file is the structural snapshot; session handoff and ne
 - Theme-level focus: raising the BP35 official level score to the 115 cap under the operator-selected P7 model
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: none
+- Active work package: P7 same-game world model and replay-gated route adoption; implementation complete, repository gate pending.
 
 ## Current Architecture
 
@@ -22,10 +22,9 @@ Updated 2026-09-29. This file is the structural snapshot; session handoff and ne
 
 ## Open Problems
 
-- No current P7 gameplay result is authorized or in flight.
-- No P7 run has been executed with a non-default model; only the `openai-codex / gpt-6-sol` default has live evidence, and only as trace identity (no game action).
-- The P7 level-witness path currently produces no game actions: the Pi model host restarts every ~15-25 s after starting. Observed 2026-09-29; cause undiagnosed.
-- Full-game P7 capability remains unverified beyond the historical evidence retained before the GPT-6-Sol migration.
+- The same-game WorldModel, TransitionModel, Playbook, declarative mechanism certificates, P7 application tool registry, and replay expectation gate are implemented and covered by focused tests.
+- No live P7 gameplay result or official submission was run in this implementation closeout; focused tests do not prove improved game-solving capability.
+- The full repository gate completed 3509 tests with one promotion-environment failure because an offline npm-ci test observed one network request; `make lint`, `make docs-check`, Pyright on changed model modules, and the combined 223-test P7 suite passed.
 - Generated `.asterion-private` evidence may contain stale post-baseline runs and must not be treated as current source state.
 
 ## Key Files
@@ -54,4 +53,4 @@ Updated 2026-09-29. This file is the structural snapshot; session handoff and ne
 1. Read this file and `RESUME-NEXT-SESSION.md`.
 2. Read the latest `JOURNAL.md` entries and `AGENTS.md`.
 3. Run `git status --short` and `git log --oneline -5`.
-4. Treat `d50897f7` as the P7 gameplay baseline; `e392577` adds operator-selected P7 model configuration on top of it.
+4. Rerun the repository gate before any live game attempt; then use the P7 implementation boundary for a controlled live verification.

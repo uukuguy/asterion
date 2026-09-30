@@ -819,3 +819,11 @@
 - Decision: The non-sensitive variables allowed across the host, Orb, and systemd guest boundaries live in `tools/p7_guest_environment.txt`. Make's `ORBENV`, the guest export step, and `run_prime_p7_guest.py` all consume that file. Provider/model values are included in this contract; credentials remain excluded.
 - Rationale: Separate allowlists had drifted. The model switch reached the outer P7 summary but was lost at a later guest boundary, while the terminal still exported the old model. A single data source keeps the boundary auditable without requiring model names to be registered in code.
 - Consequence: Adding a non-sensitive runtime variable requires one contract-file change and one focused contract test. Official scorecard forwarding remains separate and does not inherit the P7 research contract.
+
+## D-2026-09-30-04 — Reuse same-game world knowledge only through replay-gated P7 tools
+
+- Status: 🟢 active.
+- Decision: P7 stores confirmed mechanisms, transition evidence, and checked route expectations under the exact `(game_id, seed, win_levels)` identity. The application registry exposes bounded read-only WorldModel, Playbook, and retrodiction projections plus one evidence-attached hypothesis writer. Offline route candidates are eligible for live adoption only when fresh replay produces one falsifiable expectation per action; the first action or expectation mismatch stops adoption and returns control to normal model planning.
+- Rationale: A shorter offline route is useful for the same level only when P7 can test each step against fresh evidence. A route transcript alone must not masquerade as a general mechanism or silently inject an unchecked sequence into live play.
+- Consequence: Confirmed same-game facts can be reused without repeating probes, hypotheses receive at most one distinguishing probe, conflicts branch locally, and raw frames/prompts/private facts remain outside public receipts. This is a generic application mechanism and cannot encode BP35-specific action meanings.
+- Evidence: `docs/superpowers/specs/2026-09-30-prime-p7-same-game-world-model-design.md`; commits `248cd524`, `a47aa65b`, `8c58db5e`, and `cc9c991e`; combined focused P7 suite of 221 passing tests.

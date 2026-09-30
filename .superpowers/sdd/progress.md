@@ -6,4 +6,4 @@
 - Task 4: complete (commits 5f6e8455..2899f0ef, final review PASS; broker Pyright remediation in current closeout)
 - Task 5: complete (P7 registry/bridge/extension surfaces and generic action-semantics prompt)
 - Task 6: complete (fresh replay ActionExpectation gate and first-mismatch route adoption fallback)
-- Task 7: pending
+- Task 7: complete (replay/public evidence boundaries verified; focused P7 suite 223 tests passed; repository gate completed with one unrelated offline npm-ci environment failure)
