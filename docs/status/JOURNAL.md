@@ -3384,3 +3384,4 @@
 - 02:01 cognition now persists only verified completion experience [07a65865]
 - 02:05 保存 P7 通用游戏经验归纳闭环设计：ActionEffect、候选机制、区分性探测、回放晋级、持久化和纯 P7 评估边界 [185a539d]
 - 02:12 补齐设计文档的 SimState、候选规则编译、历史回放、ModelCertificate、反事实搜索和 offline oracle 隔离 [7712298e]
+- 02:20 保存 experience-induction 完整实现计划，拆分 ActionEffect、候选归纳、模拟器、Broker、Playbook、边界、合成测试和 SP80 实战 [f920e14f]
