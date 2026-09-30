@@ -3402,3 +3402,4 @@
 - 04:12 Surface bounded compiled learning hints in P7 observations so models can use induced mechanisms without route authority [757e0eda]
 - 04:20 Keep distinct keyboard actions in separate induction candidates so reusable motion rules can compile and certify [a537bda8]
 - 04:28 Expose learning hints on compact status because animated observe frames can exceed the bridge response budget [fd572607]
+- 04:42 Include bounded candidate evidence in learning hints and require candidate inspection before long batches [ebba6740]
