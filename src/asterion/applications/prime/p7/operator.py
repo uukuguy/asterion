@@ -890,13 +890,14 @@ class _P7BrokerClient:
         if isinstance(game, P7GameSelection):
             level = min(status.levels_completed, game.win_levels - 1)
             level_baseline = game.baseline_actions[level]
+        action_cap = getattr(game, "action_cap", status.actions_remaining)
         return {
             "actions_remaining": status.actions_remaining,
             "levels_completed": status.levels_completed,
             "primitive_actions": status.primitive_actions,
             "target_level": self._broker.game.target_level,
             "level_baseline": level_baseline,
-            "action_cap": self._broker.game.action_cap,
+            "action_cap": action_cap,
             "terminal_reason": status.terminal_reason,
         }
 
@@ -943,7 +944,7 @@ class _P7BrokerClient:
             "primitive_actions": status.primitive_actions,
             "target_level": self._broker.game.target_level,
             "level_baseline": self._status_view(status)["level_baseline"],
-            "action_cap": self._broker.game.action_cap,
+            "action_cap": self._status_view(status)["action_cap"],
             "terminal_reason": status.terminal_reason,
             "tried_summary": {
                 "attempts": no_effects.get("attempts", {}),

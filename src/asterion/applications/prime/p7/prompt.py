@@ -30,6 +30,8 @@ Treat ``level_baseline`` as the current level's efficiency budget and
 bounded to the selected level (plus any replayed prefix). When
 ``actions_remaining`` is low relative to the current level baseline, switch
 from exploration to the most likely winning sequence.
+Action names are opaque per-game slots; infer their meaning from observed
+transitions instead of assuming a universal keyboard mapping.
 
 Before dispatching a probe you are unsure about, call
 p7_client.tried_actions(level) or p7_client.last_outcome_summary(level) to
@@ -167,11 +169,13 @@ ARC colors are 0 white, 1 off-white, 2 light gray, 3 gray, 4 off-black, 5 black,
 6 magenta, 7 light magenta, 8 red, 9 blue, 10 light blue, 11 yellow, 12 orange,
 13 maroon, 14 green, and 15 purple.
 
-Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
-right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
-undo. Use only gameplay actions returned by the current observation. Use empty
-data for non-click actions. If ACTION6 is available, provide integer x and y
-from 0 through 63. RESET is a separate official control action:
+Action names are opaque per-game slots. Never assume that ACTION1 means up, or
+that any other action has a universal keyboard meaning; infer semantics from
+observed transitions. ACTION6 uses a click at column x and row y when the
+current observation advertises it. Use only gameplay actions returned by the
+current observation and empty data for non-click actions. If ACTION6 is
+available, provide integer x and y from 0 through 63. RESET is a separate
+official control action:
 p7_client.act([{"name":"RESET","data":{}}])
 resets the current level after at least one gameplay action on that level.
 It consumes one action and does not erase previously completed levels. Do not
@@ -346,11 +350,13 @@ ARC colors are 0 white, 1 off-white, 2 light gray, 3 gray, 4 off-black, 5 black,
 6 magenta, 7 light magenta, 8 red, 9 blue, 10 light blue, 11 yellow, 12 orange,
 13 maroon, 14 green, and 15 purple.
 
-Action semantics are fixed: ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4
-right, ACTION5 space/interact, ACTION6 a click at column x and row y, and ACTION7
-undo. Use only gameplay actions returned by the current observation. Use empty
-data for non-click actions. If ACTION6 is available, provide integer x and y
-from 0 through 63. RESET is a separate official control action:
+Action names are opaque per-game slots. Never assume that ACTION1 means up, or
+that any other action has a universal keyboard meaning; infer semantics from
+observed transitions. ACTION6 uses a click at column x and row y when the
+current observation advertises it. Use only gameplay actions returned by the
+current observation and empty data for non-click actions. If ACTION6 is
+available, provide integer x and y from 0 through 63. RESET is a separate
+official control action:
 p7_client.act([{"name":"RESET","data":{}}])
 resets the current level after at least one gameplay action on that level.
 It consumes one action and does not erase previously completed levels. Do not

@@ -480,6 +480,10 @@ def _closed_npm_subprocess_environment(
     environment["NPM_CONFIG_CACHE"] = str(npm_cache)
     environment["NPM_CONFIG_OFFLINE"] = "true"
     environment["NPM_CONFIG_REGISTRY"] = "https://registry.npmjs.org/"
+    # npm 11 may still issue its update check while an install is offline;
+    # disable that auxiliary request so the closed promotion environment has
+    # a verifiable zero-network boundary.
+    environment["NPM_CONFIG_UPDATE_NOTIFIER"] = "false"
     return environment
 
 

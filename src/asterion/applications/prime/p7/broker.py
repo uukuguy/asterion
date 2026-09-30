@@ -1037,7 +1037,7 @@ class ArcBroker:
         def append_feedback(record: ArcHistoryRecord, item_stop_reason: str) -> None:
             # Project only bounded delta evidence; never include the settled
             # frame itself in a checked-action result.
-            feedback.append({
+            item = {
                 "changed_cell_count": record.changed_cell_count,
                 "changed_cells": [list(item) for item in record.changed_cells],
                 "changed_cells_omitted": record.changed_cells_omitted,
@@ -1046,9 +1046,12 @@ class ArcBroker:
                 "levels_completed": record.levels_completed,
                 "state": record.state,
                 "no_effect": record.changed_cell_count == 0,
-                "promotion_candidates": self._visual_promotion_candidates(record),
                 "stop_reason": item_stop_reason,
-            })
+            }
+            promotion_candidates = self._visual_promotion_candidates(record)
+            if promotion_candidates:
+                item["promotion_candidates"] = promotion_candidates
+            feedback.append(item)
 
         stop_reason = "matched"
         mismatch: dict[str, object] | None = None
