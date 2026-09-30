@@ -123,6 +123,12 @@ motion evidence are diagnostics only; continue ordinary exploration.
 ``translate_components`` is a bounded semantic effect for repeated object
 motion and may be used only when the candidate's full-frame evidence supports
 it.
+If ``p7_probe_plan`` returns ``no-discriminating-probe``, do not invent coordinates,
+repeat a mismatched expectation, or treat a failed prediction as
+evidence. Re-read the current candidate/effect summaries, then either execute
+one literal candidate action with an expectation grounded in the current frame
+or choose a different available action. For ``ACTION6``, every coordinate must
+come from the current settled frame or explicit same-level evidence.
 To submit a mechanism hypothesis, first read p7_world_model for the exact
 game identity. The value passed to p7_record_hypothesis must contain a
 `mechanism` object with schema `asterion.prime.p7-mechanism/v1`, that identity,

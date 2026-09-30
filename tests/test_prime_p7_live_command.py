@@ -661,6 +661,8 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("Action semantics are fixed", P7_SOLVE_PROMPT)
         self.assertIn("ACTION1 is up", P7_SOLVE_PROMPT)
         self.assertIn("ACTION6 a click at column x and row y", P7_SOLVE_PROMPT)
+        self.assertIn("no-discriminating-probe", P7_SOLVE_PROMPT)
+        self.assertIn("do not invent coordinates", P7_SOLVE_PROMPT.lower())
         self.assertIn("stop querying", P7_CONTINUE_PROMPT)
         self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
 
