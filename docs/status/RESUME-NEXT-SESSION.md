@@ -15,6 +15,8 @@
 
 - Explicit level redo now supports rebuilding a short verified prefix while reusing a later-level route only after fresh ARC replay. This is generic and not tied to VC33.
 - World-model and Playbook consumption is observable, but the L2 result does not isolate visual hypotheses as the causal source of the route improvement because the checked route was the decisive replay artifact.
+- Post-pass audit: the first six live action expectations used replay state digests in the `frame_sha256` field, producing 6 false `prediction-mismatch` conflicts while the independent route witness still followed 7/7. The run is a valid L2 pass, but prediction diagnostics are not clean.
+- Post-pass audit: final confirmed world-model facts are 0/0/0 with 21 hypotheses; the pass does not demonstrate mechanism learning. The summary also labels `failure=null` as `application_failure`, and the debug transcript omits all message bodies/tool-result bodies.
 
 ## 历史归档
 
@@ -27,7 +29,8 @@
 
 - L2 is a partial level-witness PASS, not a full-game SDK WIN and not an official external submission.
 - The causal contribution of visual priors versus replay-verified route evidence remains unisolated.
+- Digest field disambiguation, success-path failure classification, clean retrodiction accounting, and current-prefix fallback provenance remain unresolved implementation work.
 
 ## 下一动作
 
-- For the next experiment, choose an explicit target level (`LEVEL=3` or another authorized game) and keep current-level counts separate from replayed prefixes; do not use automatic `next` when redoing a completed level.
+- Before starting another level, repair and test the post-pass defects above. Then choose an explicit target level (`LEVEL=3` or another authorized game) and keep current-level counts separate from replayed prefixes; do not use automatic `next` when redoing a completed level.

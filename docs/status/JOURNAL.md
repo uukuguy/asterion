@@ -3342,3 +3342,4 @@
 - 11:21 correction: 预算修正提交为 2e526f0f；当前前缀与完整路线源已分离。
 - 11:36 VC33 L2 最终显式重做 PASS：当前级别 7 步，L1 前缀 3 步，total=10；fresh replay 后路线 10→7，预算 cap=13。
 - 11:36 VC33 L2 一次 RPC WebSocket 重试耗尽运行失败（当前 3 步）；已由随后干净重试通过，动作路线无失败证据。
+- 11:44 复核 VC33 L2 PASS：独立路线证据 7/7 跟随且回放通过，但前 6 次 `p7_act_checked` 把 `after_state_sha256` 填入 `frame_sha256`，形成 6 个假 `prediction-mismatch` 与 `retrodiction_status=conflict`；世界模型 confirmed 仍为 0/0/0，最终摘要还把 `failure=null` 分类成 `application_failure`。已写入 P7 evidence 与 resume，待通用修复。

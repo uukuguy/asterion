@@ -730,3 +730,26 @@ The first post-persistence L2 attempt exposed a generic reuse bug: the saved 14-
 - Same-game verified level suffix reuse now works across a rebuilt prefix without accepting an unverified route: fresh ARC replay is the gate, and live `act_checked` expectations remain authoritative.
 - The world-model/Playbook tools are now actually reachable during L2. This run still does not isolate a causal score improvement from visual hypotheses versus the checked route supplied by offline replay.
 - This is a level-witness PASS through L2, not a full-game SDK WIN or an official external submission.
+
+## 2026-09-30 VC33 L2 post-pass audit — execution defects
+
+The successful receipt does not mean that the model's per-action predictions were correct. The private run and source-path comparison found the following:
+
+### 已验证事实
+
+- The route witness was valid: replay verification passed and live route adoption followed all **7/7** current L2 actions. The run therefore completed L2; this is not an action-route failure.
+- The first six `p7_act_checked` calls sent `expect.frame_sha256` values equal to the corresponding replay `after_state_sha256`. They did not send the replay `after_frame_sha256`. The seventh call only checked `levels_completed=2`. The private accounting consequently reports `matched_expectations=1`, `mismatches=6`, and `route_adoption.first_divergence=null`.
+- `ArcBroker.act_checked` compares caller `frame_sha256` with `after_frame_sha256` and records each mismatch as `prediction-mismatch`/model conflict. The final run therefore ends with `retrodiction_status=conflict` and six mismatch reasons even though every route witness matched and the level completed. This is a diagnostic/model-state defect, not evidence that the game action failed.
+- The prompt exposes route-compression `candidate_witness.observation_sha256` (an observation/state digest), while the canonical checked plan exposes `expect.frame_sha256` (a frame digest). Both are opaque SHA-256 strings. This makes the observed state/frame mix-up easy for the model to make.
+- The final world model has `confirmed.entities=0`, `confirmed.mechanics=0`, `confirmed.relations=0`, `hypotheses=21`, and `conflicts=0`; the persisted Playbook also has no confirmed facts. The successful result demonstrates replay-route execution, not learned mechanism use.
+- The summary has `failure=null` but `failure_classification.category=application_failure`. `classify_failure_cause` is called on the success path and has no success branch, so this is a false failure label.
+- The debug transcript contains tool-call arguments and bounded event metadata, but all 26 `message_end` entries have no message content. Full model message bodies and tool-result bodies cannot be reconstructed from this run, so the reasoning chain is only partially auditable.
+
+### 当前判断与未完成边界
+
+- The first repair priority is to make state/frame digest names and payloads unambiguous, and to prevent a caller prediction mismatch from poisoning retrodiction when the independent replay witness is correct. The current run's six conflicts are a concrete regression signal for that repair.
+- The success classifier should emit a success/none category (or omit failure classification) when `failure is None`; `application_failure` must remain reserved for an actual failed run.
+- The witness diagnostic reports `level_baseline=10` because it replaces the catalog L2 baseline of 18 with the last verified route length to create a tight witness cap. This is useful as an execution cap but is mislabeled as the human baseline and must be split into separate fields before using diagnostics for scoring or comparisons.
+- `_optimize_verified_route` returns the old route hint after a fresh replay exception or non-shortening result, while leaving candidate expectations empty. That fallback is a latent provenance defect when a rebuilt prefix differs: the hint is an older route, not a freshly verified route for the current prefix, and should be labeled as unverified or withheld.
+
+These findings were recorded after the pass; no code fix is claimed by this audit.
