@@ -3318,3 +3318,4 @@
 - 08:06 [248cd524] 主线程完成 broker/operator 世界模型生命周期接入：证据、TransitionModel、只读投影与标量诊断，77 项聚焦回归通过。
 - 08:15 [cef5fe18] 接入同题 Playbook 读取、投影、成功保存与失败分支保存， malformed 状态安全回退基线，64 项聚焦测试通过。
 - 08:42 [a47aa65b] 修复 Task4 审查问题：observed/verified retrodiction 分层、worker 字段保真、Playbook 路线/失败分支保存、机制探测晋级，并通过 P7ToolRegistry 全链注册新工具。
+- 09:05 [8c58db5e] 为 P7 提示移除固定动作语义，并让离线候选携带逐动作 replay expectation 后才可在线采用。
