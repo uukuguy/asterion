@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-09-30 16:10. **Session remains active — not a final handoff.**
+> Updated: 2026-10-01 09:20. **Session remains active — not a final handoff.**
 
 ## 已验证事实
 
@@ -15,6 +15,8 @@
 - 修复后 P7 回归测试 174 项通过，`make lint` 通过。
 - `6e537239` 增加通用前缀坐标保护：当前级别复用前级 ACTION6 坐标且没有当前帧 cell/frame 证据时，Broker 不派发并返回 `prefix-action-reuse`；130 项 native/live 回归与 lint 通过。
 - VC33 L2 纯 P7 重跑 `p7-live-20260930074625-ef0bc3c614461a31088ed5c7`：L1 3 步完成；L2 当前步数 9（总 primitive 12），动作坐标为 `(0,0),(32,32),(16,16),(32,16),(32,48),(16,32),(48,32),(32,32)`；未复用 `(61,33)`，未通关，因长时间推理手动取消。
+- 来源澄清：上述 L1 3 步是已验证前缀回放，不是本轮纯 P7 重新解题；L2 退化与本轮 IPython 分析工具失败同时出现。
+- `1d536fc9` 修复 Pi tool call ID 含 `|` 时 IPython 桥接拒绝请求的问题；旧 transcript 中 `print('test')` 失败、worker_cell_count=0，说明模型分析代码未执行。
 
 ## 当前判断
 
@@ -34,5 +36,5 @@
 
 ## 下一动作
 
-1. 优先修复/验证 P7 决策跟踪：开启受控 debug transcript，关联每个 `p7_act_checked` 的输入、expect 与 feedback，定位连续 prediction-mismatch 的通用原因。
+1. 用 `1d536fc9` 重建 P7 wheel，重跑纯 P7 VC33 L2，确认 IPython `worker_cell_count` 大于 0，并观察世界模型是否开始产生 confirmed facts。
 2. 再重跑纯 P7 VC33 L2；不得启用 `ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION`，按当前 L2 步数报告，不混淆总动作数。
