@@ -3383,3 +3383,4 @@
 - 02:00 修复 cognition 将未完成动作当作最佳经验：仅目标级别完成后记录最佳步数，旧未验证计数加载时清除；新增迁移回归测试。
 - 02:01 cognition now persists only verified completion experience [07a65865]
 - 02:05 保存 P7 通用游戏经验归纳闭环设计：ActionEffect、候选机制、区分性探测、回放晋级、持久化和纯 P7 评估边界 [185a539d]
+- 02:12 补齐设计文档的 SimState、候选规则编译、历史回放、ModelCertificate、反事实搜索和 offline oracle 隔离 [7712298e]
