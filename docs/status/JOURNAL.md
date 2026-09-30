@@ -3337,3 +3337,4 @@
 - 10:40 VC33 L1 rerun `p7-live-20260930023720-e2494802da5241461a4b3086` completed in 3 actions; saved Playbook now contains 12 bounded L0 visual hypotheses, 0 confirmed facts, and the 3-action checked route. Focused P7 tests: 138; lint passed.
 - 10:43 Recorded VC33 L1 complete local submission evidence and explicit L2 boundary [4ea365c6]
 - 10:50 [a19162a7] 修复 P7 Playbook 视觉先验在大路线/级别过滤下丢失，并按已验证路线计算当前级别 witness 上限，避免重复计入前缀。
+- 11:02 [37cb3b4a] 允许同题已验证级别后缀在新建前缀上 fresh replay，并按当前前缀计算 witness 预算，支持显式重做关卡。
