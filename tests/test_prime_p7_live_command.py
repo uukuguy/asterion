@@ -176,6 +176,32 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertFalse(tracker.summary()["completed"])
         self.assertFalse(tracker.summary()["reached_target"])
 
+    def test_route_adoption_stops_on_replay_expectation_mismatch(self) -> None:
+        from asterion.applications.prime.p7.optimizer import ActionExpectation, PlannerAction
+        from asterion.applications.prime.p7.operator import RouteAdoptionTracker
+
+        expectation = ActionExpectation(
+            action="ACTION1",
+            data=(),
+            prior_state_sha256="sha256:" + "1" * 64,
+            after_state_sha256="sha256:" + "2" * 64,
+            after_frame_sha256="sha256:" + "3" * 64,
+            changed_cells=(),
+            levels_completed=0,
+            state="NOT_FINISHED",
+        )
+        tracker = RouteAdoptionTracker()
+        tracker.arm(
+            (PlannerAction("ACTION1"),), target_level=1, expectations=(expectation,)
+        )
+        tracker.record(
+            (SimpleNamespace(action="ACTION1", data=(), after_sha256="sha256:" + "9" * 64, levels_completed=0),)
+        )
+        self.assertEqual(
+            tracker.summary()["first_divergence"],
+            {"index": 0, "expected": "ACTION1", "actual": "ACTION1", "reason": "expectation-mismatch"},
+        )
+
     def test_process_cancellation_signal_starts_clear_and_can_cancel(self) -> None:
         signal = live_module.ProcessCancellation()
         self.assertFalse(signal.cancelled)
@@ -305,7 +331,18 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_live_optimizer_replaces_verified_route_only_when_shorter(self) -> None:
         from asterion.applications.prime.p7.operator import _optimize_verified_route
-        from asterion.applications.prime.p7.optimizer import PlannerAction, RouteCandidate, RouteResult
+        from asterion.applications.prime.p7.optimizer import ActionExpectation, PlannerAction, RouteCandidate, RouteResult
+
+        expectation = ActionExpectation(
+            action="ACTION4",
+            data=(),
+            prior_state_sha256="sha256:" + "1" * 64,
+            after_state_sha256="sha256:" + "2" * 64,
+            after_frame_sha256="sha256:" + "3" * 64,
+            changed_cells=(),
+            levels_completed=1,
+            state="NOT_FINISHED",
+        )
 
         prefix = SimpleNamespace(
             levels_completed=1,
@@ -317,7 +354,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         game = SimpleNamespace(game_id="aa11-bb22", seed=0, target_level=1)
         optimized = RouteCandidate(
             actions=(PlannerAction("ACTION4"),),
-            replay=RouteResult(True, 1, "NOT_FINISHED", ("aa11-bb22", 0)),
+            replay=RouteResult(
+                True, 1, "NOT_FINISHED", ("aa11-bb22", 0), expectations=(expectation,)
+            ),
+            expectations=(expectation,),
             removed_indices=(1,),
             candidates_replayed=4,
         )
@@ -441,6 +481,11 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
         self.assertIn("changed_cell_count", P7_SOLVE_PROMPT)
         self.assertIn("stop querying", P7_SOLVE_PROMPT)
+        self.assertIn("p7_world_model", P7_SOLVE_PROMPT)
+        self.assertIn("p7_retrodiction_status", P7_SOLVE_PROMPT)
+        self.assertIn("Action names are opaque per-game slots", P7_SOLVE_PROMPT)
+        self.assertNotIn("Action semantics are fixed", P7_SOLVE_PROMPT)
+        self.assertNotIn("ACTION1 is up", P7_SOLVE_PROMPT)
         self.assertIn("stop querying", P7_CONTINUE_PROMPT)
         self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
 

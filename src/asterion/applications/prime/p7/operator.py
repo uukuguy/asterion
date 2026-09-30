@@ -74,6 +74,7 @@ from asterion.applications.prime.p7.playbook import (
 from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.optimizer import (
+    ActionExpectation,
     PlannerAction,
     RouteCandidate,
     RouteCompressionProof,
@@ -124,19 +125,34 @@ class P7OperatorError(RuntimeError):
 class RouteAdoptionTracker:
     """Private evidence for whether P7 followed an injected route hypothesis."""
 
-    __slots__ = ("_expected", "_target_level", "_cursor", "_divergence", "_reached_target")
+    __slots__ = ("_expected", "_expectations", "_target_level", "_cursor", "_divergence", "_reached_target")
 
     def __init__(self) -> None:
         self._expected: tuple[PlannerAction, ...] = ()
+        self._expectations: tuple[ActionExpectation, ...] = ()
         self._target_level = 0
         self._cursor = 0
         self._divergence: dict[str, object] | None = None
         self._reached_target = False
 
-    def arm(self, actions: tuple[PlannerAction, ...], *, target_level: int) -> None:
+    def arm(
+        self,
+        actions: tuple[PlannerAction, ...],
+        *,
+        target_level: int,
+        expectations: tuple[ActionExpectation, ...] = (),
+    ) -> None:
         if type(actions) is not tuple or not all(type(item) is PlannerAction for item in actions):
             raise ValueError("invalid route adoption actions")
+        if type(expectations) is not tuple or (
+            expectations and (
+                len(expectations) != len(actions)
+                or not all(type(item) is ActionExpectation for item in expectations)
+            )
+        ):
+            raise ValueError("invalid route adoption expectations")
         self._expected = actions
+        self._expectations = expectations
         self._target_level = target_level
         self._cursor = 0
         self._divergence = None
@@ -163,6 +179,18 @@ class RouteAdoptionTracker:
                     "actual": actual.name,
                 }
                 return
+            if self._expectations:
+                witness = self._expectations[self._cursor]
+                observed_hash = getattr(transition, "after_sha256", None)
+                observed_level = getattr(transition, "levels_completed", None)
+                if observed_hash != witness.after_state_sha256 or observed_level != witness.levels_completed:
+                    self._divergence = {
+                        "index": self._cursor,
+                        "expected": expected.name,
+                        "actual": actual.name,
+                        "reason": "expectation-mismatch",
+                    }
+                    return
             self._cursor += 1
 
     def summary(self) -> dict[str, object]:
@@ -525,9 +553,13 @@ class _P7BrokerClient:
         return {**self._counts, "first_sequence": 0, "last_sequence": len(self._broker.journal)}
 
     def arm_route_adoption(
-        self, actions: tuple[PlannerAction, ...], *, target_level: int
+        self,
+        actions: tuple[PlannerAction, ...],
+        *,
+        target_level: int,
+        expectations: tuple[ActionExpectation, ...] = (),
     ) -> None:
-        self._route_adoption.arm(actions, target_level=target_level)
+        self._route_adoption.arm(actions, target_level=target_level, expectations=expectations)
 
     def route_adoption(self) -> dict[str, object]:
         return self._route_adoption.summary()
@@ -1169,6 +1201,52 @@ def _summarize_verified_route(prefix: object, *, target_level: int) -> str:
     )
 
 
+def _expectation_metadata(expectations: tuple[ActionExpectation, ...]) -> list[dict[str, object]]:
+    """Serialize only bounded replay witnesses for private route adoption stats."""
+    return [
+        {
+            "action": expectation.action,
+            "data": dict(expectation.data),
+            "prior_state_sha256": expectation.prior_state_sha256,
+            "after_state_sha256": expectation.after_state_sha256,
+            "after_frame_sha256": expectation.after_frame_sha256,
+            "changed_cells": [list(cell) for cell in expectation.changed_cells],
+            "levels_completed": expectation.levels_completed,
+            "state": expectation.state,
+        }
+        for expectation in expectations
+    ]
+
+
+def _expectations_from_metadata(value: object) -> tuple[ActionExpectation, ...]:
+    if type(value) is not list or len(value) > 256:
+        return ()
+    parsed: list[ActionExpectation] = []
+    try:
+        for item in value:
+            if not isinstance(item, Mapping):
+                return ()
+            data = item.get("data", {})
+            cells = item.get("changed_cells", [])
+            if not isinstance(data, Mapping) or not isinstance(cells, list):
+                return ()
+            parsed.append(
+                ActionExpectation(
+                    action=item["action"],
+                    data=tuple(sorted((str(k), int(v)) for k, v in data.items())),
+                    prior_state_sha256=item["prior_state_sha256"],
+                    after_state_sha256=item["after_state_sha256"],
+                    after_frame_sha256=item["after_frame_sha256"],
+                    changed_cells=tuple(tuple(int(part) for part in cell) for cell in cells),
+                    levels_completed=item["levels_completed"],
+                    state=item["state"],
+                )
+            )
+    except (KeyError, TypeError, ValueError):
+        return ()
+    return tuple(parsed)
+
+
 def _optimize_verified_route(
     prefix: object, *, game: object, arc_root: Path, target_level: int
 ) -> tuple[str, dict[str, object]]:
@@ -1200,6 +1278,7 @@ def _optimize_verified_route(
         "elapsed_seconds": 0.0,
         "timed_out": False,
         "candidate_actions": [],
+        "candidate_expectations": [],
     }
     baseline_hint = _summarize_route_actions(baseline, target_level=target_level)
     if not baseline_hint:
@@ -1228,6 +1307,7 @@ def _optimize_verified_route(
             and candidate.replay.action_count == len(candidate.actions)
             and len(candidate.actions) < len(baseline)
             and candidate.replay.identity == (game.game_id, game.seed)
+            and len(candidate.expectations) == len(candidate.actions)
         ):
             optimized_hint = _summarize_route_actions(
                 candidate.actions, target_level=target_level, optimized=True
@@ -1237,6 +1317,7 @@ def _optimize_verified_route(
                     {"name": action.name, "data": dict(action.data)}
                     for action in candidate.actions
                 ]
+                metadata["candidate_expectations"] = _expectation_metadata(candidate.expectations)
                 proof_hint = _summarize_route_proofs(
                     candidate.proofs, target_level=target_level
                 )
@@ -1291,6 +1372,8 @@ def _optimize_partial_attempt(
             {"name": action.name, "data": dict(action.data)}
             for action in candidate.actions
         ] if len(candidate.actions) < len(route) else [],
+        "candidate_expectations": _expectation_metadata(candidate.expectations)
+        if len(candidate.actions) < len(route) else [],
     }
     if not candidate.replay.replay_complete:
         return "", {**metadata, "status": "partial-replay-incomplete"}
@@ -2193,8 +2276,15 @@ async def run_live(
                     and isinstance(item.get("data", {}), dict)
                 )
                 if len(parsed_actions) == len(candidate_actions):
+                    parsed_expectations = _expectations_from_metadata(
+                        route_optimization.get("candidate_expectations", [])
+                    )
+                    if len(parsed_expectations) != len(parsed_actions):
+                        parsed_expectations = ()
                     prediction_client.arm_route_adoption(
-                        parsed_actions, target_level=invocation.game.target_level
+                        parsed_actions,
+                        target_level=invocation.game.target_level,
+                        expectations=parsed_expectations,
                     )
         if prediction_client is not None:
             prompt = prompt + "\n\n" + _initial_game_context(

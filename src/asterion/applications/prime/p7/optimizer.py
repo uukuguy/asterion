@@ -11,6 +11,8 @@ import math
 import time
 from typing import Protocol
 
+from .transition_model import ActionExpectation
+
 
 @dataclass(frozen=True, slots=True)
 class PlannerAction:
@@ -35,6 +37,7 @@ class RouteResult:
     identity: tuple[str, int]
     observation_witness: tuple[ObservationWitness, ...] = ()
     replay_complete: bool = True
+    expectations: tuple[ActionExpectation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +75,7 @@ class RouteCandidate:
     elapsed_seconds: float = 0.0
     timed_out: bool = False
     proofs: tuple[RouteCompressionProof, ...] = ()
+    expectations: tuple[ActionExpectation, ...] = ()
 
 
 def _route_digest(actions: tuple[PlannerAction, ...]) -> str:
@@ -190,6 +194,7 @@ def optimize_route(
             and result.identity == identity
             and type(result.terminal_state) is str
             and bool(result.terminal_state)
+            and (not result.expectations or len(result.expectations) == len(actions))
         )
 
     def valid(
@@ -216,7 +221,7 @@ def optimize_route(
     baseline = oracle.replay(route)
     if not valid(baseline, route):
         raise ValueError("verified baseline is unavailable")
-    best = RouteCandidate(route, baseline, (), 1)
+    best = RouteCandidate(route, baseline, (), 1, expectations=baseline.expectations)
     best_proofs: tuple[RouteCompressionProof, ...] = ()
     replayed = 1
     seen = {route}
@@ -244,6 +249,7 @@ def optimize_route(
             timeout_elapsed if timeout_elapsed is not None else 0.0,
             True,
             best_proofs,
+            best.expectations,
         )
 
     def candidates():
@@ -296,7 +302,10 @@ def optimize_route(
         replay = oracle.replay(candidate)
         replayed += 1
         if valid(replay, candidate, baseline) and len(candidate) < len(best.actions):
-            best = RouteCandidate(candidate, replay, removed, replayed)
+            best = RouteCandidate(
+                candidate, replay, removed, replayed,
+                expectations=replay.expectations,
+            )
             proof = _compression_proof(
                 route, candidate, baseline, replay, identity,
                 target_level=target_level, warmup_digest=warmup_digest,
@@ -315,6 +324,7 @@ def optimize_route(
         elapsed_seconds,
         budget_exhausted,
         best_proofs,
+        best.expectations,
     )
 
 

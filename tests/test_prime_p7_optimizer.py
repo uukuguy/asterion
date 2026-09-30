@@ -273,9 +273,11 @@ class TestRouteOptimizer(unittest.TestCase):
         self.assertEqual(
             result,
             RouteResult(
-                True, 1, "WIN", (game.game_id, game.seed), result.observation_witness
+                True, 1, "WIN", (game.game_id, game.seed), result.observation_witness,
+                True, result.expectations,
             ),
         )
+        self.assertEqual(len(result.expectations), 1)
         self.assertEqual(
             tuple(item.kind for item in result.observation_witness),
             ("initial", "warmup-boundary", "candidate"),

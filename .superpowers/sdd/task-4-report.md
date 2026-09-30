@@ -407,3 +407,31 @@ Verification: 64 focused broker/playbook/mechanism tests passed; Ruff and `py_co
 The first lifecycle slice overstated `retrodiction=verified`: an observed transcript is now reported as `observed` until a broker-issued mechanism certificate is promoted. Worker `act_checked` now preserves bounded `retrodiction` and `conflict` fields. Playbook saves now derive checked routes from sealed broker evidence, require a successful run for success-route persistence, and write a branch for failed/unverified runs. Mechanism hypotheses are accepted only with one canonical distinguishing probe; matching evidence promotes a validated certificate, while contradiction consumes the probe and records a conflict.
 
 P7 application tools are registered through `P7ToolRegistry` and mirrored through the typed Python bridge, generated worker module, TypeScript extension source, and built extension resource. Python focused suites: 149 tests passed; mechanism model Pyright: 0 errors; TypeScript typecheck/build and focused extension tests passed (one context-witness test remains environment-limited by its missing peer harness).
+
+## Task 5 prompt and application-tool closeout — 2026-09-30
+
+The active solve prompt now treats action names as opaque per-game slots and
+requires action semantics to come from `available_actions`, confirmed same-game
+facts, and settled feedback. It explicitly directs the model to read the
+world model, Playbook, and retrodiction status before proposing a batch, while
+keeping hypothesis confirmation behind one distinguishing probe. The new
+world-model, Playbook, retrodiction, and hypothesis tools remain registered
+through the P7 application registry and all worker/bridge/extension surfaces.
+
+Verification: the focused live/bridge/broker prompt suite passed; no active
+prompt contains the old fixed ACTION1–ACTION7 semantic claim.
+
+## Task 6 replay expectation closeout — 2026-09-30
+
+Fresh offline ARC replays now emit one bounded `ActionExpectation` per
+candidate action, including action data, before/after state digests, settled
+frame digest, changed-cell samples, level, and state. A shorter route is
+eligible for the live optimization hint only when all expectations are
+present. Route adoption receives the expectations and stops recording at the
+first action or expectation mismatch, preserving normal model control as the
+fallback. Partial attempts carry the same private expectation metadata.
+
+Verification: optimizer, ARC witness, live-command, and full P7 model/replay
+focused suites passed (199 tests in the combined run); optimizer, broker, and
+mechanism modules pass Pyright with zero errors; Ruff and `git diff --check`
+pass.

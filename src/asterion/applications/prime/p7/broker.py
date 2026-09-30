@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
-from typing import Callable, Mapping, Protocol, cast
+from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
 from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
@@ -17,6 +17,16 @@ from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
 
 class ArcBrokerError(RuntimeError):
     """Public P7 broker failure; its message contains no engine data."""
+
+
+class _PendingProbe(TypedDict):
+    layer: str
+    key: str
+    spec: MechanismSpec
+    action: str
+    data: tuple[tuple[str, int], ...]
+    sequence: int
+    before: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -264,7 +274,7 @@ class ArcBroker:
         self._world_evidence: list[EvidenceRef] = []
         self._playbook = PlaybookSnapshot(PlaybookKey(game.game_id, game.seed, game.win_levels))
         self._model_conflicts: list[str] = []
-        self._pending_probe: dict[str, object] | None = None
+        self._pending_probe: _PendingProbe | None = None
         self._probe_tokens: set[tuple[int, str, str, int]] = set()
         self._mechanism_certificate: ModelCertificate | None = None
         self._mechanism_spec: MechanismSpec | None = None
@@ -385,8 +395,14 @@ class ArcBroker:
             if "frame_sha256" in expected and expected["frame_sha256"] != digest(prediction.frame):
                 raise ValueError
             if "cell" in expected:
-                cell = expected["cell"]
-                if prediction.frame[cell["y"]][cell["x"]] != cell["value"]:
+                cell = cast(dict[str, int], expected["cell"])
+                x, y, value = (cell.get("x"), cell.get("y"), cell.get("value"))
+                if type(x) is not int or type(y) is not int or type(value) is not int:
+                    raise ValueError
+                predicted_frame = prediction.frame
+                if predicted_frame is None:
+                    raise ValueError
+                if predicted_frame[cast(int, y)][cast(int, x)] != cast(int, value):
                     raise ValueError
             if "levels_completed" in expected and prediction.level != expected["levels_completed"]:
                 raise ValueError
@@ -399,7 +415,10 @@ class ArcBroker:
             ref = EvidenceRef(frame_id=f"frame-{previous.sequence}", source_run=previous.run_id, summary_hash=previous.after_state_sha256.removeprefix("sha256:"))
             world.record_hypothesis(layer, key, spec.to_mapping(), level=world.current_level, evidence=ref)
             self._probe_tokens.add(token)
-            self._pending_probe = {"layer": layer, "key": key, "spec": spec, "action": name, "data": data, "sequence": previous.sequence + 1, "before": previous.after_state_sha256}
+            self._pending_probe = _PendingProbe(
+                layer=layer, key=key, spec=spec, action=name, data=data,
+                sequence=previous.sequence + 1, before=previous.after_state_sha256,
+            )
             self._retrodiction_status = "hypothesis"
             return {"status": "hypothesis", "probe_sequence": previous.sequence + 1, "probes_remaining": 1}
         except (ValueError, TypeError, ArcPredictionError):

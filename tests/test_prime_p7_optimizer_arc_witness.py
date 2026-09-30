@@ -46,6 +46,8 @@ class TestArcReplayWitness(unittest.TestCase):
         result = oracle.replay((A,))
         self.assertFalse(result.success)
         self.assertTrue(result.replay_complete)
+        self.assertEqual(len(result.expectations), 1)
+        self.assertEqual(result.expectations[0].action, "ACTION1")
         self.assertEqual(result.action_count, 1)
 
     def test_witness_contains_initial_warmup_boundary_and_each_candidate_step(self) -> None:
@@ -65,6 +67,7 @@ class TestArcReplayWitness(unittest.TestCase):
         self.assertEqual([item.action_index for item in witness], [0, 0, 1])
         self.assertEqual([item.levels_completed for item in witness], [0, 0, 1])
         self.assertEqual([item.state for item in witness], ["NOT_FINISHED", "NOT_FINISHED", "WIN"])
+        self.assertEqual(len(result.expectations), 1)
         for item in witness:
             self.assertRegex(item.observation_sha256, r"^sha256:[0-9a-f]{64}$")
             self.assertNotIn("frame", repr(item))
@@ -78,6 +81,7 @@ class TestArcReplayWitness(unittest.TestCase):
 
         self.assertEqual(result.observation_witness, replayed.observation_witness)
         self.assertEqual(len(result.observation_witness), 3)
+        self.assertEqual(len(result.expectations), 2)
         for item in result.observation_witness:
             self.assertEqual(set(item.__dataclass_fields__), {
                 "kind", "action_index", "observation_sha256", "levels_completed", "state",

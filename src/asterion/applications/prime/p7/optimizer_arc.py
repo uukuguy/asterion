@@ -24,6 +24,9 @@ from .optimizer import (
     optimize_route,
 )
 from .replay import _step
+from .score import digest
+from .transition_model import ActionExpectation
+from .verified_history import stable_changed_cells
 
 
 class ArcReplayOracle:
@@ -52,6 +55,7 @@ class ArcReplayOracle:
         count = 0
         state = "UNAVAILABLE"
         observation_witness: list[ObservationWitness] = []
+        expectations: list[ActionExpectation] = []
         engine = None
         try:
             if (
@@ -61,7 +65,10 @@ class ArcReplayOracle:
                 raise ValueError
             engine = self.engine_factory()
             _engine_identity(engine, self.game)
-            current = _snapshot_observation(engine.observe(), win_levels=self.game.win_levels)
+            observe = getattr(engine, "observe", None)
+            if not callable(observe):
+                raise ValueError
+            current = _snapshot_observation(observe(), win_levels=self.game.win_levels)
             state = current.state
             observation_witness.append(
                 ObservationWitness(
@@ -84,12 +91,27 @@ class ArcReplayOracle:
                 current = _snapshot_observation(
                     _step(engine, canonical), win_levels=self.game.win_levels
                 )
+                _total_changed, changed_cells, _omitted = stable_changed_cells(
+                    previous.frame[-1], current.frame[-1]
+                )
                 if count_action:
                     count += 1
                     observation_witness.append(
                         ObservationWitness(
                             "candidate", count, _observation_digest(current),
                             current.levels_completed, current.state,
+                        )
+                    )
+                    expectations.append(
+                        ActionExpectation(
+                            action=canonical.name,
+                            data=canonical.data,
+                            prior_state_sha256=_observation_digest(previous),
+                            after_state_sha256=_observation_digest(current),
+                            after_frame_sha256=digest(current.frame[-1]),
+                            changed_cells=changed_cells,
+                            levels_completed=current.levels_completed,
+                            state=current.state,
                         )
                     )
                 state = current.state
@@ -134,11 +156,13 @@ class ArcReplayOracle:
                 and (not self.game.is_full_game or state == "WIN")
             )
             return RouteResult(
-                success, count, state, identity, tuple(observation_witness), True
+                success, count, state, identity, tuple(observation_witness), True,
+                tuple(expectations),
             )
         except BaseException:
             return RouteResult(
-                False, count, state, identity, tuple(observation_witness), False
+                False, count, state, identity, tuple(observation_witness), False,
+                tuple(expectations),
             )
         finally:
             if engine is not None:
