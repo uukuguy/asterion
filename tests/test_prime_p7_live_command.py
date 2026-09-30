@@ -313,7 +313,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             _metadata_baseline_actions=(7, 18),
             _metadata_win_levels=2,
         )
-        prefix = SimpleNamespace(
+        route_source = SimpleNamespace(
             transitions=(
                 SimpleNamespace(levels_completed=0),
                 SimpleNamespace(levels_completed=0),
@@ -322,7 +322,14 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 SimpleNamespace(levels_completed=2),
             )
         )
-        bounded = _bound_witness_level_actions(game, prefix)
+        current_prefix = SimpleNamespace(
+            transitions=(
+                SimpleNamespace(levels_completed=0),
+                SimpleNamespace(levels_completed=0),
+                SimpleNamespace(levels_completed=1),
+            )
+        )
+        bounded = _bound_witness_level_actions(game, current_prefix, route_source=route_source)
         self.assertEqual(bounded.baseline_actions, (7, 14))
         self.assertEqual(bounded.action_cap, 17)
 

@@ -2028,7 +2028,7 @@ def _select_game_for_mode(
                     / "prime-p7-live",
                     game.game_id,
                     game.seed,
-                    max_level=game.target_level,
+                    max_level=game.target_level - 1,
                     expected_model_id=expected_model,
                 )
                 route_source = load_best_prefix(
