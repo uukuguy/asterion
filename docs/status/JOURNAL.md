@@ -3387,3 +3387,4 @@
 - 02:20 保存 experience-induction 完整实现计划，拆分 ActionEffect、候选归纳、模拟器、Broker、Playbook、边界、合成测试和 SP80 实战 [f920e14f]
 - 02:27 ActionEffect 与不可变 SimState 契约落地，覆盖有界变化摘要、连通分量和动作连续性校验 [2f66c862]
 - 02:34 候选归纳与区分性探测排序落地，冲突候选自动失效且点击探测校验当前边界 [b3cd855e]
+- 02:43 候选编译为声明式模拟器，加入 unknown/conflict 与当前前缀证书门控，Broker 搜索拒绝陈旧证书 [8658343f]
