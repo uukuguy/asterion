@@ -110,6 +110,60 @@ class ExperienceSimulatorTests(unittest.TestCase):
         self.assertEqual(result.status, "model-unavailable")
         self.assertEqual(result.reason, "stale-certificate")
 
+    def test_translation_candidate_compiles_and_reuses_new_position(self) -> None:
+        inducer = ExperienceInducer()
+        for sequence, start_x in ((1, 1), (2, 5)):
+            before_rows = [[0 for _ in range(12)] for _ in range(6)]
+            after_rows = [[0 for _ in range(12)] for _ in range(6)]
+            for x in range(start_x, start_x + 2):
+                before_rows[2][x] = 7
+            for x in range(start_x + 1, start_x + 3):
+                after_rows[2][x] = 7
+            first = ArcHistoryRecord.initial(
+                game_id="game", seed=1, run_id="run", frame=tuple(tuple(row) for row in before_rows),
+                levels_completed=0, state="NOT_FINISHED", after_state_sha256=digest(("s0", sequence)),
+            )
+            second = ArcHistoryRecord.following(
+                first, action=ArcAction("ACTION1"),
+                before_state_sha256=first.after_state_sha256,
+                after_state_sha256=digest(("s1", sequence)),
+                frame=tuple(tuple(row) for row in after_rows),
+                levels_completed=0, state="NOT_FINISHED",
+            )
+            effect = extract_action_effect(first, second)
+            if sequence == 2:
+                effect = replace(effect, sequence=2)
+            inducer.observe(effect)
+        spec = compile_effect_hypothesis(inducer.candidates()[0])
+        self.assertIsNotNone(spec)
+        state = SimState.from_observation(
+            frame=tuple(tuple(7 if 5 <= x <= 6 and y == 2 else 0 for x in range(12)) for y in range(6)),
+            level=0, state="NOT_FINISHED", available_actions=["ACTION1"],
+        )
+        prediction = simulate_step(spec, state, "ACTION1")
+        self.assertEqual(prediction.status, "predicted")
+        self.assertEqual(prediction.next_state.frame[2][5:8], (0, 7, 7))
+
+    def test_large_translation_prediction_keeps_bounded_sample_and_omitted_count(self) -> None:
+        spec = MechanismSpec(
+            "game", 1, 1,
+            (MechanismRule(
+                "ACTION1",
+                effects=({"op": "translate_components", "args": {
+                    "pattern": [[0, 0, 7], [1, 0, 7]],
+                    "clear": 0, "dx": 2, "dy": 0, "count": 32,
+                }},),
+            ),),
+        )
+        frame = tuple(tuple(7 if 2 <= x < 4 and y % 2 == 0 else 0 for x in range(64)) for y in range(64))
+        state = SimState.from_observation(
+            frame=frame, level=0, state="NOT_FINISHED", available_actions=["ACTION1"],
+        )
+        prediction = simulate_step(spec, state, "ACTION1")
+        self.assertEqual(prediction.status, "predicted")
+        self.assertEqual(len(prediction.changed_cells), 80)
+        self.assertGreater(prediction.changed_cells_omitted, 0)
+
 
 if __name__ == "__main__":
     unittest.main()

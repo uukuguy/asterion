@@ -69,7 +69,11 @@ current-level perception or a model certificate.
 settled frame, level, state, action, and confirmed entity values and returns a
 predicted frame/level/state or `unknown`/`conflict`. It has no model-code
 execution, filesystem, network, or process access. Current effects are bounded
-cell edits, translation of selected cells, state updates, and level updates.
+cell edits, exact selected-cell translation, component-pattern translation,
+state updates, and level updates. Component-pattern translation matches a
+bounded source shape at the current frame, requires the observed number of
+matches and clear destination cells, and fails closed when the shape is
+ambiguous or out of bounds.
 
 `model_search.search_model` performs a bounded BFS or A* search over those
 predictions. Its action set is focused and evidence-backed:
@@ -143,4 +147,3 @@ finds. Route compression and optimality proofs remain separate diagnostics.
 These limits are deliberate; using an unverified or guessed simulator would
 recreate the route-injection and false-success failures this design is meant to
 remove.
-

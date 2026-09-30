@@ -167,6 +167,46 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertEqual(plan.action, "ACTION1")
         self.assertIn("stale-click", plan.rejected_candidates)
 
+    def test_large_frame_uses_private_full_delta_for_components(self) -> None:
+        before = tuple(tuple(0 for _ in range(12)) for _ in range(12))
+        after_rows = [list(row) for row in before]
+        for y in range(4, 12):
+            for x in range(4, 12):
+                after_rows[y][x] = 7
+        first, second = records(
+            action=ArcAction("ACTION1"), before=before,
+            after=tuple(tuple(row) for row in after_rows),
+        )
+        effect = extract_action_effect(first, second)
+        self.assertEqual(effect.changed_cell_count, 64)
+        self.assertEqual(effect.changed_cells_omitted, 0)
+        self.assertEqual(len(effect.components), 1)
+
+    def test_translation_at_different_positions_forms_one_hypothesis(self) -> None:
+        inducer = ExperienceInducer()
+        for sequence, start_x in ((1, 1), (2, 5)):
+            before_rows = [[0 for _ in range(12)] for _ in range(6)]
+            after_rows = [[0 for _ in range(12)] for _ in range(6)]
+            for x in range(start_x, start_x + 2):
+                before_rows[2][x] = 7
+            for x in range(start_x + 1, start_x + 3):
+                after_rows[2][x] = 7
+            first, second = records(
+                action=ArcAction("ACTION1"),
+                before=tuple(tuple(row) for row in before_rows),
+                after=tuple(tuple(row) for row in after_rows),
+            )
+            effect = extract_action_effect(first, second)
+            if sequence == 2:
+                effect = replace(effect, sequence=2)
+            inducer.observe(effect)
+        candidates = inducer.candidates()
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].status, "hypothesis")
+        self.assertEqual(candidates[0].support_count, 2)
+        self.assertTrue(candidates[0].template is not None)
+        self.assertTrue(candidates[0].template.motions)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,6 +35,7 @@ _EFFECTS = frozenset(
         "set_cell",
         "toggle_cell",
         "translate_cells",
+        "translate_components",
         "set_state",
         "increment_level",
     }
@@ -307,6 +308,31 @@ def _validate_effect(kind: str, args: Mapping[str, Any]) -> None:
                 if type(item) not in (list, tuple) or len(item) != 2:
                     raise ValueError("invalid translate_cells cells")
                 _coordinate({"x": item[0], "y": item[1]})
+    elif kind == "translate_components":
+        values = _mapping_args(args, {"pattern", "clear", "dx", "dy", "count"})
+        if type(values["dx"]) is not int or not -63 <= values["dx"] <= 63:
+            raise ValueError("invalid translate_components offset")
+        if type(values["dy"]) is not int or not -63 <= values["dy"] <= 63:
+            raise ValueError("invalid translate_components offset")
+        _value_byte(values["clear"])
+        if type(values["count"]) is not int or not 1 <= values["count"] <= 64:
+            raise ValueError("invalid translate_components count")
+        pattern = values["pattern"]
+        if type(pattern) not in (list, tuple) or not 1 <= len(pattern) <= 256:
+            raise ValueError("invalid translate_components pattern")
+        coordinates: set[tuple[int, int]] = set()
+        for item in pattern:
+            if type(item) not in (list, tuple) or len(item) != 3:
+                raise ValueError("invalid translate_components pattern")
+            x, y, value = item
+            if type(x) is not int or type(y) is not int or not -63 <= x <= 63 or not -63 <= y <= 63:
+                raise ValueError("invalid translate_components pattern")
+            if (x, y) in coordinates:
+                raise ValueError("invalid translate_components pattern")
+            coordinates.add((x, y))
+            _value_byte(value)
+        if values["clear"] in {item[2] for item in pattern}:
+            raise ValueError("translate_components source equals clear")
     elif kind == "set_state":
         if set(args) != {"value"} or type(args["value"]) is not str or not args["value"]:
             raise ValueError("invalid set_state effect")
@@ -322,6 +348,7 @@ class MechanismPrediction:
     level: int | None = None
     state: str | None = None
     changed_cells: tuple[tuple[int, int, int, int], ...] = ()
+    changed_cells_omitted: int = 0
     reason: str | None = None
     rule_count: int = 0
 
@@ -336,6 +363,8 @@ class MechanismPrediction:
             raise ValueError("invalid prediction state")
         if type(self.changed_cells) is not tuple or len(self.changed_cells) > 80:
             raise ValueError("invalid prediction changed cells")
+        if type(self.changed_cells_omitted) is not int or self.changed_cells_omitted < 0:
+            raise ValueError("invalid prediction omitted count")
         for item in self.changed_cells:
             if (
                 type(item) is not tuple
@@ -366,6 +395,7 @@ class SimPrediction:
     status: str
     next_state: object | None = None
     changed_cells: tuple[tuple[int, int, int, int], ...] = ()
+    changed_cells_omitted: int = 0
     rule_ids: tuple[str, ...] = ()
     reason: str | None = None
 
@@ -378,6 +408,8 @@ class SimPrediction:
             raise ValueError("unknown/conflict cannot expose a next state")
         if type(self.changed_cells) is not tuple or len(self.changed_cells) > 80:
             raise ValueError("invalid simulation changed cells")
+        if type(self.changed_cells_omitted) is not int or self.changed_cells_omitted < 0:
+            raise ValueError("invalid simulation omitted count")
         if any(
             type(item) is not tuple or len(item) != 4
             or any(type(part) is not int for part in item)
@@ -501,18 +533,14 @@ class MechanismSpec:
             after, after_level, after_state = _apply_effects(
                 stable, level, state, cast(tuple[tuple[str, Any], ...], matches[0].effects), self.win_levels
             )
-            count, changed, _ = stable_changed_cells(stable, after)
-            if count > 80:
-                return MechanismPrediction(
-                    "unknown", frame=after, level=after_level, state=after_state,
-                    reason="changed-cell-cap",
-                )
+            count, changed, omitted = stable_changed_cells(stable, after)
             return MechanismPrediction(
                 "predicted",
                 frame=after,
                 level=after_level,
                 state=after_state,
                 changed_cells=changed,
+                changed_cells_omitted=omitted,
                 rule_count=1,
             )
         except (TypeError, ValueError, IndexError):
@@ -543,11 +571,25 @@ def compile_effect_hypothesis(hypothesis: object) -> MechanismSpec | None:
     if template.data:
         guards.append({"op": "action_data_equals", "args": {"value": dict(template.data)}})
     effects: list[object] = []
-    if template.changed_cells_omitted:
-        return None
-    for x, y, old, new in template.changed_cells:
-        guards.append({"op": "cell_equals", "args": {"x": x, "y": y, "value": old}})
-        effects.append({"op": "set_cell", "args": {"x": x, "y": y, "value": new}})
+    if template.motion_complete and template.motions:
+        for motion in template.motions:
+            pattern = [
+                [x, y, motion.source_value]
+                for x, y in motion.shape
+            ]
+            effects.append({"op": "translate_components", "args": {
+                "pattern": pattern,
+                "clear": motion.clear_value,
+                "dx": motion.dx,
+                "dy": motion.dy,
+                "count": motion.count,
+            }})
+    else:
+        if template.changed_cells_omitted:
+            return None
+        for x, y, old, new in template.changed_cells:
+            guards.append({"op": "cell_equals", "args": {"x": x, "y": y, "value": old}})
+            effects.append({"op": "set_cell", "args": {"x": x, "y": y, "value": new}})
     if template.levels_completed > template.level:
         effects.append({
             "op": "increment_level",
@@ -607,6 +649,7 @@ def simulate_step(spec: MechanismSpec, sim_state: object, action: object) -> Sim
     return SimPrediction(
         "predicted", next_state=next_state,
         changed_cells=prediction.changed_cells,
+        changed_cells_omitted=prediction.changed_cells_omitted,
         rule_ids=(f"rule:{prediction.rule_count}",),
     )
 
@@ -691,6 +734,49 @@ def _apply_effects(
                 rows[y][x] = 0
             for x, y, value in moved:
                 rows[y][x] = value
+        elif kind == "translate_components":
+            pattern = tuple((item[0], item[1], item[2]) for item in args["pattern"])
+            dx, dy, clear, expected_count = args["dx"], args["dy"], args["clear"], args["count"]
+            height, width = len(rows), len(rows[0])
+            origins: list[tuple[int, int]] = []
+            for origin_y in range(height):
+                for origin_x in range(width):
+                    source = {(origin_x + rel_x, origin_y + rel_y): value for rel_x, rel_y, value in pattern}
+                    if any(
+                        x < 0 or y < 0 or x >= width or y >= height
+                        or rows[y][x] != value
+                        for (x, y), value in source.items()
+                    ):
+                        continue
+                    destination = {(x + dx, y + dy) for x, y in source}
+                    if any(
+                        x < 0 or y < 0 or x >= width or y >= height
+                        or (
+                            rows[y][x] != source.get((x, y), clear)
+                            if (x, y) in source
+                            else rows[y][x] != clear
+                        )
+                        for x, y in destination
+                    ):
+                        continue
+                    origins.append((origin_x, origin_y))
+            if len(origins) != expected_count:
+                raise ValueError
+            source_cells: set[tuple[int, int]] = set()
+            destination_cells: set[tuple[int, int]] = set()
+            for origin_x, origin_y in origins:
+                for rel_x, rel_y, _value in pattern:
+                    source_cell = (origin_x + rel_x, origin_y + rel_y)
+                    destination_cell = (source_cell[0] + dx, source_cell[1] + dy)
+                    if source_cell in source_cells or destination_cell in destination_cells:
+                        raise ValueError
+                    source_cells.add(source_cell)
+                    destination_cells.add(destination_cell)
+            for x, y in source_cells - destination_cells:
+                rows[y][x] = clear
+            for origin_x, origin_y in origins:
+                for rel_x, rel_y, value in pattern:
+                    rows[origin_y + rel_y + dy][origin_x + rel_x + dx] = value
         elif kind == "set_state":
             current_state = args["value"]
         elif kind == "increment_level":
@@ -819,6 +905,7 @@ def validate_mechanism(
             or record.changed_cells != cells
             or record.changed_cells_omitted != omitted
             or prediction.changed_cells != cells
+            or prediction.changed_cells_omitted != omitted
         ):
             return None
     return ModelCertificate._issued(

@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
-from .verified_history import ArcHistoryRecord, CellChange, Grid
+from .verified_history import ArcHistoryRecord, CellChange, Grid, stable_changed_cells
 
 _ACTIONS = frozenset(f"ACTION{i}" for i in range(1, 8))
 _STATES = frozenset({"NOT_FINISHED", "WIN", "GAME_OVER"})
@@ -43,6 +43,18 @@ class EffectComponent:
 
 
 @dataclass(frozen=True, slots=True)
+class EffectMotion:
+    """A repeated object/component translation inferred from a full delta."""
+
+    source_value: int
+    clear_value: int
+    shape: tuple[tuple[int, int], ...]
+    dx: int
+    dy: int
+    count: int = 1
+
+
+@dataclass(frozen=True, slots=True)
 class ActionEffect:
     """One verified action transition, with no unbounded frame payload."""
 
@@ -64,6 +76,11 @@ class ActionEffect:
     changed_cells_omitted: int
     outcome: str
     components: tuple[EffectComponent, ...]
+    # ``changed_cells`` remains the bounded public sample.  These fields are
+    # private semantic evidence derived from the retained frame pair.
+    full_changed_cells: tuple[CellChange, ...] = ()
+    motions: tuple[EffectMotion, ...] = ()
+    motion_complete: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +152,129 @@ def _components(changes: tuple[CellChange, ...]) -> tuple[EffectComponent, ...]:
     return tuple(result)
 
 
+def _connected_cells(cells: set[tuple[int, int]]) -> tuple[tuple[tuple[int, int], ...], ...]:
+    """Return deterministic 4-connected components for a coordinate set."""
+
+    remaining = set(cells)
+    result: list[tuple[tuple[int, int], ...]] = []
+    while remaining:
+        start = min(remaining, key=lambda cell: (cell[1], cell[0]))
+        stack = [start]
+        remaining.remove(start)
+        component: list[tuple[int, int]] = []
+        while stack:
+            x, y = stack.pop()
+            component.append((x, y))
+            for neighbour in ((x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)):
+                if neighbour in remaining:
+                    remaining.remove(neighbour)
+                    stack.append(neighbour)
+        result.append(tuple(sorted(component, key=lambda cell: (cell[1], cell[0]))))
+    return tuple(result)
+
+
+def _motions(
+    changes: tuple[CellChange, ...],
+    before: Grid | None = None,
+    after: Grid | None = None,
+) -> tuple[tuple[EffectMotion, ...], bool]:
+    """Infer conservative source→clear and clear→source translations.
+
+    A motion is emitted only when the complete changed set can be paired by a
+    single displacement.  This deliberately leaves mixed or partially
+    observed effects unmodelled instead of guessing a rule.
+    """
+
+    by_pair: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    for x, y, old, new in changes:
+        by_pair.setdefault((old, new), set()).add((x, y))
+    descriptors: list[tuple[int, int, tuple[tuple[int, int], ...], int, int]] = []
+    covered: set[tuple[int, int]] = set()
+    for (source, clear), source_cells in sorted(by_pair.items()):
+        if source == clear or not source_cells or (clear, source) not in by_pair:
+            continue
+        # The reverse delta is the same physical translation viewed from the
+        # destination.  Prefer a non-background source (and use a stable
+        # colour ordering for two nonzero colours) so one action yields one
+        # forward motion rather than two inverse rules.
+        if source == 0 and clear != 0:
+            continue
+        if source != 0 and clear != 0 and source < clear:
+            continue
+        destination_cells = by_pair[(clear, source)]
+        if before is not None and after is not None:
+            source_colour = {
+                (x, y) for y, row in enumerate(before)
+                for x, value in enumerate(row) if value == source
+            }
+            destination_colour = {
+                (x, y) for y, row in enumerate(after)
+                for x, value in enumerate(row) if value == source
+            }
+            source_components = tuple(
+                component for component in _connected_cells(source_colour)
+                if set(component) & source_cells
+            )
+            destination_components = tuple(
+                component for component in _connected_cells(destination_colour)
+                if set(component) & destination_cells
+            )
+        else:
+            source_components = _connected_cells(source_cells)
+            destination_components = _connected_cells(destination_cells)
+        for component in source_components:
+            if not component:
+                continue
+            # Try each destination anchor; only an exact translated component
+            # is accepted.  Components are small and frame cells are bounded.
+            component_set = set(component)
+            component_set = set(component)
+            destination_sets = [set(item) for item in destination_components]
+            candidate_offsets = sorted(
+                (dx - component[0][0], dy - component[0][1])
+                for dx, dy in (destination_cells if before is None else {
+                    point for item in destination_sets for point in item
+                })
+            )
+            matches: list[tuple[int, int]] = []
+            for offset in candidate_offsets:
+                translated = {(x + offset[0], y + offset[1]) for x, y in component_set}
+                if before is None:
+                    valid = translated <= destination_cells
+                else:
+                    valid = any(translated == item for item in destination_sets)
+                if valid:
+                    matches.append(offset)
+            if len(set(matches)) != 1:
+                continue
+            dx, dy = matches[0]
+            translated = {(x + dx, y + dy) for x, y in component_set}
+            # Avoid treating a source component as motion when a separate
+            # destination component is left unexplained by this pairing.
+            if before is None:
+                if not translated <= destination_cells:
+                    continue
+            elif not any(translated == item for item in destination_sets):
+                continue
+            min_x = min(x for x, _ in component)
+            min_y = min(y for _, y in component)
+            shape = tuple(sorted(
+                ((x - min_x, y - min_y) for x, y in component),
+                key=lambda cell: (cell[1], cell[0]),
+            ))
+            descriptors.append((source, clear, shape, dx, dy))
+            covered.update(component_set & source_cells)
+            covered.update(translated & destination_cells)
+    grouped: dict[tuple[int, int, tuple[tuple[int, int], ...], int, int], int] = {}
+    for descriptor in descriptors:
+        grouped[descriptor] = grouped.get(descriptor, 0) + 1
+    motions = tuple(
+        EffectMotion(source, clear, shape, dx, dy, count)
+        for (source, clear, shape, dx, dy), count in sorted(grouped.items())
+    )
+    return motions, covered == {(x, y) for x, y, _old, _new in changes}
+
+
 def extract_action_effect(
     previous: ArcHistoryRecord, record: ArcHistoryRecord,
 ) -> ActionEffect:
@@ -167,6 +307,12 @@ def extract_action_effect(
         outcome = "game-over"
     else:
         outcome = "changed"
+    full_count, full_changes, full_omitted = stable_changed_cells(
+        previous.frame, record.frame, limit=len(previous.frame) * len(previous.frame[0]),
+    )
+    if full_count != record.changed_cell_count or full_omitted != 0:
+        raise ValueError("history frame delta is inconsistent")
+    motions, motion_complete = _motions(full_changes, previous.frame, record.frame)
     return ActionEffect(
         game_id=record.game_id,
         seed=record.seed,
@@ -185,7 +331,10 @@ def extract_action_effect(
         changed_cells=tuple(record.changed_cells),
         changed_cells_omitted=record.changed_cells_omitted,
         outcome=outcome,
-        components=() if record.changed_cells_omitted else _components(record.changed_cells),
+        components=_components(full_changes),
+        full_changed_cells=full_changes,
+        motions=motions,
+        motion_complete=motion_complete,
     )
 
 
@@ -195,6 +344,15 @@ def _action_family(action: str) -> str:
 
 def _signature(effect: ActionEffect) -> str:
     """Create a coordinate-independent signature for grouping effects."""
+
+    if effect.motion_complete and effect.motions:
+        return repr((
+            "translation", effect.outcome, effect.state, effect.levels_completed,
+            tuple((
+                motion.source_value, motion.clear_value, motion.shape,
+                motion.dx, motion.dy, motion.count,
+            ) for motion in effect.motions),
+        ))
 
     components = []
     for component in effect.components:
@@ -400,6 +558,6 @@ class SimState:
 
 
 __all__ = [
-    "ActionEffect", "EffectComponent", "EffectHypothesis", "ExperienceInducer",
+    "ActionEffect", "EffectComponent", "EffectHypothesis", "EffectMotion", "ExperienceInducer",
     "ProbePlan", "SimState", "extract_action_effect",
 ]

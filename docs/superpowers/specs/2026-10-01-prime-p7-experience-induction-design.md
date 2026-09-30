@@ -8,9 +8,10 @@
 > `model_search.py`、P7 Broker/Playbook 与四个只读应用工具中；合成端到端
 > 测试覆盖 effect → candidate → probe → simulator → Playbook 重载边界。
 > 当前仍保留两个有意边界：候选编译只接受可证明的受限规则子集，且探测计划
-> 只建议不自动派发。全量 `make test` 已通过；SP80 L2 纯 P7 实战证明
-> effects/candidates 能持久化，但本轮 `confirmed=0`、simulator=`absent`，
-> 所以“采集经验”已经实现，“从经验形成可搜索机制”仍是当前待改进边界。
+> 只建议不自动派发。全量 `make test` 已通过；本轮修复已加入基于完整帧的
+> 组件平移归纳和 `translate_components` 声明式效果，并由合成测试验证可迁移
+> 预测。SP80 L2 既有纯 P7 实战仍是 `confirmed=0`、simulator=`absent`，
+> 因此真实运行中的候选晋级与后续复用仍需重新验证。
 
 ## 1. 目标
 

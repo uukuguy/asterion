@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 import json
 from typing import Callable, Mapping, Protocol, TypedDict, cast
 
-from .mechanism_model import MechanismSpec, ModelCertificate, validate_mechanism
+from .mechanism_model import MechanismSpec, ModelCertificate, compile_effect_hypothesis, validate_mechanism
 from .model_search import search_model
 from .experience_induction import ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
@@ -379,6 +379,15 @@ class ArcBroker:
             "changed_cell_count": effect.changed_cell_count,
             "changed_cells": [list(cell) for cell in effect.changed_cells],
             "changed_cells_omitted": effect.changed_cells_omitted,
+            "motions": [{
+                "source_value": motion.source_value,
+                "clear_value": motion.clear_value,
+                "shape": [list(cell) for cell in motion.shape],
+                "dx": motion.dx,
+                "dy": motion.dy,
+                "count": motion.count,
+            } for motion in effect.motions],
+            "motion_complete": effect.motion_complete,
             "state": effect.state,
             "after_frame_sha256": effect.after_frame_sha256,
         } for effect in self._experience_inducer.effects()]
@@ -392,17 +401,26 @@ class ArcBroker:
     def mechanism_candidates(self) -> tuple[dict[str, object], ...]:
         """Return candidate lifecycle and evidence without execution authority."""
 
-        current = [{
-            "key": candidate.key,
-            "level": candidate.level,
-            "action_family": candidate.action_family,
-            "action": {"name": candidate.action, "data": dict(candidate.data)},
-            "signature": candidate.signature,
-            "status": candidate.status,
-            "support_count": candidate.support_count,
-            "evidence_sequences": list(candidate.evidence_sequences),
-            "conflict_sequences": list(candidate.conflict_sequences),
-        } for candidate in self._experience_inducer.candidates()]
+        current = []
+        for candidate in self._experience_inducer.candidates():
+            item: dict[str, object] = {
+                "key": candidate.key,
+                "level": candidate.level,
+                "action_family": candidate.action_family,
+                "action": {"name": candidate.action, "data": dict(candidate.data)},
+                "signature": candidate.signature,
+                "status": candidate.status,
+                "support_count": candidate.support_count,
+                "evidence_sequences": list(candidate.evidence_sequences),
+                "conflict_sequences": list(candidate.conflict_sequences),
+            }
+            # This is a declarative proposal only.  It is useful to the model
+            # when constructing a falsifiable probe, but never grants planner
+            # authority until record_hypothesis + retrodiction succeeds.
+            compiled = compile_effect_hypothesis(candidate)
+            if compiled is not None:
+                item["compiled_mechanism"] = compiled.to_mapping()
+            current.append(item)
         seen = {item["key"] for item in current}
         for fact in self._playbook.candidate_summaries:
             value = fact.value
@@ -665,6 +683,15 @@ class ArcBroker:
                     "changed_cell_count": effect.changed_cell_count,
                     "changed_cells": [list(cell) for cell in effect.changed_cells],
                     "changed_cells_omitted": effect.changed_cells_omitted,
+                    "motions": [{
+                        "source_value": motion.source_value,
+                        "clear_value": motion.clear_value,
+                        "shape": [list(cell) for cell in motion.shape],
+                        "dx": motion.dx,
+                        "dy": motion.dy,
+                        "count": motion.count,
+                    } for motion in effect.motions],
+                    "motion_complete": effect.motion_complete,
                     "state": effect.state,
                     "after_frame_sha256": effect.after_frame_sha256,
                 }, level, (evidence,),
@@ -684,6 +711,8 @@ class ArcBroker:
                     "support_count": candidate.support_count,
                     "evidence_sequences": list(candidate.evidence_sequences),
                     "conflict_sequences": list(candidate.conflict_sequences),
+                    **({"compiled_mechanism": compiled.to_mapping()}
+                       if (compiled := compile_effect_hypothesis(candidate)) is not None else {}),
                 }, level, (evidence,),
             ))
         simulator_fact = CheckedFact(
