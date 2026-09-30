@@ -250,6 +250,24 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertEqual(len(effect.motions), 1)
         self.assertEqual((effect.motions[0].dx, effect.motions[0].dy), (1, 0))
 
+    def test_small_boundary_decoration_does_not_hide_complete_motion(self) -> None:
+        before = (
+            (0, 0, 0, 0, 0, 0, 0, 0),
+            (0, 7, 7, 0, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0),
+            (14, 14, 14, 14, 14, 14, 14, 14),
+        )
+        after = (
+            (0, 0, 0, 0, 0, 0, 0, 0),
+            (0, 0, 7, 7, 0, 0, 0, 0),
+            (0, 0, 0, 0, 0, 0, 0, 0),
+            (14, 14, 14, 0, 14, 14, 14, 14),
+        )
+        first, second = records(action=ArcAction("ACTION1"), before=before, after=after)
+        effect = extract_action_effect(first, second)
+        self.assertTrue(effect.motion_complete)
+        self.assertEqual((effect.motions[0].dx, effect.motions[0].dy), (1, 0))
+
 
 if __name__ == "__main__":
     unittest.main()

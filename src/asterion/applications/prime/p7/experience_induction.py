@@ -297,7 +297,26 @@ def _motions(
         EffectMotion(source, clear, shape, dx, dy, count)
         for (source, clear, shape, dx, dy), count in sorted(grouped.items())
     )
-    return motions, covered == {(x, y) for x, y, _old, _new in changes}
+    changed_positions = {(x, y) for x, y, _old, _new in changes}
+    if covered == changed_positions:
+        return motions, bool(motions)
+    # ARC game HUDs often advance a one-cell edge marker or timer together
+    # with the moving object.  Keep that bounded decoration from hiding a
+    # complete object translation, while retaining the conservative behavior
+    # for larger or interior unexplained deltas.
+    border_extras: set[tuple[int, int]] = set()
+    if before is not None and after is not None and motions:
+        height, width = len(before), len(before[0])
+        border_extras = changed_positions - covered
+        if (
+            len(border_extras) <= 1
+            and all(
+                x in (0, width - 1) or y in (0, height - 1)
+                for x, y in border_extras
+            )
+        ):
+            return motions, True
+    return motions, False
 
 
 def extract_action_effect(
