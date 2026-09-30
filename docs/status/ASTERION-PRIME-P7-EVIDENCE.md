@@ -707,3 +707,7 @@ The current summary contains **2** prediction mismatches and 1 matched expectati
 - Hash fields in route evidence are easy to confuse. A canonical checked plan should carry the correct frame expectation, and diagnostics should distinguish caller prediction errors, verified route execution, confirmed-mechanism contradictions and historical Playbook conflicts.
 - The summary has `failure=null` alongside `failure_classification.category=application_failure`; this is inconsistent diagnostic labeling, not a failed level. It needs a separate success-path regression.
 - No loop of repeated game actions or long retry was observed: three actions, one failed non-action tool call, six model usage events (45,794 summed input tokens including repeated/cache context and 1,919 output tokens). This does not establish efficiency on a fresh unsolved level.
+
+## 2026-09-30 VC33 L1 rerun — visual hypothesis persistence verified
+
+Run `p7-live-20260930023720-e2494802da5241461a4b3086` used explicit `LEVEL=1` with the exploration strategy and completed L1 in 3 actions. Its sealed summary reports replay verification, cleanup, model `gpt-6.1-sol`, and partial score `3.571429`. The run's final in-memory model had 15 hypotheses after the level refresh; the completed-level capture persisted the 12 L0 hypotheses that existed before refresh into the Playbook, alongside the 3-action checked route. Confirmed facts remain zero. This proves persistence and identity boundaries, but L2 consumption of the persisted hypotheses still requires a separate explicit `LEVEL=2` run.

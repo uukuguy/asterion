@@ -11,6 +11,7 @@
 - 初始帧视觉先验已接入：每次运行最多记录 32 个候选，作为 `entities` 层 hypothesis 注入同题上下文；不会自动确认墙、地板、物品或终点。
 - retrodiction 诊断现在暴露机器可读 `reasons`；VC33 本次为两次 `prediction-mismatch`、第三步预期匹配，路线采用 3/3 完成。根因是前两步把 state hash 填入 frame hash 字段；Playbook 的三条 conflict 包含历史元数据，不能当作本次计数。
 - VC33 初始模型为 12 个视觉 hypothesis；通关后刷新为下一级的 15 个，版本 28 = 12 + 刷新 1 + 15。无 hypothesis/probe 写调用，0 confirmed facts；本次证明路线执行有效，未证明规则学习有效。完整复盘见 `ASTERION-PRIME-P7-EVIDENCE.md` 的 2026-09-30 节。
+- VC33 L1 重跑后 Playbook 已实际保存 12 个 L0 `visual_hypotheses`，并保留 3 步 checked route；这是首次验证视觉候选跨运行持久化。confirmed facts 仍为 0，尚未证明 L2 模型会有效利用这些候选。
 - 离线 ARC fresh-engine replay 为每个候选动作生成 bounded expectation；在线采用候选前要求期望数量完整，首个 action 或 expectation mismatch 即停止采用。
 - 223 个组合 P7 测试通过；`make lint`、`make docs-check`、变更模型模块 Pyright 和 `git diff --check` 通过。
 - 完整仓库 gate 跑完 3509 项测试，唯一失败是 `test_full_promotion_python_environment_keeps_real_npm_ci_offline` 观察到一次网络请求；这是环境 gate 失败，不是 P7 回归。
@@ -30,10 +31,10 @@
 
 - 完整仓库 gate 已完成，但离线 npm-ci 环境测试失败，后续若需发布必须单独修复或复现实验环境。
 - TU93 L1 受控练手运行已执行但由操作者主动取消：当前关卡 18 个动作、0 关完成；external_cancel，未封存/未回放验证，不计通关。离线候选 19→18 步，但 P7 首动作偏离候选 ACTION4，route adoption 跟随 0；世界模型版本 0，说明在线机制事实没有建立。
-- VC33 的视觉 hypothesis 尚未进入 Playbook 持久化；当前 Playbook 仍只保存 confirmed facts、checked routes、level memory 和冲突/分支元数据。这是后续同题持久化设计边界，不应把运行内 hypothesis 误报为已学习事实。
+- VC33 L2 显式运行 `p7-live-20260930021849-b4a26cbd9f741b76de1b4172` 在 22 总动作（19 个当前 L2 动作）后由操作者停止，levels_completed=1；这是 unsuccessful evidence，不是新 L2 结果。此前 `next` 自动选择 L4 的错误目标运行同样不计结果。
 
 ## 下一动作
 
-1. 防止 checked plan 的 state/frame hash 混用，并将 caller prediction mismatch、replay witness 成功、确认机制冲突和历史 Playbook 元数据分层。修复成功 summary 中残留的 application_failure 分类。
-2. 设计并测试 bounded visual hypothesis 的同题 Playbook 持久化，保持 hypothesis 只能被动作证据升级，不能直接授权复用。
-3. 用新的分层诊断在下一个低 baseline L1 做一次受控 live 验证，报告当前关卡动作数、提交资格、模型/工具异常与 30 分钟/基线停止原因。
+1. 用显式 L2 运行验证 `p7_playbook` 能读到这 12 个 L0 visual hypotheses，并记录模型是否据此减少盲试；不要使用自动 `next` 选择高于目标的关卡。
+2. 防止 checked plan 的 state/frame hash 混用，并将 caller prediction mismatch、replay witness 成功、确认机制冲突和历史 Playbook 元数据分层。
+3. 继续保留 hypothesis 只能被动作证据升级的边界；不要把视觉候选直接当成 confirmed 规则。

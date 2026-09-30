@@ -3333,3 +3333,5 @@
 - 10:09 Correction: implementation commit hash is 95d71058; earlier 704f51cb was superseded by amend.
 - 10:13 Recorded VC33 L1 route adoption, world-model usage, and hash-mismatch analysis before L2 retry [adb84891]
 - 10:37 Persisted bounded same-game visual hypotheses in Playbook so later levels can read prior map candidates [82480d30]
+- 10:40 VC33 L2 explicitly targeted run stopped after 22 total actions (19 new L2 actions), levels remained 1; sealed/replay-verified but unsuccessful and not a new result. A separate automatic-next attempt incorrectly targeted L4 and was stopped before verification; neither changes VC33's verified L3 prefix.
+- 10:40 VC33 L1 rerun `p7-live-20260930023720-e2494802da5241461a4b3086` completed in 3 actions; saved Playbook now contains 12 bounded L0 visual hypotheses, 0 confirmed facts, and the 3-action checked route. Focused P7 tests: 138; lint passed.
