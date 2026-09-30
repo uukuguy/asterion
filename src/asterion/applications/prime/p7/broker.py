@@ -429,6 +429,47 @@ class ArcBroker:
             current.append({**value, "status": "stale", "source": "playbook"})
         return tuple(current[-256:])
 
+    def learning_hint(self) -> dict[str, object]:
+        """Return a small advisory induction summary for the next model turn.
+
+        The normal model path may never call the optional candidate tool.  This
+        bounded projection keeps reusable semantic evidence visible in the
+        observation without turning it into a route or planner certificate.
+        """
+
+        compiled_candidates: list[dict[str, object]] = []
+        for candidate in self._experience_inducer.candidates():
+            compiled = compile_effect_hypothesis(candidate)
+            if compiled is None:
+                continue
+            compiled_candidates.append({
+                "key": candidate.key,
+                "action": {"name": candidate.action, "data": dict(candidate.data)},
+                "support_count": candidate.support_count,
+                "evidence_sequences": list(candidate.evidence_sequences[-8:]),
+                "compiled_mechanism": compiled.to_mapping(),
+            })
+        compiled_candidates.sort(
+            key=lambda item: (-int(item["support_count"]), str(item["key"]))
+        )
+        if compiled_candidates:
+            recommendation = "inspect_candidate_and_probe"
+        elif self._experience_inducer.candidates():
+            recommendation = "inspect_candidates"
+        else:
+            recommendation = "ordinary_exploration"
+        simulator = self.simulator_status()
+        return {
+            "recommendation": recommendation,
+            "candidate_count": len(self._experience_inducer.candidates()),
+            "compiled_candidates": compiled_candidates[:4],
+            "simulator": {
+                "status": simulator["status"],
+                "confirmed_model": simulator["confirmed_model"],
+            },
+            "execution_authority": "none",
+        }
+
     def probe_plan(self) -> dict[str, object]:
         """Suggest one current-state probe; never dispatch it."""
 

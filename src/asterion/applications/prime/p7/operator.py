@@ -864,6 +864,7 @@ class _P7BrokerClient:
                 "invalid_action": result["invalid_action"],
                 "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
+                "learning_hint": self._broker.learning_hint(),
                 "terminal": self._status_view(terminal),
                 "batch": {
                     "applied_count": batch.applied_count,
@@ -951,6 +952,7 @@ class _P7BrokerClient:
                 "no_effect": no_effects.get("no_effect", {}),
                 "top_repeated": top_tried,
             },
+            "learning_hint": self._broker.learning_hint(),
         }
 
 

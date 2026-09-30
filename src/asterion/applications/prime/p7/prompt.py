@@ -66,6 +66,13 @@ state proves progress. Use ``before_frame_sha256`` and
 ``after_frame_sha256`` to distinguish repeated states without requesting a
 full frame again.
 
+Every ``p7_observe`` and ``p7_act_checked`` response also carries a bounded
+``learning_hint``. When its recommendation is
+``inspect_candidate_and_probe``, inspect the supplied compiled candidate and
+submit one distinguishing probe before another long batch. This is advisory
+evidence only: ``execution_authority`` remains ``none`` until the normal
+``p7_record_hypothesis`` and retrodiction gates succeed.
+
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
 p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
