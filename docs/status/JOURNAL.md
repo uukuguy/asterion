@@ -3407,3 +3407,4 @@
 - 05:02 Full gate passed after facade repair: 3562 tests OK, 5 skipped; live SP80 L2 still needs confirmed-model evidence
 - 05:03 Documented the repaired worker-facade integration boundary and retained the honest live-verification limit [faa5becc]
 - 05:18 Infer component motion despite independent boundary deltas, add ordered clear-cell effects, and expose a non-conflicting induced mechanism bundle [73d6e0a2]
+- 05:31 Added synthetic semantic-learning lifecycle coverage, allowed nonterminal search witnesses, and made Playbook rehydration idempotent [96da1c66]
