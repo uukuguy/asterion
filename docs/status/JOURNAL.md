@@ -3403,3 +3403,4 @@
 - 04:20 Keep distinct keyboard actions in separate induction candidates so reusable motion rules can compile and certify [a537bda8]
 - 04:28 Expose learning hints on compact status because animated observe frames can exceed the bridge response budget [fd572607]
 - 04:42 Include bounded candidate evidence in learning hints and require candidate inspection before long batches [ebba6740]
+- 04:55 Expose induction query methods through the worker facade so P7 candidate inspection no longer fails at runtime [273d71cd]
