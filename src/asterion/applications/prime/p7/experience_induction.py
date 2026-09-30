@@ -9,7 +9,7 @@ action.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 from .verified_history import ArcHistoryRecord, CellChange, Grid
@@ -64,6 +64,40 @@ class ActionEffect:
     changed_cells_omitted: int
     outcome: str
     components: tuple[EffectComponent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class EffectHypothesis:
+    """A bounded, declarative effect candidate assembled from observations."""
+
+    key: str
+    game_id: str
+    seed: int
+    level: int
+    action_family: str
+    action: str
+    data: tuple[tuple[str, int], ...]
+    signature: str
+    status: str
+    evidence_sequences: tuple[int, ...]
+    conflict_sequences: tuple[int, ...]
+
+    @property
+    def support_count(self) -> int:
+        return len(self.evidence_sequences)
+
+
+@dataclass(frozen=True, slots=True)
+class ProbePlan:
+    """Read-only probe suggestion; it never dispatches an action."""
+
+    status: str
+    reason: str
+    action: str | None = None
+    data: tuple[tuple[str, int], ...] = ()
+    candidate_keys: tuple[str, ...] = ()
+    expected_signatures: tuple[str, ...] = ()
+    rejected_candidates: tuple[str, ...] = ()
 
 
 def _components(changes: tuple[CellChange, ...]) -> tuple[EffectComponent, ...]:
@@ -153,6 +187,149 @@ def extract_action_effect(
     )
 
 
+def _action_family(action: str) -> str:
+    return "click" if action == "ACTION6" else "keyboard"
+
+
+def _signature(effect: ActionEffect) -> str:
+    """Create a coordinate-independent signature for grouping effects."""
+
+    components = []
+    for component in effect.components:
+        origin_x, origin_y = component.bounds[:2]
+        components.append((
+            tuple((x - origin_x, y - origin_y) for x, y in component.cells),
+            component.old_values,
+            component.new_values,
+        ))
+    return repr((effect.outcome, effect.state, effect.levels_completed, tuple(components)))
+
+
+class ExperienceInducer:
+    """Accumulate effects and form/reconcile small mechanism candidates."""
+
+    def __init__(self, *, max_effects: int = 128) -> None:
+        if type(max_effects) is not int or not 1 <= max_effects <= 1024:
+            raise ValueError("max_effects must be between 1 and 1024")
+        self._max_effects = max_effects
+        self._effects: list[ActionEffect] = []
+        self._candidates: dict[str, EffectHypothesis] = {}
+
+    def observe(self, effect: ActionEffect) -> tuple[EffectHypothesis, ...]:
+        """Record one effect and return the candidates touched by it."""
+
+        if not isinstance(effect, ActionEffect):
+            raise ValueError("ActionEffect required")
+        if self._effects and (
+            effect.game_id != self._effects[-1].game_id
+            or effect.seed != self._effects[-1].seed
+            or effect.run_id != self._effects[-1].run_id
+        ):
+            raise ValueError("effects must belong to one run")
+        self._effects.append(effect)
+        if len(self._effects) > self._max_effects:
+            del self._effects[: len(self._effects) - self._max_effects]
+        family = _action_family(effect.action)
+        signature = _signature(effect)
+        key = ":".join((effect.game_id, str(effect.seed), str(effect.level), family, signature))
+        broad = [
+            candidate for candidate in self._candidates.values()
+            if candidate.game_id == effect.game_id
+            and candidate.seed == effect.seed
+            and candidate.level == effect.level
+            and candidate.action_family == family
+        ]
+        touched: list[EffectHypothesis] = []
+        candidate = self._candidates.get(key)
+        if candidate is None:
+            candidate = EffectHypothesis(
+                key=key, game_id=effect.game_id, seed=effect.seed,
+                level=effect.level, action_family=family, action=effect.action,
+                data=effect.data, signature=signature, status="hypothesis",
+                evidence_sequences=(effect.sequence,), conflict_sequences=(),
+            )
+            if broad:
+                # A second incompatible delta for the same action family is
+                # evidence of context dependence, so neither variant is
+                # eligible for model compilation until a later partitioning
+                # fact is supplied.
+                for prior in broad:
+                    prior = replace(
+                        prior, status="contradicted",
+                        conflict_sequences=prior.conflict_sequences + (effect.sequence,),
+                    )
+                    self._candidates[prior.key] = prior
+                    touched.append(prior)
+                candidate = replace(
+                    candidate, status="contradicted",
+                    conflict_sequences=(effect.sequence,),
+                )
+            self._candidates[key] = candidate
+            touched.append(candidate)
+        else:
+            candidate = replace(
+                candidate,
+                evidence_sequences=candidate.evidence_sequences + (effect.sequence,),
+            )
+            self._candidates[key] = candidate
+            touched.append(candidate)
+        return tuple(touched)
+
+    def effects(self) -> tuple[ActionEffect, ...]:
+        return tuple(self._effects)
+
+    def candidates(self) -> tuple[EffectHypothesis, ...]:
+        return tuple(sorted(self._candidates.values(), key=lambda item: item.key))
+
+    @staticmethod
+    def probe_plan(
+        current: "SimState",
+        candidates: Sequence[EffectHypothesis],
+        *,
+        tried_actions: Sequence[tuple[str, tuple[tuple[str, int], ...]]] = (),
+    ) -> ProbePlan:
+        """Rank a safe, information-bearing probe without executing it."""
+
+        if not isinstance(current, SimState):
+            raise ValueError("SimState required")
+        tried = set(tried_actions)
+        rejected: list[str] = []
+        eligible: list[EffectHypothesis] = []
+        width, height = len(current.frame[0]), len(current.frame)
+        for candidate in candidates:
+            if candidate.status != "hypothesis" or candidate.level != current.level:
+                continue
+            action = (candidate.action, candidate.data)
+            if candidate.action not in current.available_actions or action in tried:
+                continue
+            if candidate.action == "ACTION6":
+                values = dict(candidate.data)
+                if (
+                    set(values) != {"x", "y"}
+                    or not 0 <= values["x"] < width
+                    or not 0 <= values["y"] < height
+                ):
+                    rejected.append(candidate.key)
+                    continue
+            eligible.append(candidate)
+        if not eligible:
+            return ProbePlan(
+                status="no-discriminating-probe", reason="no-current-safe-candidate",
+                rejected_candidates=tuple(sorted(rejected)),
+            )
+        # Prefer the candidate with the least support, since it offers the
+        # most information, then make the result deterministic by key.
+        eligible.sort(key=lambda item: (item.support_count, item.key))
+        chosen = eligible[0]
+        return ProbePlan(
+            status="ready", reason="candidate-prediction-available",
+            action=chosen.action, data=chosen.data,
+            candidate_keys=tuple(item.key for item in eligible),
+            expected_signatures=tuple(item.signature for item in eligible),
+            rejected_candidates=tuple(sorted(rejected)),
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class SimState:
     """Immutable bounded state accepted by the declarative simulator."""
@@ -214,5 +391,6 @@ class SimState:
 
 
 __all__ = [
-    "ActionEffect", "EffectComponent", "SimState", "extract_action_effect",
+    "ActionEffect", "EffectComponent", "EffectHypothesis", "ExperienceInducer",
+    "ProbePlan", "SimState", "extract_action_effect",
 ]

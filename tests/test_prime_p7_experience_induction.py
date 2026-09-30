@@ -7,6 +7,9 @@ import unittest
 
 from asterion.applications.prime.p7.broker import ArcAction
 from asterion.applications.prime.p7.experience_induction import (
+    EffectHypothesis,
+    ExperienceInducer,
+    ProbePlan,
     SimState,
     extract_action_effect,
 )
@@ -97,6 +100,59 @@ class ExperienceInductionTests(unittest.TestCase):
                         frame=((0,),), level=0, state="NOT_FINISHED",
                         available_actions=actions,
                     )
+
+    def test_repeated_effects_form_one_hypothesis_with_bounded_evidence(self) -> None:
+        inducer = ExperienceInducer(max_effects=4)
+        before = ((0, 0), (0, 0))
+        for value in (7, 7):
+            first, second = records(
+                action=ArcAction("ACTION1"), before=before,
+                after=((value, 0), (0, 0)),
+            )
+            inducer.observe(extract_action_effect(first, second))
+        candidates = inducer.candidates()
+        self.assertEqual(len(candidates), 1)
+        self.assertEqual(candidates[0].support_count, 2)
+        self.assertEqual(candidates[0].status, "hypothesis")
+        self.assertEqual(candidates[0].evidence_sequences, (1, 1))
+
+    def test_contradictory_delta_retires_prior_candidate(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((0, 0),), after=((7, 0),),
+        )
+        inducer.observe(extract_action_effect(first, second))
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((0, 0),), after=((8, 0),),
+        )
+        inducer.observe(extract_action_effect(first, second))
+        candidates = inducer.candidates()
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual({item.status for item in candidates}, {"contradicted"})
+        self.assertTrue(all(item.conflict_sequences == (1,) for item in candidates))
+
+    def test_probe_plan_ranks_information_and_rejects_stale_click(self) -> None:
+        current = SimState.from_observation(
+            frame=((0, 0), (0, 0)), level=0, state="NOT_FINISHED",
+            available_actions=["ACTION1", "ACTION6"],
+        )
+        keyboard = EffectHypothesis(
+            key="keyboard", game_id="game", seed=1, level=0,
+            action_family="keyboard", action="ACTION1", data=(),
+            signature="cell-edit", status="hypothesis",
+            evidence_sequences=(1, 2), conflict_sequences=(),
+        )
+        stale_click = EffectHypothesis(
+            key="stale-click", game_id="game", seed=1, level=0,
+            action_family="click", action="ACTION6", data=(("x", 9), ("y", 9)),
+            signature="cell-edit", status="hypothesis",
+            evidence_sequences=(3, 4), conflict_sequences=(),
+        )
+        plan = ExperienceInducer.probe_plan(current, (keyboard, stale_click))
+        self.assertIsInstance(plan, ProbePlan)
+        self.assertEqual(plan.status, "ready")
+        self.assertEqual(plan.action, "ACTION1")
+        self.assertIn("stale-click", plan.rejected_candidates)
 
 
 if __name__ == "__main__":
