@@ -629,6 +629,15 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("stop querying", P7_CONTINUE_PROMPT)
         self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
 
+    def test_continue_prompt_reestablishes_action_whitelist_after_retry(self) -> None:
+        from asterion.applications.prime.p7.prompt import P7_CONTINUE_PROMPT
+
+        normalized = " ".join(P7_CONTINUE_PROMPT.split()).lower()
+        self.assertIn("call p7_observe or p7_status before any action", normalized)
+        self.assertIn("available_actions is the only action whitelist", normalized)
+        self.assertIn("action-unavailable", normalized)
+        self.assertIn("do not retry", normalized)
+
     def test_offline_optimization_is_disabled_without_explicit_integration_mode(self) -> None:
         from asterion.applications.prime.p7.operator import _offline_optimization_enabled
 

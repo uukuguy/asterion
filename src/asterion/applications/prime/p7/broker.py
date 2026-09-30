@@ -613,6 +613,7 @@ class ArcBroker:
         stop_reason = "matched"
         mismatch: dict[str, object] | None = None
         conflict: dict[str, object] | None = None
+        unavailable_action: str | None = None
         for index, (name, data, expected) in enumerate(checked):
             witness = replay_expectations[index] if index < len(replay_expectations) else None
             if replay_expectations and witness is None:
@@ -623,15 +624,19 @@ class ArcBroker:
                 mismatch = {"route": "before-state"}
                 conflict = self._record_model_conflict(records[-1].sequence, "route-before-state")
                 break
-            if (
-                self._primitive_actions >= self._game.action_cap
-                or (name == "RESET" and self._level_gameplay_actions == 0)
-                or (name != "RESET" and (
-                    self._terminal_reason == "reset-required"
-                    or name not in self._current.available_actions
-                ))
+            if self._primitive_actions >= self._game.action_cap:
+                stop_reason = "action-cap"
+                break
+            if name == "RESET" and self._level_gameplay_actions == 0:
+                stop_reason = "action-unavailable"
+                unavailable_action = name
+                break
+            if name != "RESET" and (
+                self._terminal_reason == "reset-required"
+                or name not in self._current.available_actions
             ):
                 stop_reason = "action-unavailable"
+                unavailable_action = name
                 break
             previous_levels = self._current.levels_completed
             distinguishing = len(plan) == 1 and self._guard_probe_distinguishes(expected)
@@ -727,6 +732,8 @@ class ArcBroker:
             "batch": result,
             "feedback": feedback,
             "unexecuted_count": len(plan) - result.applied_count,
+            "available_actions": list(self._current.available_actions),
+            "invalid_action": unavailable_action,
             "retrodiction": {
                 **self.retrodiction_status(),
             },

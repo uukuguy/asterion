@@ -776,6 +776,8 @@ class _P7BrokerClient:
                 "conflict": result.get("conflict"),
                 "retrodiction": result.get("retrodiction", self._broker.retrodiction_status()),
                 "unexecuted_count": result["unexecuted_count"],
+                "available_actions": result["available_actions"],
+                "invalid_action": result["invalid_action"],
                 "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
                 "terminal": self._status_view(terminal),

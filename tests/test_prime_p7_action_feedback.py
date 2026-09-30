@@ -94,3 +94,18 @@ class TestP7ActionFeedback(unittest.TestCase):
         self.assertEqual(len(result["feedback"]), 1)
         self.assertEqual(result["feedback"][0]["stop_reason"], "game-over")
         self.assertTrue(result["feedback"][0]["changed_cell_count"] >= 0)
+
+    def test_unavailable_action_feedback_exposes_current_whitelist(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        broker = ArcBroker(engine=_HistoryEngine())
+        broker.bind_history("run-unavailable-feedback")
+        result = broker.act_checked([{
+            "action": {"name": "ACTION2", "data": {}},
+            "expect": {"state": "WIN"},
+        }])
+
+        self.assertEqual(result["stop_reason"], "action-unavailable")
+        self.assertEqual(result["available_actions"], ["ACTION1"])
+        self.assertEqual(result["invalid_action"], "ACTION2")

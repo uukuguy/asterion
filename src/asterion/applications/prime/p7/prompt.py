@@ -208,11 +208,17 @@ result; do not call observe, status, or history after the terminal boundary."""
 
 
 P7_CONTINUE_PROMPT = """Continue solving the same interactive puzzle from the
-current retained broker state. Use the registered P7 tools when available:
-p7_observe or p7_status to refresh state, then p7_act_checked for the next
-falsifiable action. Use p7_tried_actions or p7_last_outcome_summary before a
-new probe when prior attempts may constrain it. Use the persistent ipython tool
-only for bounded analysis when a registered P7 tool cannot express the query.
+current retained broker state. At the start of this continuation, call
+p7_observe or p7_status before any action. The returned available_actions
+is the only action whitelist: copy an exact gameplay action name from it and
+never invent or infer an unavailable name from an example. Then use
+p7_act_checked for the next falsifiable action. If a result has
+``stop_reason`` ``action-unavailable``, treat that hypothesis as failed, do
+not retry or batch it, refresh the observation, and choose only a currently
+listed action (or stop if no evidence-based action remains). Use
+p7_tried_actions or p7_last_outcome_summary before a new probe when prior
+attempts may constrain it. Use the persistent ipython tool only for bounded
+analysis when a registered P7 tool cannot express the query.
 Continue until the target level is completed or the broker reports a terminal
 state; a text response alone is not success. Once the target or terminal state
 is reported, stop querying broker tools and return the result."""
