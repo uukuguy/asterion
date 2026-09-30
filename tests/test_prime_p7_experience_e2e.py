@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import json
 import unittest
 from pathlib import Path
 
@@ -69,6 +70,8 @@ class ExperienceEndToEndTests(unittest.TestCase):
         self.assertEqual(hint["recommendation"], "inspect_candidate_and_probe")
         self.assertEqual(hint["execution_authority"], "none")
         self.assertTrue(hint["compiled_candidates"])
+        self.assertLessEqual(len(json.dumps(hint).encode()), 1024)
+        self.assertNotIn("plan", hint["compiled_candidates"][0])
 
     def test_learning_evidence_survives_playbook_reload_without_planner_authority(self) -> None:
         engine = _LearningEngine()

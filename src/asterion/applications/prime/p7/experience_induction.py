@@ -394,13 +394,14 @@ class ExperienceInducer:
             del self._effects[: len(self._effects) - self._max_effects]
         family = _action_family(effect.action)
         signature = _signature(effect)
-        key = ":".join((effect.game_id, str(effect.seed), str(effect.level), family, signature))
+        key = ":".join((effect.game_id, str(effect.seed), str(effect.level), effect.action, repr(effect.data), signature))
         broad = [
             candidate for candidate in self._candidates.values()
             if candidate.game_id == effect.game_id
             and candidate.seed == effect.seed
             and candidate.level == effect.level
-            and candidate.action_family == family
+            and candidate.action == effect.action
+            and candidate.data == effect.data
         ]
         touched: list[EffectHypothesis] = []
         candidate = self._candidates.get(key)

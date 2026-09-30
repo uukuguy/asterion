@@ -144,6 +144,30 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertEqual({item.status for item in candidates}, {"contradicted"})
         self.assertTrue(all(item.conflict_sequences == (1,) for item in candidates))
 
+    def test_distinct_keyboard_actions_do_not_contradict_each_other(self) -> None:
+        inducer = ExperienceInducer()
+        for action, value, sequence in (("ACTION1", 7, 1), ("ACTION2", 8, 2)):
+            first, second = records(
+                action=ArcAction(action), before=((0, 0),), after=((value, 0),),
+            )
+            effect = replace(extract_action_effect(first, second), sequence=sequence)
+            inducer.observe(effect)
+        candidates = inducer.candidates()
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual({item.status for item in candidates}, {"hypothesis"})
+
+    def test_identical_effects_from_distinct_keyboard_actions_stay_distinct(self) -> None:
+        inducer = ExperienceInducer()
+        for action, sequence in (("ACTION1", 1), ("ACTION2", 2)):
+            first, second = records(
+                action=ArcAction(action), before=((0, 0),), after=((7, 0),),
+            )
+            effect = replace(extract_action_effect(first, second), sequence=sequence)
+            inducer.observe(effect)
+        candidates = inducer.candidates()
+        self.assertEqual(len(candidates), 2)
+        self.assertEqual({item.action for item in candidates}, {"ACTION1", "ACTION2"})
+
     def test_probe_plan_ranks_information_and_rejects_stale_click(self) -> None:
         current = SimState.from_observation(
             frame=((0, 0), (0, 0)), level=0, state="NOT_FINISHED",
