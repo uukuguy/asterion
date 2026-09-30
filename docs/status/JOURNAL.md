@@ -3353,3 +3353,4 @@
 - 12:47 [e11441cd] 更新恢复检查点：VC33 纯 worldmap L1 未过关，下一步分析 prediction-mismatch 与模型使用
 - 14:14 P7 修复续推理动作白名单漂移并暴露非法动作反馈；174 项 P7 回归测试与 lint 通过 [b37121be]
 - 14:14 VC33 L2 纯 P7 重跑仍失败：当前级别 7 步、levels_completed=1；未再出现 ACTION1–ACTION7 幻觉，但未找到通关路线
+- 14:36 [42a8a921] 修复纯 P7 witness 误用历史路线 7 步上限；无显式离线路线时恢复官方 L2 baseline 18，并保留 14 步路线仅作证据。
