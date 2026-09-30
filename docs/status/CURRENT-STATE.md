@@ -23,7 +23,8 @@ Updated 2026-09-30. This file is the structural snapshot; session handoff and ne
 ## Open Problems
 
 - The same-game WorldModel, TransitionModel, Playbook, declarative mechanism certificates, P7 application tool registry, and replay expectation gate are implemented and covered by focused tests.
-- No live P7 gameplay result or official submission was run in this implementation closeout; focused tests do not prove improved game-solving capability.
+- A controlled TU93 L1 witness was run after the replay-gated route changes, then operator-cancelled at 18 current-level actions with zero completed levels; it is external-cancel evidence only, not a verified result. Focused tests do not prove improved game-solving capability.
+- Explicit level-witness runs now use the selected level's human baseline sum as their action cap; the old non-full-solve fallback of 500 remains only on the unmodified selection object and is no longer used by the witness entry point.
 - The full repository gate completed 3509 tests with one promotion-environment failure because an offline npm-ci test observed one network request; `make lint`, `make docs-check`, Pyright on changed model modules, and the combined 223-test P7 suite passed.
 - Generated `.asterion-private` evidence may contain stale post-baseline runs and must not be treated as current source state.
 

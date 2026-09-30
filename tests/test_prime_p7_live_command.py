@@ -1341,6 +1341,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(selected.target_level, 2)
             witness = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "witness", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, resolved, root)
             self.assertEqual(witness.target_level, 1)
+            self.assertEqual(witness.action_cap_override, 10)
+            witness_two = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "witness", "ASTERION_PRIME_P7_TARGET_LEVEL": "2"}, resolved, root)
+            self.assertEqual(witness_two.action_cap_override, 30)
             sweep = _select_game_for_mode({"ASTERION_PRIME_P7_RUN_MODE": "sweep", "ASTERION_PRIME_P7_TARGET_LEVEL": "2"}, resolved, root)
             self.assertEqual(sweep.target_level, 2)
             with self.assertRaises(Exception):

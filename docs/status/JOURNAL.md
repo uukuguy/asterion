@@ -3323,3 +3323,6 @@
 - 08:15 [cef5fe18] 接入同题 Playbook 读取、投影、成功保存与失败分支保存， malformed 状态安全回退基线，64 项聚焦测试通过。
 - 08:42 [a47aa65b] 修复 Task4 审查问题：observed/verified retrodiction 分层、worker 字段保真、Playbook 路线/失败分支保存、机制探测晋级，并通过 P7ToolRegistry 全链注册新工具。
 - 09:05 [8c58db5e] 为 P7 提示移除固定动作语义，并让离线候选携带逐动作 replay expectation 后才可在线采用。
+- 09:35 TU93 L1 练手运行被主动取消：18 个当前关卡动作、0 关完成；external_cancel，未封存/未回放验证；优化候选 19→18 步但 P7 首动作偏离，世界模型版本仍 0。
+- 09:37 修复 level-witness 动作预算：显式 witness 按目标关卡 baseline 总和封顶，状态输出增加 level_baseline/action_cap，避免非完整 solve 固定 500 步。
+- 09:40 [fc8abdf0] witness 按 L1/L2 baseline 封顶并输出 level_baseline/action_cap，避免非完整关卡统一使用 500 动作。

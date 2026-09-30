@@ -768,11 +768,18 @@ class _P7BrokerClient:
         }
 
     def _status_view(self, status: ArcStatus) -> dict[str, object]:
+        level_baseline = None
+        game = self._broker.game
+        if isinstance(game, P7GameSelection):
+            level = min(status.levels_completed, game.win_levels - 1)
+            level_baseline = game.baseline_actions[level]
         return {
             "actions_remaining": status.actions_remaining,
             "levels_completed": status.levels_completed,
             "primitive_actions": status.primitive_actions,
             "target_level": self._broker.game.target_level,
+            "level_baseline": level_baseline,
+            "action_cap": self._broker.game.action_cap,
             "terminal_reason": status.terminal_reason,
         }
 
@@ -818,6 +825,8 @@ class _P7BrokerClient:
             "actions_remaining": status.actions_remaining,
             "primitive_actions": status.primitive_actions,
             "target_level": self._broker.game.target_level,
+            "level_baseline": self._status_view(status)["level_baseline"],
+            "action_cap": self._broker.game.action_cap,
             "terminal_reason": status.terminal_reason,
             "tried_summary": {
                 "attempts": no_effects.get("attempts", {}),
@@ -829,13 +838,7 @@ class _P7BrokerClient:
 
     def status(self) -> Mapping[str, object]:
         _, status = self._observation_and_status()
-        return {
-            "actions_remaining": status.actions_remaining,
-            "levels_completed": status.levels_completed,
-            "primitive_actions": status.primitive_actions,
-            "target_level": self._broker.game.target_level,
-            "terminal_reason": status.terminal_reason,
-        }
+        return self._status_view(status)
 
     def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
         return self._broker.tried_actions(level)
@@ -1955,7 +1958,19 @@ def _select_game_for_mode(
         selection_environment[TARGET_LEVEL_ENV] = process_environment[TARGET_LEVEL_ENV]
     else:
         selection_environment.pop(TARGET_LEVEL_ENV, None)
-    return resolve_game_selection(selection_environment, arc_root)
+    game = resolve_game_selection(selection_environment, arc_root)
+    if mode == "witness":
+        # A level witness is an efficiency experiment, so its hard ceiling
+        # must be the human baseline through the requested level.  The
+        # previous fallback of 500 actions made an explicit L1 witness spend
+        # far beyond the level's useful budget and obscured the real stop
+        # reason.  Full solves and the separately supervised sweep keep their
+        # own caps.
+        game = replace(
+            game,
+            action_cap_override=sum(game.baseline_actions[: game.target_level]),
+        )
+    return game
 
 
 def _preflight(environment: Mapping[str, str]) -> P7Invocation:
@@ -2253,6 +2268,11 @@ async def run_live(
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
     diagnostics["prediction_variant"] = variant
+    diagnostics["budget"] = {
+        "target_level": invocation.game.target_level,
+        "level_baseline": invocation.game.baseline_actions[invocation.game.target_level - 1],
+        "action_cap": invocation.game.action_cap,
+    }
     diagnostics["route_optimization"] = route_optimization
     diagnostics["playbook_loaded"] = playbook_loaded
     diagnostics["playbook_saved"] = False

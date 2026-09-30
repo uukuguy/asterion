@@ -24,8 +24,12 @@ The broker enforces action_cap as a hard ceiling, so spending actions on
 low-yield probes after the easy gains hurts the score more than failing
 quickly. Plan probes that maximize information per action and prefer a
 falsifiable hypothesis + RESET over extended trial-and-error when stuck.
-When p7_client.status() shows actions_remaining low relative to a level's
-baseline, switch from exploration to the most likely winning sequence.
+The status view exposes both ``level_baseline`` and the hard ``action_cap``.
+Treat ``level_baseline`` as the current level's efficiency budget and
+``action_cap`` as the run ceiling; in a level-witness they are intentionally
+bounded to the selected level (plus any replayed prefix). When
+``actions_remaining`` is low relative to the current level baseline, switch
+from exploration to the most likely winning sequence.
 
 Before dispatching a probe you are unsure about, call
 p7_client.tried_actions(level) or p7_client.last_outcome_summary(level) to
