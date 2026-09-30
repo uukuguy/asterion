@@ -210,6 +210,7 @@
 
 - 候选生成、effect 读取和模型搜索是计算操作，不派发动作；
 - 内部模拟器只能读取本轮证据和同题 Playbook，不得调用真实 ARC 引擎；离线 ARC replay oracle 仅用于隔离的诊断/集成验证；
+- `ModelCertificate` 只是模拟器搜索的可信度标签，不是普通游戏动作的权限令牌；没有证书时仍可继续 `act`、单步 probe 和 `act_checked` 探索；
 - 只有 `act_checked` 能消耗 action slot；
 - identity、当前 prefix、frame/state/level witness 不匹配时停止当前批次；
 - 普通单步探索和 probe 失败不被全局权限阻断；

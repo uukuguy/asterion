@@ -70,9 +70,11 @@ Every ``p7_status``, ``p7_observe`` and ``p7_act_checked`` response also carries
 a bounded ``learning_hint`` (status is the reliable small surface when an
 animated frame is large). When its recommendation is
 ``inspect_candidate_and_probe``, inspect the supplied compiled candidate and
-submit one distinguishing probe before another long batch. This is advisory
-evidence only: ``execution_authority`` remains ``none`` until the normal
-``p7_record_hypothesis`` and retrodiction gates succeed.
+submit one distinguishing probe only when it is likely to reduce substantial
+exploration. This is advisory evidence only and must never pause ordinary
+play: ``execution_authority`` remains ``none`` until the normal
+``p7_record_hypothesis`` and retrodiction gates succeed, while ordinary
+``act``/``act_checked`` exploration remains available.
 
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
@@ -108,15 +110,16 @@ hint about the input surface, and its exact-game experience is progress memory,
 not an executable route. Normal exploration and single-step probes remain
 available; only an identity or evidence mismatch should stop a checked batch.
 When ``learning_hint.recommendation`` is ``inspect_candidates`` or
-``inspect_candidate_and_probe``, call ``p7_mechanism_candidates`` before another
-long batch. If it exposes a ``compiled_mechanism`` supported by at least two
-effects, prefer the ``experience.induced.bundle`` entry when present so all
-compatible action rules are retrodicted together. Treat it as a declarative proposal: check its current frame
-prediction, construct one distinguishing probe, and submit it through
-``p7_record_hypothesis``. A compiled proposal is not a certificate or a route;
-do not dispatch it until the broker accepts the probe. Candidates marked
-``contradicted`` or with incomplete motion evidence are diagnostics only; keep
-exploring until a falsifiable current-level probe is available.
+``inspect_candidate_and_probe``, optionally call ``p7_mechanism_candidates``
+before a long batch. If it exposes a ``compiled_mechanism`` supported by at
+least two effects and the current action is otherwise ambiguous, prefer the
+``experience.induced.bundle`` entry when present so compatible action rules
+can be retrodicted together. Treat it as a declarative proposal: check its
+current frame prediction, construct one distinguishing probe, and submit it
+through ``p7_record_hypothesis`` only when that probe is cheaper than ordinary
+exploration. A compiled proposal is not a certificate or a route; it never
+blocks normal actions. Candidates marked ``contradicted`` or with incomplete
+motion evidence are diagnostics only; continue ordinary exploration.
 ``translate_components`` is a bounded semantic effect for repeated object
 motion and may be used only when the candidate's full-frame evidence supports
 it.
