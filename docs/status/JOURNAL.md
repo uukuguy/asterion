@@ -3404,3 +3404,5 @@
 - 04:28 Expose learning hints on compact status because animated observe frames can exceed the bridge response budget [fd572607]
 - 04:42 Include bounded candidate evidence in learning hints and require candidate inspection before long batches [ebba6740]
 - 04:55 Expose induction query methods through the worker facade so P7 candidate inspection no longer fails at runtime [273d71cd]
+- 05:02 Full gate passed after facade repair: 3562 tests OK, 5 skipped; live SP80 L2 still needs confirmed-model evidence
+- 05:03 Documented the repaired worker-facade integration boundary and retained the honest live-verification limit [faa5becc]
