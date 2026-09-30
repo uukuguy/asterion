@@ -1025,6 +1025,68 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(client.frame_at(1), [[1]])
             recorder.close()
 
+    def test_model_history_queries_are_bounded_and_future_pages_are_empty(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _HistoryEngine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            broker = ArcBroker(engine=_HistoryEngine())
+            broker.bind_history("run-history-normalization")
+            client = _P7BrokerClient(broker, recorder)
+            client.act([{"name": "ACTION1", "data": {}}])
+            self.assertLessEqual(len(client.history(0, 80)), 32)
+            self.assertEqual(client.history(50, 20), [])
+            recorder.close()
+
+    def test_large_animation_is_reduced_to_settled_frame_for_model_response(self) -> None:
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+
+        class _LargeFrameBroker:
+            def observe(self):
+                return SimpleNamespace(
+                    available_actions=("ACTION1",),
+                    frame=tuple(
+                        tuple(tuple(1 for _ in range(64)) for _ in range(64))
+                        for _ in range(40)
+                    ),
+                    levels_completed=0,
+                    state="NOT_FINISHED",
+                    win_levels=1,
+                )
+
+            def status(self):
+                return SimpleNamespace(
+                    actions_remaining=500,
+                    levels_completed=0,
+                    primitive_actions=0,
+                    terminal_reason="active",
+                )
+
+            game = SimpleNamespace(target_level=1, baseline_actions=(1,), action_cap=500)
+
+            def learning_hint(self):
+                return {"recommendation": "ordinary_exploration"}
+
+            def tried_actions(self, level):
+                return []
+
+            def last_outcome_summary(self, level):
+                return {"attempts": {}, "no_effect": {}}
+
+        client = _P7BrokerClient.__new__(_P7BrokerClient)
+        client._broker = _LargeFrameBroker()
+        client._recorder = None
+        client._identities = {}
+        client._variant = "legacy"
+        client._counts = {}
+        client._route_adoption = SimpleNamespace()
+        view = client.observe()
+        self.assertTrue(view["frame_truncated"])
+        self.assertEqual(len(view["frame"]), 1)
+        self.assertEqual(view["frame"][-1][0][0], 1)
+
     def test_worker_grid_uses_settled_last_frame_and_preserves_single_grid(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)

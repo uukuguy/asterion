@@ -151,7 +151,10 @@ act, diff, and summary entries; call observe separately for a full frame.
 Frame semantics: an observation may retain an animation as a list of 2-D
 frames. The last frame is the settled post-action grid used by summary(),
 render(), positions(), and diff(); the raw animation remains available in
-observation["frame"] for timing analysis. render() uses hexadecimal symbols
+observation["frame"] for timing analysis when it fits the response budget. If
+``frame_truncated`` is true, only that settled frame was returned; use the
+changed-cell feedback and hashes for reasoning rather than requesting the raw
+animation again. render() uses hexadecimal symbols
 0-9 and A-F, where A-F represent color values 10-15.
 
 First save the status() values levels_completed and primitive_actions. If
@@ -168,7 +171,9 @@ finish paging the prefix before acting. Further history may be inspected after
 that probe, paging from the last returned sequence plus 1 and never beyond the
 saved primitive_actions value. Never query a future sequence. Each page contains
 observed facts only: action, stable before/after digests, changed cells, level
-count, and SDK state.
+count, and SDK state. The model-facing client caps an over-large ``limit`` at
+32 and returns an empty page for a future cursor, so continue from the latest
+observed sequence instead of retrying the same invalid request.
 Use p7_client.frame_at(sequence) only for a sequence already returned by
 history; it returns that occurred settled grid. Write hypotheses that history
 could disprove, and compare each with the observed facts before using it.
@@ -366,7 +371,10 @@ act, diff, and summary entries; call observe separately for a full frame.
 Frame semantics: an observation may retain an animation as a list of 2-D
 frames. The last frame is the settled post-action grid used by summary(),
 render(), positions(), and diff(); the raw animation remains available in
-observation["frame"] for timing analysis. render() uses hexadecimal symbols
+observation["frame"] for timing analysis when it fits the response budget. If
+``frame_truncated`` is true, only that settled frame was returned; use the
+changed-cell feedback and hashes for reasoning rather than requesting the raw
+animation again. render() uses hexadecimal symbols
 0-9 and A-F, where A-F represent color values 10-15.
 
 Treat only broker observations and retained Python state as game information.

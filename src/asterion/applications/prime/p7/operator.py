@@ -620,9 +620,25 @@ class _P7BrokerClient:
 
     def history(self, start: int, limit: int) -> list[dict[str, object]]:
         try:
-            if type(start) is not int or type(limit) is not int:
+            if type(start) is not int or type(limit) is not int or start < 0 or limit < 1:
                 raise ValueError
-            page = self._broker.history(start, limit)
+            # The model-facing read surface is forgiving about a page size.
+            # The broker remains strict, while an over-large model request is
+            # reduced to the documented transport bound instead of consuming
+            # a reasoning turn with an opaque host-service error.
+            bounded_limit = min(limit, 32)
+            try:
+                page = self._broker.history(start, bounded_limit)
+            except ArcBrokerError:
+                # A guessed future cursor is an empty page, not a fatal host
+                # failure.  This keeps paging read-only and lets the model
+                # continue from the latest observed sequence.
+                status = self._broker.status()
+                latest = status.primitive_actions - 1
+                if start > latest or latest < 0:
+                    page = []
+                else:
+                    raise
             self._count("history_queries")
             self._count("history_records_returned", len(page))
             return page
@@ -880,9 +896,19 @@ class _P7BrokerClient:
 
     @staticmethod
     def _observation_view(observation: ArcObservation) -> dict[str, object]:
+        frame = observation.frame
+        frame_truncated = False
+        # Animated frames are useful for local visual analysis, but the model
+        # bridge has a finite response budget. Preserve the settled frame when
+        # the raw animation would exceed that budget and make the loss
+        # explicit to the model.
+        if len(json.dumps(frame, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 48 * 1024:
+            frame = (frame[-1],)
+            frame_truncated = True
         return {
             "available_actions": list(observation.available_actions),
-            "frame": observation.frame,
+            "frame": frame,
+            "frame_truncated": frame_truncated,
             "levels_completed": observation.levels_completed,
             "state": observation.state,
             "win_levels": observation.win_levels,
@@ -939,16 +965,13 @@ class _P7BrokerClient:
             ),
         )[:5]
         learning_hint = self._broker.learning_hint()
+        view = self._observation_view(observation)
         return {
             # Keep the bounded semantic signal before the potentially large
             # frame so the worker bridge cannot truncate the only reusable
             # learning cue.
             "learning_hint": learning_hint,
-            "available_actions": list(observation.available_actions),
-            "frame": observation.frame,
-            "levels_completed": observation.levels_completed,
-            "state": observation.state,
-            "win_levels": observation.win_levels,
+            **view,
             "actions_remaining": status.actions_remaining,
             "primitive_actions": status.primitive_actions,
             "target_level": self._broker.game.target_level,
@@ -1057,13 +1080,7 @@ class _P7BrokerClient:
                 "applied_count": 0,
                 "level_advanced": False,
                 "levels_completed": prior_levels,
-                "observation": {
-                    "available_actions": list(observation.available_actions),
-                    "frame": observation.frame,
-                    "levels_completed": observation.levels_completed,
-                    "state": observation.state,
-                    "win_levels": observation.win_levels,
-                },
+                "observation": self._observation_view(observation),
                 "terminal": {
                     "actions_remaining": status.actions_remaining,
                     "levels_completed": status.levels_completed,
@@ -1085,13 +1102,7 @@ class _P7BrokerClient:
             "applied_count": result.applied_count,
             "level_advanced": result.levels_completed > prior_levels,
             "levels_completed": result.levels_completed,
-            "observation": {
-                "available_actions": list(observation.available_actions),
-                "frame": observation.frame,
-                "levels_completed": observation.levels_completed,
-                "state": observation.state,
-                "win_levels": observation.win_levels,
-            },
+            "observation": self._observation_view(observation),
             "terminal": {
                 "actions_remaining": status.actions_remaining,
                 "levels_completed": status.levels_completed,
