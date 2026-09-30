@@ -3379,3 +3379,4 @@
 - 2026-10-01 修复 cognition 计数语义：`primitive_actions` 保持历史最佳，新增 `current_primitive_actions` 表示最近一次观察；先写回归测试观察红灯，再实现并通过 cognition focused tests。
 - 01:55 cognition current/best action semantics fixed and documented [7301dfa5]
 - 01:56 success-path failure classification corrected to `none`; regression, 148 focused tests, lint, and docs-check passed [pending]
+- 01:57 correction: success-path classifier fix committed and documented [4673abcc]
