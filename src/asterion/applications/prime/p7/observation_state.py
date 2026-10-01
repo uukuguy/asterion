@@ -186,6 +186,8 @@ class EntityObservation:
         _validate_string(self.entity_id, "entity_id", pattern=_ID)
         if self.kind is not None:
             _validate_string(self.kind, "kind", pattern=_ID)
+        if any(key in {"id", "entity_id", "name", "kind", "type"} for key in self.attributes):
+            raise ObservationStateError("entity attributes contain reserved fields")
         object.__setattr__(self, "attributes", _mapping(self.attributes, "attributes"))
 
     def __hash__(self) -> int:
@@ -212,6 +214,8 @@ class RelationObservation:
         _validate_string(self.source, "source", pattern=_ID)
         _validate_string(self.relation, "relation", pattern=_ID)
         _validate_string(self.target, "target", pattern=_ID)
+        if any(key in {"source", "from", "relation", "kind", "target", "to"} for key in self.attributes):
+            raise ObservationStateError("relation attributes contain reserved fields")
         object.__setattr__(self, "attributes", _mapping(self.attributes, "attributes"))
 
     def __hash__(self) -> int:
@@ -239,6 +243,8 @@ class EventObservation:
         _validate_string(self.kind, "event kind", pattern=_ID)
         if self.sequence is not None and (type(self.sequence) is not int or self.sequence < 0):
             raise ObservationStateError("invalid event sequence")
+        if any(key in {"kind", "event", "sequence"} for key in self.attributes):
+            raise ObservationStateError("event attributes contain reserved fields")
         object.__setattr__(self, "attributes", _mapping(self.attributes, "attributes"))
 
     def __hash__(self) -> int:

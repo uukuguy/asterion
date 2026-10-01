@@ -125,6 +125,10 @@ class TestP7ObservationState(unittest.TestCase):
             ObservationState.from_projection(
                 {"frame": [[0]], "events": [{"kind": "x", "payload": object()}]}
             )
+        with self.assertRaises(ValueError):
+            EntityObservation("player", attributes={"id": "shadow"})
+        with self.assertRaises(ValueError):
+            RelationObservation("player", "near", "goal", attributes={"source": "shadow"})
 
 
 if __name__ == "__main__":
