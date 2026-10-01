@@ -404,13 +404,19 @@ const PROMOTION_PARAMETERS = TypeObject(
 
 interface MethodTool {
   name: string;
+  label: string;
   description: string;
   parameters: unknown;
   execute(
     id: string,
     input: unknown,
     signal?: AbortSignal,
-  ): Promise<unknown>;
+  ): Promise<AppToolResult>;
+}
+
+interface AppToolResult {
+  content: Array<{ type: "text"; text: string }>;
+  details: unknown;
 }
 
 interface AppToolSpec {
@@ -585,17 +591,29 @@ function makeMethodTool(
 ): MethodTool {
   return {
     name,
+    label: name,
     description,
     parameters: inputType,
     execute: async (
       id: string,
       input: unknown,
       signal?: AbortSignal,
-    ): Promise<unknown> => {
+    ): Promise<AppToolResult> => {
       const params = inputKey
         ? (input as Record<string, unknown> | null | undefined)?.[inputKey] ?? null
         : input;
-      return await bridge.callMethod(id, method, params, signal);
+      const result = await bridge.callMethod(id, method, params, signal);
+      let text: string;
+      try {
+        const serialized = JSON.stringify(result);
+        text = serialized === undefined ? String(result) : serialized;
+      } catch {
+        text = String(result);
+      }
+      return {
+        content: [{ type: "text", text }],
+        details: result,
+      };
     },
   };
 }

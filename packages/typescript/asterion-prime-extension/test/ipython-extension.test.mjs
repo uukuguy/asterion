@@ -219,7 +219,7 @@ test("registers the ipython and P7 application tools", async () => {
   assert.equal(process.env.ASTERION_PRIME_IPYTHON_FD, undefined);
 });
 
-test("registers the mechanics evidence tool with a bounded empty schema", async () => {
+test("wraps application tool results for the Pi AgentToolResult contract", async () => {
   const calls = [];
   const fakeBridge = { callMethod: async (...args) => {
     calls.push(args);
@@ -233,8 +233,8 @@ test("registers the mechanics evidence tool with a bounded empty schema", async 
   assert.match(tool.description, /evidence/i);
   assert.match(tool.description, /not a route/i);
   assert.deepEqual(await tool.execute("mechanics-1", {}), {
-    available: true,
-    current_level: 2,
+    content: [{ type: "text", text: '{"available":true,"current_level":2}' }],
+    details: { available: true, current_level: 2 },
   });
   assert.deepEqual(calls, [["mechanics-1", "mechanics_prior", {} , undefined]]);
 });
