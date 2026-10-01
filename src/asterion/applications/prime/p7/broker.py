@@ -589,10 +589,6 @@ class ArcBroker:
             candidate for candidate in candidates
             if candidate.level == current_level
         )
-        current_hypotheses = tuple(
-            candidate for candidate in current_candidates
-            if candidate.status == "hypothesis"
-        )
         persisted_candidates = self._persisted_candidates()
         persisted_current = tuple(
             item for item in persisted_candidates
