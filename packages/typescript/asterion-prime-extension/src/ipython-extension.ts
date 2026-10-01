@@ -434,7 +434,7 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
     description:
       "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
       + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
-      + "Read observation.progress and progress_guidance in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; continue that hypothesis until its cycle is understood, while zero means switch or RESET. "
+      + "Read observation.progress and progress_guidance in the result: changed_cell_count and color_count_delta describe observed frame effects but do not prove objective progress while levels_completed is unchanged; use one falsifiable probe, then switch or RESET when it has no verified level or terminal effect. "
       + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
       + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
     parameters: TypeObject(
@@ -516,7 +516,7 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   {
     name: "p7_observe",
     method: "observe",
-    description: "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, color_count_delta, frame_changed, and level_advanced) for the latest settled action. A positive changed_cell_count means the action changed the settled grid even when levels_completed did not increase; use color_count_delta to detect monotonic or cyclic mechanisms. Zero means objective no-effect. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
+    description: "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, color_count_delta, frame_changed, and level_advanced) for the latest settled action. changed_cell_count does not prove objective progress while levels_completed is unchanged; color_count_delta and frame_changed are observed effects only. Use one falsifiable probe to test the effect; zero means no observed frame effect. Call this once after a level boundary or after an action result when you need the new settled state.",
     parameters: EMPTY_PARAMETERS,
   },
   {
