@@ -89,6 +89,40 @@ class _CrossLevelMotionEngine:
         return self.observe()
 
 
+class _AutoPromotionEngine:
+    """Repeated motion plus a level transition supplies all model evidence."""
+
+    game_id = "synthetic-auto-promotion"
+    seed = 0
+    win_levels = 2
+
+    def __init__(self) -> None:
+        self.position = 1
+        self.levels_completed = 0
+        self.calls: list[str] = []
+
+    def observe(self) -> dict[str, object]:
+        row = [0] * 8
+        row[self.position] = 7
+        return {
+            "available_actions": ["ACTION1", "ACTION2"],
+            "frame": [[row]],
+            "levels_completed": self.levels_completed,
+            "state": "NOT_FINISHED",
+            "win_levels": self.win_levels,
+        }
+
+    def step(self, action: str) -> dict[str, object]:
+        if action not in {"ACTION1", "ACTION2"}:
+            raise RuntimeError(action)
+        self.calls.append(action)
+        if action == "ACTION1":
+            self.position += 1
+        else:
+            self.levels_completed += 1
+        return self.observe()
+
+
 def _game() -> P7GameSelection:
     return P7GameSelection(
         _LearningEngine.game_id,
@@ -111,6 +145,56 @@ def _move_expectation(x: int) -> dict[str, object]:
 
 
 class ExperienceLearningTests(unittest.TestCase):
+    def test_repeated_effects_auto_promote_evidence_scoped_model_for_search(self) -> None:
+        engine = _AutoPromotionEngine()
+        game = P7GameSelection(
+            engine.game_id,
+            engine.seed,
+            target_level=2,
+            _metadata_baseline_actions=(3, 1),
+            _metadata_win_levels=engine.win_levels,
+        )
+        broker = ArcBroker(
+            engine=engine,
+            game=game,
+            world_model=WorldModelStore(
+                engine.game_id, engine.seed, engine.win_levels,
+            ),
+        )
+        broker.bind_history("synthetic-auto-promotion-run")
+
+        for expected_x in (2, 3):
+            result = broker.act_checked([{
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"cell": {"x": expected_x, "y": 0, "value": 7}},
+            }])
+            self.assertEqual(result["stop_reason"], "matched")
+
+        transition = broker.act_checked([{
+            "action": {"name": "ACTION2", "data": {}},
+            "expect": {"levels_completed": 1},
+        }])
+        self.assertEqual(transition["stop_reason"], "level-advanced")
+        status = broker.simulator_status()
+        self.assertTrue(status["confirmed_model"])
+        self.assertEqual(status["status"], "verified")
+        self.assertEqual(broker.retrodiction_status()["planner"]["eligible"], True)
+        self.assertEqual(
+            broker.experience_diagnostics()["probes_submitted"],
+            0,
+        )
+
+        calls_before_search = tuple(engine.calls)
+        search = broker.model_search()
+        self.assertEqual(search["status"], "found")
+        self.assertEqual(search["plan"][0]["action"], {"name": "ACTION2", "data": {}})
+        self.assertEqual(tuple(engine.calls), calls_before_search)
+
+        completed = broker.act_checked(search["plan"])
+        self.assertEqual(completed["stop_reason"], "level-advanced")
+        self.assertEqual(completed["observation"].levels_completed, 2)
+        self.assertEqual(engine.calls, ["ACTION1", "ACTION1", "ACTION2", "ACTION2"])
+
     def test_induced_cross_level_model_promotes_and_searches_without_manual_rules(self) -> None:
         engine = _CrossLevelMotionEngine()
         game = P7GameSelection(
