@@ -3474,3 +3474,5 @@
 - 06:18 Core import allowlist now covers the generic Prime tool registry so dependency-free wheel checks remain complete [a2e9faca]
 - 06:42 Lazy root dispatcher exports only defined symbols while retaining compatibility lookup through __getattr__ [bf13f897]
 - 07:16 Independent review fixes enforce exact P7 tool sets, bridge-compatible schemas, and runnable extension test gating [c218f8c6]
+- 2026-10-02 修复 Prime P7 应用级工具的 Pi AgentToolResult 返回契约，补齐 label、模型可见文本与结构化 details，并同步资源包 [3ce97997]
+- 2026-10-02 真实打包 witness `sp80-589a99af` L1 通过：29 个原子动作，levels_completed=1，sealed/replay/cleanup=true；`tu93` 零动作失败归因于此前的原始 bridge 返回。promotion-check 运行 3654 tests 后仍受既有 source-detachment 失败及 7 failures/4 errors 阻断，本次扩展测试与 32 项 Python 聚焦测试通过。
