@@ -3478,3 +3478,4 @@
 - 2026-10-02 真实打包 witness `sp80-589a99af` L1 通过：29 个原子动作，levels_completed=1，sealed/replay/cleanup=true；`tu93` 零动作失败归因于此前的原始 bridge 返回。promotion-check 运行 3654 tests 后仍受既有 source-detachment 失败及 7 failures/4 errors 阻断，本次扩展测试与 32 项 Python 聚焦测试通过。
 - 07:16 用户否决同题成功路线注入作为解题验证；未提交的 operator/test 路线复用修改已撤回，转查当前运行的机制认证链。
 - 07:16 路线提示复跑 224816 以 23 动作失败；231045 对照实际 seed=0（Makefile 覆盖环境），已取消并 cleanup=true，不计新题证据。
+- 07:26 修正 P7 大型机制签名持久化边界，并统一工具描述要求先做可证伪 probe；避免画面变化被当成目标进度 [eab9b8a5, 55d4f627]
