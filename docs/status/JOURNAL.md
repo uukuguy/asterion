@@ -3458,3 +3458,7 @@
 - 2026-10-01 暂停前完成全局经验基础接入：Broker/Operator/worker 暴露统一观察、游戏级机制记忆和反事实模拟；最小回归 164 项通过，SP80 实战留待恢复后验证 [b1a114a3]
 - 2026-10-01 用户要求暂停；写入活动检查点，明确全局能力和 SP80 L1→L2→L3 仍未完成 [b6fcc865]
 - 2026-10-01 完成最终 handoff：刷新结构快照、架构决策和下一会话交接，保留 SP80 实战未验证边界 [2a6441c4]
+
+## 2026-10-02
+- 01:49 P7 worker bridge now exposes observation, mechanics, and counterfactual tools; regression proves no action dispatch [954fa36f]
+- 01:52 bridge regression and 165-test P7 verification recorded; state synchronized before pushing main
