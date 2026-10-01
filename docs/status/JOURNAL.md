@@ -3451,3 +3451,4 @@
 - 统一设计规格状态口径：明确受限规则闭环已实现，但全局游戏经验、跨级机制模型、子目标模拟和复杂纯 P7 收益尚未完成，避免合成验证被误报为整体能力 [f6a1b039]
 - 2026-10-01 持久化游戏级机制命名空间，支持跨关卡绑定、证据确认/冲突和原子落盘；读取保持 advisory-only [00b4544e]
 - 12:39 bounded hypothesis counterfactual simulator keeps confirmed and hypothesis branches separate, reports subgoal progress/conflicts, and never dispatches actions [63492b13]
+- 12:42 为反事实分支补充分歧标记，使同动作不同预测可在分支级诊断 [74f26d89]
