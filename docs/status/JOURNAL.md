@@ -3432,3 +3432,4 @@
 - 12:05 修复边界 no-effect 误伤一致平移候选，保留可编译运动经验并补回归测试 [bc463faa]
 - 09:58 ExperienceInducer 将 no-effect 作为独立边界证据，保留一致运动候选并补回归测试。
 - 10:12 提示词要求 inspect_candidates 与 inspect_candidate_and_probe 都读取候选工具，避免持久化经验停在提示层 [8342cad7]
+- 10:25 压缩重复 learning_hint 与 mechanism_candidates 的大运动 pattern，防止真实 L2 长考上下文膨胀 [b7d428a5]
