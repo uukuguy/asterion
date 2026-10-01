@@ -16,6 +16,8 @@
 
 > 2026-10-01 静态复审又修复两类无需实跑即可确认的缺陷：模拟搜索不再把前一关的点击坐标加入当前动作集；Playbook 导出不再用本轮摘要覆盖之前运行积累的语义经验。随后 SP80 L2 实跑还暴露了两个可复现的传输边界问题：模型越界历史查询被统一成不可恢复的 host-service 错误，动画帧过大可能吞掉动作结果。现已在模型侧做只读历史页归一化（`limit` 上限 32，未来 cursor 返回空页），并在超预算时保留 settled 帧、显式返回 `frame_truncated`；内部 broker 严格校验和执行权限不变。该实跑还发现平移动作的边界 changed-cell 数差异会错误拆分候选，现已从机制签名中移除派生的 `motion.count`，保留形状、方向和颜色作为归纳依据。最新静态复审发现 Playbook 虽保存 candidate summaries，却没有把同级候选重放为可验证先验；现已在 Broker 的 learning hint 和 candidate projection 中恢复同级 hypothesis，仍要求当前帧 probe、`record_hypothesis` 与 retrodiction 才能取得权限。聚焦 P7 回归通过，随后应重新实跑 SP80 L2/L3 验证真实语义链路。
 
+> 本轮进一步把先前级别的机制候选作为“跨级、当前帧、仍需探针”的语义先验暴露：仅移除已过期的 `level_is` guard，不复用旧坐标或路线；Broker 生成 schema-valid `record_hypothesis` envelope，模型只需原样提交并由当前动作结果验证。每次运行的私有 summary 另外记录 effects、候选生命周期、probe、证书、模型搜索调用/命中、预测匹配/冲突和当前级别动作数，后续评估必须用这些计数证明经验是否被实际复用。运动归纳只接受完整帧中形状和位移唯一一致的连通分量；颜色编号不代表语义，颜色块互换、合并或拆分保持未建模。
+
 本轮又修复了三处闭环断层：初始上下文现在携带当前 settled frame 和 `learning_hint`；`probe_plan` 会把同级 Playbook hypothesis 重新构造成普通探测候选，并允许已在旧状态观察过的多证据候选在新状态接受一次区分探测；`learning_hint` 只有在确实存在可行 probe 时才推荐 `inspect_candidate_and_probe`。每次级别推进还会在 `LevelMemory.completion` 保存当前级别动作数、终止原因、回放摘要以及最终帧/状态摘要。该记录是进度证据，不是机制证书，不能绕过当前前缀回放和 retrodiction。
 
 ## 1. 目标
