@@ -1037,6 +1037,13 @@ class ArcBroker:
             evidence = digest(candidate.key).removeprefix("sha256:")
             level = min(candidate.level, self._game.win_levels - 1)
             candidate_key = f"experience.candidate.{evidence[:32]}"
+            try:
+                compiled = compile_effect_hypothesis(candidate)
+            except (TypeError, ValueError):
+                # Candidate compilation is advisory.  A large or otherwise
+                # unsupported pattern must remain a persisted hypothesis,
+                # rather than aborting export of the whole Playbook.
+                compiled = None
             candidate_value = {
                     "key": candidate.key,
                     "level": candidate.level,
@@ -1048,7 +1055,7 @@ class ArcBroker:
                     "evidence_sequences": list(candidate.evidence_sequences),
                     "conflict_sequences": list(candidate.conflict_sequences),
                     **({"compiled_mechanism": compiled.to_mapping()}
-                       if (compiled := compile_effect_hypothesis(candidate)) is not None else {}),
+                       if compiled is not None else {}),
                 }
             try:
                 candidate_facts.append(CheckedFact("mechanics", candidate_key, candidate_value, level, (evidence,)))
