@@ -142,6 +142,8 @@ def search_model(
     max_depth: int = 24,
     strategy: str = "astar",
     certificate: ModelCertificate | None = None,
+    world_model_version: int | None = None,
+    prefix_digest: str | None = None,
     sim_state: object | None = None,
 ) -> SearchResult:
     """Search a verified mechanism without dispatching any live action.
@@ -177,6 +179,16 @@ def search_model(
                 or certificate.current_frame_sha256 != digest(stable)
             ):
                 return SearchResult("model-unavailable", reason="stale-certificate")
+            if (
+                certificate.world_model_version is not None
+                and world_model_version is not None
+                and certificate.world_model_version != world_model_version
+            ) or (
+                certificate.prefix_digest is not None
+                and prefix_digest is not None
+                and certificate.prefix_digest != prefix_digest
+            ):
+                return SearchResult("model-unavailable", reason="stale-certificate-context")
         if type(level) is not int or level < 0 or level > spec.win_levels:
             raise ValueError
         if type(state) is not str or not state:

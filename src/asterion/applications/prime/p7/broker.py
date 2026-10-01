@@ -12,6 +12,7 @@ from .mechanism_model import (
     compile_effect_hypothesis,
     validate_mechanism,
     validate_mechanism_evidence,
+    history_prefix_digest,
 )
 from .model_search import search_model
 from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
@@ -771,11 +772,15 @@ class ArcBroker:
             return
         certificate = validate_mechanism(
             spec, records, entities=self._confirmed_entity_values(),
+            world_model_version=world.version,
+            prefix_digest=history_prefix_digest(records),
         )
         if certificate is None:
             certificate = validate_mechanism_evidence(
                 spec, records, evidence,
                 entities=self._confirmed_entity_values(),
+                world_model_version=world.version,
+                prefix_digest=history_prefix_digest(records),
             )
         if certificate is None:
             return
@@ -835,7 +840,13 @@ class ArcBroker:
         except (TypeError, ValueError):
             return
         self._mechanism_spec = spec
-        self._mechanism_certificate = certificate
+        # Confirmation mutates WorldMap twice (hypothesis then confirmed), so
+        # bind the certificate to the post-confirmation revision before it is
+        # exposed to the planner.
+        self._mechanism_certificate = certificate.with_context(
+            world_model_version=world.version,
+            prefix_digest=history_prefix_digest(records),
+        )
         self._retrodiction_status = "verified"
         self._promotion_count += 1
 
@@ -1035,6 +1046,8 @@ class ArcBroker:
             "model_digest": None if certificate is None else certificate.model_digest,
             "certificate_records": 0 if certificate is None else certificate.record_count,
             "certificate_coverage": None if certificate is None else certificate.coverage,
+            "certificate_world_model_version": None if certificate is None else certificate.world_model_version,
+            "certificate_prefix_digest": None if certificate is None else certificate.prefix_digest,
             "unknown_reasons": list(self._retrodiction_reasons[-16:]),
         }
 
@@ -1057,6 +1070,8 @@ class ArcBroker:
                 "model_digest": None if certificate is None else certificate.model_digest,
                 "records_certified": 0 if certificate is None else certificate.record_count,
                 "coverage": None if certificate is None else certificate.coverage,
+                "world_model_version": None if certificate is None else certificate.world_model_version,
+                "prefix_digest": None if certificate is None else certificate.prefix_digest,
             },
         }
 
@@ -1107,6 +1122,8 @@ class ArcBroker:
                 max_depth=max_depth,
                 strategy=strategy,
                 certificate=certificate,
+                world_model_version=None if world is None else world.version,
+                prefix_digest=history_prefix_digest(self._bound_history()),
             )
         except (TypeError, ValueError):
             return {
@@ -1124,6 +1141,8 @@ class ArcBroker:
             "model_digest": certificate.model_digest,
             "certificate_records": certificate.record_count,
             "certificate_coverage": certificate.coverage,
+            "certificate_world_model_version": certificate.world_model_version,
+            "certificate_prefix_digest": certificate.prefix_digest,
             "target_level": self._game.target_level,
             "candidate_action_count": len(actions),
         })
@@ -1158,6 +1177,8 @@ class ArcBroker:
             "planner_eligible": bool(certificate is not None and certificate.planner_eligible),
             "certificate_records": 0 if certificate is None else certificate.record_count,
             "certificate_coverage": None if certificate is None else certificate.coverage,
+            "certificate_world_model_version": None if certificate is None else certificate.world_model_version,
+            "certificate_prefix_digest": None if certificate is None else certificate.prefix_digest,
             "model_search_calls": self._model_search_calls,
             "model_search_found": self._model_search_found,
             "current_level_actions": self._level_gameplay_actions,
@@ -1319,6 +1340,8 @@ class ArcBroker:
                         coverage="persisted-confirmed",
                         covered_sequences=(1,),
                         current_frame_sha256=digest(self._initial.frame[-1]),
+                        world_model_version=self._world_model.version,
+                        prefix_digest=history_prefix_digest(self._bound_history()),
                     )
                     self._retrodiction_status = "verified"
                 except (TypeError, ValueError):
@@ -1702,6 +1725,8 @@ class ArcBroker:
             certificate = validate_mechanism(
                 pending["spec"], history,
                 entities=self._confirmed_entity_values(),
+                world_model_version=self._world_model.version if self._world_model is not None else None,
+                prefix_digest=history_prefix_digest(history),
             )
             if certificate is None:
                 covered = tuple(
@@ -1712,10 +1737,15 @@ class ArcBroker:
                 certificate = validate_mechanism_evidence(
                     pending["spec"], history, covered,
                     entities=self._confirmed_entity_values(),
+                    world_model_version=self._world_model.version if self._world_model is not None else None,
+                    prefix_digest=history_prefix_digest(history),
                 )
         if certificate is not None and certificate.planner_eligible:
             self._world_model.confirm(pending["layer"], pending["key"], evidence=ref, observed_value=pending["spec"].to_mapping())
-            self._mechanism_certificate = certificate
+            self._mechanism_certificate = certificate.with_context(
+                world_model_version=self._world_model.version if self._world_model is not None else None,
+                prefix_digest=history_prefix_digest(history),
+            )
             self._mechanism_spec = pending["spec"]
             self._retrodiction_status = "verified"
         else:
@@ -1759,15 +1789,13 @@ class ArcBroker:
                             and prediction.level == record.levels_completed
                             and prediction.state == record.state
                         ):
-                            certificate = replace(
-                                certificate,
+                            certificate = certificate.with_context(
                                 current_frame_sha256=digest(record.frame),
                             )
                         else:
                             certificate = None
                     else:
-                        certificate = replace(
-                            certificate,
+                        certificate = certificate.with_context(
                             current_frame_sha256=digest(record.frame),
                         )
                 elif certificate is not None and certificate.coverage == "mechanism-evidence":
@@ -1778,11 +1806,15 @@ class ArcBroker:
                     certificate = validate_mechanism_evidence(
                         self._mechanism_spec, history, tuple(sorted(covered)),
                         entities=self._confirmed_entity_values(),
+                        world_model_version=self._world_model.version,
+                        prefix_digest=history_prefix_digest(history),
                     )
                 else:
                     certificate = validate_mechanism(
                         self._mechanism_spec, history,
                         entities=self._confirmed_entity_values(),
+                        world_model_version=self._world_model.version,
+                        prefix_digest=history_prefix_digest(history),
                     )
                 if certificate is None:
                     previous_digest = self._mechanism_spec.digest
@@ -1834,6 +1866,16 @@ class ArcBroker:
                         level=record.levels_completed,
                         evidence=ref,
                     )
+            if self._mechanism_certificate is not None:
+                # Visual hypotheses and level refreshes advance WorldMap's
+                # revision without changing the confirmed mechanism.  Keep
+                # the planner context bound to the current revision and
+                # prefix after those non-mechanism updates.
+                self._mechanism_certificate = self._mechanism_certificate.with_context(
+                    world_model_version=self._world_model.version,
+                    prefix_digest=history_prefix_digest(self._bound_history()),
+                    current_frame_sha256=digest(record.frame),
+                )
             self._transition_model = TransitionModel.from_history(self._bound_history(), world=self._world_model.snapshot)
             # TransitionModel.from_history is a checked transcript, not a
             # generalized mechanism certificate.  Do not call this verified.

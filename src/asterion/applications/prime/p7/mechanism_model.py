@@ -8,7 +8,7 @@ filesystem, or network services.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import re
@@ -872,6 +872,10 @@ class ModelCertificate:
     coverage: str = "mechanism-retrodicted"
     current_frame_sha256: str | None = None
     world_model_version: int | None = None
+    # The history prefix and confirmed-world revision used when the
+    # certificate was issued.  These are optional for legacy direct callers,
+    # but broker-issued certificates always bind both values before search.
+    prefix_digest: str | None = None
     # For an evidence-scoped certificate this records the transition
     # sequences that the mechanism actually explains.  A full retrodiction
     # keeps the historical contiguous range for backwards compatibility.
@@ -901,6 +905,8 @@ class ModelCertificate:
             type(self.world_model_version) is not int or self.world_model_version < 0
         ):
             raise ValueError("invalid certificate world revision")
+        if self.prefix_digest is not None and _HASH.fullmatch(self.prefix_digest) is None:
+            raise ValueError("invalid certificate prefix")
         if type(self.record_count) is not int or self.record_count < 1:
             raise ValueError("invalid certificate coverage")
         legacy_unissued = (
@@ -937,6 +943,7 @@ class ModelCertificate:
         cls, game_id: str, seed: int, win_levels: int, revision: int,
         model_digest: str, record_count: int, sequence_start: int, sequence_end: int,
         *, current_frame_sha256: str | None = None, world_model_version: int | None = None,
+        prefix_digest: str | None = None,
         covered_sequences: tuple[int, ...] = (), coverage: str = "mechanism-retrodicted",
     ) -> "ModelCertificate":
         if not covered_sequences:
@@ -946,6 +953,7 @@ class ModelCertificate:
             sequence_start, sequence_end, coverage=coverage,
             current_frame_sha256=current_frame_sha256,
             world_model_version=world_model_version,
+            prefix_digest=prefix_digest,
             covered_sequences=covered_sequences,
         )
         object.__setattr__(certificate, "_validated", True)
@@ -957,12 +965,44 @@ class ModelCertificate:
             "mechanism-retrodicted", "mechanism-evidence", "persisted-confirmed",
         }
 
+    def with_context(
+        self,
+        *,
+        current_frame_sha256: str | None = None,
+        world_model_version: int | None = None,
+        prefix_digest: str | None = None,
+    ) -> "ModelCertificate":
+        """Rebind live context without dropping the issued marker.
+
+        ``dataclasses.replace`` does not copy ``init=False`` fields.  The
+        private issued marker is intentionally such a field, so every runtime
+        update must use this helper instead of replacing the certificate
+        directly or a valid model would silently become planner-ineligible.
+        """
+
+        certificate = replace(
+            self,
+            current_frame_sha256=(
+                self.current_frame_sha256
+                if current_frame_sha256 is None else current_frame_sha256
+            ),
+            world_model_version=(
+                self.world_model_version
+                if world_model_version is None else world_model_version
+            ),
+            prefix_digest=self.prefix_digest if prefix_digest is None else prefix_digest,
+        )
+        object.__setattr__(certificate, "_validated", self._validated)
+        return certificate
+
 
 def validate_mechanism(
     spec: MechanismSpec,
     records: Sequence[ArcHistoryRecord],
     *,
     entities: Mapping[str, object] | None = None,
+    world_model_version: int | None = None,
+    prefix_digest: str | None = None,
 ) -> ModelCertificate | None:
     """Return a certificate only when the mechanism explains every record."""
 
@@ -1025,6 +1065,8 @@ def validate_mechanism(
         rows[1].sequence,
         rows[-1].sequence,
         current_frame_sha256=digest(rows[-1].frame),
+        world_model_version=world_model_version,
+        prefix_digest=prefix_digest or history_prefix_digest(rows),
         covered_sequences=tuple(record.sequence for record in rows[1:]),
     )
 
@@ -1035,6 +1077,8 @@ def validate_mechanism_evidence(
     evidence_sequences: Sequence[int],
     *,
     entities: Mapping[str, object] | None = None,
+    world_model_version: int | None = None,
+    prefix_digest: str | None = None,
 ) -> ModelCertificate | None:
     """Certify only the transitions covered by an induced mechanism.
 
@@ -1142,7 +1186,29 @@ def validate_mechanism_evidence(
         coverage="mechanism-evidence",
         covered_sequences=selected,
         current_frame_sha256=digest(rows[-1].frame),
+        world_model_version=world_model_version,
+        prefix_digest=prefix_digest or history_prefix_digest(rows),
     )
+
+
+def history_prefix_digest(records: Sequence[ArcHistoryRecord]) -> str:
+    """Digest the observed prefix identity without retaining raw frames."""
+
+    rows = []
+    for record in records:
+        action = None if record.action is None else record.action
+        rows.append({
+            "sequence": record.sequence,
+            "action": action,
+            "data": dict(record.data),
+            "before_state_sha256": record.before_state_sha256,
+            "after_state_sha256": record.after_state_sha256,
+            "before_frame_sha256": record.before_frame_sha256,
+            "after_frame_sha256": record.after_frame_sha256,
+            "levels_completed": record.levels_completed,
+            "state": record.state,
+        })
+    return digest(rows)
 
 
 __all__ = (
@@ -1155,4 +1221,5 @@ __all__ = (
     "simulate_step",
     "validate_mechanism",
     "validate_mechanism_evidence",
+    "history_prefix_digest",
 )
