@@ -3469,3 +3469,4 @@
 - 04:00 Plan and journal commits finalized; implementation can proceed from the approved task sequence [f8476e37, 91b31e04]
 - 04:08 Generic immutable Prime application tool registry added with validation and capability matching [863368ba]
 - 04:15 P7 concrete registry now owns canonical tool names, prompt validation, and live command exposure [d47c1b05]
+- 04:28 P7 runtime binding moved behind lazy dispatcher and launch now carries exact tool registry and model selection [85b5cb67]
