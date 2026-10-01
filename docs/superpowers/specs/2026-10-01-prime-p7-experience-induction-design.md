@@ -1,14 +1,15 @@
 # P7 通用游戏经验归纳与持久化设计
 
 **日期：** 2026-10-01  
-**状态：** 代码实现已完成静态复审并通过当前 P7 回归；Playbook 候选已可作为同级可验证先验重载，完成级别的回放/终态证据已持久化，纯 P7 的真实证书晋级、模拟搜索和跨级动作收益仍需验证
+**状态：** 通用闭环已实现并通过 P7 回归与合成端到端验证；Playbook 候选可作为同级可验证先验重载，证据范围模型可自动晋级并驱动有界模拟搜索，纯 P7 的真实复杂关卡收益仍需验证
 **范围：** P7 纯能力运行中的通用游戏经验学习，不包含具体关卡路线注入
 
 > 实施基线：代码已落在 `experience_induction.py`、`mechanism_model.py`、
 > `model_search.py`、P7 Broker/Playbook 与四个只读应用工具中；合成端到端
 > 测试覆盖 effect → candidate → probe → simulator → Playbook 重载边界。
 > 当前仍保留两个有意边界：候选编译只接受可证明的受限规则子集，且探测计划
-> 只建议不自动派发。全量 `make test` 已通过；本轮修复已加入基于完整帧的
+> 只建议不自动派发。重复确定性证据可签发 evidence-scoped certificate；区分性
+> probe 是更强的验证路径而非所有正常探索的硬门槛。全量 `make test` 已通过；本轮修复已加入基于完整帧的
 > 组件平移归纳和 `translate_components` 声明式效果，并由合成测试验证可迁移
 > 预测。SP80 L2 既有纯 P7 实战仍是 `confirmed=0`、simulator=`absent`，
 > 因此真实运行中的候选晋级与后续复用仍需重新验证。为解决模型不主动调用可选候选工具的断层，Broker 现在在每次 `p7_observe` 和
@@ -91,7 +92,7 @@
 - 精确游戏 identity；
 - 依赖的 entity/relation keys；
 - 支持它的 effect evidence 序列；
-- 至少一个可区分当前候选与替代候选的 probe；
+- 可选的区分当前候选与替代候选的 probe；没有可用 probe 时保持 hypothesis，或在已选证据完整一致时形成 evidence-scoped certificate；
 - `hypothesis`、`verified`、`contradicted` 或 `retired` 状态。
 
 候选不得包含任意 Python、网络、文件或进程能力，也不得把一条坐标动作序列包装成机制。
@@ -140,7 +141,7 @@
 2. P7 用现有 `act_checked` 执行单个 probe；
 3. Broker 比较完整 after-frame、after-state、changed cells、level 和 state；
 4. 完全匹配后重新对完整当前 history 做 retrodiction；
-5. 通过后将依赖 facts、`world_model_version`、model digest 和 coverage 写入 `ModelCertificate`；
+5. 通过后将依赖 facts、`world_model_version`、当前历史前缀摘要、model digest 和 coverage 写入 `ModelCertificate`；证书可以是已选证据范围内的 evidence-scoped，也可以在额外区分性 probe 成功后升级为更强的 mechanism-retrodicted；
 6. 机制、实体或关系 fact 晋级为 confirmed，并写入同题 Playbook；
 7. 不匹配则将候选置为 contradicted/retired，保存冲突 evidence，清除 planner eligibility，允许重新归纳。
 
@@ -162,15 +163,15 @@
 
 归纳器从第 4 节的 ActionEffect 合成受限规则库，先支持局部 cell edit、组件平移、独立边界单元的有序清除、周期变化、边界无效、state/level 转换。规则使用相对对象/局部条件表达可迁移效果；不可解释的绝对坐标、单次过关序列和自由文本结论不能编译为规则。对象及关系若尚无可预测的更新语义，仍保持 advisory，不应假装模拟器已经完整支持它们。
 
-一组 `MechanismSpec` 形成一个不可变模型版本，包含精确游戏身份、规则摘要、依赖的 confirmed fact keys、WorldMap 版本和证据覆盖范围。候选可有多个版本；冲突后旧版本标记 stale/retired，不继续参与搜索。模型更新不修改已经保存的历史证据。
+一组 `MechanismSpec` 形成一个不可变模型版本，包含精确游戏身份、规则摘要、依赖的 confirmed fact keys、WorldMap 版本、证据覆盖范围和当前历史前缀摘要。候选可有多个版本；冲突后旧版本标记 stale/retired，不继续参与搜索。模型更新不修改已经保存的历史证据。
 
 ### 6.3 历史回放与可信度
 
 候选模型必须从每条真实历史记录的 **before** 状态逐条预测其 **after** 状态，比较动作数据、完整 frame、changed cells、level 和 SDK state。Frame digest 与 observation/state digest 使用不同的类型与字段；两者不可互填。历史存在截断或缺失关键证据时，模型状态为 `insufficient-evidence`，不能宣布 verified。
 
-历史回放只证明已见转移的一致性，不能证明未来普适正确。因此签发 `ModelCertificate` 还要求至少一次由该候选事先提交的、未参与候选拟合的区分性探测与真实结果匹配。证书记载探测序列、模型摘要、连续历史覆盖区间和当前前缀摘要；若规则没有可用的区分性探测，保持 hypothesis。模型可以继续用于建议观察，但不得参与执行路线规划。
+历史回放只证明已见转移的一致性，不能证明未来普适正确。当前实现把证书分成两个强度层级：完整选定证据逐帧一致即可签发 `evidence-scoped` certificate，允许有界模拟搜索但只覆盖证书列出的证据范围；若候选另行提交并通过未参与拟合的区分性 probe，则附加更强的 `mechanism-retrodicted` 证据。证书记载探测序列（若有）、模型摘要、覆盖范围、WorldMap 版本和当前前缀摘要；没有完整证据时保持 hypothesis。普通探索不会因缺少可区分 probe 被阻断，规划也不会把未覆盖动作伪装成已知。
 
-从 Playbook 加载的 confirmed 模型也要对本轮当前前缀重新回放并核对起点状态；仅凭旧证书不能获得本轮 planner 权限。新动作与模拟预测矛盾时立即使该证书 stale，记录首个反例并返回真实观察给 P7 重规划。
+从 Playbook 加载的 confirmed 模型也要对本轮当前前缀重新绑定并核对起点状态；仅凭旧证书不能获得本轮 planner 权限。新动作与模拟预测矛盾时立即使该证书 stale，记录首个反例并返回真实观察给 P7 重规划。
 
 ### 6.4 有界反事实搜索
 
@@ -229,7 +230,7 @@
 1. 新增有界 `experience_induction.py`：ActionEffect、EffectHypothesis、归并和 probe ranking；
 2. Broker 在 `_record_world_evidence` 后生成 effect/candidate projection；
 3. 让候选规则编译为现有 `MechanismSpec` 的受限子集，并建立 `SimState`、unknown/partial-prediction 合同；不支持的对象生命周期保持 unknown；
-4. 增加候选模型的逐历史 retrodiction、拟合外 probe、证书版本与失效逻辑；
+4. 增加候选模型的逐历史 retrodiction、可选拟合外 probe、证书版本与失效逻辑；证据范围模型不因缺少 probe 阻断正常探索；
 5. 扩展 `model_search` 的证书/当前起点检查、完整 witness、节点/深度/时间预算及失败状态；
 6. 增加 P7 只读工具展示 candidates/effects/probe plan/模拟器覆盖和搜索结果，提供由无冲突候选组成的 `experience.induced.bundle`，保留现有 hypothesis/probe 验证入口；
 7. 扩展 Playbook schema 保存 candidate/effect/retired evidence 与模型证书，完善同题 rehydration；
@@ -245,7 +246,7 @@
 - 两个候选的 probe ranking；
 - `SimState` 从最新观察建立，未知隐藏值保持 unknown；
 - keyboard/click/mixed 规则编译、预测、unknown/conflict 和多步搜索；
-- 拟合历史成功但拟合外探测失败时不得发证；旧证书重载后须验证当前前缀；
+- 证据范围内历史成功即可发 evidence-scoped 证书；拟合外探测失败时不得升级为更强证据；旧证书重载后须绑定当前前缀；
 - 搜索返回带模型证书和每步完整 witness 的计划，首个真实反例停止后续动作；
 - 搜索节点/深度/时间上限与取消，以及无模型时正常回退单步探索；
 - frame/state/changed-cell/level/state 全字段匹配才晋级；
