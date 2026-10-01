@@ -56,6 +56,16 @@ class HypothesisSimulatorTests(unittest.TestCase):
         self.assertEqual(result.branches[0].path[0].action["name"], "ACTION1")
         self.assertEqual(result.executed_actions, ())
 
+    def test_broker_arc_action_data_tuple_is_normalized(self) -> None:
+        result = search_counterfactual(
+            _state(),
+            (_spec(7),),
+            actions=(ArcAction("ACTION1"),),
+            subgoals=(Subgoal("paint", cells=((0, 0, 7),)),),
+        )
+
+        self.assertEqual(result.status, "found")
+
     def test_hypothesis_is_advisory_and_simulated_with_hypothesis_grade(self) -> None:
         first = ArcHistoryRecord.initial(
             game_id="game", seed=1, run_id="run", frame=((0,),),

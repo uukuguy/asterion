@@ -53,11 +53,22 @@ def _action(value: object) -> tuple[str, tuple[tuple[str, int], ...]]:
     if raw_data is None:
         data: tuple[tuple[str, int], ...] = ()
     else:
-        if not isinstance(raw_data, Mapping):
+        if isinstance(raw_data, Mapping):
+            pairs = tuple(raw_data.items())
+        elif isinstance(raw_data, (list, tuple)):
+            pairs = tuple(raw_data)
+            if any(
+                type(pair) is not tuple or len(pair) != 2
+                for pair in pairs
+            ):
+                raise ValueError("invalid counterfactual action data")
+        else:
             raise ValueError("invalid counterfactual action data")
-        if any(type(key) is not str or type(item) is not int for key, item in raw_data.items()):
+        if any(type(key) is not str or type(item) is not int for key, item in pairs):
             raise ValueError("invalid counterfactual action data")
-        data = tuple(sorted(raw_data.items()))
+        if len({key for key, _ in pairs}) != len(pairs):
+            raise ValueError("invalid counterfactual action data")
+        data = tuple(sorted(pairs))
     if name != "ACTION6" and data:
         raise ValueError("invalid counterfactual action data")
     if name == "ACTION6" and (not data or tuple(key for key, _ in data) != ("x", "y")):
