@@ -29,6 +29,8 @@ from .transition_model import ActionExpectation, TransitionModel
 from .verified_history import ArcHistoryRecord, ArcPredictionError, validate_history_query, validate_prediction
 from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
 from .visual_priors import derive_visual_candidates
+from .tool_registry import P7_APPLICATION_TOOL_NAMES
+from asterion.runtime.protocol import ProtocolError
 
 
 class ArcBrokerError(RuntimeError):
@@ -73,6 +75,19 @@ class P7ToolRegistry:
         if type(tool) is not Tool:
             raise TypeError("tool must be a Tool instance")
         self._tools[tool.name] = tool
+
+    def validate_executable_names(self) -> None:
+        """Reject prompt entries that cannot be backed by the P7 tool module."""
+        for tool in self._tools.values():
+            if tool.name == "act_checked_hint":
+                continue
+            canonical_name = (
+                tool.name if tool.name.startswith("p7_") else f"p7_{tool.name}"
+            )
+            if canonical_name not in P7_APPLICATION_TOOL_NAMES:
+                raise ProtocolError(
+                    "P7 prompt tool is not registered in the Prime tool module"
+                )
 
     def unregister(self, name: str) -> None:
         self._tools.pop(name, None)

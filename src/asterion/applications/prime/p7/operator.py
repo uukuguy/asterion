@@ -2693,6 +2693,7 @@ async def run_live(
         signature="p7_client.promote_hypothesis(key, evidence_kind)",
         category="model",
     ))
+    tool_registry.validate_executable_names()
     strategy = _resolve_strategy(invocation.environment)
     if variant == "legacy":
         prompt = _prompt_for_variant(variant, tool_registry)
