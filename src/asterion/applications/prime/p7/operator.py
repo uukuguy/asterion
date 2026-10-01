@@ -1636,29 +1636,60 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
     }
     sections = [
         "## Initial broker state (application supplied; already observed)",
-        "Use this snapshot as the starting fact set. Do not spend a tool call rereading it.",
+        "Use this snapshot as the starting fact set. If frame_truncated is true and frame is null, call p7_observe for the current board.",
         json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
     ]
+    def fits(parts: list[str]) -> bool:
+        return len("\n".join(parts).encode("utf-8")) <= 16384
+
+    if not fits(sections):
+        hint = state["learning_hint"]
+        state["learning_hint"] = {
+            "recommendation": hint.get("recommendation") if isinstance(hint, Mapping) else None,
+            "projection_truncated": True,
+        }
+        sections[-1] = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if not fits(sections):
+        state["frame"] = None
+        state["frame_truncated"] = True
+        sections[-1] = json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    if not fits(sections):
+        raise P7OperatorError("P7 host services are unavailable")
+
+    def add_projection(heading: str, instruction: str, projection: Mapping[str, object], tool: str) -> None:
+        candidate = [
+            heading, instruction,
+            json.dumps(dict(projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        ]
+        if fits([*sections, *candidate]):
+            sections.extend(candidate)
+        else:
+            sections.append(f"{heading}: omitted from initial context; call {tool} if needed.")
+
     world_model = getattr(client, "world_model", None)
     if callable(world_model):
-        model_projection = world_model()
-        if not isinstance(model_projection, Mapping):
-            raise P7OperatorError("P7 host services are unavailable")
-        sections.extend([
-            "## Same-game world model (visual candidates are hypotheses)",
-            "Use confirmed facts directly. Treat visual candidates as observations to test; do not treat a candidate role as a confirmed wall, floor, object, or goal.",
-            json.dumps(dict(model_projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-        ])
+        try:
+            model_projection = world_model()
+        except Exception:
+            model_projection = {}
+        if isinstance(model_projection, Mapping):
+            add_projection(
+                "## Same-game world model (visual candidates are hypotheses)",
+                "Use confirmed facts directly. Treat visual candidates as observations to test; do not treat a candidate role as a confirmed wall, floor, object, or goal.",
+                model_projection, "p7_world_model",
+            )
     cognition = getattr(client, "cognition", None)
     if callable(cognition):
-        cognition_projection = cognition()
-        if not isinstance(cognition_projection, Mapping):
-            raise P7OperatorError("P7 host services are unavailable")
-        sections.extend([
-            "## Persistent game cognition (advisory; no execution authority)",
-            "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
-            json.dumps(dict(cognition_projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-        ])
+        try:
+            cognition_projection = cognition()
+        except Exception:
+            cognition_projection = {}
+        if isinstance(cognition_projection, Mapping):
+            add_projection(
+                "## Persistent game cognition (advisory; no execution authority)",
+                "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
+                cognition_projection, "p7_cognition",
+            )
     if include_prior:
         mechanics_prior = getattr(client, "mechanics_prior", None)
         if not callable(mechanics_prior):
@@ -1666,11 +1697,11 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
         prior = mechanics_prior()
         if not isinstance(prior, Mapping):
             raise P7OperatorError("P7 host services are unavailable")
-        sections.extend([
+        add_projection(
             "## Cross-level mechanics evidence (application supplied; use as a prior)",
             "Treat this as evidence for a distinguishing probe, not as a route.",
-            json.dumps(dict(prior), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-        ])
+            prior, "p7_mechanics_prior",
+        )
     value = "\n".join(sections)
     if len(value.encode("utf-8")) > 16384:
         raise P7OperatorError("P7 host services are unavailable")

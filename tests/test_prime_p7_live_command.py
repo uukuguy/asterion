@@ -698,6 +698,35 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("inspect_candidate_and_probe", context)
         self.assertIn("compiled_candidates", context)
 
+    def test_initial_context_keeps_board_when_optional_projection_exceeds_budget(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7] * 64 for _ in range(64)]],
+                    "levels_completed": 1,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 6,
+                    "learning_hint": {"recommendation": "inspect_candidates"},
+                }
+
+            def status(self):
+                return {"actions_remaining": 50, "primitive_actions": 6, "target_level": 2}
+
+            def world_model(self):
+                return {"hypotheses": "x" * 8192}
+
+            def cognition(self):
+                return {"experience": "y" * 8192}
+
+        context = _initial_game_context(Client(), include_prior=False)
+        self.assertLessEqual(len(context.encode()), 16384)
+        self.assertIn('"frame":[[7,7,7', context)
+        self.assertIn("inspect_candidates", context)
+        self.assertIn("p7_world_model", context)
+
     def test_continue_prompt_reestablishes_action_whitelist_after_retry(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_CONTINUE_PROMPT
 
