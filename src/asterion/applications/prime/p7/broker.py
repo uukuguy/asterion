@@ -1304,6 +1304,7 @@ class ArcBroker:
             candidate_summaries=merge_facts(snapshot.candidate_summaries, tuple(candidate_facts)),
             simulator_summaries=merge_facts(snapshot.simulator_summaries, (simulator_fact,)),
         )
+        snapshot = self._fit_experience_playbook(snapshot)
         if not successful:
             return branch_playbook(snapshot, "run-failed")
         if self._transition_model is not None:
@@ -1320,6 +1321,56 @@ class ArcBroker:
                 snapshot = replace(snapshot, checked_routes=tuple(r for r in snapshot.checked_routes if r.level != level))
                 snapshot = append_checked_route(snapshot, CheckedRoute(level, tuple(expectations), digest([e.after_state_sha256 for e in expectations])))
         return snapshot
+
+    @staticmethod
+    def _fit_experience_playbook(snapshot: PlaybookSnapshot) -> PlaybookSnapshot:
+        """Keep recent semantic evidence within the private Playbook cap.
+
+        A long-lived game can accumulate large frame-delta summaries even
+        though each individual fact is bounded.  Export must retain current
+        hypotheses and recent effects while deterministically trimming older
+        diagnostics before the final 256 KiB serialization limit is reached.
+        """
+
+        def value(item: CheckedFact) -> Mapping[str, object]:
+            raw = item.value
+            return raw if isinstance(raw, Mapping) else {}
+
+        def effect_rank(item: CheckedFact) -> tuple[int, int, int, str]:
+            raw = value(item)
+            return (
+                item.level,
+                1 if raw.get("motion_complete") is True else 0,
+                int(raw.get("sequence", -1)) if type(raw.get("sequence")) is int else -1,
+                item.key,
+            )
+
+        def candidate_rank(item: CheckedFact) -> tuple[int, int, int, str]:
+            raw = value(item)
+            return (
+                1 if raw.get("status") == "hypothesis" else 0,
+                item.level,
+                int(raw.get("support_count", 0)) if type(raw.get("support_count")) is int else 0,
+                item.key,
+            )
+
+        effects = tuple(sorted(snapshot.effect_summaries, key=effect_rank, reverse=True))
+        candidates = tuple(sorted(snapshot.candidate_summaries, key=candidate_rank, reverse=True))
+        effect_limits = tuple(dict.fromkeys((min(len(effects), 128), 96, 80, 64, 48, 32, 16, 8, 0)))
+        candidate_limits = tuple(dict.fromkeys((min(len(candidates), 64), 48, 32, 24, 16, 8, 0)))
+        for effect_limit in effect_limits:
+            for candidate_limit in candidate_limits:
+                trial = replace(
+                    snapshot,
+                    effect_summaries=effects[:effect_limit],
+                    candidate_summaries=candidates[:candidate_limit],
+                )
+                try:
+                    trial.projection(max_bytes=256 * 1024)
+                except ValueError:
+                    continue
+                return trial
+        raise ValueError("playbook experience exceeds cap")
 
     def _record_model_conflict(self, sequence: int, reason: str) -> dict[str, object]:
         code = f"sequence-{sequence}:{reason}"

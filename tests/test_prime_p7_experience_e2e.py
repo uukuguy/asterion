@@ -8,7 +8,9 @@ from pathlib import Path
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.ipython_host import p7_client_facade
-from asterion.applications.prime.p7.playbook import load_playbook, save_playbook
+from asterion.applications.prime.p7.playbook import (
+    CheckedFact, PlaybookKey, PlaybookSnapshot, load_playbook, save_playbook,
+)
 from asterion.applications.prime.p7.world_model import WorldModelStore
 from asterion.applications.prime.p7.experience_induction import ActionEffect, EffectHypothesis, EffectMotion
 
@@ -79,6 +81,33 @@ class _TransitionTranslationEngine(_TranslationEngine):
 
 
 class ExperienceEndToEndTests(unittest.TestCase):
+    def test_export_fit_keeps_recent_experience_under_playbook_cap(self) -> None:
+        facts = tuple(
+            CheckedFact(
+                "mechanics",
+                f"experience.effect.{index:03d}",
+                {
+                    "sequence": index,
+                    "motion_complete": index % 2 == 0,
+                    "details": ["x" * 1000] * 3,
+                },
+                0,
+                (f"{index + 1:064x}",),
+            )
+            for index in range(120)
+        )
+        snapshot = PlaybookSnapshot(
+            PlaybookKey("ls20-9607627b", 0, 7), effect_summaries=facts,
+        )
+        fitted = ArcBroker._fit_experience_playbook(snapshot)
+        self.assertLessEqual(len(fitted.effect_summaries), 96)
+        self.assertLessEqual(
+            len(json.dumps(fitted.projection(max_bytes=256 * 1024), separators=(",", ":")).encode()),
+            256 * 1024,
+        )
+        sequences = {item.value["sequence"] for item in fitted.effect_summaries}
+        self.assertIn(119, sequences)
+
     def test_export_bounds_large_motion_detail_without_dropping_playbook(self) -> None:
         broker = ArcBroker(engine=_LearningEngine())
         broker.bind_history("large-motion-run")
