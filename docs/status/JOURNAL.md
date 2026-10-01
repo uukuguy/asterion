@@ -3473,3 +3473,4 @@
 - 05:02 TypeScript now registers the complete sorted P7 tool surface with Python parity and checked-in resource sync [c9420a1e]
 - 06:18 Core import allowlist now covers the generic Prime tool registry so dependency-free wheel checks remain complete [a2e9faca]
 - 06:42 Lazy root dispatcher exports only defined symbols while retaining compatibility lookup through __getattr__ [bf13f897]
+- 07:16 Independent review fixes enforce exact P7 tool sets, bridge-compatible schemas, and runnable extension test gating [c218f8c6]
