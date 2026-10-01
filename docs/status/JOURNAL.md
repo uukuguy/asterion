@@ -3465,3 +3465,4 @@
 - 02:02 merged remote main while preserving local P7 experience bridge; lint, docs-check, and 241 focused tests pass
 - 02:05 remote main synchronized at efaece6d; live checkpoint updated with clean-tree and push boundary
 - 03:54 Prime tool registry design committed; defines generic registry, P7 injection, drift checks, and independent review gate [5a3b8bc9]
+- 03:58 Implementation plan committed; sequences registry, P7 injection, runtime split, TS bundle parity, verification, and independent review [COMMIT]
