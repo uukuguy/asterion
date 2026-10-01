@@ -1101,6 +1101,60 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(namespace["act_checked"](plan), replies["act_checked"])  # type: ignore[operator]
         self.assertEqual(calls, [("history", (0, 1)), ("frame_at", (0,)), ("act_checked", (plan,))])
 
+    def test_socket_exposes_global_experience_tools_without_dispatching_actions(self) -> None:
+        class Client:
+            def observe(self) -> dict[str, object]:
+                return {"state": "NOT_FINISHED"}
+
+            def status(self) -> dict[str, object]:
+                return {"terminal_reason": "active"}
+
+            def act(self, actions: object) -> dict[str, object]:
+                raise AssertionError("bridge probe must not dispatch actions")
+
+            def history(self, start: int, limit: int) -> list[dict[str, object]]:
+                return []
+
+            def frame_at(self, sequence: int) -> list[list[int]]:
+                return [[sequence]]
+
+            def act_checked(self, plan: object) -> dict[str, object]:
+                raise AssertionError("bridge probe must not dispatch checked actions")
+
+            def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+                return []
+
+            def last_outcome_summary(self, level: int | None = None) -> dict[str, object]:
+                return {"attempts": {}, "no_effect": {}}
+
+            def observation_state(self) -> dict[str, object]:
+                return {"frame": [], "entities": [], "relations": [], "events": []}
+
+            def game_mechanics(self) -> dict[str, object]:
+                return {"identity": "ls20-9607627b:0:1", "records": []}
+
+            def counterfactual_search(self) -> dict[str, object]:
+                return {"branches": [], "dispatch": "never"}
+
+        server = live_module.P7ClientServer(p7_client_facade(Client()))
+        try:
+            namespace: dict[str, object] = {}
+            exec(live_module.client_module_source(str(server.path)), namespace)
+            self.assertEqual(
+                namespace["observation_state"](),
+                {"frame": [], "entities": [], "relations": [], "events": []},
+            )
+            self.assertEqual(
+                namespace["game_mechanics"](),
+                {"identity": "ls20-9607627b:0:1", "records": []},
+            )
+            self.assertEqual(
+                namespace["counterfactual_search"](),
+                {"branches": [], "dispatch": "never"},
+            )
+        finally:
+            server.close()
+
     def test_checked_actions_record_exact_applied_transitions(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient
