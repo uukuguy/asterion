@@ -265,6 +265,7 @@ test-typescript:
 	npm ci --prefix packages/typescript/asterion-runtime
 	npm test --prefix packages/typescript/asterion-runtime
 	npm test --prefix packages/typescript/dci-context-extension
+	npm run check-resource --prefix packages/typescript/asterion-prime-extension
 
 test-rust:
 	cargo test --manifest-path packages/rust/controlled-executor/Cargo.toml

@@ -6,7 +6,9 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.contract.json",
     "build": "npm run typecheck && esbuild src/ipython-extension.ts --bundle --platform=node --format=esm --target=node20 --supported:template-literal=false --outfile=dist/ipython-extension.mjs --legal-comments=none --minify-syntax --minify-whitespace --footer:js=\"export default register;\"",
-    "test": "npm run build && node --test test/ipython-extension.test.mjs test/context-witness.test.mjs"
+    "test": "npm run build && node --test test/ipython-extension.test.mjs test/context-witness.test.mjs",
+    "sync-resource": "npm run build && node scripts/sync-runtime-resource.mjs --write",
+    "check-resource": "npm run build && node scripts/sync-runtime-resource.mjs"
   },
   "engines": {
     "node": ">=20"

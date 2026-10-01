@@ -4,6 +4,7 @@ import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
+  Any as TypeAny,
   Array as TypeArray,
   Null as TypeNull,
   Number as TypeNumber,
@@ -356,34 +357,42 @@ export function createIpythonBridge(
   return new IpythonBridge(descriptor, options);
 }
 
-export function toolNames(): string[] {
-  return [
-    "ipython",
-    "p7_observe",
-    "p7_mechanics_prior",
-    "p7_tried_actions",
-    "p7_history",
-    "p7_frame_at",
-    "p7_act_checked",
-  ];
-}
-
-interface MethodToolInput {
-  level?: number;
-}
-
-interface ActCheckedInput {
-  plan: unknown;
-}
-
-interface HistoryInput {
-  start: number;
-  limit: number;
-}
-
-interface FrameAtInput {
-  sequence: number;
-}
+const EMPTY_PARAMETERS = TypeObject({}, { additionalProperties: false });
+const LEVEL_PARAMETERS = TypeObject(
+  {
+    level: TypeUnion([
+      TypeNumber({ minimum: 0 }),
+      TypeNull(),
+    ]),
+  },
+  { additionalProperties: false },
+);
+const HISTORY_PARAMETERS = TypeObject(
+  {
+    start: TypeNumber({ minimum: 0 }),
+    limit: TypeNumber({ minimum: 1 }),
+  },
+  { additionalProperties: false },
+);
+const FRAME_PARAMETERS = TypeObject(
+  { sequence: TypeNumber({ minimum: 0 }) },
+  { additionalProperties: false },
+);
+const HYPOTHESIS_PARAMETERS = TypeObject(
+  {
+    layer: TypeString({ minLength: 1 }),
+    key: TypeString({ minLength: 1 }),
+    value: TypeAny(),
+  },
+  { additionalProperties: false },
+);
+const PROMOTION_PARAMETERS = TypeObject(
+  {
+    key: TypeString({ minLength: 1 }),
+    evidence_kind: TypeString({ minLength: 1 }),
+  },
+  { additionalProperties: false },
+);
 
 interface MethodTool {
   name: string;
@@ -394,6 +403,168 @@ interface MethodTool {
     input: unknown,
     signal?: AbortSignal,
   ): Promise<unknown>;
+}
+
+interface AppToolSpec {
+  name: string;
+  method: string;
+  description: string;
+  parameters: unknown;
+  inputKey?: string;
+}
+
+const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
+  {
+    name: "p7_act_checked",
+    method: "act_checked",
+    description:
+      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
+      + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
+      + "Read observation.progress and progress_guidance in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; continue that hypothesis until its cycle is understood, while zero means switch or RESET. "
+      + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
+      + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
+    parameters: TypeObject(
+      {
+        plan: TypeArray(
+          TypeObject({ action: TypeObject({}), expect: TypeObject({}) }),
+        ),
+      },
+      { additionalProperties: false },
+    ),
+  },
+  {
+    name: "p7_action_effects",
+    method: "action_effects",
+    description: "Read bounded per-action effect summaries learned in this run.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_cognition",
+    method: "cognition",
+    description: "Read advisory type cognition and exact-game experience.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_counterfactual_search",
+    method: "counterfactual_search",
+    description: "Compare candidate mechanics and subgoal progress without dispatching actions.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_frame_at",
+    method: "frame_at",
+    description: "Read the settled frame at history sequence `sequence`.",
+    parameters: FRAME_PARAMETERS,
+  },
+  {
+    name: "p7_game_mechanics",
+    method: "game_mechanics",
+    description: "Read persistent game-wide mechanisms; this is advisory memory only.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_history",
+    method: "history",
+    description: "Read a page of session history records starting at index `start` with up to `limit` records.",
+    parameters: HISTORY_PARAMETERS,
+  },
+  {
+    name: "p7_last_outcome_summary",
+    method: "last_outcome_summary",
+    description: "Read bounded per-action outcome counts for one level or the whole run.",
+    parameters: LEVEL_PARAMETERS,
+    inputKey: "level",
+  },
+  {
+    name: "p7_mechanism_candidates",
+    method: "mechanism_candidates",
+    description: "Read mechanism candidates and their evidence lifecycle.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_mechanics_prior",
+    method: "mechanics_prior",
+    description: "Read bounded mechanics evidence inferred from prior actions. This is evidence for reasoning, not a route or action prescription.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_model_search",
+    method: "model_search",
+    description: "Search a verified same-game mechanism without dispatching actions.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_observation_state",
+    method: "observation_state",
+    description: "Read the unified immutable observation with optional game metadata.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_observe",
+    method: "observe",
+    description: "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, color_count_delta, frame_changed, and level_advanced) for the latest settled action. A positive changed_cell_count means the action changed the settled grid even when levels_completed did not increase; use color_count_delta to detect monotonic or cyclic mechanisms. Zero means objective no-effect. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_playbook",
+    method: "playbook",
+    description: "Read the bounded same-game Playbook projection.",
+    parameters: LEVEL_PARAMETERS,
+    inputKey: "level",
+  },
+  {
+    name: "p7_probe_plan",
+    method: "probe_plan",
+    description: "Read one safe probe suggestion without dispatching it.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_promote_hypothesis",
+    method: "promote_hypothesis",
+    description: "Promote a visual candidate only after broker-verified action evidence.",
+    parameters: PROMOTION_PARAMETERS,
+  },
+  {
+    name: "p7_record_hypothesis",
+    method: "record_hypothesis",
+    description: "Submit one bounded hypothesis with an application-owned probe.",
+    parameters: HYPOTHESIS_PARAMETERS,
+  },
+  {
+    name: "p7_retrodiction_status",
+    method: "retrodiction_status",
+    description: "Read scalar transition-model verification status.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_simulator_status",
+    method: "simulator_status",
+    description: "Read simulator coverage and certificate status.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_status",
+    method: "status",
+    description: "Read the current action budget and terminal status.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
+    name: "p7_tried_actions",
+    method: "tried_actions",
+    description: "Enumerate every dispatched action and its bounded count for one level or the whole run.",
+    parameters: LEVEL_PARAMETERS,
+    inputKey: "level",
+  },
+  {
+    name: "p7_world_model",
+    method: "world_model",
+    description: "Read the bounded same-game confirmed model projection.",
+    parameters: EMPTY_PARAMETERS,
+  },
+]);
+
+export function toolNames(): string[] {
+  return ["ipython", ...P7_TOOL_SPECS.map((spec) => spec.name)].sort();
 }
 
 function makeMethodTool(
@@ -422,79 +593,18 @@ function makeMethodTool(
 }
 
 export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
-  return [
+  return [...P7_TOOL_SPECS]
+    .sort((left, right) => left.name < right.name ? -1 : left.name > right.name ? 1 : 0)
+    .map((spec) =>
     makeMethodTool(
       bridge,
-      "p7_observe",
-      "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, color_count_delta, frame_changed, and level_advanced) for the latest settled action. A positive changed_cell_count means the action changed the settled grid even when levels_completed did not increase; use color_count_delta to detect monotonic or cyclic mechanisms. Zero means objective no-effect. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
-      TypeObject({}, { additionalProperties: false }),
-      "observe",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_mechanics_prior",
-      "Read bounded mechanics evidence inferred from prior actions. This is evidence for reasoning, not a route or action prescription.",
-      TypeObject({}, { additionalProperties: false }),
-      "mechanics_prior",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_tried_actions",
-      "Enumerate every (level, action, position) tuple you have dispatched this run, with counts. Position is {\"x\": int, \"y\": int} for ACTION6 clicks and None for direction/interact actions. Cross-run: the broker records prefix-replay actions too, so this view spans prior verified levels. Call this before dispatching a probe you are unsure about; if the same (action, position) tuple already has a non-zero count at this level, the broker has already observed its outcome.",
-      TypeObject(
-        {
-          level: TypeUnion([
-            TypeNumber({ minimum: 0 }),
-            TypeNull(),
-          ]),
-        },
-        { additionalProperties: false },
-      ),
-      "tried_actions",
-      "level",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_history",
-      "Read a page of session history records starting at index `start` with up to `limit` records.",
-      TypeObject(
-        {
-          start: TypeNumber({ minimum: 0 }),
-          limit: TypeNumber({ minimum: 1 }),
-        },
-        { additionalProperties: false },
-      ),
-      "history",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_frame_at",
-      "Read the settled frame at history sequence `sequence`.",
-      TypeObject(
-        { sequence: TypeNumber({ minimum: 0 }) },
-        { additionalProperties: false },
-      ),
-      "frame_at",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_act_checked",
-      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
-        + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
-        + "Read observation.progress and progress_guidance in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; continue that hypothesis until its cycle is understood, while zero means switch or RESET. "
-        + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
-        + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
-      TypeObject(
-        {
-          plan: TypeArray(
-            TypeObject({ action: TypeObject({}), expect: TypeObject({}) }),
-          ),
-        },
-        { additionalProperties: false },
-      ),
-      "act_checked",
-    ),
-  ];
+      spec.name,
+      spec.description,
+      spec.parameters,
+      spec.method,
+      spec.inputKey,
+    )
+  );
 }
 
 export function createIpythonTool(bridge: IpythonBridge) {
