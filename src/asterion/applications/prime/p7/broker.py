@@ -426,6 +426,8 @@ class ArcBroker:
                 "support_count": candidate.support_count,
                 "evidence_sequences": list(candidate.evidence_sequences),
                 "conflict_sequences": list(candidate.conflict_sequences),
+                "refusal_reason": candidate.refusal_reason,
+                "refusal_reasons": list(candidate.refusal_reasons),
             }
             # This is a declarative proposal only.  It is useful to the model
             # when constructing a falsifiable probe, but never grants planner
@@ -563,6 +565,10 @@ class ArcBroker:
                     status="hypothesis", evidence_sequences=evidence,
                     conflict_sequences=conflicts, template=None,
                     win_levels=self._game.win_levels,
+                    diagnostic_reasons=tuple(
+                        reason for reason in item.get("refusal_reasons", ())
+                        if type(reason) is str
+                    ),
                 ))
             except (KeyError, TypeError, ValueError):
                 continue
@@ -645,6 +651,8 @@ class ArcBroker:
                 "action": {"name": candidate.action, "data": dict(candidate.data)},
                 "support_count": candidate.support_count,
                 "evidence_sequences": list(candidate.evidence_sequences[-8:]),
+                "refusal_reason": candidate.refusal_reason,
+                "refusal_reasons": list(candidate.refusal_reasons),
                 "compiled_mechanism": compiled.to_mapping(), "source": "history",
             })
             seen.add(key)
@@ -664,6 +672,8 @@ class ArcBroker:
                 "key": key, "level": level, "action": dict(action),
                 "support_count": value.get("support_count", 0),
                 "evidence_sequences": list(value.get("evidence_sequences", ()))[:8],
+                "refusal_reason": value.get("refusal_reason"),
+                "refusal_reasons": list(value.get("refusal_reasons", ())),
                 "compiled_mechanism": dict(compiled), "source": "playbook",
             })
             seen.add(key)
@@ -683,6 +693,8 @@ class ArcBroker:
                 "action_family": "click" if source["action"].get("name") == "ACTION6" else "keyboard",
                 "status": "hypothesis", "support_count": source["support_count"],
                 "evidence_sequences": source["evidence_sequences"],
+                "refusal_reason": source.get("refusal_reason"),
+                "refusal_reasons": list(source.get("refusal_reasons", ())),
                 "compiled_mechanism": generalized, "record_hypothesis": payload,
                 "source": source["source"],
             })
@@ -1426,6 +1438,8 @@ class ArcBroker:
                     "support_count": candidate.support_count,
                     "evidence_sequences": list(candidate.evidence_sequences),
                     "conflict_sequences": list(candidate.conflict_sequences),
+                    "refusal_reason": candidate.refusal_reason,
+                    "refusal_reasons": list(candidate.refusal_reasons),
                     **({"compiled_mechanism": compiled.to_mapping()}
                        if compiled is not None else {}),
                 }
@@ -1442,6 +1456,8 @@ class ArcBroker:
                         "support_count": candidate.support_count,
                         "evidence_sequences": list(candidate.evidence_sequences),
                         "conflict_sequences": list(candidate.conflict_sequences),
+                        "refusal_reason": candidate.refusal_reason,
+                        "refusal_reasons": list(candidate.refusal_reasons),
                         "details_omitted": True,
                     }, level, (evidence,),
                 ))

@@ -246,6 +246,23 @@ class ExperienceEndToEndTests(unittest.TestCase):
             self.assertEqual(fresh.simulator_status()["confirmed_model"], False)
             self.assertEqual(engine2.calls, [])
 
+    def test_candidate_projection_exposes_refusal_reason(self) -> None:
+        engine = _LearningEngine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history("diagnostic-run")
+        broker.act_checked([{
+            "action": {"name": "ACTION1", "data": {}},
+            "expect": {"cell": {"x": 2, "y": 0, "value": 7}},
+        }])
+
+        candidate = next(
+            item for item in broker.mechanism_candidates()
+            if item.get("key") != "experience.induced.bundle"
+        )
+
+        self.assertEqual(candidate["refusal_reason"], "insufficient-support")
+        self.assertIn("insufficient-support", candidate["refusal_reasons"])
+
     def test_reloaded_same_level_candidate_is_a_reusable_probe_prior(self) -> None:
         source = ArcBroker(engine=_TranslationEngine())
         source.bind_history("learning-run")

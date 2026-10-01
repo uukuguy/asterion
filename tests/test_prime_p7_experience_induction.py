@@ -120,6 +120,31 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertEqual(candidates[0].status, "hypothesis")
         self.assertEqual(candidates[0].evidence_sequences, (1, 2))
 
+    def test_candidate_exposes_insufficient_support_reason(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((0,),), after=((7,),),
+        )
+        inducer.observe(extract_action_effect(first, second))
+
+        candidate = inducer.candidates()[0]
+
+        self.assertEqual(candidate.refusal_reason, "insufficient-support")
+        self.assertIn("insufficient-support", candidate.refusal_reasons)
+
+    def test_candidate_exposes_ambiguous_motion_reason(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((7, 8),), after=((8, 7),),
+        )
+        effect = extract_action_effect(first, second)
+        inducer.observe(effect)
+        inducer.observe(replace(effect, sequence=2))
+
+        candidate = inducer.candidates()[0]
+
+        self.assertIn("ambiguous-motion", candidate.refusal_reasons)
+
     def test_repeated_no_effect_stays_a_boundary_and_is_not_probeable(self) -> None:
         inducer = ExperienceInducer()
         first, second = records(action=ArcAction("ACTION1"), before=((4,),), after=((4,),))
@@ -131,6 +156,60 @@ class ExperienceInductionTests(unittest.TestCase):
             frame=((4,),), level=0, state="NOT_FINISHED", available_actions=["ACTION1"],
         )
         self.assertEqual(ExperienceInducer.probe_plan(current, inducer.candidates()).status, "no-discriminating-probe")
+
+    def test_candidate_exposes_partial_delta_reason(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((0, 0),), after=((7, 7),),
+        )
+        effect = extract_action_effect(first, second)
+        effect = replace(effect, changed_cells_omitted=1)
+        inducer.observe(effect)
+        inducer.observe(replace(effect, sequence=2))
+
+        candidate = inducer.candidates()[0]
+
+        self.assertIn("partial-delta", candidate.refusal_reasons)
+
+    def test_candidate_exposes_context_conflict_reason(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((0,),), after=((7,),),
+        )
+        inducer.observe(extract_action_effect(first, second))
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((0,),), after=((8,),),
+        )
+        inducer.observe(extract_action_effect(first, second))
+
+        self.assertTrue(all(
+            "context-conflict" in item.refusal_reasons
+            for item in inducer.candidates()
+        ))
+
+    def test_candidate_exposes_unsupported_residual_reason(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"), before=((7, 0, 0),), after=((0, 7, 8),),
+        )
+        effect = extract_action_effect(first, second)
+        self.assertIsNone(effect.motion_reason)
+        effect = replace(effect, motion_reason="unsupported-residual")
+        inducer.observe(effect)
+        inducer.observe(replace(effect, sequence=2))
+
+        self.assertIn("unsupported-residual", inducer.candidates()[0].refusal_reasons)
+
+    def test_candidate_accepts_retrodiction_mismatch_diagnostic(self) -> None:
+        candidate = EffectHypothesis(
+            key="retrodiction", game_id="game", seed=1, level=0,
+            action_family="keyboard", action="ACTION1", data=(),
+            signature="cell-edit", status="hypothesis",
+            evidence_sequences=(1, 2), conflict_sequences=(),
+            diagnostic_reasons=("retrodiction-mismatch",),
+        )
+
+        self.assertEqual(candidate.refusal_reason, "retrodiction-mismatch")
 
     def test_boundary_observation_does_not_contradict_consistent_motion(self) -> None:
         inducer = ExperienceInducer()

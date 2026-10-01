@@ -16,6 +16,14 @@ from .verified_history import ArcHistoryRecord, CellChange, Grid, stable_changed
 
 _ACTIONS = frozenset(f"ACTION{i}" for i in range(1, 8))
 _STATES = frozenset({"NOT_FINISHED", "WIN", "GAME_OVER"})
+_REFUSAL_REASONS = frozenset({
+    "insufficient-support",
+    "partial-delta",
+    "ambiguous-motion",
+    "context-conflict",
+    "unsupported-residual",
+    "retrodiction-mismatch",
+})
 
 
 def _immutable(value: object) -> object:
@@ -81,6 +89,7 @@ class ActionEffect:
     full_changed_cells: tuple[CellChange, ...] = ()
     motions: tuple[EffectMotion, ...] = ()
     motion_complete: bool = False
+    motion_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,10 +109,50 @@ class EffectHypothesis:
     conflict_sequences: tuple[int, ...]
     template: ActionEffect | None = None
     win_levels: int = 1
+    diagnostic_reasons: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.diagnostic_reasons) is not tuple
+            or any(reason not in _REFUSAL_REASONS for reason in self.diagnostic_reasons)
+            or len(set(self.diagnostic_reasons)) != len(self.diagnostic_reasons)
+        ):
+            raise ValueError("invalid candidate diagnostic reasons")
+        object.__setattr__(self, "diagnostic_reasons", tuple(self.diagnostic_reasons))
 
     @property
     def support_count(self) -> int:
         return len(self.evidence_sequences)
+
+    @property
+    def refusal_reasons(self) -> tuple[str, ...]:
+        """Explain why this candidate is not currently planner-ready.
+
+        Reasons are deliberately diagnostic only.  They do not change the
+        candidate lifecycle or grant execution authority.
+        """
+
+        reasons: list[str] = []
+        if self.status == "contradicted" or self.conflict_sequences:
+            reasons.append("context-conflict")
+        template = self.template
+        if template is not None:
+            if template.changed_cells_omitted:
+                reasons.append("partial-delta")
+            if template.motion_reason is not None:
+                reasons.append(template.motion_reason)
+            if (
+                self.support_count < 2
+                and template.outcome not in {"level-transition", "game-over"}
+            ):
+                reasons.append("insufficient-support")
+        reasons.extend(self.diagnostic_reasons)
+        return tuple(dict.fromkeys(reasons))
+
+    @property
+    def refusal_reason(self) -> str | None:
+        reasons = self.refusal_reasons
+        return reasons[0] if reasons else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,7 +226,7 @@ def _motions(
     changes: tuple[CellChange, ...],
     before: Grid | None = None,
     after: Grid | None = None,
-) -> tuple[tuple[EffectMotion, ...], bool]:
+) -> tuple[tuple[EffectMotion, ...], bool, str | None]:
     """Infer conservative source→clear and clear→source translations.
 
     A motion is emitted only when the complete changed set can be paired by a
@@ -190,6 +239,7 @@ def _motions(
         by_pair.setdefault((old, new), set()).add((x, y))
     descriptors: list[tuple[int, int, tuple[tuple[int, int], ...], int, int]] = []
     covered: set[tuple[int, int]] = set()
+    ambiguous = False
 
     if before is not None and after is not None:
         # Use geometry to decide which colour is the moving object.  Numeric
@@ -245,6 +295,8 @@ def _motions(
                             (source_cells & source_set) | (destination_cells & destination_set),
                         )
                     )
+            if not component_matches:
+                ambiguous = True
             # A complete translation must preserve component identity.  If a
             # source component maps to multiple destinations (split), or
             # multiple sources map to one destination (merge), the changed
@@ -258,6 +310,7 @@ def _motions(
                 any(count != 1 for count in source_counts.values())
                 or any(count != 1 for count in destination_counts.values())
             ):
+                ambiguous = True
                 continue
             for _source_index, _destination_index, shape, dx, dy, coverage in component_matches:
                 pair_matches.setdefault((source, clear), []).append((shape, dx, dy, coverage))
@@ -267,7 +320,7 @@ def _motions(
         # A colour swap can be represented in both directions.  There is no
         # semantic evidence for choosing one, so retain no model at all.
         if any((clear, source) in valid_pairs for source, clear in valid_pairs):
-            return (), False
+            return (), False, "ambiguous-motion"
         for (source, clear), matches in sorted(pair_matches.items()):
             for shape, dx, dy, match_coverage in matches:
                 descriptors.append((source, clear, shape, dx, dy))
@@ -314,7 +367,7 @@ def _motions(
     )
     changed_positions = {(x, y) for x, y, _old, _new in changes}
     if covered == changed_positions:
-        return motions, bool(motions)
+        return motions, bool(motions), None
     # ARC game HUDs often advance a one-cell edge marker or timer together
     # with the moving object.  Keep that bounded decoration from hiding a
     # complete object translation, while retaining the conservative behavior
@@ -330,8 +383,12 @@ def _motions(
                 for x, y in border_extras
             )
         ):
-            return motions, True
-    return motions, False
+            return motions, True, None
+    if motions:
+        return motions, False, "unsupported-residual"
+    if ambiguous:
+        return (), False, "ambiguous-motion"
+    return motions, False, None
 
 
 def extract_action_effect(
@@ -371,7 +428,7 @@ def extract_action_effect(
     )
     if full_count != record.changed_cell_count or full_omitted != 0:
         raise ValueError("history frame delta is inconsistent")
-    motions, motion_complete = _motions(full_changes, previous.frame, record.frame)
+    motions, motion_complete, motion_reason = _motions(full_changes, previous.frame, record.frame)
     return ActionEffect(
         game_id=record.game_id,
         seed=record.seed,
@@ -394,6 +451,11 @@ def extract_action_effect(
         full_changed_cells=full_changes,
         motions=motions,
         motion_complete=motion_complete,
+        motion_reason=(
+            "partial-delta"
+            if record.changed_cells_omitted
+            else motion_reason
+        ),
     )
 
 

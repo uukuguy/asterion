@@ -759,7 +759,8 @@ class _P7BrokerClient:
                         for key in (
                             "key", "level", "action_family", "action",
                             "status", "support_count", "evidence_sequences",
-                            "conflict_sequences", "source",
+                            "conflict_sequences", "refusal_reason",
+                            "refusal_reasons", "source",
                         )
                         if key in item
                     }
