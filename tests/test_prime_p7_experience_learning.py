@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import tempfile
+import json
 import unittest
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.mechanism_model import MechanismSpec
+from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.playbook import PlaybookKey, load_playbook, save_playbook
 from asterion.applications.prime.p7.world_model import WorldModelStore
 from asterion.applications.prime.p7.experience_induction import (
@@ -184,6 +186,69 @@ class ExperienceLearningTests(unittest.TestCase):
 
         self.assertEqual(engine.calls, ["ACTION1", "ACTION1", "ACTION1", "ACTION2"])
 
+    def test_experience_diagnostics_separate_learning_from_execution(self) -> None:
+        broker, _engine = self._collect_two_effects()
+        before = broker.experience_diagnostics()
+        self.assertEqual(before["effects_count"], 2)
+        self.assertGreaterEqual(before["candidate_count"], 1)
+        self.assertEqual(before["probes_submitted"], 0)
+        self.assertEqual(before["model_search_calls"], 0)
+        candidate = next(
+            item for item in broker.mechanism_candidates()
+            if item.get("compiled_mechanism") and item["key"] != "experience.induced.bundle"
+        )
+        mechanism = dict(candidate["compiled_mechanism"])
+        mechanism["revision"] = 1
+        mechanism["rules"] = [
+            *mechanism["rules"],
+            {
+                "action": "ACTION2",
+                "guards": [{"op": "level_is", "args": {"value": 0}}],
+                "effects": [{"op": "increment_level", "args": {"value": 1}}],
+            },
+        ]
+        broker.record_hypothesis(
+            "mechanics", "diagnostics-model",
+            {"mechanism": mechanism, "probe": _move_expectation(4), "dependencies": []},
+        )
+        pending = broker.experience_diagnostics()
+        self.assertEqual(pending["probes_submitted"], 1)
+        self.assertTrue(pending["probe_pending"])
+        broker.act_checked([_move_expectation(4)])
+        search = broker.model_search()
+        self.assertEqual(search["status"], "found")
+        after = broker.experience_diagnostics()
+        self.assertEqual(after["probes_submitted"], 1)
+        self.assertFalse(after["probe_pending"])
+        self.assertEqual(after["model_search_calls"], 1)
+        self.assertEqual(after["model_search_found"], 1)
+        self.assertTrue(after["planner_eligible"])
+
+    def test_candidate_exposes_a_valid_record_hypothesis_payload(self) -> None:
+        broker, engine = self._collect_two_effects()
+        candidate = next(
+            item for item in broker.mechanism_candidates()
+            if item.get("compiled_mechanism") and item["key"] != "experience.induced.bundle"
+        )
+        payload = candidate.get("record_hypothesis")
+        self.assertIsInstance(payload, dict)
+        self.assertEqual(set(payload), {"layer", "key", "value"})
+        self.assertEqual(payload["layer"], "mechanics")
+        self.assertIsInstance(payload["key"], str)
+        self.assertRegex(payload["key"], r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+        value = payload["value"]
+        self.assertIsInstance(value, dict)
+        self.assertEqual(set(value), {"mechanism", "probe", "dependencies"})
+        self.assertEqual(value["mechanism"], candidate["compiled_mechanism"])
+        self.assertEqual(value["dependencies"], [])
+
+        result = broker.record_hypothesis(payload["layer"], payload["key"], value)
+        self.assertEqual(result["status"], "hypothesis")
+        probe = value["probe"]
+        checked = broker.act_checked([probe])
+        self.assertEqual(checked["stop_reason"], "matched")
+        self.assertEqual(engine.calls, ["ACTION1", "ACTION1", "ACTION1"])
+
     def test_contradictory_probe_invalidates_the_candidate_certificate(self) -> None:
         broker, _engine = self._collect_two_effects(contradict_probe=True)
         candidate = next(
@@ -205,6 +270,60 @@ class ExperienceLearningTests(unittest.TestCase):
         self.assertEqual(result["stop_reason"], "model-conflict")
         self.assertFalse(broker.simulator_status()["confirmed_model"])
         self.assertEqual(broker.retrodiction_status()["planner"]["eligible"], False)
+
+    def test_large_candidate_submission_survives_model_tool_projection(self) -> None:
+        class LargeTokenEngine(_LearningEngine):
+            def observe(self):
+                observation = super().observe()
+                frame = [[0] * 64 for _ in range(16)]
+                for y in range(4, 15):
+                    for x in range(self.position, self.position + 18):
+                        frame[y][x] = 7
+                observation["frame"] = [frame]
+                return observation
+
+        engine = LargeTokenEngine()
+        broker = ArcBroker(engine=engine, game=_game(), world_model=_world())
+        broker.bind_history("large-submission")
+        for x in (19, 20):
+            broker.act_checked([{
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"cell": {"x": x, "y": 4, "value": 7}},
+            }])
+        self.assertGreater(len(json.dumps(broker.mechanism_candidates(), separators=(",", ":")).encode()), 8192)
+        client = _P7BrokerClient(broker, None)
+        candidates = client.mechanism_candidates()
+        self.assertLessEqual(len(json.dumps(candidates, separators=(",", ":")).encode()), 8192)
+        payloads = [row["record_hypothesis"] for row in candidates if "record_hypothesis" in row]
+        self.assertTrue(payloads)
+        payload = payloads[0]
+        self.assertEqual(client.record_hypothesis(**payload)["status"], "hypothesis")
+        self.assertEqual(broker.act_checked([payload["value"]["probe"]])["stop_reason"], "matched")
+        self.assertTrue(broker.simulator_status()["confirmed_model"])
+        self.assertEqual(len(engine.calls), 3)
+
+    def test_previous_level_motion_is_exposed_as_current_level_probe_prior(self) -> None:
+        source = ArcBroker(engine=_LearningEngine(), game=_game(), world_model=_world())
+        source.bind_history("cross-level-source")
+        source.act_checked([_move_expectation(2)])
+        source.act_checked([_move_expectation(3)])
+        snapshot = source.export_playbook(successful=False)
+
+        fresh = ArcBroker(engine=_LearningEngine(), game=_game(), world_model=_world())
+        fresh.bind_history("cross-level-target")
+        fresh.load_playbook(snapshot)
+        advanced = fresh.act_checked([{
+            "action": {"name": "ACTION2", "data": {}},
+            "expect": {"levels_completed": 1},
+        }])
+        self.assertEqual(advanced["stop_reason"], "level-advanced")
+        prior = [
+            item for item in fresh.mechanism_candidates()
+            if item.get("scope") == "cross-level-prior"
+        ]
+        self.assertTrue(prior)
+        self.assertTrue(any(item.get("record_hypothesis") for item in prior))
+        self.assertEqual(fresh.learning_hint().get("cross_level_candidate_count"), len(prior))
 
 
 if __name__ == "__main__":

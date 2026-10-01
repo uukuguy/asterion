@@ -127,6 +127,12 @@ machine-readable ``reason`` and do not retry the unchanged mechanism. A
 compiled proposal is not a certificate or a route; it never
 blocks normal actions. Candidates marked ``contradicted`` or with incomplete
 motion evidence are diagnostics only; continue ordinary exploration.
+When a candidate contains ``record_hypothesis``, use that object's ``layer``,
+``key``, and ``value`` unchanged with ``p7_record_hypothesis``. It is a
+broker-generated schema-valid envelope whose probe expectation was computed
+from the current settled frame; do not rewrite colors, patterns, guards, or
+the expected frame hash by hand. A returned envelope remains a hypothesis
+until the explicit probe and retrodiction succeed.
 ``translate_components`` is a bounded semantic effect for repeated object
 motion and may be used only when the candidate's full-frame evidence supports
 it.

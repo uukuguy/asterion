@@ -190,19 +190,17 @@ def _motions(
         by_pair.setdefault((old, new), set()).add((x, y))
     descriptors: list[tuple[int, int, tuple[tuple[int, int], ...], int, int]] = []
     covered: set[tuple[int, int]] = set()
-    for (source, clear), source_cells in sorted(by_pair.items()):
-        if source == clear or not source_cells or (clear, source) not in by_pair:
-            continue
-        # The reverse delta is the same physical translation viewed from the
-        # destination.  Prefer a non-background source (and use a stable
-        # colour ordering for two nonzero colours) so one action yields one
-        # forward motion rather than two inverse rules.
-        if source == 0 and clear != 0:
-            continue
-        if source != 0 and clear != 0 and source < clear:
-            continue
-        destination_cells = by_pair[(clear, source)]
-        if before is not None and after is not None:
+
+    if before is not None and after is not None:
+        # Use geometry to decide which colour is the moving object.  Numeric
+        # colour order is not semantic and choosing it here reverses valid
+        # motions whenever the object colour is larger than the floor colour.
+        valid_pairs: set[tuple[int, int]] = set()
+        pair_matches: dict[tuple[int, int], list[tuple[tuple[int, int], ...], int, int, set[tuple[int, int]]]] = {}
+        for (source, clear), source_cells in sorted(by_pair.items()):
+            destination_cells = by_pair.get((clear, source))
+            if source == clear or not source_cells or not destination_cells:
+                continue
             source_colour = {
                 (x, y) for y, row in enumerate(before)
                 for x, value in enumerate(row) if value == source
@@ -219,77 +217,76 @@ def _motions(
                 component for component in _connected_cells(destination_colour)
                 if set(component) & destination_cells
             )
-        else:
-            source_components = _connected_cells(source_cells)
-            destination_components = _connected_cells(destination_cells)
-        for component in source_components:
-            if not component:
-                continue
-            # Try each destination anchor; only an exact translated component
-            # is accepted.  Components are small and frame cells are bounded.
-            component_set = set(component)
-            component_set = set(component)
-            destination_sets = [set(item) for item in destination_components]
-            candidate_offsets = sorted(
-                (dx - component[0][0], dy - component[0][1])
-                for dx, dy in (destination_cells if before is None else {
-                    point for item in destination_sets for point in item
-                })
-            )
-            matches: list[tuple[int, int]] = []
-            for offset in candidate_offsets:
-                translated = {(x + offset[0], y + offset[1]) for x, y in component_set}
-                if before is None:
-                    valid = translated <= destination_cells
-                else:
-                    valid = any(translated == item for item in destination_sets)
-                if valid:
-                    matches.append(offset)
-            if len(set(matches)) != 1 and before is not None and after is not None:
-                # Unchanged cells of the same colour can join the changed
-                # component in a full-frame connected-component view.  Fall
-                # back to the changed source/destination sets; this still
-                # requires an exact translated shape and therefore does not
-                # guess through an incomplete delta.
-                source_components = _connected_cells(source_cells)
-                destination_components = _connected_cells(destination_cells)
-                destination_sets = [set(item) for item in destination_components]
-                matches = []
-                for fallback_component in source_components:
-                    component_set = set(fallback_component)
-                    candidate_offsets = sorted(
-                        (dx - fallback_component[0][0], dy - fallback_component[0][1])
-                        for dx, dy in destination_cells
+            for source_component in source_components:
+                source_set = set(source_component)
+                for destination_component in destination_components:
+                    destination_set = set(destination_component)
+                    dx = destination_component[0][0] - source_component[0][0]
+                    dy = destination_component[0][1] - source_component[0][1]
+                    translated = {(x + dx, y + dy) for x, y in source_set}
+                    if translated != destination_set:
+                        continue
+                    # The complete component delta must match this motion;
+                    # this rejects merges, splits, and partial fragments.
+                    if source_set - destination_set != source_cells & source_set:
+                        continue
+                    if destination_set - source_set != destination_cells & destination_set:
+                        continue
+                    min_x = min(x for x, _ in source_component)
+                    min_y = min(y for _, y in source_component)
+                    shape = tuple(sorted(
+                        ((x - min_x, y - min_y) for x, y in source_component),
+                        key=lambda cell: (cell[1], cell[0]),
+                    ))
+                    pair_matches.setdefault((source, clear), []).append(
+                        (
+                            shape, dx, dy,
+                            (source_cells & source_set) | (destination_cells & destination_set),
+                        )
                     )
-                    local_matches = []
-                    for offset in candidate_offsets:
-                        translated = {(x + offset[0], y + offset[1]) for x, y in component_set}
-                        if any(translated == set(item) for item in destination_components):
-                            local_matches.append(offset)
-                    if len(set(local_matches)) == 1:
-                        matches = local_matches
-                        component = fallback_component
-                        break
-            if len(set(matches)) != 1:
+                    valid_pairs.add((source, clear))
+
+        # A colour swap can be represented in both directions.  There is no
+        # semantic evidence for choosing one, so retain no model at all.
+        if any((clear, source) in valid_pairs for source, clear in valid_pairs):
+            return (), False
+        for (source, clear), matches in sorted(pair_matches.items()):
+            for shape, dx, dy, match_coverage in matches:
+                descriptors.append((source, clear, shape, dx, dy))
+                covered.update(match_coverage)
+    else:
+        # Without full frames there is no reliable geometry.  Keep the
+        # conservative behavior: only emit a unique changed-cell translation
+        # and reject a direction when its reverse is equally plausible.
+        for (source, clear), source_cells in sorted(by_pair.items()):
+            destination_cells = by_pair.get((clear, source))
+            if source == clear or not source_cells or not destination_cells:
                 continue
-            dx, dy = matches[0]
-            translated = {(x + dx, y + dy) for x, y in component_set}
-            # Avoid treating a source component as motion when a separate
-            # destination component is left unexplained by this pairing.
-            if before is None:
-                if not translated <= destination_cells:
+            if (clear, source) in by_pair and (clear, source) < (source, clear):
+                continue
+            source_parts = _connected_cells(source_cells)
+            destination_parts = _connected_cells(destination_cells)
+            for source_component in source_parts:
+                source_set = set(source_component)
+                matches: set[tuple[int, int]] = set()
+                for destination_component in destination_parts:
+                    destination_set = set(destination_component)
+                    dx = destination_component[0][0] - source_component[0][0]
+                    dy = destination_component[0][1] - source_component[0][1]
+                    if {(x + dx, y + dy) for x, y in source_set} == destination_set:
+                        matches.add((dx, dy))
+                if len(matches) != 1:
                     continue
-            elif not any(translated == item for item in destination_sets):
-                continue
-            min_x = min(x for x, _ in component)
-            min_y = min(y for _, y in component)
-            shape = tuple(sorted(
-                ((x - min_x, y - min_y) for x, y in component),
-                key=lambda cell: (cell[1], cell[0]),
-            ))
-            descriptors.append((source, clear, shape, dx, dy))
-            covered.update(component_set & source_cells)
-            covered.update(translated & destination_cells)
+                dx, dy = next(iter(matches))
+                min_x = min(x for x, _ in source_component)
+                min_y = min(y for _, y in source_component)
+                shape = tuple(sorted(
+                    ((x - min_x, y - min_y) for x, y in source_component),
+                    key=lambda cell: (cell[1], cell[0]),
+                ))
+                descriptors.append((source, clear, shape, dx, dy))
+                covered.update(source_set)
+                covered.update({(x + dx, y + dy) for x, y in source_set})
     grouped: dict[tuple[int, int, tuple[tuple[int, int], ...], int, int], int] = {}
     for descriptor in descriptors:
         grouped[descriptor] = grouped.get(descriptor, 0) + 1

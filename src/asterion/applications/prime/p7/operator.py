@@ -747,6 +747,7 @@ class _P7BrokerClient:
                     value,
                     key=lambda item: (
                         0 if item.get("status") == "hypothesis" else 1,
+                        0 if "record_hypothesis" in item else 1,
                         0 if "compiled_mechanism" in item else 1,
                         -int(item.get("support_count", 0)),
                         str(item.get("key", "")),
@@ -764,6 +765,12 @@ class _P7BrokerClient:
                     }
                     if "compiled_mechanism" in item and not compact:
                         candidate["compiled_mechanism"] = item["compiled_mechanism"]
+                    if "record_hypothesis" in item and not compact:
+                        candidate["record_hypothesis"] = item["record_hypothesis"]
+                        # The submission already contains the complete spec.
+                        # Preserve it ahead of a duplicate model body.
+                        if len(json.dumps(candidate, separators=(",", ":"), ensure_ascii=False).encode()) > 8190:
+                            candidate.pop("compiled_mechanism", None)
                     compact.append(candidate)
                     if len(json.dumps(compact, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
                         compact.pop()
@@ -2742,6 +2749,7 @@ async def run_live(
     diagnostics["offline_optimization_enabled"] = offline_optimization_enabled
     diagnostics["playbook_loaded"] = playbook_loaded
     diagnostics["playbook_saved"] = False
+    diagnostics["replayed_prefix_actions"] = 0 if prefix is None else len(prefix.transitions)
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",
@@ -2884,6 +2892,7 @@ async def run_live(
                     )
                     diagnostics["retrodiction_status"] = retrodiction["status"]
                     diagnostics["retrodiction_reasons"] = list(retrodiction.get("reasons", ()))
+                    diagnostics["experience"] = broker_value.experience_diagnostics()
                     diagnostics["conflict_count"] = (
                         0 if world_snapshot is None else len(world_snapshot.conflicts)
                     )

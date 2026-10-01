@@ -311,6 +311,44 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertTrue(effect.motion_complete)
         self.assertEqual((effect.motions[0].dx, effect.motions[0].dy), (1, 0))
 
+    def test_motion_direction_uses_geometry_instead_of_color_order(self) -> None:
+        for object_color, background_color in ((9, 12), (12, 9)):
+            before = tuple(
+                tuple(object_color if x in (2, 3) and y in (1, 2) else background_color for x in range(8))
+                for y in range(4)
+            )
+            after = tuple(
+                tuple(object_color if x in (3, 4) and y in (1, 2) else background_color for x in range(8))
+                for y in range(4)
+            )
+            first, second = records(action=ArcAction("ACTION1"), before=before, after=after)
+            effect = extract_action_effect(first, second)
+            with self.subTest(object_color=object_color, background_color=background_color):
+                self.assertEqual(len(effect.motions), 1)
+                self.assertEqual(effect.motions[0].source_value, object_color)
+                self.assertEqual(effect.motions[0].clear_value, background_color)
+                self.assertEqual((effect.motions[0].dx, effect.motions[0].dy), (1, 0))
+
+    def test_color_block_swap_is_ambiguous_and_stays_unmodeled(self) -> None:
+        first, second = records(
+            action=ArcAction("ACTION1"),
+            before=((9, 9, 12, 12),),
+            after=((12, 12, 9, 9),),
+        )
+        effect = extract_action_effect(first, second)
+        self.assertEqual(effect.motions, ())
+        self.assertFalse(effect.motion_complete)
+
+    def test_component_merge_is_not_reduced_to_a_partial_motion(self) -> None:
+        first, second = records(
+            action=ArcAction("ACTION1"),
+            before=((0, 7, 7, 0, 7, 7, 0),),
+            after=((0, 0, 7, 7, 7, 7, 0),),
+        )
+        effect = extract_action_effect(first, second)
+        self.assertEqual(effect.motions, ())
+        self.assertFalse(effect.motion_complete)
+
 
 if __name__ == "__main__":
     unittest.main()

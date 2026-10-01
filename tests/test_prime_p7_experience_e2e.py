@@ -153,11 +153,13 @@ class ExperienceEndToEndTests(unittest.TestCase):
         }])
         hint = broker.learning_hint()
 
-        self.assertEqual(hint["recommendation"], "ordinary_exploration")
+        self.assertEqual(hint["recommendation"], "inspect_candidate_and_probe")
         self.assertEqual(hint["compiled_candidates"], [])
         self.assertEqual(hint["current_candidate_count"], 0)
+        self.assertGreater(hint.get("cross_level_candidate_count", 0), 0)
         self.assertGreater(hint["stale_candidate_count"], 0)
-        self.assertEqual(hint["candidate_previews"], [])
+        self.assertTrue(hint["candidate_previews"])
+        self.assertEqual(hint["candidate_previews"][0]["scope"], "cross-level-prior")
 
     def test_observation_surfaces_compiled_learning_hint_without_route_authority(self) -> None:
         broker = ArcBroker(engine=_TranslationEngine())

@@ -308,6 +308,13 @@ class ArcBroker:
         # can query this through the broker API to avoid repeating probes.
         self._tried_actions: dict[tuple[int, str, tuple[tuple[str, int], ...] | None], int] = {}
         self._experience_inducer = ExperienceInducer(win_levels=game.win_levels)
+        # Private counters make a live run auditable: learned evidence,
+        # hypothesis probes, and planner use are reported separately from
+        # primitive action counts.
+        self._model_search_calls = 0
+        self._model_search_found = 0
+        self._prediction_matches = 0
+        self._prediction_mismatches = 0
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -400,7 +407,6 @@ class ArcBroker:
 
     def mechanism_candidates(self) -> tuple[dict[str, object], ...]:
         """Return candidate lifecycle and evidence without execution authority."""
-
         current = []
         for candidate in self._experience_inducer.candidates():
             item: dict[str, object] = {
@@ -420,6 +426,13 @@ class ArcBroker:
             compiled = compile_effect_hypothesis(candidate)
             if compiled is not None:
                 item["compiled_mechanism"] = compiled.to_mapping()
+                payload = self._record_hypothesis_payload(
+                    candidate.key,
+                    item["compiled_mechanism"],
+                    item["action"],
+                )
+                if payload is not None:
+                    item["record_hypothesis"] = payload
             current.append(item)
         seen = {item["key"] for item in current}
         for fact in self._playbook.candidate_summaries:
@@ -434,7 +447,16 @@ class ArcBroker:
             # validate it against the fresh frame; it never grants execution
             # authority or bypasses record_hypothesis/retrodiction.
             restored_status = "hypothesis" if same_level and status == "hypothesis" else "stale"
-            current.append({**value, "status": restored_status, "source": "playbook"})
+            restored = {**value, "status": restored_status, "source": "playbook"}
+            if restored_status == "hypothesis" and isinstance(value.get("compiled_mechanism"), Mapping):
+                payload = self._record_hypothesis_payload(
+                    str(value.get("key", "")),
+                    value["compiled_mechanism"],
+                    value.get("action"),
+                )
+                if payload is not None:
+                    restored["record_hypothesis"] = payload
+            current.append(restored)
         bundle = self._compiled_induced_mechanism()
         bundle_item: dict[str, object] | None = None
         if bundle is not None:
@@ -461,9 +483,10 @@ class ArcBroker:
         # Put the compact, current induced bundle first.  A candidate response
         # may share the worker's bounded output budget with large evidence
         # fields; the reusable summary must not be hidden at the tail.
+        cross_level = list(self._cross_level_candidate_items())
         stale = [item for item in current if item.get("source") == "playbook"]
         live = [item for item in current if item.get("source") != "playbook"]
-        ordered = ([] if bundle_item is None else [bundle_item]) + live + stale
+        ordered = ([] if bundle_item is None else [bundle_item]) + live + cross_level + stale
         return tuple(ordered[:64])
 
     def _persisted_candidates(self) -> tuple[dict[str, object], ...]:
@@ -538,6 +561,126 @@ class ArcBroker:
                 continue
         return tuple(result)
 
+    def _record_hypothesis_payload(
+        self, candidate_key: str, compiled: object, action: object,
+    ) -> dict[str, object] | None:
+        """Build a schema-valid current-frame probe envelope."""
+
+        if not isinstance(compiled, Mapping) or not isinstance(action, Mapping):
+            return None
+        name = action.get("name")
+        raw_data = action.get("data")
+        if type(name) is not str or not isinstance(raw_data, Mapping):
+            return None
+        if name not in self._current.available_actions:
+            return None
+        try:
+            data = tuple(sorted((key, value) for key, value in raw_data.items()))
+            if any(type(key) is not str or type(value) is not int for key, value in data):
+                return None
+            spec = MechanismSpec.from_mapping(compiled)
+            prediction = spec.predict(
+                frame=self._current.frame[-1], action=ArcAction(name, data),
+                level=self._current.levels_completed, state=self._current.state,
+                entities=self._confirmed_entity_values(),
+            )
+            if prediction.status != "predicted" or prediction.frame is None:
+                return None
+            expected = {"frame_sha256": digest(prediction.frame)}
+            if not self._guard_probe_distinguishes(expected):
+                return None
+            return {
+                "layer": "mechanics",
+                "key": f"experience.probe.{digest(candidate_key).removeprefix('sha256:')[:32]}",
+                "value": {
+                    "mechanism": spec.to_mapping(),
+                    "probe": {"action": {"name": name, "data": dict(data)}, "expect": expected},
+                    "dependencies": [],
+                },
+            }
+        except (TypeError, ValueError, ArcPredictionError):
+            return None
+
+    @staticmethod
+    def _generalize_level_guard(compiled: object) -> dict[str, object] | None:
+        """Turn a prior-level rule into a probe-only game semantic prior."""
+
+        if not isinstance(compiled, Mapping):
+            return None
+        try:
+            spec = MechanismSpec.from_mapping(compiled)
+            rules = []
+            changed = False
+            for rule in spec.to_mapping()["rules"]:
+                guards = [guard for guard in rule["guards"] if guard["op"] != "level_is"]
+                changed = changed or len(guards) != len(rule["guards"])
+                rules.append({**rule, "guards": guards})
+            if not changed:
+                return None
+            return {**spec.to_mapping(), "revision": spec.revision + 1, "rules": rules}
+        except (TypeError, ValueError, KeyError):
+            return None
+
+    def _cross_level_candidate_items(self) -> tuple[dict[str, object], ...]:
+        """Expose prior-level mechanics as current-frame, probe-only priors."""
+
+        sources: list[dict[str, object]] = []
+        seen: set[str] = set()
+        for candidate in self._experience_inducer.candidates():
+            if candidate.level >= self._current.levels_completed or candidate.status != "hypothesis":
+                continue
+            compiled = compile_effect_hypothesis(candidate)
+            if compiled is None:
+                continue
+            key = candidate.key
+            sources.append({
+                "key": key, "level": candidate.level,
+                "action": {"name": candidate.action, "data": dict(candidate.data)},
+                "support_count": candidate.support_count,
+                "evidence_sequences": list(candidate.evidence_sequences[-8:]),
+                "compiled_mechanism": compiled.to_mapping(), "source": "history",
+            })
+            seen.add(key)
+        for fact in self._playbook.candidate_summaries:
+            value = fact.value
+            if not isinstance(value, Mapping):
+                continue
+            key, level = value.get("key"), value.get("level")
+            action, compiled = value.get("action"), value.get("compiled_mechanism")
+            if (
+                type(key) is not str or key in seen or type(level) is not int
+                or level >= self._current.levels_completed or value.get("status") != "hypothesis"
+                or not isinstance(action, Mapping) or not isinstance(compiled, Mapping)
+            ):
+                continue
+            sources.append({
+                "key": key, "level": level, "action": dict(action),
+                "support_count": value.get("support_count", 0),
+                "evidence_sequences": list(value.get("evidence_sequences", ()))[:8],
+                "compiled_mechanism": dict(compiled), "source": "playbook",
+            })
+            seen.add(key)
+        result: list[dict[str, object]] = []
+        for source in sources:
+            generalized = self._generalize_level_guard(source["compiled_mechanism"])
+            if generalized is None:
+                continue
+            key = f"experience.cross-level.{digest((source['key'], self._current.levels_completed)).removeprefix('sha256:')[:32]}"
+            payload = self._record_hypothesis_payload(key, generalized, source["action"])
+            if payload is None:
+                continue
+            result.append({
+                "key": key, "level": self._current.levels_completed,
+                "prior_level": source["level"], "scope": "cross-level-prior",
+                "action": source["action"],
+                "action_family": "click" if source["action"].get("name") == "ACTION6" else "keyboard",
+                "status": "hypothesis", "support_count": source["support_count"],
+                "evidence_sequences": source["evidence_sequences"],
+                "compiled_mechanism": generalized, "record_hypothesis": payload,
+                "source": source["source"],
+            })
+        return tuple(sorted(result, key=lambda item: (-int(item["support_count"]), str(item["key"]))))
+
     def _compiled_induced_mechanism(self) -> MechanismSpec | None:
         """Combine non-conflicting induced rules into one advisory model."""
 
@@ -599,6 +742,7 @@ class ArcBroker:
             item for item in persisted_current
             if item.get("key") not in current_keys
         )
+        cross_level_candidates = self._cross_level_candidate_items()
         all_candidate_keys = {
             candidate.key for candidate in candidates
         } | {
@@ -654,6 +798,15 @@ class ArcBroker:
                     "compiled_mechanism": dict(compiled),
                     "source": "playbook",
                 })
+        for item in cross_level_candidates[:4]:
+            candidate_previews.append({
+                "action": item["action"],
+                "status": "hypothesis",
+                "scope": "cross-level-prior",
+                "prior_level": item["prior_level"],
+                "support_count": item["support_count"],
+                "evidence_sequences": item["evidence_sequences"],
+            })
         compiled_candidates.sort(
             key=lambda item: (-int(item["support_count"]), str(item["key"]))
         )
@@ -680,14 +833,14 @@ class ArcBroker:
             key=lambda item: (-int(item["support_count"]), str(item["action"]))
         )
         probe_status = self.probe_plan().get("status")
-        if compiled_candidates and probe_status == "ready":
+        if (compiled_candidates and probe_status == "ready") or cross_level_candidates:
             recommendation = "inspect_candidate_and_probe"
         elif current_candidates or persisted_current:
             recommendation = "inspect_candidates"
         else:
             recommendation = "ordinary_exploration"
         simulator = self.simulator_status()
-        return {
+        result = {
             "recommendation": recommendation,
             "candidate_count": len(all_candidate_keys),
             "current_candidate_count": current_candidate_total,
@@ -700,6 +853,9 @@ class ArcBroker:
             },
             "execution_authority": "none",
         }
+        if cross_level_candidates:
+            result["cross_level_candidate_count"] = len(cross_level_candidates)
+        return result
 
     def probe_plan(self) -> dict[str, object]:
         """Suggest one current-state probe; never dispatch it."""
@@ -793,6 +949,7 @@ class ArcBroker:
         """
 
         self._require_open()
+        self._model_search_calls += 1
         certificate = self._mechanism_certificate
         spec = self._mechanism_spec
         if spec is None or certificate is None or not certificate.planner_eligible:
@@ -835,6 +992,8 @@ class ArcBroker:
                 "start": None,
             }
         projection = result.projection()
+        if projection.get("status") == "found":
+            self._model_search_found += 1
         projection.update({
             "model_digest": certificate.model_digest,
             "certificate_records": certificate.record_count,
@@ -843,6 +1002,42 @@ class ArcBroker:
             "candidate_action_count": len(actions),
         })
         return projection
+
+    def experience_diagnostics(self) -> dict[str, object]:
+        """Return bounded counters showing whether experience was reusable."""
+
+        candidates = self._experience_inducer.candidates()
+        persisted = self._persisted_candidates()
+        current_level = self._current.levels_completed
+        current = sum(1 for item in candidates if item.level == current_level)
+        current += sum(
+            1 for item in persisted
+            if item.get("level") == current_level and item.get("status") == "hypothesis"
+        )
+        all_keys = {item.key for item in candidates}
+        all_keys.update(item["key"] for item in persisted if isinstance(item.get("key"), str))
+        status_counts = {
+            status: sum(1 for item in candidates if item.status == status)
+            for status in ("hypothesis", "boundary", "contradicted")
+        }
+        certificate = self._mechanism_certificate
+        return {
+            "effects_count": len(self._experience_inducer.effects()),
+            "candidate_count": len(all_keys),
+            "current_candidate_count": current,
+            "stale_candidate_count": max(0, len(all_keys) - current),
+            "candidate_status_counts": status_counts,
+            "probes_submitted": len(self._probe_tokens),
+            "probe_pending": self._pending_probe is not None,
+            "planner_eligible": bool(certificate is not None and certificate.planner_eligible),
+            "certificate_records": 0 if certificate is None else certificate.record_count,
+            "model_search_calls": self._model_search_calls,
+            "model_search_found": self._model_search_found,
+            "current_level_actions": self._level_gameplay_actions,
+            "primitive_actions": self._actions_dispatched,
+            "prediction_matches": self._prediction_matches,
+            "prediction_mismatches": self._prediction_mismatches,
+        }
 
     def _model_search_actions(self) -> tuple[dict[str, object], ...]:
         """Build a bounded, evidence-backed action set for model search."""
@@ -1577,6 +1772,7 @@ class ArcBroker:
                 append_feedback(record, stop_reason)
                 break
             if mismatch is not None:
+                self._prediction_mismatches += 1
                 stop_reason = "prediction-mismatch"
                 conflict = self._record_model_conflict(record.sequence, "prediction-mismatch")
                 append_feedback(record, stop_reason)
@@ -1617,6 +1813,8 @@ class ArcBroker:
                 stop_reason = "action-cap"
                 append_feedback(record, stop_reason)
                 break
+            if expected:
+                self._prediction_matches += 1
             append_feedback(record, "matched")
         result = ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
         return {
