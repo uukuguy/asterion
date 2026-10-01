@@ -395,6 +395,8 @@ class GameMechanicsStore:
         _id(mechanism_id, "mechanism_id")
         if mechanism_id in self._records:
             raise ValueError("duplicate mechanism id")
+        if len(self._records) >= _MAX_RECORDS:
+            raise ValueError("mechanism record cap exceeded")
         if level is not None:
             if levels is not None:
                 raise ValueError("level and levels are mutually exclusive")
