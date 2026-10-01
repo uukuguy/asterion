@@ -3467,3 +3467,4 @@
 - 03:54 Prime tool registry design committed; defines generic registry, P7 injection, drift checks, and independent review gate [5a3b8bc9]
 - 03:58 Implementation plan committed; sequences registry, P7 injection, runtime split, TS bundle parity, verification, and independent review [COMMIT]
 - 04:00 Plan and journal commits finalized; implementation can proceed from the approved task sequence [f8476e37, 91b31e04]
+- 04:08 Generic immutable Prime application tool registry added with validation and capability matching [863368ba]
