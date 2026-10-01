@@ -3439,3 +3439,4 @@
 - 2026-10-01 修复长期 Playbook 经验合并超 256KB 导致 playbook_saved=false，保留高价值近期效果与候选 [d617deda]
 - 2026-10-01 全量回归与文档检查通过：3591 tests OK（5 skipped），259 份 Markdown / 62 个本地链接检查通过；经验机制修复未破坏既有协议与运行边界。
 - 2026-10-01 完成经验晋升闭环：重复确定性转移自动形成 evidence-scoped confirmed model，confirmed Playbook 可跨运行恢复并自动触发模型搜索；补齐帧几何拆分歧义拒绝、L1→L2 合成闭环与 live 自动搜索测试（聚焦 129 项通过）。
+- 2026-10-01 全局复审明确能力边界：合成关卡已验证候选→confirmed model→model_search→act_checked→Playbook 热启动；SP80 实跑尚未形成 confirmed model，复杂运动仍受 effect 表达与上下文分叉限制，不能把候选或历史账本误报为已学会规则。
