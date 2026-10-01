@@ -6,7 +6,7 @@ import tempfile
 import json
 import unittest
 
-from asterion.applications.prime.p7.broker import ArcBroker
+from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.applications.prime.p7.mechanism_model import MechanismSpec
 from asterion.applications.prime.p7.operator import _P7BrokerClient
@@ -208,8 +208,13 @@ class ExperienceLearningTests(unittest.TestCase):
         self.assertEqual(search["status"], "found")
         self.assertEqual(search["plan"][0]["action"], {"name": "ACTION2", "data": {}})
         self.assertEqual(tuple(warm_engine.calls), calls_before_search)
-        completed = warm.act_checked(search["plan"])
+        stale_context = dict(search["context"])
+        stale_context["prefix_digest"] = "sha256:" + "0" * 64
+        with self.assertRaises(ArcBrokerError):
+            warm.act_checked({"plan": search["plan"], "context": stale_context})
+        completed = warm.act_checked({"plan": search["plan"], "context": search["context"]})
         self.assertEqual(completed["stop_reason"], "level-advanced")
+        self.assertTrue(completed["plan_context_used"])
         self.assertEqual(completed["observation"].levels_completed, 1)
         self.assertEqual(warm_engine.calls, ["ACTION2"])
 

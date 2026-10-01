@@ -80,7 +80,11 @@ The broker also performs automatic promotion for repeated, deterministic
 action effects. When ``p7_simulator_status`` reports ``confirmed_model=true``,
 that model is already evidence-backed; the initial context may contain an
 ``Automatic verified model plan``. Execute that checked plan unchanged with
-``p7_act_checked`` before starting fresh exploration. This automatic path is
+``p7_act_checked`` before starting fresh exploration. Prefer passing the full
+search result as ``{"plan": result["plan"], "context": result["context"]}``;
+the broker then verifies that the model, WorldMap revision, current frame and
+history prefix are still the same. A plain action list remains valid for
+ordinary checked exploration. This automatic path is
 separate from visual-object promotion and does not require the model to
 discover a registration tool first.
 

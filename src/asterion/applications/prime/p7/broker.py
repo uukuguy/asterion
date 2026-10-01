@@ -1145,6 +1145,16 @@ class ArcBroker:
             "certificate_prefix_digest": certificate.prefix_digest,
             "target_level": self._game.target_level,
             "candidate_action_count": len(actions),
+            "context": {
+                "game_id": self._game.game_id,
+                "seed": self._game.seed,
+                "win_levels": self._game.win_levels,
+                "model_digest": certificate.model_digest,
+                "coverage": certificate.coverage,
+                "world_model_version": certificate.world_model_version,
+                "prefix_digest": certificate.prefix_digest,
+                "frame_sha256": digest(self._current.frame[-1]),
+            },
         })
         return projection
 
@@ -1985,6 +1995,30 @@ class ArcBroker:
     ) -> dict[str, object]:
         records = self._bound_history()
         self._require_open()
+        plan_context: Mapping[str, object] | None = None
+        if isinstance(plan, Mapping):
+            if set(plan) != {"plan", "context"} or not isinstance(plan.get("plan"), list) or not isinstance(plan.get("context"), Mapping):
+                raise ArcBrokerError("unavailable")
+            plan_context = cast(Mapping[str, object], plan["context"])
+            plan = plan["plan"]
+            certificate = self._mechanism_certificate
+            world = self._world_model.snapshot if self._world_model is not None else None
+            expected_context = {
+                "game_id": self._game.game_id,
+                "seed": self._game.seed,
+                "win_levels": self._game.win_levels,
+                "model_digest": None if certificate is None else certificate.model_digest,
+                "coverage": None if certificate is None else certificate.coverage,
+                "world_model_version": None if world is None else world.version,
+                "prefix_digest": history_prefix_digest(records),
+                "frame_sha256": digest(self._current.frame[-1]),
+            }
+            if (
+                certificate is None
+                or not certificate.planner_eligible
+                or dict(plan_context) != expected_context
+            ):
+                raise ArcBrokerError("unavailable")
         if type(plan) is not list or not 1 <= len(plan) <= 20:
             raise ArcBrokerError("unavailable")
         try:
@@ -2163,6 +2197,7 @@ class ArcBroker:
             "unexecuted_count": len(plan) - result.applied_count,
             "available_actions": list(self._current.available_actions),
             "invalid_action": unavailable_action,
+            "plan_context_used": plan_context is not None,
             "retrodiction": {
                 **self.retrodiction_status(),
             },
