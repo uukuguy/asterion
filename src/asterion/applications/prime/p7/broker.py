@@ -657,6 +657,25 @@ class ArcBroker:
         compiled_candidates.sort(
             key=lambda item: (-int(item["support_count"]), str(item["key"]))
         )
+        # The hint is repeated in every observation.  Keep large compiled
+        # patterns in the on-demand mechanism_candidates tool instead of
+        # replaying them into every model turn.  Small synthetic mechanisms
+        # remain inline for a useful bounded fast path.
+        bounded_compiled: list[dict[str, object]] = []
+        for item in compiled_candidates[:4]:
+            encoded = json.dumps(item, ensure_ascii=False, separators=(",", ":")).encode()
+            if len(encoded) <= 2048:
+                bounded_compiled.append(item)
+            else:
+                bounded_compiled.append({
+                    "key": item["key"],
+                    "action": item["action"],
+                    "support_count": item["support_count"],
+                    "evidence_sequences": item["evidence_sequences"],
+                    "compiled_mechanism_omitted": True,
+                    "compiled_mechanism_digest": digest(item),
+                    **({"source": item["source"]} if "source" in item else {}),
+                })
         candidate_previews.sort(
             key=lambda item: (-int(item["support_count"]), str(item["action"]))
         )
@@ -674,7 +693,7 @@ class ArcBroker:
             "current_candidate_count": current_candidate_total,
             "stale_candidate_count": len(all_candidate_keys) - current_candidate_total,
             "candidate_previews": candidate_previews[:4],
-            "compiled_candidates": compiled_candidates[:4],
+            "compiled_candidates": bounded_compiled,
             "simulator": {
                 "status": simulator["status"],
                 "confirmed_model": simulator["confirmed_model"],

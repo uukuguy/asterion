@@ -738,7 +738,37 @@ class _P7BrokerClient:
         try:
             value = list(self._broker.mechanism_candidates())
             if len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
-                return value[-16:]
+                # Prefer current hypotheses and compiled proposals.  The
+                # full signature is diagnostic only and can consume the
+                # entire model-tool budget, so drop it from the bounded
+                # fallback while retaining one complete compiled proposal.
+                compact: list[dict[str, object]] = []
+                ordered = sorted(
+                    value,
+                    key=lambda item: (
+                        0 if item.get("status") == "hypothesis" else 1,
+                        0 if "compiled_mechanism" in item else 1,
+                        -int(item.get("support_count", 0)),
+                        str(item.get("key", "")),
+                    ),
+                )
+                for item in ordered:
+                    candidate = {
+                        key: item[key]
+                        for key in (
+                            "key", "level", "action_family", "action",
+                            "status", "support_count", "evidence_sequences",
+                            "conflict_sequences", "source",
+                        )
+                        if key in item
+                    }
+                    if "compiled_mechanism" in item and not compact:
+                        candidate["compiled_mechanism"] = item["compiled_mechanism"]
+                    compact.append(candidate)
+                    if len(json.dumps(compact, separators=(",", ":"), ensure_ascii=False).encode()) > 8192:
+                        compact.pop()
+                        break
+                return compact
             return value
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
