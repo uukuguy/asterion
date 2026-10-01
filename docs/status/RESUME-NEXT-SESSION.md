@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-02 01:52. Session remains active. Recovery synchronization is complete; this is not a final handoff.
+> Updated: 2026-10-02 02:05. Session remains active. Recovery synchronization and remote push are complete; this is not a final handoff.
 
 ## TL;DR
 
@@ -21,6 +21,7 @@
 - Fixed the Unix worker bridge whitelist so `observation_state`, `game_mechanics`, and `counterfactual_search` are callable through the actual socket protocol.
 - Regression coverage now exercises all three calls without dispatching `act` or `act_checked`.
 - `make lint`, `make docs-check`, `git diff --check`, and the focused P7 suite (165 tests) pass. Existing asyncio `ResourceWarning` messages do not change the successful result.
+- Remote `origin/main` is synchronized at `efaece6d`; no unpushed commits or working-tree changes remain.
 
 ## Recovered durable work
 
@@ -33,9 +34,8 @@
 
 ## Next steps (immediate)
 
-1. Push the committed bridge fix and synchronized state to `origin/main`.
-2. Resume pure P7 SP80 with `offline_optimization_enabled=false`; track current-level actions, candidate lifecycle, confirmed model, simulator status, prediction matches/conflicts, and whether persistent memory changes the next decision.
-3. Compare a cold-start run with a warm-start run before claiming that the agent becomes more skilled through repetition.
+1. Resume pure P7 SP80 with `offline_optimization_enabled=false`; track current-level actions, candidate lifecycle, confirmed model, simulator status, prediction matches/conflicts, and whether persistent memory changes the next decision.
+2. Compare a cold-start run with a warm-start run before claiming that the agent becomes more skilled through repetition.
 
 ## Do not repeat these paths
 
