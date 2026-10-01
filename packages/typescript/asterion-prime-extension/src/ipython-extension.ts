@@ -4,13 +4,14 @@ import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
-  Any as TypeAny,
   Array as TypeArray,
+  Integer as TypeInteger,
   Null as TypeNull,
   Number as TypeNumber,
   Object as TypeObject,
   String as TypeString,
   Union as TypeUnion,
+  Optional as TypeOptional,
   type Static,
 } from "typebox";
 
@@ -360,10 +361,10 @@ export function createIpythonBridge(
 const EMPTY_PARAMETERS = TypeObject({}, { additionalProperties: false });
 const LEVEL_PARAMETERS = TypeObject(
   {
-    level: TypeUnion([
-      TypeNumber({ minimum: 0 }),
+    level: TypeOptional(TypeUnion([
+      TypeInteger({ minimum: 0 }),
       TypeNull(),
-    ]),
+    ])),
   },
   { additionalProperties: false },
 );
@@ -382,7 +383,14 @@ const HYPOTHESIS_PARAMETERS = TypeObject(
   {
     layer: TypeString({ minLength: 1 }),
     key: TypeString({ minLength: 1 }),
-    value: TypeAny(),
+    value: TypeObject(
+      {
+        mechanism: TypeObject({}, { additionalProperties: true }),
+        probe: TypeObject({}, { additionalProperties: true }),
+        dependencies: TypeArray(TypeString()),
+      },
+      { additionalProperties: false },
+    ),
   },
   { additionalProperties: false },
 );

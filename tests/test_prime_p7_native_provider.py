@@ -14,6 +14,7 @@ from typing import AsyncIterator, cast
 
 from asterion.agents.prime.session import ASTERION_PRIME_LIMITS
 from asterion.agents.prime.trace import PrimeTraceRecorder
+from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.services.diagnostics import FailureDiagnostic
 from asterion.applications.discovery import (
     list_application_providers,
@@ -637,6 +638,49 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
 
             with self.assertRaises(RuntimeFactoryError):
                 asterion_prime_runtime_binding().factory(context)
+            self.assertTrue(launch.extension_lease.closed)
+
+    def test_runtime_binding_rejects_same_identity_with_incomplete_tool_registry(self) -> None:
+        from dataclasses import replace
+        from asterion.applications.prime.p7.runtime_binding import build_p7_runtime
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            broker = ArcBroker(engine=_Engine())
+            launch, trace = self._launch(root, broker)
+            bad_launch = replace(
+                launch,
+                tool_registry=PrimeApplicationToolRegistry(
+                    module_id=launch.tool_registry.module_id,
+                    capability_id=launch.tool_registry.capability_id,
+                    tool_names=("ipython",),
+                ),
+            )
+            ipython = PersistentIpythonHost(
+                worker=_Worker(), p7_client=p7_client_facade(broker)
+            )
+            context = RuntimeFactoryContext(
+                provider_id="prime-applications",
+                application_id="prime.arc-agi-3-solving",
+                application_version="1.0.0",
+                runtime_id="asterion.prime",
+                assembly_path=ASSEMBLY.resolve(),
+                options=p7_runtime_options(
+                    resolve_p7_runtime({
+                        "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
+                        "ASTERION_PRIME_PROVIDER": "openai-codex",
+                        "ASTERION_PRIME_MODEL": "gpt-6-sol",
+                    })
+                ),
+                host_services={
+                    "prime.arc-broker": broker,
+                    "prime.ipython": ipython,
+                    "prime.launch": bad_launch,
+                    "prime.private-trace": trace,
+                },
+            )
+            with self.assertRaises(RuntimeFactoryError):
+                build_p7_runtime(context)
             self.assertTrue(launch.extension_lease.closed)
 
     def test_runtime_factory_accepts_only_consistently_recorded_active_prefix(self) -> None:

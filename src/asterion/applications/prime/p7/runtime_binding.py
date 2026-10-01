@@ -25,6 +25,7 @@ from asterion.applications.prime.p7.gameplay_trace import (
     PrimeGameplayTraceError,
 )
 from asterion.applications.prime.p7.tool_registry import (
+    P7_APPLICATION_TOOL_NAMES,
     P7_TOOL_CAPABILITY_ID,
     P7_TOOL_MODULE_ID,
 )
@@ -484,6 +485,7 @@ def build_p7_runtime(
             or launch is None
             or declared != (provider, model)
             or not launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID)
+            or launch.tool_registry.allowed_tool_names != P7_APPLICATION_TOOL_NAMES
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
@@ -580,6 +582,7 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             or launch is None
             or declared != (provider, model)
             or not launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID)
+            or launch.tool_registry.allowed_tool_names != P7_APPLICATION_TOOL_NAMES
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)

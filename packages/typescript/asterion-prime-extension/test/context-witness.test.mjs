@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer, createConnection } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +14,24 @@ const command = "b".repeat(64);
 const authority = "c".repeat(64);
 const base = { protocol: "asterion.prime-context-witness/v1", launch_nonce: launch, command_nonce: command, authority_sha256: authority };
 const artifact = pathToFileURL(resolve("dist/ipython-extension.mjs")).href;
+// These tests exercise Pi's private compaction driver through the historical
+// Prime Agent checkout. That checkout was removed with the Prime Gateway
+// surface, and the installed Pi 0.99.x line no longer exposes the
+// `_performCompaction` seam used by the witness harness. Keep the protocol and
+// registration tests below active, but do not replace the missing mechanics
+// with a local fake.
+const historicalPiRoot = resolve("../../../../3th-party/prime-agent");
+const harnessPath = resolve("test/context-witness-harness.mjs");
+const historicalAgentSession = join(historicalPiRoot, "packages/coding-agent/dist/core/agent-session.js");
+const externalMechanicsSkip = !existsSync(historicalPiRoot)
+  ? "external Pi mechanics unavailable: the pinned 3th-party/prime-agent checkout is absent"
+  : !existsSync(harnessPath)
+    ? "external Pi mechanics unavailable: the compatibility harness is absent"
+    : !existsSync(historicalAgentSession)
+      ? "external Pi mechanics unavailable: the pinned AgentSession build is absent"
+    : !readFileSync(historicalAgentSession, "utf8").includes("_performCompaction")
+      ? "external Pi mechanics unavailable: the available AgentSession has no historical _performCompaction seam"
+      : false;
 // The native side is authoritative for the prompt material and delivers it on
 // the arm frame, so the shared fixture supplies it here too.
 const material = JSON.parse(readFileSync(
@@ -84,7 +102,7 @@ test("shared fixture has byte-for-byte TypeScript projection parity", () => {
   }
 });
 
-test("reject cancels before either real built-in summary callback or appendCompaction", async () => {
+test("reject cancels before either real built-in summary callback or appendCompaction", {skip: externalMechanicsSkip}, async () => {
   assert.equal(typeof extension.registerContextWitness,"function");
   const sockets=await pair();
   try {
@@ -103,7 +121,7 @@ test("reject cancels before either real built-in summary callback or appendCompa
   } finally{sockets.close();}
 });
 
-test("approve permits only Pi built-in summary then one persisted frame and ack", async () => {
+test("approve permits only Pi built-in summary then one persisted frame and ack", {skip: externalMechanicsSkip}, async () => {
   assert.equal(typeof extension.registerContextWitness,"function");
   const sockets=await pair();
   try {
@@ -127,7 +145,7 @@ test("approve permits only Pi built-in summary then one persisted frame and ack"
   } finally{sockets.close();}
 });
 
-test("bad decision frames cancel and permanently fence before mutation", async t => {
+test("bad decision frames cancel and permanently fence before mutation", {skip: externalMechanicsSkip}, async t => {
   assert.equal(typeof extension.registerContextWitness,"function");
   for(const kind of ["wrong-command","wrong-launch","wrong-authority","duplicate","malformed","oversized","closed","missing"]){
     await t.test(kind,async()=>{
@@ -153,7 +171,7 @@ test("bad decision frames cancel and permanently fence before mutation", async t
   }
 });
 
-test("short native source never pads or calls summary", async()=>{
+test("short native source never pads or calls summary", {skip: externalMechanicsSkip}, async()=>{
   assert.equal(typeof extension.registerContextWitness,"function");
   const sockets=await pair();
   try {const result=await run(sockets,{short:true});assert.equal(result.calls,0);assert.equal(result.appends,0);assert.deepEqual(result.order,[]);}
@@ -190,7 +208,7 @@ test("failed environment or tool registration closes the context descriptor", as
   }
 });
 
-test("proposal backpressure times out before summary or append",async()=>{
+test("proposal backpressure times out before summary or append", {skip: externalMechanicsSkip}, async()=>{
   const sockets=await pair();
   try{
     sockets.peer.pause();
@@ -201,7 +219,7 @@ test("proposal backpressure times out before summary or append",async()=>{
   }finally{sockets.close();}
 });
 
-test("missing post-mutation ack fences the observer",async()=>{
+test("missing post-mutation ack fences the observer", {skip: externalMechanicsSkip}, async()=>{
   const sockets=await pair();
   try{
     const running=run(sockets,{timeoutMs:150});

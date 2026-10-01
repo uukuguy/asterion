@@ -239,6 +239,18 @@ test("registers the mechanics evidence tool with a bounded empty schema", async 
   assert.deepEqual(calls, [["mechanics-1", "mechanics_prior", {} , undefined]]);
 });
 
+test("level queries and hypothesis registration expose the Python bridge contract", () => {
+  const tools = createAppLevelTools({ callMethod: async () => ({}) });
+  for (const name of ["p7_playbook", "p7_tried_actions", "p7_last_outcome_summary"]) {
+    const schema = tools.find((tool) => tool.name === name).parameters;
+    assert.equal(schema.required, undefined, name);
+    assert.equal(schema.properties.level.anyOf[0].type, "integer", name);
+  }
+  const hypothesis = tools.find((tool) => tool.name === "p7_record_hypothesis").parameters;
+  assert.deepEqual(hypothesis.properties.value.required, ["mechanism", "probe", "dependencies"]);
+  assert.equal(hypothesis.properties.value.additionalProperties, false);
+});
+
 test("rejects malformed requests before writing", async () => {
   const pair = await socketPair();
   try {
@@ -556,7 +568,7 @@ const WITNESS_PAYLOAD = {
   event: {
     type: "session_before_compact",
     preparation: {
-      settings: { enabled: false, reserveTokens: 4096, keepRecentTokens: 256 },
+      settings: { enabled: false, reserveTokens: 16384, keepRecentTokens: 256 },
       firstKeptEntryId: "entry-2",
       messagesToSummarize: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
       turnPrefixMessages: [],
