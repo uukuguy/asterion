@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import FrozenInstanceError
 import json
 import unittest
+from unittest.mock import patch
 
 
 class _Engine:
@@ -231,6 +232,86 @@ class TestNativeP7Broker(unittest.TestCase):
         projection = broker.playbook_projection()
         projection["mutated"] = True
         self.assertNotIn("mutated", broker.playbook_projection())
+
+    def test_world_evidence_reports_candidate_extraction_stage_and_exception_type(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        broker, _ = _broker()
+        broker.bind_history("diagnostic-candidate")
+        with patch(
+            "asterion.applications.prime.p7.broker.extract_action_effect",
+            side_effect=ValueError("secret prompt /private/path"),
+        ):
+            broker.act(("ACTION1",))
+
+        status = broker.retrodiction_status()
+        self.assertEqual(status["status"], "unavailable")
+        self.assertEqual(
+            status["reasons"][-1],
+            "history-validation-failed:candidate-extraction:ValueError",
+        )
+        self.assertNotIn("secret", status["reasons"][-1])
+        self.assertNotIn("/private/path", status["reasons"][-1])
+
+    def test_world_evidence_reports_persistence_stage_and_exception_type(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+
+        broker, _ = _broker()
+        broker.bind_history("diagnostic-persistence")
+        with patch.object(
+            broker,
+            "_persist_game_mechanics",
+            side_effect=TypeError("credential=secret"),
+        ):
+            broker.act(("ACTION1",))
+
+        self.assertEqual(
+            broker.retrodiction_status()["reasons"][-1],
+            "history-validation-failed:persistence:TypeError",
+        )
+
+    def test_world_evidence_reports_model_promotion_stage_and_exception_type(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        broker, engine = _broker()
+        broker = ArcBroker(
+            engine=engine,
+            world_model=WorldModelStore(engine.game_id, engine.seed, engine.win_levels),
+        )
+        broker.bind_history("diagnostic-promotion")
+        with patch.object(
+            broker,
+            "_try_auto_promote_model",
+            side_effect=ValueError("frame=secret"),
+        ):
+            broker.act(("ACTION1",))
+
+        self.assertEqual(
+            broker.retrodiction_status()["reasons"][-1],
+            "history-validation-failed:model-promotion:ValueError",
+        )
+
+    def test_world_evidence_reports_transition_model_stage_and_exception_type(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        broker, engine = _broker()
+        broker = ArcBroker(
+            engine=engine,
+            world_model=WorldModelStore(engine.game_id, engine.seed, engine.win_levels),
+        )
+        broker.bind_history("diagnostic-transition")
+        with patch(
+            "asterion.applications.prime.p7.broker.TransitionModel.from_history",
+            side_effect=ValueError("prompt=secret"),
+        ):
+            broker.act(("ACTION1",))
+
+        self.assertEqual(
+            broker.retrodiction_status()["reasons"][-1],
+            "history-validation-failed:transition-model:ValueError",
+        )
 
     def test_level_completion_is_persisted_as_progress_evidence(self) -> None:
         from asterion.applications.prime.p7.broker import ArcAction, ArcBroker

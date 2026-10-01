@@ -1935,12 +1935,19 @@ class ArcBroker:
             self._record_model_conflict(record.sequence, "probe-contradicted" if matches else "probe-expired")
 
     def _record_world_evidence(self, record: ArcHistoryRecord) -> None:
+        stage = "history-validation"
         try:
             records = self._bound_history()
             if len(records) >= 2:
+                stage = "candidate-extraction"
                 effect = extract_action_effect(records[-2], record)
                 self._experience_inducer.observe(effect)
+                stage = "persistence"
                 self._persist_game_mechanics(record)
+                if self._retrodiction_reasons and self._retrodiction_reasons[-1].startswith(
+                    "history-validation-failed:persistence:"
+                ):
+                    return
             if self._world_model is None:
                 return
             ref = EvidenceRef(
@@ -1950,6 +1957,7 @@ class ArcBroker:
                 summary_hash=record.after_state_sha256.removeprefix("sha256:"),
             )
             self._world_evidence.append(ref)
+            stage = "model-promotion"
             self._consume_probe(record, ref)
             if self._mechanism_spec is not None:
                 history = self._bound_history()
@@ -2012,6 +2020,7 @@ class ArcBroker:
                 else:
                     self._mechanism_certificate = certificate
             self._try_auto_promote_model(self._bound_history())
+            stage = "transition-model"
             level = self._world_model.current_level
             if record.levels_completed > level:
                 completion_reason = (
@@ -2064,12 +2073,35 @@ class ArcBroker:
             # generalized mechanism certificate.  Do not call this verified.
             if self._retrodiction_status not in {"verified", "conflict", "hypothesis"}:
                 self._retrodiction_status = "observed"
-        except (ArcPredictionError, ValueError):
-            self._transition_model = None
-            self._retrodiction_status = "unavailable"
-            self._retrodiction_reasons = [
-                *self._retrodiction_reasons[-15:], "history-validation-failed"
-            ]
+        except (ArcPredictionError, TypeError, ValueError) as error:
+            self._record_history_failure(stage, error)
+
+    def _record_history_failure(self, stage: str, error: Exception) -> None:
+        """Record a bounded public reason without exposing exception details."""
+
+        stages = {
+            "candidate-extraction", "persistence", "model-promotion",
+            "transition-model", "history-validation",
+        }
+        safe_stage = stage if stage in stages else "history-validation"
+        exception_type = type(error).__name__
+        if type(exception_type) is not str or not exception_type:
+            exception_type = "Exception"
+        safe_type = "".join(
+            character
+            if (
+                "A" <= character <= "Z"
+                or "a" <= character <= "z"
+                or "0" <= character <= "9"
+                or character in "._-"
+            )
+            else "_"
+            for character in exception_type
+        )[:48] or "Exception"
+        reason = f"history-validation-failed:{safe_stage}:{safe_type}"[:128]
+        self._transition_model = None
+        self._retrodiction_status = "unavailable"
+        self._retrodiction_reasons = [*self._retrodiction_reasons[-15:], reason]
 
     def _persist_game_mechanics(self, record: ArcHistoryRecord) -> None:
         """Mirror induced semantic evidence into the advisory game namespace.
@@ -2147,10 +2179,8 @@ class ArcBroker:
                             evidence=evidence,
                             levels=[candidate.level],
                         )
-            except (OSError, TypeError, ValueError):
-                self._retrodiction_reasons = [
-                    *self._retrodiction_reasons[-15:], "game-mechanics-persistence-unavailable"
-                ]
+            except (OSError, TypeError, ValueError) as error:
+                self._record_history_failure("persistence", error)
 
     def bind_history(self, run_id: str) -> None:
         if (
