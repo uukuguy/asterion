@@ -664,6 +664,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("no-discriminating-probe", P7_SOLVE_PROMPT)
         self.assertIn("do not invent coordinates", P7_SOLVE_PROMPT.lower())
         self.assertIn("current settled frame", P7_SOLVE_PROMPT)
+        self.assertIn("In either case, call ``p7_mechanism_candidates`` and", P7_SOLVE_PROMPT)
         self.assertIn("submit exactly one current-frame distinguishing probe", P7_SOLVE_PROMPT)
         self.assertIn("stop querying", P7_CONTINUE_PROMPT)
         self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())

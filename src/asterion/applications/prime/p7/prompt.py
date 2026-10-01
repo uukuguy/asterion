@@ -112,8 +112,9 @@ available; only an identity or evidence mismatch should stop a checked batch.
 When ``learning_hint.recommendation`` is ``inspect_candidates`` or
 ``inspect_candidate_and_probe``, the initial broker context already includes
 the current settled frame and the bounded hint; use them as the starting
-observation. For ``inspect_candidate_and_probe``, call
-``p7_mechanism_candidates`` and ``p7_probe_plan`` before a long batch. If the
+observation. In either case, call ``p7_mechanism_candidates`` and
+``p7_probe_plan`` before a long batch so persisted effects are actually
+considered. If the recommendation is ``inspect_candidate_and_probe`` and the
 probe plan is ``ready``, submit exactly one current-frame distinguishing probe
 and inspect its result before batching. If it exposes a ``compiled_mechanism``
 supported by at least two effects and the current action is otherwise ambiguous, prefer the
