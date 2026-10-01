@@ -10,7 +10,7 @@ from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.ipython_host import p7_client_facade
 from asterion.applications.prime.p7.playbook import load_playbook, save_playbook
 from asterion.applications.prime.p7.world_model import WorldModelStore
-from asterion.applications.prime.p7.experience_induction import ActionEffect, EffectMotion
+from asterion.applications.prime.p7.experience_induction import ActionEffect, EffectHypothesis, EffectMotion
 
 
 class _LearningEngine:
@@ -107,10 +107,29 @@ class ExperienceEndToEndTests(unittest.TestCase):
             ),),
             motion_complete=True,
         ))
+        long_key = "candidate-" + "x" * 2048
+        broker._experience_inducer._candidates[long_key] = EffectHypothesis(
+            key=long_key,
+            game_id=_LearningEngine.game_id,
+            seed=0,
+            level=0,
+            action_family="keyboard",
+            action="ACTION1",
+            data=(),
+            signature="s" * 2048,
+            status="hypothesis",
+            evidence_sequences=(1,),
+            conflict_sequences=(),
+            template=None,
+            win_levels=7,
+        )
 
         snapshot = broker.export_playbook(successful=False)
         effect = snapshot.effect_summaries[0].value
         self.assertTrue(effect["details_omitted"])
+        candidate = snapshot.candidate_summaries[0].value
+        self.assertTrue(candidate["details_omitted"])
+        self.assertTrue(candidate["key"].startswith("sha256:"))
         with tempfile.TemporaryDirectory() as directory:
             save_playbook(Path(directory), snapshot)
             loaded = load_playbook(Path(directory), snapshot.key)

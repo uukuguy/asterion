@@ -1037,6 +1037,12 @@ class ArcBroker:
             evidence = digest(candidate.key).removeprefix("sha256:")
             level = min(candidate.level, self._game.win_levels - 1)
             candidate_key = f"experience.candidate.{evidence[:32]}"
+            # Motion signatures can contain a full object shape and exceed the
+            # Playbook text bound.  Keep a stable compact identity for
+            # persistence; the action/evidence fields remain the useful prior.
+            persisted_candidate_id = (
+                candidate.key if len(candidate.key) <= 1024 else f"sha256:{evidence}"
+            )
             try:
                 compiled = compile_effect_hypothesis(candidate)
             except (TypeError, ValueError):
@@ -1045,7 +1051,7 @@ class ArcBroker:
                 # rather than aborting export of the whole Playbook.
                 compiled = None
             candidate_value = {
-                    "key": candidate.key,
+                    "key": persisted_candidate_id,
                     "level": candidate.level,
                     "action_family": candidate.action_family,
                     "action": {"name": candidate.action, "data": dict(candidate.data)},
@@ -1062,7 +1068,7 @@ class ArcBroker:
             except ValueError:
                 candidate_facts.append(CheckedFact(
                     "mechanics", candidate_key, {
-                        "key": candidate.key,
+                        "key": persisted_candidate_id,
                         "level": candidate.level,
                         "action_family": candidate.action_family,
                         "action": {"name": candidate.action, "data": dict(candidate.data)},
