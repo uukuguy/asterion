@@ -36,6 +36,26 @@ def effect_for(value: int):
 
 
 class ExperienceSimulatorTests(unittest.TestCase):
+    def test_unsupported_residual_candidate_is_not_compiled(self) -> None:
+        first = ArcHistoryRecord.initial(
+            game_id="game", seed=1, run_id="run", frame=((9, 12),),
+            levels_completed=0, state="NOT_FINISHED", after_state_sha256=digest("s0"),
+        )
+        second = ArcHistoryRecord.following(
+            first, action=ArcAction("ACTION1"),
+            before_state_sha256=first.after_state_sha256,
+            after_state_sha256=digest("s1"), frame=((12, 9),),
+            levels_completed=0, state="NOT_FINISHED",
+        )
+        effect = replace(extract_action_effect(first, second), motion_reason="unsupported-residual")
+        inducer = ExperienceInducer(win_levels=1)
+        inducer.observe(effect)
+        inducer.observe(replace(effect, sequence=2))
+
+        candidate = inducer.candidates()[0]
+        self.assertIn("unsupported-residual", candidate.refusal_reasons)
+        self.assertIsNone(compile_effect_hypothesis(candidate))
+
     def test_candidate_compiles_and_simulates_a_cell_edit(self) -> None:
         inducer = ExperienceInducer(win_levels=1)
         effect = effect_for(7)

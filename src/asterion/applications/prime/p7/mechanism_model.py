@@ -574,6 +574,11 @@ def compile_effect_hypothesis(hypothesis: object) -> MechanismSpec | None:
         return None
     if hypothesis.status != "hypothesis" or hypothesis.template is None:
         return None
+    # A candidate with an unexplained residual is diagnostic evidence only.
+    # Do not turn it into an advisory rule: the residual may encode an
+    # independent state transition that this pure effect model cannot express.
+    if "unsupported-residual" in hypothesis.refusal_reasons:
+        return None
     template = hypothesis.template
     if (
         hypothesis.support_count < 2
