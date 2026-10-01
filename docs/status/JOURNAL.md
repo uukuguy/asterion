@@ -3452,3 +3452,5 @@
 - 2026-10-01 持久化游戏级机制命名空间，支持跨关卡绑定、证据确认/冲突和原子落盘；读取保持 advisory-only [00b4544e]
 - 12:39 bounded hypothesis counterfactual simulator keeps confirmed and hypothesis branches separate, reports subgoal progress/conflicts, and never dispatches actions [63492b13]
 - 12:42 为反事实分支补充分歧标记，使同动作不同预测可在分支级诊断 [74f26d89]
+- 2026-10-01 限制游戏机制持久化记录数为 256，避免有界文件被无限增长 [b03b6368]
+- 12:46 修正反事实默认目标末级边界，最终级别必须预测 WIN 才算达成 [eb43b2ed]
