@@ -3436,3 +3436,4 @@
 - 10:35 hypothesis 探测失败改为返回安全 rejection reason，避免 worker 只能看到无原因的 client unavailable [9709a1a5]
 - 2026-10-01 采用完整帧几何推断、跨级 probe 先验和经验诊断计数；110 项 P7 聚焦回归通过 [75795c97]
 - 2026-10-01 设计文档补充跨级语义先验与“经验被复用”诊断判定标准 [24be8d8e]
+- 2026-10-01 修复长期 Playbook 经验合并超 256KB 导致 playbook_saved=false，保留高价值近期效果与候选 [d617deda]
