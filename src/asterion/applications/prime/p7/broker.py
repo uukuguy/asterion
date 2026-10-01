@@ -1944,15 +1944,7 @@ class ArcBroker:
                 effect = extract_action_effect(records[-2], record)
                 self._experience_inducer.observe(effect)
                 stage = "persistence"
-                previous_reason_count = len(self._retrodiction_reasons)
-                self._persist_game_mechanics(record)
-                if (
-                    len(self._retrodiction_reasons) > previous_reason_count
-                    and self._retrodiction_reasons[-1].startswith(
-                        "history-validation-failed:persistence:"
-                    )
-                ):
-                    persistence_failed = True
+                persistence_failed = not self._persist_game_mechanics(record)
             if self._world_model is None:
                 return
             ref = EvidenceRef(
@@ -2110,7 +2102,7 @@ class ArcBroker:
         self._retrodiction_status = "unavailable"
         self._retrodiction_reasons = [*self._retrodiction_reasons[-15:], reason]
 
-    def _persist_game_mechanics(self, record: ArcHistoryRecord) -> None:
+    def _persist_game_mechanics(self, record: ArcHistoryRecord) -> bool:
         """Mirror induced semantic evidence into the advisory game namespace.
 
         The persistent store is intentionally downstream of local induction:
@@ -2120,7 +2112,8 @@ class ArcBroker:
 
         store = self._game_mechanics_store
         if store is None:
-            return
+            return True
+        failed = False
         for candidate in self._experience_inducer.candidates():
             try:
                 mechanism_id = "induced." + digest({
@@ -2187,7 +2180,9 @@ class ArcBroker:
                             levels=[candidate.level],
                         )
             except (OSError, TypeError, ValueError) as error:
+                failed = True
                 self._record_history_failure("persistence", error)
+        return not failed
 
     def bind_history(self, run_id: str) -> None:
         if (

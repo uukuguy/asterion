@@ -310,6 +310,38 @@ class TestNativeP7Broker(unittest.TestCase):
             "history-validation-failed:persistence:ValueError",
         )
 
+    def test_internal_persistence_failure_is_detected_when_reason_list_is_full(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _HistoryEngine()
+        with tempfile.TemporaryDirectory() as directory:
+            store = GameMechanicsStore(
+                Path(directory), engine.game_id, engine.seed, engine.win_levels,
+            )
+            broker = ArcBroker(
+                engine=engine,
+                world_model=WorldModelStore(
+                    engine.game_id, engine.seed, engine.win_levels,
+                ),
+                game_mechanics_store=store,
+            )
+            broker.bind_history("diagnostic-persistence-full-reasons")
+            broker._retrodiction_reasons = ["prior-conflict"] * 16
+            with patch.object(store, "record", side_effect=ValueError("secret")):
+                broker.act(("ACTION1",))
+
+        self.assertEqual(len(broker.world_evidence()), 1)
+        self.assertIsNotNone(broker.transition_model())
+        status = broker.retrodiction_status()
+        self.assertEqual(status["status"], "unavailable")
+        self.assertEqual(len(status["reasons"]), 16)
+        self.assertEqual(
+            status["reasons"][-1],
+            "history-validation-failed:persistence:ValueError",
+        )
+
     def test_world_evidence_reports_model_promotion_stage_and_exception_type(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.world_model import WorldModelStore
