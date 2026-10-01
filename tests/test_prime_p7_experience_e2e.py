@@ -10,6 +10,7 @@ from asterion.applications.prime.p7.operator import _P7BrokerClient
 from asterion.applications.prime.p7.ipython_host import p7_client_facade
 from asterion.applications.prime.p7.playbook import load_playbook, save_playbook
 from asterion.applications.prime.p7.world_model import WorldModelStore
+from asterion.applications.prime.p7.experience_induction import ActionEffect, EffectMotion
 
 
 class _LearningEngine:
@@ -78,6 +79,43 @@ class _TransitionTranslationEngine(_TranslationEngine):
 
 
 class ExperienceEndToEndTests(unittest.TestCase):
+    def test_export_bounds_large_motion_detail_without_dropping_playbook(self) -> None:
+        broker = ArcBroker(engine=_LearningEngine())
+        broker.bind_history("large-motion-run")
+        frame_digest = "sha256:" + "a" * 64
+        broker._experience_inducer._effects.append(ActionEffect(
+            game_id=_LearningEngine.game_id,
+            seed=0,
+            run_id="large-motion-run",
+            sequence=1,
+            level=0,
+            levels_completed=0,
+            state="NOT_FINISHED",
+            action="ACTION1",
+            data=(),
+            before_state_sha256=frame_digest,
+            after_state_sha256=frame_digest,
+            before_frame_sha256=frame_digest,
+            after_frame_sha256=frame_digest,
+            changed_cell_count=300,
+            changed_cells=(),
+            changed_cells_omitted=300,
+            outcome="changed",
+            components=(),
+            motions=(EffectMotion(
+                7, 0, tuple((x, 0) for x in range(300)), 1, 0, 1,
+            ),),
+            motion_complete=True,
+        ))
+
+        snapshot = broker.export_playbook(successful=False)
+        effect = snapshot.effect_summaries[0].value
+        self.assertTrue(effect["details_omitted"])
+        with tempfile.TemporaryDirectory() as directory:
+            save_playbook(Path(directory), snapshot)
+            loaded = load_playbook(Path(directory), snapshot.key)
+            self.assertIsNotNone(loaded)
+
     def test_learning_hint_does_not_recommend_stale_level_candidates(self) -> None:
         source = ArcBroker(engine=_TranslationEngine())
         source.bind_history("learning-run")

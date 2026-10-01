@@ -988,8 +988,8 @@ class ArcBroker:
         for effect in self._experience_inducer.effects()[-256:]:
             evidence = effect.after_frame_sha256.removeprefix("sha256:")
             level = min(effect.level, self._game.win_levels - 1)
-            effect_facts.append(CheckedFact(
-                "mechanics", f"experience.effect.{digest((effect.run_id, effect.sequence, effect.after_frame_sha256)).removeprefix('sha256:')[:32]}", {
+            effect_key = f"experience.effect.{digest((effect.run_id, effect.sequence, effect.after_frame_sha256)).removeprefix('sha256:')[:32]}"
+            effect_value = {
                     "sequence": effect.sequence,
                     "level": effect.level,
                     "action": {"name": effect.action, "data": dict(effect.data)},
@@ -1008,14 +1008,36 @@ class ArcBroker:
                     "motion_complete": effect.motion_complete,
                     "state": effect.state,
                     "after_frame_sha256": effect.after_frame_sha256,
-                }, level, (evidence,),
-            ))
+                }
+            try:
+                effect_facts.append(CheckedFact("mechanics", effect_key, effect_value, level, (evidence,)))
+            except ValueError:
+                # A full component/motion description can exceed the bounded
+                # fact-value contract for a large moving object.  Preserve a
+                # useful, auditable effect summary rather than dropping the
+                # whole Playbook (and any level-completion evidence) because
+                # one detail is too large.
+                effect_facts.append(CheckedFact(
+                    "mechanics", effect_key, {
+                        "sequence": effect.sequence,
+                        "level": effect.level,
+                        "action": {"name": effect.action, "data": dict(effect.data)},
+                        "outcome": effect.outcome,
+                        "changed_cell_count": effect.changed_cell_count,
+                        "changed_cells_omitted": effect.changed_cells_omitted,
+                        "motion_count": len(effect.motions),
+                        "motion_complete": effect.motion_complete,
+                        "state": effect.state,
+                        "after_frame_sha256": effect.after_frame_sha256,
+                        "details_omitted": True,
+                    }, level, (evidence,),
+                ))
         candidate_facts: list[CheckedFact] = []
         for candidate in self._experience_inducer.candidates()[-256:]:
             evidence = digest(candidate.key).removeprefix("sha256:")
             level = min(candidate.level, self._game.win_levels - 1)
-            candidate_facts.append(CheckedFact(
-                "mechanics", f"experience.candidate.{evidence[:32]}", {
+            candidate_key = f"experience.candidate.{evidence[:32]}"
+            candidate_value = {
                     "key": candidate.key,
                     "level": candidate.level,
                     "action_family": candidate.action_family,
@@ -1027,8 +1049,23 @@ class ArcBroker:
                     "conflict_sequences": list(candidate.conflict_sequences),
                     **({"compiled_mechanism": compiled.to_mapping()}
                        if (compiled := compile_effect_hypothesis(candidate)) is not None else {}),
-                }, level, (evidence,),
-            ))
+                }
+            try:
+                candidate_facts.append(CheckedFact("mechanics", candidate_key, candidate_value, level, (evidence,)))
+            except ValueError:
+                candidate_facts.append(CheckedFact(
+                    "mechanics", candidate_key, {
+                        "key": candidate.key,
+                        "level": candidate.level,
+                        "action_family": candidate.action_family,
+                        "action": {"name": candidate.action, "data": dict(candidate.data)},
+                        "status": candidate.status,
+                        "support_count": candidate.support_count,
+                        "evidence_sequences": list(candidate.evidence_sequences),
+                        "conflict_sequences": list(candidate.conflict_sequences),
+                        "details_omitted": True,
+                    }, level, (evidence,),
+                ))
         simulator_fact = CheckedFact(
             "mechanics", "experience.simulator.status", self.simulator_status(),
             min(self._current.levels_completed, self._game.win_levels - 1),
