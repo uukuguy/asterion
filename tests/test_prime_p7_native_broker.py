@@ -234,8 +234,6 @@ class TestNativeP7Broker(unittest.TestCase):
         self.assertNotIn("mutated", broker.playbook_projection())
 
     def test_world_evidence_reports_candidate_extraction_stage_and_exception_type(self) -> None:
-        from asterion.applications.prime.p7.broker import ArcBroker
-
         broker, _ = _broker()
         broker.bind_history("diagnostic-candidate")
         with patch(
@@ -254,8 +252,6 @@ class TestNativeP7Broker(unittest.TestCase):
         self.assertNotIn("/private/path", status["reasons"][-1])
 
     def test_world_evidence_reports_persistence_stage_and_exception_type(self) -> None:
-        from asterion.applications.prime.p7.broker import ArcBroker
-
         broker, _ = _broker()
         broker.bind_history("diagnostic-persistence")
         with patch.object(
