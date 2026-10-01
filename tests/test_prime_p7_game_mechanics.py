@@ -74,6 +74,24 @@ class GameMechanicsStoreTests(unittest.TestCase):
             self.assertEqual(confirmed.bound_levels, (2,))
             self.assertEqual(confirmed.scope["kind"], "level")
 
+    def test_observe_appends_cross_level_evidence_without_promoting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            store.record(
+                "move",
+                rules=[{"action": "ACTION1"}],
+                conditions=[],
+                effects=[{"kind": "translate"}],
+                level=0,
+                evidence=[self._evidence(0)],
+            )
+            observed = store.observe(
+                "move", evidence=[self._evidence(1)], levels=[1]
+            )
+            self.assertEqual(observed.status, "hypothesis")
+            self.assertEqual(observed.bound_levels, (0, 1))
+            self.assertEqual(len(observed.evidence), 2)
+
     def test_conflict_preserves_evidence_and_cannot_be_confirmed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))
@@ -104,6 +122,7 @@ class GameMechanicsStoreTests(unittest.TestCase):
                 rules=[{"action": "ACTION1"}],
                 conditions=[],
                 effects=[{"kind": "translate"}],
+                level=0,
                 evidence=[self._evidence(0)],
             )
             projection = store.projection()

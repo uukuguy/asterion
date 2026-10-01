@@ -255,6 +255,12 @@ class GameMechanicsStore:
         return self._path
 
     @property
+    def identity(self) -> tuple[str, int, int]:
+        """Return the exact game identity without serializing the store."""
+
+        return self._game_id, self._seed, self._win_levels
+
+    @property
     def version(self) -> int:
         return self._version
 
@@ -446,6 +452,45 @@ class GameMechanicsStore:
             current.mechanism_id, current.rules, current.conditions, current.effects,
             scope, _merge_dicts(current.evidence, additions), "confirmed", bound,
             current.conflicts, current.revision + 1,
+        )
+        updated = dict(self._records)
+        updated[mechanism_id] = fact
+        self._commit(updated, self._version + 1)
+        return fact
+
+    def observe(
+        self,
+        mechanism_id: str,
+        *,
+        evidence: Sequence[Mapping[str, Any]],
+        levels: Sequence[int] | None = None,
+    ) -> GameMechanism:
+        """Append fresh evidence while retaining the current lifecycle status.
+
+        This is the persistence counterpart of observing the same mechanic on
+        another level.  It never upgrades a hypothesis to confirmed and never
+        changes planner authority; callers must use :meth:`confirm` after an
+        independent evidence decision.
+        """
+
+        _id(mechanism_id, "mechanism_id")
+        current = self._records.get(mechanism_id)
+        if current is None:
+            raise ValueError("unknown mechanism id")
+        additions = _evidence(evidence)
+        requested = _levels(levels)
+        if any(level >= self._win_levels for level in requested):
+            raise ValueError("mechanism level exceeds game")
+        if current.scope["kind"] == "level" and requested and tuple(requested) != current.bound_levels:
+            raise ValueError("level mechanism cannot bind another level")
+        bound = tuple(sorted(set(current.bound_levels) | set(requested)))
+        scope = copy.deepcopy(current.scope)
+        if scope["kind"] == "game":
+            scope["levels"] = list(bound)
+        fact = GameMechanism(
+            current.mechanism_id, current.rules, current.conditions, current.effects,
+            scope, _merge_dicts(current.evidence, additions), current.status,
+            bound, current.conflicts, current.revision + 1,
         )
         updated = dict(self._records)
         updated[mechanism_id] = fact

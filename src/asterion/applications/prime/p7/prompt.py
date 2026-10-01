@@ -91,7 +91,8 @@ discover a registration tool first.
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
 p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
-p7_simulator_status,
+p7_simulator_status, p7_observation_state, p7_game_mechanics,
+p7_counterfactual_search,
 p7_playbook, p7_retrodiction_status, p7_tried_actions,
 p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked,
 p7_record_hypothesis, p7_promote_hypothesis, and p7_model_search. Read the same-game model and Playbook before proposing a
@@ -121,6 +122,11 @@ Call p7_cognition before a long deliberation. Its type profile is a prior-only
 hint about the input surface, and its exact-game experience is progress memory,
 not an executable route. Normal exploration and single-step probes remain
 available; only an identity or evidence mismatch should stop a checked batch.
+Call p7_observation_state to read the unified object/relationship/event view,
+p7_game_mechanics to inspect persistent game-wide mechanisms, and
+p7_counterfactual_search to compare candidate branches against a subgoal.
+Counterfactual paths are evidence-ranked predictions; they must be validated
+through the normal checked-action boundary before execution.
 When ``learning_hint.recommendation`` is ``inspect_candidates`` or
 ``inspect_candidate_and_probe``, the initial broker context already includes
 the current settled frame and the bounded hint; use them as the starting

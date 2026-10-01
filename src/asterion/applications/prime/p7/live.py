@@ -67,6 +67,9 @@ P7_APPLICATION_TOOL_NAMES = (
     "p7_frame_at",
     "p7_act_checked",
     "p7_world_model",
+    "p7_observation_state",
+    "p7_game_mechanics",
+    "p7_counterfactual_search",
     "p7_cognition",
     "p7_action_effects",
     "p7_mechanism_candidates",
@@ -718,6 +721,18 @@ def p7_world_model():
     """Read the bounded same-game confirmed model projection."""
     return _call("world_model")
 
+def p7_observation_state():
+    """Read the unified immutable observation with optional game metadata."""
+    return _call("observation_state")
+
+def p7_game_mechanics():
+    """Read persistent game-wide mechanisms; this is advisory memory only."""
+    return _call("game_mechanics")
+
+def p7_counterfactual_search():
+    """Compare candidate mechanics and subgoal progress without dispatching actions."""
+    return _call("counterfactual_search")
+
 def p7_cognition():
     """Read advisory type cognition and exact-game experience."""
     return _call("cognition")
@@ -886,6 +901,15 @@ def last_outcome_summary(level=None):
 
 def world_model():
     return p7_world_model()
+
+def observation_state():
+    return p7_observation_state()
+
+def game_mechanics():
+    return p7_game_mechanics()
+
+def counterfactual_search():
+    return p7_counterfactual_search()
 
 def cognition():
     return p7_cognition()

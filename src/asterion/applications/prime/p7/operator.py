@@ -31,6 +31,7 @@ from asterion.applications.prime.p7.broker import (
     _observation_digest,
 )
 from asterion.applications.prime.p7.cognition import GameCognitionStore
+from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
     ArcGameContract,
@@ -418,7 +419,7 @@ class _IpythonBridgeServer:
                     or (
                         "params" not in value
                         and value.get("method")
-                        not in {"observe", "status", "mechanics_prior", "world_model", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status"}
+                        not in {"observe", "status", "mechanics_prior", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status"}
                     )
                     or type(value["method"]) is not str
                 ):
@@ -495,7 +496,7 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
-            elif method in {"world_model", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status", "model_search"}:
+            elif method in {"world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status", "model_search"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
@@ -713,6 +714,24 @@ class _P7BrokerClient:
             if snapshot is None:
                 return {"status": "unavailable"}
             return snapshot.projection(max_bytes=8192)
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def observation_state(self) -> dict[str, object]:
+        try:
+            return self._broker.observation_state().to_projection()
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def game_mechanics(self) -> dict[str, object]:
+        try:
+            return self._broker.game_mechanics_projection()
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def counterfactual_search(self) -> dict[str, object]:
+        try:
+            return self._broker.counterfactual_search()
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -2190,6 +2209,12 @@ def build_p7_operator_resources(
             game=game,
             world_model=WorldModelStore(game.game_id, game.seed, game.win_levels),
             cognition_store=cognition_store,
+            game_mechanics_store=GameMechanicsStore(
+                working_directory,
+                game.game_id,
+                game.seed,
+                game.win_levels,
+            ),
         )
         history_run_id = private_trace_root.parent.name
         if (
@@ -2567,6 +2592,34 @@ async def run_live(
         name="world_model",
         description="Read the bounded same-game confirmed model projection; hypotheses remain unconfirmed until action evidence promotes them.",
         signature="p7_client.world_model()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="observation_state",
+        description=(
+            "Read the immutable unified observation: frame, input kind, HUD, timers, "
+            "resources, entities, relations, and events. Metadata is observational and "
+            "does not grant action authority."
+        ),
+        signature="p7_client.observation_state()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="game_mechanics",
+        description=(
+            "Read persistent game-wide mechanism memory and its evidence scope. "
+            "Loaded records are advisory and always report execution_authority='none'."
+        ),
+        signature="p7_client.game_mechanics()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
+        name="counterfactual_search",
+        description=(
+            "Compare confirmed and hypothesized mechanics against bounded subgoals. "
+            "This is simulation only: it never dispatches actions and preserves divergent branches."
+        ),
+        signature="p7_client.counterfactual_search()",
         category="model",
     ))
     tool_registry.register(Tool(

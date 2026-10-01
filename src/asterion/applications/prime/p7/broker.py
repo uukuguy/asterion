@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import json
 from copy import deepcopy
+from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import (
@@ -18,6 +19,9 @@ from .mechanism_model import (
 from .model_search import search_model
 from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
+from .game_mechanics import GameMechanicsStore
+from .observation_state import ObservationState
+from .hypothesis_simulator import Subgoal, search_counterfactual
 from .playbook import (LevelCompletion, PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
@@ -94,6 +98,7 @@ class ArcObservation:
     levels_completed: int
     state: str
     win_levels: int
+    metadata: Mapping[str, object] = field(default_factory=lambda: MappingProxyType({}))
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,9 +208,9 @@ def _available_action_name(value: object) -> str:
 
 
 def _snapshot_observation(value: object, *, win_levels: int) -> ArcObservation:
-    if type(value) is not dict or set(value) != {
+    if type(value) is not dict or not {
         "available_actions", "frame", "levels_completed", "state", "win_levels"
-    }:
+    }.issubset(value):
         raise ValueError
     available = value["available_actions"]
     if (
@@ -222,18 +227,33 @@ def _snapshot_observation(value: object, *, win_levels: int) -> ArcObservation:
     names = tuple(_available_action_name(item) for item in available)
     if tuple(sorted(set(names))) != names:
         raise ValueError
-    return ArcObservation(names, _frame(value["frame"]), value["levels_completed"], value["state"], value["win_levels"])
+    optional = {
+        key: value[key]
+        for key in ("hud", "timers", "resources", "entities", "relations", "events")
+        if key in value
+    }
+    if optional:
+        unified = ObservationState.from_observation({**value, **optional})
+        projection = unified.to_projection()
+        optional = {key: projection[key] for key in optional}
+    return ArcObservation(
+        names, _frame(value["frame"]), value["levels_completed"],
+        value["state"], value["win_levels"], MappingProxyType(optional),
+    )
 
 
 def _observation_digest(value: ArcObservation) -> str:
+    unified = ObservationState.from_observation({
+        "available_actions": list(value.available_actions),
+        "frame": value.frame,
+        "levels_completed": value.levels_completed,
+        "state": value.state,
+        "win_levels": value.win_levels,
+        **dict(value.metadata),
+    })
+    projection = unified.to_projection()
     return digest(
-        {
-            "available_actions": value.available_actions,
-            "frame": value.frame,
-            "levels_completed": value.levels_completed,
-            "state": value.state,
-            "win_levels": value.win_levels,
-        }
+        projection
     )
 
 
@@ -256,6 +276,7 @@ class ArcBroker:
         game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
         world_model: WorldModelStore | None = None,
         cognition_store: GameCognitionStore | None = None,
+        game_mechanics_store: GameMechanicsStore | None = None,
     ) -> None:
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
@@ -284,6 +305,12 @@ class ArcBroker:
         if cognition_store is not None and type(cognition_store) is not GameCognitionStore:
             raise ArcBrokerError("unavailable")
         self._cognition_store = cognition_store
+        if game_mechanics_store is not None and type(game_mechanics_store) is not GameMechanicsStore:
+            raise ArcBrokerError("unavailable")
+        if game_mechanics_store is not None:
+            if game_mechanics_store.identity != (game.game_id, game.seed, game.win_levels):
+                raise ArcBrokerError("unavailable")
+        self._game_mechanics_store = game_mechanics_store
         self._transition_model: TransitionModel | None = None
         self._retrodiction_status = "unavailable"
         self._retrodiction_reasons: list[str] = []
@@ -350,6 +377,77 @@ class ArcBroker:
             seed=self._game.seed,
             win_levels=self._game.win_levels,
         )
+
+    def observation_state(self) -> ObservationState:
+        """Return the current unified observation for model-side reasoning."""
+
+        current = self._current
+        return ObservationState.from_observation({
+            "available_actions": list(current.available_actions),
+            "frame": current.frame,
+            "levels_completed": current.levels_completed,
+            "state": current.state,
+            "win_levels": current.win_levels,
+            **dict(current.metadata),
+        })
+
+    def game_mechanics_projection(self) -> dict[str, object]:
+        """Return persistent game-wide mechanism memory as advisory data."""
+
+        if self._game_mechanics_store is None:
+            return {"status": "unavailable", "execution_authority": "none", "mechanisms": []}
+        return self._game_mechanics_store.projection(max_bytes=8192)
+
+    def counterfactual_search(
+        self,
+        *,
+        subgoals: tuple[Subgoal, ...] = (),
+        max_nodes: int = 128,
+        max_depth: int = 8,
+    ) -> dict[str, object]:
+        """Compare confirmed and hypothesized mechanics without dispatching actions."""
+
+        current = self._current
+        state = SimState.from_observation(
+            frame=current.frame[-1],
+            level=current.levels_completed,
+            state=current.state,
+            available_actions=current.available_actions,
+        )
+        candidates: list[object] = []
+        if self._mechanism_spec is not None and self._mechanism_certificate is not None and self._mechanism_certificate.planner_eligible:
+            candidates.append(self._mechanism_spec)
+        candidates.extend(self._experience_inducer.candidates())
+        actions: list[object] = []
+        for name in current.available_actions:
+            if name != "ACTION6":
+                actions.append(name)
+        if "ACTION6" in current.available_actions:
+            actions.extend(
+                item for item in self._model_search_actions()
+                if item.get("name") == "ACTION6"
+            )
+        if not actions:
+            return {
+                "status": "no-plan", "reason": "no-grounded-actions",
+                "branches": [], "conflicts": [], "progress": [],
+                "expanded_nodes": 0, "generated_nodes": 0,
+                "executed_actions": [], "execution_authority": "none",
+            }
+        result = search_counterfactual(
+            state,
+            tuple(candidates),
+            actions=tuple(actions),
+            subgoals=subgoals,
+            max_nodes=max_nodes,
+            max_depth=max_depth,
+        )
+        projection = result.projection()
+        projection["execution_authority"] = "none"
+        projection["game_mechanics_version"] = (
+            None if self._game_mechanics_store is None else self._game_mechanics_store.version
+        )
+        return projection
 
     def _record_cognition(self) -> None:
         """Persist bounded progress without making persistence a run gate."""
@@ -1249,6 +1347,12 @@ class ArcBroker:
             "prediction_matches": self._prediction_matches,
             "prediction_mismatches": self._prediction_mismatches,
             "promotion_count": self._promotion_count,
+            "game_mechanics_version": (
+                None if self._game_mechanics_store is None else self._game_mechanics_store.version
+            ),
+            "game_mechanics_count": (
+                0 if self._game_mechanics_store is None else len(self._game_mechanics_store.records())
+            ),
         }
 
     def _model_search_actions(self) -> tuple[dict[str, object], ...]:
@@ -1821,6 +1925,7 @@ class ArcBroker:
             if len(records) >= 2:
                 effect = extract_action_effect(records[-2], record)
                 self._experience_inducer.observe(effect)
+                self._persist_game_mechanics(record)
             if self._world_model is None:
                 return
             ref = EvidenceRef(
@@ -1950,6 +2055,87 @@ class ArcBroker:
             self._retrodiction_reasons = [
                 *self._retrodiction_reasons[-15:], "history-validation-failed"
             ]
+
+    def _persist_game_mechanics(self, record: ArcHistoryRecord) -> None:
+        """Mirror induced semantic evidence into the advisory game namespace.
+
+        The persistent store is intentionally downstream of local induction:
+        it records what was observed, while WorldMap/ModelCertificate remain
+        the only sources that can make a checked plan executable.
+        """
+
+        store = self._game_mechanics_store
+        if store is None:
+            return
+        for candidate in self._experience_inducer.candidates():
+            try:
+                mechanism_id = "induced." + digest({
+                    "action": candidate.action,
+                    "signature": candidate.signature,
+                }).removeprefix("sha256:")[:32]
+                evidence = [{
+                    "frame_id": f"frame-{sequence}",
+                    "action_id": f"action-{sequence}",
+                    "source_run": record.run_id,
+                    "level": candidate.level,
+                    "action": candidate.action,
+                    "candidate_key": candidate.key,
+                } for sequence in candidate.evidence_sequences[-8:]]
+                if not evidence:
+                    continue
+                template = candidate.template
+                rules = [{"action": candidate.action, "data": dict(candidate.data)}]
+                conditions = [{"kind": "observed-transition", "level": candidate.level}]
+                effects = [{
+                    "kind": "frame-delta",
+                    "signature": candidate.signature,
+                    "outcome": None if template is None else template.outcome,
+                    "motion_complete": False if template is None else template.motion_complete,
+                    "refusal_reasons": list(candidate.refusal_reasons),
+                }]
+                current = store.get(mechanism_id)
+                if current is None:
+                    store.record(
+                        mechanism_id,
+                        rules=rules,
+                        conditions=conditions,
+                        effects=effects,
+                        scope="game",
+                        level=candidate.level,
+                        evidence=evidence,
+                    )
+                    current = store.get(mechanism_id)
+                if candidate.status == "contradicted" or candidate.conflict_sequences:
+                    if current is not None and current.status != "conflict":
+                        store.conflict(
+                            mechanism_id,
+                            observed={"candidate_key": candidate.key},
+                            evidence=evidence,
+                            reason="candidate-conflict",
+                        )
+                    continue
+                if current is not None:
+                    store.observe(mechanism_id, evidence=evidence, levels=[candidate.level])
+                    # Two consistent observations are enough to mark the
+                    # persistent memory as reusable knowledge; it still has
+                    # planner_eligible=False until local retrodiction proves
+                    # the current context.
+                    updated = store.get(mechanism_id)
+                    if (
+                        updated is not None
+                        and updated.status == "hypothesis"
+                        and candidate.support_count >= 2
+                        and not candidate.conflict_sequences
+                    ):
+                        store.confirm(
+                            mechanism_id,
+                            evidence=evidence,
+                            levels=[candidate.level],
+                        )
+            except (OSError, TypeError, ValueError):
+                self._retrodiction_reasons = [
+                    *self._retrodiction_reasons[-15:], "game-mechanics-persistence-unavailable"
+                ]
 
     def bind_history(self, run_id: str) -> None:
         if (
