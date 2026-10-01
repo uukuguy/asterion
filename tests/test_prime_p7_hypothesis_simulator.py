@@ -94,6 +94,7 @@ class HypothesisSimulatorTests(unittest.TestCase):
         self.assertEqual(result.status, "found")
         self.assertTrue(result.conflicts)
         self.assertTrue(any("candidate-divergence" in item for item in result.conflicts))
+        self.assertTrue(any(branch.conflicts for branch in result.branches))
         self.assertEqual(len(result.branches), 2)
 
     def test_history_only_transition_rule_is_not_executed_or_fabricated(self) -> None:

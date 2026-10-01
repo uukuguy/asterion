@@ -16,7 +16,7 @@ boundary.
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Mapping, Sequence
 
 from .experience_induction import EffectHypothesis, SimState
@@ -402,11 +402,28 @@ def search_counterfactual(
             if not complete and child.state != "GAME_OVER" and len(path) < max_depth:
                 queue.append(_Node(node.candidate, child, path))
 
+    divergent_actions: dict[tuple[str, tuple[tuple[str, int], ...]], str] = {}
     for (name, data), states in sorted(observed.items(), key=lambda item: item[0]):
         if len(states) > 1:
             suffix = "" if not data else f"/{dict(data)}"
-            conflicts.append(f"candidate-divergence:{name}{suffix}")
+            message = f"candidate-divergence:{name}{suffix}"
+            divergent_actions[(name, data)] = message
+            conflicts.append(message)
     conflicts = list(dict.fromkeys(conflicts))
+    if divergent_actions:
+        marked: list[CounterfactualBranch] = []
+        for branch in branches:
+            branch_actions = {
+                (step.action["name"], tuple(sorted(step.action["data"].items())))
+                for step in branch.path
+            }
+            branch_conflicts = tuple(
+                divergent_actions[action]
+                for action in sorted(branch_actions)
+                if action in divergent_actions
+            )
+            marked.append(replace(branch, conflicts=branch_conflicts))
+        branches = marked
     found = any(branch.status == "goal-reached" for branch in branches)
     if found:
         status, reason = "found", None
