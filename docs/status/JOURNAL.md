@@ -3421,3 +3421,4 @@
 - 07:25 SP80 L2 实跑确认边界平移的 changed-cell 数差异错误拆分候选；移除 motion.count 签名维度并通过 148 项 P7 回归 [1926ba66]
 - 07:45 SP80 L2 纯 P7 复测：当前级别 9 步后按 10 分钟停止；transport/权限错误为 0，模型复用前缀并识别 ACTION2 连续下移，但目标接触条件推理失败，WorldMap 仍无 confirmed/simulator；判定为运行时解题能力不足，非已定位代码异常。
 - 08:05 静态复审发现 Playbook 候选只保存不重用；恢复同级 hypothesis 到 learning_hint/candidate projection，并验证无需路线注入即可重新 probe/retrodict [4cdd92f2]
+- 10:20 修复初始棋盘/经验提示丢失和候选探测闭环，持久化通关证据，支持同题经验真实复用 [41e0a944]
