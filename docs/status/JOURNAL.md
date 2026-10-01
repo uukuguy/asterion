@@ -3482,3 +3482,4 @@
 - 07:26 记录本次 P7 机制边界修复与提示契约修复的提交收口 [a696350b]
 - 07:33 独立评审发现并修复 candidate_key 长签名遗漏，冲突证据同步摘要化；203 项 P7 聚焦测试通过 [85027bcb]
 - 07:33 提交 P7 长 key 持久化与 probe 提示对齐，完成评审前验证 [7bd5b699]
+- 07:44 P7 broker now reports bounded stage and exception type for evidence failures; four regressions cover diagnostic redaction [78462123]
