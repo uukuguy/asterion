@@ -88,7 +88,8 @@ from asterion.applications.prime.p7.prompt import (
     build_solve_prompt,
     build_strategy_prompt,
 )
-from asterion.applications.prime.runtime_binding import PrimeLaunch
+from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
+from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     CAPABILITY_REF,
@@ -2200,6 +2201,7 @@ def build_p7_operator_resources(
             binding_environment=dict(binding.environment),
             extension_lease=lease,
             deadline_seconds=None if selection.deadline_ms is None else selection.deadline_ms / 1000,
+            tool_registry=P7_TOOL_REGISTRY,
             compact_events=True,
             approved_environment=approved_environment,
         )

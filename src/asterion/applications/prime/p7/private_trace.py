@@ -8,6 +8,7 @@ import re
 from types import MappingProxyType
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
+from asterion.services.diagnostics import FailureDiagnostic
 from asterion.applications.prime.p7.broker import (
     ArcBroker, ArcRunReceipt, ArcTransition, _observation_digest,
 )
@@ -82,6 +83,7 @@ class P7PrivateTraceReceipt:
     _recorder: PrimeTraceRecorder
     _identities: Mapping[str, str] | None = field(default=None, compare=False)
     _accessed: bool = field(default=False, init=False, compare=False)
+    _failure_diagnostic: FailureDiagnostic | None = field(default=None, init=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -169,6 +171,19 @@ class P7PrivateTraceReceipt:
             )
         except Exception:
             return False
+
+    @property
+    def failure_diagnostic(self) -> FailureDiagnostic | None:
+        return self._failure_diagnostic
+
+    def record_failure(self, diagnostic: FailureDiagnostic | None) -> None:
+        """Retain one bounded runtime diagnostic without exposing its contents."""
+
+        if diagnostic is not None and type(diagnostic) is not FailureDiagnostic:
+            raise P7PrivateTraceReceiptError("P7 failure evidence is invalid")
+        if self._accessed:
+            raise P7PrivateTraceReceiptError("P7 failure evidence is unavailable")
+        object.__setattr__(self, "_failure_diagnostic", diagnostic)
 
     def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
         """Append one validated public runtime usage event to private evidence."""

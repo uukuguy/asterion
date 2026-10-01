@@ -50,6 +50,7 @@ from asterion.applications.prime.p7.operator import (
 )
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
 from asterion.capabilities.execution import CapabilityInvocation
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
@@ -955,6 +956,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 binding_environment=dict(binding.environment),
                 extension_lease=lease,
                 deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
+                tool_registry=P7_TOOL_REGISTRY,
             ),
             P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root)),
         )
