@@ -21,6 +21,7 @@ CORE_MODULES = (
     "asterion.agents.prime.summarization",
     "asterion.agents.prime.tools",
     "asterion.agents.prime.trace",
+    "asterion.agents.prime.tool_registry",
     "asterion.applications",
     "asterion.applications.discovery",
     "asterion.applications.product",
