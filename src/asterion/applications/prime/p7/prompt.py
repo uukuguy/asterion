@@ -122,7 +122,9 @@ supported by at least two effects and the current action is otherwise ambiguous,
 can be retrodicted together. Treat it as a declarative proposal: check its
 current frame prediction, construct one distinguishing probe, and submit it
 through ``p7_record_hypothesis`` before any long batch when the probe plan is
-ready. A compiled proposal is not a certificate or a route; it never
+ready. If ``p7_record_hypothesis`` returns ``status=rejected``, read its
+machine-readable ``reason`` and do not retry the unchanged mechanism. A
+compiled proposal is not a certificate or a route; it never
 blocks normal actions. Candidates marked ``contradicted`` or with incomplete
 motion evidence are diagnostics only; continue ordinary exploration.
 ``translate_components`` is a bounded semantic effect for repeated object

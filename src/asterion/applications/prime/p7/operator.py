@@ -874,7 +874,22 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def record_hypothesis(self, layer: str, key: str, value: dict[str, object]) -> dict[str, object]:
-        return self._broker.record_hypothesis(layer, key, value)
+        try:
+            return self._broker.record_hypothesis(layer, key, value)
+        except ArcBrokerError as error:
+            # Keep the sealed worker API body-free on exceptions, but give
+            # the model a safe machine-readable outcome so it does not retry
+            # an unchanged malformed mechanism indefinitely.
+            reason = str(error)
+            if reason == "closed":
+                safe_reason = "closed"
+            elif reason == "uncertain":
+                safe_reason = "uncertain"
+            elif reason == "REPLAN_REQUIRED":
+                safe_reason = "replan-required"
+            else:
+                safe_reason = "validation-failed"
+            return {"status": "rejected", "reason": safe_reason}
 
     def promote_hypothesis(self, key: str, evidence_kind: str) -> dict[str, object]:
         return self._broker.promote_hypothesis(key, evidence_kind)
