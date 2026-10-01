@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 import json
+from copy import deepcopy
 from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import (
@@ -320,6 +321,8 @@ class ArcBroker:
         # primitive action counts.
         self._model_search_calls = 0
         self._model_search_found = 0
+        self._model_search_cache_key: tuple[object, ...] | None = None
+        self._model_search_cache_result: dict[str, object] | None = None
         self._prediction_matches = 0
         self._prediction_mismatches = 0
         self._promotion_count = 0
@@ -988,6 +991,30 @@ class ArcBroker:
             },
             "execution_authority": "none",
         }
+        # A confirmed model must be useful without relying on the LLM to
+        # discover and call an optional tool after every promotion.  Expose a
+        # bounded search result in the same small hint surface.  This remains
+        # advisory: the returned context-bound plan still has to go through
+        # act_checked, which validates the current prefix and witnesses.
+        if simulator["confirmed_model"]:
+            try:
+                automatic_plan = self.model_search()
+                encoded = json.dumps(
+                    automatic_plan, ensure_ascii=False, separators=(",", ":")
+                ).encode("utf-8")
+                if len(encoded) <= 8192:
+                    result["verified_model_plan"] = automatic_plan
+                else:
+                    result["verified_model_plan"] = {
+                        "status": automatic_plan.get("status", "unknown"),
+                        "reason": "plan-omitted-size",
+                        "model_digest": automatic_plan.get("model_digest"),
+                    }
+            except (ArcBrokerError, TypeError, ValueError):
+                result["verified_model_plan"] = {
+                    "status": "model-unavailable",
+                    "reason": "automatic-search-failed",
+                }
         if cross_level_candidates:
             result["cross_level_candidate_count"] = len(cross_level_candidates)
         return result
@@ -1110,6 +1137,23 @@ class ArcBroker:
                 if world is not None
                 else {}
             )
+            cache_key = (
+                certificate.model_digest,
+                certificate.world_model_version,
+                certificate.prefix_digest,
+                self._current.levels_completed,
+                self._current.state,
+                digest(self._current.frame[-1]),
+                tuple(
+                    (item.get("name"), tuple(sorted((item.get("data") or {}).items())))
+                    for item in actions
+                ),
+            )
+            if cache_key == self._model_search_cache_key and self._model_search_cache_result is not None:
+                cached = deepcopy(self._model_search_cache_result)
+                if cached.get("status") == "found":
+                    self._model_search_found += 1
+                return cached
             result = search_model(
                 spec,
                 frame=self._current.frame[-1],
@@ -1156,6 +1200,8 @@ class ArcBroker:
                 "frame_sha256": digest(self._current.frame[-1]),
             },
         })
+        self._model_search_cache_key = cache_key
+        self._model_search_cache_result = deepcopy(projection)
         return projection
 
     def experience_diagnostics(self) -> dict[str, object]:

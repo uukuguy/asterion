@@ -358,6 +358,12 @@ class ExperienceLearningTests(unittest.TestCase):
         self.assertEqual(broker.simulator_status()["status"], "verified")
         probe_result = broker.act_checked([_move_expectation(4)])
         self.assertEqual(probe_result["stop_reason"], "matched")
+        hint = broker.learning_hint()
+        self.assertEqual(hint["recommendation"], "use_verified_model")
+        automatic_plan = hint["verified_model_plan"]
+        self.assertEqual(automatic_plan["status"], "found")
+        self.assertTrue(automatic_plan["plan"])
+        self.assertIn("context", automatic_plan)
         self.assertEqual(broker.simulator_status()["status"], "verified")
         self.assertTrue(broker.retrodiction_status()["planner"]["eligible"])
 

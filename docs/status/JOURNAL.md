@@ -3443,3 +3443,4 @@
 - 2026-10-01 将 planner 证书绑定到 WorldMap 版本与当前历史前缀摘要，修复上下文漂移可继续搜索及 replace 丢失已签发标记的问题 [8b9b3e65]
 - 2026-10-01 为模拟搜索结果增加可选 PlanningContext，act_checked 可核对模型、WorldMap、当前帧和历史前缀后执行，保留普通探索路径。
 - 12:04 增加候选 refusal reason 与 motion 诊断 projection，保持 P7 API 兼容 [e6707e03]
+- 12:18 确认模型晋级后在 learning_hint 自动提供上下文绑定的模型计划，并按当前证书/前缀/帧缓存搜索结果；新增合成闭环回归。
