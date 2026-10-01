@@ -129,6 +129,32 @@ class ExperienceInductionTests(unittest.TestCase):
         )
         self.assertEqual(ExperienceInducer.probe_plan(current, inducer.candidates()).status, "no-discriminating-probe")
 
+    def test_boundary_observation_does_not_contradict_consistent_motion(self) -> None:
+        inducer = ExperienceInducer()
+        first, second = records(
+            action=ArcAction("ACTION1"),
+            before=((7, 0, 0),),
+            after=((0, 7, 0),),
+        )
+        motion = extract_action_effect(first, second)
+        inducer.observe(motion)
+        inducer.observe(replace(motion, sequence=2))
+
+        boundary_first, boundary_second = records(
+            action=ArcAction("ACTION1"),
+            before=((7, 0, 0),),
+            after=((7, 0, 0),),
+        )
+        boundary = extract_action_effect(boundary_first, boundary_second)
+        inducer.observe(replace(boundary, sequence=3))
+
+        candidates = inducer.candidates()
+        motion_candidate = next(item for item in candidates if item.signature.startswith("('translation'"))
+        boundary_candidate = next(item for item in candidates if item.signature.startswith("('no-effect'"))
+        self.assertEqual(motion_candidate.status, "hypothesis")
+        self.assertEqual(motion_candidate.support_count, 2)
+        self.assertEqual(boundary_candidate.status, "boundary")
+
     def test_contradictory_delta_retires_prior_candidate(self) -> None:
         inducer = ExperienceInducer()
         first, second = records(

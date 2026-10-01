@@ -458,12 +458,21 @@ class ExperienceInducer:
                 evidence_sequences=(effect.sequence,), conflict_sequences=(),
                 template=effect, win_levels=self._win_levels,
             )
-            if broad:
+            # A no-effect result is boundary evidence for this action/state,
+            # not a competing motion hypothesis. Keep it independent so a
+            # boundary observation cannot retire an otherwise consistent
+            # motion candidate. Likewise, an earlier boundary candidate must
+            # not make a later motion candidate contradictory.
+            conflicting = tuple(
+                prior for prior in broad
+                if prior.status != "boundary" and effect.outcome != "no-effect"
+            )
+            if conflicting:
                 # A second incompatible delta for the same action family is
                 # evidence of context dependence, so neither variant is
                 # eligible for model compilation until a later partitioning
                 # fact is supplied.
-                for prior in broad:
+                for prior in conflicting:
                     prior = replace(
                         prior, status="contradicted",
                         conflict_sequences=prior.conflict_sequences + (effect.sequence,),
