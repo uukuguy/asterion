@@ -286,14 +286,27 @@ class TestNativeP7Broker(unittest.TestCase):
                 game_mechanics_store=store,
             )
             broker.bind_history("diagnostic-persistence-internal")
-            with patch.object(store, "record", side_effect=ValueError("secret")):
+            original_record = store.record
+            calls = 0
+
+            def fail_once(*args: object, **kwargs: object) -> object:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise ValueError("secret")
+                return original_record(*args, **kwargs)
+
+            with patch.object(store, "record", side_effect=fail_once):
+                broker.act(("ACTION1",))
+                first_status = broker.retrodiction_status()
                 broker.act(("ACTION1",))
 
-        self.assertEqual(len(broker.world_evidence()), 1)
+        self.assertEqual(len(broker.world_evidence()), 2)
         self.assertIsNotNone(broker.transition_model())
-        self.assertEqual(broker.retrodiction_status()["status"], "unavailable")
+        self.assertEqual(first_status["status"], "unavailable")
+        self.assertEqual(broker.retrodiction_status()["status"], "observed")
         self.assertEqual(
-            broker.retrodiction_status()["reasons"][-1],
+            first_status["reasons"][-1],
             "history-validation-failed:persistence:ValueError",
         )
 

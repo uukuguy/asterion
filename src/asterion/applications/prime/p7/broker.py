@@ -1944,9 +1944,13 @@ class ArcBroker:
                 effect = extract_action_effect(records[-2], record)
                 self._experience_inducer.observe(effect)
                 stage = "persistence"
+                previous_reason_count = len(self._retrodiction_reasons)
                 self._persist_game_mechanics(record)
-                if self._retrodiction_reasons and self._retrodiction_reasons[-1].startswith(
-                    "history-validation-failed:persistence:"
+                if (
+                    len(self._retrodiction_reasons) > previous_reason_count
+                    and self._retrodiction_reasons[-1].startswith(
+                        "history-validation-failed:persistence:"
+                    )
                 ):
                     persistence_failed = True
             if self._world_model is None:
