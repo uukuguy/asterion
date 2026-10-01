@@ -3483,3 +3483,10 @@
 - 07:33 独立评审发现并修复 candidate_key 长签名遗漏，冲突证据同步摘要化；203 项 P7 聚焦测试通过 [85027bcb]
 - 07:33 提交 P7 长 key 持久化与 probe 提示对齐，完成评审前验证 [7bd5b699]
 - 07:44 P7 broker now reports bounded stage and exception type for evidence failures; four regressions cover diagnostic redaction [78462123]
+- 07:44 Journal entry committed to preserve durable P7 diagnostic handoff [dde30677]
+- 07:45 Ruff cleanup removed unused imports from staged diagnostic tests [85949248]
+- 07:47 P7 persistence diagnostics now retain world evidence and transition learning while keeping unavailable status [b95c2f39]
+- 07:49 P7 persistence failure state is scoped to the current transition, preventing stale unavailable status [97d4f3da]
+- 08:02 P7 persistence failures now return explicit bounded status, preserve WorldMap/transition learning, and remain unavailable without reason-list edge errors [64cb4fed]
+- 08:02 Independent final review: P0/P1/P3 clear; unsupported residuals fail closed; no fresh P7 solving or same-session exploration-shortening claim [review]
+- 08:03 promotion-check was started for packaged verification but stopped after prolonged no-output; prior gate remains historically red and is not claimed PASS
