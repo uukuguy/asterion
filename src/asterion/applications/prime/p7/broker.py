@@ -1936,6 +1936,7 @@ class ArcBroker:
 
     def _record_world_evidence(self, record: ArcHistoryRecord) -> None:
         stage = "history-validation"
+        persistence_failed = False
         try:
             records = self._bound_history()
             if len(records) >= 2:
@@ -1947,7 +1948,7 @@ class ArcBroker:
                 if self._retrodiction_reasons and self._retrodiction_reasons[-1].startswith(
                     "history-validation-failed:persistence:"
                 ):
-                    return
+                    persistence_failed = True
             if self._world_model is None:
                 return
             ref = EvidenceRef(
@@ -2071,7 +2072,9 @@ class ArcBroker:
             self._transition_model = TransitionModel.from_history(self._bound_history(), world=self._world_model.snapshot)
             # TransitionModel.from_history is a checked transcript, not a
             # generalized mechanism certificate.  Do not call this verified.
-            if self._retrodiction_status not in {"verified", "conflict", "hypothesis"}:
+            if persistence_failed:
+                self._retrodiction_status = "unavailable"
+            elif self._retrodiction_status not in {"verified", "conflict", "hypothesis"}:
                 self._retrodiction_status = "observed"
         except (ArcPredictionError, TypeError, ValueError) as error:
             self._record_history_failure(stage, error)

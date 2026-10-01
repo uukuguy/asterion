@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 import json
+from pathlib import Path
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -264,6 +266,35 @@ class TestNativeP7Broker(unittest.TestCase):
         self.assertEqual(
             broker.retrodiction_status()["reasons"][-1],
             "history-validation-failed:persistence:TypeError",
+        )
+
+    def test_internal_persistence_failure_keeps_world_evidence_and_transition_model(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _HistoryEngine()
+        with tempfile.TemporaryDirectory() as directory:
+            store = GameMechanicsStore(
+                Path(directory), engine.game_id, engine.seed, engine.win_levels,
+            )
+            broker = ArcBroker(
+                engine=engine,
+                world_model=WorldModelStore(
+                    engine.game_id, engine.seed, engine.win_levels,
+                ),
+                game_mechanics_store=store,
+            )
+            broker.bind_history("diagnostic-persistence-internal")
+            with patch.object(store, "record", side_effect=ValueError("secret")):
+                broker.act(("ACTION1",))
+
+        self.assertEqual(len(broker.world_evidence()), 1)
+        self.assertIsNotNone(broker.transition_model())
+        self.assertEqual(broker.retrodiction_status()["status"], "unavailable")
+        self.assertEqual(
+            broker.retrodiction_status()["reasons"][-1],
+            "history-validation-failed:persistence:ValueError",
         )
 
     def test_world_evidence_reports_model_promotion_stage_and_exception_type(self) -> None:
