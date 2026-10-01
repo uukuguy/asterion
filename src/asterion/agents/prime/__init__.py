@@ -11,6 +11,7 @@ from asterion.agents.prime.tools import (
     PrimeToolLedger,
     PrimeToolResult,
 )
+from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 
 
 __all__ = (
@@ -21,4 +22,5 @@ __all__ = (
     "PrimeToolCall",
     "PrimeToolLedger",
     "PrimeToolResult",
+    "PrimeApplicationToolRegistry",
 )
