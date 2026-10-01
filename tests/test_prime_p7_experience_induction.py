@@ -66,6 +66,9 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertEqual(effect.outcome, "level-transition")
         self.assertEqual(effect.levels_completed, 1)
         self.assertEqual(effect.state, "WIN")
+        candidate = ExperienceInducer(win_levels=2)
+        candidate.observe(effect)
+        self.assertEqual(candidate.candidates()[0].status, "hypothesis")
 
     def test_extract_rejects_non_adjacent_or_mismatched_identity(self) -> None:
         first, second = records(
@@ -344,6 +347,16 @@ class ExperienceInductionTests(unittest.TestCase):
             action=ArcAction("ACTION1"),
             before=((0, 7, 7, 0, 7, 7, 0),),
             after=((0, 0, 7, 7, 7, 7, 0),),
+        )
+        effect = extract_action_effect(first, second)
+        self.assertEqual(effect.motions, ())
+        self.assertFalse(effect.motion_complete)
+
+    def test_component_split_is_not_reduced_to_background_fragments(self) -> None:
+        first, second = records(
+            action=ArcAction("ACTION1"),
+            before=((0, 7, 7, 7, 0),),
+            after=((7, 7, 0, 7, 7),),
         )
         effect = extract_action_effect(first, second)
         self.assertEqual(effect.motions, ())

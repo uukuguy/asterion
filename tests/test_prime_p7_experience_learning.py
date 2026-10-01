@@ -184,16 +184,34 @@ class ExperienceLearningTests(unittest.TestCase):
             0,
         )
 
-        calls_before_search = tuple(engine.calls)
-        search = broker.model_search()
+        snapshot = broker.export_playbook(successful=False)
+        warm_engine = _AutoPromotionEngine()
+        warm_game = P7GameSelection(
+            warm_engine.game_id,
+            warm_engine.seed,
+            target_level=1,
+            _metadata_baseline_actions=(3, 1),
+            _metadata_win_levels=warm_engine.win_levels,
+        )
+        warm = ArcBroker(
+            engine=warm_engine,
+            game=warm_game,
+            world_model=WorldModelStore(
+                warm_engine.game_id, warm_engine.seed, warm_engine.win_levels,
+            ),
+        )
+        warm.bind_history("synthetic-auto-promotion-warm")
+        warm.load_playbook(snapshot)
+        self.assertTrue(warm.simulator_status()["confirmed_model"])
+        calls_before_search = tuple(warm_engine.calls)
+        search = warm.model_search()
         self.assertEqual(search["status"], "found")
         self.assertEqual(search["plan"][0]["action"], {"name": "ACTION2", "data": {}})
-        self.assertEqual(tuple(engine.calls), calls_before_search)
-
-        completed = broker.act_checked(search["plan"])
+        self.assertEqual(tuple(warm_engine.calls), calls_before_search)
+        completed = warm.act_checked(search["plan"])
         self.assertEqual(completed["stop_reason"], "level-advanced")
-        self.assertEqual(completed["observation"].levels_completed, 2)
-        self.assertEqual(engine.calls, ["ACTION1", "ACTION1", "ACTION2", "ACTION2"])
+        self.assertEqual(completed["observation"].levels_completed, 1)
+        self.assertEqual(warm_engine.calls, ["ACTION2"])
 
     def test_induced_cross_level_model_promotes_and_searches_without_manual_rules(self) -> None:
         engine = _CrossLevelMotionEngine()
@@ -330,7 +348,9 @@ class ExperienceLearningTests(unittest.TestCase):
                 "dependencies": [],
             },
         )
-        self.assertEqual(broker.simulator_status()["status"], "hypothesis")
+        # The broker may already have auto-promoted the repeated observed
+        # motion before this optional explicit probe is submitted.
+        self.assertEqual(broker.simulator_status()["status"], "verified")
         probe_result = broker.act_checked([_move_expectation(4)])
         self.assertEqual(probe_result["stop_reason"], "matched")
         self.assertEqual(broker.simulator_status()["status"], "verified")
@@ -358,11 +378,13 @@ class ExperienceLearningTests(unittest.TestCase):
             fresh = ArcBroker(engine=fresh_engine, game=_game(), world_model=_world())
             fresh.bind_history("synthetic-learning-reload")
             fresh.load_playbook(reloaded)
-            self.assertFalse(fresh.simulator_status()["confirmed_model"])
-            fresh.act_checked([_move_expectation(2)])
-            fresh.act_checked([_move_expectation(3)])
             self.assertTrue(fresh.simulator_status()["confirmed_model"])
             self.assertTrue(fresh.retrodiction_status()["planner"]["eligible"])
+            warm_search = fresh.model_search()
+            self.assertEqual(warm_search["status"], "found")
+            self.assertEqual(fresh_engine.calls, [])
+            warm_result = fresh.act_checked(warm_search["plan"])
+            self.assertEqual(warm_result["observation"].levels_completed, 1)
 
         self.assertEqual(engine.calls, ["ACTION1", "ACTION1", "ACTION1", "ACTION2"])
 

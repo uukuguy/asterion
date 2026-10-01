@@ -50,6 +50,32 @@ P7 每次运行都要增加可复用的认知，同时保持当前游戏的探�
 
 长考的输出是下一步决策和停止条件，不是绕过执行边界的路线注入。失败也会留下可复用的类型和游戏进度证据，避免下次从零开始。
 
+## confirmed model 的形成保证
+
+“有经验”必须能改变规划行为，单纯保存 `effects` 或 `candidates` 不算学会。
+因此 broker 对每次新转移自动执行晋升检查，不要求模型先发现工具或手工提交假设：
+
+1. 同一动作在相同游戏身份下形成一致的可编译候选；普通帧效果至少需要两次独立证据，
+   关卡跃迁或终局效果有直接的结果证据，可以从一次跃迁记录开始；
+2. `MechanismSpec` 在所引用的历史序列上重放，逐帧匹配 frame、state、level 和 changed-cell
+   witness；
+3. 通过后写入 WorldMap 的 confirmed mechanics，并产生 planner-eligible certificate；
+4. 已有 confirmed model 时，broker 自动触发一次有界 `model_search`，结果仍必须经过
+   `act_checked` 的 witness 校验；模型不需要自行记住“先调用搜索工具”。
+
+证书有两个明确范围：
+
+- `mechanism-retrodicted`：模型解释完整连续历史；
+- `mechanism-evidence`：模型只解释列出的候选证据序列，其他探索动作保持 unknown。
+
+第二种范围解决了“一个小机制必须解释所有无关探索动作才能被确认”的设计断点。它不是放宽
+安全性：每个被列入的转移仍需完整帧重放通过，未覆盖动作不会获得任何执行权；当前帧变化后
+搜索计划仍以最新 frame witness 为准，出现偏差立即停批。
+
+跨级经验继续保留 level guard。它可以作为下一关的一次 probe prior，但只有在当前关卡出现
+同样的证据后才晋升为当前关卡模型。这样游戏会越玩越熟，同时不会把一个关卡的偶然动作
+误当成全局规则。
+
 运行评估必须区分“收集到了经验”和“经验改变了行为”。私有 run summary 记录
 effect/candidate 数量、当前级别与过期候选、probe 提交及 pending 状态、证书是否
 planner-eligible、模型搜索调用/命中、预测匹配/冲突和当前级别动作数。跨级候选只

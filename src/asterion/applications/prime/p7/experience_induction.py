@@ -217,9 +217,10 @@ def _motions(
                 component for component in _connected_cells(destination_colour)
                 if set(component) & destination_cells
             )
-            for source_component in source_components:
+            component_matches: list[tuple[int, int, tuple[tuple[int, int], ...], int, int, set[tuple[int, int]]]] = []
+            for source_index, source_component in enumerate(source_components):
                 source_set = set(source_component)
-                for destination_component in destination_components:
+                for destination_index, destination_component in enumerate(destination_components):
                     destination_set = set(destination_component)
                     dx = destination_component[0][0] - source_component[0][0]
                     dy = destination_component[0][1] - source_component[0][1]
@@ -238,13 +239,30 @@ def _motions(
                         ((x - min_x, y - min_y) for x, y in source_component),
                         key=lambda cell: (cell[1], cell[0]),
                     ))
-                    pair_matches.setdefault((source, clear), []).append(
+                    component_matches.append(
                         (
-                            shape, dx, dy,
+                            source_index, destination_index, shape, dx, dy,
                             (source_cells & source_set) | (destination_cells & destination_set),
                         )
                     )
-                    valid_pairs.add((source, clear))
+            # A complete translation must preserve component identity.  If a
+            # source component maps to multiple destinations (split), or
+            # multiple sources map to one destination (merge), the changed
+            # cells alone do not identify a reusable motion rule.
+            source_counts: dict[int, int] = {}
+            destination_counts: dict[int, int] = {}
+            for source_index, destination_index, _shape, _dx, _dy, _coverage in component_matches:
+                source_counts[source_index] = source_counts.get(source_index, 0) + 1
+                destination_counts[destination_index] = destination_counts.get(destination_index, 0) + 1
+            if (
+                any(count != 1 for count in source_counts.values())
+                or any(count != 1 for count in destination_counts.values())
+            ):
+                continue
+            for _source_index, _destination_index, shape, dx, dy, coverage in component_matches:
+                pair_matches.setdefault((source, clear), []).append((shape, dx, dy, coverage))
+            if component_matches:
+                valid_pairs.add((source, clear))
 
         # A colour swap can be represented in both directions.  There is no
         # semantic evidence for choosing one, so retain no model at all.
@@ -340,10 +358,10 @@ def extract_action_effect(
         raise ValueError("history records are not adjacent")
     if record.action not in _ACTIONS:
         raise ValueError("unsupported action")
-    if record.changed_cell_count == 0:
-        outcome = "no-effect"
-    elif record.levels_completed > previous.levels_completed:
+    if record.levels_completed > previous.levels_completed:
         outcome = "level-transition"
+    elif record.changed_cell_count == 0:
+        outcome = "no-effect"
     elif record.state in {"WIN", "GAME_OVER"}:
         outcome = "game-over"
     else:
@@ -451,7 +469,14 @@ class ExperienceInducer:
                 key=key, game_id=effect.game_id, seed=effect.seed,
                 level=effect.level, action_family=family, action=effect.action,
                 data=effect.data, signature=signature,
-                status="boundary" if effect.outcome == "no-effect" else "hypothesis",
+                # A level transition can have no changed cells, but its
+                # outcome is still a directly observed reusable mechanic.
+                # Only a plain no-effect action remains boundary evidence.
+                status=(
+                    "hypothesis"
+                    if effect.outcome in {"level-transition", "game-over"}
+                    else "boundary" if effect.outcome == "no-effect" else "hypothesis"
+                ),
                 evidence_sequences=(effect.sequence,), conflict_sequences=(),
                 template=effect, win_levels=self._win_levels,
             )

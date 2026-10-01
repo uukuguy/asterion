@@ -1754,6 +1754,29 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
             "Treat this as evidence for a distinguishing probe, not as a route.",
             prior, "p7_mechanics_prior",
         )
+    # A certified same-game model is executable planning evidence.  Query it
+    # once while building the initial context so a live model does not need to
+    # discover and call model_search before using an already verified plan.
+    # The returned plan remains checked data: act_checked still validates each
+    # frame/state witness and stops on divergence.
+    model_search = getattr(client, "model_search", None)
+    simulator_status = getattr(client, "simulator_status", None)
+    if callable(model_search) and callable(simulator_status):
+        try:
+            simulator = simulator_status()
+            if isinstance(simulator, Mapping) and simulator.get("confirmed_model") is True:
+                automatic_plan = model_search()
+                if isinstance(automatic_plan, Mapping):
+                    add_projection(
+                        "## Automatic verified model plan",
+                        "This plan was generated from the current certified model. Pass its checked actions unchanged to p7_client.act_checked; do not treat it as authority after any witness mismatch.",
+                        automatic_plan,
+                        "p7_model_search",
+                    )
+        except Exception:
+            # Planning is advisory; an unavailable search must not block
+            # ordinary exploration or hide the rest of the initial context.
+            pass
     value = "\n".join(sections)
     if len(value.encode("utf-8")) > 16384:
         raise P7OperatorError("P7 host services are unavailable")

@@ -872,6 +872,10 @@ class ModelCertificate:
     coverage: str = "mechanism-retrodicted"
     current_frame_sha256: str | None = None
     world_model_version: int | None = None
+    # For an evidence-scoped certificate this records the transition
+    # sequences that the mechanism actually explains.  A full retrodiction
+    # keeps the historical contiguous range for backwards compatibility.
+    covered_sequences: tuple[int, ...] = ()
     _validated: bool = field(default=False, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
@@ -887,7 +891,9 @@ class ModelCertificate:
             or _HASH.fullmatch(self.model_digest) is None
         ):
             raise ValueError("invalid certificate identity")
-        if type(self.coverage) is not str or self.coverage != "mechanism-retrodicted":
+        if type(self.coverage) is not str or self.coverage not in {
+            "mechanism-retrodicted", "mechanism-evidence", "persisted-confirmed",
+        }:
             raise ValueError("invalid certificate coverage")
         if self.current_frame_sha256 is not None and _HASH.fullmatch(self.current_frame_sha256) is None:
             raise ValueError("invalid certificate current frame")
@@ -895,33 +901,61 @@ class ModelCertificate:
             type(self.world_model_version) is not int or self.world_model_version < 0
         ):
             raise ValueError("invalid certificate world revision")
+        if type(self.record_count) is not int or self.record_count < 1:
+            raise ValueError("invalid certificate coverage")
+        legacy_unissued = (
+            self.coverage == "mechanism-retrodicted"
+            and self.covered_sequences == ()
+            and self.sequence_start == 0
+            and self.sequence_end == self.record_count - 1
+        )
+        if legacy_unissued:
+            return
         if (
-            type(self.record_count) is not int
-            or self.record_count < 2
-            or type(self.sequence_start) is not int
+            type(self.sequence_start) is not int
             or type(self.sequence_end) is not int
-            or self.sequence_start != 0
-            or self.sequence_end != self.record_count - 1
+            or self.sequence_start < 1
+            or self.sequence_end < self.sequence_start
+            or type(self.covered_sequences) is not tuple
+            or any(type(sequence) is not int or sequence < 1 for sequence in self.covered_sequences)
+            or tuple(sorted(set(self.covered_sequences))) != self.covered_sequences
+            or len(self.covered_sequences) != (
+                self.record_count - 1
+                if self.coverage == "mechanism-retrodicted"
+                else self.record_count
+            )
         ):
             raise ValueError("invalid certificate coverage")
+        if self.coverage == "mechanism-retrodicted":
+            if self.sequence_start != 1 or self.sequence_end != self.record_count - 1:
+                raise ValueError("invalid full certificate coverage")
+        elif self.covered_sequences[-1] != self.sequence_end:
+            raise ValueError("invalid evidence certificate coverage")
 
     @classmethod
     def _issued(
         cls, game_id: str, seed: int, win_levels: int, revision: int,
         model_digest: str, record_count: int, sequence_start: int, sequence_end: int,
         *, current_frame_sha256: str | None = None, world_model_version: int | None = None,
+        covered_sequences: tuple[int, ...] = (), coverage: str = "mechanism-retrodicted",
     ) -> "ModelCertificate":
+        if not covered_sequences:
+            covered_sequences = tuple(range(sequence_start, sequence_end + 1))
         certificate = cls(
             game_id, seed, win_levels, revision, model_digest, record_count,
-            sequence_start, sequence_end, current_frame_sha256=current_frame_sha256,
+            sequence_start, sequence_end, coverage=coverage,
+            current_frame_sha256=current_frame_sha256,
             world_model_version=world_model_version,
+            covered_sequences=covered_sequences,
         )
         object.__setattr__(certificate, "_validated", True)
         return certificate
 
     @property
     def planner_eligible(self) -> bool:
-        return self._validated is True and self.coverage == "mechanism-retrodicted"
+        return self._validated is True and self.coverage in {
+            "mechanism-retrodicted", "mechanism-evidence", "persisted-confirmed",
+        }
 
 
 def validate_mechanism(
@@ -988,8 +1022,125 @@ def validate_mechanism(
         spec.revision,
         spec.digest,
         len(rows),
-        rows[0].sequence,
+        rows[1].sequence,
         rows[-1].sequence,
+        current_frame_sha256=digest(rows[-1].frame),
+        covered_sequences=tuple(record.sequence for record in rows[1:]),
+    )
+
+
+def validate_mechanism_evidence(
+    spec: MechanismSpec,
+    records: Sequence[ArcHistoryRecord],
+    evidence_sequences: Sequence[int],
+    *,
+    entities: Mapping[str, object] | None = None,
+) -> ModelCertificate | None:
+    """Certify only the transitions covered by an induced mechanism.
+
+    A game history contains exploratory actions that may be unrelated to a
+    candidate rule.  Requiring one small rule to explain every exploratory
+    action prevents useful experience from ever becoming a model.  This
+    validator keeps the safety property by requiring every selected evidence
+    transition to reproduce its exact frame, state, level, and changed-cell
+    witness.  Unselected transitions remain unknown and are never treated as
+    evidence for the model.
+
+    Ordinary frame effects need two independent observations before they can
+    be certified.  A level-transition or terminal effect has a direct outcome
+    witness and may be certified from one observation.  The compiler already
+    applies the same minimum when creating a candidate.
+    """
+
+    if type(spec) is not MechanismSpec:
+        return None
+    try:
+        rows = tuple(records)
+        selected = tuple(evidence_sequences)
+    except (TypeError, ValueError):
+        return None
+    if (
+        not rows
+        or any(type(record) is not ArcHistoryRecord for record in rows)
+        or any(type(sequence) is not int or sequence < 1 for sequence in selected)
+        or tuple(sorted(set(selected))) != selected
+        or not selected
+        or len(rows) < 2
+    ):
+        return None
+    by_sequence = {record.sequence: record for record in rows}
+    if len(by_sequence) != len(rows):
+        return None
+    rules = tuple(spec.rules)
+    if not rules or any(
+        rule.action not in {by_sequence[sequence].action for sequence in selected if sequence in by_sequence}
+        for rule in rules
+    ):
+        return None
+    has_direct_terminal = any(
+        operation[0] in {"increment_level", "set_state"}
+        for rule in rules
+        for operation in rule.effects
+    )
+    minimum = 1 if has_direct_terminal else 2
+    if len(selected) < minimum:
+        return None
+    for sequence in selected:
+        record = by_sequence.get(sequence)
+        previous = by_sequence.get(sequence - 1)
+        if record is None or previous is None:
+            return None
+        if (
+            record.game_id != spec.game_id
+            or record.seed != spec.seed
+            or previous.game_id != record.game_id
+            or previous.seed != record.seed
+            or record.run_id != previous.run_id
+            or record.before_state_sha256 != previous.after_state_sha256
+            or record.before_frame_sha256 != previous.after_frame_sha256
+            or record.before_frame_sha256 != digest(previous.frame)
+            or record.after_frame_sha256 != digest(record.frame)
+            or record.levels_completed < previous.levels_completed
+        ):
+            return None
+        prediction = spec.predict(
+            frame=previous.frame,
+            action=record.action,
+            data=record.data,
+            level=previous.levels_completed,
+            state=previous.state,
+            entities=entities or {},
+        )
+        if (
+            prediction.status != "predicted"
+            or prediction.frame != record.frame
+            or prediction.level != record.levels_completed
+            or prediction.state != record.state
+        ):
+            return None
+        try:
+            count, cells, omitted = stable_changed_cells(previous.frame, record.frame)
+        except ArcPredictionError:
+            return None
+        if (
+            record.changed_cell_count != count
+            or record.changed_cells != cells
+            or record.changed_cells_omitted != omitted
+            or prediction.changed_cells != cells
+            or prediction.changed_cells_omitted != omitted
+        ):
+            return None
+    return ModelCertificate._issued(
+        spec.game_id,
+        spec.seed,
+        spec.win_levels,
+        spec.revision,
+        spec.digest,
+        len(selected),
+        selected[0],
+        selected[-1],
+        coverage="mechanism-evidence",
+        covered_sequences=selected,
         current_frame_sha256=digest(rows[-1].frame),
     )
 
@@ -1003,4 +1154,5 @@ __all__ = (
     "compile_effect_hypothesis",
     "simulate_step",
     "validate_mechanism",
+    "validate_mechanism_evidence",
 )

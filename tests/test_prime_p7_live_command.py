@@ -699,6 +699,44 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("inspect_candidate_and_probe", context)
         self.assertIn("compiled_candidates", context)
 
+    def test_initial_context_automatically_queries_confirmed_model_plan(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def __init__(self):
+                self.search_calls = 0
+
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7, 0]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"actions_remaining": 500, "primitive_actions": 0, "target_level": 1}
+
+            def simulator_status(self):
+                return {"confirmed_model": True, "status": "verified"}
+
+            def model_search(self):
+                self.search_calls += 1
+                return {
+                    "status": "found",
+                    "plan": [{
+                        "action": {"name": "ACTION1", "data": {}},
+                        "expect": {"frame_sha256": "sha256:" + "a" * 64},
+                    }],
+                }
+
+        client = Client()
+        context = _initial_game_context(client, include_prior=False)
+        self.assertEqual(client.search_calls, 1)
+        self.assertIn("Automatic verified model plan", context)
+        self.assertIn('"status":"found"', context)
+
     def test_initial_context_keeps_board_when_optional_projection_exceeds_budget(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
 

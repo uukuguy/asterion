@@ -6,7 +6,13 @@ from dataclasses import dataclass, replace
 import json
 from typing import Callable, Mapping, Protocol, TypedDict, cast
 
-from .mechanism_model import MechanismSpec, ModelCertificate, compile_effect_hypothesis, validate_mechanism
+from .mechanism_model import (
+    MechanismSpec,
+    ModelCertificate,
+    compile_effect_hypothesis,
+    validate_mechanism,
+    validate_mechanism_evidence,
+)
 from .model_search import search_model
 from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
@@ -315,6 +321,7 @@ class ArcBroker:
         self._model_search_found = 0
         self._prediction_matches = 0
         self._prediction_mismatches = 0
+        self._promotion_count = 0
 
     @property
     def journal(self) -> tuple[ArcTransition, ...]:
@@ -684,7 +691,9 @@ class ArcBroker:
     def _compiled_induced_mechanism(self) -> MechanismSpec | None:
         """Combine non-conflicting induced rules into one advisory model."""
 
-        by_action: dict[tuple[str, tuple[tuple[str, int], ...]], object] = {}
+        # Rules at different levels are compatible even when they use the
+        # same action/data pair.  Only same-level duplicates are ambiguous.
+        by_action: dict[tuple[str, tuple[tuple[str, int], ...], int], object] = {}
         for candidate in self._experience_inducer.candidates():
             if candidate.status != "hypothesis":
                 continue
@@ -692,7 +701,7 @@ class ArcBroker:
             if compiled is None or len(compiled.rules) != 1:
                 continue
             rule = compiled.rules[0]
-            action_key = (rule.action, candidate.data)
+            action_key = (rule.action, candidate.data, candidate.level)
             prior = by_action.get(action_key)
             if prior is False:
                 continue
@@ -717,6 +726,106 @@ class ArcBroker:
             )
         except (TypeError, ValueError):
             return None
+
+    def _try_auto_promote_model(self, records: list[ArcHistoryRecord]) -> None:
+        """Promote deterministic observed mechanics without model intervention.
+
+        This is the design boundary that turns repeated game experience into
+        an actual game model.  The broker only promotes a bundle whose rules
+        are compiled from observed candidates and whose selected transitions
+        reproduce exact frame/state/level witnesses.  Unrelated exploratory
+        actions remain unknown; they do not prevent a proven mechanic from
+        guiding planning and they never become implicit evidence.
+        """
+
+        world = self._world_model
+        if world is None or self._pending_probe is not None or not records:
+            return
+        spec = self._compiled_induced_mechanism()
+        if spec is None:
+            return
+        candidates = tuple(
+            candidate
+            for candidate in self._experience_inducer.candidates()
+            if candidate.status == "hypothesis" and compile_effect_hypothesis(candidate) is not None
+        )
+        evidence = tuple(sorted({
+            sequence
+            for candidate in candidates
+            for sequence in candidate.evidence_sequences
+            if type(sequence) is int and sequence > 0
+        }))
+        if not evidence:
+            return
+        certificate = validate_mechanism(
+            spec, records, entities=self._confirmed_entity_values(),
+        )
+        if certificate is None:
+            certificate = validate_mechanism_evidence(
+                spec, records, evidence,
+                entities=self._confirmed_entity_values(),
+            )
+        if certificate is None:
+            return
+        if (
+            self._mechanism_certificate is not None
+            and self._mechanism_spec is not None
+            and self._mechanism_spec.digest != spec.digest
+            and len(records) >= 2
+        ):
+            # Never replace a verified generalization with a narrower
+            # level-local bundle when the existing model already predicts the
+            # newest transition.  A new bundle may replace it only when the
+            # observed action is genuinely uncovered by the current model.
+            latest, previous = records[-1], records[-2]
+            existing_prediction = self._mechanism_spec.predict(
+                frame=previous.frame,
+                action=latest.action,
+                data=latest.data,
+                level=previous.levels_completed,
+                state=previous.state,
+                entities=self._confirmed_entity_values(),
+            )
+            if (
+                existing_prediction.status == "predicted"
+                and existing_prediction.frame == latest.frame
+                and existing_prediction.level == latest.levels_completed
+                and existing_prediction.state == latest.state
+            ):
+                return
+        if (
+            self._mechanism_certificate is not None
+            and self._mechanism_spec is not None
+            and self._mechanism_spec.digest == spec.digest
+            and self._mechanism_certificate.current_frame_sha256 == digest(records[-1].frame)
+        ):
+            return
+        key = f"experience.confirmed.{spec.digest.removeprefix('sha256:')[:32]}"
+        ref = EvidenceRef(
+            frame_id=f"frame-{records[-1].sequence}",
+            action_id=None if records[-1].action is None else f"action-{records[-1].sequence}",
+            source_run=records[-1].run_id,
+            summary_hash=records[-1].after_state_sha256.removeprefix("sha256:"),
+        )
+        try:
+            existing = world.snapshot.mechanics.get(key)
+            if existing is None:
+                hypothesis = world.snapshot.hypotheses.get(f"mechanics:{key}")
+                if hypothesis is None:
+                    world.record_hypothesis(
+                        "mechanics", key, spec.to_mapping(),
+                        level=min(self._current.levels_completed, self._game.win_levels - 1),
+                        evidence=ref,
+                    )
+                world.confirm("mechanics", key, evidence=ref, observed_value=spec.to_mapping())
+            elif existing.value != spec.to_mapping():
+                return
+        except (TypeError, ValueError):
+            return
+        self._mechanism_spec = spec
+        self._mechanism_certificate = certificate
+        self._retrodiction_status = "verified"
+        self._promotion_count += 1
 
     def learning_hint(self) -> dict[str, object]:
         """Return a small advisory induction summary for the next model turn.
@@ -833,13 +942,15 @@ class ArcBroker:
             key=lambda item: (-int(item["support_count"]), str(item["action"]))
         )
         probe_status = self.probe_plan().get("status")
-        if (compiled_candidates and probe_status == "ready") or cross_level_candidates:
+        simulator = self.simulator_status()
+        if simulator["confirmed_model"]:
+            recommendation = "use_verified_model"
+        elif (compiled_candidates and probe_status == "ready") or cross_level_candidates:
             recommendation = "inspect_candidate_and_probe"
         elif current_candidates or persisted_current:
             recommendation = "inspect_candidates"
         else:
             recommendation = "ordinary_exploration"
-        simulator = self.simulator_status()
         result = {
             "recommendation": recommendation,
             "candidate_count": len(all_candidate_keys),
@@ -850,6 +961,7 @@ class ArcBroker:
             "simulator": {
                 "status": simulator["status"],
                 "confirmed_model": simulator["confirmed_model"],
+                "coverage": simulator.get("certificate_coverage"),
             },
             "execution_authority": "none",
         }
@@ -910,6 +1022,7 @@ class ArcBroker:
             "confirmed_model": certificate is not None and certificate.planner_eligible,
             "model_digest": None if certificate is None else certificate.model_digest,
             "certificate_records": 0 if certificate is None else certificate.record_count,
+            "certificate_coverage": None if certificate is None else certificate.coverage,
             "unknown_reasons": list(self._retrodiction_reasons[-16:]),
         }
 
@@ -931,6 +1044,7 @@ class ArcBroker:
                 "eligible": bool(certificate is not None and certificate.planner_eligible),
                 "model_digest": None if certificate is None else certificate.model_digest,
                 "records_certified": 0 if certificate is None else certificate.record_count,
+                "coverage": None if certificate is None else certificate.coverage,
             },
         }
 
@@ -1031,12 +1145,14 @@ class ArcBroker:
             "probe_pending": self._pending_probe is not None,
             "planner_eligible": bool(certificate is not None and certificate.planner_eligible),
             "certificate_records": 0 if certificate is None else certificate.record_count,
+            "certificate_coverage": None if certificate is None else certificate.coverage,
             "model_search_calls": self._model_search_calls,
             "model_search_found": self._model_search_found,
             "current_level_actions": self._level_gameplay_actions,
             "primitive_actions": self._actions_dispatched,
             "prediction_matches": self._prediction_matches,
             "prediction_mismatches": self._prediction_mismatches,
+            "promotion_count": self._promotion_count,
         }
 
     def _model_search_actions(self) -> tuple[dict[str, object], ...]:
@@ -1121,6 +1237,7 @@ class ArcBroker:
             raise ArcBrokerError("unavailable")
         self._playbook = snapshot
         if self._world_model is not None:
+            loaded_specs: list[MechanismSpec] = []
             for fact in snapshot.confirmed_facts:
                 if fact.layer != "mechanics" and fact.level != self._world_model.current_level:
                     continue
@@ -1145,7 +1262,7 @@ class ArcBroker:
                         fact.layer, fact.key, fact.value, level=fact.level, evidence=refs,
                     )
                     self._world_model.confirm(fact.layer, fact.key, evidence=refs, observed_value=fact.value)
-                if fact.layer == "mechanics" and self._mechanism_spec is None:
+                if fact.layer == "mechanics":
                     try:
                         candidate = MechanismSpec.from_mapping(fact.value)
                     except (TypeError, ValueError):
@@ -1159,7 +1276,42 @@ class ArcBroker:
                         self._game.seed,
                         self._game.win_levels,
                     ):
-                        self._mechanism_spec = candidate
+                        loaded_specs.append(candidate)
+            if loaded_specs:
+                unique_rules = {
+                    json.dumps(rule.mapping(), sort_keys=True, separators=(",", ":")): rule
+                    for spec in loaded_specs
+                    for rule in spec.rules
+                }
+                try:
+                    self._mechanism_spec = MechanismSpec(
+                        self._game.game_id,
+                        self._game.seed,
+                        self._game.win_levels,
+                        tuple(unique_rules.values()),
+                        revision=max(spec.revision for spec in loaded_specs),
+                    )
+                    # The previous run already verified this exact model for
+                    # this exact game identity.  Reuse is permitted, while
+                    # the current frame witness still gates every generated
+                    # plan and checked action.
+                    self._mechanism_certificate = ModelCertificate._issued(
+                        self._game.game_id,
+                        self._game.seed,
+                        self._game.win_levels,
+                        self._mechanism_spec.revision,
+                        self._mechanism_spec.digest,
+                        1,
+                        1,
+                        1,
+                        coverage="persisted-confirmed",
+                        covered_sequences=(1,),
+                        current_frame_sha256=digest(self._initial.frame[-1]),
+                    )
+                    self._retrodiction_status = "verified"
+                except (TypeError, ValueError):
+                    self._mechanism_spec = None
+                    self._mechanism_certificate = None
             # Visual candidates are advisory and level-local.  Rehydrate only
             # the broker's current level so a later prefix replay can refresh
             # them before any promotion attempt.
@@ -1298,8 +1450,26 @@ class ArcBroker:
             min(self._current.levels_completed, self._game.win_levels - 1),
             (digest(self.simulator_status()).removeprefix("sha256:"),),
         )
+        confirmed_facts: list[CheckedFact] = []
+        if self._world_model is not None:
+            for fact in self._world_model.snapshot.mechanics.values():
+                evidence = tuple(
+                    ref.summary_hash.removeprefix("sha256:")
+                    for ref in fact.evidence
+                    if isinstance(ref.summary_hash, str)
+                    and len(ref.summary_hash.removeprefix("sha256:")) >= 16
+                )
+                if not evidence:
+                    continue
+                try:
+                    confirmed_facts.append(
+                        CheckedFact(fact.layer, fact.key, fact.value, fact.level, evidence)
+                    )
+                except (TypeError, ValueError):
+                    continue
         snapshot = replace(
             snapshot,
+            confirmed_facts=merge_facts(snapshot.confirmed_facts, tuple(confirmed_facts)),
             effect_summaries=merge_facts(snapshot.effect_summaries, tuple(effect_facts)),
             candidate_summaries=merge_facts(snapshot.candidate_summaries, tuple(candidate_facts)),
             simulator_summaries=merge_facts(snapshot.simulator_summaries, (simulator_fact,)),
@@ -1510,15 +1680,23 @@ class ArcBroker:
             return
         self._pending_probe = None
         matches = (record.sequence == pending["sequence"] and record.before_state_sha256 == pending["before"] and record.action == pending["action"] and record.data == pending["data"])
-        certificate = (
-            validate_mechanism(
-                pending["spec"],
-                self._bound_history(),
+        certificate = None
+        if matches:
+            history = self._bound_history()
+            certificate = validate_mechanism(
+                pending["spec"], history,
                 entities=self._confirmed_entity_values(),
             )
-            if matches
-            else None
-        )
+            if certificate is None:
+                covered = tuple(
+                    record.sequence
+                    for record in history[1:]
+                    if record.action == pending["action"] and record.data == pending["data"]
+                )
+                certificate = validate_mechanism_evidence(
+                    pending["spec"], history, covered,
+                    entities=self._confirmed_entity_values(),
+                )
         if certificate is not None and certificate.planner_eligible:
             self._world_model.confirm(pending["layer"], pending["key"], evidence=ref, observed_value=pending["spec"].to_mapping())
             self._mechanism_certificate = certificate
@@ -1545,17 +1723,64 @@ class ArcBroker:
             self._world_evidence.append(ref)
             self._consume_probe(record, ref)
             if self._mechanism_spec is not None:
-                certificate = validate_mechanism(
-                    self._mechanism_spec,
-                    self._bound_history(),
-                    entities=self._confirmed_entity_values(),
-                )
+                history = self._bound_history()
+                certificate = self._mechanism_certificate
+                if certificate is not None and certificate.coverage == "persisted-confirmed":
+                    actions = {rule.action for rule in self._mechanism_spec.rules}
+                    if record.action in actions:
+                        previous = history[-2]
+                        prediction = self._mechanism_spec.predict(
+                            frame=previous.frame,
+                            action=record.action,
+                            data=record.data,
+                            level=previous.levels_completed,
+                            state=previous.state,
+                            entities=self._confirmed_entity_values(),
+                        )
+                        if (
+                            prediction.status == "predicted"
+                            and prediction.frame == record.frame
+                            and prediction.level == record.levels_completed
+                            and prediction.state == record.state
+                        ):
+                            certificate = replace(
+                                certificate,
+                                current_frame_sha256=digest(record.frame),
+                            )
+                        else:
+                            certificate = None
+                    else:
+                        certificate = replace(
+                            certificate,
+                            current_frame_sha256=digest(record.frame),
+                        )
+                elif certificate is not None and certificate.coverage == "mechanism-evidence":
+                    covered = list(certificate.covered_sequences)
+                    actions = {rule.action for rule in self._mechanism_spec.rules}
+                    if record.action in actions and record.sequence not in covered:
+                        covered.append(record.sequence)
+                    certificate = validate_mechanism_evidence(
+                        self._mechanism_spec, history, tuple(sorted(covered)),
+                        entities=self._confirmed_entity_values(),
+                    )
+                else:
+                    certificate = validate_mechanism(
+                        self._mechanism_spec, history,
+                        entities=self._confirmed_entity_values(),
+                    )
                 if certificate is None:
-                    self._mechanism_certificate = None
-                    self._mechanism_spec = None
-                    self._record_model_conflict(record.sequence, "mechanism-contradicted")
+                    previous_digest = self._mechanism_spec.digest
+                    # A newly observed action may complete a larger induced
+                    # bundle.  Try that bundle before declaring the existing
+                    # smaller certificate contradictory.
+                    self._try_auto_promote_model(history)
+                    if self._mechanism_spec is None or self._mechanism_spec.digest == previous_digest:
+                        self._mechanism_certificate = None
+                        self._mechanism_spec = None
+                        self._record_model_conflict(record.sequence, "mechanism-contradicted")
                 else:
                     self._mechanism_certificate = certificate
+            self._try_auto_promote_model(self._bound_history())
             level = self._world_model.current_level
             if record.levels_completed > level:
                 completion_reason = (

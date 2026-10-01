@@ -76,6 +76,14 @@ play: ``execution_authority`` remains ``none`` until the normal
 ``p7_record_hypothesis`` and retrodiction gates succeed, while ordinary
 ``act``/``act_checked`` exploration remains available.
 
+The broker also performs automatic promotion for repeated, deterministic
+action effects. When ``p7_simulator_status`` reports ``confirmed_model=true``,
+that model is already evidence-backed; the initial context may contain an
+``Automatic verified model plan``. Execute that checked plan unchanged with
+``p7_act_checked`` before starting fresh exploration. This automatic path is
+separate from visual-object promotion and does not require the model to
+discover a registration tool first.
+
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
 p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
