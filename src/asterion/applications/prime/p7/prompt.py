@@ -110,14 +110,18 @@ hint about the input surface, and its exact-game experience is progress memory,
 not an executable route. Normal exploration and single-step probes remain
 available; only an identity or evidence mismatch should stop a checked batch.
 When ``learning_hint.recommendation`` is ``inspect_candidates`` or
-``inspect_candidate_and_probe``, optionally call ``p7_mechanism_candidates``
-before a long batch. If it exposes a ``compiled_mechanism`` supported by at
-least two effects and the current action is otherwise ambiguous, prefer the
+``inspect_candidate_and_probe``, the initial broker context already includes
+the current settled frame and the bounded hint; use them as the starting
+observation. For ``inspect_candidate_and_probe``, call
+``p7_mechanism_candidates`` and ``p7_probe_plan`` before a long batch. If the
+probe plan is ``ready``, submit exactly one current-frame distinguishing probe
+and inspect its result before batching. If it exposes a ``compiled_mechanism``
+supported by at least two effects and the current action is otherwise ambiguous, prefer the
 ``experience.induced.bundle`` entry when present so compatible action rules
 can be retrodicted together. Treat it as a declarative proposal: check its
 current frame prediction, construct one distinguishing probe, and submit it
-through ``p7_record_hypothesis`` only when that probe is cheaper than ordinary
-exploration. A compiled proposal is not a certificate or a route; it never
+through ``p7_record_hypothesis`` before any long batch when the probe plan is
+ready. A compiled proposal is not a certificate or a route; it never
 blocks normal actions. Candidates marked ``contradicted`` or with incomplete
 motion evidence are diagnostics only; continue ordinary exploration.
 ``translate_components`` is a bounded semantic effect for repeated object

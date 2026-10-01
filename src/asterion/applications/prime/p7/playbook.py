@@ -154,10 +154,39 @@ class CheckedFact:
 
 
 @dataclass(frozen=True, slots=True)
+class LevelCompletion:
+    """Evidence that a level reached its terminal completion boundary.
+
+    This is progress memory, not a mechanism certificate.  The replay digest
+    and final-frame/state witnesses make the completion reusable and auditable
+    without granting the planner any new authority.
+    """
+
+    action_count: int
+    terminal_reason: str
+    replay_sha256: str
+    final_state_sha256: str
+    final_frame_sha256: str
+
+    def __post_init__(self) -> None:
+        if (
+            type(self.action_count) is not int
+            or self.action_count <= 0
+            or self.action_count > 1_000_000
+            or self.terminal_reason not in {"level-completed", "game-won", "game-incomplete"}
+        ):
+            raise ValueError("invalid level completion")
+        _digest(self.replay_sha256)
+        _digest(self.final_state_sha256)
+        _digest(self.final_frame_sha256)
+
+
+@dataclass(frozen=True, slots=True)
 class LevelMemory:
     level: int
     checked_facts: tuple[CheckedFact, ...] = ()
     rejected_branches: tuple[str, ...] = ()
+    completion: LevelCompletion | None = None
 
     def __post_init__(self) -> None:
         if type(self.level) is not int or self.level < 0:
@@ -168,6 +197,8 @@ class LevelMemory:
             raise ValueError("invalid rejected branches")
         if len(set(self.rejected_branches)) != len(self.rejected_branches):
             raise ValueError("invalid rejected branches")
+        if self.completion is not None and type(self.completion) is not LevelCompletion:
+            raise ValueError("invalid level completion")
         object.__setattr__(self, "rejected_branches", tuple(sorted(self.rejected_branches)))
 
 
@@ -254,7 +285,7 @@ def _json(snapshot: PlaybookSnapshot) -> bytes:
                 "candidates": [_fact_json(x) for x in sorted(snapshot.candidate_summaries, key=lambda x: (x.layer, x.key))],
                 "simulator": [_fact_json(x) for x in sorted(snapshot.simulator_summaries, key=lambda x: (x.layer, x.key))],
             },
-            "level_memory": [{"level": x.level, "checked_facts": [_fact_json(f) for f in sorted(x.checked_facts, key=lambda f: (f.layer, f.key))], "rejected_branches": sorted(x.rejected_branches)} for x in sorted(snapshot.level_memory, key=lambda x: x.level)],
+            "level_memory": [{"level": x.level, "checked_facts": [_fact_json(f) for f in sorted(x.checked_facts, key=lambda f: (f.layer, f.key))], "rejected_branches": sorted(x.rejected_branches), "completion": None if x.completion is None else {"action_count": x.completion.action_count, "terminal_reason": x.completion.terminal_reason, "replay_sha256": x.completion.replay_sha256, "final_state_sha256": x.completion.final_state_sha256, "final_frame_sha256": x.completion.final_frame_sha256}} for x in sorted(snapshot.level_memory, key=lambda x: x.level)],
             "conflict_metadata": sorted(snapshot.conflict_metadata), "evidence_index": sorted(snapshot.evidence_index), "branch_reasons": list(snapshot.branch_reasons)}
     encoded = json.dumps(body, ensure_ascii=True, sort_keys=True, separators=(",", ":")).encode()
     if len(encoded) > _MAX_BYTES:
@@ -375,10 +406,15 @@ def load_playbook(root: Path, key: PlaybookKey) -> PlaybookSnapshot | None:
             raise ValueError
         memory_rows = []
         for x in body["level_memory"]:
-            x = _mapping(x, {"level", "checked_facts", "rejected_branches"})
+            if type(x) is not dict or set(x) not in ({"level", "checked_facts", "rejected_branches"}, {"level", "checked_facts", "rejected_branches", "completion"}):
+                raise ValueError("invalid playbook schema")
             if type(x["checked_facts"]) is not list or type(x["rejected_branches"]) is not list:
                 raise ValueError
-            memory_rows.append(LevelMemory(x["level"], tuple(_parse_fact(f) for f in x["checked_facts"]), tuple(x["rejected_branches"])))
+            completion = None
+            if "completion" in x and x["completion"] is not None:
+                raw = _mapping(x["completion"], {"action_count", "terminal_reason", "replay_sha256", "final_state_sha256", "final_frame_sha256"})
+                completion = LevelCompletion(raw["action_count"], raw["terminal_reason"], raw["replay_sha256"], raw["final_state_sha256"], raw["final_frame_sha256"])
+            memory_rows.append(LevelMemory(x["level"], tuple(_parse_fact(f) for f in x["checked_facts"]), tuple(x["rejected_branches"]), completion))
         memory = tuple(memory_rows)
         for name in ("conflict_metadata", "evidence_index", "branch_reasons"):
             if type(body[name]) is not list:
@@ -403,7 +439,7 @@ def branch_playbook(snapshot: PlaybookSnapshot, reason: str) -> PlaybookSnapshot
     return PlaybookSnapshot(snapshot.key, snapshot.confirmed_facts, snapshot.checked_routes, snapshot.level_memory, snapshot.conflict_metadata, snapshot.evidence_index, tuple(sorted(set((*snapshot.branch_reasons, reason)))), snapshot.visual_hypotheses, snapshot.effect_summaries, snapshot.candidate_summaries, snapshot.simulator_summaries)
 
 
-def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapshot, *, level: int) -> PlaybookSnapshot:
+def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapshot, *, level: int, completion: LevelCompletion | None = None) -> PlaybookSnapshot:
     if type(snapshot) is not PlaybookSnapshot or type(world) is not WorldModelSnapshot or (world.game_id, world.seed, world.win_levels) != (snapshot.key.game_id, snapshot.key.seed, snapshot.key.win_levels):
         raise ValueError("playbook identity mismatch")
     if type(level) is not int or not 0 <= level < snapshot.key.win_levels or world.current_level != level:
@@ -417,7 +453,7 @@ def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapsho
             if not digests or any(ref.summary_hash is None for ref in fact.evidence):
                 raise ValueError("confirmed fact lacks evidence digest")
             facts.append(CheckedFact(layer, fact.key, fact.value, fact.level, digests))
-    memory = LevelMemory(level, tuple(sorted(facts, key=lambda x: (x.layer, x.key))))
+    memory = LevelMemory(level, tuple(sorted(facts, key=lambda x: (x.layer, x.key))), completion=completion)
     visual_hypotheses = []
     for fact in world.hypotheses.values():
         if fact.layer != "entities" or not fact.key.startswith("visual.level.") or fact.level != level:
@@ -430,4 +466,4 @@ def capture_completed_level(snapshot: PlaybookSnapshot, world: WorldModelSnapsho
     return PlaybookSnapshot(snapshot.key, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.confirmed_facts, *facts)}.values(), key=lambda x: (x.layer, x.key))), snapshot.checked_routes, (*tuple(m for m in snapshot.level_memory if m.level != level), memory), snapshot.conflict_metadata, evidence_index, snapshot.branch_reasons, tuple(sorted({(f.layer, f.key): f for f in (*snapshot.visual_hypotheses, *visual_hypotheses)}.values(), key=lambda x: (x.layer, x.key))), snapshot.effect_summaries, snapshot.candidate_summaries, snapshot.simulator_summaries)
 
 
-__all__ = ["PlaybookKey", "PlaybookSnapshot", "CheckedRoute", "CheckedFact", "LevelMemory", "load_playbook", "save_playbook", "append_checked_route", "branch_playbook", "capture_completed_level"]
+__all__ = ["PlaybookKey", "PlaybookSnapshot", "CheckedRoute", "CheckedFact", "LevelCompletion", "LevelMemory", "load_playbook", "save_playbook", "append_checked_route", "branch_playbook", "capture_completed_level"]

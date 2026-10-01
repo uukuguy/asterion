@@ -191,6 +191,23 @@ class ExperienceInductionTests(unittest.TestCase):
         self.assertEqual(plan.action, "ACTION1")
         self.assertIn("stale-click", plan.rejected_candidates)
 
+    def test_probe_plan_allows_consistent_candidate_in_a_new_state(self) -> None:
+        current = SimState.from_observation(
+            frame=((0, 0),), level=0, state="NOT_FINISHED",
+            available_actions=["ACTION1"],
+        )
+        candidate = EffectHypothesis(
+            key="move", game_id="game", seed=1, level=0,
+            action_family="keyboard", action="ACTION1", data=(),
+            signature="translate", status="hypothesis",
+            evidence_sequences=(1, 2), conflict_sequences=(),
+        )
+        plan = ExperienceInducer.probe_plan(
+            current, (candidate,), tried_actions=(("ACTION1", ()),),
+        )
+        self.assertEqual(plan.status, "ready")
+        self.assertEqual(plan.action, "ACTION1")
+
     def test_large_frame_uses_private_full_delta_for_components(self) -> None:
         before = tuple(tuple(0 for _ in range(12)) for _ in range(12))
         after_rows = [list(row) for row in before]

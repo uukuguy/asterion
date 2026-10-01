@@ -184,6 +184,9 @@ class ExperienceEndToEndTests(unittest.TestCase):
         self.assertEqual(candidate["source"], "playbook")
         self.assertEqual(candidate["status"], "hypothesis")
         self.assertIn("compiled_mechanism", candidate)
+        plan = fresh.probe_plan()
+        self.assertEqual(plan["status"], "ready")
+        self.assertEqual(plan["action"], {"name": "ACTION1", "data": {}})
 
     def test_reloaded_candidate_can_be_retro_verified_without_route_injection(self) -> None:
         source = ArcBroker(engine=_TranslationEngine())

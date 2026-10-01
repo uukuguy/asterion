@@ -8,9 +8,9 @@ from typing import Callable, Mapping, Protocol, TypedDict, cast
 
 from .mechanism_model import MechanismSpec, ModelCertificate, compile_effect_hypothesis, validate_mechanism
 from .model_search import search_model
-from .experience_induction import ExperienceInducer, SimState, extract_action_effect
+from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
-from .playbook import (PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
+from .playbook import (LevelCompletion, PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
 from .score import P7_ACTION_CAP, P7_GAME_ID, P7_SEED, digest, replay_sha256
 from .transition_model import ActionExpectation, TransitionModel
@@ -496,6 +496,48 @@ class ArcBroker:
             result.append(item)
         return tuple(result)
 
+    def _persisted_hypotheses(self) -> tuple[EffectHypothesis, ...]:
+        """Rehydrate same-level Playbook candidates for probe planning.
+
+        Playbook records are deliberately summaries rather than executable
+        objects.  Rebuilding the bounded hypothesis value here lets the
+        ordinary probe planner rank a persisted prior while retaining the
+        normal current-frame/action-whitelist checks.
+        """
+
+        result: list[EffectHypothesis] = []
+        for item in self._persisted_candidates():
+            if item.get("status") != "hypothesis":
+                continue
+            action = item.get("action")
+            if not isinstance(action, Mapping):
+                continue
+            name = action.get("name")
+            raw_data = action.get("data")
+            if type(name) is not str or not isinstance(raw_data, Mapping):
+                continue
+            try:
+                data = tuple(sorted((key, value) for key, value in raw_data.items()))
+                if any(type(key) is not str or type(value) is not int for key, value in data):
+                    continue
+                evidence = tuple(int(value) for value in item.get("evidence_sequences", ()))
+                conflicts = tuple(int(value) for value in item.get("conflict_sequences", ()))
+                support = item.get("support_count", len(evidence))
+                if type(support) is not int or support < 0:
+                    continue
+                result.append(EffectHypothesis(
+                    key=item["key"], game_id=self._game.game_id,
+                    seed=self._game.seed, level=self._current.levels_completed,
+                    action_family=item.get("action_family", "unknown"),
+                    action=name, data=data, signature=item.get("signature", "persisted"),
+                    status="hypothesis", evidence_sequences=evidence,
+                    conflict_sequences=conflicts, template=None,
+                    win_levels=self._game.win_levels,
+                ))
+            except (KeyError, TypeError, ValueError):
+                continue
+        return tuple(result)
+
     def _compiled_induced_mechanism(self) -> MechanismSpec | None:
         """Combine non-conflicting induced rules into one advisory model."""
 
@@ -622,7 +664,8 @@ class ArcBroker:
         candidate_previews.sort(
             key=lambda item: (-int(item["support_count"]), str(item["action"]))
         )
-        if compiled_candidates:
+        probe_status = self.probe_plan().get("status")
+        if compiled_candidates and probe_status == "ready":
             recommendation = "inspect_candidate_and_probe"
         elif current_candidates or persisted_current:
             recommendation = "inspect_candidates"
@@ -656,8 +699,14 @@ class ArcBroker:
                 for (level, action, data), _count in self._tried_actions.items()
                 if level == self._current.levels_completed
             )
+            live_candidates = self._experience_inducer.candidates()
+            live_keys = {candidate.key for candidate in live_candidates}
+            persisted = tuple(
+                candidate for candidate in self._persisted_hypotheses()
+                if candidate.key not in live_keys
+            )
             plan = ExperienceInducer.probe_plan(
-                current, self._experience_inducer.candidates(), tried_actions=tried,
+                current, (*live_candidates, *persisted), tried_actions=tried,
             )
             return {
                 "status": plan.status,
@@ -1198,7 +1247,34 @@ class ArcBroker:
                     self._mechanism_certificate = certificate
             level = self._world_model.current_level
             if record.levels_completed > level:
-                self._playbook = capture_completed_level(self._playbook, self._world_model.snapshot, level=level)
+                completion_reason = (
+                    (
+                        "game-won" if record.state == "WIN" else "game-incomplete"
+                    )
+                    if record.levels_completed == self._game.target_level
+                    and self._game.is_full_game
+                    else "level-completed"
+                )
+                history = self._bound_history()
+                level_actions = sum(
+                    1 for before, _after in zip(history, history[1:])
+                    if before.levels_completed == level
+                )
+                completion = LevelCompletion(
+                    action_count=level_actions,
+                    terminal_reason=completion_reason,
+                    replay_sha256=replay_sha256(
+                        self._journal,
+                        terminal_reason=completion_reason,
+                        uncertain_action=self._failed_action,
+                    ),
+                    final_state_sha256=record.after_state_sha256,
+                    final_frame_sha256=record.after_frame_sha256,
+                )
+                self._playbook = capture_completed_level(
+                    self._playbook, self._world_model.snapshot,
+                    level=level, completion=completion,
+                )
                 if record.levels_completed < self._game.win_levels:
                     self._world_model.refresh_level(record.levels_completed)
                     self._world_model.record_visual_candidates(

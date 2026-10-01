@@ -232,6 +232,27 @@ class TestNativeP7Broker(unittest.TestCase):
         projection["mutated"] = True
         self.assertNotIn("mutated", broker.playbook_projection())
 
+    def test_level_completion_is_persisted_as_progress_evidence(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine(level_after=1)
+        broker = ArcBroker(
+            engine=engine,
+            world_model=WorldModelStore(engine.game_id, engine.seed, engine.win_levels),
+        )
+        broker.bind_history("completion-memory")
+        broker.act((ArcAction("ACTION1"),))
+
+        memory = broker.playbook_projection()["level_memory"]
+        self.assertEqual(len(memory), 1)
+        completion = memory[0]["completion"]
+        self.assertEqual(completion["action_count"], 1)
+        self.assertEqual(completion["terminal_reason"], "level-completed")
+        self.assertTrue(completion["replay_sha256"].startswith("sha256:"))
+        self.assertTrue(completion["final_state_sha256"].startswith("sha256:"))
+        self.assertTrue(completion["final_frame_sha256"].startswith("sha256:"))
+
     def test_model_search_requires_a_retrodicted_mechanism_certificate(self) -> None:
         broker, _ = _broker()
         broker.bind_history("run-search-gate")

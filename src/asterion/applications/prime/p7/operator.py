@@ -766,9 +766,24 @@ class _P7BrokerClient:
             visual = list(self._broker.playbook_visual_hypotheses())
             if level is not None:
                 visual = [item for item in visual if item["level"] < level]
+                raw_experience = projection.get("experience_model", {})
+                if not isinstance(raw_experience, Mapping):
+                    raw_experience = {}
+                experience = {
+                    "effects": [
+                        item for item in raw_experience.get("effects", [])
+                        if isinstance(item, Mapping) and item.get("level") == level
+                    ][-8:],
+                    "candidates": [
+                        item for item in raw_experience.get("candidates", [])
+                        if isinstance(item, Mapping) and item.get("level") == level
+                    ][-8:],
+                    "simulator": list(raw_experience.get("simulator", []))[-1:],
+                }
                 value = {
                     "level": level,
                     "memory": [m for m in projection.get("level_memory", []) if m["level"] == level],
+                    "experience": experience,
                 }
             else:
                 value = projection
@@ -779,6 +794,7 @@ class _P7BrokerClient:
                     "status": "projection-capped",
                     "level": level,
                     "prior_visual_hypotheses": visual,
+                    "experience": value.get("experience", {}),
                     "checked_plan": value["checked_plan"],
                 }
                 while len(json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()) > 8192 and visual:
@@ -1591,13 +1607,28 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
     broker_status = status()
     if not isinstance(observation, Mapping) or not isinstance(broker_status, Mapping):
         raise P7OperatorError("P7 host services are unavailable")
+    raw_frame = observation.get("frame")
+    frame = raw_frame
+    frame_truncated = bool(observation.get("frame_truncated", False))
+    if isinstance(raw_frame, (list, tuple)) and raw_frame:
+        # Keep the settled frame in the initial context.  The previous
+        # ``frame_summary`` placeholder was not emitted by observe(), which
+        # silently deprived a fresh model turn of the board it must inspect.
+        settled = raw_frame[-1]
+        if len(json.dumps(settled, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 12 * 1024:
+            frame = settled
+        else:
+            frame = None
+            frame_truncated = True
     state = {
         "available_actions": observation.get("available_actions", ()),
-        "frame_summary": observation.get("frame_summary", {}),
+        "frame": frame,
+        "frame_truncated": frame_truncated,
         "levels_completed": observation.get("levels_completed"),
         "state": observation.get("state"),
         "win_levels": observation.get("win_levels"),
         "tried_summary": observation.get("tried_summary", {}),
+        "learning_hint": observation.get("learning_hint", {}),
         "actions_remaining": broker_status.get("actions_remaining"),
         "primitive_actions": broker_status.get("primitive_actions"),
         "target_level": broker_status.get("target_level"),

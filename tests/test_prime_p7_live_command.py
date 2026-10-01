@@ -663,8 +663,40 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("ACTION6 a click at column x and row y", P7_SOLVE_PROMPT)
         self.assertIn("no-discriminating-probe", P7_SOLVE_PROMPT)
         self.assertIn("do not invent coordinates", P7_SOLVE_PROMPT.lower())
+        self.assertIn("current settled frame", P7_SOLVE_PROMPT)
+        self.assertIn("submit exactly one current-frame distinguishing probe", P7_SOLVE_PROMPT)
         self.assertIn("stop querying", P7_CONTINUE_PROMPT)
         self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
+
+    def test_initial_context_keeps_settled_frame_and_learning_hint(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7, 0]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 2,
+                    "learning_hint": {
+                        "recommendation": "inspect_candidate_and_probe",
+                        "compiled_candidates": [{"key": "candidate"}],
+                    },
+                }
+
+            def status(self):
+                return {
+                    "actions_remaining": 500,
+                    "primitive_actions": 0,
+                    "target_level": 2,
+                    "terminal_reason": "active",
+                }
+
+        context = _initial_game_context(Client(), include_prior=False)
+        self.assertIn('"frame":[[7,0]]', context)
+        self.assertIn("inspect_candidate_and_probe", context)
+        self.assertIn("compiled_candidates", context)
 
     def test_continue_prompt_reestablishes_action_whitelist_after_retry(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_CONTINUE_PROMPT

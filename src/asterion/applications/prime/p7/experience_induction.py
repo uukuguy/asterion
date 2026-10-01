@@ -512,7 +512,13 @@ class ExperienceInducer:
             if candidate.status != "hypothesis" or candidate.level != current.level:
                 continue
             action = (candidate.action, candidate.data)
-            if candidate.action not in current.available_actions or action in tried:
+            if candidate.action not in current.available_actions:
+                continue
+            # A candidate supported by multiple consistent effects is being
+            # tested in a new current state; seeing the same keyboard action
+            # in an earlier state is not the same probe.  Single-observation
+            # candidates still avoid repeating an exact action/data tuple.
+            if action in tried and candidate.support_count < 2:
                 continue
             if candidate.action == "ACTION6":
                 values = dict(candidate.data)

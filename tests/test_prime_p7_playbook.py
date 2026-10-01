@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 from asterion.applications.prime.p7.playbook import (
     CheckedFact,
+    LevelCompletion,
     LevelMemory,
     CheckedRoute,
     PlaybookKey,
@@ -25,6 +26,7 @@ from asterion.applications.prime.p7.world_model import EvidenceRef, WorldModelSt
 
 _HASH = "sha256:" + "a" * 64
 _HASH2 = "sha256:" + "b" * 64
+_HASH3 = "sha256:" + "c" * 64
 
 
 def _expectation() -> ActionExpectation:
@@ -178,6 +180,27 @@ class TestP7Playbook(unittest.TestCase):
         self.assertEqual({fact.key for fact in captured.level_memory[0].checked_facts}, {"goal", "controls"})
         save_playbook(self.root, captured)
         self.assertEqual(load_playbook(self.root, self.key), captured)
+
+    def test_completed_level_persists_completion_evidence_without_confirming_mechanics(self) -> None:
+        world = WorldModelStore("game-1", 42, 3)
+        completion = LevelCompletion(
+            action_count=6,
+            terminal_reason="level-completed",
+            replay_sha256=_HASH,
+            final_state_sha256=_HASH2,
+            final_frame_sha256=_HASH3,
+        )
+        captured = capture_completed_level(
+            self.snapshot, world.snapshot, level=0, completion=completion,
+        )
+
+        self.assertEqual(captured.level_memory[0].completion, completion)
+        self.assertEqual(captured.confirmed_facts, ())
+        save_playbook(self.root, captured)
+        loaded = load_playbook(self.root, self.key)
+        self.assertIsNotNone(loaded)
+        assert loaded is not None
+        self.assertEqual(loaded.level_memory[0].completion, completion)
 
     def test_completed_level_persists_bounded_visual_hypotheses_for_same_game(self) -> None:
         world = WorldModelStore("game-1", 42, 3)

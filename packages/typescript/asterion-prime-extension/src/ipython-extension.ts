@@ -428,14 +428,14 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_observe",
-      "Read the current game state: available_actions, last settled frame, levels_completed, state, win_levels. Call this *first* on a new level. The framework also injects a component summary and untried-clicks list into your observation-no-change responses, so you don't need to call p7_components or p7_untried_clicks manually.",
+      "Read the current game state: available_actions, last settled frame, levels_completed, state, win_levels, and the bounded learning_hint. The hint contains same-game candidate summaries and compiled semantic proposals with execution_authority=none; inspect it before ordinary exploration. Call this *first* on a new level. The framework also injects a component summary and untried-clicks list into your observation-no-change responses, so you don't need to call p7_components or p7_untried_clicks manually.",
       TypeObject({}, { additionalProperties: false }),
       "observe",
     ),
     makeMethodTool(
       bridge,
       "p7_status",
-      "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason.",
+      "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason, and the bounded learning_hint. When it recommends inspect_candidate_and_probe, call p7_mechanism_candidates and p7_probe_plan before a long batch.",
       TypeObject({}, { additionalProperties: false }),
       "status",
     ),
