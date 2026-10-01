@@ -2897,15 +2897,20 @@ async def run_live(
                 if sealed_trace and replay_verified:
                     try:
                         snapshot = broker_value.export_playbook(successful=failure is None)
-                        save_playbook(root, snapshot)
-                        playbook_saved = True
                     except (OSError, ValueError) as error:
                         playbook_saved = False
                         # Keep only the exception class in private diagnostics.
                         # The operator must remain body-free while making a
                         # persistence failure distinguishable from an
                         # unverified trace during live-run diagnosis.
-                        diagnostics["playbook_save_error"] = type(error).__name__
+                        diagnostics["playbook_save_error"] = f"export:{type(error).__name__}"
+                    else:
+                        try:
+                            save_playbook(root, snapshot)
+                            playbook_saved = True
+                        except (OSError, ValueError) as error:
+                            playbook_saved = False
+                            diagnostics["playbook_save_error"] = f"write:{type(error).__name__}"
                 elif failure is not None:
                     try:
                         if isinstance(broker_value, ArcBroker):
@@ -2913,11 +2918,16 @@ async def run_live(
                         else:
                             baseline = playbook_snapshot or PlaybookSnapshot(PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels))
                             baseline = branch_playbook(baseline, "run-unverified")
-                        save_playbook(root, baseline)
-                        playbook_saved = True
                     except (OSError, ValueError) as error:
                         playbook_saved = False
-                        diagnostics["playbook_save_error"] = type(error).__name__
+                        diagnostics["playbook_save_error"] = f"export:{type(error).__name__}"
+                    else:
+                        try:
+                            save_playbook(root, baseline)
+                            playbook_saved = True
+                        except (OSError, ValueError) as error:
+                            playbook_saved = False
+                            diagnostics["playbook_save_error"] = f"write:{type(error).__name__}"
                 diagnostics["playbook_saved"] = playbook_saved
             # Keep the operator-only Pi stderr tail in private evidence. The
             # public receipt remains body-free, but extension-registration
