@@ -1,34 +1,33 @@
 # Current State
 
-Updated 2026-10-01 01:55 (Asia/Shanghai). This file is the structural snapshot; session handoff and next actions are in `RESUME-NEXT-SESSION.md`.
-
 ## Project Snapshot
 
 - Project: Asterion composable multi-runtime agent framework
 - Current branch: `main`
-- Theme-level focus: make native P7 accumulate type cognition, exact-game experience, and a verified same-game world model instead of restarting visual exploration on every level
+- Theme-level focus: native P7 builds persistent game knowledge and verifies whether it improves solving
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: P7 same-game world model, retrodicted declarative simulator, and bounded model search; implementation is in place, live capability remains unverified.
+- Active work package: P7 experience induction, game-wide mechanisms, and bounded counterfactual planning
 
 ## Current Architecture
 
-- Python owns orchestration, composition, application assembly, and execution.
-- TypeScript validates shared contracts and packages Pi application resources.
-- Rust owns controlled command execution.
-- P7 is an application-level native ARC-AGI-3 solving route using an operator-injected Pi host and an operator-selected provider/model pair.
-- `ASTERION_PRIME_PROVIDER` / `ASTERION_PRIME_MODEL` are read once in `p7/model_selection.py`; the trace identity, receipt, prefix reuse and runtime options all follow that selection.
-- Framework runtime modules remain domain-neutral; application bridges own P7 tools and state observations.
+- Python owns P7 orchestration, broker authority, persistence, and operator assembly.
+- `ArcBroker` validates identity, current history, action witnesses, and planner certificates before checked execution.
+- `WorldModelStore` holds per-run mechanics/entities/relations and level-local visual evidence.
+- `GameCognitionStore` holds input-type priors and exact-game progress summaries.
+- `ObservationState` provides one immutable representation for frame, input surface, HUD, timers, resources, entities, relations, and events.
+- `GameMechanicsStore` persists game-wide mechanism candidates, conditions, effects, scope, evidence, and conflicts with `execution_authority=none`.
+- `hypothesis_simulator.search_counterfactual` compares confirmed and hypothesis branches, reports subgoal progress and divergence, and never dispatches actions.
+- `MechanismSpec`/`ModelCertificate`/`model_search` remain the only path from retrodicted local evidence to a checked executable plan.
+- P7 application tools are registered through the Operator, worker bridge, live RPC module, and prompt; offline route injection is disabled for capability runs.
 
 ## Open Problems
 
-- `WorldModelStore` persists mechanics/entities/relations and level-local visual hypotheses. `MechanismSpec` plus `ModelCertificate` now provide a safe executable model only after complete current-history retrodiction; `p7_model_search` exposes bounded BFS/A* plans with checked frame/state expectations. Design and limits are documented in `docs/architecture/prime-p7-world-model-simulator.md`.
-- The model-search path is covered by synthetic mechanism tests and P7 bridge regressions. The first pure live verification after cognition integration completed SP80 L1, but did not yet prove that GPT-6.1-Sol forms a useful mechanism hypothesis, certifies it, or improves a later replay without a route hint.
-- Pure SP80 L1 run `p7-live-20260930174531-72d55dc672bc34f8481c3f8a` completed the current level in 6 actions with `offline_optimization_enabled=false`, `replay_verified=true`, `sealed_trace=true`, and `cleanup_complete=true`; the selected model was `gpt-6.1-sol`. The trace exposed 3 retrodiction prediction mismatches and one recoverable oversized `act_checked` warning while still completing normally.
-- A controlled TU93 L1 witness was run after the replay-gated route changes, then operator-cancelled at 18 current-level actions with zero completed levels; it is external-cancel evidence only, not a verified result. Focused tests do not prove improved game-solving capability.
-- Explicit level-witness runs now use the selected level's human baseline sum as their action cap; the old non-full-solve fallback of 500 remains only on the unmodified selection object and is no longer used by the witness entry point.
-- The full repository gate completed 3509 tests with one promotion-environment failure because an offline npm-ci test observed one network request; `make lint`, `make docs-check`, Pyright on changed model modules, and the combined 223-test P7 suite passed.
-- Generated `.asterion-private` evidence may contain stale post-baseline runs and must not be treated as current source state.
+- Native ARC history still records frame/state/level as the authoritative replay evidence; richer metadata needs an adapter that preserves protocol compatibility.
+- Game-wide mechanisms are persisted and advisory, but cross-level confirmation and current-context binding still require live evidence.
+- Counterfactual simulation is implemented and tested synthetically; its effect on real SP80 exploration and action efficiency is unverified.
+- A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
+- Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
 
 ## Key Files
 
@@ -39,33 +38,33 @@ Updated 2026-10-01 01:55 (Asia/Shanghai). This file is the structural snapshot; 
 
 ### State / handoff
 
-- `docs/status/RESUME-NEXT-SESSION.md` — current session baton
+- `docs/status/RESUME-NEXT-SESSION.md` — final session baton
 - `docs/status/JOURNAL.md` — append-only event log
 - `docs/status/INDEX.md` — status-file index
 
-### Implementation entry points
+### P7 implementation entry points
 
-- `src/asterion/applications/prime/p7/operator.py` — P7 operator and host wiring
-- `src/asterion/applications/prime/p7/model_search.py` — certificate-gated bounded simulator search
-- `src/asterion/applications/prime/p7/mechanism_model.py` — safe declarative transition model and certificate
-- `src/asterion/applications/prime/p7/model_selection.py` — the only reader of the P7 model selection
-- `src/asterion/applications/prime/p7/cognition.py` — bounded persistent type priors and exact-game experience
-- `src/asterion/applications/prime/p7/live.py` — Pi RPC live execution plumbing
-- `src/asterion/applications/prime/runtime_binding.py` — fixed Prime runtime selection
-- `Makefile` — provider-backed P7 presets
+- `src/asterion/applications/prime/p7/broker.py` — identity, evidence, execution, and learning integration
+- `src/asterion/applications/prime/p7/observation_state.py` — immutable unified observations
+- `src/asterion/applications/prime/p7/world_model.py` — per-run WorldMap facts and conflicts
+- `src/asterion/applications/prime/p7/game_mechanics.py` — persistent game-wide mechanism memory
+- `src/asterion/applications/prime/p7/hypothesis_simulator.py` — bounded counterfactual branches and subgoals
+- `src/asterion/applications/prime/p7/mechanism_model.py` — declarative transitions and certificates
+- `src/asterion/applications/prime/p7/model_search.py` — certificate-gated bounded search
+- `src/asterion/applications/prime/p7/operator.py` — P7 tools and host wiring
+- `src/asterion/applications/prime/p7/live.py` — live RPC and worker plumbing
 
-## Cognition and execution boundary
+## Execution and evidence boundary
 
-- `GameCognitionStore` persists input-type profiles and exact-game progress under `.asterion-private/prime-p7-live/cognition.json` and exposes them through `p7_cognition()` / `p7_client.cognition()`.
-- Type profiles are `prior-only`; exact-game memory is advisory until the current prefix and evidence are checked. Cache writes never gate normal exploration.
-- Experience now distinguishes `primitive_actions` (historical best) from `current_primitive_actions` (latest observed run), so a shorter prior route cannot masquerade as current progress.
-- Best action counts are now recorded only after the selected target level completes; legacy unverified counts are discarded on load.
-- Success-path diagnostics now emit `failure_classification.category=none`; `application_failure` is reserved for runs with an actual failure.
-- Execution authority is narrow: only identity or checked-witness mismatches stop a batch. Ordinary probes, single-step exploration, and certified model search remain available. See `docs/architecture/prime-p7-cognition-and-experience.md`.
+- Input-type priors and exact-game memory are advisory; persistence failures do not block ordinary exploration.
+- Checked actions require current identity, prefix, frame/state/level expectations, and certificate context.
+- Hypothesis simulation, offline optimization, and Playbook records never grant execution authority by themselves.
+- A passing synthetic induction test does not establish real-game capability; live claims require sealed trace, replay verification, and explicit diagnostics.
 
 ## Resume Instructions
 
-1. Read this file and `RESUME-NEXT-SESSION.md`.
+1. Read this file and `docs/status/RESUME-NEXT-SESSION.md`.
 2. Read the latest `JOURNAL.md` entries and `AGENTS.md`.
 3. Run `git status --short` and `git log --oneline -5`.
-4. Rerun the repository gate before any live game attempt; then use the P7 implementation boundary for a controlled live verification.
+4. Run `make lint`, `make docs-check`, and the focused P7 regression suite before any live game attempt.
+5. If live work resumes, keep offline optimization disabled and report current-level steps separately from replay prefixes and total primitive actions.

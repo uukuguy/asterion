@@ -864,3 +864,11 @@
 - Execution boundary: stop only when a checked batch has an identity, current-prefix, frame/state/level witness, or terminal mismatch. Ordinary exploration, single-step probes, current-observation planning, and bounded certified model search remain available. Cache read/write failures do not block valid action dispatch.
 - Rationale: A permission layer that blocks normal hypothesis testing prevents the model from learning. The boundary must prevent route injection and stale evidence from silently executing while leaving the exploratory loop intact.
 - Evidence: `src/asterion/applications/prime/p7/cognition.py`, broker/operator/live/IPython integration, `docs/architecture/prime-p7-cognition-and-experience.md`, and 147 focused P7 tests plus `make lint`.
+
+## D-2026-10-01-03 — Separate game-wide experience memory from executable local certificates
+
+- Status: 🟢 active.
+- Decision: Persist reusable mechanism observations in a game-wide exact-identity namespace with scope, evidence, conflicts, and cross-level bindings. Expose immutable observations and bounded counterfactual branches through P7 tools, while keeping `execution_authority=none` until current WorldMap evidence and retrodiction produce a planner certificate.
+- Rationale: A human-like agent needs durable gameplay knowledge and long-horizon comparison, but persisted hypotheses and simulator predictions must not silently become action routes.
+- Consequence: `ObservationState`, `GameMechanicsStore`, and `hypothesis_simulator` improve reuse and diagnosis; real capability still requires cold/warm live evidence and cannot be inferred from synthetic tests.
+- Evidence: commits `d85b03b8`, `00b4544e`, `63492b13`, `b1a114a3`; focused P7/Broker/tool regression passed.
