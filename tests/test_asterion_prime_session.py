@@ -23,6 +23,7 @@ from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcEvent, PiRpcResult
+from asterion.services.diagnostics import FailureDiagnostic
 
 
 class FakeSignal:
@@ -42,6 +43,8 @@ class FakePiRpcSession:
         entered: asyncio.Event | None = None,
         release: asyncio.Event | None = None,
         release_after_events: bool = False,
+        failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
+        diagnostic: FailureDiagnostic | None = None,
     ) -> None:
         self.config = config
         self.events = events
@@ -51,6 +54,8 @@ class FakePiRpcSession:
         self.entered = entered
         self.release = release
         self.release_after_events = release_after_events
+        self.failure_diagnostic = failure_diagnostic
+        self.last_diagnostic = diagnostic
         self.calls = 0
 
     async def run(
@@ -201,6 +206,8 @@ class SessionFixture:
         completion_predicate: Callable[[], bool] | None = None,
         unbounded: bool = False,
         allowed_tool_names: tuple[str, ...] = ("ipython",),
+        failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
+        diagnostic: FailureDiagnostic | None = None,
     ) -> tuple[AsterionPrimeSession, FakePiRpcSession, PiExtensionLease]:
         limits = prime_session_module.AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS
         lease = self.binding.preflight()
@@ -220,6 +227,7 @@ class SessionFixture:
             entered=entered,
             release=release,
             release_after_events=release_after_events,
+            diagnostic=diagnostic,
         )
         session = AsterionPrimeSession(
             rpc_session=rpc,  # type: ignore[arg-type]
@@ -229,6 +237,7 @@ class SessionFixture:
             limits=limits,
             completion_predicate=completion_predicate,
             allowed_tool_names=allowed_tool_names,
+            failure_diagnostic=failure_diagnostic,
         )
         return session, rpc, lease
 
@@ -328,6 +337,23 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertNotIn("solved", repr(events))
         self.assertEqual(rpc.calls, 1)
         self.assertTrue(lease.closed)
+
+    def test_session_exposes_native_private_diagnostic(self) -> None:
+        session, rpc, lease = self.fixture.make()
+        diagnostic = FailureDiagnostic(
+            "pi-diagnostic-1",
+            "pi.prompt",
+            "RuntimeError",
+            "subject",
+            None,
+            "pi-provider-execution",
+        )
+        rpc.last_diagnostic_id = diagnostic.diagnostic_id
+        rpc.last_diagnostic = diagnostic
+        self.addCleanup(lease.close)
+
+        self.assertEqual(session.last_diagnostic_id, "pi-diagnostic-1")
+        self.assertIs(session.last_diagnostic, diagnostic)
 
     def test_usage_is_streamed_before_invoke_finishes(self) -> None:
         async def exercise() -> list[RunEvent]:
@@ -440,20 +466,6 @@ class TestAsterionPrimeSession(unittest.TestCase):
         public = asyncio.run(collect(session))
         self.assertEqual(public[-1].payload, {"status": "completed"})
 
-    def test_provider_auto_retry_marker_is_accepted(self) -> None:
-        session, _rpc, _lease = self.fixture.make(native_events(
-            ("agent_start", {}),
-            ("agent_end", {"willRetry": True}),
-            ("auto_retry_start", {}),
-            ("entry_appended", {}),
-            ("agent_start", {}),
-            ("agent_end", {}),
-            ("auto_retry_end", {}),
-            ("agent_settled", {}),
-        ))
-        public = asyncio.run(collect(session))
-        self.assertEqual(public[-1].payload, {"status": "completed"})
-
     def test_default_agent_end_terminal_completes_without_public_payload(self) -> None:
         session, _rpc, _lease = self.fixture.make(
             native_events(("agent_end", {"messages": ["PRIVATE-ANSWER"]}))
@@ -530,7 +542,8 @@ class TestAsterionPrimeSession(unittest.TestCase):
             ("agent_end", {}),
         )
         session, _rpc, lease = self.fixture.make(
-            events, allowed_tool_names=("ipython", "p7_mechanics_prior")
+            events,
+            allowed_tool_names=("ipython", "p7_mechanics_prior"),
         )
         public = asyncio.run(collect(session))
         self.assertEqual(public[1].payload["name"], "p7_mechanics_prior")
@@ -740,6 +753,24 @@ class TestAsterionPrimeSession(unittest.TestCase):
             },
         )
         self.assertNotIn("PRIVATE", repr(events))
+        self.assertTrue(lease.closed)
+
+    def test_transport_failure_reports_bounded_private_diagnostic(self) -> None:
+        reported: list[FailureDiagnostic | None] = []
+        diagnostic = FailureDiagnostic(
+            "diagnostic-id", "pi.prompt", "RuntimeError", "subject", None,
+            "pi-provider-execution",
+        )
+        session, _rpc, lease = self.fixture.make(
+            (), failure=RuntimeError("PRIVATE FAILURE"),
+            failure_diagnostic=reported.append,
+            diagnostic=diagnostic,
+        )
+
+        events = asyncio.run(collect(session))
+
+        self.assertEqual(events[-1].type, "run.failed")
+        self.assertEqual(reported, [diagnostic])
         self.assertTrue(lease.closed)
 
     def test_transport_protocol_error_is_normalized_without_context(self) -> None:

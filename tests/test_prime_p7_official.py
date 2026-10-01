@@ -90,7 +90,9 @@ class TestOfficialAdapter(unittest.TestCase):
         self.assertEqual(session.preflight.total_deadline_seconds, 7200)
         for policy in session.preflight.games:
             runtime = P7RuntimeSelection.fixed(
-                ArcGameContract(policy.game_id, 1, action_cap=policy.action_cap)
+                ArcGameContract(policy.game_id, 1, action_cap=policy.action_cap),
+                provider="openai-codex",
+                model="gpt-6-sol",
             )
             self.assertEqual(policy.model_callback_cap, runtime.max_callbacks)
             self.assertEqual(policy.deadline_seconds, runtime.deadline_ms // 1000)

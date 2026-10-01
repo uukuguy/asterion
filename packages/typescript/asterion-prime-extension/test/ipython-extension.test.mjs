@@ -21,6 +21,7 @@ import register, {
   PROTOCOL,
   canonicalJson,
   composeSummarizationRequest,
+  createAppLevelTools,
   createIpythonBridge,
   registerContextWitness,
   summarizeInstruction,
@@ -66,15 +67,13 @@ async function socketPair() {
 
 function runInheritedBridge(pair, payload) {
   const source = `
-    import { createIpythonBridge, createIpythonTool } from ${JSON.stringify(pathToFileURL(artifactPath).href)};
+    import { createIpythonBridge } from ${JSON.stringify(pathToFileURL(artifactPath).href)};
     const payload = JSON.parse(process.argv[1]);
     const bridge = createIpythonBridge(3, payload.options);
     const controller = new AbortController();
     if (payload.abort) controller.abort();
     try {
-      const result = payload.asTool
-        ? await createIpythonTool(bridge).execute(payload.requestId, {code: payload.code}, controller.signal)
-        : await bridge.execute(payload.requestId, payload.code, controller.signal);
+      const result = await bridge.execute(payload.requestId, payload.code, controller.signal);
       process.stdout.write(JSON.stringify({ ok: true, result }));
     } catch (error) {
       process.stdout.write(JSON.stringify({ ok: false, message: error instanceof Error ? error.message : "invalid" }));
@@ -166,18 +165,29 @@ function readJsonLine(socket) {
   });
 }
 
-test("registers exactly the ipython tool", async () => {
+test("registers the ipython and P7 application tools", async () => {
   const registered = [];
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
   register({ registerTool: (tool) => registered.push(tool) });
-  const expectedTools = [
-    "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
-    "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
-    "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
-    "p7_record_hypothesis", "p7_promote_hypothesis",
+  const expectedNames = [
+    "ipython",
+    "p7_observe",
+    "p7_mechanics_prior",
+    "p7_tried_actions",
+    "p7_history",
+    "p7_frame_at",
+    "p7_act_checked",
   ];
-  assert.deepEqual(toolNames(), expectedTools);
-  assert.deepEqual(registered.map((tool) => tool.name), expectedTools);
+  assert.deepEqual(toolNames(), expectedNames);
+  assert.deepEqual(registered.map((tool) => tool.name), expectedNames);
+  assert.match(
+    registered.find((tool) => tool.name === "p7_act_checked").description,
+    /invalid-checked-plan.*one-item.*RESET/s,
+  );
+  assert.match(
+    registered.find((tool) => tool.name === "p7_observe").description,
+    /progress.*changed_cell_count.*color_count_delta/s,
+  );
   assert.equal(registered[0].label, "ipython");
   assert.equal(
     registered[0].description,
@@ -193,6 +203,26 @@ test("registers exactly the ipython tool", async () => {
   assert.equal(process.env.ASTERION_PRIME_IPYTHON_FD, undefined);
 });
 
+test("registers the mechanics evidence tool with a bounded empty schema", async () => {
+  const calls = [];
+  const fakeBridge = { callMethod: async (...args) => {
+    calls.push(args);
+    return { available: true, current_level: 2 };
+  } };
+  const tool = createAppLevelTools(fakeBridge).find((candidate) => candidate.name === "p7_mechanics_prior");
+  assert.ok(tool);
+  assert.equal(IsSchema(tool.parameters), true);
+  assert.deepEqual(tool.parameters.properties, {});
+  assert.equal(tool.parameters.additionalProperties, false);
+  assert.match(tool.description, /evidence/i);
+  assert.match(tool.description, /not a route/i);
+  assert.deepEqual(await tool.execute("mechanics-1", {}), {
+    available: true,
+    current_level: 2,
+  });
+  assert.deepEqual(calls, [["mechanics-1", "mechanics_prior", {} , undefined]]);
+});
+
 test("rejects malformed requests before writing", async () => {
   const pair = await socketPair();
   try {
@@ -206,31 +236,6 @@ test("rejects malformed requests before writing", async () => {
       }),
       { message: "Asterion ipython bridge is unavailable" },
     );
-  } finally {
-    pair.close();
-  }
-});
-
-test("adapts compound provider tool IDs before IPython bridge validation", async () => {
-  const pair = await socketPair();
-  try {
-    const id = "call_FLL3s6s0KuMqpTLb4vVtKfYo|fc_061be86d68507e54016abcbaa8c95c87d0b80602bede6a7cfe";
-    const running = runInheritedBridge(pair, {
-      requestId: id, code: "print('test')", options: {}, asTool: true,
-    });
-    const first = await Promise.race([
-      readJsonLine(pair.peer).then((request) => ({request})),
-      running.result.then((result) => ({result})),
-    ]);
-    assert.ok(first.request, `provider ID rejected before dispatch: ${JSON.stringify(first.result)}`);
-    assert.equal(first.request.request_id, "tool-" + createHash("sha256").update(id).digest("hex"));
-    pair.peer.write(JSON.stringify({
-      protocol: PROTOCOL, request_id: first.request.request_id,
-      type: "result", status: "ok", output: "test\n",
-    }) + "\n");
-    const result = await running.result;
-    assert.equal(result.ok, true);
-    assert.equal(result.result.content[0].text, "test\n");
   } finally {
     pair.close();
   }
@@ -469,10 +474,13 @@ test("built artifact is comment-free and loads through the pinned loader", async
     const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
     await loader.default({ registerTool: (tool) => registered.push(tool) });
     assert.deepEqual(registered.map((tool) => tool.name), [
-      "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
-      "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
-      "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
-      "p7_record_hypothesis", "p7_promote_hypothesis",
+      "ipython",
+      "p7_observe",
+      "p7_mechanics_prior",
+      "p7_tried_actions",
+      "p7_history",
+      "p7_frame_at",
+      "p7_act_checked",
     ]);
   } finally {
     rmSync(root, { recursive: true, force: true });

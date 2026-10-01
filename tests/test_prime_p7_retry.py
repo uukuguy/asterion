@@ -51,7 +51,9 @@ class TestP7RetryController(unittest.TestCase):
     def test_run_once_attempts_once_writes_prefix_replay_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            config = retry.RetryConfig(root, root, root / "runs", "bp35")
+            arc_root = root / "arc"
+            runs_root = root / "runs"
+            config = retry.RetryConfig(root, arc_root, runs_root, "bp35")
             check = {"target_level": 1, "prefix_actions": 21}
             metadata = {"game_id": "bp35-0a0ad940", "win_levels": 1}
             metrics = {
@@ -75,7 +77,7 @@ class TestP7RetryController(unittest.TestCase):
                 patch.object(retry, "_run_metrics", return_value=metrics),
                 patch.object(
                     retry, "load_best_prefix", return_value=fake_prefix,
-                ),
+                ) as load_best_prefix,
                 patch.object(
                     retry, "_safe_summary",
                     return_value={
@@ -84,6 +86,9 @@ class TestP7RetryController(unittest.TestCase):
                 ),
             ):
                 result = retry.run_once(config)
+            load_best_prefix.assert_called_once_with(
+                arc_root, runs_root, "bp35-0a0ad940", 0,
+            )
             self.assertEqual(fake_prefix.levels_completed, 0)
             scheduler = _FakeScheduler.instances[0]
             self.assertEqual(scheduler.attempts, [("bp35-0a0ad940", 1, 1800)])
@@ -111,7 +116,8 @@ class TestP7RetryController(unittest.TestCase):
             }))
             with self.assertRaises(ValueError):
                 retry._validate_prefix_replay(
-                    runs_root, run_id, "bp35-0a0ad940", 0, 1,
+                    runs_root.parent / "arc", runs_root,
+                    run_id, "bp35-0a0ad940", 0, 1,
                 )
             self.assertEqual(len(fake_prefix.transitions), 20)
 

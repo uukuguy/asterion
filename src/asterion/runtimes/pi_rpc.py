@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
-import hashlib
 import json
 import math
 import os
@@ -21,7 +20,11 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal, Protocol
 
-from asterion.services.diagnostics import DiagnosticSink, capture_failure
+from asterion.services.diagnostics import (
+    DiagnosticSink,
+    FailureDiagnostic,
+    capture_failure,
+)
 
 
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
@@ -37,7 +40,6 @@ _PIPE_DRAIN_SECONDS = 0.25
 _POLL_SECONDS = 0.05
 _PROMPT_DRIVER_EXIT_SECONDS = 1.0
 _STDOUT_EOF = object()
-_MAX_PRIVATE_ERROR_EVENTS = 32
 
 
 def normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
@@ -219,7 +221,6 @@ class PiRpcPromptControl:
 
     def checkpoint(self) -> None:
         if self._session._is_cancelled(self._signal):
-            self._session._cancel_requested = True
             self.abort()
             raise RuntimeError("RPC prompt was cancelled")
         if self.remaining_seconds() == 0:
@@ -230,7 +231,6 @@ class PiRpcPromptControl:
 
     def check_before_prompt(self) -> None:
         if self._session._is_cancelled(self._signal):
-            self._session._cancel_requested = True
             raise RuntimeError("RPC prompt was cancelled")
         if self.remaining_seconds() == 0:
             raise RuntimeError(
@@ -528,9 +528,6 @@ class PiRpcSession:
         self._state: _ProcessState | None = None
         self._last_stderr = b""
         self._last_failure: str | None = None
-        self._private_error_events: list[dict[str, object]] = []
-        self._cancel_requested = False
-        self._last_process_returncode: int | None = None
         self._request_id = 0
         self._run_active = False
         self._run_owner: asyncio.Task[object] | None = None
@@ -613,48 +610,19 @@ class PiRpcSession:
     def last_diagnostic_id(self) -> str | None:
         return self._last_diagnostic_id
 
-    def private_diagnostics(self) -> dict[str, object]:
-        """Return bounded, redacted lifecycle metadata for operator diagnostics."""
-        process = self.process
-        return {
-            "lifecycle_poisoned": self._lifecycle_poisoned,
-            "cancel_requested": self._cancel_requested,
-            "process_returncode": (
-                process.poll() if process is not None else self._last_process_returncode
-            ),
-            "error_events": [dict(item) for item in self._private_error_events],
-        }
+    @property
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        """Return the bounded private diagnostic for the last failed prompt."""
 
-    def _record_private_error_event(self, payload: Mapping[str, object]) -> None:
-        event_type = payload.get("type")
-        record: dict[str, object] = {"type": event_type}
-        if event_type == "message_end":
-            message = payload.get("message")
-            if not isinstance(message, Mapping):
-                return
-            stop_reason = message.get("stopReason")
-            error_value = message.get("errorMessage", message.get("error"))
-            if stop_reason not in {"error", "aborted"} and error_value is None:
-                return
-            if isinstance(stop_reason, str):
-                record["stop_reason"] = stop_reason
-            if error_value is not None:
-                encoded = str(error_value).encode("utf-8", errors="replace")
-                record["error_digest"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
-                record["error_length"] = len(encoded)
-        elif event_type == "auto_retry_end":
-            error_value = payload.get("error")
-            if error_value is None:
-                return
-            encoded = str(error_value).encode("utf-8", errors="replace")
-            record["error_digest"] = "sha256:" + hashlib.sha256(encoded).hexdigest()
-            record["error_length"] = len(encoded)
-        elif event_type == "response" and payload.get("success") is False:
-            record["rpc_failure"] = True
-        else:
-            return
-        if len(self._private_error_events) < _MAX_PRIVATE_ERROR_EVENTS:
-            self._private_error_events.append(record)
+        diagnostic_id = self._last_diagnostic_id
+        sink = self._diagnostics
+        if diagnostic_id is None or sink is None:
+            return None
+        try:
+            diagnostic = sink.get(diagnostic_id)  # type: ignore[attr-defined]
+        except (AttributeError, KeyError):
+            return None
+        return diagnostic if type(diagnostic) is FailureDiagnostic else None
 
     def next_id(self) -> str:
         self._request_id += 1
@@ -664,9 +632,6 @@ class PiRpcSession:
         if self._state is not None:
             raise RuntimeError("RPC session already started")
         self._last_stderr = b""
-        self._private_error_events.clear()
-        self._cancel_requested = False
-        self._last_process_returncode = None
         try:
             process = self._popen(
                 list(self.config.command),
@@ -723,7 +688,6 @@ class PiRpcSession:
                 if not isinstance(payload, dict):
                     self._fail_output(state, "Pi RPC emitted a non-object JSON value")
                     return
-                self._record_private_error_event(payload)
                 if (
                     self.config.compact_events
                     and payload.get("type") == "message_update"
@@ -954,7 +918,6 @@ class PiRpcSession:
         if state is None:
             return
         process = state.process
-        self._last_process_returncode = process.poll()
         failure: BaseException | None = None
         try:
             if process.stdin is not None:
@@ -975,7 +938,6 @@ class PiRpcSession:
                             process.wait(timeout=_PROCESS_EXIT_SECONDS)
                         except subprocess.TimeoutExpired as error:
                             failure = error
-            self._last_process_returncode = process.poll()
         finally:
             threads = tuple(
                 thread

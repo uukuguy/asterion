@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import cast
 
 from asterion.agents.prime.session import AsterionPrimeSession
 from asterion.agents.prime.execution import ASTERION_PRIME_LIMITS, AsterionPrimeLimits
 from asterion.applications.prime.p7.game import P7GameSelection
-from asterion.applications.prime.p7.model_selection import valid_selection_name
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
@@ -23,7 +23,7 @@ from asterion.applications.prime.p7.gameplay_trace import (
     PrimeGameplayTraceError,
 )
 from asterion.applications.prime.p7.live import P7_APPLICATION_TOOL_NAMES
-from asterion.applications.prime.p7.prompt import P7_CONTINUE_PROMPT
+from asterion.applications.prime.p7.frame_analysis import summarize_frame
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -34,6 +34,7 @@ from asterion.runtime.native_rpc import build_rpc_session
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.immutable import RedactedImmutableMapping
+from asterion.services.diagnostics import MemoryDiagnosticSink
 
 
 _HOST_CAPABILITIES = frozenset(
@@ -44,8 +45,6 @@ _HOST_CAPABILITIES = frozenset(
         "prime.private-trace",
     }
 )
-# The bounds are framework-owned; the provider/model pair is operator-owned
-# and must agree with the approved launch command (see _launch_selection).
 _RUNTIME_OPTIONS = {
     "deadline_ms": "3600000",
     "max_callbacks": "128",
@@ -62,25 +61,6 @@ _GAMEPLAY_OPTIONS = {
 }
 _GAMEPLAY_ARTIFACT = "prime.p7-gameplay-run.evidence"
 _GAMEPLAY_MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
-
-
-def _launch_selection(command: object) -> tuple[str, str] | None:
-    """Return the one provider/model pair the approved launch declares."""
-
-    if type(command) is not tuple or not command:
-        return None
-    declared: dict[str, str] = {}
-    for flag in ("--provider", "--model"):
-        positions = [
-            index for index, part in enumerate(command) if part == flag
-        ]
-        if len(positions) != 1:
-            return None
-        value = command[positions[0] + 1 : positions[0] + 2]
-        if len(value) != 1 or not valid_selection_name(value[0]):
-            return None
-        declared[flag] = value[0]
-    return declared["--provider"], declared["--model"]
 
 
 def _p7_terminal(broker: ArcBroker) -> bool:
@@ -100,6 +80,77 @@ def _p7_gameplay_terminal(broker: ArcBroker) -> bool:
         return broker.status().terminal_reason not in {"active", "reset-required"}
     except Exception:
         return True
+
+
+def _p7_continuation_prompt(broker: ArcBroker, round_index: int) -> str:
+    """Carry the latest settled state into every model continuation round."""
+
+    if (
+        type(round_index) is not int
+        or round_index < 1
+        or not callable(getattr(broker, "status", None))
+        or not callable(getattr(broker, "observe", None))
+        or not hasattr(getattr(broker, "game", None), "target_level")
+    ):
+        raise RuntimeFactoryError(_ERROR)
+    status = broker.status()
+    observation = broker.observe()
+    tried_summary: Mapping[str, object] = {}
+    tried_actions = getattr(broker, "tried_actions", None)
+    last_outcome_summary = getattr(broker, "last_outcome_summary", None)
+    if callable(tried_actions) and callable(last_outcome_summary):
+        tried = tried_actions(observation.levels_completed)
+        top_repeated = sorted(
+            (
+                item
+                for item in tried
+                if isinstance(item, Mapping)
+                and type(item.get("count")) is int
+                and not isinstance(item.get("count"), bool)
+            ),
+            key=lambda item: (-item["count"], str(item.get("action", ""))),
+        )[:5]
+        outcome = last_outcome_summary(observation.levels_completed)
+        tried_summary = {
+            "attempts": outcome.get("attempts", {}) if isinstance(outcome, Mapping) else {},
+            "no_effect": outcome.get("no_effect", {}) if isinstance(outcome, Mapping) else {},
+            "top_repeated": top_repeated,
+        }
+    top_count = max(
+        (
+            item.get("count", 0)
+            for item in tried_summary.get("top_repeated", ())
+            if isinstance(item, Mapping)
+        ),
+        default=0,
+    )
+    action_guard = (
+        "force-replan-after-repeated-action"
+        if top_count >= 10
+        else "no-repetition-threshold"
+    )
+    state = {
+        "available_actions": list(observation.available_actions),
+        "frame_summary": summarize_frame(observation.frame),
+        "levels_completed": observation.levels_completed,
+        "state": observation.state,
+        "win_levels": observation.win_levels,
+        "actions_remaining": status.actions_remaining,
+        "primitive_actions": status.primitive_actions,
+        "target_level": broker.game.target_level,
+        "terminal_reason": status.terminal_reason,
+        "tried_summary": tried_summary,
+        "action_guard": action_guard,
+    }
+    return (
+        f"Continue Round {round_index} from this application-supplied settled state. "
+        "Treat it as authoritative. Before another read-only query, perform one "
+        "falsifiable gameplay action or RESET that distinguishes the current "
+        "hypothesis; record the expected changed region and stop condition. "
+        "If action_guard is force-replan-after-repeated-action, stop repeating "
+        "that action and RESET or switch to one different probe.\n"
+        + json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    )
 
 
 @dataclass(frozen=True, repr=False, slots=True)
@@ -386,14 +437,16 @@ def build_p7_runtime(
         )
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
         unbounded = launch is not None and launch.deadline_seconds is None
-        declared = (
-            None if launch is None else _launch_selection(launch.approved_command)
-        )
         expected_options = dict(_RUNTIME_OPTIONS)
-        if declared is not None:
-            expected_options.update(
-                provider=declared[0], model=declared[1]
-            )
+        provider = context.options.get("provider")
+        model = context.options.get("model")
+        if (
+            type(provider) is not str or not provider
+            or type(model) is not str or not model
+            or not provider.isascii() or not model.isascii()
+        ):
+            raise RuntimeFactoryError(_ERROR)
+        expected_options.update(provider=provider, model=model)
         if unbounded:
             # The operator validates OFFLINE authorization before stripping ARC
             # configuration from the model subprocess environment. This seam
@@ -415,7 +468,6 @@ def build_p7_runtime(
             or context.runtime_id != "asterion.prime"
             or set(context.host_services) != _HOST_CAPABILITIES
             or launch is None
-            or declared is None
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
@@ -446,6 +498,7 @@ def build_p7_runtime(
         )
         if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
             raise RuntimeFactoryError(_ERROR)
+        diagnostic_sink = MemoryDiagnosticSink()
         rpc_session = build_rpc_session(
             command=launch.approved_command,
             cwd=launch.working_directory,
@@ -453,6 +506,7 @@ def build_p7_runtime(
             deadline_seconds=launch.deadline_seconds,
             inherited_fds=launch.extension_lease.inherited_fds,
             compact_events=launch.compact_events,
+            diagnostics=diagnostic_sink,
         )
         session = AsterionPrimeSession(
             rpc_session=rpc_session,
@@ -462,7 +516,9 @@ def build_p7_runtime(
             approved_environment=launch.approved_environment,
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
-            continuation_prompt=lambda _: P7_CONTINUE_PROMPT,
+            continuation_prompt=lambda round_index: _p7_continuation_prompt(broker, round_index),
+            round_diagnostic=trace_adapter.record_model_round,
+            failure_diagnostic=trace_adapter.record_failure,
             allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
         launch = None
@@ -485,19 +541,19 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
     launch_value = context.host_services.get("prime.launch")
     launch = launch_value if type(launch_value) is PrimeLaunch else None
     try:
+        provider = context.options.get("provider")
+        model = context.options.get("model")
+        if (
+            type(provider) is not str or not provider
+            or type(model) is not str or not model
+            or not provider.isascii() or not model.isascii()
+        ):
+            raise RuntimeFactoryError(_ERROR)
         ipython = context.host_services.get("prime.ipython")
         broker = context.host_services.get("prime.arc-broker")
         trace_value = context.host_services.get("prime.arc-run-evidence")
         trace_adapter = trace_value if type(trace_value) is PrimeGameplayTrace else None
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
-        declared = (
-            None if launch is None else _launch_selection(launch.approved_command)
-        )
-        expected_options = dict(_GAMEPLAY_OPTIONS)
-        if declared is not None:
-            expected_options.update(
-                provider=declared[0], model=declared[1]
-            )
         if (
             context.provider_id != "prime-applications"
             or context.application_id != "prime.arc-agi-3-gameplay"
@@ -505,14 +561,15 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             or context.runtime_id != "asterion.prime"
             or set(context.host_services) != _GAMEPLAY_HOST_CAPABILITIES
             or launch is None
-            or declared is None
             or type(ipython) is not PersistentIpythonHost
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
             or not getattr(broker.game, "is_full_game", False)
             or dict(context.options) != {
-                **expected_options,
+                **_GAMEPLAY_OPTIONS,
+                "provider": provider,
+                "model": model,
                 "max_actions": str(broker.game.action_cap),
             }
             or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")
@@ -548,7 +605,6 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
             completion_predicate=lambda: _p7_gameplay_terminal(broker),
-            continuation_prompt=lambda _: P7_CONTINUE_PROMPT,
             allowed_tool_names=P7_APPLICATION_TOOL_NAMES,
         )
         launch = None

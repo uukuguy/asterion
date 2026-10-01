@@ -165,10 +165,15 @@ def _run_metrics(runs_root: Path, run_id: str | None) -> dict[str, Any]:
 
 
 def _validate_prefix_replay(
-    runs_root: Path, run_id: str, game_id: str, seed: int, target_level: int
+    arc_root: Path,
+    runs_root: Path,
+    run_id: str,
+    game_id: str,
+    seed: int,
+    target_level: int,
 ) -> int:
     """Require the new run to record the same sealed prefix used for replay."""
-    prefix = load_best_prefix(runs_root.parent, runs_root, game_id, seed)
+    prefix = load_best_prefix(arc_root, runs_root, game_id, seed)
     if prefix is None or prefix.levels_completed >= target_level:
         raise ValueError("saved prefix is missing or already covers the target level")
     summary = _safe_summary(runs_root / run_id) or {}
@@ -249,7 +254,7 @@ def run_once(config: RetryConfig) -> dict[str, Any]:
     if run_id is None:
         raise ValueError("retry produced ambiguous run evidence")
     prefix_actions = _validate_prefix_replay(
-        config.runs_root, run_id,
+        config.arc_root, config.runs_root, run_id,
         str(metadata["game_id"]), config.seed, level,
     )
     result = {

@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from dotenv import dotenv_values
-
+from asterion.applications.prime.operator_config import load_operator_environment
 from asterion.runtime.native_rpc import build_rpc_session
 
 from .analysis import RunStoryNarrationRequest
@@ -144,12 +142,7 @@ def load_operator_narrator(repo_root: Path) -> RunStoryNarrator:
     """Resolve the fixed application preset from operator-owned configuration."""
 
     root = repo_root.resolve(strict=True)
-    dotenv = {
-        key: value
-        for key, value in dotenv_values(root / ".env").items()
-        if value is not None
-    }
-    environment = {**dotenv, **os.environ}
+    environment = load_operator_environment(root)
     model = environment.get(_MODEL_ENV, "").strip()
     provider = _PROVIDERS.get(model)
     if provider is None or not environment.get("DEEPSEEK_API_KEY", "").strip():

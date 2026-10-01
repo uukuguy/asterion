@@ -8,6 +8,7 @@ from asterion.runtime.host import RunEvent
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
+from asterion.services.diagnostics import FailureDiagnostic
 
 
 class FakeSession:
@@ -60,8 +61,21 @@ class TestAsterionPrimeRuntimeClient(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, [(request, signal)])
 
     def test_accepts_narrow_private_run_protocol(self) -> None:
-        client = AsterionPrimeRuntimeClient(FakeSession())
+        session = FakeSession()
+        diagnostic = FailureDiagnostic(
+            "pi-diagnostic-1",
+            "pi.prompt",
+            "ProtocolError",
+            "0" * 64,
+            None,
+            "pi-provider-execution",
+        )
+        session.last_diagnostic_id = diagnostic.diagnostic_id
+        session.last_diagnostic = diagnostic
+        client = AsterionPrimeRuntimeClient(session)
         self.assertEqual(client.manifest.runtime_id, "asterion.prime")
+        self.assertEqual(client.last_diagnostic_id, diagnostic.diagnostic_id)
+        self.assertIs(client.last_diagnostic, diagnostic)
 
     def test_rejects_absent_or_noncallable_run(self) -> None:
         with self.assertRaisesRegex(ProtocolError, "session is invalid"):

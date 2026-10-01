@@ -43,10 +43,7 @@ def _progress(payload: Mapping[str, object], previous_level: int | None) -> tupl
     ), valid_level if valid_level is not None else previous_level
 
 
-def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
-    """Read trace evidence only; this function has no execution-side callbacks."""
-
-    entries = validate_trace(entries)
+def _analyze_trace_entries(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
     transitions = tuple(entry for entry in entries if entry.kind == "arc.action")
     maximum_noop = 0
     current_noop = 0
@@ -120,4 +117,103 @@ def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
     )
 
 
-__all__ = ("DiagnosticReport", "analyze_trace")
+def analyze_trace(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
+    """Read sealed trace evidence only; this function has no callbacks."""
+
+    return _analyze_trace_entries(validate_trace(entries))
+
+
+def analyze_trace_snapshot(entries: tuple[PrimeTraceEntry, ...]) -> DiagnosticReport:
+    """Read a recorder snapshot before sealing without requiring a terminal marker."""
+
+    if type(entries) is not tuple or any(type(entry) is not PrimeTraceEntry for entry in entries):
+        raise ValueError("trace snapshot is unavailable")
+    return _analyze_trace_entries(entries)
+
+
+def _model_round_report(rounds: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
+    read_only = 0
+    planned_actions = 0
+    prior_rounds = 0
+    for entry in rounds:
+        output = entry.payload.get("output_signals")
+        signals = tuple(output) if isinstance(output, (list, tuple)) else ()
+        if "action" not in signals:
+            read_only += 1
+        if "plan" in signals and "action" in signals:
+            planned_actions += 1
+        if "prior" in signals:
+            prior_rounds += 1
+    recommendation = (
+        "require-action-after-planning"
+        if rounds and read_only == len(rounds)
+        else "reinforce-hypothesis-to-action-link"
+        if read_only > 0
+        else "guidance-is-being-used"
+    )
+    return {
+        "round_count": len(rounds),
+        "read_only_rounds": read_only,
+        "planned_action_rounds": planned_actions,
+        "prior_rounds": prior_rounds,
+        "recommendation": recommendation,
+    }
+
+
+def analyze_model_rounds(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
+    """Summarize sealed model guidance uptake without exposing prompt or prose."""
+
+    entries = validate_trace(entries)
+    return _model_round_report(
+        tuple(entry for entry in entries if entry.kind == "prime.model.round")
+    )
+
+
+def analyze_model_round_snapshot(entries: tuple[PrimeTraceEntry, ...]) -> Mapping[str, object]:
+    """Summarize recorder snapshots while a live trace is still unsealed."""
+
+    if type(entries) is not tuple or any(type(entry) is not PrimeTraceEntry for entry in entries):
+        raise ValueError("model diagnostics are unavailable")
+    return _model_round_report(
+        tuple(entry for entry in entries if entry.kind == "prime.model.round")
+    )
+
+
+def combine_model_round_action_evidence(
+    model_report: Mapping[str, object],
+    action_report: DiagnosticReport,
+) -> Mapping[str, object]:
+    """Add bounded gameplay evidence to the private model-round diagnosis.
+
+    Model-round signals alone can show that a model produced an action plan,
+    but they cannot show whether that plan kept making objective progress.
+    Keeping the two reports separate at the trace boundary avoids exposing
+    gameplay payloads while this small merge makes the operator diagnosis
+    useful for the next prompt adjustment.
+    """
+
+    if not isinstance(model_report, Mapping) or not isinstance(action_report, DiagnosticReport):
+        raise ValueError("diagnostic reports are unavailable")
+    result = dict(model_report)
+    result.update(
+        {
+            "repeated_action_streak": action_report.repeated_action_streak,
+            "actions_since_progress": action_report.actions_since_progress,
+        }
+    )
+    if (
+        action_report.actions_since_progress >= 20
+        and action_report.repeated_action_streak >= 10
+    ):
+        result["recommendation"] = "force-replan-after-no-progress"
+    return result
+
+
+__all__ = (
+    "DiagnosticReport",
+    "combine_model_round_action_evidence",
+    "analyze_model_round_snapshot",
+    "analyze_model_rounds",
+    "analyze_trace",
+    "analyze_trace_snapshot",
+)

@@ -1,5 +1,4 @@
 import { closeSync, read, write } from "node:fs";
-import { createHash } from "node:crypto";
 import { TextDecoder } from "node:util";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
@@ -17,15 +16,13 @@ import {
 export const PROTOCOL = "asterion.prime-ipython/v1";
 
 const DEFAULT_CODE_CAP = 16 * 1024;
-const DEFAULT_OUTPUT_CAP = 512 * 1024;
-const DEFAULT_LINE_CAP = 1024 * 1024;
+const DEFAULT_OUTPUT_CAP = 64 * 1024;
+const DEFAULT_LINE_CAP = 128 * 1024;
 const DEFAULT_DEADLINE_MS = 60_000;
 const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
-const PROVIDER_IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]*\|[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const RESULT_KEYS = ["output", "protocol", "request_id", "status", "type"];
 const REQUEST_KEYS = ["code", "protocol", "request_id", "type"];
-const METHOD_RESULT_KEYS = ["error", "params", "protocol", "request_id", "status", "type", "value"];
 const METHOD_REQUEST_KEYS = ["method", "params", "protocol", "request_id", "type"];
 
 type ResultStatus = "ok" | "error" | "uncertain";
@@ -361,10 +358,13 @@ export function createIpythonBridge(
 
 export function toolNames(): string[] {
   return [
-    "ipython", "p7_observe", "p7_status", "p7_mechanics_prior",
-    "p7_tried_actions", "p7_last_outcome_summary", "p7_history", "p7_frame_at",
-    "p7_act_checked", "p7_world_model", "p7_playbook", "p7_retrodiction_status",
-    "p7_record_hypothesis", "p7_promote_hypothesis",
+    "ipython",
+    "p7_observe",
+    "p7_mechanics_prior",
+    "p7_tried_actions",
+    "p7_history",
+    "p7_frame_at",
+    "p7_act_checked",
   ];
 }
 
@@ -389,7 +389,6 @@ interface MethodTool {
   name: string;
   description: string;
   parameters: unknown;
-  executionMode: "sequential";
   execute(
     id: string,
     input: unknown,
@@ -409,7 +408,6 @@ function makeMethodTool(
     name,
     description,
     parameters: inputType,
-    executionMode: "sequential",
     execute: async (
       id: string,
       input: unknown,
@@ -428,21 +426,14 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_observe",
-      "Read the current game state: available_actions, last settled frame, levels_completed, state, win_levels, and the bounded learning_hint. The hint contains same-game candidate summaries and compiled semantic proposals with execution_authority=none; inspect it before ordinary exploration. Call this *first* on a new level. The framework also injects a component summary and untried-clicks list into your observation-no-change responses, so you don't need to call p7_components or p7_untried_clicks manually.",
+      "Read the current game state and budget: available_actions, last settled frame, bounded frame_summary (shape, color counts, and non-background components), tried_summary, and application-supplied progress (changed_cell_count, changed_cells, color_count_delta, frame_changed, and level_advanced) for the latest settled action. A positive changed_cell_count means the action changed the settled grid even when levels_completed did not increase; use color_count_delta to detect monotonic or cyclic mechanisms. Zero means objective no-effect. Call this once after a level boundary or after an action result when you need the new settled state; use it to form the next falsifiable probe.",
       TypeObject({}, { additionalProperties: false }),
       "observe",
     ),
     makeMethodTool(
       bridge,
-      "p7_status",
-      "Read the broker status: actions_remaining, levels_completed, primitive_actions, target_level, terminal_reason, and the bounded learning_hint. When it recommends inspect_candidate_and_probe, call p7_mechanism_candidates and p7_probe_plan before a long batch.",
-      TypeObject({}, { additionalProperties: false }),
-      "status",
-    ),
-    makeMethodTool(
-      bridge,
       "p7_mechanics_prior",
-      "Read bounded mechanics evidence inferred from prior actions.",
+      "Read bounded mechanics evidence inferred from prior actions. This is evidence for reasoning, not a route or action prescription.",
       TypeObject({}, { additionalProperties: false }),
       "mechanics_prior",
     ),
@@ -460,22 +451,6 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
         { additionalProperties: false },
       ),
       "tried_actions",
-      "level",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_last_outcome_summary",
-      "Aggregate per-action counts for the current run, split into {\"attempts\": {action: count}, \"no_effect\": {action: count}}. Useful for spotting an action that has been attempted many times at this level with no observed frame change.",
-      TypeObject(
-        {
-          level: TypeUnion([
-            TypeNumber({ minimum: 0 }),
-            TypeNull(),
-          ]),
-        },
-        { additionalProperties: false },
-      ),
-      "last_outcome_summary",
       "level",
     ),
     makeMethodTool(
@@ -504,97 +479,20 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
     makeMethodTool(
       bridge,
       "p7_act_checked",
-      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. Each action has a name and data object. Each expect must contain exactly one falsifiable prediction: cell, frame_sha256, a strictly higher levels_completed, or state WIN/GAME_OVER. Never send an empty expect or the current levels_completed value. The broker stops at first prediction mismatch / no-effect / unavailable action.",
+      "Dispatch a checked batch of actions. `plan` is a list of {action, expect} dicts. "
+        + "The broker stops at the first prediction mismatch / no-effect / unavailable action. "
+        + "Read observation.progress and progress_guidance in the result: a positive changed_cell_count and color_count_delta are objective action progress even when the level counter is unchanged; continue that hypothesis until its cycle is understood, while zero means switch or RESET. "
+        + "If the result has stop_reason 'invalid-checked-plan', do not submit another batch: "
+        + "inspect the settled observation once, then use a one-item probe or RESET with one valid expect object.",
       TypeObject(
         {
           plan: TypeArray(
-            TypeObject({
-              action: TypeObject({
-                name: TypeString({ pattern: "^(RESET|ACTION[1-7])$" }),
-                data: TypeUnion([
-                  TypeObject({}, { additionalProperties: false }),
-                  TypeObject(
-                    {
-                      x: TypeNumber({ minimum: 0, maximum: 63 }),
-                      y: TypeNumber({ minimum: 0, maximum: 63 }),
-                    },
-                    { additionalProperties: false },
-                  ),
-                ]),
-              }),
-              expect: TypeUnion([
-                TypeObject(
-                  {
-                    cell: TypeObject({
-                      x: TypeNumber({ minimum: 0, maximum: 63 }),
-                      y: TypeNumber({ minimum: 0, maximum: 63 }),
-                      value: TypeNumber({ minimum: 0, maximum: 255 }),
-                    }),
-                  },
-                  { additionalProperties: false },
-                ),
-                TypeObject(
-                  { frame_sha256: TypeString({ minLength: 1 }) },
-                  { additionalProperties: false },
-                ),
-                TypeObject(
-                  { levels_completed: TypeNumber({ minimum: 1 }) },
-                  { additionalProperties: false },
-                ),
-                TypeObject(
-                  { state: TypeString({ pattern: "^(WIN|GAME_OVER)$" }) },
-                  { additionalProperties: false },
-                ),
-              ]),
-            }),
+            TypeObject({ action: TypeObject({}), expect: TypeObject({}) }),
           ),
         },
         { additionalProperties: false },
       ),
       "act_checked",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_world_model",
-      "Read the bounded same-game world model projection.",
-      TypeObject({}, { additionalProperties: false }),
-      "world_model",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_playbook",
-      "Read the bounded same-game Playbook projection.",
-      TypeObject({ level: TypeUnion([TypeNumber({ minimum: 0 }), TypeNull()]) }, { additionalProperties: false }),
-      "playbook",
-      "level",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_retrodiction_status",
-      "Read scalar transition-model verification status.",
-      TypeObject({}, { additionalProperties: false }),
-      "retrodiction_status",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_record_hypothesis",
-      "Submit one canonical mechanism hypothesis and one distinguishing probe.",
-      TypeObject({
-        layer: TypeString({ minLength: 1 }),
-        key: TypeString({ minLength: 1 }),
-        value: TypeObject({}, { additionalProperties: true }),
-      }, { additionalProperties: false }),
-      "record_hypothesis",
-    ),
-    makeMethodTool(
-      bridge,
-      "p7_promote_hypothesis",
-      "Promote a current-level visual component only after the latest action changed a settled cell inside its recorded bounds.",
-      TypeObject({
-        key: TypeString({ minLength: 1 }),
-        evidence_kind: TypeString({ pattern: "^changed_cell_in_bounds$" }),
-      }, { additionalProperties: false }),
-      "promote_hypothesis",
     ),
   ];
 }
@@ -612,12 +510,7 @@ export function createIpythonTool(bridge: IpythonBridge) {
       signal?: AbortSignal,
     ): Promise<IpythonToolResult> => {
       try {
-        // Provider IDs are opaque. Keep the internal bridge's canonical ID
-        // contract while adapting compound Responses API tool identifiers.
-        const requestId = typeof id === "string" && id.length <= 256 && PROVIDER_IDENTIFIER.test(id)
-          ? "tool-" + createHash("sha256").update(id).digest("hex")
-          : id;
-        return await bridge.execute(requestId, input.code, signal);
+        return await bridge.execute(id, input.code, signal);
       } catch {
         throw unavailable();
       }

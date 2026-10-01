@@ -66,6 +66,16 @@ Runners receive a resolved plan, runtime, implementations, cancellation signal, 
 
 Host services are operator-owned and explicitly injected. `executor.controlled` does not itself authorize commands. The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output caps, and cancellation; it is not an OS sandbox.
 
+### Prime 应用级工具（当前以 P7 验证）
+
+应用级工具注册是 Prime 应用的通用机制：打包的 Pi 扩展由 TypeScript 源码中的 `register(pi)` 调用 `registerTool`，构建产物是 `src/asterion/applications/prime/resources/ipython-extension.mjs`。当前仅在 P7 中完成实用验证；P7 的 Python operator 负责工具元数据与 bridge dispatch，将已注册工具映射到 `P7ClientFacade`（`p7_mechanics_prior` 对应 `mechanics_prior`）。不要用 prompt 伪造注册，也不要在通用 runtime 另造一套注册机制；改工具时同步更新 TypeScript、打包资源、对应应用 bridge 和测试。
+
+必需的状态/观察结果由应用直接追加到模型上下文；只把有明确使用场景的查询或动作工具注册给模型，并在工具描述中写清调用时机、输入和返回结果。减少或新增工具时同步修改 Pi allowlist、TypeScript 注册、Python bridge、prompt 说明和测试。
+
+### P7 重构后的部署闭环
+
+完成一键重构脚本或 Prime 应用级工具改动后，按顺序执行 `npm --prefix packages/typescript/asterion-prime-extension test`、相关 Python 测试、`make promotion-check`；再用 `make asterion-prime-p7-level-witness GAME=<...> LEVEL=<...>` 走一次真实打包运行，确认生成的 wheel、Pi 扩展资源和工具 allowlist 是同一版本。记录运行证据并提交代码与状态文档；不得只改 TypeScript 源码或只改 prompt 就宣称部署完成。
+
 The repository `.env` already contains operator-owned backend LLM configuration. Application or operator integration may resolve that configuration and inject an exact host service; framework modules must never read `.env`, credentials, or provider settings directly. A user-facing “small verification” is one preset action: it must not ask the user for provider, model, cost, or deadline knobs. The integration enforces finite controls internally and exposes only public-safe status. Missing Native host wiring is an application-integration task, not a request for the user to budget or configure a backend.
 
 ## Route Changes by Intent

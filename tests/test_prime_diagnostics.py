@@ -9,7 +9,8 @@ import unittest
 from unittest.mock import patch
 
 from asterion.applications.prime.p3.operator import _drive_success, run_success_path
-from asterion.services.diagnostics import MemoryDiagnosticSink
+from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import MemoryDiagnosticSink, capture_failure
 
 
 class _Runner:
@@ -81,3 +82,69 @@ class TestP3OperatorDiagnosticInjection(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].stage, "prime.worker")
         self.assertNotIn("PRIVATE-WORKER-PAYLOAD", repr(records[0]))
+
+
+class TestFailureCodeDiagnostics(unittest.TestCase):
+    def test_protocol_failure_code_is_bounded_without_message(self) -> None:
+        sink = MemoryDiagnosticSink()
+        diagnostic_id = capture_failure(
+            sink,
+            stage="capability.execute",
+            error=ProtocolError("Pi runtime provider execution failed"),
+            subject_id="run-1",
+        )
+        self.assertIsNotNone(diagnostic_id)
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.failure_code, "pi-provider-execution")
+        self.assertNotIn("Pi runtime provider execution failed", repr(record))
+
+    def test_prime_protocol_failure_codes_are_bounded(self) -> None:
+        cases = {
+            "Asterion-prime transport protocol failed": "prime-transport-protocol",
+            "Asterion-prime native result is malformed": "prime-native-result",
+            "Asterion-prime native terminal is invalid": "prime-native-terminal",
+            "Asterion-prime continuation is invalid": "prime-continuation",
+        }
+        for message, expected in cases.items():
+            with self.subTest(message=message):
+                sink = MemoryDiagnosticSink()
+                diagnostic_id = capture_failure(
+                    sink,
+                    stage="capability.execute",
+                    error=ProtocolError(message),
+                    subject_id="run-1",
+                )
+                assert diagnostic_id is not None
+                record = sink.get(diagnostic_id)
+                self.assertEqual(record.failure_code, expected)
+                self.assertNotIn(message, repr(record))
+
+    def test_native_callback_rejection_has_bounded_failure_code(self) -> None:
+        sink = MemoryDiagnosticSink()
+        callback_rejected = type("_CallbackRejected", (Exception,), {})
+        diagnostic_id = capture_failure(
+            sink,
+            stage="pi.prompt",
+            error=callback_rejected("PRIVATE-CALLBACK-PAYLOAD"),
+            subject_id="run-1",
+        )
+        assert diagnostic_id is not None
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.failure_code, "prime-native-callback")
+        self.assertNotIn("PRIVATE-CALLBACK-PAYLOAD", repr(record))
+
+    def test_native_callback_rejection_reason_is_bounded(self) -> None:
+        sink = MemoryDiagnosticSink()
+        callback_rejected = type("_CallbackRejected", (Exception,), {})
+        error = callback_rejected()
+        error.failure_code = "Asterion-prime native event is invalid"
+        diagnostic_id = capture_failure(
+            sink,
+            stage="pi.prompt",
+            error=error,
+            subject_id="run-1",
+        )
+        assert diagnostic_id is not None
+        record = sink.get(diagnostic_id)
+        self.assertEqual(record.failure_code, "prime-native-event")
+        self.assertNotIn("Asterion-prime native event is invalid", repr(record))

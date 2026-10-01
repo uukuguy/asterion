@@ -25,7 +25,7 @@ import time
 from typing import Any
 
 from asterion.applications.prime.p7.broker import ArcTransition
-from asterion.applications.prime.p7.private_trace import are_p7_trace_identities
+from asterion.applications.prime.p7.private_trace import P7_TRACE_IDENTITIES
 from asterion.applications.prime.p7.score import replay_sha256
 from asterion.applications.prime.p7.game import _read_catalog
 from asterion.applications.prime.p7.solutions import load_best_prefix
@@ -59,34 +59,6 @@ _SECOND_ROUND_CAMPAIGN_FILE = "second-round-campaign.json"
 _SECOND_ROUND_CAMPAIGN_ID = re.compile(r"^second-round-[0-9a-f]{32}$")
 _ACTION_STALL_SECONDS = 5 * 60
 _STALL_RECEIPT_FILE = "stall-receipt.json"
-_MODEL_SELECTION_ENVIRONMENT = ("ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL")
-
-
-def _operator_model_selection_environment(repo_root: Path) -> dict[str, str]:
-    """Overlay only model-selection keys declared by the operator ``.env``.
-
-    The scheduler launches a host ``make`` process before the guest operator
-    can load its own environment. Forwarding these keys prevents a stale
-    terminal export from selecting a different model inside the guest.
-    """
-
-    path = repo_root / ".env"
-    if not path.is_file():
-        return {}
-    values: dict[str, str] = {}
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError:
-        return {}
-    for raw in lines:
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        if key in _MODEL_SELECTION_ENVIRONMENT:
-            values[key] = value.strip().strip("'").strip('"')
-    return values
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,8 +87,6 @@ class SweepConfig:
     # The legacy second round remains enabled by its existing flag for compatibility.
     action_stall_seconds: int | None = None
     validate_action_stall: bool = False
-    # Bound the guest/bootstrap phase separately from the solve deadline.
-    startup_timeout_seconds: float = 120.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -232,7 +202,7 @@ def _write_stall_receipt(
         return False
     try:
         entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
-        if not entries:
+        if not entries or entries[-1]["kind"] == "trace.sealed":
             return False
         payload = {
             "schema": "asterion.prime.p7-stall-receipt/v1",
@@ -581,8 +551,8 @@ class SweepScheduler:
                 or summary["failure"].get("type") not in {"ApplicationRunError"}
                 or len(entries) < 3
                 or [row["kind"] for row in entries[-2:]] != ["arc.run.partial", "trace.sealed"]
-                or any(not are_p7_trace_identities(row["identities"]) for row in entries)
-                or any(row["kind"] not in {"arc.action", "arc.usage.reported"} for row in entries[:-2])
+                or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                or any(row["kind"] not in {"arc.action", "arc.tool.call", "arc.usage.reported"} for row in entries[:-2])
                 or entries[-1]["payload"] != {"entry_count": len(entries) - 1, "final_sha256": entries[-2]["sha256"]}
             ):
                 return False
@@ -689,7 +659,7 @@ class SweepScheduler:
                     or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
                     or seal["entry_count"] != len(entries)
                     or seal["final_sha256"] != entries[-1]["sha256"]
-                    or any(not are_p7_trace_identities(row["identities"]) for row in entries)
+                    or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
                 ):
                     continue
                 historical_actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
@@ -724,7 +694,7 @@ class SweepScheduler:
         self, run_id: str, game_id: str, *, target_level: int = 2,
         allow_later_progress: bool = False,
     ) -> bool:
-        """Admit a supervisor stall with bounded sealed or unsealed evidence."""
+        """Admit a supervisor stall with a hash-valid unsealed trace and receipt."""
 
         if (
             not (self.config.unbounded_second_round or self.config.validate_action_stall)
@@ -740,90 +710,6 @@ class SweepScheduler:
                 return False
             receipt = _read_json(run / _STALL_RECEIPT_FILE)
             entries = _read_hash_chained_trace(run / "trace" / "prime-trace.jsonl", in_progress=True)
-            sealed = bool(entries) and entries[-1]["kind"] == "trace.sealed"
-            if sealed:
-                # Cooperative cancellation can now finish replay and seal a
-                # verified completed-level prefix before the supervisor writes
-                # its stall receipt. Keep this path stricter than the legacy
-                # unsealed observation: require the exact partial marker,
-                # summary identity, seal sidecar, and replay-verified prefix.
-                summary = _read_json(run / "summary.json")
-                seal = _read_json(run / "trace" / "prime-trace.seal.json")
-                partial_rows = [row for row in entries if row["kind"] == "arc.run.partial"]
-                actions = tuple(row["payload"] for row in entries if row["kind"] == "arc.action")
-                if (
-                    not summary
-                    or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
-                    or summary.get("run_id") != run_id
-                    or any(summary.get(key) is not True for key in ("replay_verified", "sealed_trace", "cleanup_complete"))
-                    or type(summary.get("failure")) is not dict or not summary["failure"]
-                    or type(summary.get("broker")) is not dict
-                    or summary["broker"].get("game_id") != game_id
-                    or summary["broker"].get("seed") != 0
-                    or type(summary["broker"].get("primitive_actions")) is not int
-                    or summary["broker"]["primitive_actions"] != len(actions)
-                    or len(partial_rows) != 1
-                    or summary.get("completed_prefix") != partial_rows[0]["payload"]
-                    or not seal
-                    or set(seal) != {"entry_count", "final_sha256", "sealed_at"}
-                    or seal.get("entry_count") != len(entries)
-                    or seal.get("final_sha256") != entries[-1]["sha256"]
-                ):
-                    return False
-                try:
-                    if (
-                        not receipt
-                        or set(receipt) != {"schema", "game_id", "run_id", "seed", "action_count", "stall_seconds", "cleanup_complete", "trace_final_sha256"}
-                        or receipt.get("schema") != "asterion.prime.p7-stall-receipt/v1"
-                        or receipt.get("game_id") != game_id or receipt.get("run_id") != run_id
-                        or receipt.get("seed") != 0 or receipt.get("cleanup_complete") is not True
-                        or type(receipt.get("action_count")) is not int or receipt["action_count"] <= 0
-                        or receipt["action_count"] != len(actions)
-                        or type(receipt.get("stall_seconds")) is not int or receipt["stall_seconds"] < _ACTION_STALL_SECONDS
-                        or receipt.get("trace_final_sha256") != entries[-1]["sha256"]
-                        or any(not are_p7_trace_identities(row["identities"]) for row in entries)
-                        or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial", "trace.sealed"} for row in entries)
-                        or _recorded_game_id(run, {game_id}) != game_id
-                        or target_level != 2
-                    ):
-                        return False
-                    usage = read_run_usage(run)
-                    if usage[2] or usage[3]:
-                        return False
-                    metadata = self._metadata()[game_id]
-                    baselines = metadata.get("baseline_actions")
-                    if type(baselines) is not tuple or len(baselines) < 2 or len(actions) > sum(baselines[:2]):
-                        return False
-                    previous_level = 0
-                    transitions: list[ArcTransition] = []
-                    for sequence, action in enumerate(actions, 1):
-                        level = action.get("levels_completed")
-                        if (
-                            action.get("sequence") != sequence
-                            or type(level) is not int or not previous_level <= level <= 1
-                            or any(type(action.get(key)) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", action[key]) is None for key in ("before_sha256", "after_sha256"))
-                            or (sequence > 1 and action.get("before_sha256") != actions[sequence - 2].get("after_sha256"))
-                        ):
-                            return False
-                        transitions.append(ArcTransition(sequence, action["action"], action["before_sha256"], action["after_sha256"], level, tuple(sorted(action.get("data", {}).items()))))
-                        previous_level = level
-                    partial = partial_rows[0]["payload"]
-                    first_level = next((index for index, action in enumerate(actions) if action["levels_completed"] >= 1), None)
-                    prefix = load_best_prefix(self.config.arc_root, self.config.runs_root, game_id, self.config.seed)
-                    if (
-                        first_level is None
-                        or first_level + 1 != partial.get("primitive_actions")
-                        or partial.get("levels_completed") != 1
-                        or not prefix or prefix.levels_completed < 1
-                        or len(prefix.transitions) != first_level + 1
-                        or tuple(transitions[:first_level + 1]) != prefix.transitions
-                        or partial.get("replay_sha256") != replay_sha256(transitions[:first_level + 1], terminal_reason="level-completed")
-                        or len(actions) - first_level - 1 > baselines[1]
-                    ):
-                        return False
-                    return allow_later_progress or prefix.levels_completed == target_level - 1
-                except (OSError, ValueError, KeyError, TypeError, IndexError, AttributeError):
-                    return False
             if (
                 not receipt or set(receipt) != {"schema", "game_id", "run_id", "seed", "action_count", "stall_seconds", "cleanup_complete", "trace_final_sha256"}
                 or receipt.get("schema") != "asterion.prime.p7-stall-receipt/v1"
@@ -833,8 +719,8 @@ class SweepScheduler:
                 or type(receipt.get("stall_seconds")) is not int or receipt["stall_seconds"] < _ACTION_STALL_SECONDS
                 or receipt.get("trace_final_sha256") != entries[-1]["sha256"]
                 or entries[-1]["kind"] == "trace.sealed"
-                or any(not are_p7_trace_identities(row["identities"]) for row in entries)
-                or any(row["kind"] not in {"arc.action", "arc.usage.reported", "arc.run.partial"} for row in entries)
+                or any(row["identities"] != P7_TRACE_IDENTITIES for row in entries)
+                or any(row["kind"] not in {"arc.action", "arc.tool.call", "arc.usage.reported", "arc.run.partial"} for row in entries)
                 or sum(row["kind"] == "arc.action" for row in entries) != receipt["action_count"]
                 or _recorded_game_id(run, {game_id}) != game_id
                 or (target_level > 1 and not _trace_reached_level(entries, target_level - 1))
@@ -1078,10 +964,7 @@ class SweepScheduler:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass
-                try:
-                    process.communicate(timeout=2)
-                except subprocess.TimeoutExpired:
-                    self._stop_reason = "child-cleanup-timeout"
+                process.communicate()
             cleanup_guest()
 
         def monitor() -> None:
@@ -1126,19 +1009,14 @@ class SweepScheduler:
                 [*self.config.command, f"GAME={game_id}", f"LEVEL={level}",
                  *([f"PRIME_ORB_MACHINE={self.config.guest_machine}"] if self.config.guest_machine else [])],
                 cwd=self.config.repo_root,
-                env={**os.environ, **_operator_model_selection_environment(self.config.repo_root),
-                     "ASTERION_PRIME_P7_SEED": "0",
+                env={**os.environ, "ASTERION_PRIME_P7_SEED": "0",
                      "ASTERION_PRIME_P7_ATTEMPT_UNIT": unit,
                      "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "0" if timeout is None else str(min(
                          timeout + 30 if self._is_research_round(self.config) else timeout, 4 * 60 * 60)),
                      "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1" if self._is_research_round(self.config) else "",
                      "OPERATION_MODE": "offline" if self._is_research_round(self.config) else ""},
-                # Do not pipe the supervisor's stdout/stderr: orb/guest
-                # descendants may inherit those descriptors and keep
-                # communicate() blocked after the supervisor exits. Run
-                # evidence is collected from the private trace tree instead.
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
                 start_new_session=True,
             )
@@ -1150,18 +1028,6 @@ class SweepScheduler:
                 while True:
                     monitor()
                     if self._stop_reason != "completed":
-                        stop_child()
-                        break
-                    if (
-                        time.monotonic() - started_at >= self.config.startup_timeout_seconds
-                        and not any(
-                            (
-                                self.config.runs_root / run_id / "trace" / "prime-trace.jsonl"
-                            ).exists()
-                            for run_id in _run_names(self.config.runs_root) - before
-                        )
-                    ):
-                        self._stop_reason = "child-launch-timeout"
                         stop_child()
                         break
                     remaining = None if deadline is None else deadline - time.monotonic()

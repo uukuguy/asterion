@@ -19,6 +19,7 @@ class FailureDiagnostic:
     exception_type: str
     subject_sha256: str
     capability_sha256: str | None
+    failure_code: str | None
 
 
 class DiagnosticSink(Protocol):
@@ -53,6 +54,7 @@ def capture_failure(
     if sink is None:
         return None
     diagnostic_id = uuid4().hex
+    failure_code = _failure_code(error)
     record = FailureDiagnostic(
         diagnostic_id=diagnostic_id,
         stage=stage,
@@ -63,12 +65,53 @@ def capture_failure(
             if capability_ref is None
             else sha256(capability_ref.encode("utf-8")).hexdigest()
         ),
+        failure_code=failure_code,
     )
     try:
         sink.record(record)
     except Exception:
         return None
     return diagnostic_id
+
+
+def _failure_code(error: Exception) -> str | None:
+    """Classify known protocol failures without retaining their messages."""
+
+    native_message = getattr(error, "failure_code", None)
+    native_codes = {
+        "Asterion-prime native event is invalid": "prime-native-event",
+        "Asterion-prime model callback limit exceeded": "prime-model-callback-limit",
+        "Asterion-prime tool callback limit exceeded": "prime-tool-callback-limit",
+        "Asterion-prime tool call is invalid": "prime-tool-call",
+        "Asterion-prime tool result is invalid": "prime-tool-result",
+        "Asterion-prime emitted duplicate terminal event": "prime-duplicate-terminal",
+        "Asterion-prime native event type is invalid": "prime-event-type",
+        "Asterion-prime message update is malformed": "prime-message-update",
+        "Asterion-prime usage event is malformed": "prime-usage",
+        "Asterion-prime tool call is malformed": "prime-tool-call-malformed",
+        "Asterion-prime tool result is malformed": "prime-tool-result-malformed",
+    }
+    if type(native_message) is str:
+        return native_codes.get(native_message, "prime-native-callback")
+    if type(error).__name__ == "_CallbackRejected":
+        return "prime-native-callback"
+    if type(error).__name__ != "ProtocolError":
+        return None
+    message = str(error)
+    known = {
+        "Pi runtime provider execution failed": "pi-provider-execution",
+        "Pi runtime process ended before completion": "pi-process-ended",
+        "Pi runtime emitted invalid JSONL": "pi-invalid-jsonl",
+        "Pi runtime emitted an invalid JSONL object": "pi-invalid-jsonl-object",
+        "Pi runtime output limit exceeded": "pi-output-limit",
+        "Pi runtime turn limit exceeded": "pi-turn-limit",
+        "Pi runtime request deadline expired": "pi-deadline",
+        "Asterion-prime transport protocol failed": "prime-transport-protocol",
+        "Asterion-prime native result is malformed": "prime-native-result",
+        "Asterion-prime native terminal is invalid": "prime-native-terminal",
+        "Asterion-prime continuation is invalid": "prime-continuation",
+    }
+    return known.get(message, "protocol-error")
 
 
 __all__ = (

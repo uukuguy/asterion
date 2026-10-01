@@ -9,11 +9,12 @@ import tomllib
 import unittest
 from importlib import metadata
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 from typing import AsyncIterator, cast
 
 from asterion.agents.prime.session import ASTERION_PRIME_LIMITS
 from asterion.agents.prime.trace import PrimeTraceRecorder
+from asterion.services.diagnostics import FailureDiagnostic
 from asterion.applications.discovery import (
     list_application_providers,
     load_application_provider,
@@ -176,6 +177,49 @@ class _CompletingRuntime:
 
 
 class TestPrimeP7NativeProvider(unittest.TestCase):
+    def test_private_trace_retains_bounded_failure_diagnostic(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            broker = ArcBroker(engine=_CompletingEngine())
+            adapter = P7PrivateTraceReceipt(
+                broker, PrimeTraceRecorder(Path(directory).resolve())
+            )
+            diagnostic = FailureDiagnostic(
+                "diagnostic-id", "pi.prompt", "RuntimeError", "subject", None,
+                "pi-provider-execution",
+            )
+
+            adapter.record_failure(diagnostic)
+
+            self.assertIs(adapter.failure_diagnostic, diagnostic)
+
+    def test_p7_continuation_prompt_carries_current_state(self) -> None:
+        from asterion.applications.prime.runtime_binding import _p7_continuation_prompt
+        from asterion.applications.prime.p7.broker import ArcObservation, ArcStatus
+
+        class Broker:
+            game = SimpleNamespace(target_level=3)
+
+            def status(self):
+                return ArcStatus(4, 2, 40, "active")
+
+            def observe(self):
+                return ArcObservation(("ACTION1",), (((0, 0),),), 2, "NOT_FINISHED", 3)
+
+            def tried_actions(self, level):
+                del level
+                return [{"level": 2, "action": "ACTION1", "count": 10, "position": None}]
+
+            def last_outcome_summary(self, level):
+                return {"attempts": {"ACTION1": 10}, "no_effect": {"ACTION1": 3}}
+
+        prompt = _p7_continuation_prompt(Broker(), 1)
+        self.assertIn("Round 1", prompt)
+        self.assertIn("actions_remaining", prompt)
+        self.assertIn("frame_summary", prompt)
+        self.assertIn("force-replan-after-repeated-action", prompt)
+        self.assertIn("tried_summary", prompt)
+        self.assertIn("one falsifiable gameplay action", prompt)
+
     def test_p7_runtime_terminal_predicate_stops_after_game_over(self) -> None:
         from asterion.applications.prime.runtime_binding import _p7_terminal
         from tests.test_prime_p7_native_broker import _Engine as TerminalEngine
@@ -404,6 +448,11 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             "[plan]",
             "p7_client.history(0, 32)",
             "p7_client.act_checked(plan)",
+            "p7_client.mechanics_prior()",
+            "registered p7_mechanics_prior",
+            "next tool call must be the registered p7_mechanics_prior",
+            "shortest distinguishing probe",
+            "prior over the hidden action mechanics",
         ):
             self.assertIn(required, lowered)
         for forbidden in (
@@ -424,7 +473,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
     def test_operator_selection_is_fixed_and_runtime_options_are_immutable(
         self,
     ) -> None:
-        selection = resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")})
+        selection = resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"})
 
         self.assertEqual(
             selection,
@@ -456,7 +505,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         from asterion.applications.prime.p7.operator import _sweep_game
         game = _sweep_game(P7GameSelection("ls20-9607627b", 0), None)
         environment = {
-            "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
+            "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol",
             "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
             "ASTERION_PRIME_P7_RUN_MODE": "sweep",
             "OPERATION_MODE": "offline",
@@ -489,7 +538,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             extension.write_text("export default function extension() {}\n")
             resources = build_p7_operator_resources(
                 environment={
-                    "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
+                    "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol",
                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
                     "ASTERION_PRIME_P7_RUN_MODE": "sweep",
                     "OPERATION_MODE": "offline",
@@ -538,7 +587,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 runtime_id="asterion.prime",
                 assembly_path=ASSEMBLY.resolve(),
                 options=p7_runtime_options(
-                    resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")})
+                    resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"})
                 ),
                 host_services={
                     "prime.arc-broker": broker,
@@ -651,7 +700,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                     application_version="1.0.0",
                     runtime_id="asterion.prime",
                     assembly_path=ASSEMBLY.resolve(),
-                    options=p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")}, game), game),
+                    options=p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"}, game), game),
                     host_services={
                         "prime.arc-broker": broker,
                         "prime.ipython": ipython,
@@ -692,7 +741,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             worker = _Worker()
 
             resources = build_p7_operator_resources(
-                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")},
+                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"},
                 pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
                 extension_path=extension,
                 working_directory=root,
@@ -806,7 +855,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             broker = ArcBroker(engine=_Engine(), game=game)
             launch, trace = self._launch(root, broker)
             ipython = PersistentIpythonHost(worker=_Worker(), p7_client=p7_client_facade(broker))
-            options = dict(p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent")}, game), game))
+            options = dict(p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"}, game), game))
             options["max_actions"] = "500"
             context = RuntimeFactoryContext(
                 provider_id="prime-applications",

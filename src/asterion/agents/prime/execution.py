@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from hashlib import sha256
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -31,6 +32,7 @@ from asterion.runtimes.pi_rpc import (
     validate_pi_compact_result,
     normalize_pi_usage,
 )
+from asterion.services.diagnostics import FailureDiagnostic
 
 
 ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
@@ -45,7 +47,9 @@ _DEFAULT_TOOL_NAMES = ("ipython",)
 
 
 class _CallbackRejected(Exception):
-    pass
+    def __init__(self, failure_code: str | None = None) -> None:
+        super().__init__()
+        self.failure_code = failure_code
 
 
 class _NativeDiagnostic(Enum):
@@ -182,6 +186,53 @@ ASTERION_PRIME_LIMITS = AsterionPrimeLimits(
 )
 
 
+@dataclass(frozen=True, slots=True)
+class PrimeRoundDiagnostic:
+    """Bounded, content-free evidence about one model round."""
+
+    round_index: int
+    prompt_bytes: int
+    prompt_sha256: str
+    output_bytes: int
+    output_sha256: str
+    prompt_signals: tuple[str, ...]
+    output_signals: tuple[str, ...]
+
+
+def _round_diagnostic(round_index: int, prompt: str, output: str) -> PrimeRoundDiagnostic:
+    prompt_bytes = len(prompt.encode("utf-8"))
+    output_bytes = len(output.encode("utf-8"))
+    prompt_lower = prompt.lower()
+    output_lower = output.lower()
+    prompt_signals = tuple(
+        name for name, needles in (
+            ("tool-guidance", ("tool reference", "registered")),
+            ("mechanics-prior", ("mechanics_prior", "mechanics prior")),
+            ("state-guidance", ("p7_client.status", "p7_client.observe")),
+            ("application-state", ("application-supplied settled state", "frame_summary")),
+            ("completion-guidance", ("game_solved", "levels_completed")),
+        ) if any(needle in prompt_lower for needle in needles)
+    )
+    output_signals = tuple(
+        name for name, needles in (
+            ("plan", ("[plan]", "hypothesis", "expected change")),
+            ("observation", ("observe", "status", "frame")),
+            ("prior", ("mechanics_prior", "mechanics prior")),
+            ("action", ("act_checked", "p7_act", "action1", "action2", "action3", "action4", "reset")),
+            ("progress", ("progress", "level_advanced", "game_solved", "objective")),
+        ) if any(needle in output_lower for needle in needles)
+    )
+    return PrimeRoundDiagnostic(
+        round_index=round_index,
+        prompt_bytes=prompt_bytes,
+        prompt_sha256=sha256(prompt.encode("utf-8")).hexdigest(),
+        output_bytes=output_bytes,
+        output_sha256=sha256(output.encode("utf-8")).hexdigest(),
+        prompt_signals=prompt_signals,
+        output_signals=output_signals,
+    )
+
+
 class _NeverCancelled:
     @property
     def cancelled(self) -> bool:
@@ -212,8 +263,9 @@ class PrimeExecutionKernel:
         reusable: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
+        failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
-        debug_sink: Callable[[str, Mapping[str, object]], None] | None = None,
     ) -> None:
         self._validate_launch_material(
             rpc_session,
@@ -229,7 +281,12 @@ class PrimeExecutionKernel:
         self._reusable = reusable
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
-        self._debug_sink = debug_sink
+        if round_diagnostic is not None and not callable(round_diagnostic):
+            raise ProtocolError("Asterion-prime round diagnostic is invalid")
+        if failure_diagnostic is not None and not callable(failure_diagnostic):
+            raise ProtocolError("Asterion-prime failure diagnostic is invalid")
+        self._round_diagnostic = round_diagnostic
+        self._failure_diagnostic = failure_diagnostic
         if (
             type(allowed_tool_names) is not tuple
             or not allowed_tool_names
@@ -249,6 +306,16 @@ class PrimeExecutionKernel:
 
     def __repr__(self) -> str:
         return "<PrimeExecutionKernel redacted>"
+
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        value = getattr(self._rpc_session, "last_diagnostic_id", None)
+        return value if type(value) is str else None
+
+    @property
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        value = getattr(self._rpc_session, "last_diagnostic", None)
+        return value if type(value) is FailureDiagnostic else None
 
     async def invoke(
         self,
@@ -360,6 +427,17 @@ class PrimeExecutionKernel:
         round_terminal_seen = False
         callback_failure: ProtocolError | None = None
 
+        def report_failure() -> None:
+            if self._failure_diagnostic is None:
+                return
+            try:
+                self._failure_diagnostic(
+                    getattr(self._rpc_session, "last_diagnostic", None)
+                )
+            except Exception:
+                # Private diagnostics cannot alter the execution result.
+                pass
+
         def consume_checked(event: PiRpcEvent) -> None:
             nonlocal model_callbacks, round_terminal_seen
             expected_sequence = (
@@ -379,11 +457,6 @@ class PrimeExecutionKernel:
                 return
             if event_type in {
                 "response", "message_start", "turn_end", "tool_execution_update",
-                # Pi emits this lifecycle marker when a provider error starts
-                # an automatic retry. It carries no model payload; accepting
-                # it lets the retry continue to its normal agent_start/end
-                # settlement instead of poisoning an otherwise valid run.
-                "auto_retry_start", "auto_retry_end", "entry_appended",
             }:
                 # Streaming tool updates contain private partial output.
                 return
@@ -466,19 +539,7 @@ class PrimeExecutionKernel:
                 trusted_event = _snapshot_native_event(event)
             except BaseException:
                 callback_failure = ProtocolError(_NATIVE_EVENT_ERROR)
-                raise _CallbackRejected from None
-            if self._debug_sink is not None:
-                try:
-                    self._debug_sink(
-                        "native_event",
-                        {
-                            "sequence": trusted_event.sequence,
-                            "type": trusted_event.type,
-                            "payload": trusted_event.payload,
-                        },
-                    )
-                except Exception:
-                    pass
+                raise _CallbackRejected(_NATIVE_EVENT_ERROR) from None
             safe_failure: ProtocolError | None = None
             try:
                 consume_checked(trusted_event)
@@ -488,7 +549,7 @@ class PrimeExecutionKernel:
                 safe_failure = ProtocolError(_NATIVE_EVENT_ERROR)
             if safe_failure is not None:
                 callback_failure = safe_failure
-                raise _CallbackRejected from None
+                raise _CallbackRejected(str(safe_failure)) from None
 
         prompt = request.input_text
         round_index = 0
@@ -498,14 +559,6 @@ class PrimeExecutionKernel:
             round_start = len(native)
             round_terminal_seen = False
             try:
-                if self._debug_sink is not None:
-                    try:
-                        self._debug_sink(
-                            "model_input",
-                            {"round": round_index, "input_text": prompt},
-                        )
-                    except Exception:
-                        pass
                 self._extension_lease.validate_launch()
                 driver = (
                     self._rpc_session.prompt
@@ -518,14 +571,17 @@ class PrimeExecutionKernel:
                     on_event=consume,
                 )
             except _CallbackRejected:
+                report_failure()
                 protocol_failure = callback_failure or ProtocolError(
                     _NATIVE_EVENT_ERROR
                 )
             except ProtocolError:
+                report_failure()
                 protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
             except asyncio.CancelledError:
                 raise
             except Exception:
+                report_failure()
                 if signal is not None and signal.cancelled:
                     emit("run.completed", {"status": "cancelled"})
                 else:
@@ -555,6 +611,14 @@ class PrimeExecutionKernel:
                 emit("run.completed", {"status": "cancelled"})
                 return
             self._final_text = result.final_text
+            if self._round_diagnostic is not None:
+                try:
+                    self._round_diagnostic(
+                        _round_diagnostic(round_index, prompt, result.final_text)
+                    )
+                except Exception:
+                    # Diagnostics are private observability and cannot alter gameplay.
+                    pass
             current_round = native[round_start:]
             if (
                 not round_terminal_seen

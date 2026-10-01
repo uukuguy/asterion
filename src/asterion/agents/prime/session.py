@@ -3,9 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import os
-from pathlib import Path
 import weakref
 from collections.abc import AsyncIterator, Callable, Mapping
 
@@ -14,7 +11,9 @@ from asterion.agents.prime.execution import (
     ASTERION_PRIME_LIMITS,
     AsterionPrimeLimits,
     PrimeExecutionKernel,
+    PrimeRoundDiagnostic,
 )
+from asterion.services.diagnostics import FailureDiagnostic
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
@@ -46,7 +45,6 @@ class AsterionPrimeSession:
         "_limits",
         "_completion_predicate",
         "_continuation_prompt",
-        "_debug_transcript_path",
         "_rpc_session",
         "_used_run_ids",
         "__weakref__",
@@ -63,6 +61,8 @@ class AsterionPrimeSession:
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
+        failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
@@ -90,11 +90,12 @@ class AsterionPrimeSession:
             raise ProtocolError("Asterion-prime continuation is invalid")
         if continuation_prompt is not None and not callable(continuation_prompt):
             raise ProtocolError("Asterion-prime continuation is invalid")
+        if round_diagnostic is not None and not callable(round_diagnostic):
+            raise ProtocolError("Asterion-prime round diagnostic is invalid")
+        if failure_diagnostic is not None and not callable(failure_diagnostic):
+            raise ProtocolError("Asterion-prime failure diagnostic is invalid")
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
-        self._debug_transcript_path = self._resolve_debug_transcript_path(
-            approved_environment
-        )
         self._used_run_ids: set[str] = set()
         self._active = False
         self._consumed = False
@@ -107,100 +108,21 @@ class AsterionPrimeSession:
             limits=limits,
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
+            round_diagnostic=round_diagnostic,
+            failure_diagnostic=failure_diagnostic,
             allowed_tool_names=allowed_tool_names,
-            debug_sink=self._debug_record,
         )
 
     def __repr__(self) -> str:
         return "<AsterionPrimeSession redacted>"
 
-    @staticmethod
-    def _resolve_debug_transcript_path(
-        approved_environment: Mapping[str, str] | None,
-    ) -> Path | None:
-        if not approved_environment or approved_environment.get(
-            "ASTERION_PRIME_DEBUG_TRANSCRIPT"
-        ) != "1":
-            return None
-        raw = approved_environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH", "")
-        if not raw:
-            raise ProtocolError("Asterion-prime debug transcript is unavailable")
-        path = Path(raw)
-        if not path.is_absolute() or "\x00" in raw:
-            raise ProtocolError("Asterion-prime debug transcript is unavailable")
-        return path
-
-    def _debug_record(self, kind: str, payload: Mapping[str, object]) -> None:
-        path = self._debug_transcript_path
-        if path is None:
-            return
-        try:
-            path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-            record = {
-                "kind": kind,
-                "payload": self._debug_json_value(payload),
-            }
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False, separators=(",", ":"), default=str))
-                handle.write("\n")
-            os.chmod(path, 0o600)
-        except Exception:
-            # Diagnostic capture must never change game execution semantics.
-            return
-
-    @classmethod
-    def _debug_json_value(cls, value: object) -> object:
-        if isinstance(value, Mapping):
-            return {str(key): cls._debug_json_value(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [cls._debug_json_value(item) for item in value]
-        if value is None or type(value) in {bool, int, float, str}:
-            return value
-        return str(value)
+    @property
+    def last_diagnostic_id(self) -> str | None:
+        return self._kernel.last_diagnostic_id
 
     @property
-    def native_event_summary(self) -> tuple[dict[str, object], ...]:
-        """Return private, payload-free native event diagnostics."""
-
-        events = getattr(self._kernel, "_native_events", ())
-        summary: list[dict[str, object]] = []
-        for event in events[-64:]:
-            item: dict[str, object] = {
-                "sequence": event.sequence,
-                "type": event.type,
-            }
-            if event.type == "tool_execution_start":
-                name = event.payload.get("toolName")
-                if type(name) is str:
-                    item["tool_name"] = name
-            elif event.type == "tool_execution_end":
-                effect = event.payload.get("effect")
-                is_error = event.payload.get("isError")
-                if type(effect) is str:
-                    item["effect"] = effect
-                if type(is_error) is bool:
-                    item["is_error"] = is_error
-            elif event.type == "message_end":
-                message = event.payload.get("message")
-                if isinstance(message, Mapping):
-                    role = message.get("role")
-                    stop_reason = message.get("stopReason")
-                    if type(role) is str:
-                        item["role"] = role
-                    if type(stop_reason) is str:
-                        item["stop_reason"] = stop_reason
-                    content = message.get("content")
-                    if isinstance(content, (list, tuple)):
-                        item["content_items"] = len(content)
-                        item["tool_call_names"] = tuple(
-                            block.get("name")
-                            for block in content
-                            if isinstance(block, Mapping)
-                            and block.get("type") == "toolCall"
-                            and type(block.get("name")) is str
-                        )
-            summary.append(item)
-        return tuple(summary)
+    def last_diagnostic(self) -> FailureDiagnostic | None:
+        return self._kernel.last_diagnostic
 
     def close(self) -> None:
         """Release the owned single-run lease without invoking the transport."""
@@ -228,7 +150,6 @@ class AsterionPrimeSession:
         self._active = True
         self._consumed = True
         self._used_run_ids.add(request.run_id)
-        self._debug_record("run_start", {"run_id": request.run_id})
         public: list[RunEvent] = []
         pending: asyncio.Queue[RunEvent] = asyncio.Queue()
 
@@ -322,4 +243,5 @@ __all__ = (
     "ASTERION_PRIME_LIMITS",
     "AsterionPrimeLimits",
     "AsterionPrimeSession",
+    "PrimeRoundDiagnostic",
 )
