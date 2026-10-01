@@ -6,6 +6,7 @@ from pathlib import Path
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
+from asterion.applications.prime.p7.experience_induction import EffectHypothesis
 
 
 class _TranslationEngine:
@@ -35,6 +36,40 @@ class _TranslationEngine:
 
 
 class GlobalExperienceIntegrationTests(unittest.TestCase):
+    def test_large_candidate_signature_is_bounded_for_game_memory(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = _TranslationEngine()
+            store = GameMechanicsStore(root, engine.game_id, engine.seed, engine.win_levels)
+            broker = ArcBroker(engine=engine, game_mechanics_store=store)
+            broker.bind_history("large-signature-run")
+            candidate = EffectHypothesis(
+                key="large-signature",
+                game_id=engine.game_id,
+                seed=engine.seed,
+                level=0,
+                action_family="keyboard",
+                action="ACTION1",
+                data=(),
+                signature="s" * 5000,
+                status="hypothesis",
+                evidence_sequences=(1,),
+                conflict_sequences=(),
+                template=None,
+                win_levels=engine.win_levels,
+            )
+            broker._experience_inducer._candidates[candidate.key] = candidate
+
+            broker._persist_game_mechanics(broker._history[0])
+
+            fact = store.records()[0]
+            effect = fact.effects[0]
+            self.assertIsInstance(effect["signature"], dict)
+            self.assertTrue(effect["signature"]["truncated"])
+            self.assertEqual(effect["signature"]["length"], 5000)
+            self.assertEqual(len(effect["signature"]["prefix"]), 512)
+            self.assertEqual(store.path.is_file(), True)
+
     def test_broker_persists_game_memory_and_exposes_safe_simulation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

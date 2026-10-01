@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 import copy
+from hashlib import sha256
 import json
 import os
 from pathlib import Path
@@ -26,7 +27,28 @@ _MAX_VALUE_BYTES = 16 * 1024
 _MAX_VALUE_DEPTH = 16
 _MAX_VALUE_ITEMS = 256
 _MAX_TEXT = 2048
+_TEXT_PREFIX = 512
 _ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+
+
+def bounded_text(value: object) -> str | dict[str, object]:
+    """Keep diagnostic text JSON-safe without making the store unbounded.
+
+    Short text remains readable.  Long text retains a deterministic prefix,
+    character count, and raw UTF-8 digest so callers can compare the complete
+    value without asking the persistence layer to accept it.
+    """
+
+    if type(value) is not str:
+        raise ValueError("mechanism text must be a string")
+    if len(value) <= _MAX_TEXT:
+        return value
+    return {
+        "truncated": True,
+        "length": len(value),
+        "prefix": value[:_TEXT_PREFIX],
+        "sha256": "sha256:" + sha256(value.encode("utf-8")).hexdigest(),
+    }
 
 
 def _id(value: object, name: str) -> str:
@@ -538,4 +560,4 @@ class GameMechanicsStore:
         return copy.deepcopy(result)
 
 
-__all__ = ["SCHEMA", "GameMechanism", "GameMechanicsStore"]
+__all__ = ["SCHEMA", "GameMechanism", "GameMechanicsStore", "bounded_text"]

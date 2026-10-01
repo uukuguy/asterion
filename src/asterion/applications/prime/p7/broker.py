@@ -19,7 +19,7 @@ from .mechanism_model import (
 from .model_search import search_model
 from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
-from .game_mechanics import GameMechanicsStore
+from .game_mechanics import GameMechanicsStore, bounded_text
 from .observation_state import ObservationState
 from .hypothesis_simulator import Subgoal, search_counterfactual
 from .playbook import (LevelCompletion, PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
@@ -2103,7 +2103,7 @@ class ArcBroker:
                 conditions = [{"kind": "observed-transition", "level": candidate.level}]
                 effects = [{
                     "kind": "frame-delta",
-                    "signature": candidate.signature,
+                    "signature": bounded_text(candidate.signature),
                     "outcome": None if template is None else template.outcome,
                     "motion_complete": False if template is None else template.motion_complete,
                     "refusal_reasons": list(candidate.refusal_reasons),
