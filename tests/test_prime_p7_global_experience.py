@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+from hashlib import sha256
 import tempfile
 import unittest
 from pathlib import Path
@@ -7,6 +9,7 @@ from pathlib import Path
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
 from asterion.applications.prime.p7.experience_induction import EffectHypothesis
+from asterion.applications.prime.p7.score import digest
 
 
 class _TranslationEngine:
@@ -43,15 +46,19 @@ class GlobalExperienceIntegrationTests(unittest.TestCase):
             store = GameMechanicsStore(root, engine.game_id, engine.seed, engine.win_levels)
             broker = ArcBroker(engine=engine, game_mechanics_store=store)
             broker.bind_history("large-signature-run")
+            signature = "s" * 5000
+            candidate_key = ":".join((
+                engine.game_id, str(engine.seed), "0", "ACTION1", repr(()), signature,
+            ))
             candidate = EffectHypothesis(
-                key="large-signature",
+                key=candidate_key,
                 game_id=engine.game_id,
                 seed=engine.seed,
                 level=0,
                 action_family="keyboard",
                 action="ACTION1",
                 data=(),
-                signature="s" * 5000,
+                signature=signature,
                 status="hypothesis",
                 evidence_sequences=(1,),
                 conflict_sequences=(),
@@ -68,7 +75,25 @@ class GlobalExperienceIntegrationTests(unittest.TestCase):
             self.assertTrue(effect["signature"]["truncated"])
             self.assertEqual(effect["signature"]["length"], 5000)
             self.assertEqual(len(effect["signature"]["prefix"]), 512)
-            self.assertEqual(store.path.is_file(), True)
+            evidence_key = fact.evidence[0]["candidate_key"]
+            self.assertTrue(evidence_key["truncated"])
+            self.assertEqual(evidence_key["length"], len(candidate_key))
+            self.assertEqual(evidence_key["prefix"], candidate_key[:512])
+            self.assertEqual(evidence_key["sha256"], "sha256:" + sha256(candidate_key.encode()).hexdigest())
+            self.assertEqual(fact.mechanism_id, "induced." + digest({
+                "action": candidate.action, "signature": signature,
+            }).removeprefix("sha256:")[:32])
+            self.assertEqual(candidate.key, candidate_key)
+            self.assertTrue(store.path.is_file())
+
+            broker._experience_inducer._candidates[candidate.key] = replace(
+                candidate, status="contradicted", conflict_sequences=(2,),
+            )
+            broker._persist_game_mechanics(broker._history[0])
+            conflicted = store.records()[0]
+            self.assertEqual(conflicted.status, "conflict")
+            self.assertEqual(conflicted.conflicts[0]["observed"]["candidate_key"], evidence_key)
+            self.assertNotIn("game-mechanics-persistence-unavailable", broker.retrodiction_status()["reasons"])
 
     def test_broker_persists_game_memory_and_exposes_safe_simulation(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

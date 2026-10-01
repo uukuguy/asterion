@@ -2094,7 +2094,7 @@ class ArcBroker:
                     "source_run": record.run_id,
                     "level": candidate.level,
                     "action": candidate.action,
-                    "candidate_key": candidate.key,
+                    "candidate_key": bounded_text(candidate.key),
                 } for sequence in candidate.evidence_sequences[-8:]]
                 if not evidence:
                     continue
@@ -2124,7 +2124,7 @@ class ArcBroker:
                     if current is not None and current.status != "conflict":
                         store.conflict(
                             mechanism_id,
-                            observed={"candidate_key": candidate.key},
+                            observed={"candidate_key": bounded_text(candidate.key)},
                             evidence=evidence,
                             reason="candidate-conflict",
                         )
