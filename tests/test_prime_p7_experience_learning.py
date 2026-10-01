@@ -437,6 +437,13 @@ class ExperienceLearningTests(unittest.TestCase):
         self.assertEqual(after["model_search_found"], 1)
         self.assertTrue(after["planner_eligible"])
 
+    def test_search_cache_rechecks_budget_and_current_world(self) -> None:
+        broker, _engine = self._collect_two_effects()
+        self.assertEqual(broker.model_search()["status"], "no-plan")
+        self.assertEqual(broker.model_search(max_nodes=0)["reason"], "input")
+        broker._world_model.refresh_level(1)
+        self.assertEqual(broker.model_search()["reason"], "stale-certificate-context")
+
     def test_candidate_exposes_a_valid_record_hypothesis_payload(self) -> None:
         broker, engine = self._collect_two_effects()
         candidate = next(
