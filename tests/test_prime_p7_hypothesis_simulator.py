@@ -20,10 +20,10 @@ from asterion.applications.prime.p7.transition_model import TransitionRule
 from asterion.applications.prime.p7.verified_history import ArcHistoryRecord
 
 
-def _state(*, value: int = 0) -> SimState:
+def _state(*, value: int = 0, level: int = 0) -> SimState:
     return SimState.from_observation(
         frame=((value,),),
-        level=0,
+        level=level,
         state="NOT_FINISHED",
         available_actions=["ACTION1"],
     )
@@ -128,6 +128,18 @@ class HypothesisSimulatorTests(unittest.TestCase):
         self.assertEqual(projection["status"], "budget-exhausted")
         self.assertIn("evidence_grade", projection["branches"][0])
         self.assertIn("subgoals", projection["branches"][0])
+
+    def test_default_goal_at_final_level_waits_for_win_state(self) -> None:
+        result = search_counterfactual(
+            _state(level=1),
+            (_spec(7),),
+            actions=("ACTION1",),
+            max_depth=1,
+        )
+
+        self.assertNotEqual(result.status, "found")
+        self.assertEqual(result.branches[0].subgoals[0].name, "win-state")
+        self.assertEqual(result.branches[0].subgoals[0].status, "unchanged")
 
 
 if __name__ == "__main__":

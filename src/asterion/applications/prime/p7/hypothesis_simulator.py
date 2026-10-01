@@ -282,11 +282,13 @@ class _Node:
 
 
 def _default_subgoals(current: SimState, candidates: tuple[_Candidate, ...]) -> tuple[Subgoal, ...]:
-    target = current.level + 1
-    for candidate in candidates:
-        if candidate.spec is not None:
-            target = min(target, candidate.spec.win_levels)
-    return (Subgoal("advance-level", target_level=target),)
+    maximum = max(
+        (candidate.spec.win_levels for candidate in candidates if candidate.spec is not None),
+        default=current.level + 1,
+    )
+    if current.level >= maximum:
+        return (Subgoal("win-state", target_state="WIN"),)
+    return (Subgoal("advance-level", target_level=current.level + 1),)
 
 
 def search_counterfactual(
