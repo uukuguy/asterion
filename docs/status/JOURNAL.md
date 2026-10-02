@@ -3513,3 +3513,4 @@
 - 2026-10-02 认知证据改为具体预测帧或受限终态谓词，并让实验动作错配可恢复 [6d038d3e]
 - 2026-10-02 promotion-check 3684 tests 失败，原因仍为外部 Pi source-detachment 及既有 10 failures/5 errors；本次聚焦回归无新增失败
 - 2026-10-02 cognition checked action 允许仅有 NOT_FINISHED 的非区分性见证，限定 cognition mode，普通 solve 仍需区分性预期
+- 2026-10-02 cognition checked action 非区分性 NOT_FINISHED 见证仅限 cognition mode，避免未知动作首轮被错误拒绝 [ea4d305b]
