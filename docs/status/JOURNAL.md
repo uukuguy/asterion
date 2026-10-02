@@ -3551,3 +3551,4 @@
 - 14:15 commit 05ee26b5 accepted the model's `predicate` alias for cognition experiments, preventing recoverable probe selection rejection.
 - 14:22 commit d1abfee1 accepted model `id`/`result`/`evidence` analysis aliases, allowing real multi-claim probe results to persist.
 - 14:27 commit 237c49bd explicitly requires L1 displacement probes to assess `role-background-12` passability with movement claims.
+- 2026-10-02 live run p7-live-20261002140652-d95349813aeea3d814150880 completed 16 cognition actions; ACTION4 jointly confirmed color-9 control and local color-12 passability, while solve remained unsuccessful with completion=0.
