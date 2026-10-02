@@ -600,9 +600,18 @@ class ExperienceInducer:
         tried = set(tried_actions)
         rejected: list[str] = []
         eligible: list[EffectHypothesis] = []
+        # Keep probe suggestions aligned with the pure simulator boundary.
+        # Diagnostic hypotheses (for example, effects with unexplained
+        # residual deltas) must remain visible as rejected evidence, never as
+        # actions presented as ready to probe.
+        from .mechanism_model import compile_effect_hypothesis
+
         width, height = len(current.frame[0]), len(current.frame)
         for candidate in candidates:
             if candidate.status != "hypothesis" or candidate.level != current.level:
+                continue
+            if compile_effect_hypothesis(candidate) is None:
+                rejected.append(candidate.key)
                 continue
             action = (candidate.action, candidate.data)
             if candidate.action not in current.available_actions:

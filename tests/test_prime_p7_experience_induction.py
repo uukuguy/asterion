@@ -295,8 +295,9 @@ class ExperienceInductionTests(unittest.TestCase):
         )
         plan = ExperienceInducer.probe_plan(current, (keyboard, stale_click))
         self.assertIsInstance(plan, ProbePlan)
-        self.assertEqual(plan.status, "ready")
-        self.assertEqual(plan.action, "ACTION1")
+        self.assertEqual(plan.status, "no-discriminating-probe")
+        self.assertIsNone(plan.action)
+        self.assertIn("keyboard", plan.rejected_candidates)
         self.assertIn("stale-click", plan.rejected_candidates)
 
     def test_probe_plan_allows_consistent_candidate_in_a_new_state(self) -> None:
@@ -313,8 +314,9 @@ class ExperienceInductionTests(unittest.TestCase):
         plan = ExperienceInducer.probe_plan(
             current, (candidate,), tried_actions=(("ACTION1", ()),),
         )
-        self.assertEqual(plan.status, "ready")
-        self.assertEqual(plan.action, "ACTION1")
+        self.assertEqual(plan.status, "no-discriminating-probe")
+        self.assertIsNone(plan.action)
+        self.assertEqual(plan.rejected_candidates, ("move",))
 
     def test_large_frame_uses_private_full_delta_for_components(self) -> None:
         before = tuple(tuple(0 for _ in range(12)) for _ in range(12))

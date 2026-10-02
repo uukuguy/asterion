@@ -283,15 +283,15 @@ class ExperienceEndToEndTests(unittest.TestCase):
         hint = fresh.learning_hint()
         self.assertEqual(hint["current_candidate_count"], 1)
         self.assertEqual(hint["stale_candidate_count"], 0)
-        self.assertEqual(hint["recommendation"], "inspect_candidate_and_probe")
+        self.assertEqual(hint["recommendation"], "inspect_candidates")
         self.assertTrue(hint["compiled_candidates"])
         candidate = fresh.mechanism_candidates()[0]
         self.assertEqual(candidate["source"], "playbook")
         self.assertEqual(candidate["status"], "hypothesis")
         self.assertIn("compiled_mechanism", candidate)
         plan = fresh.probe_plan()
-        self.assertEqual(plan["status"], "ready")
-        self.assertEqual(plan["action"], {"name": "ACTION1", "data": {}})
+        self.assertEqual(plan["status"], "no-discriminating-probe")
+        self.assertIsNone(plan["action"])
 
     def test_reloaded_candidate_can_be_retro_verified_without_route_injection(self) -> None:
         source = ArcBroker(engine=_TranslationEngine())

@@ -55,6 +55,16 @@ class ExperienceSimulatorTests(unittest.TestCase):
         candidate = inducer.candidates()[0]
         self.assertIn("unsupported-residual", candidate.refusal_reasons)
         self.assertIsNone(compile_effect_hypothesis(candidate))
+        plan = ExperienceInducer.probe_plan(
+            SimState.from_observation(
+                frame=((9, 12),), level=0, state="NOT_FINISHED",
+                available_actions=["ACTION1"],
+            ),
+            (candidate,),
+        )
+        self.assertEqual(plan.status, "no-discriminating-probe")
+        self.assertEqual(plan.reason, "no-current-safe-candidate")
+        self.assertEqual(plan.rejected_candidates, (candidate.key,))
 
     def test_candidate_compiles_and_simulates_a_cell_edit(self) -> None:
         inducer = ExperienceInducer(win_levels=1)
