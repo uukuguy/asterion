@@ -3549,3 +3549,4 @@
 - 14:00 commit a8daf8f5 made multi-claim cognition evidence resolution transactional so invalid later claims cannot partially persist.
 - 14:08 commit 2bf62053 deferred cognition hypothesis events until transactional claim resolution succeeds, keeping failed analyses event-consistent.
 - 14:15 commit 05ee26b5 accepted the model's `predicate` alias for cognition experiments, preventing recoverable probe selection rejection.
+- 14:22 commit d1abfee1 accepted model `id`/`result`/`evidence` analysis aliases, allowing real multi-claim probe results to persist.
