@@ -3532,3 +3532,4 @@
 - 2026-10-02 first-frame prompt now requires LLM to derive competing hypotheses from all information points and name/test a familiar game-family analogy.
 - 2026-10-02 cognition prompt now requires first probe before tried-actions/history/readiness queries so one move can produce evidence updates.
 - 2026-10-02 code-level first-probe gate added after review found prompt-only ordering insufficient; cognition mode now blocks detours before first experiment.
+- 2026-10-02 tightened first-probe gate: any OBSERVE/PROPOSE cognition session with zero episode actions blocks detour tools until experiment/action begins.
