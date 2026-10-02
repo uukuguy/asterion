@@ -3497,3 +3497,4 @@
 - 08:14 corrected prefix replay accounting so successful runs exclude later live actions and partial failures retain only applied prefix transitions [8d2c8678]
 - 08:14 Independent final review: P0/P1/P2/P3 all clear; 229 Python, 32 TypeScript (26 pass/6 external skips), lint and docs checks pass
 - 08:16 added partial prefix replay count regression for diagnostic boundary coverage [fd77ffed]
+- 08:16 refreshed the live checkpoint with current P7 fixes, cancelled witness evidence, and next bounded actions [a093d177]
