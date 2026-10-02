@@ -126,6 +126,20 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             ),
             {"category": "none", "evidence": {}},
         )
+        self.assertEqual(
+            classify_failure_cause(
+                failure=RuntimeError("Pi RPC prompt execution failed"),
+                broker_status={"terminal_reason": "active"},
+                pi_private=None,
+                pi_last_failure="Pi RPC prompt execution failed",
+                bridge_method_failures={},
+                cleanup_failed=False,
+            ),
+            {
+                "category": "model_rpc_error",
+                "evidence": {"last_failure": "Pi RPC prompt execution failed"},
+            },
+        )
 
     def test_partial_route_hint_does_not_claim_level_completion(self) -> None:
         from asterion.applications.prime.p7.optimizer import PlannerAction
