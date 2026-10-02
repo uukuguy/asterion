@@ -716,6 +716,21 @@ class _P7BrokerClient:
     def _count(self, name: str, increment: int = 1) -> None:
         self._counts[name] = min(5000, self._counts[name] + increment)
 
+    def _first_probe_hint(self) -> dict[str, object] | None:
+        if not self._cognition_mode:
+            return None
+        snapshot = self._broker.cognition_projection().get("cognition_session")
+        if not isinstance(snapshot, Mapping):
+            return None
+        if snapshot.get("state") in {"OBSERVE", "PROPOSE"} and snapshot.get("episode_actions") == 0:
+            return {
+                "status": "blocked",
+                "reason": "cognition-first-probe-required",
+                "next": "p7_cognition_update select_experiment, then p7_act_checked",
+                "execution_authority": "none",
+            }
+        return None
+
     def private_accounting(self) -> dict[str, int]:
         """Return bounded scalar diagnostics without exposing frames or predictions."""
         return {**self._counts, "first_sequence": 0, "last_sequence": len(self._broker.journal)}
@@ -830,6 +845,8 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def world_model(self) -> dict[str, object]:
+        if (hint := self._first_probe_hint()) is not None:
+            return hint
         try:
             snapshot = self._broker.world_model()
             if snapshot is None:
@@ -839,12 +856,16 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def observation_state(self) -> dict[str, object]:
+        if (hint := self._first_probe_hint()) is not None:
+            return hint
         try:
             return self._broker.observation_state().to_projection()
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def game_mechanics(self) -> dict[str, object]:
+        if (hint := self._first_probe_hint()) is not None:
+            return hint
         try:
             return self._broker.game_mechanics_projection()
         except Exception:
@@ -1061,6 +1082,8 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def playbook(self, level: int | None = None) -> dict[str, object]:
+        if (hint := self._first_probe_hint()) is not None:
+            return hint
         if level is not None and (type(level) is not int or level < 0):
             raise P7OperatorError("P7 host services are unavailable")
         try:
@@ -1350,6 +1373,8 @@ class _P7BrokerClient:
         }
 
     def tried_actions(self, level: int | None = None) -> list[dict[str, object]]:
+        if (hint := self._first_probe_hint()) is not None:
+            return [hint]
         return self._broker.tried_actions(level)
 
     def last_outcome_summary(
