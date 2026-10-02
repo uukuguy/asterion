@@ -3502,3 +3502,4 @@
 - 2026-10-02 P7 Broker、Python facade、live worker、TypeScript 资源和 prompt 接入 p7_cognition_update；相关 169 Python、26 TypeScript 通过，6 项外部 Pi 跳过
 - 2026-10-02 语义认知主合同与 P7 探索管道完成实现并提交，因果实验、RESET 边界和只读通关交接纳入 cc54a5c3
 - 2026-10-02 修复 cognition_update 验证拒绝导致 bridge 中止，改为可恢复结果并补充重试契约 d041857c
+- 2026-10-02 cognition prompt 补齐提案与实验 JSON 约束，降低模型首轮无效请求 eb2295e7
