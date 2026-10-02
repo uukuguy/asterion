@@ -600,7 +600,6 @@ class _IpythonBridgeServer:
         blocked = (
             snapshot.get("state") in {"OBSERVE", "PROPOSE"}
             and snapshot.get("episode_actions") == 0
-            and snapshot.get("pending") is None
         )
         if blocked:
             print(
