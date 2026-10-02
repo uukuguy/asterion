@@ -164,6 +164,9 @@ class CognitionSession:
                         "kind": claim.get("kind"),
                         "subject": claim.get("subject"),
                         "claim": claim.get("claim"),
+                        "reason": claim.get("reason"),
+                        "falsifier": claim.get("falsifier"),
+                        "context": claim.get("context"),
                         "status": claim.get("status"),
                         "confidence": claim.get("confidence"),
                         "evidence_count": claim.get("evidence_count", 0),
@@ -189,6 +192,13 @@ class CognitionSession:
             file=sys.stderr,
             flush=True,
         )
+        for change in claim_changes:
+            print(
+                "[p7-cognition] hypothesis "
+                + json.dumps(change, sort_keys=True, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _persist_events(self) -> None:
         payload = json.dumps({"schema": "asterion.prime.p7-semantic-cognition-events/v1", "events": self._events}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -242,7 +252,7 @@ class CognitionSession:
         return self.snapshot()
 
     def propose(self, proposal: Mapping[str, Any]) -> int:
-        if self._observation is None or self._state not in {"OBSERVE", "PROPOSE", "ANALYZED", "SNAPSHOT"}:
+        if self._observation is None or self._state not in {"OBSERVE", "ANALYZED", "SNAPSHOT"}:
             raise CognitionSessionError("proposal is not allowed")
         try:
             count = self.store.propose(proposal)
