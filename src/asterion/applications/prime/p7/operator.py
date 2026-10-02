@@ -709,6 +709,46 @@ def _bounded_validation(value: object) -> dict[str, object]:
     return result
 
 
+def _bounded_pending(value: object) -> dict[str, object] | None:
+    """Keep the selected experiment visible without forwarding bulky predicates."""
+
+    if not isinstance(value, Mapping):
+        return None
+    result: dict[str, object] = {}
+    claim_ids = value.get("claim_ids")
+    if isinstance(claim_ids, (list, tuple)):
+        result["claim_ids"] = [
+            claim_id for claim_id in claim_ids[:32] if isinstance(claim_id, str)
+        ]
+    for key in ("question", "information_gain"):
+        if key in value:
+            result[key] = str(value.get(key, ""))[:512]
+    if "action_name" in value:
+        action_name = value.get("action_name")
+        result["action_name"] = str(action_name)[:256] if action_name is not None else None
+    expected = value.get("expected")
+    if isinstance(expected, Mapping):
+        result["expected"] = {
+            key: ("frame-predicate" if key == "frame" else expected.get(key))
+            for key in ("frame_changed", "levels_completed", "state", "frame")
+            if key in expected
+        }
+    return result
+
+
+def _compact_session_state(value: Mapping[str, object]) -> dict[str, object]:
+    compact = {
+        key: value.get(key)
+        for key in ("session_id", "episode", "episode_actions", "resets", "state")
+        if key in value
+    }
+    if "pending" in value:
+        compact["pending"] = _bounded_pending(value.get("pending"))
+    if "validation" in value:
+        compact["validation"] = _bounded_validation(value.get("validation"))
+    return compact
+
+
 def _compact_cognition_session(value: object) -> dict[str, object]:
     """Project session state without hiding validation control from the model."""
 
@@ -719,8 +759,16 @@ def _compact_cognition_session(value: object) -> dict[str, object]:
         for key in ("state", "episode", "episode_actions", "resets")
         if key in value
     }
-    if "validation" in value:
-        compact["validation"] = _bounded_validation(value.get("validation"))
+    nested_session = value.get("session")
+    if isinstance(nested_session, Mapping):
+        # CognitionSession.snapshot() is an envelope: the actionable control
+        # state lives under ``session`` beside the bulky report and events.
+        compact["session"] = _compact_session_state(nested_session)
+    else:
+        if "pending" in value:
+            compact["pending"] = _bounded_pending(value.get("pending"))
+        if "validation" in value:
+            compact["validation"] = _bounded_validation(value.get("validation"))
     return compact
 
 
@@ -1028,22 +1076,7 @@ class _P7BrokerClient:
                 compact = dict(result)
                 session = compact.get("session")
                 if isinstance(session, Mapping):
-                    pending = session.get("pending")
-                    compact_pending = None
-                    if isinstance(pending, Mapping):
-                        compact_pending = {
-                            key: pending.get(key)
-                            for key in ("claim_ids", "question", "information_gain", "action_name")
-                            if key in pending
-                        }
-                        expected = pending.get("expected")
-                        if isinstance(expected, Mapping):
-                            compact_pending["expected"] = {
-                                key: ("frame-predicate" if key == "frame" else value)
-                                for key, value in expected.items()
-                            }
                     compact["session"] = _compact_cognition_session(session)
-                    compact["session"]["pending"] = compact_pending
                 if isinstance(compact.get("report"), Mapping):
                     compact["report"] = _bounded_semantic_report(
                         compact["report"], max_bytes=7 * 1024

@@ -533,13 +533,17 @@ class CognitionSession:
                 f"predicate={predicate_name}; observed={observed}; action_evidence={evidence_ref}; {explanation}"
             )
             if status == "certain":
-                if (is_known_predicate and not observed) or not evidence_allowed:
+                # The predicate is diagnostic context for the LLM, not a
+                # shared verdict for every selected hypothesis.  One settled
+                # frame may support one claim while falsifying another, so
+                # preserve each submitted semantic status independently.
+                if not evidence_allowed:
                     pending_events.append(("cognition.hypothesis.remains_undetermined", item["claim_id"], explanation))
                     continue
                 resolutions.append({"claim_id": item["claim_id"], "status": "certain", "evidence": evidence_ref, "explanation": evidence_explanation})
                 pending_events.append(("cognition.hypothesis.confirmed", item["claim_id"], explanation))
             elif status == "falsified":
-                if (is_known_predicate and observed) or not evidence_allowed:
+                if not evidence_allowed:
                     pending_events.append(("cognition.hypothesis.remains_undetermined", item["claim_id"], explanation))
                     continue
                 resolutions.append({"claim_id": item["claim_id"], "status": "falsified", "evidence": evidence_ref, "explanation": evidence_explanation})

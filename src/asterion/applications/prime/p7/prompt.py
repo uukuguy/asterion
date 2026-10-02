@@ -374,23 +374,26 @@ P7_COGNITION_APPENDIX = """\n\nThis is a cognition-exploration session, not an o
 Do not optimize for a human baseline and do not import a prior route. Spend
 bounded experiments building the semantic game picture. After each settled
 observation update p7_cognition_update using support, counterexample, or
-undetermined status. One experiment may test several claims at once: include
-every selected claim that the observation bears on, including passability when
-a moving object visibly enters or crosses a candidate background region. Use
-the canonical analysis envelope `{"results":[{"claim_id":"...","status":"certain|falsified|undetermined","explanation":"..."}]}`;
+undetermined status. One experiment may test several claims at once: before
+dispatch, select every hypothesis that the action or its expected observation
+could directly implicate, including movement, actor/object role, entered-cell
+passability, interaction, or goal claims. A displacement can provide evidence
+about both the moving actor and the space it enters, but do not infer any fact
+automatically: the LLM must inspect the settled frame and explain the evidence
+for each selected claim. Keep level-local claims separate from game-wide rules;
+generalize only when observations support that scope. After the action, review
+the whole settled result, including incidental cell, boundary, counter, or
+state changes, and assess every selected claim. If incidental evidence reveals
+an unselected hypothesis, propose it and test it in a later experiment rather
+than silently resolving it. Use the canonical analysis envelope
+`{"results":[{"claim_id":"...","status":"certain|falsified|undetermined","explanation":"..."}]}`;
 the results list may contain multiple claims. `supported_but_unconfirmed`,
 `weakened_but_unconfirmed`, and similar language means `undetermined` until a
 later discriminating observation. Use RESET to discard the current episode experiment while
 preserving the semantic ledger. Stop with `ready` when the report has a useful
 language description and supported control evidence; otherwise stop with the
 actual safety reason. The final report must state what is known, unknown, and
-what experiment comes next. When a displacement changes which cells contain
-the actor, include every directly implicated claim in `analysis.results`;
-passability of the entered/background cell is a first-class implication, not
-an optional secondary claim. For this L1, if the color-9 band displaces into
-the large color-12 region, select the existing `role-background-12` claim (or
-the equivalent passability claim) together with the movement claim and assess
-both from that same settled frame."""
+what experiment comes next."""
 
 P7_COGNITION_PROMPT = """You are Asterion-prime conducting a bounded semantic game-cognition
 exploration for one exact game and Level 1. This session is not an official
@@ -423,25 +426,29 @@ immediately; do not call `p7_tried_actions`, `p7_history`, `p7_frame_at`, or
 `p7_cognition_update({"op":"ready"})` before that experiment has executed
 and been analyzed. The first probe should normally be one legal non-RESET
 direction so the actor and floor hypotheses can gain evidence together.
-Select one information-bearing
-experiment with an explicit observable predicate such as
-`{"frame": [[...]]}` for a concrete predicted settled frame,
-`{"levels_completed": 1}`, or `{"state": "WIN"}`; include claim ids,
-question, information gain, and one non-RESET action. `{"frame_changed": true}`
-only proves that some visual change occurred and therefore remains insufficient
-to confirm or falsify a directional, object-role, or goal claim. Dispatch it
-with one-item `p7_act_checked`, whose plan item
-uses the broker shape `{"action":{"name":"ACTION1","data":{}},"expect":{"state":"NOT_FINISHED"}}`
+Select one information-bearing experiment with an explicit observable
+predicate such as `{"frame": [[...]]}` for a concrete predicted settled frame,
+`{"levels_completed": 1}`, or `{"state": "WIN"}`. Select every directly
+implicated claim for the action, then use this exact cognition envelope:
+`{"op":"select_experiment","experiment":{"claim_ids":["claim-a","claim-b"],"question":"...","information_gain":"...","action":{"name":"ACTION1","data":{}},"expected":{"frame":[[...]]}}}`.
+The `expected` object is the cognition predicate; it is separate from the
+checked-action expectation. `{"frame_changed": true}` only proves that some
+visual change occurred and therefore remains insufficient to confirm or
+falsify a directional, object-role, or goal claim. Dispatch the same action
+exactly once with one-item `p7_act_checked`, whose plan item uses the broker
+shape `{"action":{"name":"ACTION1","data":{}},"expect":{"state":"NOT_FINISHED"}}`
 or a concrete `cell`/terminal expectation; `frame_changed` belongs to the
 cognition experiment predicate, not the checked-action `expect` object. A
-rejected action plan is recoverable: correct it and retry once. Dispatch the
-action exactly once, then analyze the settled result. A single settled result
-may support several selected claims; assess them together in
-`analysis.results`, and use the displacement itself to assess whether the
-object crossed or occupied a candidate passable region. For L1 specifically,
-when color 9 enters the large color-12 region, include `role-background-12`
-(or its equivalent) in `claim_ids` and in the result list alongside the
-movement claim. A frame change is
+rejected action plan is recoverable: correct it and retry once. After the
+settled response, inspect the entire result, including incidental changes, and
+use this exact analysis envelope:
+`{"op":"analyze","analysis":{"results":[{"claim_id":"claim-a","status":"certain|falsified|undetermined","explanation":"..."},{"claim_id":"claim-b","status":"certain|falsified|undetermined","explanation":"..."}]}}`.
+A single action may therefore test multiple claims; choose each result status
+from the observed evidence independently. In particular, displacement may
+jointly bear on movement, actor role, and passability of the entered cell,
+without making any one of those facts automatic. Keep level-local claims
+scoped to the current evidence and only generalize a rule with cross-level or
+game-wide support. A frame change is
 evidence of change, not proof of a particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call

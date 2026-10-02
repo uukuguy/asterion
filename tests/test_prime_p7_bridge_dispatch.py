@@ -381,6 +381,52 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertLessEqual(len(json.dumps(result, separators=(",", ":")).encode()), 16 * 1024)
         self.assertEqual(result["cognition_session"]["state"], "EXPERIMENT_SELECTED")
 
+    def test_cognition_compaction_preserves_nested_session_control(self):
+        class Broker:
+            def cognition_projection(self):
+                return {
+                    "input_kind": "keyboard",
+                    "type_profile": {"authority": "prior-only"},
+                    "game_experience": {"history": "x" * 50000},
+                    "semantic": {"claims": {}, "natural_language_context": "c" * 5000},
+                    "cognition_session": {
+                        "state": "EXPERIMENT_SELECTED",
+                        "report": {"claims": {}, "natural_language_context": "r" * 50000},
+                        "session": {
+                            "session_id": "session-1",
+                            "episode": 2,
+                            "episode_actions": 3,
+                            "resets": 1,
+                            "state": "EXPERIMENT_SELECTED",
+                            "pending": {
+                                "claim_ids": ["claim-a", "claim-b", 3],
+                                "question": "q" * 5000,
+                                "information_gain": "i" * 5000,
+                                "action_name": "ACTION1",
+                                "expected": {"frame": [[1] * 10000]},
+                            },
+                            "validation": {
+                                "needed": True,
+                                "possible": True,
+                                "reason": "actionable-hypotheses-remain",
+                                "actionable_claim_ids": ["claim-a", "claim-b", 4],
+                            },
+                        },
+                        "events": [{"explanation": "e" * 5000}] * 32,
+                        "execution_authority": "none",
+                    },
+                }
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        result = client.cognition()
+        encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded.encode("utf-8")), 16 * 1024)
+        session = result["cognition_session"]["session"]
+        self.assertEqual(session["validation"]["actionable_claim_ids"], ["claim-a", "claim-b"])
+        self.assertEqual(session["pending"]["claim_ids"], ["claim-a", "claim-b"])
+        self.assertEqual(session["pending"]["action_name"], "ACTION1")
+
 
 if __name__ == "__main__":
     unittest.main()

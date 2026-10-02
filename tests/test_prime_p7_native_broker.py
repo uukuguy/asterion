@@ -1302,6 +1302,21 @@ class TestP7ToolRegistry(unittest.TestCase):
         self.assertEqual(build_solve_prompt(None), P7_SOLVE_PROMPT)
         self.assertEqual(build_solve_prompt(P7ToolRegistry_shim()), P7_SOLVE_PROMPT)
 
+    def test_cognition_prompt_uses_generic_joint_claim_guidance(self) -> None:
+        from asterion.applications.prime.p7.prompt import P7_COGNITION_PROMPT
+
+        self.assertIn("Select every directly", P7_COGNITION_PROMPT)
+        self.assertIn("movement, actor role, and passability", P7_COGNITION_PROMPT)
+        self.assertIn("including incidental changes", P7_COGNITION_PROMPT)
+        self.assertIn('"op":"select_experiment"', P7_COGNITION_PROMPT)
+        self.assertIn('"expected":{"frame"', P7_COGNITION_PROMPT)
+        self.assertIn('"op":"analyze"', P7_COGNITION_PROMPT)
+        self.assertIn('"claim_id":"claim-a"', P7_COGNITION_PROMPT)
+        self.assertIn('"status":"certain|falsified|undetermined"', P7_COGNITION_PROMPT)
+        self.assertIn('"explanation":"..."', P7_COGNITION_PROMPT)
+        self.assertNotIn("color-12", P7_COGNITION_PROMPT)
+        self.assertNotIn("role-background-12", P7_COGNITION_PROMPT)
+
 
 class P7ToolRegistry_shim:
     def render_section(self) -> str:

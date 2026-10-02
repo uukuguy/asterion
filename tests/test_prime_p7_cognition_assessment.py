@@ -163,6 +163,39 @@ class CognitionAssessmentTests(unittest.TestCase):
             self.assertEqual(claims["bar-moves"]["status"], "certain")
             self.assertEqual(claims["space-passable"]["status"], "certain")
 
+    def test_mixed_claim_results_remain_independent_when_frame_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = SemanticCognitionStore(Path(directory), "mixed-assessment-game", 0, 2, level=0)
+            session = CognitionSession(store, session_id="mixed-assessments")
+            session.start_episode({"frame": [[9, 12]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            session.propose({"claims": [
+                {"id": "bar-moves", "kind": "control", "subject": "actor", "claim": "The actor moves right.", "reason": "r", "falsifier": "The actor stays.", "next_test": "Move right."},
+                {"id": "space-blocks", "kind": "object_role", "subject": "space", "claim": "The entered space blocks the actor.", "reason": "r", "falsifier": "The actor enters it.", "next_test": "Move into the space."},
+            ]})
+            session.select_experiment({
+                "claim_ids": ["bar-moves", "space-blocks"],
+                "question": "Did the actor enter the next cell?",
+                "information_gain": "Tests movement and traversability together.",
+                "action": {"name": "ACTION1"},
+                "expected": {"frame": [[12, 9]]},
+            })
+            session.record_action(
+                {"frame": [[12, 9]], "levels_completed": 0, "state": "NOT_FINISHED"},
+                action={"name": "ACTION1"},
+            )
+            snapshot = session.analyze({"results": [
+                {"claim_id": "bar-moves", "status": "certain", "explanation": "The actor entered the next cell."},
+                {"claim_id": "space-blocks", "status": "falsified", "explanation": "The actor occupied the purported blocking cell."},
+            ]})
+            claims = {
+                item["id"]: item
+                for values in snapshot["report"]["claims"].values()
+                if isinstance(values, list)
+                for item in values
+            }
+            self.assertEqual(claims["bar-moves"]["status"], "certain")
+            self.assertEqual(claims["space-blocks"]["status"], "falsified")
+
 
 if __name__ == "__main__":
     unittest.main()
