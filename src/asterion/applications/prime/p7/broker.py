@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
+import hashlib
 import json
 import sys
 from copy import deepcopy
@@ -416,6 +417,135 @@ class ArcBroker:
                 "cognition_session": None if self._cognition_session is None else self._cognition_session.snapshot(emit_event=False),
             }
         return projection
+
+    def planning_background(self) -> dict[str, object]:
+        """Return the current worldmap plus semantic cognition for planning.
+
+        This projection is deliberately advisory.  It gives the model one
+        coherent, refreshable background after cognition changes, while the
+        checked-action broker remains the only execution authority.
+        """
+
+        observation = self.observation_state().to_projection()
+        world = self._planning_world_projection()
+        cognition = self.cognition_projection()
+        mechanics = self._planning_mechanics_projection()
+        simulator = self.simulator_status()
+        retrodiction = self.retrodiction_status()
+        session = cognition.get("cognition_session")
+        events = session.get("events", []) if isinstance(session, Mapping) else []
+        event_sequence = 0
+        if isinstance(events, list):
+            for event in events:
+                if isinstance(event, Mapping) and type(event.get("sequence")) is int:
+                    event_sequence = max(event_sequence, event["sequence"])
+        identity = {
+            "game_id": self._game.game_id,
+            "seed": self._game.seed,
+            "win_levels": self._game.win_levels,
+            "level": self._current.levels_completed,
+        }
+        revision = {
+            "frame_sha256": _observation_digest(self._current),
+            "world_model_version": world.get("version") if isinstance(world, Mapping) else None,
+            "semantic_digest": digest(cognition.get("semantic", {})),
+            "semantic_event_sequence": event_sequence,
+            "mechanics_digest": digest(mechanics),
+            "simulator_digest": digest(simulator),
+            "retrodiction_digest": digest(retrodiction),
+            "primitive_actions": self._actions_dispatched,
+        }
+        digest_input = json.dumps(
+            {"identity": identity, "revision": revision},
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return {
+            "schema": "asterion.prime.p7-planning-background/v1",
+            "execution_authority": "none",
+            "identity": identity,
+            "revision": revision,
+            "background_id": "sha256:" + hashlib.sha256(digest_input).hexdigest(),
+            "worldmap": world,
+            "semantic_cognition": {
+                key: cognition.get(key)
+                for key in ("semantic", "cognition_session", "type_profile", "game_experience")
+                if key in cognition
+            },
+            "mechanics": mechanics,
+            "simulator": simulator,
+            "retrodiction": retrodiction,
+            "observation": observation,
+            "planning_rule": (
+                "Use confirmed worldmap facts and certain semantic claims as planning context; "
+                "treat hypotheses and undetermined claims as priors to test. This projection "
+                "never certifies or dispatches an action. Re-read it after an action or cognition update."
+            ),
+        }
+
+    def _planning_world_projection(self) -> dict[str, object]:
+        if self._world_model is None:
+            return {"status": "unavailable"}
+        snapshot = self._world_model.snapshot
+        try:
+            return snapshot.projection(max_bytes=256 * 1024)
+        except ValueError:
+            # Keep the identity/version and fact statuses available even when
+            # large visual values exceed the transport budget.  A compact
+            # worldmap is still useful background and never grants authority.
+            def compact(fact: object) -> dict[str, object]:
+                return {
+                    "key": getattr(fact, "key", None),
+                    "level": getattr(fact, "level", None),
+                    "status": getattr(fact, "status", None),
+                    "evidence_count": len(getattr(fact, "evidence", ())),
+                }
+
+            return {
+                "game_id": snapshot.game_id,
+                "seed": snapshot.seed,
+                "win_levels": snapshot.win_levels,
+                "current_level": snapshot.current_level,
+                "version": snapshot.version,
+                "projection_truncated": True,
+                "confirmed": {
+                    layer: {key: compact(fact) for key, fact in sorted(getattr(snapshot, layer).items())}
+                    for layer in ("mechanics", "entities", "relations")
+                },
+                "hypotheses": {key: compact(fact) for key, fact in sorted(snapshot.hypotheses.items())},
+                "conflicts": [compact(fact) for fact in snapshot.conflicts],
+            }
+
+    def _planning_mechanics_projection(self) -> dict[str, object]:
+        """Return bounded mechanics memory without making it a planning gate."""
+
+        try:
+            return self.game_mechanics_projection()
+        except ValueError:
+            store = self._game_mechanics_store
+            if store is None:
+                return {"status": "unavailable", "execution_authority": "none", "mechanisms": []}
+            return {
+                "schema": "asterion.prime.p7-game-mechanics/v1",
+                "game": {
+                    "game_id": self._game.game_id,
+                    "seed": self._game.seed,
+                    "win_levels": self._game.win_levels,
+                },
+                "version": store.version,
+                "execution_authority": "none",
+                "projection_truncated": True,
+                "mechanisms": [
+                    {
+                        "mechanism_id": record.mechanism_id,
+                        "status": record.status,
+                        "bound_levels": list(record.bound_levels),
+                        "revision": record.revision,
+                        "planner_eligible": False,
+                    }
+                    for record in store.records()
+                ],
+            }
 
     def cognition_update(self, payload: Mapping[str, object]) -> dict[str, object]:
         """Apply one explicit semantic cognition operation; never execute actions."""

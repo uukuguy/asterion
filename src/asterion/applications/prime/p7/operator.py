@@ -423,7 +423,7 @@ class _IpythonBridgeServer:
                     or (
                         "params" not in value
                         and value.get("method")
-                        not in {"observe", "status", "mechanics_prior", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status"}
+                        not in {"observe", "status", "mechanics_prior", "world_model", "planning_background", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status"}
                     )
                     or type(value["method"]) is not str
                 ):
@@ -507,7 +507,7 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
-            elif method in {"world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status", "model_search"}:
+            elif method in {"world_model", "planning_background", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status", "model_search"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
@@ -585,7 +585,7 @@ class _IpythonBridgeServer:
         """Force cognition mode to execute its first selected probe before detours."""
         client = getattr(self._client, "_P7ClientFacade__client", None)
         if not getattr(client, "_cognition_mode", False) or method in {
-            "observe", "status", "cognition", "cognition_update",
+            "observe", "status", "cognition", "planning_background", "cognition_update",
         }:
             return False
         broker = getattr(client, "_broker", None)
@@ -772,6 +772,88 @@ def _compact_cognition_session(value: object) -> dict[str, object]:
     return compact
 
 
+def _compact_planning_background(value: object, *, max_bytes: int = 48 * 1024) -> dict[str, object]:
+    """Bound the unified worldmap/cognition context without hiding its contract."""
+
+    if type(max_bytes) is not int or max_bytes <= 0:
+        raise ValueError("invalid planning background size")
+    if not isinstance(value, Mapping):
+        return {"status": "unavailable", "execution_authority": "none"}
+    result = dict(value)
+    result["execution_authority"] = "none"
+    semantic = result.get("semantic_cognition")
+    if isinstance(semantic, Mapping):
+        compact_semantic = dict(semantic)
+        if "semantic" in compact_semantic:
+            compact_semantic["semantic"] = _bounded_semantic_report(
+                compact_semantic.get("semantic"), max_bytes=12 * 1024
+            )
+        if "cognition_session" in compact_semantic:
+            compact_semantic["cognition_session"] = _compact_cognition_session(
+                compact_semantic.get("cognition_session")
+            )
+        result["semantic_cognition"] = compact_semantic
+    observation = result.get("observation")
+    if isinstance(observation, Mapping):
+        compact_observation = dict(observation)
+        frame = compact_observation.get("frame")
+        if _json_bytes(compact_observation) > 24 * 1024 and isinstance(frame, list):
+            compact_observation["frame"] = frame[-1] if frame else None
+            compact_observation["frame_truncated"] = True
+        result["observation"] = compact_observation
+    while _json_bytes(result) > max_bytes:
+        mechanics = result.get("mechanics")
+        if isinstance(mechanics, Mapping):
+            reduced = dict(mechanics)
+            for key in ("levels", "candidate_rules", "level_advances", "mechanisms"):
+                if isinstance(reduced.get(key), list):
+                    reduced[key] = reduced[key][:8]
+            result["mechanics"] = reduced
+        if _json_bytes(result) <= max_bytes:
+            break
+        observation = result.get("observation")
+        if isinstance(observation, Mapping) and "frame" in observation:
+            reduced_observation = dict(observation)
+            reduced_observation.pop("frame", None)
+            reduced_observation["frame_truncated"] = True
+            result["observation"] = reduced_observation
+        else:
+            break
+    if _json_bytes(result) > max_bytes:
+        identity = result.get("identity") if isinstance(result.get("identity"), Mapping) else {}
+        revision = result.get("revision") if isinstance(result.get("revision"), Mapping) else {}
+        semantic = result.get("semantic_cognition") if isinstance(result.get("semantic_cognition"), Mapping) else {}
+        compact_semantic = {
+            "semantic": _bounded_semantic_report(semantic.get("semantic"), max_bytes=max(512, max_bytes // 4)),
+            "cognition_session": _compact_cognition_session(semantic.get("cognition_session")),
+        }
+        result = {
+            "schema": result.get("schema"),
+            "execution_authority": "none",
+            "identity": identity,
+            "revision": revision,
+            "background_id": result.get("background_id"),
+            "worldmap": {"version": result.get("worldmap", {}).get("version") if isinstance(result.get("worldmap"), Mapping) else None, "projection_truncated": True},
+            "semantic_cognition": compact_semantic,
+            "simulator": result.get("simulator", {}),
+            "retrodiction": result.get("retrodiction", {}),
+        }
+    if _json_bytes(result) > max_bytes:
+        minimal = {
+            "schema": "asterion.prime.p7-planning-background/v1",
+            "execution_authority": "none",
+            "projection_truncated": True,
+        }
+        if _json_bytes(minimal) <= max_bytes:
+            result = minimal
+        else:
+            authority_only = {"execution_authority": "none"}
+            if _json_bytes(authority_only) > max_bytes:
+                raise ValueError("planning background size is too small")
+            result = authority_only
+    return result
+
+
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
@@ -945,6 +1027,32 @@ class _P7BrokerClient:
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
+    def planning_background(self) -> dict[str, object]:
+        """Read one coherent, refreshable worldmap/cognition planning view."""
+        provider = getattr(self._broker, "planning_background", None)
+        if not callable(provider):
+            return {
+                "schema": "asterion.prime.p7-planning-background/v1",
+                "execution_authority": "none",
+                "status": "unavailable",
+            }
+        try:
+            projection = provider()
+            if not isinstance(projection, Mapping):
+                raise ValueError
+            return _compact_planning_background(projection)
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def _attach_planning_background(self, result: Mapping[str, object]) -> dict[str, object]:
+        """Attach the newest context without masking an already safe result."""
+        attached = dict(result)
+        try:
+            attached["planning_background"] = self.planning_background()
+        except P7OperatorError:
+            pass
+        return attached
+
     def observation_state(self) -> dict[str, object]:
         if (hint := self._first_probe_hint()) is not None:
             return hint
@@ -1022,7 +1130,7 @@ class _P7BrokerClient:
                 file=sys.stderr,
                 flush=True,
             )
-            return result
+            return self._attach_planning_background(result)
         except Exception as error:
             print(
                 "[p7-cognition] cognition-failure "
@@ -1062,7 +1170,7 @@ class _P7BrokerClient:
                 "execution_authority": "none",
             }
             log_update("update-call", status="rejected", accepted=None, reason=result["reason"])
-            return result
+            return self._attach_planning_background(result)
         try:
             result = self._broker.cognition_update(payload)
             if isinstance(result, Mapping) and isinstance(result.get("report"), Mapping):
@@ -1088,6 +1196,17 @@ class _P7BrokerClient:
                         for key in ("status", "accepted", "reason", "next", "transition", "execution_authority", "session", "report")
                         if key in compact
                     }
+            if isinstance(result, Mapping):
+                try:
+                    result = {
+                        **result,
+                        "planning_background": self.planning_background(),
+                    }
+                except P7OperatorError:
+                    # Cognition result remains useful if a transient context
+                    # projection cannot be assembled; the next explicit read
+                    # will retry without changing the semantic ledger.
+                    pass
             # Print the post-operation semantic picture itself.  The request
             # and outcome records explain transport; this record is the
             # cognition the model actually accumulated (claims, status,
@@ -1127,7 +1246,7 @@ class _P7BrokerClient:
                 accepted=result.get("accepted") if isinstance(result, Mapping) else None,
                 reason=result.get("reason") if isinstance(result, Mapping) else None,
             )
-            return result
+            return self._attach_planning_background(result)
         except ArcBrokerError as exc:
             # Model-authored cognition records can be rejected by the
             # semantic contract. Return a bounded, recoverable result so a
@@ -1149,7 +1268,7 @@ class _P7BrokerClient:
                 error_type="ArcBrokerError",
                 detail=str(exc)[:256],
             )
-            return result
+            return self._attach_planning_background(result)
         except Exception as exc:
             log_update(
                 "update-call",
@@ -1380,6 +1499,7 @@ class _P7BrokerClient:
             observation = result["observation"]
             terminal = result["terminal"]
             learning_hint = self._broker.learning_hint()
+            planning_background = self.planning_background()
             return {
                 # Put the bounded cue before the full observation frame; the
                 # worker output cap may truncate the latter.
@@ -1396,6 +1516,7 @@ class _P7BrokerClient:
                 "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
                 "terminal": self._status_view(terminal),
+                "planning_background": planning_background,
                 "batch": {
                     "applied_count": batch.applied_count,
                     "levels_completed": batch.levels_completed,
@@ -1414,12 +1535,12 @@ class _P7BrokerClient:
                 "uncertain": "uncertain",
                 "cognition-experiment-mismatch": "experiment-mismatch",
             }.get(reason, "validation-failed")
-            return {
+            return self._attach_planning_background({
                 "status": "rejected",
                 "reason": safe_reason,
                 "retryable": True,
                 "execution_authority": "none",
-            }
+            })
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -1495,6 +1616,7 @@ class _P7BrokerClient:
         )[:5]
         learning_hint = self._broker.learning_hint()
         view = self._observation_view(observation)
+        planning_background = self.planning_background()
         return {
             # Keep the bounded semantic signal before the potentially large
             # frame so the worker bridge cannot truncate the only reusable
@@ -1512,6 +1634,7 @@ class _P7BrokerClient:
                 "no_effect": no_effects.get("no_effect", {}),
                 "top_repeated": top_tried,
             },
+            "planning_background": planning_background,
         }
 
 
@@ -2189,7 +2312,27 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
         else:
             sections.append(f"{heading}: omitted from initial context; call {tool} if needed.")
 
-    world_model = None if semantic_only else getattr(client, "world_model", None)
+    planning_background = getattr(client, "planning_background", None)
+    background_added = False
+    if callable(planning_background):
+        try:
+            background_projection = planning_background()
+        except Exception:
+            background_projection = {}
+        if (
+            isinstance(background_projection, Mapping)
+            and background_projection.get("schema") == "asterion.prime.p7-planning-background/v1"
+        ):
+            before = len(sections)
+            add_projection(
+                "## WorldMap planning background (refreshable; advisory)",
+                "Use this single current projection to plan: worldmap facts and certain semantic claims are usable context, hypotheses and undetermined claims are priors to test. execution_authority is none. Re-read p7_planning_background after every action or cognition update before choosing the next action.",
+                background_projection,
+                "p7_planning_background",
+            )
+            background_added = len(sections) > before
+
+    world_model = None if semantic_only or background_added else getattr(client, "world_model", None)
     if callable(world_model):
         try:
             model_projection = world_model()
@@ -2209,7 +2352,7 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
         except Exception:
             cognition_projection = {}
         print("[p7-cognition] initial-stage {\"stage\":\"cognition-projection-ready\"}", file=sys.stderr, flush=True)
-        if isinstance(cognition_projection, Mapping):
+        if isinstance(cognition_projection, Mapping) and not background_added:
             semantic = cognition_projection.get("semantic")
             if isinstance(semantic, Mapping):
                 # The complete ledger is retained privately, but the live
@@ -2582,8 +2725,12 @@ def build_p7_operator_resources(
     cognition_store: GameCognitionStore | None = None,
     semantic_cognition_store: SemanticCognitionStore | None = None,
     semantic_cognition_read_only: bool = False,
+    cognition_mode: bool = False,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
+
+    if type(cognition_mode) is not bool:
+        raise P7OperatorError("P7 host services are unavailable")
 
     lease: ExtensionLease | None = None
     parent: socket.socket | None = None
@@ -2707,7 +2854,7 @@ def build_p7_operator_resources(
             trace,
             identities,
             variant=variant,
-            cognition_mode=not semantic_cognition_read_only,
+            cognition_mode=cognition_mode,
         )
         ipython = PersistentIpythonHost(
             worker=worker,
@@ -3104,6 +3251,17 @@ async def run_live(
         category="model",
     ))
     tool_registry.register(Tool(
+        name="planning_background",
+        description=(
+            "Read one refreshable planning background combining the current worldmap, "
+            "semantic game cognition, mechanics memory, and observation. Confirmed facts "
+            "guide planning; hypotheses remain advisory and execution_authority is always none. "
+            "Call after actions or cognition updates before choosing the next action."
+        ),
+        signature="p7_client.planning_background()",
+        category="model",
+    ))
+    tool_registry.register(Tool(
         name="observation_state",
         description=(
             "Read the immutable unified observation: frame, input kind, HUD, timers, "
@@ -3340,9 +3498,11 @@ async def run_live(
             root, invocation.game.game_id, invocation.game.seed,
             invocation.game.win_levels, level=0,
         ),
-        semantic_cognition_read_only=(
-            invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") != "cognition"
-        ),
+        # Solve sessions may discover a contradiction and write a new
+        # hypothesis.  Exploration-only first-probe gating remains controlled
+        # separately by ``cognition_mode``.
+        semantic_cognition_read_only=False,
+        cognition_mode=cognition_mode,
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:

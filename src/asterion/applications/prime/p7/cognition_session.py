@@ -319,7 +319,7 @@ class CognitionSession:
         # game/seed/level ledger. If that ledger already contains enough
         # confirmed knowledge, resume directly in solve testing so the next
         # run does not spend a fresh probe re-validating the same claims.
-        if self._knowledge_ready():
+        if self._solve_attempt_ready():
             self._state = "READY"
             self._emit("cognition.ready_for_solve", {"state": self._state})
         return self.snapshot()
@@ -379,7 +379,19 @@ class CognitionSession:
         # Models sometimes call the observable predicate ``predicate`` while
         # the public broker shape names it ``expected``.  Both are the same
         # non-authoritative observation contract; normalize the alias here.
-        expected = experiment.get("expected", experiment.get("predicate"))
+        # Keep ``expected`` canonical while accepting descriptive aliases that
+        # models commonly emit when restating the distinguishing result. All
+        # aliases remain the same non-authoritative observation predicate.
+        expected = experiment.get(
+            "expected",
+            experiment.get(
+                "predicate",
+                experiment.get(
+                    "expected_result",
+                    experiment.get("expected_distinguishing_result"),
+                ),
+            ),
+        )
         if not isinstance(expected, Mapping) or not expected:
             raise CognitionSessionError("experiment expected predicate is unavailable")
         try:
@@ -396,7 +408,9 @@ class CognitionSession:
             raise CognitionSessionError("invalid state predicate")
         if "frame" in expected:
             expected = {"frame": _expected_frame(expected["frame"])}
-        self._pending = {"claim_ids": tuple(claim_ids), "question": _text(experiment.get("question"), "question"), "information_gain": _text(experiment.get("information_gain"), "information_gain"), "action_name": action["name"], "action_data": tuple(sorted(action_data.items())), "expected": dict(expected), "before": self._before_digest, "episode": self._episode}
+        question = experiment.get("question", experiment.get("information_question", "What observable result will distinguish the claims?"))
+        information_gain = experiment.get("information_gain", experiment.get("information_value", "one settled observation"))
+        self._pending = {"claim_ids": tuple(claim_ids), "question": _text(question, "question"), "information_gain": _text(information_gain, "information_gain"), "action_name": action["name"], "action_data": tuple(sorted(action_data.items())), "expected": dict(expected), "before": self._before_digest, "episode": self._episode}
         self._state = "EXPERIMENT_SELECTED"
         self._analyzed = False
         self._emit("cognition.experiment.selected", self._pending)
@@ -492,7 +506,7 @@ class CognitionSession:
             seen_claim_ids.add(claim_id)
             normalized_results.append({
                 "claim_id": claim_id,
-                "status": _normalize_analysis_status(item.get("status", item.get("result", item.get("assessment")))),
+                "status": _normalize_analysis_status(item.get("status", item.get("result", item.get("assessment", item.get("outcome"))))),
                 "explanation": _text(
                     item.get("explanation", item.get("evidence", item.get("observation", item.get("reason")))),
                     "explanation",
@@ -578,8 +592,8 @@ class CognitionSession:
         return self.snapshot()
 
     def ready_for_solve(self) -> dict[str, Any]:
-        if not self._knowledge_ready():
-            raise CognitionSessionError("cognition is not ready")
+        if not self._solve_attempt_ready():
+            raise CognitionSessionError("cognition has no usable solve hypothesis")
         self._state = "READY"
         self._emit("cognition.ready_for_solve", {"state": self._state})
         return self.snapshot()
@@ -609,6 +623,32 @@ class CognitionSession:
         }
         return required_kinds.issubset(certain_kinds)
 
+    def _solve_attempt_ready(self) -> bool:
+        """Allow a solve attempt before the exact game is fully understood.
+
+        A human can try a plausible move as soon as the model has proposed a
+        game-specific hypothesis.  Full semantic coverage remains useful for
+        diagnostics, but it is not a prerequisite for feedback-driven play.
+        """
+
+        report = self.store.report()
+        claims = [
+            claim
+            for values in report["claims"].values()
+            if isinstance(values, list)
+            for claim in values
+            if isinstance(claim, Mapping)
+        ]
+        return any(
+            claim.get("id", "") not in {
+                "bootstrap-frame-semantics",
+                "bootstrap-discrete-actions",
+                "bootstrap-success-condition",
+            }
+            and claim.get("status") in {"certain", "undetermined"}
+            for claim in claims
+        )
+
     def stop(self, reason: str) -> dict[str, Any]:
         self._state = "STOPPED"
         self._emit("cognition.stopped", {"reason": _text(reason, "reason"), "state": self._state})
@@ -630,12 +670,12 @@ class CognitionSession:
             claim["id"] for claim in open_claims
             if isinstance(claim.get("next_test"), str) and bool(claim["next_test"].strip())
         ]
-        if self._knowledge_ready():
-            return {"needed": False, "possible": False, "actionable_claim_ids": [], "reason": "knowledge-ready"}
         if self._state == "STOPPED":
             return {"needed": True, "possible": False, "actionable_claim_ids": actionable, "reason": "session-stopped"}
         if self._episode_actions >= self.max_actions_per_episode and self._resets >= self.max_resets:
             return {"needed": True, "possible": False, "actionable_claim_ids": actionable, "reason": "validation-budget-exhausted"}
+        if self._solve_attempt_ready():
+            return {"needed": False, "possible": False, "actionable_claim_ids": [], "reason": "solve-attempt-ready"}
         if not actionable:
             return {"needed": True, "possible": False, "actionable_claim_ids": [], "reason": "no-actionable-hypotheses"}
         return {"needed": True, "possible": True, "actionable_claim_ids": actionable, "reason": "actionable-hypotheses-remain"}

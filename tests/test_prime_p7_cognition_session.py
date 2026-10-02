@@ -71,6 +71,31 @@ class CognitionSessionTests(unittest.TestCase):
                     "expected": {"state": "WON"},
                 })
 
+    def test_experiment_expected_result_alias_is_normalized(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="expected-alias")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            selected = session.select_experiment({
+                "claim_ids": ["control-right"],
+                "information_question": "Does ACTION2 move right?",
+                "action": {"name": "ACTION2"},
+                "expected_result": {"cell": {"x": 0, "y": 0, "value": 2}},
+            })
+            self.assertEqual(selected["state"], "EXPERIMENT_SELECTED")
+            session.record_action(
+                {"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"},
+                action={"name": "ACTION2"},
+            )
+            analyzed = session.analyze({
+                "results": [{
+                    "claim_id": "control-right",
+                    "outcome": "supported",
+                    "observation": "The cell changed as predicted.",
+                }],
+            })
+            self.assertEqual(analyzed["state"], "ANALYZED")
+
     def test_event_persistence_failure_is_not_silent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             event_root = Path(directory) / "event-root"
@@ -159,6 +184,23 @@ class CognitionSessionTests(unittest.TestCase):
             ready = session.ready_for_solve()
             self.assertEqual(ready["state"], "READY")
             self.assertIn("cognition.ready_for_solve", [event["type"] for event in session.events])
+
+    def test_ready_allows_feedback_driven_solve_with_partial_game_knowledge(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="partial-ready")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            session.propose({"claims": [{
+                "id": "partial-control",
+                "kind": "control",
+                "subject": "ACTION1",
+                "claim": "ACTION1 may move the controllable object.",
+                "reason": "The initial scene has one salient object and ACTION1 is available.",
+                "falsifier": "The object does not move after ACTION1.",
+                "next_test": "Select ACTION1 with a concrete frame prediction.",
+            }]})
+            ready = session.ready_for_solve()
+            self.assertEqual(ready["state"], "READY")
+            self.assertEqual(ready["session"]["validation"]["reason"], "solve-attempt-ready")
 
     def test_ready_session_can_continue_cognition_guided_solve_testing(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -130,6 +130,10 @@ class P7ClientFacade:
     def world_model(self) -> Mapping[str, object]:
         return cast(Mapping[str, object], self.__invoke("world_model"))
 
+    def planning_background(self) -> Mapping[str, object]:
+        """Read the unified worldmap and semantic-cognition planning context."""
+        return cast(Mapping[str, object], self.__invoke("planning_background"))
+
     def observation_state(self) -> Mapping[str, object]:
         return cast(Mapping[str, object], self.__invoke("observation_state"))
 
@@ -184,7 +188,7 @@ class P7ClientFacade:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"} and type(value) is not dict) or (
+            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "planning_background", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"} and type(value) is not dict) or (
                 name in {"history", "frame_at", "action_effects", "mechanism_candidates"} and type(value) is not list
             ):
                 raise ValueError
@@ -648,8 +652,8 @@ def _valid_client_module(source: object) -> bool:
         "p7_act", "p7_observe", "p7_mechanics_prior", "p7_history",
         "p7_frame_at", "p7_act_checked", "p7_tried_actions",
         "p7_last_outcome_summary", "p7_components",
-        "p7_world_model", "p7_observation_state", "p7_game_mechanics", "p7_counterfactual_search", "p7_cognition", "p7_cognition_update", "p7_action_effects", "p7_mechanism_candidates", "p7_probe_plan", "p7_simulator_status", "p7_playbook", "p7_retrodiction_status", "p7_model_search",
-        "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "playbook", "retrodiction_status",
+        "p7_world_model", "p7_planning_background", "p7_observation_state", "p7_game_mechanics", "p7_counterfactual_search", "p7_cognition", "p7_cognition_update", "p7_action_effects", "p7_mechanism_candidates", "p7_probe_plan", "p7_simulator_status", "p7_playbook", "p7_retrodiction_status", "p7_model_search",
+        "world_model", "planning_background", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "playbook", "retrodiction_status",
         "model_search",
         "p7_record_hypothesis", "record_hypothesis", "p7_promote_hypothesis", "promote_hypothesis",
         "positions", "diff", "summary", "render", "act_and_observe",

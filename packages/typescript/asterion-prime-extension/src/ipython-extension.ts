@@ -579,6 +579,13 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
     parameters: EMPTY_PARAMETERS,
   },
   {
+    name: "p7_planning_background",
+    method: "planning_background",
+    description:
+      "Read the refreshable planning background combining semantic cognition, WorldMap, the current frame identity, and simulator status. It never dispatches actions or grants execution authority.",
+    parameters: EMPTY_PARAMETERS,
+  },
+  {
     name: "p7_playbook",
     method: "playbook",
     description: "Read the bounded same-game Playbook projection.",

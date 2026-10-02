@@ -8,6 +8,7 @@ from asterion.applications.prime.p7.operator import (
     _IpythonBridgeServer,
     _P7BrokerClient,
     _compact_cognition_session,
+    _compact_planning_background,
     _bounded_semantic_report,
     P7OperatorError,
 )
@@ -31,6 +32,9 @@ class _Facade:
 
     def world_model(self):
         return {"version": 1}
+
+    def planning_background(self):
+        return {"schema": "asterion.prime.p7-planning-background/v1", "execution_authority": "none"}
 
     def cognition(self):
         return {"input_kind": "keyboard", "type_profile": {"authority": "prior-only"}}
@@ -65,11 +69,26 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.bridge._method_failures = {}
 
     def test_no_argument_tools_do_not_receive_empty_object(self):
-        for method in ("observe", "status", "mechanics_prior", "world_model", "cognition", "retrodiction_status"):
+        for method in ("observe", "status", "mechanics_prior", "world_model", "planning_background", "cognition", "retrodiction_status"):
             with self.subTest(method=method):
                 response = self.bridge._dispatch_method_call("request", method, {})
                 self.assertEqual(response["status"], "ok")
             self.assertEqual(response["type"], "method_result")
+
+    def test_planning_background_compaction_honors_small_cap(self):
+        value = {
+            "schema": "asterion.prime.p7-planning-background/v1",
+            "execution_authority": "none",
+            "identity": {"game_id": "game", "seed": 0, "win_levels": 1, "level": 0},
+            "revision": {"frame_sha256": "sha256:" + "a" * 64},
+            "background_id": "sha256:" + "b" * 64,
+            "worldmap": {"confirmed": {"entities": {"x": {"value": "x" * 100000}}}},
+            "semantic_cognition": {"semantic": {"natural_language_context": "c" * 100000}},
+            "observation": {"events": ["e" * 100000]},
+        }
+        compact = _compact_planning_background(value, max_bytes=1024)
+        self.assertLessEqual(len(json.dumps(compact, separators=(",", ":")).encode()), 1024)
+        self.assertEqual(compact["execution_authority"], "none")
 
     def test_model_tools_receive_typed_parameters(self):
         for method, params in (("playbook", 0), ("record_hypothesis", {"layer": "mechanics", "key": "x", "value": {}})):

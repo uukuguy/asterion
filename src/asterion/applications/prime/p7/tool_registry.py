@@ -23,6 +23,7 @@ P7_APPLICATION_TOOL_NAMES = tuple(sorted({
     "p7_model_search",
     "p7_observation_state",
     "p7_observe",
+    "p7_planning_background",
     "p7_playbook",
     "p7_probe_plan",
     "p7_promote_hypothesis",

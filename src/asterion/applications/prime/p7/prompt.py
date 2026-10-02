@@ -37,12 +37,27 @@ Only program-bound observations may mark a claim certain or falsified. If a
 probe contaminates the episode, dispatch RESET and call the cognition update
 operation `reset`; this clears the pending experiment and temporary simulation
 while preserving the semantic ledger. Keep unresolved visual analogies and
-open questions explicit. Use `ready` only after the report has a game type,
-object, control, goal and strategy description plus at least one supported
-control/rule; a step cap or a lucky WIN alone is not cognition readiness.
-For a solve test, load the report read-only and use only supported knowledge
-for planning. If a result contradicts it, stop the plan, record a new
-undetermined hypothesis, and return to cognition exploration.
+open questions explicit. Use `ready` once the report contains at least one
+game-specific hypothesis or supported claim that can guide a safe solve
+attempt; a step cap or a lucky WIN alone is not cognition readiness. The
+report may still be incomplete and must keep its open questions available for
+solve-time experiments.
+For a solve test, load the current report and use supported knowledge plus
+useful open hypotheses for planning; the report is allowed to be incomplete.
+Before an action that tests an open or newly suspected claim, select its
+experiment with `p7_cognition_update` before dispatch, then analyze the real
+result. If an ordinary action exposes an unexplained result, stop the current
+plan, propose/select a new experiment for the next action, analyze that real
+result, and resume solve from the refreshed planning background. Do not wait
+for a separate full-cognition run before attempting a plausible route.
+
+The current worldmap and this continuously updated semantic cognition are one
+planning background. Read `p7_planning_background()` at the start of planning
+and again after every action or cognition update. Use its confirmed worldmap
+facts, certain claims, open hypotheses, mechanics memory, and current frame
+together to choose the next falsifiable action. Its `execution_authority` is
+always `none`: it is background for reasoning, while `p7_act_checked` remains
+the only action boundary and its current observation remains authoritative.
 
 Your secondary objective is to minimize cumulative actions, because the
 leaderboard scores each completed level as
@@ -119,7 +134,7 @@ discover a registration tool first.
 
 Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
-p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
+p7_planning_background, p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
 p7_simulator_status, p7_observation_state, p7_game_mechanics,
 p7_counterfactual_search, p7_cognition_update,
 p7_playbook, p7_retrodiction_status, p7_tried_actions,
@@ -390,9 +405,11 @@ than silently resolving it. Use the canonical analysis envelope
 the results list may contain multiple claims. `supported_but_unconfirmed`,
 `weakened_but_unconfirmed`, and similar language means `undetermined` until a
 later discriminating observation. Use RESET to discard the current episode experiment while
-preserving the semantic ledger. Stop with `ready` when the report has a useful
-language description and supported control evidence; otherwise stop with the
-actual safety reason. The final report must state what is known, unknown, and
+preserving the semantic ledger. Stop with `ready` once the report has a useful
+language description or another game-specific hypothesis that can guide a
+safe solve attempt; cognition may remain incomplete and solve-time feedback
+should add new experiments. Stop with the actual safety reason when no safe
+attempt can be made. The final report must state what is known, unknown, and
 what experiment comes next."""
 
 P7_COGNITION_PROMPT = """You are Asterion-prime conducting a bounded semantic game-cognition
@@ -428,8 +445,10 @@ and been analyzed. The first probe should normally be one legal non-RESET
 direction so the actor and floor hypotheses can gain evidence together.
 Select one information-bearing experiment with an explicit observable
 predicate such as `{"frame": [[...]]}` for a concrete predicted settled frame,
-`{"levels_completed": 1}`, or `{"state": "WIN"}`. Select every directly
-implicated claim for the action, then use this exact cognition envelope:
+`{"levels_completed": 1}`, or `{"state": "WIN"}`. Put that mapping under
+the key `expected` (never a prose `expected_distinguishing_result`). Select every directly
+implicated claim for the action, then use this exact cognition
+envelope:
 `{"op":"select_experiment","experiment":{"claim_ids":["claim-a","claim-b"],"question":"...","information_gain":"...","action":{"name":"ACTION1","data":{}},"expected":{"frame":[[...]]}}}`.
 The `expected` object is the cognition predicate; it is separate from the
 checked-action expectation. `{"frame_changed": true}` only proves that some
@@ -442,7 +461,7 @@ cognition experiment predicate, not the checked-action `expect` object. A
 rejected action plan is recoverable: correct it and retry once. After the
 settled response, inspect the entire result, including incidental changes, and
 use this exact analysis envelope:
-`{"op":"analyze","analysis":{"results":[{"claim_id":"claim-a","status":"certain|falsified|undetermined","explanation":"..."},{"claim_id":"claim-b","status":"certain|falsified|undetermined","explanation":"..."}]}}`.
+`{"op":"analyze","analysis":{"results":[{"claim_id":"claim-a","status":"certain|falsified|undetermined","explanation":"..."},{"claim_id":"claim-b","status":"certain|falsified|undetermined","explanation":"..."}]}}`. Use the key `status`; `result`, `assessment`, and `outcome` are accepted aliases for recovery.
 A single action may therefore test multiple claims; choose each result status
 from the observed evidence independently. In particular, displacement may
 jointly bear on movement, actor role, and passability of the entered cell,
@@ -451,15 +470,17 @@ scoped to the current evidence and only generalize a rule with cross-level or
 game-wide support. A frame change is
 evidence of change, not proof of a particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
-with independent experiments until the language picture is useful, then call
-`p7_cognition_update({"op":"ready"})`. A successful ready response is a
-transition into cognition-guided solve testing, not the end of the run: use
-the confirmed claims to choose and dispatch bounded solve actions, and keep
-recording new falsifiable hypotheses and experiments when the route exposes
-an uncertainty. The response includes `next: "solve"` and
-`transition: "cognition-ready-to-solve"`. If safety limits or missing
-evidence prevent readiness, the tool returns `status: "not-ready"`; continue
-with a new experiment instead of repeating `ready`. Read the returned
+with independent experiments until there is at least one game-specific
+hypothesis or supported claim that can guide a safe attempt, then call
+`p7_cognition_update({"op":"ready"})`. Do not wait for every object, rule,
+or goal to be fully settled. A successful ready response starts a
+cognition-guided solve attempt, not the end of learning: use the current
+claims and planning background to act, and when feedback exposes an
+unexplained result, propose/select/analyze a new hypothesis and return to
+solve. The response includes `next: "solve"` and
+`transition: "cognition-ready-to-solve"`. If no game-specific hypothesis
+exists, the tool returns `status: "not-ready"`; continue with a new experiment
+instead of repeating `ready`. Read the returned
 `session.validation` object: if `needed` is true and `possible` is false,
 record the last semantic update and call `stop` with that actual reason; do
 not loop on `ready` when no further validation can run. Call `stop` only with the

@@ -3553,3 +3553,6 @@
 - 14:27 commit 237c49bd explicitly requires L1 displacement probes to assess `role-background-12` passability with movement claims.
 - 2026-10-02 live run p7-live-20261002140652-d95349813aeea3d814150880 completed 16 cognition actions; ACTION4 jointly confirmed color-9 control and local color-12 passability, while solve remained unsuccessful with completion=0.
 - 2026-10-03 commit d979cbb2 generalized multi-claim displacement guidance, fixed nested cognition compaction visibility, and preserved independent LLM statuses for mixed evidence.
+- 2026-10-03 P7 feedback-loop implementation now composes semantic cognition, WorldMap, simulator, and retrodiction into a bounded read-only planning background refreshed after observe/action/cognition updates; partial game-specific cognition can enter solve while unresolved claims trigger new experiments.
+- 2026-10-03 targeted verification passed 204 P7 Python tests, Ruff, diff checks, and TypeScript resource synchronization. Packaged `sp80` L1 with `gpt-6.1-sol` reached native runtime, selected an experiment, executed one ACTION, analyzed the result, and confirmed claims; the bounded witness timed out before level completion, so no solve PASS is claimed.
+- 2026-10-03 promotion-check remains external-limited by the known Pi source-detachment/fixture failures; it is not promoted to PASS.

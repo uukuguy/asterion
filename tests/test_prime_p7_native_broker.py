@@ -235,6 +235,62 @@ class TestNativeP7Broker(unittest.TestCase):
         projection["mutated"] = True
         self.assertNotIn("mutated", broker.playbook_projection())
 
+    def test_planning_background_joins_worldmap_and_current_observation(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        engine = _Engine()
+        world = WorldModelStore(engine.game_id, engine.seed, engine.win_levels)
+        broker = ArcBroker(engine=engine, world_model=world)
+        broker.bind_history("planning-background")
+        background = broker.planning_background()
+
+        self.assertEqual(background["schema"], "asterion.prime.p7-planning-background/v1")
+        self.assertEqual(background["execution_authority"], "none")
+        self.assertEqual(background["identity"]["game_id"], engine.game_id)
+        self.assertEqual(background["worldmap"]["version"], world.version)
+        self.assertEqual(background["revision"]["world_model_version"], world.version)
+        self.assertEqual(background["observation"]["levels_completed"], 0)
+        self.assertEqual(background["semantic_cognition"], {})
+        self.assertIn("background_id", background)
+
+    def test_planning_background_refreshes_after_semantic_claim_update(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
+
+        engine = _Engine()
+        with tempfile.TemporaryDirectory() as directory:
+            store = SemanticCognitionStore(
+                Path(directory), engine.game_id, engine.seed, engine.win_levels, level=0
+            )
+            broker = ArcBroker(
+                engine=engine,
+                semantic_cognition_store=store,
+                semantic_cognition_read_only=False,
+            )
+            broker.bind_history("planning-background-cognition")
+            before = broker.planning_background()
+            broker.cognition_update({
+                "op": "propose",
+                "proposal": {"claims": [{
+                    "id": "background-claim",
+                    "kind": "control",
+                    "subject": "ACTION1",
+                    "claim": "ACTION1 changes the scene.",
+                    "reason": "It is available.",
+                    "falsifier": "The scene remains unchanged.",
+                    "next_test": "Apply ACTION1 once.",
+                }]},
+            })
+            after = broker.planning_background()
+            claims = after["semantic_cognition"]["semantic"]["claims"]
+            self.assertTrue(any(item["id"] == "background-claim" for item in claims["control"]))
+            self.assertGreater(
+                after["revision"]["semantic_event_sequence"],
+                before["revision"]["semantic_event_sequence"],
+            )
+            self.assertNotEqual(after["background_id"], before["background_id"])
+
     def test_world_evidence_reports_candidate_extraction_stage_and_exception_type(self) -> None:
         broker, _ = _broker()
         broker.bind_history("diagnostic-candidate")

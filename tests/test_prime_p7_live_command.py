@@ -686,6 +686,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("changed_cell_count", P7_SOLVE_PROMPT)
         self.assertIn("stop querying", P7_SOLVE_PROMPT)
         self.assertIn("p7_world_model", P7_SOLVE_PROMPT)
+        self.assertIn("p7_planning_background", P7_SOLVE_PROMPT)
         self.assertIn("p7_retrodiction_status", P7_SOLVE_PROMPT)
         self.assertIn("Do not carry prior-level visual coordinates", P7_SOLVE_PROMPT)
         self.assertIn("Replayed prefix actions are evidence of prior levels", P7_SOLVE_PROMPT)
@@ -730,6 +731,36 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn('"frame":[[7,0]]', context)
         self.assertIn("inspect_candidate_and_probe", context)
         self.assertIn("compiled_candidates", context)
+
+    def test_initial_context_uses_unified_planning_background(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"actions_remaining": 20, "primitive_actions": 0, "target_level": 1}
+
+            def planning_background(self):
+                return {
+                    "schema": "asterion.prime.p7-planning-background/v1",
+                    "execution_authority": "none",
+                    "revision": {"world_model_version": 2},
+                    "worldmap": {"version": 2},
+                    "semantic_cognition": {"semantic": {"natural_language_context": "bar is movable"}},
+                }
+
+        context = _initial_game_context(Client(), include_prior=False)
+        self.assertIn("WorldMap planning background", context)
+        self.assertIn("asterion.prime.p7-planning-background/v1", context)
+        self.assertIn("bar is movable", context)
 
     def test_initial_context_automatically_queries_confirmed_model_plan(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
@@ -857,6 +888,65 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 {"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 7}}},
             ])
             self.assertEqual((result["stop_reason"], result["applied_count"]), ("REPLAN_REQUIRED", 0))
+            recorder.close()
+
+    def test_observe_and_checked_action_return_fresh_planning_background(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from tests.test_prime_p7_native_broker import _Engine
+
+        with tempfile.TemporaryDirectory() as directory:
+            recorder = PrimeTraceRecorder(Path(directory))
+            engine = _Engine()
+            broker = ArcBroker(engine=engine)
+            broker.bind_history("background-refresh")
+            client = _P7BrokerClient(broker, recorder)
+            before = client.observe()["planning_background"]
+            result = client.act_checked([{
+                "action": {"name": "ACTION1", "data": {}},
+                "expect": {"cell": {"x": 0, "y": 0, "value": 1}},
+            }])
+            after = result["planning_background"]
+            self.assertEqual(after["execution_authority"], "none")
+            self.assertNotEqual(after["revision"]["frame_sha256"], before["revision"]["frame_sha256"])
+            self.assertEqual(after["revision"]["primitive_actions"], 1)
+            recorder.close()
+
+    def test_solve_client_can_extend_cognition_without_exploration_gate(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
+        from tests.test_prime_p7_native_broker import _Engine
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace_root = root / "trace"
+            trace_root.mkdir()
+            recorder = PrimeTraceRecorder(trace_root)
+            engine = _Engine()
+            broker = ArcBroker(
+                engine=engine,
+                semantic_cognition_store=SemanticCognitionStore(
+                    root, engine.game_id, engine.seed, engine.win_levels, level=0
+                ),
+                semantic_cognition_read_only=False,
+            )
+            broker.bind_history("solve-feedback")
+            client = _P7BrokerClient(broker, recorder, cognition_mode=False)
+            result = client.cognition_update({
+                "op": "propose",
+                "proposal": {"claims": [{
+                    "id": "solve-feedback-claim",
+                    "kind": "control",
+                    "subject": "ACTION1",
+                    "claim": "ACTION1 may change the scene.",
+                    "reason": "It is available.",
+                    "falsifier": "The frame remains unchanged.",
+                    "next_test": "Apply ACTION1 once.",
+                }]},
+            })
+            self.assertEqual(result["status"], "ok")
+            self.assertIn("planning_background", result)
             recorder.close()
 
     def test_cognition_experiment_mismatch_is_recoverable_after_action(self) -> None:
@@ -1205,6 +1295,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             def counterfactual_search(self) -> dict[str, object]:
                 return {"branches": [], "dispatch": "never"}
 
+            def planning_background(self) -> dict[str, object]:
+                return {"schema": "asterion.prime.p7-planning-background/v1", "execution_authority": "none"}
+
         server = live_module.P7ClientServer(p7_client_facade(Client()))
         try:
             namespace: dict[str, object] = {}
@@ -1220,6 +1313,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual(
                 namespace["counterfactual_search"](),
                 {"branches": [], "dispatch": "never"},
+            )
+            self.assertEqual(
+                namespace["planning_background"](),
+                {"schema": "asterion.prime.p7-planning-background/v1", "execution_authority": "none"},
             )
         finally:
             server.close()
