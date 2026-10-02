@@ -62,6 +62,7 @@
 - Input-type priors and exact-game memory are advisory; persistence failures do not block ordinary exploration.
 - Checked actions require current identity, prefix, frame/state/level expectations, and certificate context.
 - Hypothesis simulation, offline optimization, and Playbook records never grant execution authority by themselves.
+- Cognition experiments now keep generic `frame_changed` observations undetermined; semantic claims require a concrete predicted frame, or a constrained level/state predicate. Checked-action experiment mismatches are recoverable in cognition mode.
 - A passing synthetic induction test does not establish real-game capability; live claims require sealed trace, replay verification, and explicit diagnostics.
 
 ## Resume Instructions

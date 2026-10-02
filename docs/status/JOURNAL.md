@@ -3509,3 +3509,4 @@
 - 2026-10-02 启动认知幂等写入三条基础未知假说并支持非权威 confidence，保持 undetermined 与 execution_authority=none [0d5a8254]
 - 2026-10-02 tu93 L1 实际 cognition 运行已加载 9 条语义假说（3 启动+6 LLM），本轮外部 RPC 取消且 0 动作；标记 External-limited，未宣称过关
 - 2026-10-02 ready 失败处理区分 cognition 持久化不可用与证据不足：持久化错误继续 fail-closed，不伪装为 not-ready
+- 2026-10-02 独立复审后修正认知证据边界：generic frame_changed 不再确认方向/对象/目标，具体预测帧统一 list/tuple；实验动作不一致在 cognition mode 可恢复 [pending]

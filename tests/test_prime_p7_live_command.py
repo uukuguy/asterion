@@ -845,6 +845,43 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual((result["stop_reason"], result["applied_count"]), ("REPLAN_REQUIRED", 0))
             recorder.close()
 
+    def test_cognition_experiment_mismatch_is_recoverable_after_action(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.operator import _P7BrokerClient
+        from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
+        from tests.test_prime_p7_native_broker import _Engine
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            engine = _Engine()
+            store = SemanticCognitionStore(root, engine.game_id, engine.seed, engine.win_levels, level=0)
+            broker = ArcBroker(engine=engine, semantic_cognition_store=store)
+            broker.bind_history("cognition-mismatch")
+            broker.cognition_update({"op": "propose", "proposal": {"claims": [{
+                "id": "control", "kind": "control", "subject": "ACTION1",
+                "claim": "ACTION1 changes the scene.", "reason": "It is available.",
+                "falsifier": "No scene change.", "next_test": "Apply ACTION1.",
+            }]}})
+            broker.cognition_update({"op": "select_experiment", "experiment": {
+                "claim_ids": ["control"], "question": "Does ACTION1 change the scene?",
+                "information_gain": "Tests the control hypothesis.",
+                "action": {"name": "ACTION1"}, "expected": {"frame_changed": True},
+            }})
+            trace_root = root / "trace"
+            trace_root.mkdir()
+            recorder = PrimeTraceRecorder(trace_root)
+            try:
+                client = _P7BrokerClient(broker, recorder, cognition_mode=True)
+                result = client.act_checked([{
+                    "action": {"name": "ACTION2", "data": {}},
+                    "expect": {"cell": {"x": 0, "y": 0, "value": 1}},
+                }])
+            finally:
+                recorder.close()
+            self.assertEqual(result["status"], "rejected")
+            self.assertEqual(result["reason"], "experiment-mismatch")
+            self.assertTrue(result["retryable"])
+
     def test_checked_mismatch_accounts_only_dispatched_action(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.operator import _P7BrokerClient

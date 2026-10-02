@@ -396,9 +396,12 @@ several broad, falsifiable hypotheses even when their confidence differs:
 describe the scene, the discrete action interface, and the currently unknown
 success condition before selecting a probe. Select one information-bearing
 experiment with an explicit observable predicate such as
-`{"frame_changed": true}`, `{"levels_completed": 1}`, or
-`{"state": "WIN"}`; include claim ids, question, information gain, and one
-non-RESET action. Dispatch it with one-item `p7_act_checked`, whose plan item
+`{"frame": [[...]]}` for a concrete predicted settled frame,
+`{"levels_completed": 1}`, or `{"state": "WIN"}`; include claim ids,
+question, information gain, and one non-RESET action. `{"frame_changed": true}`
+only proves that some visual change occurred and therefore remains insufficient
+to confirm or falsify a directional, object-role, or goal claim. Dispatch it
+with one-item `p7_act_checked`, whose plan item
 uses the broker shape `{"action":{"name":"ACTION1","data":{}},"expect":{"state":"NOT_FINISHED"}}`
 or a concrete `cell`/terminal expectation; `frame_changed` belongs to the
 cognition experiment predicate, not the checked-action `expect` object. A

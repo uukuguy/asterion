@@ -30,7 +30,7 @@ class CognitionSessionTests(unittest.TestCase):
             self._claim(session)
             session.select_experiment({
                 "claim_ids": ["control-right"], "question": "Does ACTION2 move right?",
-                "information_gain": "Separates movement from no-effect.", "action": {"name": "ACTION2"}, "expected": {"frame_changed": True},
+                "information_gain": "Separates movement from no-effect.", "action": {"name": "ACTION2"}, "expected": {"frame": [[2]]},
             })
             session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION2"})
             session.analyze({"results": [{"claim_id": "control-right", "status": "certain", "explanation": "The isolated object moved."}]})
@@ -113,12 +113,43 @@ class CognitionSessionTests(unittest.TestCase):
                 {"id": "goal", "kind": "success_condition", "subject": "goal", "claim": "Reach the special cell.", "reason": "Distinct cell.", "falsifier": "No win.", "next_test": "Touch it."},
                 {"id": "strategy", "kind": "strategy", "subject": "L1", "claim": "Probe one move at a time.", "reason": "Unknown.", "falsifier": "Batch is required.", "next_test": "Probe."},
             ]})
-            session.select_experiment({"claim_ids": ["control"], "question": "move?", "information_gain": "movement", "action": {"name": "ACTION1"}, "expected": {"frame_changed": True}})
+            session.select_experiment({"claim_ids": ["control"], "question": "move?", "information_gain": "movement", "action": {"name": "ACTION1"}, "expected": {"frame": [[2]]}})
             session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
             session.analyze({"results": [{"claim_id": "control", "status": "certain", "explanation": "Frame changed."}]})
             ready = session.ready_for_solve()
             self.assertEqual(ready["state"], "READY")
             self.assertIn("cognition.ready_for_solve", [event["type"] for event in session.events])
+
+    def test_generic_frame_change_cannot_confirm_directional_claim(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="generic-frame")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            session.select_experiment({
+                "claim_ids": ["control-right"], "question": "Did the scene change?",
+                "information_gain": "Detects any effect, not its meaning.",
+                "action": {"name": "ACTION2"}, "expected": {"frame_changed": True},
+            })
+            session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION2"})
+            snapshot = session.analyze({"results": [{"claim_id": "control-right", "status": "certain", "explanation": "A frame changed."}]})
+            claim = next(item for item in snapshot["report"]["claims"]["control"] if item["id"] == "control-right")
+            self.assertEqual(claim["status"], "undetermined")
+            self.assertEqual(claim["evidence_count"], 0)
+
+    def test_concrete_frame_prediction_matches_broker_tuple_frame(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="tuple-frame")
+            session.start_episode({"frame": ((1,),), "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            session.select_experiment({
+                "claim_ids": ["control-right"], "question": "Does the predicted scene occur?",
+                "information_gain": "Checks the concrete settled frame.",
+                "action": {"name": "ACTION2"}, "expected": {"frame": [[2]]},
+            })
+            session.record_action({"frame": ((2,),), "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION2"})
+            snapshot = session.analyze({"results": [{"claim_id": "control-right", "status": "certain", "explanation": "The predicted frame occurred."}]})
+            claim = next(item for item in snapshot["report"]["claims"]["control"] if item["id"] == "control-right")
+            self.assertEqual(claim["status"], "certain")
 
 
 if __name__ == "__main__":

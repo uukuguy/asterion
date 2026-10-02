@@ -1016,12 +1016,13 @@ class _P7BrokerClient:
             reason = str(error)
             if not self._cognition_mode:
                 raise P7OperatorError("P7 host services are unavailable") from None
-            if reason not in {"unavailable", "REPLAN_REQUIRED", "closed", "uncertain"}:
+            if reason not in {"unavailable", "REPLAN_REQUIRED", "closed", "uncertain", "cognition-experiment-mismatch"}:
                 raise P7OperatorError("P7 host services are unavailable") from None
             safe_reason = {
                 "REPLAN_REQUIRED": "replan-required",
                 "closed": "closed",
                 "uncertain": "uncertain",
+                "cognition-experiment-mismatch": "experiment-mismatch",
             }.get(reason, "validation-failed")
             return {
                 "status": "rejected",
