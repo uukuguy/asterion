@@ -7,6 +7,7 @@ from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 from asterion.applications.prime.p7.operator import (
     _IpythonBridgeServer,
     _P7BrokerClient,
+    _compact_cognition_session,
     _bounded_semantic_report,
     P7OperatorError,
 )
@@ -263,6 +264,11 @@ class TestP7BridgeDispatch(unittest.TestCase):
                     "session": {
                         "session_id": "visible", "episode": 1, "episode_actions": 1,
                         "resets": 0, "state": "ANALYZED",
+                        "validation": {
+                            "needed": True, "possible": False,
+                            "reason": "validation-budget-exhausted",
+                            "actionable_claim_ids": ["goal"],
+                        },
                     },
                 }
 
@@ -281,6 +287,41 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(claim["id"], "move-right")
         self.assertEqual(claim["status"], "certain")
         self.assertEqual(states[0]["cognition"]["session"]["state"], "ANALYZED")
+        self.assertEqual(states[0]["cognition"]["session"]["validation"]["possible"], False)
+
+    def test_compacted_session_preserves_validation_control(self):
+        compacted = _compact_cognition_session({
+            "state": "ANALYZED", "episode": 2, "episode_actions": 4, "resets": 1,
+            "validation": {
+                "needed": True, "possible": False, "reason": "no-actionable-hypotheses",
+                "actionable_claim_ids": ["a", 3, "b"],
+                "ignored": "private detail",
+            },
+        })
+        self.assertEqual(compacted["validation"], {
+            "needed": True, "possible": False,
+            "reason": "no-actionable-hypotheses",
+            "actionable_claim_ids": ["a", "b"],
+        })
+
+    def test_cognition_compaction_keeps_validation(self):
+        class Broker:
+            def cognition_projection(self):
+                return {
+                    "input_kind": "keyboard",
+                    "type_profile": {"authority": "prior-only"},
+                    "game_experience": {"history": "x" * 50000},
+                    "semantic": {"claims": {}, "natural_language_context": "context"},
+                    "cognition_session": {
+                        "state": "ANALYZED", "episode": 1, "episode_actions": 1, "resets": 0,
+                        "validation": {"needed": True, "possible": False, "reason": "budget"},
+                    },
+                }
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        result = client.cognition()
+        self.assertEqual(result["cognition_session"]["validation"]["reason"], "budget")
 
     def test_semantic_report_is_byte_bounded_and_deduplicated(self):
         claim = {

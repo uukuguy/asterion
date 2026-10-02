@@ -691,6 +691,39 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
     return result
 
 
+def _bounded_validation(value: object) -> dict[str, object]:
+    """Keep validation control visible when cognition output is compacted."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, object] = {
+        key: value.get(key)
+        for key in ("needed", "possible", "reason")
+        if key in value
+    }
+    claim_ids = value.get("actionable_claim_ids")
+    if isinstance(claim_ids, (list, tuple)):
+        result["actionable_claim_ids"] = [
+            claim_id for claim_id in claim_ids[:32] if isinstance(claim_id, str)
+        ]
+    return result
+
+
+def _compact_cognition_session(value: object) -> dict[str, object]:
+    """Project session state without hiding validation control from the model."""
+
+    if not isinstance(value, Mapping):
+        return {}
+    compact = {
+        key: value.get(key)
+        for key in ("state", "episode", "episode_actions", "resets")
+        if key in value
+    }
+    if "validation" in value:
+        compact["validation"] = _bounded_validation(value.get("validation"))
+    return compact
+
+
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
@@ -909,11 +942,7 @@ class _P7BrokerClient:
             while _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
                 session = result.get("cognition_session")
                 if isinstance(session, Mapping):
-                    compact_session = {
-                        key: session.get(key)
-                        for key in ("state", "episode", "episode_actions", "resets")
-                        if key in session
-                    }
+                    compact_session = _compact_cognition_session(session)
                     result["cognition_session"] = compact_session
                 semantic = result.get("semantic")
                 if isinstance(semantic, Mapping):
@@ -1013,11 +1042,7 @@ class _P7BrokerClient:
                                 key: ("frame-predicate" if key == "frame" else value)
                                 for key, value in expected.items()
                             }
-                    compact["session"] = {
-                        key: session.get(key)
-                        for key in ("state", "episode", "episode_actions", "resets")
-                        if key in session
-                    }
+                    compact["session"] = _compact_cognition_session(session)
                     compact["session"]["pending"] = compact_pending
                 if isinstance(compact.get("report"), Mapping):
                     compact["report"] = _bounded_semantic_report(
@@ -1044,6 +1069,8 @@ class _P7BrokerClient:
                         for key in ("session_id", "episode", "episode_actions", "resets", "state")
                         if key in session_value
                     }
+                    if "validation" in session_value:
+                        session_state["validation"] = _bounded_validation(session_value.get("validation"))
                     pending = session_value.get("pending")
                     if isinstance(pending, Mapping):
                         session_state["pending"] = {

@@ -34,6 +34,30 @@ _MAX_ACTIONS = 128
 _OBSERVED_STATES = {"NOT_FINISHED", "GAME_OVER", "WIN"}
 _MAX_EXPECTED_FRAME_BYTES = 64 * 1024
 _MAX_EXPECTED_BYTES = 64 * 1024
+_ANALYSIS_STATUS_ALIASES = {
+    "certain": "certain",
+    "confirmed": "certain",
+    "supported": "certain",
+    "falsified": "falsified",
+    "refuted": "falsified",
+    "contradicted": "falsified",
+    "not_supported": "falsified",
+    "undetermined": "undetermined",
+    "still_undetermined": "undetermined",
+    "supported_but_unconfirmed": "undetermined",
+    "weakened_but_unconfirmed": "undetermined",
+    "not_supported_but_unconfirmed": "undetermined",
+    "partially_supported_but_unconfirmed": "undetermined",
+}
+
+
+def _normalize_analysis_status(value: object) -> str:
+    if type(value) is not str:
+        raise CognitionSessionError("invalid analysis status")
+    normalized = _ANALYSIS_STATUS_ALIASES.get(value.strip().lower())
+    if normalized is None:
+        raise CognitionSessionError("invalid analysis status")
+    return normalized
 
 
 def _text(value: object, name: str) -> str:
@@ -414,20 +438,6 @@ class CognitionSession:
             if not isinstance(assessments, Sequence) or isinstance(assessments, (str, bytes)) or not assessments:
                 raise CognitionSessionError("claim assessments are unavailable")
             normalized: list[dict[str, str]] = []
-            status_map = {
-                "certain": "certain",
-                "confirmed": "certain",
-                "supported": "certain",
-                "falsified": "falsified",
-                "refuted": "falsified",
-                "contradicted": "falsified",
-                "not_supported": "falsified",
-                "undetermined": "undetermined",
-                "still_undetermined": "undetermined",
-                "supported_but_unconfirmed": "undetermined",
-                "weakened_but_unconfirmed": "undetermined",
-                "not_supported_but_unconfirmed": "undetermined",
-            }
             for item in assessments:
                 if not isinstance(item, Mapping):
                     raise CognitionSessionError("invalid claim assessment")
@@ -435,7 +445,7 @@ class CognitionSession:
                 assessment = item.get("assessment", item.get("status", "undetermined"))
                 if type(claim_id) is not str or type(assessment) is not str:
                     raise CognitionSessionError("invalid claim assessment")
-                status = status_map.get(assessment.strip().lower(), "undetermined")
+                status = _normalize_analysis_status(assessment)
                 explanation = item.get("reason", item.get("explanation", item.get("observation", "LLM analysis")))
                 if not isinstance(explanation, str):
                     explanation = json.dumps(explanation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
@@ -449,9 +459,8 @@ class CognitionSession:
                 raise CognitionSessionError("analysis claim_ids are unavailable")
             status = analysis.get("status")
             if status is None:
-                status = analysis.get("outcome")
-            if status not in {"certain", "falsified", "undetermined"}:
-                status = "undetermined"
+                status = analysis.get("result", analysis.get("outcome", "undetermined"))
+            status = _normalize_analysis_status(status)
             detail_parts = []
             for key in ("interpretation", "assessment", "observation", "reason", "explanation", "outcome"):
                 if key in analysis and analysis[key] is not None:
@@ -463,6 +472,23 @@ class CognitionSession:
         if not isinstance(results, list) or not results:
             raise CognitionSessionError("analysis results are unavailable")
         allowed = set(self._pending["claim_ids"])
+        normalized_results: list[dict[str, object]] = []
+        seen_claim_ids: set[str] = set()
+        for item in results:
+            if not isinstance(item, Mapping) or type(item.get("claim_id")) is not str:
+                raise CognitionSessionError("analysis references an unselected claim")
+            claim_id = item["claim_id"]
+            if claim_id not in allowed:
+                raise CognitionSessionError("analysis references an unselected claim")
+            if claim_id in seen_claim_ids:
+                raise CognitionSessionError("analysis contains duplicate claim")
+            seen_claim_ids.add(claim_id)
+            normalized_results.append({
+                "claim_id": claim_id,
+                "status": _normalize_analysis_status(item.get("status", item.get("result"))),
+                "explanation": item.get("explanation"),
+            })
+        results = normalized_results
         evidence_ref = f"{self.session_id}/episode-{self._episode}/action-{self._episode_actions}"
         changed = _digest(self._observation) != self._pending["before"]
         predicate = self._pending["expected"]
@@ -485,8 +511,6 @@ class CognitionSession:
             for claim in values
         }
         for item in results:
-            if not isinstance(item, Mapping) or item.get("claim_id") not in allowed:
-                raise CognitionSessionError("analysis references an unselected claim")
             status = item.get("status")
             explanation = _text(item.get("explanation"), "explanation")
             claim = claim_by_id.get(item["claim_id"])

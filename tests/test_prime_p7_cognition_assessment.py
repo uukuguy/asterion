@@ -4,11 +4,61 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from asterion.applications.prime.p7.cognition_session import CognitionSession
+from asterion.applications.prime.p7.cognition_session import CognitionSession, CognitionSessionError
 from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
 
 
 class CognitionAssessmentTests(unittest.TestCase):
+    def _prepared_session(self, root: Path, session_id: str = "prepared") -> CognitionSession:
+        session = CognitionSession(SemanticCognitionStore(root, "assessment-game", 0, 2, level=0), session_id=session_id)
+        session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+        session.propose({"claims": [{
+            "id": "probe", "kind": "control", "subject": "ACTION1", "claim": "ACTION1 changes the scene.",
+            "reason": "It is available.", "falsifier": "The scene is unchanged.", "next_test": "Apply it.",
+        }]})
+        session.select_experiment({
+            "claim_ids": ["probe"], "question": "Does it change?", "information_gain": "control",
+            "action": {"name": "ACTION1"}, "expected": {"frame": [[2]]},
+        })
+        session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
+        return session
+
+    def test_results_accept_result_alias(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = self._prepared_session(root, "aliases")
+            snapshot = session.analyze({
+                "results": [{"claim_id": "probe", "result": "supported", "explanation": "moved"}],
+            })
+            claim = next(item for item in snapshot["report"]["control"] if item["id"] == "probe")
+            self.assertEqual(claim["status"], "certain")
+            self.assertEqual(claim["evidence_count"], 1)
+
+    def test_duplicate_claims_do_not_partially_persist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = self._prepared_session(root, "duplicate")
+            with self.assertRaises(CognitionSessionError):
+                session.analyze({"results": [
+                    {"claim_id": "probe", "result": "supported", "explanation": "first"},
+                    {"claim_id": "probe", "result": "supported", "explanation": "duplicate"},
+                ]})
+            claim = next(item for item in session.snapshot(emit_event=False)["report"]["control"] if item["id"] == "probe")
+            self.assertEqual(claim["status"], "undetermined")
+            self.assertEqual(claim["evidence_count"], 0)
+
+    def test_unknown_claim_assessment_is_rejected_without_persisting(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = self._prepared_session(root, "unknown-assessment")
+            with self.assertRaises(CognitionSessionError):
+                session.analyze({"claim_assessments": [
+                    {"id": "probe", "assessment": "maybe-supported", "reason": "ambiguous"},
+                ]})
+            claim = next(item for item in session.snapshot(emit_event=False)["report"]["control"] if item["id"] == "probe")
+            self.assertEqual(claim["status"], "undetermined")
+            self.assertEqual(claim["evidence_count"], 0)
+
     def test_snapshot_reports_whether_more_validation_is_needed_and_possible(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = SemanticCognitionStore(Path(directory), "validation-game", 0, 2, level=0)
