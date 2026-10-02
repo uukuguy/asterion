@@ -104,11 +104,11 @@ def _action_fields(value: object) -> tuple[str, tuple[tuple[str, int], ...]]:
 
 
 def validate_prediction(
-    value: object, *, current_levels: int,
+    value: object, *, current_levels: int, allow_nondistinguishing: bool = False,
 ) -> tuple[str, tuple[tuple[str, int], ...], dict[str, object]]:
-    """Validate one canonical action and at least one falsifiable expectation."""
+    """Validate one canonical action and its bounded observation expectation."""
 
-    if type(current_levels) is not int or current_levels < 0:
+    if type(current_levels) is not int or current_levels < 0 or type(allow_nondistinguishing) is not bool:
         raise ArcPredictionError
     if type(value) is not dict or set(value) != {"action", "expect"}:
         raise ArcPredictionError
@@ -147,7 +147,7 @@ def validate_prediction(
         # level expectation, but by itself it does not distinguish a probe.
         if expect["state"] != "NOT_FINISHED":
             distinguishing = True
-    if not distinguishing:
+    if not distinguishing and not allow_nondistinguishing:
         raise ArcPredictionError
     return name, data, checked
 

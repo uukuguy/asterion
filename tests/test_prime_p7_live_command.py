@@ -874,7 +874,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 client = _P7BrokerClient(broker, recorder, cognition_mode=True)
                 result = client.act_checked([{
                     "action": {"name": "ACTION2", "data": {}},
-                    "expect": {"cell": {"x": 0, "y": 0, "value": 1}},
+                    "expect": {"state": "NOT_FINISHED"},
                 }])
             finally:
                 recorder.close()

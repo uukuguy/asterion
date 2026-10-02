@@ -2404,7 +2404,15 @@ class ArcBroker:
         if type(plan) is not list or not 1 <= len(plan) <= 20:
             raise ArcBrokerError("unavailable")
         try:
-            checked = [validate_prediction(item, current_levels=self._current.levels_completed) for item in plan]
+            cognition_probe = self._cognition_session is not None and not self._semantic_cognition_read_only
+            checked = [
+                validate_prediction(
+                    item,
+                    current_levels=self._current.levels_completed,
+                    allow_nondistinguishing=cognition_probe,
+                )
+                for item in plan
+            ]
         except ArcPredictionError:
             raise ArcBrokerError("unavailable") from None
         if type(replay_expectations) is not tuple or any(type(item) is not ActionExpectation for item in replay_expectations):
