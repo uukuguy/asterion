@@ -3531,3 +3531,4 @@
 - 2026-10-02 run p7-live-20261002063043-47527d28c018bd5b14532873 entered factory-ready and logged full claim_changes, but timed out before experiment/action; primitive_action_count=0.
 - 2026-10-02 first-frame prompt now requires LLM to derive competing hypotheses from all information points and name/test a familiar game-family analogy.
 - 2026-10-02 cognition prompt now requires first probe before tried-actions/history/readiness queries so one move can produce evidence updates.
+- 2026-10-02 code-level first-probe gate added after review found prompt-only ordering insufficient; cognition mode now blocks detours before first experiment.
