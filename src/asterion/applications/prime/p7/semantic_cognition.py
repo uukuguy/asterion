@@ -381,8 +381,8 @@ class SemanticCognitionStore:
     def propose(self, proposal: Mapping[str, Any]) -> int:
         """Accept LLM hypotheses; no proposal can grant certainty or authority."""
 
-        if not isinstance(proposal, Mapping) or set(proposal) != {"claims"}:
-            raise CognitionError("proposal must contain only claims")
+        if not isinstance(proposal, Mapping) or "claims" not in proposal:
+            raise CognitionError("proposal must contain claims")
         claims = proposal["claims"]
         if not isinstance(claims, Sequence) or isinstance(claims, (str, bytes)):
             raise CognitionError("claims must be a sequence")
@@ -391,6 +391,7 @@ class SemanticCognitionStore:
             raise CognitionError("too many cognition claims")
         staged = _copy(record["claims"])
         accepted = 0
+        updated = 0
         for item in claims:
             if not isinstance(item, Mapping):
                 raise CognitionError("claim must be an object")
@@ -400,15 +401,21 @@ class SemanticCognitionStore:
             claim_id = normalized["id"]
             existing = staged.get(claim_id)
             if existing is not None:
-                if any(existing.get(field) != normalized.get(field) for field in ("kind", "subject", "claim")):
+                if any(existing.get(field) != normalized.get(field) for field in ("kind", "subject")):
                     raise CognitionError("claim id is already bound to another claim")
+                mutable = ("claim", "reason", "falsifier", "next_test", "confidence", "context")
+                if any(existing.get(field) != normalized.get(field) for field in mutable):
+                    for field in mutable:
+                        if field in normalized:
+                            existing[field] = normalized[field]
+                    updated += 1
                 continue
             staged[claim_id] = normalized
             accepted += 1
-        if accepted:
+        if accepted or updated:
             record["claims"] = staged
             self._persist()
-        return accepted
+        return accepted + updated
 
     def seed_bootstrap_claims(self) -> int:
         """Seed the minimum unknown game model for a new cognition episode.

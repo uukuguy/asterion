@@ -136,6 +136,76 @@ class CognitionSessionTests(unittest.TestCase):
             self.assertEqual(claim["status"], "undetermined")
             self.assertEqual(claim["evidence_count"], 0)
 
+    def test_open_expected_predicate_accepts_llm_judgment_with_action_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="open-predicate")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            session.select_experiment({
+                "claim_ids": ["control-right"], "question": "Did the actor move toward the goal?",
+                "information_gain": "Tests the semantic movement interpretation.",
+                "action": {"name": "ACTION2"},
+                "expected": {"actor_moved_toward_goal": True, "confidence": "high"},
+            })
+            session.record_action(
+                {"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"},
+                action={"name": "ACTION2"},
+            )
+            session.analyze({"results": [{
+                "claim_id": "control-right", "status": "certain",
+                "explanation": "The actor moved toward the goal in the observed frame.",
+            }]})
+            claim = next(item for item in session.snapshot()["report"]["control"] if item["id"] == "control-right")
+            self.assertEqual(claim["status"], "certain")
+            self.assertIn("predicate=llm judgment", claim["evidence"][0]["explanation"])
+
+    def test_open_expected_predicate_must_be_nonempty_json_object(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="open-shape")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            for expected in ({}, {"value": {1, 2}}):
+                with self.subTest(expected=expected):
+                    with self.assertRaises(CognitionSessionError):
+                        session.select_experiment({
+                            "claim_ids": ["control-right"], "question": "shape?",
+                            "information_gain": "shape", "action": {"name": "ACTION2"},
+                            "expected": expected,
+                        })
+
+    def test_open_analysis_accepts_llm_envelope_and_defaults_missing_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="open-analysis")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            session.select_experiment({
+                "claim_ids": ["control-right"], "question": "What happened?",
+                "information_gain": "semantic", "action": {"name": "ACTION2"},
+                "expected": {"actor_moved": True},
+            })
+            session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION2"})
+            snapshot = session.analyze({
+                "claim_ids": ["control-right"],
+                "interpretation": "The actor moved toward the goal.",
+                "assessment": "uncertain",
+            })
+            claim = next(item for item in snapshot["report"]["claims"]["control"] if item["id"] == "control-right")
+            self.assertEqual(claim["status"], "undetermined")
+            self.assertEqual(claim["evidence_count"], 0)
+
+    def test_open_analysis_rejects_forged_executable_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="analysis-action")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            session.select_experiment({
+                "claim_ids": ["control-right"], "question": "What happened?",
+                "information_gain": "semantic", "action": {"name": "ACTION2"},
+                "expected": {"actor_moved": True},
+            })
+            session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION2"})
+            with self.assertRaises(CognitionSessionError):
+                session.analyze({"claim_ids": ["control-right"], "status": "certain", "action": {"name": "ACTION1"}})
     def test_concrete_frame_prediction_matches_broker_tuple_frame(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session = CognitionSession(self._store(Path(directory)), session_id="tuple-frame")

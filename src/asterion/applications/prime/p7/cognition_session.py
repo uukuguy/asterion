@@ -33,6 +33,7 @@ _MAX_EVENTS = 512
 _MAX_ACTIONS = 128
 _OBSERVED_STATES = {"NOT_FINISHED", "GAME_OVER", "WIN"}
 _MAX_EXPECTED_FRAME_BYTES = 64 * 1024
+_MAX_EXPECTED_BYTES = 64 * 1024
 
 
 def _text(value: object, name: str) -> str:
@@ -130,6 +131,7 @@ class CognitionSession:
         if event_type not in {
             "cognition.session.started", "cognition.episode.started", "cognition.hypothesis.proposed",
             "cognition.experiment.selected", "cognition.action.executed", "cognition.observation.analyzed",
+            "cognition.hypothesis.updated",
             "cognition.hypothesis.confirmed", "cognition.hypothesis.falsified", "cognition.hypothesis.remains_undetermined",
             "cognition.snapshot", "cognition.episode.reset", "cognition.ready_for_solve", "cognition.stopped",
         }:
@@ -254,12 +256,35 @@ class CognitionSession:
     def propose(self, proposal: Mapping[str, Any]) -> int:
         if self._observation is None or self._state not in {"OBSERVE", "ANALYZED", "SNAPSHOT"}:
             raise CognitionSessionError("proposal is not allowed")
+        before = {
+            claim["id"]: claim
+            for values in self.store.report().get("claims", {}).values()
+            if isinstance(values, list)
+            for claim in values
+            if isinstance(claim, Mapping)
+        }
         try:
             count = self.store.propose(proposal)
         except CognitionError as exc:
             raise CognitionSessionError(str(exc)) from None
         self._state = "PROPOSE"
         self._emit("cognition.hypothesis.proposed", {"count": count})
+        after = {
+            claim["id"]: claim
+            for values in self.store.report().get("claims", {}).values()
+            if isinstance(values, list)
+            for claim in values
+            if isinstance(claim, Mapping)
+        }
+        updated = [
+            claim_id for claim_id, claim in after.items()
+            if claim_id in before and any(
+                before[claim_id].get(field) != claim.get(field)
+                for field in ("claim", "reason", "falsifier", "next_test", "confidence", "context")
+            )
+        ]
+        if updated:
+            self._emit("cognition.hypothesis.updated", {"claim_ids": sorted(updated), "count": len(updated)})
         return count
 
     def select_experiment(self, experiment: Mapping[str, Any]) -> dict[str, Any]:
@@ -281,8 +306,14 @@ class CognitionSession:
         if not isinstance(action_data, Mapping) or any(type(key) is not str or type(value) is not int for key, value in action_data.items()):
             raise CognitionSessionError("experiment action data is unavailable")
         expected = experiment.get("expected")
-        if not isinstance(expected, Mapping) or len(expected) != 1 or set(expected) - {"frame_changed", "levels_completed", "state", "frame"}:
+        if not isinstance(expected, Mapping) or not expected:
             raise CognitionSessionError("experiment expected predicate is unavailable")
+        try:
+            encoded_expected = json.dumps(expected, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+        except (TypeError, ValueError, OverflowError):
+            raise CognitionSessionError("experiment expected predicate is unavailable") from None
+        if len(encoded_expected.encode("utf-8")) > _MAX_EXPECTED_BYTES:
+            raise CognitionSessionError("experiment expected predicate is too large")
         if "frame_changed" in expected and type(expected["frame_changed"]) is not bool:
             raise CognitionSessionError("invalid frame predicate")
         if "levels_completed" in expected and type(expected["levels_completed"]) is not int:
@@ -321,23 +352,49 @@ class CognitionSession:
     def analyze(self, analysis: Mapping[str, Any]) -> dict[str, Any]:
         if self._pending is None or self._state != "ACTION_EXECUTED" or self._observation is None:
             raise CognitionSessionError("analysis is not allowed")
-        results = analysis.get("results") if isinstance(analysis, Mapping) else None
+        if not isinstance(analysis, Mapping):
+            raise CognitionSessionError("analysis is unavailable")
+        if set(analysis) & {"action", "actions", "plan", "route", "command", "commands"}:
+            raise CognitionSessionError("analysis cannot submit executable actions")
+        results = analysis.get("results")
+        if isinstance(results, Mapping):
+            results = [results]
+        if results is None:
+            raw_ids = analysis.get("claim_ids", list(self._pending["claim_ids"]))
+            if isinstance(raw_ids, str):
+                raw_ids = [raw_ids]
+            if not isinstance(raw_ids, Sequence) or isinstance(raw_ids, (str, bytes)) or not raw_ids:
+                raise CognitionSessionError("analysis claim_ids are unavailable")
+            status = analysis.get("status")
+            if status is None:
+                status = analysis.get("outcome")
+            if status not in {"certain", "falsified", "undetermined"}:
+                status = "undetermined"
+            detail_parts = []
+            for key in ("interpretation", "assessment", "observation", "reason", "explanation", "outcome"):
+                if key in analysis and analysis[key] is not None:
+                    value = analysis[key]
+                    if not isinstance(value, str):
+                        value = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                    detail_parts.append(f"{key}={value}")
+            results = [{"claim_id": claim_id, "status": status, "explanation": "; ".join(detail_parts) or "LLM analysis"} for claim_id in raw_ids]
         if not isinstance(results, list) or not results:
             raise CognitionSessionError("analysis results are unavailable")
         allowed = set(self._pending["claim_ids"])
         evidence_ref = f"{self.session_id}/episode-{self._episode}/action-{self._episode_actions}"
         changed = _digest(self._observation) != self._pending["before"]
         predicate = self._pending["expected"]
-        predicate_name = next(iter(predicate))
-        observed = (
-            changed if predicate_name == "frame_changed" else
-            self._observation["levels_completed"] == predicate["levels_completed"] if predicate_name == "levels_completed" else
-            self._observation["state"] == predicate["state"] if predicate_name == "state" else
-            _expected_frame(self._observation["frame"]) == predicate["frame"]
-        )
-        # A generic change cannot identify a direction, object role, or goal.
-        # Level/state predicates are reserved for success/rule claims; a
-        # concrete predicted frame is required for other semantic claims.
+        known_predicates = {"frame_changed", "levels_completed", "state", "frame"}
+        is_known_predicate = len(predicate) == 1 and set(predicate).issubset(known_predicates)
+        predicate_name = next(iter(predicate)) if is_known_predicate else "llm judgment"
+        observed = None
+        if is_known_predicate:
+            observed = (
+                changed if predicate_name == "frame_changed" else
+                self._observation["levels_completed"] == predicate["levels_completed"] if predicate_name == "levels_completed" else
+                self._observation["state"] == predicate["state"] if predicate_name == "state" else
+                _expected_frame(self._observation["frame"]) == predicate["frame"]
+            )
         report = self.store.report()
         claim_by_id = {
             claim["id"]: claim
@@ -351,12 +408,14 @@ class CognitionSession:
             status = item.get("status")
             explanation = _text(item.get("explanation"), "explanation")
             claim = claim_by_id.get(item["claim_id"])
-            evidence_allowed = predicate_name == "frame"
+            evidence_allowed = predicate_name == "llm judgment" or predicate_name == "frame"
             if predicate_name in {"levels_completed", "state"} and claim is not None:
                 evidence_allowed = claim.get("kind") in {"success_condition", "rule"}
-            evidence_explanation = f"predicate={predicate_name}; observed={observed}; {explanation}"
+            evidence_explanation = (
+                f"predicate={predicate_name}; observed={observed}; action_evidence={evidence_ref}; {explanation}"
+            )
             if status == "certain":
-                if not observed or not evidence_allowed:
+                if (is_known_predicate and not observed) or not evidence_allowed:
                     self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
                     continue
                 try:
@@ -365,7 +424,7 @@ class CognitionSession:
                     raise CognitionSessionError(str(exc)) from None
                 self._emit("cognition.hypothesis.confirmed", {"claim_ids": [item["claim_id"]], "explanation": explanation})
             elif status == "falsified":
-                if observed or not evidence_allowed:
+                if (is_known_predicate and observed) or not evidence_allowed:
                     self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
                     continue
                 try:

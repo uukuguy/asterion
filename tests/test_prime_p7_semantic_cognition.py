@@ -60,6 +60,44 @@ class SemanticCognitionTests(unittest.TestCase):
             self.assertNotIn('"data"', encoded)
             self.assertNotIn('"x"', encoded)
 
+    def test_proposal_accepts_descriptive_envelope_and_updates_same_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            store.propose({
+                "scope": {"level": 0}, "status": "working", "description": "initial pass",
+                "claims": [{
+                    "id": "control-updated", "kind": "control", "subject": "ACTION2",
+                    "claim": "ACTION2 may move the actor.", "reason": "The actor is isolated.",
+                    "falsifier": "No actor movement occurs.", "next_test": "Apply ACTION2.",
+                }],
+            })
+            accepted = store.propose({
+                "scope": {"level": 0}, "status": "refined", "claims": [{
+                    "id": "control-updated", "kind": "control", "subject": "ACTION2",
+                    "claim": "ACTION2 moves the actor toward the goal.", "reason": "The latest frame suggests alignment.",
+                    "falsifier": "The actor moves away from the goal.", "next_test": "Repeat ACTION2.",
+                    "confidence": 0.8,
+                }],
+            })
+            self.assertEqual(accepted, 1)
+            claim = next(item for item in store.report()["claims"]["undetermined"] if item["id"] == "control-updated")
+            self.assertEqual(claim["subject"], "ACTION2")
+            self.assertEqual(claim["claim"], "ACTION2 moves the actor toward the goal.")
+            self.assertEqual(claim["confidence"], 0.8)
+
+    def test_proposal_rejects_core_identity_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            store.propose({"claims": [{
+                "id": "identity-bound", "kind": "control", "subject": "ACTION1",
+                "claim": "ACTION1 moves.", "reason": "Available.", "falsifier": "No movement.", "next_test": "Apply.",
+            }]})
+            with self.assertRaises(CognitionError):
+                store.propose({"claims": [{
+                    "id": "identity-bound", "kind": "object_role", "subject": "ACTION1",
+                    "claim": "ACTION1 is an object.", "reason": "Changed interpretation.", "falsifier": "It moves.", "next_test": "Observe.",
+                }]})
+
     def test_confidence_is_non_authoritative_and_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))
