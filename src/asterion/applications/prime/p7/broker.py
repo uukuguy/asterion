@@ -455,8 +455,13 @@ class ArcBroker:
                         "session": snapshot["session"],
                         "execution_authority": "none",
                     }
-                self._terminal_reason = "cognition-ready"
-                return value
+                return {
+                    **value,
+                    "status": "ready",
+                    "next": "solve",
+                    "transition": "cognition-ready-to-solve",
+                    "execution_authority": "none",
+                }
             if op == "stop":
                 value = session.stop(payload.get("reason", "operator-stop"))
                 self._terminal_reason = "cognition-stopped"

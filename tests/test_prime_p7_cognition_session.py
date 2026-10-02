@@ -120,6 +120,26 @@ class CognitionSessionTests(unittest.TestCase):
             self.assertEqual(ready["state"], "READY")
             self.assertIn("cognition.ready_for_solve", [event["type"] for event in session.events])
 
+    def test_ready_session_can_continue_cognition_guided_solve_testing(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="ready-followup")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            session.propose({"claims": [
+                {"id": "type", "kind": "game_type", "subject": "board", "claim": "A grid game.", "reason": "Grid.", "falsifier": "No grid.", "next_test": "Observe."},
+                {"id": "role", "kind": "object_role", "subject": "color-7", "claim": "Color 7 may be the player.", "reason": "It is isolated.", "falsifier": "Another object moves.", "next_test": "Apply."},
+                {"id": "control", "kind": "control", "subject": "ACTION1", "claim": "It moves.", "reason": "Available.", "falsifier": "No change.", "next_test": "Apply."},
+                {"id": "goal", "kind": "success_condition", "subject": "goal", "claim": "Reach the special cell.", "reason": "Distinct cell.", "falsifier": "No win.", "next_test": "Touch it."},
+                {"id": "strategy", "kind": "strategy", "subject": "L1", "claim": "Probe one move at a time.", "reason": "Unknown.", "falsifier": "Batch is required.", "next_test": "Probe."},
+            ]})
+            session.select_experiment({"claim_ids": ["control"], "question": "move?", "information_gain": "movement", "action": {"name": "ACTION1"}, "expected": {"frame": [[2]]}})
+            session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
+            session.analyze({"results": [{"claim_id": "control", "status": "certain", "explanation": "Moved."}]})
+            session.ready_for_solve()
+            accepted = session.propose({"claims": [{
+                "id": "solve-next", "kind": "strategy", "subject": "L1", "claim": "Repeat the tested movement.", "reason": "Control is confirmed.", "falsifier": "It does not progress.", "next_test": "Apply ACTION1 again.",
+            }]})
+            self.assertEqual(accepted, 1)
+
     def test_generic_frame_change_cannot_confirm_directional_claim(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session = CognitionSession(self._store(Path(directory)), session_id="generic-frame")

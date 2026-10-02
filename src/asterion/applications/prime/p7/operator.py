@@ -597,14 +597,17 @@ class _IpythonBridgeServer:
             return False
         if not isinstance(snapshot, Mapping):
             return False
+        session_snapshot = snapshot.get("session")
+        if not isinstance(session_snapshot, Mapping):
+            return False
         blocked = (
-            snapshot.get("state") in {"OBSERVE", "PROPOSE"}
-            and snapshot.get("episode_actions") == 0
+            session_snapshot.get("state") in {"OBSERVE", "PROPOSE"}
+            and session_snapshot.get("episode_actions") == 0
         )
         if blocked:
             print(
                 "[p7-cognition] first-probe-blocked "
-                + json.dumps({"method": method, "state": snapshot.get("state")}, separators=(",", ":")),
+                + json.dumps({"method": method, "state": session_snapshot.get("state"), "episode_actions": 0}, separators=(",", ":")),
                 file=sys.stderr,
                 flush=True,
             )
@@ -723,7 +726,10 @@ class _P7BrokerClient:
         snapshot = self._broker.cognition_projection().get("cognition_session")
         if not isinstance(snapshot, Mapping):
             return None
-        if snapshot.get("state") in {"OBSERVE", "PROPOSE"} and snapshot.get("episode_actions") == 0:
+        session_snapshot = snapshot.get("session")
+        if not isinstance(session_snapshot, Mapping):
+            return None
+        if session_snapshot.get("state") in {"OBSERVE", "PROPOSE"} and session_snapshot.get("episode_actions") == 0:
             return {
                 "status": "blocked",
                 "reason": "cognition-first-probe-required",

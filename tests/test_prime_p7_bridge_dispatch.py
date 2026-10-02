@@ -146,6 +146,35 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(result["reason"], "invalid-cognition-operation")
         self.assertEqual(result["execution_authority"], "none")
 
+    def test_first_probe_hint_reads_nested_session_action_count(self):
+        class Broker:
+            journal = ()
+
+            def cognition_projection(self):
+                return {"cognition_session": {
+                    "state": "OBSERVE",
+                    "session": {"state": "OBSERVE", "episode_actions": 0},
+                }}
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        client._cognition_mode = True
+        hint = client._first_probe_hint()
+        self.assertEqual(hint["reason"], "cognition-first-probe-required")
+
+    def test_ready_cognition_update_keeps_broker_open_for_followup_solve(self):
+        class Session:
+            def ready_for_solve(self):
+                return {"state": "READY", "execution_authority": "none"}
+
+        broker = object.__new__(ArcBroker)
+        broker._cognition_session = Session()
+        broker._semantic_cognition_read_only = False
+        broker._terminal_reason = "active"
+        result = broker.cognition_update({"op": "ready"})
+        self.assertEqual(result["state"], "READY")
+        self.assertEqual(broker._terminal_reason, "active")
+
     def test_cognition_update_logs_complete_correlated_request_and_outcome(self):
         payload = {
             "op": "select_experiment",

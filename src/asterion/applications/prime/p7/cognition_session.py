@@ -254,7 +254,7 @@ class CognitionSession:
         return self.snapshot()
 
     def propose(self, proposal: Mapping[str, Any]) -> int:
-        if self._observation is None or self._state not in {"OBSERVE", "ANALYZED", "SNAPSHOT"}:
+        if self._observation is None or self._state not in {"OBSERVE", "ANALYZED", "SNAPSHOT", "READY"}:
             raise CognitionSessionError("proposal is not allowed")
         before = {
             claim["id"]: claim
@@ -288,7 +288,7 @@ class CognitionSession:
         return count
 
     def select_experiment(self, experiment: Mapping[str, Any]) -> dict[str, Any]:
-        if self._observation is None or self._state not in {"OBSERVE", "PROPOSE", "ANALYZED", "SNAPSHOT"}:
+        if self._observation is None or self._state not in {"OBSERVE", "PROPOSE", "ANALYZED", "SNAPSHOT", "READY"}:
             raise CognitionSessionError("experiment is not allowed")
         if not isinstance(experiment, Mapping):
             raise CognitionSessionError("experiment is unavailable")

@@ -423,10 +423,15 @@ evidence of change, not proof of a
 particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
-`p7_cognition_update({"op":"ready"})`; if safety limits or missing evidence
-prevent readiness, the tool returns `status: "not-ready"`; continue with a
-new experiment instead of repeating `ready`. Call `stop` only with the actual
-safety reason. Never import or replay a
+`p7_cognition_update({"op":"ready"})`. A successful ready response is a
+transition into cognition-guided solve testing, not the end of the run: use
+the confirmed claims to choose and dispatch bounded solve actions, and keep
+recording new falsifiable hypotheses and experiments when the route exposes
+an uncertainty. The response includes `next: "solve"` and
+`transition: "cognition-ready-to-solve"`. If safety limits or missing
+evidence prevent readiness, the tool returns `status: "not-ready"`; continue
+with a new experiment instead of repeating `ready`. Call `stop` only with the
+actual safety reason. Never import or replay a
 prior success route and never claim official completion from this session. If
 a cognition update returns `status: "rejected"`, repair the requested object
 and retry; do not stop solely because a proposal was rejected."""
