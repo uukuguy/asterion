@@ -3539,3 +3539,4 @@
 - 2026-10-02 commit 9b08dcb4 fixed nested cognition probe gating and kept READY runs open for cognition-guided solve testing.
 - 2026-10-02 follow-up commits a9eee487/e3a54120 exposed cognition transition hints and scoped generic frame evidence to control/rule claims.
 - 2026-10-02 commit 6da87cb0 keeps generic frame_changed probes inconclusive so directional claims require stronger evidence.
+- 2026-10-02 commit 8cf6bdaa classifies Pi prompt retry failures from bounded last-failure evidence instead of generic application failure.
