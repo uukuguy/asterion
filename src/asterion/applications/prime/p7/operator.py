@@ -3627,6 +3627,7 @@ async def run_live(
                 failure=failure,
                 broker_status=diagnostics.get("broker_status"),
                 pi_private=diagnostics.get("pi_rpc_private"),
+                pi_last_failure=diagnostics.get("pi_last_failure"),
                 bridge_method_failures=diagnostics.get("bridge_method_failures"),
                 cleanup_failed=cleanup_failed,
             )
@@ -3691,6 +3692,7 @@ def classify_failure_cause(
     pi_private: Mapping[str, object] | None,
     bridge_method_failures: Mapping[str, object] | None,
     cleanup_failed: bool,
+    pi_last_failure: object = None,
 ) -> Mapping[str, object]:
     """Classify one failed live run using only bounded private evidence."""
     status = {} if broker_status is None else dict(broker_status)
@@ -3707,6 +3709,11 @@ def classify_failure_cause(
         if cleanup_failed:
             evidence["cleanup_failed"] = True
         return {"category": "external_cancel", "evidence": evidence}
+    if isinstance(pi_last_failure, str) and pi_last_failure:
+        return {
+            "category": "model_rpc_error",
+            "evidence": {"last_failure": pi_last_failure[:256]},
+        }
     if cleanup_failed:
         return {"category": "cleanup_failure", "evidence": {"cleanup_failed": True}}
     error_events = private.get("error_events")
