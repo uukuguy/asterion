@@ -3090,6 +3090,14 @@ async def run_live(
                     diagnostics["retrodiction_status"] = retrodiction["status"]
                     diagnostics["retrodiction_reasons"] = list(retrodiction.get("reasons", ()))
                     diagnostics["experience"] = broker_value.experience_diagnostics()
+                    # Cognition output is private evidence: retain the
+                    # bounded semantic report and episode event projection in
+                    # the per-run summary, while keeping public receipts
+                    # body-free. This makes live cognition auditable after
+                    # the provider/model session ends.
+                    cognition_projection = broker_value.cognition_projection()
+                    if isinstance(cognition_projection, Mapping):
+                        diagnostics["semantic_cognition"] = dict(cognition_projection)
                     diagnostics["conflict_count"] = (
                         0 if world_snapshot is None else len(world_snapshot.conflicts)
                     )
