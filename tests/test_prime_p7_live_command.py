@@ -41,6 +41,19 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_prefix_diagnostics_separate_context_from_applied_replay(self) -> None:
+        from asterion.applications.prime.p7.operator import _prefix_action_diagnostics
+
+        prefix = SimpleNamespace(transitions=(object(), object()))
+        self.assertEqual(
+            _prefix_action_diagnostics(prefix, applied=False),
+            {"replayed_prefix_actions": 0, "prior_prefix_actions": 2},
+        )
+        self.assertEqual(
+            _prefix_action_diagnostics(prefix, applied=True),
+            {"replayed_prefix_actions": 2, "prior_prefix_actions": 2},
+        )
+
     def test_failure_classification_is_explicit_and_evidence_backed(self) -> None:
         from asterion.applications.prime.p7.operator import classify_failure_cause
 

@@ -2517,6 +2517,16 @@ def _sweep_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
     return replace(game, action_cap_override=action_cap)
 
 
+def _prefix_action_diagnostics(prefix: object, *, applied: bool) -> dict[str, int]:
+    """Separate saved-prefix context from transitions applied to this run."""
+
+    count = len(getattr(prefix, "transitions", ())) if prefix is not None else 0
+    return {
+        "replayed_prefix_actions": count if applied else 0,
+        "prior_prefix_actions": count,
+    }
+
+
 async def run_live(
     invocation: P7Invocation,
     run_id: str,
@@ -2829,7 +2839,9 @@ async def run_live(
     diagnostics["offline_optimization_enabled"] = offline_optimization_enabled
     diagnostics["playbook_loaded"] = playbook_loaded
     diagnostics["playbook_saved"] = False
-    diagnostics["replayed_prefix_actions"] = 0 if prefix is None else len(prefix.transitions)
+    # A saved prefix may be loaded as prompt/playbook context for level 1;
+    # those transitions were not applied to this broker/runtime.
+    diagnostics.update(_prefix_action_diagnostics(prefix, applied=False))
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",
@@ -2860,6 +2872,7 @@ async def run_live(
                     broker, evidence.runtime_recorder, prefix.transitions,
                     identities=evidence.identities,
                 )
+                diagnostics.update(_prefix_action_diagnostics(prefix, applied=True))
                 if broker.status().levels_completed != prefix.levels_completed:
                     raise P7OperatorError("P7 saved prefix is unavailable")
         prediction_client = getattr(resources_, "_prediction_client", None)
