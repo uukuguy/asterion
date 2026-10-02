@@ -19,7 +19,7 @@ from .mechanism_model import (
 from .model_search import search_model
 from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
-from .cognition_session import CognitionSession, CognitionSessionError
+from .cognition_session import CognitionPersistenceError, CognitionSession, CognitionSessionError
 from .game_mechanics import GameMechanicsStore, bounded_text
 from .semantic_cognition import SemanticCognitionStore
 from .observation_state import ObservationState
@@ -2654,6 +2654,8 @@ class ArcBroker:
                     },
                     action={"name": action.name, "data": dict(action.data)},
                 )
+        except CognitionPersistenceError:
+            raise ArcBrokerError("cognition-persistence-unavailable") from None
         except CognitionSessionError:
             # Ordinary gameplay remains valid when no cognition experiment is
             # selected. A selected stale experiment is surfaced as a broker

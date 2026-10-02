@@ -426,7 +426,10 @@ class SemanticCognitionStore:
             if existing is None:
                 missing.append(dict(claim))
                 continue
-            if any(existing.get(field) != claim[field] for field in ("kind", "subject", "claim")):
+            if any(
+                existing.get(field) != claim[field]
+                for field in ("kind", "subject", "claim", "reason", "falsifier", "next_test", "confidence")
+            ):
                 raise CognitionError("bootstrap claim id is already bound to another claim")
         if not missing:
             return 0

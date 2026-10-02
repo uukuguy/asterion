@@ -4,7 +4,11 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from asterion.applications.prime.p7.cognition_session import CognitionSession, CognitionSessionError
+from asterion.applications.prime.p7.cognition_session import (
+    CognitionPersistenceError,
+    CognitionSession,
+    CognitionSessionError,
+)
 from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
 
 
@@ -53,6 +57,25 @@ class CognitionSessionTests(unittest.TestCase):
                 session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
             with self.assertRaises(CognitionSessionError):
                 session.ready_for_solve()
+
+    def test_experiment_state_predicate_uses_runtime_states(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="states")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            with self.assertRaises(CognitionSessionError):
+                session.select_experiment({
+                    "claim_ids": ["control-right"], "question": "state?",
+                    "information_gain": "terminal state", "action": {"name": "ACTION2"},
+                    "expected": {"state": "WON"},
+                })
+
+    def test_event_persistence_failure_is_not_silent(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            event_root = Path(directory) / "event-root"
+            event_root.write_text("not-a-directory", encoding="utf-8")
+            with self.assertRaises(CognitionPersistenceError):
+                CognitionSession(self._store(Path(directory)), session_id="persist", event_root=event_root)
 
     def test_first_episode_bootstraps_unknown_game_picture_idempotently(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

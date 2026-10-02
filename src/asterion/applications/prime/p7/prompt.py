@@ -397,7 +397,7 @@ describe the scene, the discrete action interface, and the currently unknown
 success condition before selecting a probe. Select one information-bearing
 experiment with an explicit observable predicate such as
 `{"frame_changed": true}`, `{"levels_completed": 1}`, or
-`{"state": "WON"}`; include claim ids, question, information gain, and one
+`{"state": "WIN"}`; include claim ids, question, information gain, and one
 non-RESET action. Dispatch exactly that action, then analyze the settled
 result. A frame change alone is evidence of change, not proof of a
 particular object role or goal. Use RESET when an episode is contaminated;

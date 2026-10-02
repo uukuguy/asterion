@@ -23,9 +23,14 @@ class CognitionSessionError(ValueError):
     """Invalid cognition operation or stale experiment binding."""
 
 
+class CognitionPersistenceError(CognitionSessionError):
+    """The private cognition event ledger could not be durably updated."""
+
+
 _STATES = {"OBSERVE", "PROPOSE", "EXPERIMENT_SELECTED", "ACTION_EXECUTED", "ANALYZED", "SNAPSHOT", "READY", "STOPPED"}
 _MAX_EVENTS = 512
 _MAX_ACTIONS = 128
+_OBSERVED_STATES = {"NOT_FINISHED", "GAME_OVER", "WIN"}
 
 
 def _text(value: object, name: str) -> str:
@@ -109,21 +114,28 @@ class CognitionSession:
     def _persist_events(self) -> None:
         payload = json.dumps({"schema": "asterion.prime.p7-semantic-cognition-events/v1", "events": self._events}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         directory = self._event_path.parent
-        directory.mkdir(parents=True, exist_ok=True)
-        os.chmod(directory, 0o700)
-        descriptor, temporary = tempfile.mkstemp(prefix=".semantic-events-", dir=directory)
+        descriptor = -1
+        temporary = ""
         try:
+            directory.mkdir(parents=True, exist_ok=True)
+            os.chmod(directory, 0o700)
+            descriptor, temporary = tempfile.mkstemp(prefix=".semantic-events-", dir=directory)
             with open(descriptor, "w", encoding="utf-8", closefd=True) as handle:
+                descriptor = -1
                 handle.write(payload)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(temporary, self._event_path)
             os.chmod(self._event_path, 0o600)
         except OSError:
+            if descriptor >= 0:
+                os.close(descriptor)
             try:
-                Path(temporary).unlink(missing_ok=True)
+                if temporary:
+                    Path(temporary).unlink(missing_ok=True)
             except OSError:
                 pass
+            raise CognitionPersistenceError("cognition event persistence unavailable") from None
 
     def _require_observation(self, observation: Mapping[str, Any]) -> None:
         if not isinstance(observation, Mapping) or "frame" not in observation:
@@ -186,7 +198,7 @@ class CognitionSession:
             raise CognitionSessionError("invalid frame predicate")
         if "levels_completed" in expected and type(expected["levels_completed"]) is not int:
             raise CognitionSessionError("invalid level predicate")
-        if "state" in expected and type(expected["state"]) is not str:
+        if "state" in expected and (type(expected["state"]) is not str or expected["state"] not in _OBSERVED_STATES):
             raise CognitionSessionError("invalid state predicate")
         self._pending = {"claim_ids": tuple(claim_ids), "question": _text(experiment.get("question"), "question"), "information_gain": _text(experiment.get("information_gain"), "information_gain"), "action_name": action["name"], "action_data": tuple(sorted(action_data.items())), "expected": dict(expected), "before": self._before_digest, "episode": self._episode}
         self._state = "EXPERIMENT_SELECTED"
@@ -301,4 +313,4 @@ class CognitionSession:
         return {"state": self._state, "report": self.store.report(), "session": {"schema": "asterion.prime.p7-cognition-session/v1", "session_id": self.session_id, "episode": self._episode, "episode_actions": self._episode_actions, "resets": self._resets, "state": self._state, "pending": None if self._pending is None else {"claim_ids": list(self._pending["claim_ids"]), "question": self._pending["question"], "information_gain": self._pending["information_gain"], "action_name": self._pending["action_name"], "expected": dict(self._pending["expected"])}}, "events": list(self.events[-32:]), "execution_authority": "none"}
 
 
-__all__ = ["CognitionSession", "CognitionSessionError"]
+__all__ = ["CognitionPersistenceError", "CognitionSession", "CognitionSessionError"]
