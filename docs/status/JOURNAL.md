@@ -3503,4 +3503,5 @@
 - 2026-10-02 语义认知主合同与 P7 探索管道完成实现并提交，因果实验、RESET 边界和只读通关交接纳入 cc54a5c3
 - 2026-10-02 修复 cognition_update 验证拒绝导致 bridge 中止，改为可恢复结果并补充重试契约 d041857c
 - 2026-10-02 cognition prompt 补齐提案与实验 JSON 约束，降低模型首轮无效请求 eb2295e7
+- 2026-10-02 加固 cognition 状态谓词、事件持久化失败和 bootstrap 冲突校验，保持主合同 fail-closed 14abf17c
 - 2026-10-02 启动认知幂等写入三条基础未知假说并支持非权威 confidence，保持 undetermined 与 execution_authority=none [0d5a8254]
