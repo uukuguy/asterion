@@ -2854,6 +2854,7 @@ async def run_live(
     runtime: object | None = None
     prediction_client: object | None = None
     completed_prefix: dict[str, object] | None = None
+    prefix_journal_start: int | None = None
     try:
         if invocation.game.target_level > 1:
             if prefix is not None:
@@ -2868,6 +2869,7 @@ async def run_live(
                     or not 0 < prefix.levels_completed < invocation.game.target_level
                 ):
                     raise P7OperatorError("P7 saved prefix is unavailable")
+                prefix_journal_start = len(broker.journal)
                 _apply_saved_prefix(
                     broker, evidence.runtime_recorder, prefix.transitions,
                     identities=evidence.identities,
@@ -2965,6 +2967,10 @@ async def run_live(
         try:
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
+                if prefix_journal_start is not None:
+                    diagnostics["replayed_prefix_actions"] = max(
+                        0, len(broker_value.journal) - prefix_journal_start
+                    )
                 try:
                     try:
                         status = broker_value.status()
