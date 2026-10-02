@@ -27,6 +27,9 @@ class _Facade:
     def cognition(self):
         return {"input_kind": "keyboard", "type_profile": {"authority": "prior-only"}}
 
+    def cognition_update(self, payload):
+        return {"received": payload}
+
     def playbook(self, level=None):
         return {"level": level}
 
@@ -86,6 +89,13 @@ class TestP7BridgeDispatch(unittest.TestCase):
             with self.subTest(method=method):
                 response = self.bridge._dispatch_method_call("request", method, params)
                 self.assertEqual(response["status"], "error")
+
+    def test_cognition_update_receives_direct_payload(self):
+        response = self.bridge._dispatch_method_call("request", "cognition_update", {"op": "snapshot"})
+        self.assertEqual(response["status"], "ok")
+        self.assertEqual(json.loads(response["output"])["received"], {"op": "snapshot"})
+        malformed = self.bridge._dispatch_method_call("request", "cognition_update", {"payload": {"op": "snapshot"}})
+        self.assertEqual(malformed["status"], "error")
 
     def test_rejected_cognition_payload_is_recoverable(self):
         class RejectingBroker:

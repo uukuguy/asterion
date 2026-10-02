@@ -505,9 +505,9 @@ class _IpythonBridgeServer:
                     return error_response()
                 value = getattr(facade, method)()
             elif method == "cognition_update":
-                if type(params) is not dict or set(params) != {"payload"} or not isinstance(params["payload"], dict):
+                if type(params) is not dict or type(params.get("op")) is not str:
                     return error_response()
-                value = facade.cognition_update(params["payload"])
+                value = facade.cognition_update(params)
             elif method == "playbook":
                 if params is not None and (type(params) is not int or params < 0):
                     return error_response()

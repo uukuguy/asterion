@@ -49,6 +49,8 @@ export interface IpythonToolResult {
   details: Record<string, never>;
 }
 
+export type ToolExecutionMode = "sequential" | "parallel";
+
 export const IPYTHON_PARAMETERS = TypeObject(
   { code: TypeString({ minLength: 1 }) },
   { additionalProperties: false },
@@ -156,6 +158,7 @@ export class IpythonBridge {
   #active = false;
   #closed = false;
   #pending = Buffer.alloc(0);
+  #methodTail: Promise<void> = Promise.resolve();
 
   constructor(descriptor: number, options: BridgeOptions = {}) {
     if (!Number.isSafeInteger(descriptor) || descriptor < 3) throw unavailable();
@@ -224,38 +227,76 @@ export class IpythonBridge {
     params: unknown,
     signal?: AbortSignal,
   ): Promise<unknown> {
-    const request = JSON.stringify(
-      {
-        method,
-        params,
-        protocol: PROTOCOL,
-        request_id: requestId,
-        type: "method_call",
-      },
-      (_key: string, value: unknown): unknown =>
-        typeof value === "bigint" ? value.toString() : value,
-    );
-    await writeAll(
-      this.#descriptor,
-      Buffer.from(`${request}\n`, "utf8"),
-    );
-    const executeResult = await this.#withCancellation(
-      this.#readResult(requestId),
-      signal,
-    );
-    if (executeResult.type !== "method_result") {
-      throw new Error("expected method_result, got " + executeResult.type);
-    }
-    if (executeResult.status === "error") {
-      throw new Error(executeResult.output || "method call failed");
-    }
-    let parsed: unknown;
+    let release!: () => void;
+    const previous = this.#methodTail;
+    this.#methodTail = new Promise<void>((resolve) => { release = resolve; });
+    let waitingForPrevious = true;
+    let possiblyDispatched = false;
+    let applicationError: Error | undefined;
     try {
-      parsed = JSON.parse(executeResult.output);
-    } catch {
-      parsed = executeResult.output;
+      await this.#withCancellation(previous, signal);
+      waitingForPrevious = false;
+      if (this.#closed || signal?.aborted === true) throw unavailable();
+      const request = JSON.stringify(
+        {
+          method,
+          params,
+          protocol: PROTOCOL,
+          request_id: requestId,
+          type: "method_call",
+        },
+        (_key: string, value: unknown): unknown =>
+          typeof value === "bigint" ? value.toString() : value,
+      );
+      const raw = Buffer.from(`${request}\n`, "utf8");
+      if (raw.length > this.#maxLineBytes) throw unavailable();
+      possiblyDispatched = true;
+      try {
+        await this.#withCancellation(writeAll(this.#descriptor, raw), signal);
+      } catch {
+        this.#poison();
+        throw unavailable();
+      }
+      let executeResult: ExecuteResult;
+      try {
+        executeResult = await this.#withCancellation(
+          this.#readResult(requestId),
+          signal,
+        );
+      } catch {
+        // A timed-out or malformed response leaves the single descriptor
+        // unreadable. Close it so a late result cannot poison a later call.
+        this.#poison();
+        throw unavailable();
+      }
+      if (executeResult.type !== "method_result") {
+        this.#poison();
+        throw new Error("expected method_result, got " + executeResult.type);
+      }
+      if (executeResult.status === "error") {
+        // A validated application rejection is recoverable. Keep the bridge
+        // usable so cognition can repair its payload and retry.
+        applicationError = new Error(executeResult.output || "method call failed");
+        throw applicationError;
+      }
+      if (executeResult.status !== "ok") {
+        this.#poison();
+        throw new Error("method call was uncertain");
+      }
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(executeResult.output);
+      } catch {
+        parsed = executeResult.output;
+      }
+      return parsed;
+    } catch (error) {
+      if (applicationError !== undefined) throw applicationError;
+      if (waitingForPrevious || possiblyDispatched) this.#poison();
+      throw unavailable();
+    } finally {
+      release();
     }
-    return parsed;
   }
 
   #validRequest(value: unknown): value is ExecuteRequest {
@@ -401,12 +442,23 @@ const PROMOTION_PARAMETERS = TypeObject(
   },
   { additionalProperties: false },
 );
+const COGNITION_PARAMETERS = TypeObject(
+  {
+    op: TypeString({ minLength: 1 }),
+    proposal: TypeOptional(TypeObject({}, { additionalProperties: true })),
+    experiment: TypeOptional(TypeObject({}, { additionalProperties: true })),
+    analysis: TypeOptional(TypeObject({}, { additionalProperties: true })),
+    reason: TypeOptional(TypeString({ minLength: 1 })),
+  },
+  { additionalProperties: false },
+);
 
 interface MethodTool {
   name: string;
   label: string;
   description: string;
   parameters: unknown;
+  executionMode?: ToolExecutionMode;
   execute(
     id: string,
     input: unknown,
@@ -463,10 +515,7 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
     method: "cognition_update",
     description:
       "Propose or analyze semantic game-cognition hypotheses. Use {op, proposal|experiment|analysis|reason}; this updates the persisted language ledger only and never dispatches an action or grants execution authority.",
-    parameters: TypeObject(
-      { payload: TypeObject({}) },
-      { additionalProperties: false },
-    ),
+    parameters: COGNITION_PARAMETERS,
   },
   {
     name: "p7_counterfactual_search",
@@ -604,6 +653,7 @@ function makeMethodTool(
     label: name,
     description,
     parameters: inputType,
+    executionMode: "sequential" as const,
     execute: async (
       id: string,
       input: unknown,

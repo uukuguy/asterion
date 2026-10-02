@@ -72,3 +72,9 @@
 3. Run `git status --short` and `git log --oneline -5`.
 4. Run `make lint`, `make docs-check`, and the focused P7 regression suite before any live game attempt.
 5. If live work resumes, keep offline optimization disabled and report current-level steps separately from replay prefixes and total primitive actions.
+
+### 2026-10-02 cognition transport correction
+
+The prior live cognition run made four `cognition_update` calls but produced no semantic proposal/experiment/analyze events because the prompt's direct payload shape disagreed with the TypeScript wrapper and Python dispatch contract. This is now corrected: the tool schema requires top-level `op`, the bridge sends it directly, Python rejects the obsolete `{payload: ...}` wrapper, and the packaged resource is synchronized. Shared-descriptor method calls are serialized; validated application errors are retryable without poisoning the bridge, while transport and uncertain results remain fail-closed.
+
+Verification: 178 focused P7 Python tests passed; Ruff, compileall, diff checks, and `npm --prefix packages/typescript/asterion-prime-extension run check-resource` passed. The focused TypeScript bridge/cognition regressions passed. A complete npm run is still externally limited by pre-existing Pi-dependent tests/harnesses. No post-fix live cognition run has yet established semantic events or a level solve; the next bounded run is required for that evidence.

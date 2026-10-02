@@ -52,6 +52,9 @@ async function socketPair() {
     client.once("error", reject);
   });
   const peer = await accepted;
+  // The bridge consumes the client descriptor with fs.read(). Pause the
+  // net.Socket wrapper so its own stream reader cannot race that consumer.
+  client.pause();
   return {
     descriptor: client._handle.fd,
     client,
@@ -197,6 +200,10 @@ test("registers the ipython and P7 application tools", async () => {
   ];
   assert.deepEqual(toolNames(), expectedNames);
   assert.deepEqual(registered.map((tool) => tool.name), expectedNames);
+  assert.deepEqual(
+    registered.slice(1).map((tool) => tool.executionMode),
+    registered.slice(1).map(() => "sequential"),
+  );
   assert.match(
     registered.find((tool) => tool.name === "p7_act_checked").description,
     /invalid-checked-plan.*one-item.*RESET/s,
@@ -238,6 +245,23 @@ test("wraps application tool results for the Pi AgentToolResult contract", async
     details: { available: true, current_level: 2 },
   });
   assert.deepEqual(calls, [["mechanics-1", "mechanics_prior", {} , undefined]]);
+});
+
+test("passes cognition operations directly through the method bridge", async () => {
+  const calls = [];
+  const tool = createAppLevelTools({
+    callMethod: async (...args) => {
+      calls.push(args);
+      return { status: "ok" };
+    },
+  }).find((candidate) => candidate.name === "p7_cognition_update");
+  assert.ok(tool);
+  assert.deepEqual(tool.parameters.required, ["op"]);
+  assert.deepEqual(await tool.execute("cognition-1", { op: "snapshot" }), {
+    content: [{ type: "text", text: '{"status":"ok"}' }],
+    details: { status: "ok" },
+  });
+  assert.deepEqual(calls, [["cognition-1", "cognition_update", { op: "snapshot" }, undefined]]);
 });
 
 test("level queries and hypothesis registration expose the Python bridge contract", () => {
@@ -301,6 +325,97 @@ test("uses one strict request and matching result over the descriptor", async ()
         details: {},
       },
     });
+  } finally {
+    pair.close();
+  }
+});
+
+test("serializes method calls over the single bridge descriptor", async () => {
+  const pair = await socketPair();
+  try {
+    const bridge = createIpythonBridge(pair.descriptor);
+    const first = bridge.callMethod("method-1", "observe", {});
+    assert.deepEqual(await readJsonLine(pair.peer), {
+      method: "observe",
+      params: {},
+      protocol: PROTOCOL,
+      request_id: "method-1",
+      type: "method_call",
+    });
+    const second = bridge.callMethod("method-2", "status", {});
+    let secondSettled = false;
+    void second.then(() => { secondSettled = true; });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(secondSettled, false);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    pair.peer.write(JSON.stringify({
+      protocol: PROTOCOL,
+      request_id: "method-1",
+      type: "method_result",
+      status: "ok",
+      output: '{"first":true}',
+    }) + "\n");
+    assert.deepEqual(await first, { first: true });
+    assert.deepEqual(await readJsonLine(pair.peer), {
+      method: "status",
+      params: {},
+      protocol: PROTOCOL,
+      request_id: "method-2",
+      type: "method_call",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    pair.peer.write(JSON.stringify({
+      protocol: PROTOCOL,
+      request_id: "method-2",
+      type: "method_result",
+      status: "ok",
+      output: '{"second":true}',
+    }) + "\n");
+    assert.deepEqual(await second, { second: true });
+  } finally {
+    pair.close();
+  }
+});
+
+test("recoverable method errors do not poison the bridge", async () => {
+  const pair = await socketPair();
+  try {
+    const bridge = createIpythonBridge(pair.descriptor);
+    const rejected = bridge.callMethod("method-error", "cognition_update", { bad: true });
+    assert.deepEqual(await readJsonLine(pair.peer), {
+      method: "cognition_update",
+      params: { bad: true },
+      protocol: PROTOCOL,
+      request_id: "method-error",
+      type: "method_call",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    pair.peer.write(JSON.stringify({
+      protocol: PROTOCOL,
+      request_id: "method-error",
+      type: "method_result",
+      status: "error",
+      output: "invalid cognition payload",
+    }) + "\n");
+    await assert.rejects(rejected, { message: "invalid cognition payload" });
+
+    const recovered = bridge.callMethod("method-recovered", "cognition_update", { op: "snapshot" });
+    assert.deepEqual(await readJsonLine(pair.peer), {
+      method: "cognition_update",
+      params: { op: "snapshot" },
+      protocol: PROTOCOL,
+      request_id: "method-recovered",
+      type: "method_call",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    pair.peer.write(JSON.stringify({
+      protocol: PROTOCOL,
+      request_id: "method-recovered",
+      type: "method_result",
+      status: "ok",
+      output: '{"recovered":true}',
+    }) + "\n");
+    assert.deepEqual(await recovered, { recovered: true });
   } finally {
     pair.close();
   }
