@@ -3525,3 +3525,4 @@
 - 2026-10-02 actual tu93 L1 run `p7-live-20261002055614-2f3b30a5ffa10f7e27513b28` printed 20+ initial semantic hypotheses: grid scene, color-9 actor, color-0 floor, color-2 wall, color-5 background, color-14 goal, ACTION1-4 cardinal controls, and levels_completed/WIN success hypotheses; all remained undetermined pending experiments
 - 2026-10-02 that run had successful cognition tool transport but zero primitive actions and repeated ready/update calls; operator stopped the cognition-only spin, so it is not a solve and not evidence of verified mechanics
 - 2026-10-02 root cause of earlier bridge poisoning was unbounded full semantic cognition returned through the 64KiB TypeScript tool output cap; bounded projection changed native cognition/observation/tried-actions/update calls to isError=false in live evidence
+- 2026-10-02 commit 4af4a424: live cognition growth logging, rejection diagnostics, bounded cognition projections, and bridge regression tests landed.
