@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 import tempfile
 import unittest
 
@@ -76,6 +77,40 @@ class CognitionSessionTests(unittest.TestCase):
             event_root.write_text("not-a-directory", encoding="utf-8")
             with self.assertRaises(CognitionPersistenceError):
                 CognitionSession(self._store(Path(directory)), session_id="persist", event_root=event_root)
+
+    def test_live_log_records_each_cognition_event_and_claim_change(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self._store(root)
+            session = CognitionSession(store, session_id="visible")
+            self.assertEqual(session.live_log_path, store.path.parent / "cognition-live-visible.jsonl")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self._claim(session)
+            session.select_experiment({
+                "claim_ids": ["control-right"], "question": "Does ACTION2 move right?",
+                "information_gain": "movement", "action": {"name": "ACTION2"},
+                "expected": {"frame": [[2]]},
+            })
+            session.record_action(
+                {"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"},
+                action={"name": "ACTION2"},
+            )
+            session.analyze({"results": [{
+                "claim_id": "control-right", "status": "certain", "explanation": "The actor moved right.",
+            }]})
+            lines = session.live_log_path.read_text(encoding="utf-8").splitlines()
+            events = [json.loads(line) for line in lines]
+            event_types = [event["type"] for event in events]
+            self.assertIn("cognition.session.started", event_types)
+            self.assertIn("cognition.episode.started", event_types)
+            self.assertIn("cognition.hypothesis.proposed", event_types)
+            self.assertIn("cognition.experiment.selected", event_types)
+            self.assertIn("cognition.action.executed", event_types)
+            self.assertIn("cognition.observation.analyzed", event_types)
+            changed = [claim for event in events for claim in event.get("claim_changes", [])]
+            observed = [claim for claim in changed if claim["id"] == "control-right"][-1]
+            self.assertEqual(observed["status"], "certain")
+            self.assertEqual(observed["confidence"], 0.5)
 
     def test_first_episode_bootstraps_unknown_game_picture_idempotently(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

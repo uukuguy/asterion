@@ -625,9 +625,11 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
     """Project semantic cognition below the packaged bridge output cap.
 
     Claim reports contain model-authored prose, so count limits alone do not
-    bound the wire size.  This projection deduplicates the status convenience
-    buckets, truncates prose, then drops the least useful tail until the
-    serialized projection fits the cap.
+    bound the wire size.  This projection removes only the duplicate status
+    convenience bucket, truncates prose, then drops the least useful tail
+    only when the transport cap requires it.  The durable ledger and live
+    cognition log retain every hypothesis; this wire projection is not a
+    reasoning policy and must not discard claims based on age or status.
     """
 
     if not isinstance(value, Mapping):
@@ -640,22 +642,7 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
             if group == "undetermined" or not isinstance(claims, list):
                 continue
             selected: list[dict[str, object]] = []
-            # The durable ledger can contain many earlier wording variants.
-            # Keep resolved evidence plus the newest open hypotheses in the
-            # model-facing view, so accumulation remains useful without
-            # burying the next experiment under stale repeats.
-            resolved = [
-                claim for claim in claims
-                if isinstance(claim, Mapping)
-                and claim.get("status") in {"certain", "falsified"}
-            ]
-            open_claims = [
-                claim for claim in claims
-                if isinstance(claim, Mapping)
-                and claim.get("status") not in {"certain", "falsified"}
-            ]
-            prioritized = [*resolved[:8], *open_claims[-24:]]
-            for claim in prioritized:
+            for claim in claims[:32]:
                 if not isinstance(claim, Mapping):
                     continue
                 claim_id = claim.get("id")
@@ -943,6 +930,21 @@ class _P7BrokerClient:
                         result.get("semantic"), max_bytes=4 * 1024
                     )
                     break
+            print(
+                "[p7-cognition] cognition-read "
+                + json.dumps(
+                    {
+                        "semantic": result.get("semantic"),
+                        "cognition_session": result.get("cognition_session"),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    default=str,
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
             return result
         except Exception as error:
             print(
@@ -1028,6 +1030,34 @@ class _P7BrokerClient:
                         for key in ("status", "accepted", "reason", "next", "transition", "execution_authority", "session", "report")
                         if key in compact
                     }
+            # Print the post-operation semantic picture itself.  The request
+            # and outcome records explain transport; this record is the
+            # cognition the model actually accumulated (claims, status,
+            # confidence, evidence and next tests).  It is deliberately
+            # emitted for every operation that returns a semantic report.
+            if isinstance(result, Mapping) and isinstance(result.get("report"), Mapping):
+                session_value = result.get("session")
+                session_state: dict[str, object] = {}
+                if isinstance(session_value, Mapping):
+                    session_state = {
+                        key: session_value.get(key)
+                        for key in ("session_id", "episode", "episode_actions", "resets", "state")
+                        if key in session_value
+                    }
+                    pending = session_value.get("pending")
+                    if isinstance(pending, Mapping):
+                        session_state["pending"] = {
+                            key: (str(pending.get(key, ""))[:512] if key in {"question", "information_gain"} else pending.get(key))
+                            for key in ("claim_ids", "question", "information_gain", "action_name")
+                            if key in pending
+                        }
+                cognition_state = {
+                    "report": _bounded_semantic_report(result["report"], max_bytes=12 * 1024),
+                    "session": session_state,
+                    "status": result.get("status"),
+                    "next": result.get("next"),
+                }
+                log_update("cognition-state", op=canonical_op, cognition=cognition_state)
             log_update(
                 "update-call",
                 op=payload.get("op"),

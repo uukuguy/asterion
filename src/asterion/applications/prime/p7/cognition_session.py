@@ -110,6 +110,12 @@ class CognitionSession:
         self.max_actions_per_episode = max_actions_per_episode
         self.max_resets = max_resets
         self._event_path = (event_root or store.path.parent) / f"semantic-events-{sid}.json"
+        # The per-session event ledger is the durable source of truth.  This
+        # companion JSONL stream is the operator-facing live log: it is a
+        # stable path that can be tailed while a run is still in progress.
+        # Each line contains the cognition event and any changed hypotheses.
+        self._live_log_path = self._event_path.with_name(f"cognition-live-{sid}.jsonl")
+        self._live_log_announced = False
         self._events: list[dict[str, Any]] = []
         self._sequence = 0
         self._episode = 0
@@ -187,7 +193,14 @@ class CognitionSession:
         # diagnosable before its private summary is written.
         logged = dict(event)
         if claim_changes:
-            logged["claim_changes"] = claim_changes[:32]
+            # The live log is the complete operator record.  Transport
+            # projections may be byte-bounded elsewhere, but this record must
+            # not silently omit hypotheses when a proposal contains many.
+            logged["claim_changes"] = claim_changes
+        try:
+            self._append_live_log(logged)
+        except OSError as error:
+            raise CognitionPersistenceError("cognition live log unavailable") from error
         print(
             "[p7-cognition] "
             + json.dumps(logged, sort_keys=True, separators=(",", ":")),
@@ -201,6 +214,31 @@ class CognitionSession:
                 file=sys.stderr,
                 flush=True,
             )
+
+    @property
+    def live_log_path(self) -> Path:
+        """Return the stable operator-facing JSONL cognition log path."""
+
+        return self._live_log_path
+
+    def _append_live_log(self, logged: Mapping[str, Any]) -> None:
+        directory = self._live_log_path.parent
+        directory.mkdir(parents=True, exist_ok=True)
+        os.chmod(directory, 0o700)
+        with self._live_log_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(logged, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(self._live_log_path, 0o600)
+        if not self._live_log_announced:
+            print(
+                "[p7-cognition] live-log "
+                + json.dumps({"path": str(self._live_log_path), "session_id": self.session_id}, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
+            self._live_log_announced = True
 
     def _persist_events(self) -> None:
         payload = json.dumps({"schema": "asterion.prime.p7-semantic-cognition-events/v1", "events": self._events}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

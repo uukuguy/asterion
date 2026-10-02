@@ -240,6 +240,48 @@ class TestP7BridgeDispatch(unittest.TestCase):
                     self.assertEqual(outcome["error_type"], type(failure).__name__)
                     self.assertEqual(outcome["detail"], str(failure))
 
+    def test_cognition_update_prints_post_operation_cognition(self):
+        class Broker:
+            def cognition_update(self, submitted):
+                return {
+                    "status": "ok",
+                    "next": "select_experiment",
+                    "report": {
+                        "schema": "schema",
+                        "scope": {"game_id": "synthetic"},
+                        "claims": {
+                            "control": [{
+                                "id": "move-right", "kind": "control", "subject": "ACTION2",
+                                "claim": "ACTION2 moves the player right.", "status": "certain", "confidence": 0.8,
+                                "evidence_count": 1, "support_count": 1, "counterexample_count": 0,
+                                "next_test": "Repeat ACTION2.",
+                            }],
+                        },
+                        "evidence_counts": {"total": 1},
+                        "execution_authority": "none",
+                    },
+                    "session": {
+                        "session_id": "visible", "episode": 1, "episode_actions": 1,
+                        "resets": 0, "state": "ANALYZED",
+                    },
+                }
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            client.cognition_update({"op": "analyze"})
+        states = [
+            json.loads(line.removeprefix("[p7-cognition] cognition-state "))
+            for line in stream.getvalue().splitlines()
+            if line.startswith("[p7-cognition] cognition-state ")
+        ]
+        self.assertEqual(len(states), 1)
+        claim = states[0]["cognition"]["report"]["claims"]["control"][0]
+        self.assertEqual(claim["id"], "move-right")
+        self.assertEqual(claim["status"], "certain")
+        self.assertEqual(states[0]["cognition"]["session"]["state"], "ANALYZED")
+
     def test_semantic_report_is_byte_bounded_and_deduplicated(self):
         claim = {
             "id": "claim-1", "kind": "control", "subject": "ACTION1",
