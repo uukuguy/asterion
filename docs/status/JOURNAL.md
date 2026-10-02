@@ -3490,3 +3490,7 @@
 - 08:02 P7 persistence failures now return explicit bounded status, preserve WorldMap/transition learning, and remain unavailable without reason-list edge errors [64cb4fed]
 - 08:02 Independent final review: P0/P1/P3 clear; unsupported residuals fail closed; no fresh P7 solving or same-session exploration-shortening claim [review]
 - 08:03 promotion-check was started for packaged verification but stopped after prolonged no-output; prior gate remains historically red and is not claimed PASS
+- 08:08 probe_plan now rejects non-compilable hypotheses, so unsupported residuals cannot appear as ready probes [c7ea3b19]
+- 08:08 diagnostics now distinguish prior prefix context from actually replayed actions, including partial replay counts on failure [0d50589b, f340c0c4]
+- 08:08 fresh SP80 L1 witness cancelled by external RPC prompt after 5 current actions; cleanup=true, sealed/replay=false, not counted as a solve
+- 08:08 ACTION4 recording analysis confirms moving edge markers are not representable by the current safe DSL; fail-closed boundary retained
