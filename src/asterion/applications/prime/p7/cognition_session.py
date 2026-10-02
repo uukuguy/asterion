@@ -511,7 +511,7 @@ class CognitionSession:
             for claim in values
         }
         resolutions: list[dict[str, str]] = []
-        resolution_events: list[tuple[str, str]] = []
+        pending_events: list[tuple[str, str, str]] = []
         for item in results:
             status = item.get("status")
             explanation = item["explanation"]
@@ -524,26 +524,26 @@ class CognitionSession:
             )
             if status == "certain":
                 if (is_known_predicate and not observed) or not evidence_allowed:
-                    self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
+                    pending_events.append(("cognition.hypothesis.remains_undetermined", item["claim_id"], explanation))
                     continue
                 resolutions.append({"claim_id": item["claim_id"], "status": "certain", "evidence": evidence_ref, "explanation": evidence_explanation})
-                resolution_events.append(("cognition.hypothesis.confirmed", explanation))
+                pending_events.append(("cognition.hypothesis.confirmed", item["claim_id"], explanation))
             elif status == "falsified":
                 if (is_known_predicate and observed) or not evidence_allowed:
-                    self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
+                    pending_events.append(("cognition.hypothesis.remains_undetermined", item["claim_id"], explanation))
                     continue
                 resolutions.append({"claim_id": item["claim_id"], "status": "falsified", "evidence": evidence_ref, "explanation": evidence_explanation})
-                resolution_events.append(("cognition.hypothesis.falsified", explanation))
+                pending_events.append(("cognition.hypothesis.falsified", item["claim_id"], explanation))
             elif status == "undetermined":
-                self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
+                pending_events.append(("cognition.hypothesis.remains_undetermined", item["claim_id"], explanation))
             else:
                 raise CognitionSessionError("invalid analysis status")
         try:
             self.store.resolve_many(resolutions)
         except CognitionError as exc:
             raise CognitionSessionError(str(exc)) from None
-        for (event_type, explanation), item in zip(resolution_events, resolutions, strict=True):
-            self._emit(event_type, {"claim_ids": [item["claim_id"]], "explanation": explanation})
+        for event_type, claim_id, explanation in pending_events:
+            self._emit(event_type, {"claim_ids": [claim_id], "explanation": explanation})
         self._state = "ANALYZED"
         self._analyzed = True
         self._emit("cognition.observation.analyzed", {"state": self._state})

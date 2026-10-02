@@ -87,6 +87,10 @@ class CognitionAssessmentTests(unittest.TestCase):
             self.assertEqual(claims["first"]["status"], "undetermined")
             self.assertEqual(claims["first"]["evidence_count"], 0)
             self.assertEqual(claims["second"]["status"], "undetermined")
+            self.assertFalse(any(
+                event["type"] in {"cognition.hypothesis.confirmed", "cognition.hypothesis.remains_undetermined"}
+                for event in session.events
+            ))
 
     def test_snapshot_reports_whether_more_validation_is_needed_and_possible(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
