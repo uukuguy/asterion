@@ -394,7 +394,14 @@ attention; confidence is non-authoritative and every proposal remains
 `undetermined`, so omit `status` and `evidence`. On the first frame, propose
 several broad, falsifiable hypotheses even when their confidence differs:
 describe the scene, the discrete action interface, and the currently unknown
-success condition before selecting a probe. Select one information-bearing
+success condition before selecting a probe. Treat every supplied information
+point (the first frame, visible colors/shapes, available action names,
+observation/status fields, and persisted same-game context) as evidence from
+which the LLM should derive multiple competing cognition hypotheses. Include
+at least one `game_type` hypothesis naming the closest familiar real-world or
+game-family analogy, the visual reasons for that analogy, and an observation
+that could disprove it. The analogy is a hypothesis, never an assumed rule.
+Select one information-bearing
 experiment with an explicit observable predicate such as
 `{"frame": [[...]]}` for a concrete predicted settled frame,
 `{"levels_completed": 1}`, or `{"state": "WIN"}`; include claim ids,
