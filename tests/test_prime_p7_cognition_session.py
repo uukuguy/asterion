@@ -175,6 +175,42 @@ class CognitionSessionTests(unittest.TestCase):
             }]})
             self.assertEqual(accepted, 1)
 
+    def test_new_session_resumes_ready_semantics_for_same_game_level(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = CognitionSession(self._store(root), session_id="first-run")
+            first.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            first.propose({"claims": [
+                {"id": "known-type", "kind": "game_type", "subject": "board", "claim": "A grid game.", "reason": "Grid.", "falsifier": "No grid.", "next_test": "Observe."},
+                {"id": "known-role", "kind": "object_role", "subject": "color-7", "claim": "Color 7 is the player.", "reason": "It moves.", "falsifier": "Another object moves.", "next_test": "Probe."},
+                {"id": "known-control", "kind": "control", "subject": "ACTION1", "claim": "ACTION1 moves the player.", "reason": "A prior probe moved it.", "falsifier": "The player does not move.", "next_test": "Repeat."},
+                {"id": "known-goal", "kind": "success_condition", "subject": "goal", "claim": "Reach the goal.", "reason": "The level reports completion there.", "falsifier": "The level does not complete.", "next_test": "Reach it."},
+                {"id": "known-strategy", "kind": "strategy", "subject": "L1", "claim": "Use confirmed movement semantics.", "reason": "The control is known.", "falsifier": "The movement diverges.", "next_test": "Follow the current model."},
+            ]})
+            first.store.resolve(
+                "known-control", status="certain", evidence="first-run/action-1",
+                explanation="The runtime observed the player move.",
+            )
+
+            resumed = CognitionSession(self._store(root), session_id="second-run")
+            snapshot = resumed.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self.assertEqual(snapshot["state"], "READY")
+            self.assertEqual(snapshot["session"]["state"], "READY")
+            self.assertEqual(snapshot["session"]["episode_actions"], 0)
+            self.assertIn("cognition.ready_for_solve", [event["type"] for event in resumed.events])
+            self.assertEqual(snapshot["report"]["scope"]["game_id"], "synthetic-game")
+
+            # A different level has its own semantic ledger and must still
+            # begin with exploration instead of inheriting L1 certainty.
+            other_level = CognitionSession(
+                SemanticCognitionStore(root, "synthetic-game", 0, 2, level=1),
+                session_id="other-level",
+            )
+            other_snapshot = other_level.start_episode(
+                {"frame": [[1]], "levels_completed": 1, "state": "NOT_FINISHED"}
+            )
+            self.assertEqual(other_snapshot["state"], "OBSERVE")
+
     def test_generic_frame_change_cannot_confirm_directional_claim(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session = CognitionSession(self._store(Path(directory)), session_id="generic-frame")

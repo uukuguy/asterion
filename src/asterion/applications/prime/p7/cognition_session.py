@@ -289,6 +289,13 @@ class CognitionSession:
         self._episode_actions = 0
         self._analyzed = False
         self._emit("cognition.episode.started", {"state": self._state})
+        # Semantic claims survive the session boundary in the exact
+        # game/seed/level ledger. If that ledger already contains enough
+        # confirmed knowledge, resume directly in solve testing so the next
+        # run does not spend a fresh probe re-validating the same claims.
+        if self._knowledge_ready():
+            self._state = "READY"
+            self._emit("cognition.ready_for_solve", {"state": self._state})
         return self.snapshot()
 
     def propose(self, proposal: Mapping[str, Any]) -> int:
@@ -494,15 +501,36 @@ class CognitionSession:
         return self.snapshot()
 
     def ready_for_solve(self) -> dict[str, Any]:
-        report = self.store.report()
-        claims = [claim for values in report["claims"].values() if isinstance(values, list) for claim in values]
-        kinds = {claim["kind"] for claim in claims}
-        supported_control = any(claim["kind"] in {"control", "rule"} and claim["status"] == "certain" for claim in claims)
-        if not {"game_type", "object_role", "control", "success_condition", "strategy"}.issubset(kinds) or not supported_control:
+        if not self._knowledge_ready():
             raise CognitionSessionError("cognition is not ready")
         self._state = "READY"
         self._emit("cognition.ready_for_solve", {"state": self._state})
         return self.snapshot()
+
+    def _knowledge_ready(self) -> bool:
+        """Return whether persisted semantics can safely start solve testing."""
+
+        report = self.store.report()
+        claims = [
+            claim
+            for values in report["claims"].values()
+            if isinstance(values, list)
+            for claim in values
+            if isinstance(claim, Mapping)
+        ]
+        kinds = {claim.get("kind") for claim in claims}
+        supported_control = any(
+            claim.get("kind") in {"control", "rule"}
+            and claim.get("status") == "certain"
+            for claim in claims
+        )
+        return {
+            "game_type",
+            "object_role",
+            "control",
+            "success_condition",
+            "strategy",
+        }.issubset(kinds) and supported_control
 
     def stop(self, reason: str) -> dict[str, Any]:
         self._state = "STOPPED"
