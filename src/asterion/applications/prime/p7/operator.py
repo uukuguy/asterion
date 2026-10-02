@@ -615,6 +615,8 @@ class _IpythonBridgeServer:
 
 
 _COGNITION_OUTPUT_BYTES = 16 * 1024
+_P7_RESPONSE_BUDGET_BYTES = 60 * 1024
+_P7_RESPONSE_HEADROOM_BYTES = 1024
 
 
 def _json_bytes(value: object) -> int:
@@ -1045,11 +1047,52 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def _attach_planning_background(self, result: Mapping[str, object]) -> dict[str, object]:
-        """Attach the newest context without masking an already safe result."""
+        """Attach context only within the aggregate worker response budget."""
         attached = dict(result)
+        available = (
+            _P7_RESPONSE_BUDGET_BYTES
+            - _P7_RESPONSE_HEADROOM_BYTES
+            - _json_bytes(attached)
+        )
+        if available < 128:
+            return attached
         try:
-            attached["planning_background"] = self.planning_background()
-        except P7OperatorError:
+            background = self.planning_background()
+            # ``observe`` and checked actions already expose the current frame.
+            # Do not spend the attachment budget sending that same frame twice.
+            result_frame = attached.get("frame")
+            result_observation = attached.get("observation")
+            if result_frame is None and isinstance(result_observation, Mapping):
+                result_frame = result_observation.get("frame")
+            background_observation = background.get("observation") if isinstance(background, Mapping) else None
+            background_frame = (
+                background_observation.get("frame")
+                if isinstance(background_observation, Mapping)
+                else None
+            )
+            same_settled_frame = (
+                isinstance(result_frame, list)
+                and bool(result_frame)
+                and background_frame == result_frame[-1]
+            )
+            if (
+                result_frame is not None
+                and isinstance(background_observation, Mapping)
+                and (background_frame == result_frame or same_settled_frame)
+            ):
+                background = dict(background)
+                compact_observation = dict(background_observation)
+                compact_observation.pop("frame", None)
+                compact_observation["frame_reused"] = True
+                background["observation"] = compact_observation
+            attached["planning_background"] = _compact_planning_background(
+                background, max_bytes=available
+            )
+            # Keep the primary action/result/observation surface intact even if
+            # the background's minimum projection consumes more than expected.
+            if _json_bytes(attached) > _P7_RESPONSE_BUDGET_BYTES - _P7_RESPONSE_HEADROOM_BYTES:
+                attached.pop("planning_background", None)
+        except (P7OperatorError, ValueError):
             pass
         return attached
 
@@ -1196,17 +1239,6 @@ class _P7BrokerClient:
                         for key in ("status", "accepted", "reason", "next", "transition", "execution_authority", "session", "report")
                         if key in compact
                     }
-            if isinstance(result, Mapping):
-                try:
-                    result = {
-                        **result,
-                        "planning_background": self.planning_background(),
-                    }
-                except P7OperatorError:
-                    # Cognition result remains useful if a transient context
-                    # projection cannot be assembled; the next explicit read
-                    # will retry without changing the semantic ledger.
-                    pass
             # Print the post-operation semantic picture itself.  The request
             # and outcome records explain transport; this record is the
             # cognition the model actually accumulated (claims, status,
@@ -1499,8 +1531,7 @@ class _P7BrokerClient:
             observation = result["observation"]
             terminal = result["terminal"]
             learning_hint = self._broker.learning_hint()
-            planning_background = self.planning_background()
-            return {
+            return self._attach_planning_background({
                 # Put the bounded cue before the full observation frame; the
                 # worker output cap may truncate the latter.
                 "learning_hint": learning_hint,
@@ -1516,13 +1547,12 @@ class _P7BrokerClient:
                 "feedback": result["feedback"],
                 "observation": self._observation_view(observation),
                 "terminal": self._status_view(terminal),
-                "planning_background": planning_background,
                 "batch": {
                     "applied_count": batch.applied_count,
                     "levels_completed": batch.levels_completed,
                     "transitions": [self._transition_view(item) for item in batch.transitions],
                 },
-            }
+            })
         except ArcBrokerError as error:
             reason = str(error)
             if not self._cognition_mode:
@@ -1616,8 +1646,7 @@ class _P7BrokerClient:
         )[:5]
         learning_hint = self._broker.learning_hint()
         view = self._observation_view(observation)
-        planning_background = self.planning_background()
-        return {
+        return self._attach_planning_background({
             # Keep the bounded semantic signal before the potentially large
             # frame so the worker bridge cannot truncate the only reusable
             # learning cue.
@@ -1634,8 +1663,7 @@ class _P7BrokerClient:
                 "no_effect": no_effects.get("no_effect", {}),
                 "top_repeated": top_tried,
             },
-            "planning_background": planning_background,
-        }
+        })
 
 
     def status(self) -> Mapping[str, object]:

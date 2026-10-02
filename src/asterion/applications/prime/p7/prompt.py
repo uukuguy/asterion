@@ -417,9 +417,10 @@ exploration for one exact game and Level 1. This session is not an official
 solve, score attempt, or route-replay test. Begin from the supplied settled
 frame and the persisted semantic report. If the supplied session is already
 `READY`, or its `session.validation.needed` is false, do not propose a new
-first probe and do not repeat validation of settled claims: load the confirmed
-semantic picture, decide whether cognition-guided solve testing is appropriate,
-and save/stop when no new uncertainty is exposed. Otherwise describe in plain
+first probe and do not repeat validation of settled claims: load the current
+semantic picture, including useful unresolved hypotheses, decide whether
+cognition-guided solve testing is appropriate, and save/stop when no new
+uncertainty is exposed. Otherwise describe in plain
 language the game
 type, visible object/color roles, action meanings, success condition, and a
 strategy hypothesis. Propose only falsifiable `undetermined` claims with

@@ -1407,6 +1407,79 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(len(view["frame"]), 1)
         self.assertEqual(view["frame"][-1][0][0], 1)
 
+    def test_attached_background_stays_within_aggregate_response_budget(self) -> None:
+        from asterion.applications.prime.p7.operator import (
+            _COGNITION_OUTPUT_BYTES,
+            _P7BrokerClient,
+            _P7_RESPONSE_BUDGET_BYTES,
+            _P7_RESPONSE_HEADROOM_BYTES,
+            _json_bytes,
+        )
+
+        # Two animation frames are just under the standalone 48 KiB frame
+        # limit.  Including the same observation in a 48 KiB background used
+        # to push the worker response beyond the TypeScript bridge cap.
+        frame = [[[0] * 11_500], [[1] * 11_500]]
+
+        class _BudgetBroker:
+            game = SimpleNamespace(target_level=1, baseline_actions=(1,), action_cap=500)
+
+            def observe(self):
+                return SimpleNamespace(
+                    available_actions=("ACTION1",), frame=frame,
+                    levels_completed=0, state="NOT_FINISHED", win_levels=1,
+                )
+
+            def status(self):
+                return SimpleNamespace(
+                    actions_remaining=500, levels_completed=0,
+                    primitive_actions=0, terminal_reason="active",
+                )
+
+            def learning_hint(self):
+                return {"recommendation": "ordinary_exploration"}
+
+            def tried_actions(self, level):
+                return []
+
+            def last_outcome_summary(self, level):
+                return {"attempts": {}, "no_effect": {}}
+
+            def planning_background(self):
+                return {
+                    "schema": "asterion.prime.p7-planning-background/v1",
+                    "execution_authority": "none",
+                    "observation": {"frame": frame, "state": "NOT_FINISHED"},
+                    "semantic_cognition": {
+                        "semantic": {"claims": {"large": {"claim": "x" * 14_000}}}
+                    },
+                }
+
+            def cognition_update(self, payload):
+                return {
+                    "status": "ok",
+                    "report": {"claims": {"large": {"claim": "y" * 14_000}}},
+                }
+
+        client = _P7BrokerClient.__new__(_P7BrokerClient)
+        client._broker = _BudgetBroker()
+        client._recorder = None
+        client._identities = {}
+        client._variant = "legacy"
+        client._counts = {}
+        client._route_adoption = SimpleNamespace()
+        client._cognition_mode = False
+        client._cognition_update_sequence = 0
+
+        observation = client.observe()
+        cognition = client.cognition_update({"op": "propose"})
+        response_limit = _P7_RESPONSE_BUDGET_BYTES - _P7_RESPONSE_HEADROOM_BYTES
+        self.assertLessEqual(_json_bytes(observation), response_limit)
+        self.assertLessEqual(_json_bytes(cognition), response_limit)
+        self.assertEqual(observation["frame"], frame)
+        self.assertTrue(observation["planning_background"]["observation"].get("frame_reused"))
+        self.assertLessEqual(_json_bytes(cognition["report"]), _COGNITION_OUTPUT_BYTES)
+
     def test_worker_grid_uses_settled_last_frame_and_preserves_single_grid(self) -> None:
         namespace: dict[str, object] = {}
         exec(live_module.client_module_source("/tmp/test-p7.sock"), namespace)

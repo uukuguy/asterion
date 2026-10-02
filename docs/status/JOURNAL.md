@@ -3557,3 +3557,4 @@
 - 2026-10-03 targeted verification passed 204 P7 Python tests, Ruff, diff checks, and TypeScript resource synchronization. Packaged `sp80` L1 with `gpt-6.1-sol` reached native runtime, selected an experiment, executed one ACTION, analyzed the result, and confirmed claims; the bounded witness timed out before level completion, so no solve PASS is claimed.
 - 2026-10-03 promotion-check remains external-limited by the known Pi source-detachment/fixture failures; it is not promoted to PASS.
 - 06:52 P7 partial cognition now feeds solve planning and refreshes after experiments, enabling feedback-driven play [07223470]
+- 06:56 Evidence journal persisted for P7 feedback-loop recovery [66483d49]
