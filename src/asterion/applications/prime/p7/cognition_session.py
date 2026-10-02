@@ -404,6 +404,43 @@ class CognitionSession:
         results = analysis.get("results")
         if isinstance(results, Mapping):
             results = [results]
+        # The cognition prompt asks the model to assess several hypotheses in
+        # one observation.  Accept that semantic envelope explicitly and
+        # normalize it into the durable per-claim result shape.  One probe may
+        # therefore confirm or falsify multiple claims (for example, a moved
+        # actor also supplies evidence about the space it entered).
+        if results is None and "claim_assessments" in analysis:
+            assessments = analysis.get("claim_assessments")
+            if not isinstance(assessments, Sequence) or isinstance(assessments, (str, bytes)) or not assessments:
+                raise CognitionSessionError("claim assessments are unavailable")
+            normalized: list[dict[str, str]] = []
+            status_map = {
+                "certain": "certain",
+                "confirmed": "certain",
+                "supported": "certain",
+                "falsified": "falsified",
+                "refuted": "falsified",
+                "contradicted": "falsified",
+                "not_supported": "falsified",
+                "undetermined": "undetermined",
+                "still_undetermined": "undetermined",
+                "supported_but_unconfirmed": "undetermined",
+                "weakened_but_unconfirmed": "undetermined",
+                "not_supported_but_unconfirmed": "undetermined",
+            }
+            for item in assessments:
+                if not isinstance(item, Mapping):
+                    raise CognitionSessionError("invalid claim assessment")
+                claim_id = item.get("claim_id", item.get("id"))
+                assessment = item.get("assessment", item.get("status", "undetermined"))
+                if type(claim_id) is not str or type(assessment) is not str:
+                    raise CognitionSessionError("invalid claim assessment")
+                status = status_map.get(assessment.strip().lower(), "undetermined")
+                explanation = item.get("reason", item.get("explanation", item.get("observation", "LLM analysis")))
+                if not isinstance(explanation, str):
+                    explanation = json.dumps(explanation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+                normalized.append({"claim_id": claim_id, "status": status, "explanation": explanation})
+            results = normalized
         if results is None:
             raw_ids = analysis.get("claim_ids", list(self._pending["claim_ids"]))
             if isinstance(raw_ids, str):
@@ -537,12 +574,38 @@ class CognitionSession:
         self._emit("cognition.stopped", {"reason": _text(reason, "reason"), "state": self._state})
         return self.snapshot()
 
+    def _validation_status(self) -> dict[str, Any]:
+        """Describe whether another useful cognition experiment can run."""
+
+        report = self.store.report()
+        claims = [
+            claim
+            for values in report["claims"].values()
+            if isinstance(values, list)
+            for claim in values
+            if isinstance(claim, Mapping)
+        ]
+        open_claims = [claim for claim in claims if claim.get("status") == "undetermined"]
+        actionable = [
+            claim["id"] for claim in open_claims
+            if isinstance(claim.get("next_test"), str) and bool(claim["next_test"].strip())
+        ]
+        if self._knowledge_ready():
+            return {"needed": False, "possible": False, "actionable_claim_ids": [], "reason": "knowledge-ready"}
+        if self._state == "STOPPED":
+            return {"needed": True, "possible": False, "actionable_claim_ids": actionable, "reason": "session-stopped"}
+        if self._episode_actions >= self.max_actions_per_episode and self._resets >= self.max_resets:
+            return {"needed": True, "possible": False, "actionable_claim_ids": actionable, "reason": "validation-budget-exhausted"}
+        if not actionable:
+            return {"needed": True, "possible": False, "actionable_claim_ids": [], "reason": "no-actionable-hypotheses"}
+        return {"needed": True, "possible": True, "actionable_claim_ids": actionable, "reason": "actionable-hypotheses-remain"}
+
     def snapshot(self, *, emit_event: bool = True) -> dict[str, Any]:
         if type(emit_event) is not bool:
             raise CognitionSessionError("invalid snapshot mode")
         if emit_event:
             self._emit("cognition.snapshot", {"state": self._state})
-        return {"state": self._state, "report": self.store.report(), "session": {"schema": "asterion.prime.p7-cognition-session/v1", "session_id": self.session_id, "episode": self._episode, "episode_actions": self._episode_actions, "resets": self._resets, "state": self._state, "pending": None if self._pending is None else {"claim_ids": list(self._pending["claim_ids"]), "question": self._pending["question"], "information_gain": self._pending["information_gain"], "action_name": self._pending["action_name"], "expected": dict(self._pending["expected"])}}, "events": list(self.events[-32:]), "execution_authority": "none"}
+        return {"state": self._state, "report": self.store.report(), "session": {"schema": "asterion.prime.p7-cognition-session/v1", "session_id": self.session_id, "episode": self._episode, "episode_actions": self._episode_actions, "resets": self._resets, "state": self._state, "pending": None if self._pending is None else {"claim_ids": list(self._pending["claim_ids"]), "question": self._pending["question"], "information_gain": self._pending["information_gain"], "action_name": self._pending["action_name"], "expected": dict(self._pending["expected"])}, "validation": self._validation_status()}, "events": list(self.events[-32:]), "execution_authority": "none"}
 
 
 __all__ = ["CognitionPersistenceError", "CognitionSession", "CognitionSessionError"]

@@ -374,7 +374,13 @@ P7_COGNITION_APPENDIX = """\n\nThis is a cognition-exploration session, not an o
 Do not optimize for a human baseline and do not import a prior route. Spend
 bounded experiments building the semantic game picture. After each settled
 observation update p7_cognition_update using support, counterexample, or
-undetermined status. Use RESET to discard the current episode experiment while
+undetermined status. One experiment may test several claims at once: include
+every selected claim that the observation bears on, including passability when
+a moving object visibly enters or crosses a candidate background region. Use
+the canonical analysis envelope `{"results":[{"claim_id":"...","status":"certain|falsified|undetermined","explanation":"..."}]}`;
+the results list may contain multiple claims. `supported_but_unconfirmed`,
+`weakened_but_unconfirmed`, and similar language means `undetermined` until a
+later discriminating observation. Use RESET to discard the current episode experiment while
 preserving the semantic ledger. Stop with `ready` when the report has a useful
 language description and supported control evidence; otherwise stop with the
 actual safety reason. The final report must state what is known, unknown, and
@@ -418,9 +424,11 @@ uses the broker shape `{"action":{"name":"ACTION1","data":{}},"expect":{"state":
 or a concrete `cell`/terminal expectation; `frame_changed` belongs to the
 cognition experiment predicate, not the checked-action `expect` object. A
 rejected action plan is recoverable: correct it and retry once. Dispatch the
-action exactly once, then analyze the settled result. A frame change is
-evidence of change, not proof of a
-particular object role or goal. Use RESET when an episode is contaminated;
+action exactly once, then analyze the settled result. A single settled result
+may support several selected claims; assess them together in
+`analysis.results`, and use the displacement itself to assess whether the
+object crossed or occupied a candidate passable region. A frame change is
+evidence of change, not proof of a particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
 `p7_cognition_update({"op":"ready"})`. A successful ready response is a
@@ -430,7 +438,10 @@ recording new falsifiable hypotheses and experiments when the route exposes
 an uncertainty. The response includes `next: "solve"` and
 `transition: "cognition-ready-to-solve"`. If safety limits or missing
 evidence prevent readiness, the tool returns `status: "not-ready"`; continue
-with a new experiment instead of repeating `ready`. Call `stop` only with the
+with a new experiment instead of repeating `ready`. Read the returned
+`session.validation` object: if `needed` is true and `possible` is false,
+record the last semantic update and call `stop` with that actual reason; do
+not loop on `ready` when no further validation can run. Call `stop` only with the
 actual safety reason. Never import or replay a
 prior success route and never claim official completion from this session. If
 a cognition update returns `status: "rejected"`, repair the requested object
