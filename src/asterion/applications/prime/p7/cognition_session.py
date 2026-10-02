@@ -374,7 +374,10 @@ class CognitionSession:
         action_data = action.get("data", {})
         if not isinstance(action_data, Mapping) or any(type(key) is not str or type(value) is not int for key, value in action_data.items()):
             raise CognitionSessionError("experiment action data is unavailable")
-        expected = experiment.get("expected")
+        # Models sometimes call the observable predicate ``predicate`` while
+        # the public broker shape names it ``expected``.  Both are the same
+        # non-authoritative observation contract; normalize the alias here.
+        expected = experiment.get("expected", experiment.get("predicate"))
         if not isinstance(expected, Mapping) or not expected:
             raise CognitionSessionError("experiment expected predicate is unavailable")
         try:
