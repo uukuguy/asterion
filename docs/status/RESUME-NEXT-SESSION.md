@@ -1,60 +1,47 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-02 02:05. Session remains active. Recovery synchronization and remote push are complete; this is not a final handoff.
+> Updated: 2026-10-02 08:14 Asia/Shanghai. Session remains active; this is not a final handoff.
 
 ## TL;DR
 
-- The global experience foundation is implemented and integrated: immutable observations, persistent game-wide mechanisms, and bounded counterfactual simulation.
-- Focused implementation verification passed, but real SP80 L1→L2→L3 capability remains unproven. The last pure run stopped at the 10-minute limit in L2.
-- Resume with static gates and a short tool-surface check before another live run. Keep offline route injection disabled.
+- P7 persistence, probe eligibility, and replay diagnostics are now fail-closed and independently reviewed.
+- ACTION4 still has an unrepresentable moving edge-marker residual; no certificate or model-search authority exists for it.
+- A fresh SP80 L1 witness was cancelled by external RPC after 5 current actions; it is not solve evidence.
 
-## Where things stand
+## Verified changes
 
-- Branch: `main`; working tree was clean before this recovery checkpoint.
-- Model used in the last live run: `gpt-6.1-sol`.
-- Last SP80 run: L1 used a replay-verified 6-step prefix; L2 executed 22 current-level actions and did not complete within 10 minutes; `confirmed_model=false`, `simulator=absent`, no transport or permission errors.
-- Focused verification after the integration: 164 P7/Broker/tool/new-module tests passed; official Operator tests: 12 passed; `py_compile` and `git diff --check` passed.
-- No P7 process is running.
+- `compile_effect_hypothesis()` rejects `unsupported-residual` candidates.
+- `ExperienceInducer.probe_plan()` only reports candidates that compile; rejected candidates remain diagnostic.
+- Prefix diagnostics distinguish `prior_prefix_actions` from actual `replayed_prefix_actions`, including partial replay and excluding later live actions.
+- Persistence failures retain WorldMap/transition learning while preserving bounded unavailable diagnostics.
+- 229 focused Python tests, 32 TypeScript tests (26 pass, 6 external Pi skips), lint, docs-check, and resource parity pass.
+- Independent review of the current code reports P0/P1/P2/P3 = 0.
 
-## Current verified slice
+## Live evidence boundary
 
-- Fixed the Unix worker bridge whitelist so `observation_state`, `game_mechanics`, and `counterfactual_search` are callable through the actual socket protocol.
-- Regression coverage now exercises all three calls without dispatching `act` or `act_checked`.
-- `make lint`, `make docs-check`, `git diff --check`, and the focused P7 suite (165 tests) pass. Existing asyncio `ResourceWarning` messages do not change the successful result.
-- Remote `origin/main` is synchronized at `efaece6d`; no unpushed commits or working-tree changes remain.
+- Run `p7-live-20261001235840-4c37429319e405352e45c96d` ended with `cleanup=true`, `sealed_trace=false`, `replay_verified=false`, `primitive_action_count=5`, and `external_cancel`; do not count it as a solve.
+- Historical L1 prefixes are context or replay evidence, not fresh P7 solving.
+- ACTION4 recordings show a stable 20×4 block translation plus 14→0 edge markers whose positions and counts vary. Current DSL cannot safely express that residual.
+- Full `make promotion-check` remains unresolved: prior gate was red and a later run was stopped after prolonged no output. Do not claim PASS.
 
-## Recovered durable work
+## Next actions
 
-- `d85b03b8`, `f7c51d1b`: immutable `ObservationState` and reserved-field validation.
-- `00b4544e`, `b03b6368`: bounded atomic `GameMechanicsStore` with exact-game identity, scope, evidence, conflict, and advisory-only projection.
-- `63492b13`, `74f26d89`, `eb43b2ed`, `5a2f8d95`: counterfactual hypothesis branches, divergence diagnostics, final-level WIN boundary, and ARC action-data compatibility.
-- `b1a114a3`: Broker, Operator, worker bridge, live RPC, prompt, and integration tests for the new experience path.
-- `b6fcc865`, `eab0db3a`, `2a6441c4`, `94829aca`: pause checkpoint, status journal, final handoff, and handoff recording.
-- `CURRENT-STATE.md`: refreshed structural architecture and evidence boundary.
+1. Keep unsupported residuals diagnostic-only unless a bounded, context-sensitive rule is backed by multiple fresh transitions and exact replay validation.
+2. Diagnose the external RPC cancellation before another live witness; use a bounded fresh run only after the runtime path is responsive.
+3. If a new live run succeeds, report current-level actions separately from prior prefix context and replay actions.
 
-## Next steps (immediate)
-
-1. Resume pure P7 SP80 with `offline_optimization_enabled=false`; track current-level actions, candidate lifecycle, confirmed model, simulator status, prediction matches/conflicts, and whether persistent memory changes the next decision.
-2. Compare a cold-start run with a warm-start run before claiming that the agent becomes more skilled through repetition.
-
-## Do not repeat these paths
-
-- Do not treat a replayed L1 prefix or an offline route as a fresh P7 solve.
-- Do not inject optimizer routes into capability runs.
-- Do not treat a persisted hypothesis, transition ledger, or counterfactual path as an executable certificate.
-- Stop after three consecutive failed levels or when a reproducible generic mechanism defect appears; repair first.
-
-## Ready-to-paste commands
+## Commands
 
 ```bash
-make lint
-make docs-check
 uv run python -m unittest -q \
   tests.test_prime_p7_global_experience \
   tests.test_prime_p7_game_mechanics \
-  tests.test_prime_p7_observation_state \
-  tests.test_prime_p7_hypothesis_simulator \
+  tests.test_prime_p7_experience_induction \
+  tests.test_prime_p7_experience_simulator \
+  tests.test_prime_p7_experience_e2e \
   tests.test_prime_p7_native_broker \
   tests.test_prime_p7_live_command
-make asterion-prime-p7-level-witness GAME=sp80 LEVEL=3
+npm --prefix packages/typescript/asterion-prime-extension test
+make lint
+make docs-check
 ```
