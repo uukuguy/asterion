@@ -518,19 +518,19 @@ class CognitionSession:
             for claim in values
             if isinstance(claim, Mapping)
         ]
-        kinds = {claim.get("kind") for claim in claims}
-        supported_control = any(
-            claim.get("kind") in {"control", "rule"}
-            and claim.get("status") == "certain"
-            for claim in claims
-        )
-        return {
+        required_kinds = {
             "game_type",
             "object_role",
             "control",
             "success_condition",
             "strategy",
-        }.issubset(kinds) and supported_control
+        }
+        certain_kinds = {
+            claim.get("kind")
+            for claim in claims
+            if claim.get("status") == "certain"
+        }
+        return required_kinds.issubset(certain_kinds)
 
     def stop(self, reason: str) -> dict[str, Any]:
         self._state = "STOPPED"

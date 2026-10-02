@@ -151,6 +151,11 @@ class CognitionSessionTests(unittest.TestCase):
             session.select_experiment({"claim_ids": ["control"], "question": "move?", "information_gain": "movement", "action": {"name": "ACTION1"}, "expected": {"frame": [[2]]}})
             session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
             session.analyze({"results": [{"claim_id": "control", "status": "certain", "explanation": "Frame changed."}]})
+            for claim_id in ("type", "role", "goal", "strategy"):
+                session.store.resolve(
+                    claim_id, status="certain", evidence=f"s3/{claim_id}",
+                    explanation="Independent runtime evidence supports the claim.",
+                )
             ready = session.ready_for_solve()
             self.assertEqual(ready["state"], "READY")
             self.assertIn("cognition.ready_for_solve", [event["type"] for event in session.events])
@@ -169,6 +174,11 @@ class CognitionSessionTests(unittest.TestCase):
             session.select_experiment({"claim_ids": ["control"], "question": "move?", "information_gain": "movement", "action": {"name": "ACTION1"}, "expected": {"frame": [[2]]}})
             session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
             session.analyze({"results": [{"claim_id": "control", "status": "certain", "explanation": "Moved."}]})
+            for claim_id in ("type", "role", "goal", "strategy"):
+                session.store.resolve(
+                    claim_id, status="certain", evidence=f"ready-followup/{claim_id}",
+                    explanation="Independent runtime evidence supports the claim.",
+                )
             session.ready_for_solve()
             accepted = session.propose({"claims": [{
                 "id": "solve-next", "kind": "strategy", "subject": "L1", "claim": "Repeat the tested movement.", "reason": "Control is confirmed.", "falsifier": "It does not progress.", "next_test": "Apply ACTION1 again.",
@@ -187,10 +197,11 @@ class CognitionSessionTests(unittest.TestCase):
                 {"id": "known-goal", "kind": "success_condition", "subject": "goal", "claim": "Reach the goal.", "reason": "The level reports completion there.", "falsifier": "The level does not complete.", "next_test": "Reach it."},
                 {"id": "known-strategy", "kind": "strategy", "subject": "L1", "claim": "Use confirmed movement semantics.", "reason": "The control is known.", "falsifier": "The movement diverges.", "next_test": "Follow the current model."},
             ]})
-            first.store.resolve(
-                "known-control", status="certain", evidence="first-run/action-1",
-                explanation="The runtime observed the player move.",
-            )
+            for claim_id in ("known-type", "known-role", "known-control", "known-goal", "known-strategy"):
+                first.store.resolve(
+                    claim_id, status="certain", evidence=f"first-run/{claim_id}",
+                    explanation="The runtime observed evidence supporting the claim.",
+                )
 
             resumed = CognitionSession(self._store(root), session_id="second-run")
             snapshot = resumed.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
