@@ -48,6 +48,8 @@ _ANALYSIS_STATUS_ALIASES = {
     "weakened_but_unconfirmed": "undetermined",
     "not_supported_but_unconfirmed": "undetermined",
     "partially_supported_but_unconfirmed": "undetermined",
+    "inconclusive": "undetermined",
+    "inconclusive_but_unconfirmed": "undetermined",
 }
 
 
@@ -478,9 +480,11 @@ class CognitionSession:
         normalized_results: list[dict[str, object]] = []
         seen_claim_ids: set[str] = set()
         for item in results:
-            if not isinstance(item, Mapping) or type(item.get("claim_id")) is not str:
+            if not isinstance(item, Mapping):
                 raise CognitionSessionError("analysis references an unselected claim")
-            claim_id = item["claim_id"]
+            claim_id = item.get("claim_id", item.get("id"))
+            if type(claim_id) is not str:
+                raise CognitionSessionError("analysis references an unselected claim")
             if claim_id not in allowed:
                 raise CognitionSessionError("analysis references an unselected claim")
             if claim_id in seen_claim_ids:
@@ -488,8 +492,11 @@ class CognitionSession:
             seen_claim_ids.add(claim_id)
             normalized_results.append({
                 "claim_id": claim_id,
-                "status": _normalize_analysis_status(item.get("status", item.get("result"))),
-                "explanation": _text(item.get("explanation"), "explanation"),
+                "status": _normalize_analysis_status(item.get("status", item.get("result", item.get("assessment")))),
+                "explanation": _text(
+                    item.get("explanation", item.get("evidence", item.get("observation", item.get("reason")))),
+                    "explanation",
+                ),
             })
         results = normalized_results
         evidence_ref = f"{self.session_id}/episode-{self._episode}/action-{self._episode_actions}"

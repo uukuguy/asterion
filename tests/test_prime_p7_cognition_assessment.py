@@ -34,6 +34,15 @@ class CognitionAssessmentTests(unittest.TestCase):
             self.assertEqual(claim["status"], "certain")
             self.assertEqual(claim["evidence_count"], 1)
 
+    def test_results_accept_model_id_and_evidence_aliases(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = self._prepared_session(Path(directory), "model-aliases")
+            snapshot = session.analyze({
+                "results": [{"id": "probe", "result": "supported", "evidence": "moved"}],
+            })
+            claim = next(item for item in snapshot["report"]["control"] if item["id"] == "probe")
+            self.assertEqual(claim["status"], "certain")
+
     def test_duplicate_claims_do_not_partially_persist(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
