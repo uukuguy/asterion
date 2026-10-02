@@ -3505,4 +3505,5 @@
 - 2026-10-02 cognition prompt 补齐提案与实验 JSON 约束，降低模型首轮无效请求 eb2295e7
 - 2026-10-02 加固 cognition 状态谓词、事件持久化失败和 bootstrap 冲突校验，保持主合同 fail-closed 14abf17c
 - 2026-10-02 cognition 模式的 checked-action 校验改为可恢复，并明确 broker expect 结构，避免首轮动作桥接中止 1dd84117
+- 2026-10-02 ready 不足证据改为结构化 not-ready，避免模型重复终止并继续认知实验 10a6622d
 - 2026-10-02 启动认知幂等写入三条基础未知假说并支持非权威 confidence，保持 undetermined 与 execution_authority=none [0d5a8254]
