@@ -456,12 +456,25 @@ class ArcBroker:
                 return value
             if op == "snapshot":
                 return session.snapshot()
-        except (CognitionSessionError, TypeError, ValueError) as exc:
+        except CognitionSessionError as exc:
             print("[p7-cognition] rejected " + json.dumps({
                 "op": op,
                 "reason": str(exc) if isinstance(exc, CognitionSessionError) else "invalid-operation-shape",
                 "payload_keys": sorted(str(key) for key in payload),
                 "proposal_keys": sorted(str(key) for key in payload.get("proposal", {})) if isinstance(payload.get("proposal"), Mapping) else None,
+            }, separators=(",", ":")), file=sys.stderr, flush=True)
+            return {
+                "status": "rejected",
+                "reason": str(exc),
+                "retryable": True,
+                "next": "select_experiment",
+                "execution_authority": "none",
+            }
+        except (TypeError, ValueError) as exc:
+            print("[p7-cognition] rejected " + json.dumps({
+                "op": op,
+                "reason": "invalid-operation-shape",
+                "detail": str(exc)[:160],
             }, separators=(",", ":")), file=sys.stderr, flush=True)
             raise ArcBrokerError("unavailable") from None
         raise ArcBrokerError("unavailable")
