@@ -3535,3 +3535,4 @@
 - 2026-10-02 tightened first-probe gate: any OBSERVE/PROPOSE cognition session with zero episode actions blocks detour tools until experiment/action begins.
 - 2026-10-02 cognition logs now print one hypothesis line with reason/falsifier/context/next_test/evidence, and proposal cycles cannot repeat before experiment analysis.
 - 2026-10-02 cognition proposal rejection now returns explicit reason and next=select_experiment instead of generic unavailable, preventing retry loops.
+- 2026-10-02 live evidence showed bridge-only gate missed direct P7 facade calls; first-probe enforcement now lives in _P7BrokerClient query methods.
