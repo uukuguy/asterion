@@ -476,33 +476,32 @@ def build_p7_runtime(
             ):
                 raise RuntimeFactoryError(_ERROR)
             expected_options.update(deadline_ms="none", max_callbacks="none")
-        if (
-            context.provider_id != "prime-applications"
-            or context.application_id != "prime.arc-agi-3-solving"
-            or context.application_version != "1.0.0"
-            or context.runtime_id != "asterion.prime"
-            or set(context.host_services) != _HOST_CAPABILITIES
-            or launch is None
-            or declared != (provider, model)
-            or not launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID)
-            or launch.tool_registry.allowed_tool_names != P7_APPLICATION_TOOL_NAMES
-            or type(ipython) is not PersistentIpythonHost
-            or getattr(ipython, "_closed", True)
-            or getattr(ipython, "_lost", True)
-            or type(broker) is not ArcBroker
-            or dict(context.options) != {
-                **expected_options,
-                "max_actions": str(broker.game.action_cap),
-            }
-            or trace_adapter is None
-            or trace is None
-            or not trace_adapter.matches_runtime_broker(broker)
-            or not trace_adapter.runtime_ready()
-            or type(trace) is not PrimeTraceRecorder
-            or trace._seal is not None
-            or trace._trace_fd is None
-        ):
-            raise RuntimeFactoryError(_ERROR)
+        checks = {
+            "provider_id": context.provider_id == "prime-applications",
+            "application_id": context.application_id == "prime.arc-agi-3-solving",
+            "application_version": context.application_version == "1.0.0",
+            "runtime_id": context.runtime_id == "asterion.prime",
+            "host_services": set(context.host_services) == _HOST_CAPABILITIES,
+            "launch": launch is not None,
+            "selection": declared == (provider, model),
+            "tool_registry": launch is not None and launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID),
+            "allowlist": launch is not None and launch.tool_registry.allowed_tool_names == P7_APPLICATION_TOOL_NAMES,
+            "ipython_type": type(ipython) is PersistentIpythonHost,
+            "ipython_open": not getattr(ipython, "_closed", True),
+            "ipython_lost": not getattr(ipython, "_lost", True),
+            "broker_type": type(broker) is ArcBroker,
+            "options": type(broker) is ArcBroker and dict(context.options) == {**expected_options, "max_actions": str(broker.game.action_cap)},
+            "trace_service": trace_adapter is not None,
+            "trace": trace is not None,
+            "trace_broker": trace_adapter is not None and trace_adapter.matches_runtime_broker(broker),
+            "trace_ready": trace_adapter is not None and trace_adapter.runtime_ready(),
+            "trace_type": type(trace) is PrimeTraceRecorder,
+            "trace_sealed": trace is not None and trace._seal is None,
+            "trace_fd": trace is not None and trace._trace_fd is not None,
+        }
+        if not all(checks.values()):
+            failed = ",".join(name for name, passed in checks.items() if not passed)
+            raise RuntimeFactoryError(f"{_ERROR}: {failed}")
         # Reconstruct the framework-owned launch objects from plain data. The
         # pinned extension is already acquired (fd + digest) by the operator;
         # this factory consumes those exact descriptors without re-resolving

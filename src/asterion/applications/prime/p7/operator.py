@@ -865,7 +865,13 @@ class _P7BrokerClient:
                     )
                     break
             return result
-        except Exception:
+        except Exception as error:
+            print(
+                "[p7-cognition] cognition-failure "
+                + json.dumps({"error_type": type(error).__name__, "detail": str(error)[:256]}, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def cognition_update(self, payload: Mapping[str, object]) -> dict[str, object]:
@@ -1899,8 +1905,16 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
     status = getattr(client, "status", None)
     if not callable(observe) or not callable(status):
         raise P7OperatorError("P7 host services are unavailable")
-    observation = observe()
-    broker_status = status()
+    try:
+        observation = observe()
+    except Exception as error:
+        print("[p7-cognition] initial-observe-failure " + json.dumps({"error_type": type(error).__name__, "detail": str(error)[:256]}, separators=(",", ":")), file=sys.stderr, flush=True)
+        raise
+    try:
+        broker_status = status()
+    except Exception as error:
+        print("[p7-cognition] initial-status-failure " + json.dumps({"error_type": type(error).__name__, "detail": str(error)[:256]}, separators=(",", ":")), file=sys.stderr, flush=True)
+        raise
     if not isinstance(observation, Mapping) or not isinstance(broker_status, Mapping):
         raise P7OperatorError("P7 host services are unavailable")
     raw_frame = observation.get("frame")
@@ -1976,10 +1990,12 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
             )
     cognition = getattr(client, "cognition", None)
     if callable(cognition):
+        print("[p7-cognition] initial-stage {\"stage\":\"cognition-projection\"}", file=sys.stderr, flush=True)
         try:
             cognition_projection = cognition()
         except Exception:
             cognition_projection = {}
+        print("[p7-cognition] initial-stage {\"stage\":\"cognition-projection-ready\"}", file=sys.stderr, flush=True)
         if isinstance(cognition_projection, Mapping):
             semantic = cognition_projection.get("semantic")
             if isinstance(semantic, Mapping):
@@ -1994,11 +2010,12 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
                     semantic,
                     "p7_cognition",
                 )
-            add_projection(
-                "## Persistent game cognition (advisory; no execution authority)",
-                "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
-                cognition_projection, "p7_cognition",
-            )
+            if not semantic_only:
+                add_projection(
+                    "## Persistent game cognition (advisory; no execution authority)",
+                    "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
+                    cognition_projection, "p7_cognition",
+                )
     if include_prior:
         mechanics_prior = getattr(client, "mechanics_prior", None)
         if not callable(mechanics_prior):
@@ -2503,7 +2520,17 @@ def build_p7_operator_resources(
             _bridge=bridge,
             _prediction_client=prediction_client,
         )
-    except Exception:
+    except Exception as error:
+        print(
+            "[p7-cognition] resource-failure "
+            + json.dumps(
+                {"error_type": type(error).__name__, "detail": str(error)[:256]},
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
         if bridge is not None:
             bridge.close()
         if trace is not None:
@@ -3198,11 +3225,13 @@ async def run_live(
                         expectations=parsed_expectations,
                     )
         if prediction_client is not None:
+            print("[p7-cognition] runtime-stage {\"stage\":\"initial-context\"}", file=sys.stderr, flush=True)
             prompt = prompt + "\n\n" + _initial_game_context(
                 prediction_client,
                 include_prior=prefix is not None and prefix.levels_completed > 0,
                 semantic_only=strategy == "cognition",
             )
+            print("[p7-cognition] runtime-stage {\"stage\":\"initial-context-ready\"}", file=sys.stderr, flush=True)
         broker_for_log = resources_.host_services.get("prime.arc-broker")
         ledger_for_log = (
             _bounded_semantic_report(broker_for_log.cognition_projection().get("semantic"))
@@ -3223,8 +3252,10 @@ async def run_live(
             flush=True,
         )
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
+        print("[p7-cognition] runtime-stage {\"stage\":\"resolve-application\"}", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
+        print("[p7-cognition] runtime-stage {\"stage\":\"factory\"}", file=sys.stderr, flush=True)
         runtime = assembly.runtime_binding.factory(
             RuntimeFactoryContext(
                 provider_id="prime-applications",
@@ -3236,6 +3267,7 @@ async def run_live(
                 host_services=resources_.host_services,
             )
         )
+        print("[p7-cognition] runtime-stage {\"stage\":\"factory-ready\"}", file=sys.stderr, flush=True)
         result = await run_composed_application(
             assembly.plan,
             implementations=application.implementations,
@@ -3298,6 +3330,7 @@ async def run_live(
                     "run_id": run_id,
                     "error_type": type(error).__name__,
                     "reason": reason,
+                    "detail": str(error)[:256],
                     "runtime_started": runtime is not None,
                 },
                 sort_keys=True,
