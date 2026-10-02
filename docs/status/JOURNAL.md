@@ -3547,3 +3547,4 @@
 - 2026-10-02 P7 cognition now validates result aliases and duplicate/unknown assessments atomically, preserves validation control in compact bridge output and cognition-state logs, and instructs displacement probes to assess implicated passability claims together.
 - 13:53 commit 7203ce88 tightened P7 cognition validation aliases, compact-state visibility, and displacement/passability guidance.
 - 14:00 commit a8daf8f5 made multi-claim cognition evidence resolution transactional so invalid later claims cannot partially persist.
+- 14:08 commit 2bf62053 deferred cognition hypothesis events until transactional claim resolution succeeds, keeping failed analyses event-consistent.
