@@ -3494,3 +3494,5 @@
 - 08:08 diagnostics now distinguish prior prefix context from actually replayed actions, including partial replay counts on failure [0d50589b, f340c0c4]
 - 08:08 fresh SP80 L1 witness cancelled by external RPC prompt after 5 current actions; cleanup=true, sealed/replay=false, not counted as a solve
 - 08:08 ACTION4 recording analysis confirms moving edge markers are not representable by the current safe DSL; fail-closed boundary retained
+- 08:14 corrected prefix replay accounting so successful runs exclude later live actions and partial failures retain only applied prefix transitions [8d2c8678]
+- 08:14 Independent final review: P0/P1/P2/P3 all clear; 229 Python, 32 TypeScript (26 pass/6 external skips), lint and docs checks pass
