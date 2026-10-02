@@ -640,7 +640,22 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
             if group == "undetermined" or not isinstance(claims, list):
                 continue
             selected: list[dict[str, object]] = []
-            for claim in claims[:32]:
+            # The durable ledger can contain many earlier wording variants.
+            # Keep resolved evidence plus the newest open hypotheses in the
+            # model-facing view, so accumulation remains useful without
+            # burying the next experiment under stale repeats.
+            resolved = [
+                claim for claim in claims
+                if isinstance(claim, Mapping)
+                and claim.get("status") in {"certain", "falsified"}
+            ]
+            open_claims = [
+                claim for claim in claims
+                if isinstance(claim, Mapping)
+                and claim.get("status") not in {"certain", "falsified"}
+            ]
+            prioritized = [*resolved[:8], *open_claims[-24:]]
+            for claim in prioritized:
                 if not isinstance(claim, Mapping):
                     continue
                 claim_id = claim.get("id")
