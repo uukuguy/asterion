@@ -1010,7 +1010,7 @@ class _P7BrokerClient:
                 if _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
                     result = {
                         key: compact.get(key)
-                        for key in ("status", "accepted", "reason", "execution_authority", "session", "report")
+                        for key in ("status", "accepted", "reason", "next", "transition", "execution_authority", "session", "report")
                         if key in compact
                     }
             log_update(

@@ -433,14 +433,25 @@ class ArcBroker:
         try:
             if op == "propose":
                 value = session.propose(payload.get("proposal", {}))
-                return {"status": "ok", "accepted": value, **session.snapshot()}
+                return {
+                    "status": "ok",
+                    "accepted": value,
+                    "next": "select_experiment",
+                    **session.snapshot(),
+                }
             if op == "select_experiment":
-                return session.select_experiment(payload.get("experiment", {}))
+                return {
+                    **session.select_experiment(payload.get("experiment", {})),
+                    "next": "p7_act_checked",
+                }
             if op == "analyze":
-                return session.analyze(payload.get("analysis", {}))
+                return {
+                    **session.analyze(payload.get("analysis", {})),
+                    "next": "select_experiment_or_ready",
+                }
             if op == "reset":
                 self._reset_cognition_runtime()
-                return session.reset_episode()
+                return {**session.reset_episode(), "next": "propose_or_select_experiment"}
             if op == "ready":
                 try:
                     value = session.ready_for_solve()
