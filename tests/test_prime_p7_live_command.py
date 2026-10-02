@@ -55,6 +55,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             _prefix_action_diagnostics(prefix, applied=True),
             {"replayed_prefix_actions": 2, "prior_prefix_actions": 2},
         )
+        self.assertEqual(_prefix_replayed_count(prefix, 10, 11), 1)
         self.assertEqual(_prefix_replayed_count(prefix, 10, 12), 2)
         self.assertEqual(_prefix_replayed_count(prefix, 10, 15), 2)
 
