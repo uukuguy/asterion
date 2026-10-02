@@ -756,6 +756,16 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable")
         try:
             return self._broker.cognition_update(payload)
+        except ArcBrokerError:
+            # Model-authored cognition records can be rejected by the
+            # semantic contract. Return a bounded, recoverable result so a
+            # malformed proposal does not poison the bridge or end the whole
+            # cognition episode.
+            return {
+                "status": "rejected",
+                "reason": "invalid-cognition-operation",
+                "execution_authority": "none",
+            }
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 

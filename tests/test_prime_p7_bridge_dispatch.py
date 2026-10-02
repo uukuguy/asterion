@@ -1,7 +1,8 @@
 import json
 import unittest
 
-from asterion.applications.prime.p7.operator import _IpythonBridgeServer
+from asterion.applications.prime.p7.broker import ArcBrokerError
+from asterion.applications.prime.p7.operator import _IpythonBridgeServer, _P7BrokerClient
 
 
 class _Facade:
@@ -85,6 +86,18 @@ class TestP7BridgeDispatch(unittest.TestCase):
             with self.subTest(method=method):
                 response = self.bridge._dispatch_method_call("request", method, params)
                 self.assertEqual(response["status"], "error")
+
+    def test_rejected_cognition_payload_is_recoverable(self):
+        class RejectingBroker:
+            def cognition_update(self, payload):
+                raise ArcBrokerError("unavailable")
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = RejectingBroker()
+        result = client.cognition_update({"op": "propose"})
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(result["reason"], "invalid-cognition-operation")
+        self.assertEqual(result["execution_authority"], "none")
 
 
 if __name__ == "__main__":

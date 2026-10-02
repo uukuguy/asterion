@@ -21,7 +21,12 @@ and level, not as a route. On a fresh level, first describe in plain language
 the game type, visible object/color roles, action meanings, success condition,
 and a falsifiable strategy hypothesis. Submit those hypotheses with
 `p7_cognition_update({"op":"propose","proposal":{"claims":[...]}})`;
-the tool accepts only `undetermined` hypotheses and never executes actions.
+Each claim must include `id`, `kind`, `subject`, `claim`, `reason`,
+`falsifier`, and `next_test`; `kind` is one of `game_type`, `object_role`,
+`control`, `success_condition`, `rule`, or `strategy`. Omit `status` and
+`evidence` from proposals. A response with `status: "rejected"` is a
+recoverable validation result: correct the payload and retry. The tool accepts
+only `undetermined` hypotheses and never executes actions.
 Before a learning probe, call `p7_cognition_update({"op":"select_experiment",
 "experiment":{...}})` with claim ids, the information question, expected
 distinguishing result, and one action. Dispatch exactly that action, then call
@@ -387,7 +392,9 @@ RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
 `p7_cognition_update({"op":"ready"})`; if safety limits or missing evidence
 prevent readiness, call `stop` with the actual reason. Never import or replay a
-prior success route and never claim official completion from this session."""
+prior success route and never claim official completion from this session. If
+a cognition update returns `status: "rejected"`, repair the requested object
+and retry; do not stop solely because a proposal was rejected."""
 
 
 # Tool surface is rendered at run start from the application's
