@@ -3545,3 +3545,4 @@
 - 19:56 P7 cognition now prints bootstrap hypotheses, cognition reads, and post-update semantic state; per-session JSONL preserves every claim change [c6a007f6]
 - 2026-10-02 commits 68a098ed/96993bc4 resume persisted exact-level cognition and require core knowledge certainty before READY; f86caec1 persists multi-claim assessments and validation continuation state.
 - 2026-10-02 P7 cognition now validates result aliases and duplicate/unknown assessments atomically, preserves validation control in compact bridge output and cognition-state logs, and instructs displacement probes to assess implicated passability claims together.
+- 13:53 commit 7203ce88 tightened P7 cognition validation aliases, compact-state visibility, and displacement/passability guidance.
