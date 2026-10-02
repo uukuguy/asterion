@@ -387,7 +387,10 @@ actual safety reason. The final report must state what is known, unknown, and
 what experiment comes next. When a displacement changes which cells contain
 the actor, include every directly implicated claim in `analysis.results`;
 passability of the entered/background cell is a first-class implication, not
-an optional secondary claim."""
+an optional secondary claim. For this L1, if the color-9 band displaces into
+the large color-12 region, select the existing `role-background-12` claim (or
+the equivalent passability claim) together with the movement claim and assess
+both from that same settled frame."""
 
 P7_COGNITION_PROMPT = """You are Asterion-prime conducting a bounded semantic game-cognition
 exploration for one exact game and Level 1. This session is not an official
@@ -435,7 +438,10 @@ rejected action plan is recoverable: correct it and retry once. Dispatch the
 action exactly once, then analyze the settled result. A single settled result
 may support several selected claims; assess them together in
 `analysis.results`, and use the displacement itself to assess whether the
-object crossed or occupied a candidate passable region. A frame change is
+object crossed or occupied a candidate passable region. For L1 specifically,
+when color 9 enters the large color-12 region, include `role-background-12`
+(or its equivalent) in `claim_ids` and in the result list alongside the
+movement claim. A frame change is
 evidence of change, not proof of a particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
