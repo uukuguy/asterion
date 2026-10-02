@@ -1,11 +1,14 @@
 import json
+import io
 import unittest
+from contextlib import redirect_stderr
 
 from asterion.applications.prime.p7.broker import ArcBrokerError
 from asterion.applications.prime.p7.operator import (
     _IpythonBridgeServer,
     _P7BrokerClient,
     _bounded_semantic_report,
+    P7OperatorError,
 )
 
 
@@ -112,6 +115,71 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(result["reason"], "invalid-cognition-operation")
         self.assertEqual(result["execution_authority"], "none")
+
+    def test_cognition_update_logs_complete_correlated_request_and_outcome(self):
+        payload = {
+            "op": "select_experiment",
+            "experiment": {"expected": {"frame_changed": True, "state": "NOT_FINISHED"}, "question": "为什么？"},
+            "proposal": {"claim": "semantic detail " * 2000},
+            "analysis": {"results": [{"explanation": "exact explanation"}]},
+            "reason": "operator reason",
+        }
+        encoded_before = json.dumps(payload, sort_keys=True)
+
+        class Broker:
+            def cognition_update(self, submitted):
+                return {"status": "rejected", "reason": "experiment expected predicate is unavailable", "retryable": True}
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            for _ in range(2):
+                result = client.cognition_update(payload)
+        lines = stream.getvalue().splitlines()
+        requests = [json.loads(line.removeprefix("[p7-cognition] update-request ")) for line in lines if line.startswith("[p7-cognition] update-request ")]
+        outcomes = [json.loads(line.removeprefix("[p7-cognition] update-call ")) for line in lines if line.startswith("[p7-cognition] update-call ")]
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(len(outcomes), 2)
+        self.assertEqual([item["request_sequence"] for item in requests], [1, 2])
+        self.assertEqual([item["request_sequence"] for item in outcomes], [1, 2])
+        self.assertEqual(requests[0]["payload"], payload)
+        self.assertEqual(outcomes[0]["reason"], result["reason"])
+        self.assertEqual(json.dumps(payload, sort_keys=True), encoded_before)
+
+    def test_cognition_update_logs_every_exit_without_changing_results(self):
+        cases = (
+            ({"op": "snapshot"}, {"state": "OBSERVE"}, None, "ok"),
+            ({"op": "propose"}, None, ArcBrokerError("cognition-persistence-unavailable"), "rejected"),
+            ({"op": "propose"}, None, ValueError("exact validation failure"), "error"),
+            ({"op": 3}, None, None, "rejected"),
+        )
+        for payload, response, failure, status in cases:
+            with self.subTest(payload=payload, status=status):
+                class Broker:
+                    def cognition_update(self, submitted):
+                        if failure is not None:
+                            raise failure
+                        return response
+
+                client = object.__new__(_P7BrokerClient)
+                client._broker = Broker()
+                stream = io.StringIO()
+                with redirect_stderr(stream):
+                    if status == "error":
+                        with self.assertRaises(P7OperatorError):
+                            client.cognition_update(payload)
+                    else:
+                        client.cognition_update(payload)
+                lines = stream.getvalue().splitlines()
+                self.assertEqual(len(lines), 2)
+                self.assertTrue(lines[0].startswith("[p7-cognition] update-request "))
+                outcome = json.loads(lines[-1].removeprefix("[p7-cognition] update-call "))
+                self.assertEqual(outcome["request_sequence"], 1)
+                self.assertEqual(outcome["status"], "ok" if status == "ok" else status)
+                if failure is not None:
+                    self.assertEqual(outcome["error_type"], type(failure).__name__)
+                    self.assertEqual(outcome["detail"], str(failure))
 
     def test_semantic_report_is_byte_bounded_and_deduplicated(self):
         claim = {

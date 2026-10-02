@@ -689,7 +689,7 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence")
 
     def __init__(
         self,
@@ -706,6 +706,7 @@ class _P7BrokerClient:
         self._identities = identities
         self._variant = variant
         self._cognition_mode = cognition_mode
+        self._cognition_update_sequence = 0
         self._route_adoption = RouteAdoptionTracker()
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
@@ -932,13 +933,28 @@ class _P7BrokerClient:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def cognition_update(self, payload: Mapping[str, object]) -> dict[str, object]:
+        self._cognition_update_sequence = getattr(self, "_cognition_update_sequence", 0) + 1
+        request_sequence = self._cognition_update_sequence
+
+        def log_update(event: str, **details: object) -> None:
+            record = {"request_sequence": request_sequence, **details}
+            print(
+                "[p7-cognition] " + event + " "
+                + json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str),
+                file=sys.stderr,
+                flush=True,
+            )
+
+        log_update("update-request", payload=payload)
         if not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
-            return {
+            result = {
                 "status": "rejected",
                 "reason": "invalid-cognition-operation",
                 "retryable": True,
                 "execution_authority": "none",
             }
+            log_update("update-call", status="rejected", accepted=None, reason=result["reason"])
+            return result
         try:
             result = self._broker.cognition_update(payload)
             if isinstance(result, Mapping) and isinstance(result.get("report"), Mapping):
@@ -983,33 +999,44 @@ class _P7BrokerClient:
                         for key in ("status", "accepted", "reason", "execution_authority", "session", "report")
                         if key in compact
                     }
-            print(
-                "[p7-cognition] update-call "
-                + json.dumps(
-                    {
-                        "op": payload.get("op"),
-                        "status": result.get("status") if isinstance(result, Mapping) else None,
-                        "accepted": result.get("accepted") if isinstance(result, Mapping) else None,
-                        "reason": result.get("reason") if isinstance(result, Mapping) else None,
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-                file=sys.stderr,
-                flush=True,
+            log_update(
+                "update-call",
+                op=payload.get("op"),
+                status=(result.get("status") or "ok") if isinstance(result, Mapping) else "ok",
+                accepted=result.get("accepted") if isinstance(result, Mapping) else None,
+                reason=result.get("reason") if isinstance(result, Mapping) else None,
             )
             return result
-        except ArcBrokerError:
+        except ArcBrokerError as exc:
             # Model-authored cognition records can be rejected by the
             # semantic contract. Return a bounded, recoverable result so a
             # malformed proposal does not poison the bridge or end the whole
             # cognition episode.
-            return {
+            result = {
                 "status": "rejected",
                 "reason": "invalid-cognition-operation",
                 "execution_authority": "none",
             }
+            log_update(
+                "update-call",
+                op=payload.get("op"),
+                status=result["status"],
+                accepted=None,
+                reason=result["reason"],
+                error_type="ArcBrokerError",
+                detail=str(exc)[:256],
+            )
+            return result
         except Exception:
+            log_update(
+                "update-call",
+                op=payload.get("op"),
+                status="error",
+                accepted=None,
+                reason=None,
+                error_type=type(sys.exc_info()[1]).__name__,
+                detail=str(sys.exc_info()[1])[:256],
+            )
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def action_effects(self) -> list[dict[str, object]]:
