@@ -459,6 +459,16 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
     parameters: EMPTY_PARAMETERS,
   },
   {
+    name: "p7_cognition_update",
+    method: "cognition_update",
+    description:
+      "Propose or analyze semantic game-cognition hypotheses. Use {op, proposal|experiment|analysis|reason}; this updates the persisted language ledger only and never dispatches an action or grants execution authority.",
+    parameters: TypeObject(
+      { payload: TypeObject({}) },
+      { additionalProperties: false },
+    ),
+  },
+  {
     name: "p7_counterfactual_search",
     method: "counterfactual_search",
     description: "Compare candidate mechanics and subgoal progress without dispatching actions.",

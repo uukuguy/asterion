@@ -15,6 +15,28 @@ snapshot when it is present. Only call p7_client.status() and observe() when
 that snapshot is absent, then continue from the current level; do not repeat
 completed levels.
 
+Semantic game cognition is the primary reasoning surface. Treat the persisted
+`p7_cognition()` report as a language-level understanding of this exact game
+and level, not as a route. On a fresh level, first describe in plain language
+the game type, visible object/color roles, action meanings, success condition,
+and a falsifiable strategy hypothesis. Submit those hypotheses with
+`p7_cognition_update({"op":"propose","proposal":{"claims":[...]}})`;
+the tool accepts only `undetermined` hypotheses and never executes actions.
+Before a learning probe, call `p7_cognition_update({"op":"select_experiment",
+"experiment":{...}})` with claim ids, the information question, expected
+distinguishing result, and one action. Dispatch exactly that action, then call
+`p7_cognition_update({"op":"analyze","analysis":{"results":[...]}})`.
+Only program-bound observations may mark a claim certain or falsified. If a
+probe contaminates the episode, dispatch RESET and call the cognition update
+operation `reset`; this clears the pending experiment and temporary simulation
+while preserving the semantic ledger. Keep unresolved visual analogies and
+open questions explicit. Use `ready` only after the report has a game type,
+object, control, goal and strategy description plus at least one supported
+control/rule; a step cap or a lucky WIN alone is not cognition readiness.
+For a solve test, load the report read-only and use only supported knowledge
+for planning. If a result contradicts it, stop the plan, record a new
+undetermined hypothesis, and return to cognition exploration.
+
 Your secondary objective is to minimize cumulative actions, because the
 leaderboard scores each completed level as
 ((baseline_actions / actions_used) ** 2) * 100, capped at 115. Solving a
@@ -92,7 +114,7 @@ Use the registered P7 application tools for broker operations whenever they
 are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
 p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
 p7_simulator_status, p7_observation_state, p7_game_mechanics,
-p7_counterfactual_search,
+p7_counterfactual_search, p7_cognition_update,
 p7_playbook, p7_retrodiction_status, p7_tried_actions,
 p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked,
 p7_record_hypothesis, p7_promote_hypothesis, and p7_model_search. Read the same-game model and Playbook before proposing a
@@ -341,6 +363,32 @@ shorter route, but only publish or reuse it after the complete candidate has
 passed offline replay verification. Keep probes bounded and preserve the
 verified route as the fallback when a shorter hypothesis is contradicted."""
 
+P7_COGNITION_APPENDIX = """\n\nThis is a cognition-exploration session, not an official solve or score run.
+Do not optimize for a human baseline and do not import a prior route. Spend
+bounded experiments building the semantic game picture. After each settled
+observation update p7_cognition_update using support, counterexample, or
+undetermined status. Use RESET to discard the current episode experiment while
+preserving the semantic ledger. Stop with `ready` when the report has a useful
+language description and supported control evidence; otherwise stop with the
+actual safety reason. The final report must state what is known, unknown, and
+what experiment comes next."""
+
+P7_COGNITION_PROMPT = """You are Asterion-prime conducting a bounded semantic game-cognition
+exploration for one exact game and Level 1. This session is not an official
+solve, score attempt, or route-replay test. Begin from the supplied settled
+frame and the persisted semantic report. Describe in plain language the game
+type, visible object/color roles, action meanings, success condition, and a
+strategy hypothesis. Propose only falsifiable `undetermined` claims with
+`p7_cognition_update`. Select one information-bearing experiment with an
+explicit observable predicate, dispatch exactly that action, and analyze the
+settled result. A frame change alone is evidence of change, not proof of a
+particular object role or goal. Use RESET when an episode is contaminated;
+RESET clears the pending experiment but keeps the semantic ledger. Continue
+with independent experiments until the language picture is useful, then call
+`p7_cognition_update({"op":"ready"})`; if safety limits or missing evidence
+prevent readiness, call `stop` with the actual reason. Never import or replay a
+prior success route and never claim official completion from this session."""
+
 
 # Tool surface is rendered at run start from the application's
 # P7ToolRegistry. The base prompt carries no game-specific or tool-specific
@@ -370,8 +418,15 @@ def build_solve_prompt(tool_registry: object) -> str:
 
 def build_strategy_prompt(tool_registry: object, strategy: str = "replay") -> str:
     """Render the generic prompt with the operator-selected route strategy."""
-    if strategy not in {"replay", "explore"}:
+    if strategy not in {"replay", "explore", "cognition"}:
         raise ValueError("unsupported P7 strategy")
+    if strategy == "cognition":
+        section = ""
+        if tool_registry is not None:
+            render = getattr(tool_registry, "render_section", None)
+            if callable(render):
+                section = render() or ""
+        return P7_COGNITION_PROMPT + ("\n\n" + section if section else "")
     prompt = build_solve_prompt(tool_registry)
     if strategy == "explore":
         return prompt + P7_EXPLORE_APPENDIX

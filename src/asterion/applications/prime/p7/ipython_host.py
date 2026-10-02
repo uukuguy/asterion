@@ -142,6 +142,11 @@ class P7ClientFacade:
     def cognition(self) -> Mapping[str, object]:
         return cast(Mapping[str, object], self.__invoke("cognition"))
 
+    def cognition_update(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        if not isinstance(payload, Mapping):
+            raise P7ClientError()
+        return cast(Mapping[str, object], self.__invoke("cognition_update", dict(payload)))
+
     def action_effects(self) -> list[dict[str, object]]:
         return cast(list[dict[str, object]], self.__invoke("action_effects"))
 
@@ -179,7 +184,7 @@ class P7ClientFacade:
                 raise ValueError
             operation = getattr(self.__client, name)
             value = operation(*args)
-            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"} and type(value) is not dict) or (
+            if (name in {"observe", "status", "mechanics_prior", "act", "act_checked", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"} and type(value) is not dict) or (
                 name in {"history", "frame_at", "action_effects", "mechanism_candidates"} and type(value) is not list
             ):
                 raise ValueError
@@ -643,8 +648,8 @@ def _valid_client_module(source: object) -> bool:
         "p7_act", "p7_observe", "p7_mechanics_prior", "p7_history",
         "p7_frame_at", "p7_act_checked", "p7_tried_actions",
         "p7_last_outcome_summary", "p7_components",
-        "p7_world_model", "p7_observation_state", "p7_game_mechanics", "p7_counterfactual_search", "p7_cognition", "p7_action_effects", "p7_mechanism_candidates", "p7_probe_plan", "p7_simulator_status", "p7_playbook", "p7_retrodiction_status", "p7_model_search",
-        "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "playbook", "retrodiction_status",
+        "p7_world_model", "p7_observation_state", "p7_game_mechanics", "p7_counterfactual_search", "p7_cognition", "p7_cognition_update", "p7_action_effects", "p7_mechanism_candidates", "p7_probe_plan", "p7_simulator_status", "p7_playbook", "p7_retrodiction_status", "p7_model_search",
+        "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "playbook", "retrodiction_status",
         "model_search",
         "p7_record_hypothesis", "record_hypothesis", "p7_promote_hypothesis", "promote_hypothesis",
         "positions", "diff", "summary", "render", "act_and_observe",
@@ -669,6 +674,8 @@ def _valid_client_module(source: object) -> bool:
         and _exact_arguments(public["game_mechanics"], 0)
         and _exact_arguments(public["counterfactual_search"], 0)
         and _exact_arguments(public["cognition"], 0)
+        and _exact_arguments(public["cognition_update"], 1)
+        and public["cognition_update"].args.args[0].arg == "payload"
         and _helper_arguments(public["playbook"], ("level",), (None,))
         and _exact_arguments(public["retrodiction_status"], 0)
         and _exact_arguments(public["model_search"], 0)

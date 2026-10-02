@@ -12,6 +12,7 @@ P7_APPLICATION_TOOL_NAMES = tuple(sorted({
     "p7_act_checked",
     "p7_action_effects",
     "p7_cognition",
+    "p7_cognition_update",
     "p7_counterfactual_search",
     "p7_frame_at",
     "p7_game_mechanics",

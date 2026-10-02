@@ -3498,3 +3498,5 @@
 - 08:14 Independent final review: P0/P1/P2/P3 all clear; 229 Python, 32 TypeScript (26 pass/6 external skips), lint and docs checks pass
 - 08:16 added partial prefix replay count regression for diagnostic boundary coverage [fd77ffed]
 - 08:16 refreshed the live checkpoint with current P7 fixes, cancelled witness evidence, and next bounded actions [a093d177]
+- 2026-10-02 认知主合同落盘：新增 SemanticCognitionStore 与 CognitionSession，持久化语义假说/证据/事件，RESET 保留账本并清理 episode
+- 2026-10-02 P7 Broker、Python facade、live worker、TypeScript 资源和 prompt 接入 p7_cognition_update；相关 169 Python、26 TypeScript 通过，6 项外部 Pi 跳过

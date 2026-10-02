@@ -31,6 +31,7 @@ from asterion.applications.prime.p7.broker import (
     _observation_digest,
 )
 from asterion.applications.prime.p7.cognition import GameCognitionStore
+from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
 from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
@@ -266,8 +267,10 @@ def _prompt_for_variant(variant: str, tool_registry: object = None) -> str:
 
 
 def _resolve_strategy(environment: Mapping[str, str]) -> str:
+    if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition":
+        return "cognition"
     strategy = environment.get(P7_STRATEGY_ENV, "replay")
-    if strategy not in {"replay", "explore"}:
+    if strategy not in {"replay", "explore", "cognition"}:
         raise P7OperatorError("P7 route strategy is unavailable")
     return strategy
 
@@ -501,6 +504,10 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
+            elif method == "cognition_update":
+                if type(params) is not dict or set(params) != {"payload"} or not isinstance(params["payload"], dict):
+                    return error_response()
+                value = facade.cognition_update(params["payload"])
             elif method == "playbook":
                 if params is not None and (type(params) is not int or params < 0):
                     return error_response()
@@ -741,6 +748,14 @@ class _P7BrokerClient:
 
         try:
             return self._broker.cognition_projection()
+        except Exception:
+            raise P7OperatorError("P7 host services are unavailable") from None
+
+    def cognition_update(self, payload: Mapping[str, object]) -> dict[str, object]:
+        if not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
+            raise P7OperatorError("P7 host services are unavailable")
+        try:
+            return self._broker.cognition_update(payload)
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -1669,7 +1684,7 @@ def _optimize_partial_attempt(
     return hint, metadata
 
 
-def _initial_game_context(client: object, *, include_prior: bool) -> str:
+def _initial_game_context(client: object, *, include_prior: bool, semantic_only: bool = False) -> str:
     """Inject one bounded broker snapshot before the model chooses tools."""
 
     observe = getattr(client, "observe", None)
@@ -1739,7 +1754,7 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
         else:
             sections.append(f"{heading}: omitted from initial context; call {tool} if needed.")
 
-    world_model = getattr(client, "world_model", None)
+    world_model = None if semantic_only else getattr(client, "world_model", None)
     if callable(world_model):
         try:
             model_projection = world_model()
@@ -1758,6 +1773,14 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
         except Exception:
             cognition_projection = {}
         if isinstance(cognition_projection, Mapping):
+            semantic = cognition_projection.get("semantic")
+            if isinstance(semantic, Mapping):
+                add_projection(
+                    "## Semantic game cognition (primary reasoning surface)",
+                    "Use the natural-language context and claim states first. This ledger is persistent understanding only; it has execution_authority=none. Propose and test new hypotheses with p7_cognition_update.",
+                    semantic,
+                    "p7_cognition",
+                )
             add_projection(
                 "## Persistent game cognition (advisory; no execution authority)",
                 "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
@@ -1780,8 +1803,8 @@ def _initial_game_context(client: object, *, include_prior: bool) -> str:
     # discover and call model_search before using an already verified plan.
     # The returned plan remains checked data: act_checked still validates each
     # frame/state witness and stops on divergence.
-    model_search = getattr(client, "model_search", None)
-    simulator_status = getattr(client, "simulator_status", None)
+    model_search = None if semantic_only else getattr(client, "model_search", None)
+    simulator_status = None if semantic_only else getattr(client, "simulator_status", None)
     if callable(model_search) and callable(simulator_status):
         try:
             simulator = simulator_status()
@@ -2114,6 +2137,8 @@ def build_p7_operator_resources(
     game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
     run_id: str | None = None,
     cognition_store: GameCognitionStore | None = None,
+    semantic_cognition_store: SemanticCognitionStore | None = None,
+    semantic_cognition_read_only: bool = False,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -2211,6 +2236,8 @@ def build_p7_operator_resources(
             game=game,
             world_model=WorldModelStore(game.game_id, game.seed, game.win_levels),
             cognition_store=cognition_store,
+            semantic_cognition_store=semantic_cognition_store,
+            semantic_cognition_read_only=semantic_cognition_read_only,
             game_mechanics_store=GameMechanicsStore(
                 working_directory,
                 game.game_id,
@@ -2297,9 +2324,9 @@ def _select_game_for_mode(
     """Use only an explicitly forwarded level; otherwise solve the full game."""
 
     mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
-    if mode not in {"solve", "witness", "sweep"}:
+    if mode not in {"solve", "witness", "sweep", "cognition"}:
         raise P7OperatorError("P7 run mode is unavailable")
-    if mode == "witness" and TARGET_LEVEL_ENV not in process_environment:
+    if mode in {"witness", "cognition"} and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 level witness requires explicit LEVEL")
     if mode == "sweep" and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 sweep requires explicit LEVEL")
@@ -2348,6 +2375,12 @@ def _select_game_for_mode(
                 prefix = None
                 route_source = None
         game = _bound_witness_level_actions(game, prefix, route_source=route_source)
+    elif mode == "cognition":
+        if game.target_level != 1:
+            raise P7OperatorError("P7 cognition exploration is currently L1-only")
+        # Cognition is deliberately independent of leaderboard budgets, but it
+        # still has an application safety ceiling to bound a forgotten agent.
+        game = replace(game, action_cap_override=max(256, 4 * game.baseline_actions[game.target_level - 1]))
     return game
 
 
@@ -2554,6 +2587,7 @@ async def run_live(
     from .solutions import load_best_prefix, load_verified_attempt
 
     variant = _resolve_history_variant(invocation.environment, invocation.game)
+    cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
     run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
     if type(getattr(run_signal, "cancelled", None)) is not bool:
         raise P7OperatorError("P7 cancellation signal is unavailable")
@@ -2654,6 +2688,16 @@ async def run_live(
         category="model",
     ))
     tool_registry.register(Tool(
+        name="cognition_update",
+        description=(
+            "Update the persisted semantic game cognition ledger. Submit only "
+            "undetermined hypotheses, select one information-bearing experiment, "
+            "or analyze its real result; this tool never executes actions or grants authority."
+        ),
+        signature="p7_client.cognition_update(payload)",
+        category="model",
+    ))
+    tool_registry.register(Tool(
         name="action_effects",
         description="Read bounded effects extracted from settled transitions in this run; this is evidence, not a route or execution authority.",
         signature="p7_client.action_effects()",
@@ -2722,7 +2766,7 @@ async def run_live(
             prompt += P7_EXPLORE_APPENDIX
     else:
         prompt = _prompt_for_strategy(strategy, tool_registry)
-    prefix = load_best_prefix(
+    prefix = None if strategy == "cognition" else load_best_prefix(
         invocation.arc_root,
         root / ".asterion-private" / "prime-p7-live",
         invocation.game.game_id,
@@ -2736,7 +2780,7 @@ async def run_live(
         summary = _summarize_prefix_mechanics(prefix)
         if summary:
             prompt = prompt + "\n\n" + summary
-    offline_optimization_enabled = _offline_optimization_enabled(invocation.environment)
+    offline_optimization_enabled = strategy != "cognition" and _offline_optimization_enabled(invocation.environment)
     if offline_optimization_enabled:
         route_source = load_best_prefix(
             invocation.arc_root,
@@ -2821,6 +2865,13 @@ async def run_live(
         game=invocation.game,
         run_id=run_id,
         cognition_store=GameCognitionStore(root),
+        semantic_cognition_store=SemanticCognitionStore(
+            root, invocation.game.game_id, invocation.game.seed,
+            invocation.game.win_levels, level=0,
+        ),
+        semantic_cognition_read_only=(
+            invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") != "cognition"
+        ),
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
@@ -2919,6 +2970,7 @@ async def run_live(
             prompt = prompt + "\n\n" + _initial_game_context(
                 prediction_client,
                 include_prior=prefix is not None and prefix.levels_completed > 0,
+                semantic_only=strategy == "cognition",
             )
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
@@ -2944,19 +2996,20 @@ async def run_live(
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
             signal=run_signal,
         )
-        receipt = live.receipt_value(result.artifacts)
+        receipt = {} if cognition_mode else live.receipt_value(result.artifacts)
         broker = resources_.host_services["prime.arc-broker"]
         if not isinstance(broker, ArcBroker):
             raise live.P7LiveSolveError("P7 broker is unavailable")
         broker_receipt = broker.seal()
-        broker.replay(
-            lambda: live.ArcadeEngine(
-                arc_root=invocation.arc_root,
-                recordings_dir=private / "replay-recordings",
-                game=invocation.game,
+        if not cognition_mode:
+            broker.replay(
+                lambda: live.ArcadeEngine(
+                    arc_root=invocation.arc_root,
+                    recordings_dir=private / "replay-recordings",
+                    game=invocation.game,
+                )
             )
-        )
-        replay_verified = True
+            replay_verified = True
         analyze_trace(live.read_trace_entries(trace_root))
         sealed_trace = True
         comparison_report = live.compare_if_available(root, trace_root, private)
@@ -3024,7 +3077,7 @@ async def run_live(
                         broker_receipt = broker_value.seal()
                     except Exception:
                         pass
-                if broker_receipt is not None and not replay_verified:
+                if broker_receipt is not None and not replay_verified and not cognition_mode:
                     try:
                         broker_value.replay(
                             lambda: live.ArcadeEngine(
@@ -3274,9 +3327,26 @@ def classify_live_result(
     *,
     provider: str | None = None,
     model: str | None = None,
+    cognition_mode: bool = False,
 ) -> Mapping[str, object]:
     """Project one completed solve into the public receipt, or fail closed."""
 
+    if cognition_mode:
+        if not result.sealed_trace or not result.cleanup_complete:
+            raise live.P7LiveSolveError("cognition evidence was not sealed")
+        return _public_receipt(
+            "COGNITION",
+            result.run_id,
+            provider=provider,
+            model=model,
+            completed_level_count=result.completed_level_count,
+            primitive_action_count=result.primitive_action_count,
+            replay_verified=False,
+            sealed_trace=result.sealed_trace,
+            cleanup_complete=result.cleanup_complete,
+            game=result.game,
+            terminal_reason=result.terminal_reason,
+        )
     if result.completed_level_count != result.game.target_level:
         raise live.P7LiveSolveError("target level completion was not observed")
     if not 1 <= result.primitive_action_count <= result.game.action_cap:
@@ -3433,6 +3503,7 @@ def main(argv: list[str] | None = None) -> int:
             _run_live_with_process_signals(invocation, run_id),
             provider=receipt_provider,
             model=receipt_model,
+            cognition_mode=invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition",
         )
     except KeyboardInterrupt:
         return 130

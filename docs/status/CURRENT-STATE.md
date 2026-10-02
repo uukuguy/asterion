@@ -14,10 +14,10 @@
 - Python owns P7 orchestration, broker authority, persistence, and operator assembly.
 - `ArcBroker` validates identity, current history, action witnesses, and planner certificates before checked execution.
 - `WorldModelStore` holds per-run mechanics/entities/relations and level-local visual evidence.
-- `GameCognitionStore` holds input-type priors and exact-game progress summaries.
+- `GameCognitionStore` remains an advisory progress cache; `SemanticCognitionStore` is the primary exact-game/L1 language cognition contract with atomic persistence and execution_authority=none.
 - `ObservationState` provides one immutable representation for frame, input surface, HUD, timers, resources, entities, relations, and events.
 - `GameMechanicsStore` persists game-wide mechanism candidates, conditions, effects, scope, evidence, and conflicts with `execution_authority=none`.
-- `hypothesis_simulator.search_counterfactual` compares confirmed and hypothesis branches, reports subgoal progress and divergence, and never dispatches actions.
+- `CognitionSession` runs bounded hypothesis/experiment/analyze/RESET episodes; `hypothesis_simulator.search_counterfactual` compares confirmed and hypothesis branches and never dispatches actions.
 - `MechanismSpec`/`ModelCertificate`/`model_search` remain the only path from retrodicted local evidence to a checked executable plan.
 - P7 application tools are registered through the Operator, worker bridge, live RPC module, and prompt; offline route injection is disabled for capability runs.
 
@@ -47,6 +47,8 @@
 - `src/asterion/applications/prime/p7/broker.py` — identity, evidence, execution, and learning integration
 - `src/asterion/applications/prime/p7/observation_state.py` — immutable unified observations
 - `src/asterion/applications/prime/p7/world_model.py` — per-run WorldMap facts and conflicts
+- `src/asterion/applications/prime/p7/semantic_cognition.py` — persistent language-level cognition ledger
+- `src/asterion/applications/prime/p7/cognition_session.py` — experiment episode state machine and event audit
 - `src/asterion/applications/prime/p7/game_mechanics.py` — persistent game-wide mechanism memory
 - `src/asterion/applications/prime/p7/hypothesis_simulator.py` — bounded counterfactual branches and subgoals
 - `src/asterion/applications/prime/p7/mechanism_model.py` — declarative transitions and certificates

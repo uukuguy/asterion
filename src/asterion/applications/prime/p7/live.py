@@ -300,13 +300,13 @@ class P7ClientServer:
                 type(request) is not dict
                 or request.get("protocol") != WORKER_PROTOCOL
                 or type(request.get("id")) is not int
-                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"}
+                or request.get("method") not in {"observe", "status", "mechanics_prior", "act", "history", "frame_at", "act_checked", "tried_actions", "last_outcome_summary", "world_model", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "cognition_update", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "playbook", "retrodiction_status", "model_search", "record_hypothesis", "promote_hypothesis"}
                 or type(request.get("args")) is not list
             ):
                 raise ValueError
             method = str(request["method"])
             args = request["args"]
-            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "observation_state": 0, "game_mechanics": 0, "counterfactual_search": 0, "cognition": 0, "action_effects": 0, "mechanism_candidates": 0, "probe_plan": 0, "simulator_status": 0, "playbook": 1, "retrodiction_status": 0, "model_search": 0, "record_hypothesis": 3, "promote_hypothesis": 2}[method]:
+            if len(args) != {"observe": 0, "status": 0, "mechanics_prior": 0, "act": 1, "history": 2, "frame_at": 1, "act_checked": 1, "tried_actions": 1, "last_outcome_summary": 1, "world_model": 0, "observation_state": 0, "game_mechanics": 0, "counterfactual_search": 0, "cognition": 0, "cognition_update": 1, "action_effects": 0, "mechanism_candidates": 0, "probe_plan": 0, "simulator_status": 0, "playbook": 1, "retrodiction_status": 0, "model_search": 0, "record_hypothesis": 3, "promote_hypothesis": 2}[method]:
                 raise ValueError
             value = getattr(self._client, method)(*args)
             response = {
@@ -713,6 +713,10 @@ def p7_cognition():
     """Read advisory type cognition and exact-game experience."""
     return _call("cognition")
 
+def p7_cognition_update(payload):
+    """Propose or analyze semantic cognition; never dispatches an action."""
+    return _call("cognition_update", payload)
+
 def p7_action_effects():
     """Read bounded per-action effect summaries learned in this run."""
     return _call("action_effects")
@@ -889,6 +893,9 @@ def counterfactual_search():
 
 def cognition():
     return p7_cognition()
+
+def cognition_update(payload):
+    return p7_cognition_update(payload)
 
 def action_effects():
     return p7_action_effects()

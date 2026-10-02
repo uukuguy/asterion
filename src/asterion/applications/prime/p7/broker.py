@@ -19,7 +19,9 @@ from .mechanism_model import (
 from .model_search import search_model
 from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
+from .cognition_session import CognitionSession, CognitionSessionError
 from .game_mechanics import GameMechanicsStore, bounded_text
+from .semantic_cognition import SemanticCognitionStore
 from .observation_state import ObservationState
 from .hypothesis_simulator import Subgoal, search_counterfactual
 from .playbook import (LevelCompletion, PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
@@ -292,6 +294,8 @@ class ArcBroker:
         world_model: WorldModelStore | None = None,
         cognition_store: GameCognitionStore | None = None,
         game_mechanics_store: GameMechanicsStore | None = None,
+        semantic_cognition_store: SemanticCognitionStore | None = None,
+        semantic_cognition_read_only: bool = False,
     ) -> None:
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
@@ -326,6 +330,17 @@ class ArcBroker:
             if game_mechanics_store.identity != (game.game_id, game.seed, game.win_levels):
                 raise ArcBrokerError("unavailable")
         self._game_mechanics_store = game_mechanics_store
+        if semantic_cognition_store is not None and type(semantic_cognition_store) is not SemanticCognitionStore:
+            raise ArcBrokerError("unavailable")
+        if semantic_cognition_store is not None and semantic_cognition_store.identity != {
+            "game_id": game.game_id, "seed": game.seed, "win_levels": game.win_levels, "level": 0,
+        }:
+            raise ArcBrokerError("unavailable")
+        self._semantic_cognition_store = semantic_cognition_store
+        if type(semantic_cognition_read_only) is not bool:
+            raise ArcBrokerError("unavailable")
+        self._semantic_cognition_read_only = semantic_cognition_read_only
+        self._cognition_session: CognitionSession | None = None
         self._transition_model: TransitionModel | None = None
         self._retrodiction_status = "unavailable"
         self._retrodiction_reasons: list[str] = []
@@ -386,12 +401,68 @@ class ArcBroker:
         """Return advisory type cognition and exact-game progress memory."""
 
         if self._cognition_store is None:
-            return {"status": "unavailable"}
-        return self._cognition_store.projection(
+            projection: dict[str, object] = {"status": "unavailable"}
+        else:
+            projection = self._cognition_store.projection(
             game_id=self._game.game_id,
             seed=self._game.seed,
             win_levels=self._game.win_levels,
-        )
+            )
+        if self._semantic_cognition_store is not None:
+            projection = {
+                **projection,
+                "semantic": self._semantic_cognition_store.report(),
+                "cognition_session": None if self._cognition_session is None else self._cognition_session.snapshot(emit_event=False),
+            }
+        return projection
+
+    def cognition_update(self, payload: Mapping[str, object]) -> dict[str, object]:
+        """Apply one explicit semantic cognition operation; never execute actions."""
+        session = self._cognition_session
+        if session is None or self._semantic_cognition_read_only or not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
+            raise ArcBrokerError("unavailable")
+        op = payload["op"]
+        try:
+            if op == "propose":
+                value = session.propose(payload.get("proposal", {}))
+                return {"status": "ok", "accepted": value, **session.snapshot()}
+            if op == "select_experiment":
+                return session.select_experiment(payload.get("experiment", {}))
+            if op == "analyze":
+                return session.analyze(payload.get("analysis", {}))
+            if op == "reset":
+                self._reset_cognition_runtime()
+                return session.reset_episode()
+            if op == "ready":
+                value = session.ready_for_solve()
+                self._terminal_reason = "cognition-ready"
+                return value
+            if op == "stop":
+                value = session.stop(payload.get("reason", "operator-stop"))
+                self._terminal_reason = "cognition-stopped"
+                return value
+            if op == "snapshot":
+                return session.snapshot()
+        except (CognitionSessionError, TypeError, ValueError):
+            raise ArcBrokerError("unavailable") from None
+        raise ArcBrokerError("unavailable")
+
+    def _reset_cognition_runtime(self) -> None:
+        """Discard episode-bound model and probe state while keeping semantics."""
+        self._pending_probe = None
+        self._probe_tokens.clear()
+        self._transition_model = None
+        self._mechanism_certificate = None
+        self._mechanism_spec = None
+        self._model_search_cache_key = None
+        self._model_search_cache_result = None
+        self._tried_actions.clear()
+        self._no_effect_counts.clear()
+        self._retrodict_no_effect_hint = None
+        self._level_gameplay_actions = 0
+        self._experience_inducer = ExperienceInducer(win_levels=self._game.win_levels)
+        if self._world_model is not None:
+            self._world_model = WorldModelStore(self._game.game_id, self._game.seed, self._game.win_levels)
 
     def observation_state(self) -> ObservationState:
         """Return the current unified observation for model-side reasoning."""
@@ -2201,6 +2272,19 @@ class ArcBroker:
         except ArcPredictionError:
             raise ArcBrokerError("unavailable") from None
         self._history = [initial]
+        if self._semantic_cognition_store is not None and not self._semantic_cognition_read_only:
+            try:
+                self._cognition_session = CognitionSession(
+                    self._semantic_cognition_store,
+                    session_id=f"{run_id}-cognition",
+                )
+                self._cognition_session.start_episode({
+                    "frame": self._initial.frame[-1],
+                    "levels_completed": self._initial.levels_completed,
+                    "state": self._initial.state,
+                })
+            except CognitionSessionError:
+                raise ArcBrokerError("unavailable") from None
         if self._world_model is not None:
             try:
                 self._world_model.record_visual_candidates(
@@ -2543,6 +2627,42 @@ class ArcBroker:
             raise ValueError
         return act({"name": action.name, "data": dict(action.data)})
 
+    def _record_semantic_action(self, action: ArcAction, after: ArcObservation) -> None:
+        session = self._cognition_session
+        if session is None:
+            return
+        if after.levels_completed > 0:
+            try:
+                session.store.seed_protocol_claims(level_completed=after.levels_completed)
+            except Exception:
+                raise ArcBrokerError("cognition-persistence-unavailable") from None
+        try:
+            if action.name == "RESET":
+                self._reset_cognition_runtime()
+                session.reset_episode()
+                session.start_episode({
+                    "frame": after.frame[-1],
+                    "levels_completed": after.levels_completed,
+                    "state": after.state,
+                })
+            else:
+                session.record_action(
+                    {
+                        "frame": after.frame[-1],
+                        "levels_completed": after.levels_completed,
+                        "state": after.state,
+                    },
+                    action={"name": action.name, "data": dict(action.data)},
+                )
+        except CognitionSessionError:
+            # Ordinary gameplay remains valid when no cognition experiment is
+            # selected. A selected stale experiment is surfaced as a broker
+            # error so the model must observe and rebind it.
+            projection = session.snapshot()
+            pending = projection.get("session", {}).get("pending") if isinstance(projection.get("session"), Mapping) else None
+            if pending is not None:
+                raise ArcBrokerError("cognition-experiment-mismatch") from None
+
     def act(
         self,
         actions: tuple[str | ArcAction, ...],
@@ -2610,6 +2730,7 @@ class ArcBroker:
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after
+            self._record_semantic_action(action, after)
             self._record_cognition()
             if action.name == "RESET" or after.levels_completed > before.levels_completed:
                 self._clear_no_effect_level(before.levels_completed)
