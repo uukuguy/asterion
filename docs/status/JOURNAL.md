@@ -3558,3 +3558,4 @@
 - 2026-10-03 promotion-check remains external-limited by the known Pi source-detachment/fixture failures; it is not promoted to PASS.
 - 06:52 P7 partial cognition now feeds solve planning and refreshes after experiments, enabling feedback-driven play [07223470]
 - 06:56 Evidence journal persisted for P7 feedback-loop recovery [66483d49]
+- 07:02 Aggregate P7 response budgeting preserves cognition background under bridge limits [0b248e4e]
