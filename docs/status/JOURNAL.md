@@ -3528,3 +3528,4 @@
 - 2026-10-02 commit 4af4a424: live cognition growth logging, rejection diagnostics, bounded cognition projections, and bridge regression tests landed.
 - 2026-10-02 P7 run p7-live-20261002060535-31802ef241af170e4f3bf9bf entered cognition startup and printed 20+ hypotheses including black nodes/red connectors/orange actor/ACTION4-right/green goal, but runtime_started=false before model action; no step claimed.
 - 2026-10-02 commit 08ef6fe3: bounded cognition-only initial context and runtime-stage diagnostics let P7 reach factory/model instead of failing before runtime.
+- 2026-10-02 run p7-live-20261002063043-47527d28c018bd5b14532873 entered factory-ready and logged full claim_changes, but timed out before experiment/action; primitive_action_count=0.
