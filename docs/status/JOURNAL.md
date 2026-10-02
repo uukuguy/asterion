@@ -3511,3 +3511,4 @@
 - 2026-10-02 ready 失败处理区分 cognition 持久化不可用与证据不足：持久化错误继续 fail-closed，不伪装为 not-ready
 - 2026-10-02 独立复审后修正认知证据边界：generic frame_changed 不再确认方向/对象/目标，具体预测帧统一 list/tuple；实验动作不一致在 cognition mode 可恢复 [pending]
 - 2026-10-02 认知证据改为具体预测帧或受限终态谓词，并让实验动作错配可恢复 [6d038d3e]
+- 2026-10-02 promotion-check 3684 tests 失败，原因仍为外部 Pi source-detachment 及既有 10 failures/5 errors；本次聚焦回归无新增失败
