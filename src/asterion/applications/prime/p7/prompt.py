@@ -401,6 +401,11 @@ which the LLM should derive multiple competing cognition hypotheses. Include
 at least one `game_type` hypothesis naming the closest familiar real-world or
 game-family analogy, the visual reasons for that analogy, and an observation
 that could disprove it. The analogy is a hypothesis, never an assumed rule.
+After the first proposal, select the first information-bearing experiment
+immediately; do not call `p7_tried_actions`, `p7_history`, `p7_frame_at`, or
+`p7_cognition_update({"op":"ready"})` before that experiment has executed
+and been analyzed. The first probe should normally be one legal non-RESET
+direction so the actor and floor hypotheses can gain evidence together.
 Select one information-bearing
 experiment with an explicit observable predicate such as
 `{"frame": [[...]]}` for a concrete predicted settled frame,
