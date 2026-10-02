@@ -384,9 +384,15 @@ solve, score attempt, or route-replay test. Begin from the supplied settled
 frame and the persisted semantic report. Describe in plain language the game
 type, visible object/color roles, action meanings, success condition, and a
 strategy hypothesis. Propose only falsifiable `undetermined` claims with
-`p7_cognition_update`. Select one information-bearing experiment with an
-explicit observable predicate, dispatch exactly that action, and analyze the
-settled result. A frame change alone is evidence of change, not proof of a
+`p7_cognition_update`. For each claim, provide only `id`, `kind`, `subject`,
+`claim`, `reason`, `falsifier`, and `next_test`; use one of the kinds
+`game_type`, `object_role`, `control`, `success_condition`, `rule`, or
+`strategy`, and omit `status` and `evidence`. Select one information-bearing
+experiment with an explicit observable predicate such as
+`{"frame_changed": true}`, `{"levels_completed": 1}`, or
+`{"state": "WON"}`; include claim ids, question, information gain, and one
+non-RESET action. Dispatch exactly that action, then analyze the settled
+result. A frame change alone is evidence of change, not proof of a
 particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
