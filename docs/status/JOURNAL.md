@@ -3542,3 +3542,4 @@
 - 2026-10-02 commit 8cf6bdaa classifies Pi prompt retry failures from bounded last-failure evidence instead of generic application failure.
 - 2026-10-02 commit 8a0e6464 prioritizes resolved evidence and newest open hypotheses in bounded cognition context to prevent stale repetition.
 - 2026-10-02 commit 5257021c tests Pi prompt failure classification so retry errors remain actionable.
+- 19:56 P7 cognition now prints bootstrap hypotheses, cognition reads, and post-update semantic state; per-session JSONL preserves every claim change [c6a007f6]
