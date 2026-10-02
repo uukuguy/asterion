@@ -3,7 +3,7 @@ import io
 import unittest
 from contextlib import redirect_stderr
 
-from asterion.applications.prime.p7.broker import ArcBrokerError
+from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 from asterion.applications.prime.p7.operator import (
     _IpythonBridgeServer,
     _P7BrokerClient,
@@ -103,6 +103,36 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(json.loads(response["output"])["received"], {"op": "snapshot"})
         malformed = self.bridge._dispatch_method_call("request", "cognition_update", {"payload": {"op": "snapshot"}})
         self.assertEqual(malformed["status"], "error")
+
+    def test_cognition_operation_aliases_dispatch_to_canonical_session_methods(self):
+        class Session:
+            def __init__(self):
+                self.calls = []
+            def propose(self, value):
+                self.calls.append(("propose", value))
+                return 1
+            def select_experiment(self, value):
+                self.calls.append(("select_experiment", value))
+                return {"state": "EXPERIMENT_SELECTED"}
+            def analyze(self, value):
+                self.calls.append(("analyze", value))
+                return {"state": "ANALYZED"}
+            def snapshot(self):
+                return {"report": {}, "session": {}}
+
+        broker = object.__new__(ArcBroker)
+        broker._cognition_session = Session()
+        broker._semantic_cognition_read_only = False
+        for submitted, payload, canonical, field in (
+            ("proposal", {"claims": []}, "propose", "proposal"),
+            ("experiment", {"claim_ids": ["c"], "action": {"name": "ACTION1"}}, "select_experiment", "experiment"),
+            ("select", {"claim_ids": ["c"]}, "select_experiment", "experiment"),
+            ("record_analysis", {"results": []}, "analyze", "analysis"),
+            ("analyze_experiment", {"results": []}, "analyze", "analysis"),
+        ):
+            with self.subTest(submitted=submitted):
+                broker.cognition_update({"op": submitted, field: payload})
+                self.assertEqual(broker._cognition_session.calls[-1][0], canonical)
 
     def test_rejected_cognition_payload_is_recoverable(self):
         class RejectingBroker:

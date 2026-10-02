@@ -945,7 +945,15 @@ class _P7BrokerClient:
                 flush=True,
             )
 
-        log_update("update-request", payload=payload)
+        submitted_op = payload.get("op") if isinstance(payload, Mapping) else None
+        canonical_op = {
+            "proposal": "propose",
+            "experiment": "select_experiment",
+            "select": "select_experiment",
+            "record_analysis": "analyze",
+            "analyze_experiment": "analyze",
+        }.get(submitted_op, submitted_op)
+        log_update("update-request", payload=payload, submitted_op=submitted_op, canonical_op=canonical_op)
         if not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
             result = {
                 "status": "rejected",
@@ -1002,6 +1010,8 @@ class _P7BrokerClient:
             log_update(
                 "update-call",
                 op=payload.get("op"),
+                submitted_op=submitted_op,
+                canonical_op=canonical_op,
                 status=(result.get("status") or "ok") if isinstance(result, Mapping) else "ok",
                 accepted=result.get("accepted") if isinstance(result, Mapping) else None,
                 reason=result.get("reason") if isinstance(result, Mapping) else None,
@@ -1020,6 +1030,8 @@ class _P7BrokerClient:
             log_update(
                 "update-call",
                 op=payload.get("op"),
+                submitted_op=submitted_op,
+                canonical_op=canonical_op,
                 status=result["status"],
                 accepted=None,
                 reason=result["reason"],
@@ -1031,6 +1043,8 @@ class _P7BrokerClient:
             log_update(
                 "update-call",
                 op=payload.get("op"),
+                submitted_op=submitted_op,
+                canonical_op=canonical_op,
                 status="error",
                 accepted=None,
                 reason=None,

@@ -422,7 +422,14 @@ class ArcBroker:
         session = self._cognition_session
         if session is None or self._semantic_cognition_read_only or not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
             raise ArcBrokerError("unavailable")
-        op = payload["op"]
+        submitted_op = payload["op"]
+        op = {
+            "proposal": "propose",
+            "experiment": "select_experiment",
+            "select": "select_experiment",
+            "record_analysis": "analyze",
+            "analyze_experiment": "analyze",
+        }.get(submitted_op, submitted_op)
         try:
             if op == "propose":
                 value = session.propose(payload.get("proposal", {}))
@@ -458,7 +465,8 @@ class ArcBroker:
                 return session.snapshot()
         except CognitionSessionError as exc:
             print("[p7-cognition] rejected " + json.dumps({
-                "op": op,
+                "op": submitted_op,
+                "canonical_op": op,
                 "reason": str(exc) if isinstance(exc, CognitionSessionError) else "invalid-operation-shape",
                 "payload_keys": sorted(str(key) for key in payload),
                 "proposal_keys": sorted(str(key) for key in payload.get("proposal", {})) if isinstance(payload.get("proposal"), Mapping) else None,
@@ -472,7 +480,8 @@ class ArcBroker:
             }
         except (TypeError, ValueError) as exc:
             print("[p7-cognition] rejected " + json.dumps({
-                "op": op,
+                "op": submitted_op,
+                "canonical_op": op,
                 "reason": "invalid-operation-shape",
                 "detail": str(exc)[:160],
             }, separators=(",", ":")), file=sys.stderr, flush=True)
