@@ -80,3 +80,9 @@ The prior live cognition run made four `cognition_update` calls but produced no 
 Verification: 178 focused P7 Python tests passed; Ruff, compileall, diff checks, and `npm --prefix packages/typescript/asterion-prime-extension run check-resource` passed. The focused TypeScript bridge/cognition regressions passed. A complete npm run is still externally limited by pre-existing Pi-dependent tests/harnesses. No post-fix live cognition run has yet established semantic events or a level solve; the next bounded run is required for that evidence.
 
 A post-fix bounded run rebuilt the wheel and entered the native live-run, but the external execution did not return a public receipt before the 180-second bound. Therefore semantic-event and solve status for that run are unknown externally and are not counted as evidence.
+
+### Live cognition logging evidence (2026-10-02)
+
+The cognition pipeline now prints readable growth events from startup. Each `[p7-cognition] claim_changes` entry identifies a hypothesis, confidence, status, evidence counts, and its next test; native events separately show model turns and whether each application tool call succeeded. A real tu93 L1 run (`p7-live-20261002055614-2f3b30a5ffa10f7e27513b28`) produced more than twenty initial hypotheses covering the grid, actor, floor, wall, background, goal, cardinal controls, and success signals. They were correctly retained as `undetermined` because no experiment was completed.
+
+The run made zero primitive actions and repeatedly requested cognition updates/readiness. It was stopped by the operator after the cognition log had been captured; this is an unsuccessful cognition-only run, not an external RPC cancellation and not a solve. Earlier bridge failures were traced to returning the unbounded full semantic ledger through the 64KiB TypeScript output cap; bounded model-facing projections now keep the tool calls `isError=false` while the private persisted ledger remains complete.

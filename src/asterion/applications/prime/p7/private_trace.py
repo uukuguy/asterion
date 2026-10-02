@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+import json
 import re
+import sys
 from types import MappingProxyType
 
+from asterion.agents.prime.execution import PrimeRoundDiagnostic
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.services.diagnostics import FailureDiagnostic
 from asterion.applications.prime.p7.broker import (
@@ -184,6 +187,28 @@ class P7PrivateTraceReceipt:
         if self._accessed:
             raise P7PrivateTraceReceiptError("P7 failure evidence is unavailable")
         object.__setattr__(self, "_failure_diagnostic", diagnostic)
+
+    def record_model_round(self, diagnostic: PrimeRoundDiagnostic) -> None:
+        """Print bounded per-round signals for live cognition diagnosis."""
+
+        if type(diagnostic) is not PrimeRoundDiagnostic or self._accessed:
+            raise P7PrivateTraceReceiptError("P7 model-round evidence is unavailable")
+        print(
+            "[p7-cognition] model-round "
+            + json.dumps(
+                {
+                    "round": diagnostic.round_index,
+                    "prompt_bytes": diagnostic.prompt_bytes,
+                    "output_bytes": diagnostic.output_bytes,
+                    "prompt_signals": list(diagnostic.prompt_signals),
+                    "output_signals": list(diagnostic.output_signals),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
 
     def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
         """Append one validated public runtime usage event to private evidence."""

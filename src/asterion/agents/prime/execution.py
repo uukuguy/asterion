@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 from hashlib import sha256
 import math
+import json
+import os
+import sys
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -450,6 +453,17 @@ class PrimeExecutionKernel:
             self._native_events.append(event)
             event_type = event.type
             payload = event.payload
+            if os.environ.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition":
+                event_log = {"type": event_type}
+                for key in ("toolName", "toolCallId", "isError", "willRetry"):
+                    if key in payload:
+                        event_log[key] = payload[key]
+                print(
+                    "[p7-cognition] native-event "
+                    + json.dumps(event_log, sort_keys=True, separators=(",", ":")),
+                    file=sys.stderr,
+                    flush=True,
+                )
             if event_type == "agent_start":
                 # Post-run work may start another agent cycle before the
                 # prompt's settlement barrier. Its terminal is still required.

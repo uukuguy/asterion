@@ -2,7 +2,11 @@ import json
 import unittest
 
 from asterion.applications.prime.p7.broker import ArcBrokerError
-from asterion.applications.prime.p7.operator import _IpythonBridgeServer, _P7BrokerClient
+from asterion.applications.prime.p7.operator import (
+    _IpythonBridgeServer,
+    _P7BrokerClient,
+    _bounded_semantic_report,
+)
 
 
 class _Facade:
@@ -108,6 +112,64 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(result["status"], "rejected")
         self.assertEqual(result["reason"], "invalid-cognition-operation")
         self.assertEqual(result["execution_authority"], "none")
+
+    def test_semantic_report_is_byte_bounded_and_deduplicated(self):
+        claim = {
+            "id": "claim-1", "kind": "control", "subject": "ACTION1",
+            "claim": "x" * 4000, "status": "undetermined", "confidence": 0.5,
+            "evidence_count": 0, "support_count": 0,
+            "counterexample_count": 0, "next_test": "y" * 4000,
+        }
+        report = {
+            "schema": "schema", "scope": {"game_id": "g"},
+            "claims": {"control": [claim] * 32, "undetermined": [claim] * 32},
+            "natural_language_context": "z" * 8000,
+            "evidence_counts": {"total": 0}, "execution_authority": "none",
+        }
+        bounded = _bounded_semantic_report(report)
+        encoded = json.dumps(bounded, ensure_ascii=False, separators=(",", ":"))
+        self.assertLessEqual(len(encoded.encode("utf-8")), 16 * 1024)
+        self.assertEqual(len(bounded["claims"]["control"]), 1)
+        self.assertNotIn("undetermined", bounded["claims"])
+
+    def test_cognition_preserves_projection_envelope(self):
+        class Broker:
+            def cognition_projection(self):
+                return {
+                    "input_kind": "keyboard",
+                    "type_profile": {"authority": "prior-only"},
+                    "game_experience": {"observations": 2},
+                    "semantic": {"claims": {}, "natural_language_context": "context"},
+                    "cognition_session": {"state": "PROPOSE"},
+                }
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        result = client.cognition()
+        self.assertEqual(result["input_kind"], "keyboard")
+        self.assertEqual(result["cognition_session"]["state"], "PROPOSE")
+        self.assertEqual(result["semantic"]["natural_language_context"], "context")
+
+    def test_cognition_response_caps_large_pending_projection(self):
+        class Broker:
+            def cognition_projection(self):
+                return {
+                    "input_kind": "keyboard",
+                    "type_profile": {"authority": "prior-only"},
+                    "game_experience": {},
+                    "semantic": {"claims": {}, "natural_language_context": "c" * 5000},
+                    "cognition_session": {
+                        "state": "EXPERIMENT_SELECTED",
+                        "pending": {"expected": {"frame": [[1] * 10000]}},
+                        "events": [{"explanation": "e" * 1000}] * 32,
+                    },
+                }
+
+        client = object.__new__(_P7BrokerClient)
+        client._broker = Broker()
+        result = client.cognition()
+        self.assertLessEqual(len(json.dumps(result, separators=(",", ":")).encode()), 16 * 1024)
+        self.assertEqual(result["cognition_session"]["state"], "EXPERIMENT_SELECTED")
 
 
 if __name__ == "__main__":

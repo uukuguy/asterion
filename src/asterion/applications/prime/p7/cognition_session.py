@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 from typing import Any
 import uuid
@@ -118,6 +119,7 @@ class CognitionSession:
         self._episode_actions = 0
         self._resets = 0
         self._analyzed = False
+        self._logged_claims: dict[str, dict[str, Any]] = {}
         self._emit("cognition.session.started", {"session_id": sid})
 
     @property
@@ -141,6 +143,52 @@ class CognitionSession:
         self._events.append(event)
         self._events = self._events[-_MAX_EVENTS:]
         self._persist_events()
+        claim_changes: list[dict[str, Any]] = []
+        try:
+            report = self.store.report()
+            current_claims: dict[str, dict[str, Any]] = {}
+            for group, claims in report.get("claims", {}).items():
+                # The report also exposes an ``undetermined`` convenience
+                # bucket; category buckets are the canonical one-per-id view.
+                if group == "undetermined":
+                    continue
+                if not isinstance(claims, list):
+                    continue
+                for claim in claims:
+                    if not isinstance(claim, Mapping) or type(claim.get("id")) is not str:
+                        continue
+                    if claim["id"] in current_claims:
+                        continue
+                    view = {
+                        "id": claim["id"],
+                        "kind": claim.get("kind"),
+                        "subject": claim.get("subject"),
+                        "claim": claim.get("claim"),
+                        "status": claim.get("status"),
+                        "confidence": claim.get("confidence"),
+                        "evidence_count": claim.get("evidence_count", 0),
+                        "support_count": claim.get("support_count", 0),
+                        "counterexample_count": claim.get("counterexample_count", 0),
+                        "next_test": claim.get("next_test"),
+                    }
+                    current_claims[claim["id"]] = view
+                    if self._logged_claims.get(claim["id"]) != view:
+                        claim_changes.append(view)
+            self._logged_claims = current_claims
+        except Exception:
+            claim_changes = []
+        # Operator-visible, body-free progress logging.  The durable event
+        # file remains the source of truth; this stream makes a live run
+        # diagnosable before its private summary is written.
+        logged = dict(event)
+        if claim_changes:
+            logged["claim_changes"] = claim_changes[:32]
+        print(
+            "[p7-cognition] "
+            + json.dumps(logged, sort_keys=True, separators=(",", ":")),
+            file=sys.stderr,
+            flush=True,
+        )
 
     def _persist_events(self) -> None:
         payload = json.dumps({"schema": "asterion.prime.p7-semantic-cognition-events/v1", "events": self._events}, sort_keys=True, separators=(",", ":"), ensure_ascii=True)

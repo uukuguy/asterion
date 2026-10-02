@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 import json
+import sys
 from copy import deepcopy
 from types import MappingProxyType
 from typing import Callable, Mapping, Protocol, TypedDict, cast
@@ -455,7 +456,8 @@ class ArcBroker:
                 return value
             if op == "snapshot":
                 return session.snapshot()
-        except (CognitionSessionError, TypeError, ValueError):
+        except (CognitionSessionError, TypeError, ValueError) as exc:
+            print("[p7-cognition] rejected " + json.dumps({"op": op, "reason": str(exc) if isinstance(exc, CognitionSessionError) else "invalid-operation-shape"}), file=sys.stderr, flush=True)
             raise ArcBrokerError("unavailable") from None
         raise ArcBrokerError("unavailable")
 

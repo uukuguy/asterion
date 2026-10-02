@@ -575,6 +575,81 @@ class _IpythonBridgeServer:
         return ok_response(value)
 
 
+_COGNITION_OUTPUT_BYTES = 16 * 1024
+
+
+def _json_bytes(value: object) -> int:
+    return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+
+
+def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPUT_BYTES) -> dict[str, object]:
+    """Project semantic cognition below the packaged bridge output cap.
+
+    Claim reports contain model-authored prose, so count limits alone do not
+    bound the wire size.  This projection deduplicates the status convenience
+    buckets, truncates prose, then drops the least useful tail until the
+    serialized projection fits the cap.
+    """
+
+    if not isinstance(value, Mapping):
+        return {"status": "unavailable", "execution_authority": "none"}
+    bounded_claims: dict[str, list[dict[str, object]]] = {}
+    seen_ids: set[str] = set()
+    raw_claims = value.get("claims", {})
+    if isinstance(raw_claims, Mapping):
+        for group, claims in raw_claims.items():
+            if group == "undetermined" or not isinstance(claims, list):
+                continue
+            selected: list[dict[str, object]] = []
+            for claim in claims[:32]:
+                if not isinstance(claim, Mapping):
+                    continue
+                claim_id = claim.get("id")
+                if not isinstance(claim_id, str) or claim_id in seen_ids:
+                    continue
+                seen_ids.add(claim_id)
+                selected.append({
+                    key: (str(claim.get(key, ""))[:512] if key in {"subject", "claim", "next_test"} else claim.get(key))
+                    for key in (
+                        "id", "kind", "subject", "claim", "status", "confidence",
+                        "evidence_count", "support_count", "counterexample_count",
+                        "next_test",
+                    )
+                })
+            if selected:
+                bounded_claims[str(group)] = selected
+    result: dict[str, object] = {
+        "schema": value.get("schema"),
+        "scope": value.get("scope"),
+        "execution_authority": value.get("execution_authority", "none"),
+        "evidence_counts": value.get("evidence_counts", {}),
+        "claims": bounded_claims,
+        "natural_language_context": str(value.get("natural_language_context", ""))[:2048],
+    }
+    # Remove claims from the end of the largest bucket until the complete
+    # projection (including scope and context) is below the hard cap.
+    while _json_bytes(result) > max_bytes:
+        groups = [group for group, claims in bounded_claims.items() if claims]
+        if groups:
+            group = max(groups, key=lambda item: len(bounded_claims[item]))
+            bounded_claims[group].pop()
+            if not bounded_claims[group]:
+                bounded_claims.pop(group)
+            result["claims"] = bounded_claims
+            continue
+        context = result.get("natural_language_context")
+        if isinstance(context, str) and context:
+            result["natural_language_context"] = context[: max(0, len(context) // 2)]
+            continue
+        # Scope and counters are useful identity metadata, but can still be
+        # oversized if a malformed provider supplied arbitrary values.
+        result["scope"] = {}
+        result["evidence_counts"] = {}
+        result["schema"] = None
+        break
+    return result
+
+
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
@@ -749,7 +824,47 @@ class _P7BrokerClient:
         """Read advisory type cognition and exact-game experience."""
 
         try:
-            return self._broker.cognition_projection()
+            projection = self._broker.cognition_projection()
+            if not isinstance(projection, Mapping):
+                return {"semantic": _bounded_semantic_report(None)}
+            result = {
+                key: projection.get(key)
+                for key in (
+                    "input_kind", "type_profile", "game_experience",
+                    "semantic", "cognition_session",
+                )
+                if key in projection
+            }
+            result["semantic"] = _bounded_semantic_report(
+                projection.get("semantic"), max_bytes=10 * 1024
+            )
+            # Keep the type/game envelope and session state, but guarantee the
+            # entire method response remains below the bridge's hard cap.
+            while _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
+                session = result.get("cognition_session")
+                if isinstance(session, Mapping):
+                    compact_session = {
+                        key: session.get(key)
+                        for key in ("state", "episode", "episode_actions", "resets")
+                        if key in session
+                    }
+                    result["cognition_session"] = compact_session
+                semantic = result.get("semantic")
+                if isinstance(semantic, Mapping):
+                    result["semantic"] = _bounded_semantic_report(
+                        semantic, max_bytes=7 * 1024
+                    )
+                if _json_bytes(result) <= _COGNITION_OUTPUT_BYTES:
+                    break
+                result.pop("game_experience", None)
+                if _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
+                    result.pop("type_profile", None)
+                if _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
+                    result["semantic"] = _bounded_semantic_report(
+                        result.get("semantic"), max_bytes=4 * 1024
+                    )
+                    break
+            return result
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -762,7 +877,65 @@ class _P7BrokerClient:
                 "execution_authority": "none",
             }
         try:
-            return self._broker.cognition_update(payload)
+            result = self._broker.cognition_update(payload)
+            if isinstance(result, Mapping) and isinstance(result.get("report"), Mapping):
+                result = {
+                    **result,
+                    "report": _bounded_semantic_report(result["report"], max_bytes=10 * 1024),
+                }
+            if isinstance(result, Mapping) and _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
+                # Preserve operation outcome and the compact pending/session
+                # state while dropping bulky event history first.
+                compact = dict(result)
+                session = compact.get("session")
+                if isinstance(session, Mapping):
+                    pending = session.get("pending")
+                    compact_pending = None
+                    if isinstance(pending, Mapping):
+                        compact_pending = {
+                            key: pending.get(key)
+                            for key in ("claim_ids", "question", "information_gain", "action_name")
+                            if key in pending
+                        }
+                        expected = pending.get("expected")
+                        if isinstance(expected, Mapping):
+                            compact_pending["expected"] = {
+                                key: ("frame-predicate" if key == "frame" else value)
+                                for key, value in expected.items()
+                            }
+                    compact["session"] = {
+                        key: session.get(key)
+                        for key in ("state", "episode", "episode_actions", "resets")
+                        if key in session
+                    }
+                    compact["session"]["pending"] = compact_pending
+                if isinstance(compact.get("report"), Mapping):
+                    compact["report"] = _bounded_semantic_report(
+                        compact["report"], max_bytes=7 * 1024
+                    )
+                result = compact
+                if _json_bytes(result) > _COGNITION_OUTPUT_BYTES:
+                    result = {
+                        key: compact.get(key)
+                        for key in ("status", "accepted", "reason", "execution_authority", "session", "report")
+                        if key in compact
+                    }
+            print(
+                "[p7-cognition] update-call "
+                + json.dumps(
+                    {
+                        "op": payload.get("op"),
+                        "status": result.get("status") if isinstance(result, Mapping) else None,
+                        "accepted": result.get("accepted") if isinstance(result, Mapping) else None,
+                        "reason": result.get("reason") if isinstance(result, Mapping) else None,
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+                file=sys.stderr,
+                flush=True,
+            )
+            return result
         except ArcBrokerError:
             # Model-authored cognition records can be rejected by the
             # semantic contract. Return a bounded, recoverable result so a
@@ -1810,6 +1983,11 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
         if isinstance(cognition_projection, Mapping):
             semantic = cognition_projection.get("semantic")
             if isinstance(semantic, Mapping):
+                # The complete ledger is retained privately, but the live
+                # operator stream must stay readable and bounded.  Claim
+                # changes are emitted by CognitionSession as the durable
+                # source of truth for growth.
+                semantic = _bounded_semantic_report(semantic)
                 add_projection(
                     "## Semantic game cognition (primary reasoning surface)",
                     "Use the natural-language context and claim states first. This ledger is persistent understanding only; it has execution_authority=none. Propose and test new hypotheses with p7_cognition_update.",
@@ -2883,6 +3061,23 @@ async def run_live(
     private = live.private_root(root, run_id)
     trace_root = private / "trace"
     trace_root.mkdir(mode=0o700)
+    print(
+        "[p7-cognition] startup "
+        + json.dumps(
+            {
+                "run_id": run_id,
+                "game": invocation.game.game_id,
+                "seed": invocation.game.seed,
+                "target_level": invocation.game.target_level,
+                "strategy": strategy,
+                "cognition_mode": cognition_mode,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        file=sys.stderr,
+        flush=True,
+    )
     worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
         arc_root=invocation.arc_root,
@@ -3008,6 +3203,25 @@ async def run_live(
                 include_prior=prefix is not None and prefix.levels_completed > 0,
                 semantic_only=strategy == "cognition",
             )
+        broker_for_log = resources_.host_services.get("prime.arc-broker")
+        ledger_for_log = (
+            _bounded_semantic_report(broker_for_log.cognition_projection().get("semantic"))
+            if isinstance(broker_for_log, ArcBroker) else None
+        )
+        print(
+            "[p7-cognition] initial-context "
+            + json.dumps(
+                {
+                    "run_id": run_id,
+                    "semantic_ledger": ledger_for_log,
+                    "prompt_bytes": len(prompt.encode("utf-8")),
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
@@ -3054,12 +3268,43 @@ async def run_live(
         # cancellation explicitly to let the finally block seal verified work.
         failure = error
         reason = "P7 live solve cancelled"
+        print(
+            "[p7-cognition] live-cancelled "
+            + json.dumps(
+                {
+                    "run_id": run_id,
+                    "signal_cancelled": bool(getattr(run_signal, "cancelled", False)),
+                    "task_cancelling": asyncio.current_task().cancelling()
+                    if asyncio.current_task() is not None else None,
+                    "runtime_started": runtime is not None,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
     except Exception as error:
         failure = error
         reason = (
             str(error)
             if isinstance(error, live.P7LiveSolveError)
             else "P7 live solve unsuccessful"
+        )
+        print(
+            "[p7-cognition] live-failure "
+            + json.dumps(
+                {
+                    "run_id": run_id,
+                    "error_type": type(error).__name__,
+                    "reason": reason,
+                    "runtime_started": runtime is not None,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            file=sys.stderr,
+            flush=True,
         )
     finally:
         try:
