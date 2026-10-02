@@ -408,7 +408,14 @@ class CognitionSession:
             status = item.get("status")
             explanation = _text(item.get("explanation"), "explanation")
             claim = claim_by_id.get(item["claim_id"])
+            # A generic frame change is evidence for an action having an
+            # observable effect, which can support a broad control/rule
+            # claim. It cannot establish a specific object role, direction,
+            # or goal. Open LLM judgments remain available for exploratory
+            # cognition and are explicitly recorded as such.
             evidence_allowed = predicate_name == "llm judgment" or predicate_name == "frame"
+            if predicate_name == "frame_changed" and claim is not None:
+                evidence_allowed = claim.get("kind") in {"control", "rule"}
             if predicate_name in {"levels_completed", "state"} and claim is not None:
                 evidence_allowed = claim.get("kind") in {"success_condition", "rule"}
             evidence_explanation = (
