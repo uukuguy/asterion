@@ -98,6 +98,20 @@ class SemanticCognitionTests(unittest.TestCase):
                     "claim": "ACTION1 is an object.", "reason": "Changed interpretation.", "falsifier": "It moves.", "next_test": "Observe.",
                 }]})
 
+    def test_resolved_claim_cannot_be_rewritten_with_stale_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            store.propose({"claims": [{
+                "id": "resolved-bound", "kind": "control", "subject": "ACTION1",
+                "claim": "ACTION1 moves.", "reason": "Available.", "falsifier": "No movement.", "next_test": "Apply.",
+            }]})
+            store.resolve("resolved-bound", status="certain", evidence="run/1", explanation="Observed movement.")
+            with self.assertRaisesRegex(CognitionError, "resolved cognition claims cannot be rewritten"):
+                store.propose({"claims": [{
+                    "id": "resolved-bound", "kind": "control", "subject": "ACTION1",
+                    "claim": "ACTION1 moves toward the goal.", "reason": "New interpretation.", "falsifier": "It moves away.", "next_test": "Repeat.",
+                }]})
+
     def test_confidence_is_non_authoritative_and_validated(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))

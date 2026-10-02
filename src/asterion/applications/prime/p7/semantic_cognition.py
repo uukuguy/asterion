@@ -403,6 +403,10 @@ class SemanticCognitionStore:
             if existing is not None:
                 if any(existing.get(field) != normalized.get(field) for field in ("kind", "subject")):
                     raise CognitionError("claim id is already bound to another claim")
+                if existing.get("status") in {"certain", "falsified"}:
+                    if any(existing.get(field) != normalized.get(field) for field in ("claim", "reason", "falsifier", "next_test", "confidence", "context")):
+                        raise CognitionError("resolved cognition claims cannot be rewritten")
+                    continue
                 mutable = ("claim", "reason", "falsifier", "next_test", "confidence", "context")
                 if any(existing.get(field) != normalized.get(field) for field in mutable):
                     for field in mutable:
