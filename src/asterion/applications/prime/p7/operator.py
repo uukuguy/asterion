@@ -578,7 +578,7 @@ class _IpythonBridgeServer:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode")
 
     def __init__(
         self,
@@ -586,13 +586,15 @@ class _P7BrokerClient:
         recorder: PrimeTraceRecorder,
         identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
         variant: str = "verified",
+        cognition_mode: bool = False,
     ) -> None:
-        if variant not in {"legacy", "verified"}:
+        if variant not in {"legacy", "verified"} or type(cognition_mode) is not bool:
             raise P7OperatorError("P7 host services are unavailable")
         self._broker = broker
         self._recorder = recorder
         self._identities = identities
         self._variant = variant
+        self._cognition_mode = cognition_mode
         self._route_adoption = RouteAdoptionTracker()
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
@@ -753,7 +755,11 @@ class _P7BrokerClient:
 
     def cognition_update(self, payload: Mapping[str, object]) -> dict[str, object]:
         if not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
-            raise P7OperatorError("P7 host services are unavailable")
+            return {
+                "status": "rejected",
+                "reason": "invalid-cognition-operation",
+                "execution_authority": "none",
+            }
         try:
             return self._broker.cognition_update(payload)
         except ArcBrokerError:
@@ -1004,6 +1010,22 @@ class _P7BrokerClient:
                     "levels_completed": batch.levels_completed,
                     "transitions": [self._transition_view(item) for item in batch.transitions],
                 },
+            }
+        except ArcBrokerError as error:
+            reason = str(error)
+            if not self._cognition_mode:
+                raise P7OperatorError("P7 host services are unavailable") from None
+            if reason not in {"unavailable", "REPLAN_REQUIRED", "closed", "uncertain"}:
+                raise P7OperatorError("P7 host services are unavailable") from None
+            safe_reason = {
+                "REPLAN_REQUIRED": "replan-required",
+                "closed": "closed",
+                "uncertain": "uncertain",
+            }.get(reason, "validation-failed")
+            return {
+                "status": "rejected",
+                "reason": safe_reason,
+                "execution_authority": "none",
             }
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
@@ -2274,6 +2296,7 @@ def build_p7_operator_resources(
             trace,
             identities,
             variant=variant,
+            cognition_mode=not semantic_cognition_read_only,
         )
         ipython = PersistentIpythonHost(
             worker=worker,

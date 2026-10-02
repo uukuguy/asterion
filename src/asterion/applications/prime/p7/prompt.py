@@ -398,8 +398,13 @@ success condition before selecting a probe. Select one information-bearing
 experiment with an explicit observable predicate such as
 `{"frame_changed": true}`, `{"levels_completed": 1}`, or
 `{"state": "WIN"}`; include claim ids, question, information gain, and one
-non-RESET action. Dispatch exactly that action, then analyze the settled
-result. A frame change alone is evidence of change, not proof of a
+non-RESET action. Dispatch it with one-item `p7_act_checked`, whose plan item
+uses the broker shape `{"action":{"name":"ACTION1","data":{}},"expect":{"state":"NOT_FINISHED"}}`
+or a concrete `cell`/terminal expectation; `frame_changed` belongs to the
+cognition experiment predicate, not the checked-action `expect` object. A
+rejected action plan is recoverable: correct it and retry once. Dispatch the
+action exactly once, then analyze the settled result. A frame change is
+evidence of change, not proof of a
 particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
