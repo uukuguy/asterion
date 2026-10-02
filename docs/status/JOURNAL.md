@@ -3508,3 +3508,4 @@
 - 2026-10-02 ready 不足证据改为结构化 not-ready，避免模型重复终止并继续认知实验 10a6622d
 - 2026-10-02 启动认知幂等写入三条基础未知假说并支持非权威 confidence，保持 undetermined 与 execution_authority=none [0d5a8254]
 - 2026-10-02 tu93 L1 实际 cognition 运行已加载 9 条语义假说（3 启动+6 LLM），本轮外部 RPC 取消且 0 动作；标记 External-limited，未宣称过关
+- 2026-10-02 ready 失败处理区分 cognition 持久化不可用与证据不足：持久化错误继续 fail-closed，不伪装为 not-ready

@@ -436,6 +436,8 @@ class ArcBroker:
             if op == "ready":
                 try:
                     value = session.ready_for_solve()
+                except CognitionPersistenceError:
+                    raise ArcBrokerError("cognition-persistence-unavailable") from None
                 except CognitionSessionError:
                     snapshot = session.snapshot(emit_event=False)
                     return {
