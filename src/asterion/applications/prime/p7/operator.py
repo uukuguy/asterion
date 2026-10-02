@@ -2527,6 +2527,15 @@ def _prefix_action_diagnostics(prefix: object, *, applied: bool) -> dict[str, in
     }
 
 
+def _prefix_replayed_count(prefix: object, journal_start: int, journal_length: int) -> int:
+    """Count only prefix transitions, excluding actions run after replay."""
+
+    if prefix is None:
+        return 0
+    expected = len(getattr(prefix, "transitions", ()))
+    return min(expected, max(0, journal_length - journal_start))
+
+
 async def run_live(
     invocation: P7Invocation,
     run_id: str,
@@ -2968,8 +2977,8 @@ async def run_live(
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
                 if prefix_journal_start is not None:
-                    diagnostics["replayed_prefix_actions"] = max(
-                        0, len(broker_value.journal) - prefix_journal_start
+                    diagnostics["replayed_prefix_actions"] = _prefix_replayed_count(
+                        prefix, prefix_journal_start, len(broker_value.journal)
                     )
                 try:
                     try:
