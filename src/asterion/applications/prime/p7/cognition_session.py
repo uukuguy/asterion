@@ -486,7 +486,7 @@ class CognitionSession:
             normalized_results.append({
                 "claim_id": claim_id,
                 "status": _normalize_analysis_status(item.get("status", item.get("result"))),
-                "explanation": item.get("explanation"),
+                "explanation": _text(item.get("explanation"), "explanation"),
             })
         results = normalized_results
         evidence_ref = f"{self.session_id}/episode-{self._episode}/action-{self._episode_actions}"
@@ -510,9 +510,11 @@ class CognitionSession:
             if isinstance(values, list)
             for claim in values
         }
+        resolutions: list[dict[str, str]] = []
+        resolution_events: list[tuple[str, str]] = []
         for item in results:
             status = item.get("status")
-            explanation = _text(item.get("explanation"), "explanation")
+            explanation = item["explanation"]
             claim = claim_by_id.get(item["claim_id"])
             evidence_allowed = predicate_name == "llm judgment" or predicate_name == "frame"
             if predicate_name in {"levels_completed", "state"} and claim is not None:
@@ -524,24 +526,24 @@ class CognitionSession:
                 if (is_known_predicate and not observed) or not evidence_allowed:
                     self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
                     continue
-                try:
-                    self.store.resolve(item["claim_id"], status="certain", evidence=evidence_ref, explanation=evidence_explanation)
-                except CognitionError as exc:
-                    raise CognitionSessionError(str(exc)) from None
-                self._emit("cognition.hypothesis.confirmed", {"claim_ids": [item["claim_id"]], "explanation": explanation})
+                resolutions.append({"claim_id": item["claim_id"], "status": "certain", "evidence": evidence_ref, "explanation": evidence_explanation})
+                resolution_events.append(("cognition.hypothesis.confirmed", explanation))
             elif status == "falsified":
                 if (is_known_predicate and observed) or not evidence_allowed:
                     self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
                     continue
-                try:
-                    self.store.resolve(item["claim_id"], status="falsified", evidence=evidence_ref, explanation=evidence_explanation)
-                except CognitionError as exc:
-                    raise CognitionSessionError(str(exc)) from None
-                self._emit("cognition.hypothesis.falsified", {"claim_ids": [item["claim_id"]], "explanation": explanation})
+                resolutions.append({"claim_id": item["claim_id"], "status": "falsified", "evidence": evidence_ref, "explanation": evidence_explanation})
+                resolution_events.append(("cognition.hypothesis.falsified", explanation))
             elif status == "undetermined":
                 self._emit("cognition.hypothesis.remains_undetermined", {"claim_ids": [item["claim_id"]], "explanation": explanation})
             else:
                 raise CognitionSessionError("invalid analysis status")
+        try:
+            self.store.resolve_many(resolutions)
+        except CognitionError as exc:
+            raise CognitionSessionError(str(exc)) from None
+        for (event_type, explanation), item in zip(resolution_events, resolutions, strict=True):
+            self._emit(event_type, {"claim_ids": [item["claim_id"]], "explanation": explanation})
         self._state = "ANALYZED"
         self._analyzed = True
         self._emit("cognition.observation.analyzed", {"state": self._state})

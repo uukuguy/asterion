@@ -59,6 +59,35 @@ class CognitionAssessmentTests(unittest.TestCase):
             self.assertEqual(claim["status"], "undetermined")
             self.assertEqual(claim["evidence_count"], 0)
 
+    def test_invalid_later_explanation_does_not_partially_persist(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            session = CognitionSession(SemanticCognitionStore(root, "assessment-game", 0, 2, level=0), session_id="atomic")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            session.propose({"claims": [
+                {"id": "first", "kind": "control", "subject": "ACTION1", "claim": "first", "reason": "r", "falsifier": "f", "next_test": "t"},
+                {"id": "second", "kind": "rule", "subject": "scene", "claim": "second", "reason": "r", "falsifier": "f", "next_test": "t"},
+            ]})
+            session.select_experiment({
+                "claim_ids": ["first", "second"], "question": "both?", "information_gain": "both",
+                "action": {"name": "ACTION1"}, "expected": {"frame": [[2]]},
+            })
+            session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
+            with self.assertRaises(CognitionSessionError):
+                session.analyze({"results": [
+                    {"claim_id": "first", "status": "certain", "explanation": "valid"},
+                    {"claim_id": "second", "status": "certain", "explanation": "x" * 2049},
+                ]})
+            claims = {
+                item["id"]: item
+                for values in session.snapshot(emit_event=False)["report"]["claims"].values()
+                if isinstance(values, list)
+                for item in values
+            }
+            self.assertEqual(claims["first"]["status"], "undetermined")
+            self.assertEqual(claims["first"]["evidence_count"], 0)
+            self.assertEqual(claims["second"]["status"], "undetermined")
+
     def test_snapshot_reports_whether_more_validation_is_needed_and_possible(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = SemanticCognitionStore(Path(directory), "validation-game", 0, 2, level=0)

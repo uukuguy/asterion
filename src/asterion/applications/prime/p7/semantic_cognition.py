@@ -449,29 +449,56 @@ class SemanticCognitionStore:
     def resolve(self, claim_id: str, *, status: str, evidence: str, explanation: str) -> dict[str, Any]:
         """Resolve one hypothesis using program-owned evidence."""
 
-        claim_id = _id(claim_id, "claim id")
-        if status not in {"certain", "falsified"}:
-            raise CognitionError("program resolution requires certain or falsified")
-        evidence = _text(evidence, "evidence reference")
-        explanation = _text(explanation, "evidence explanation")
-        record = self._record()
-        claim = record["claims"].get(claim_id)
-        if not isinstance(claim, dict):
-            raise CognitionError("unknown cognition claim")
-        if claim.get("status") == "falsified" and status == "certain":
-            raise CognitionError("falsified claims cannot be revived")
-        if len(claim.get("evidence", [])) >= _MAX_EVIDENCE:
-            raise CognitionError("claim evidence exceeds cap")
-        if any(item.get("reference") == evidence for item in claim.get("evidence", [])):
-            raise CognitionError("duplicate cognition evidence reference")
-        claim.setdefault("evidence", []).append({
-            "reference": evidence,
-            "explanation": explanation,
+        return self.resolve_many([{
+            "claim_id": claim_id,
             "status": status,
-        })
-        claim["status"] = status
-        self._persist()
-        return _claim_view(claim)
+            "evidence": evidence,
+            "explanation": explanation,
+        }])[0]
+
+    def resolve_many(self, resolutions: Sequence[Mapping[str, str]]) -> list[dict[str, Any]]:
+        """Resolve several hypotheses in one durable transaction."""
+
+        if not isinstance(resolutions, Sequence) or isinstance(resolutions, (str, bytes)):
+            raise CognitionError("resolutions must be a sequence")
+        record = self._record()
+        staged = _copy(record["claims"])
+        views: list[dict[str, Any]] = []
+        for resolution in resolutions:
+            if not isinstance(resolution, Mapping):
+                raise CognitionError("invalid cognition resolution")
+            claim_id = _id(resolution.get("claim_id"), "claim id")
+            status = resolution.get("status")
+            if status not in {"certain", "falsified"}:
+                raise CognitionError("program resolution requires certain or falsified")
+            evidence = _text(resolution.get("evidence"), "evidence reference")
+            explanation = _text(resolution.get("explanation"), "evidence explanation")
+            claim = staged.get(claim_id)
+            if not isinstance(claim, dict):
+                raise CognitionError("unknown cognition claim")
+            if claim.get("status") == "falsified" and status == "certain":
+                raise CognitionError("falsified claims cannot be revived")
+            if len(claim.get("evidence", [])) >= _MAX_EVIDENCE:
+                raise CognitionError("claim evidence exceeds cap")
+            if any(item.get("reference") == evidence for item in claim.get("evidence", [])):
+                raise CognitionError("duplicate cognition evidence reference")
+            claim.setdefault("evidence", []).append({
+                "reference": evidence,
+                "explanation": explanation,
+                "status": status,
+            })
+            claim["status"] = status
+            views.append(_claim_view(claim))
+        if not views:
+            return []
+        original = record["claims"]
+        record["claims"] = staged
+        try:
+            self._persist()
+        except Exception:
+            record["claims"] = original
+            raise
+        return views
 
     def seed_protocol_claims(self, *, level_completed: int) -> None:
         """Record the runtime's protocol-level completion observation."""
