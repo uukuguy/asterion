@@ -3526,3 +3526,4 @@
 - 2026-10-02 that run had successful cognition tool transport but zero primitive actions and repeated ready/update calls; operator stopped the cognition-only spin, so it is not a solve and not evidence of verified mechanics
 - 2026-10-02 root cause of earlier bridge poisoning was unbounded full semantic cognition returned through the 64KiB TypeScript tool output cap; bounded projection changed native cognition/observation/tried-actions/update calls to isError=false in live evidence
 - 2026-10-02 commit 4af4a424: live cognition growth logging, rejection diagnostics, bounded cognition projections, and bridge regression tests landed.
+- 2026-10-02 P7 run p7-live-20261002060535-31802ef241af170e4f3bf9bf entered cognition startup and printed 20+ hypotheses including black nodes/red connectors/orange actor/ACTION4-right/green goal, but runtime_started=false before model action; no step claimed.
