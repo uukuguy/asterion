@@ -1027,15 +1027,15 @@ class _P7BrokerClient:
                 detail=str(exc)[:256],
             )
             return result
-        except Exception:
+        except Exception as exc:
             log_update(
                 "update-call",
                 op=payload.get("op"),
                 status="error",
                 accepted=None,
                 reason=None,
-                error_type=type(sys.exc_info()[1]).__name__,
-                detail=str(sys.exc_info()[1])[:256],
+                error_type=type(exc).__name__,
+                detail=str(exc)[:256],
             )
             raise P7OperatorError("P7 host services are unavailable") from None
 
