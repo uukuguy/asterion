@@ -35,10 +35,12 @@ class CognitionSessionTests(unittest.TestCase):
                 "information_gain": "Tests repeatability.", "action": {"name": "ACTION2"}, "expected": {"frame_changed": True},
             })
             before = session.snapshot()
-            self.assertEqual(before["report"]["control"][0]["status"], "certain")
+            control_right = next(item for item in before["report"]["control"] if item["id"] == "control-right")
+            self.assertEqual(control_right["status"], "certain")
             session.reset_episode()
             after = session.snapshot()
-            self.assertEqual(after["report"]["control"][0]["status"], "certain")
+            control_right = next(item for item in after["report"]["control"] if item["id"] == "control-right")
+            self.assertEqual(control_right["status"], "certain")
             self.assertEqual(after["session"]["episode_actions"], 0)
             self.assertEqual(after["session"]["state"], "OBSERVE")
             self.assertIn("cognition.episode.reset", [event["type"] for event in session.events])
@@ -51,6 +53,31 @@ class CognitionSessionTests(unittest.TestCase):
                 session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION1"})
             with self.assertRaises(CognitionSessionError):
                 session.ready_for_solve()
+
+    def test_first_episode_bootstraps_unknown_game_picture_idempotently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self._store(root)
+            session = CognitionSession(store, session_id="bootstrap")
+            first = session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            claims = first["report"]["claims"]["undetermined"]
+            self.assertEqual(
+                {claim["id"] for claim in claims},
+                {"bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition"},
+            )
+            self.assertEqual({claim["status"] for claim in claims}, {"undetermined"})
+            self.assertGreaterEqual(max(claim["confidence"] for claim in claims), 0.8)
+            self.assertEqual(first["execution_authority"], "none")
+            encoded = str(first["report"])
+            self.assertNotIn("route", encoded.lower())
+            self.assertNotIn('"x"', encoded)
+            self.assertNotIn('"y"', encoded)
+
+            # A second episode must preserve the same semantic questions and
+            # must not create duplicate records or upgrade their status.
+            second = session.start_episode({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            self.assertEqual(len(second["report"]["claims"]["undetermined"]), 3)
+            self.assertEqual(second["report"]["evidence_counts"]["total"], 0)
 
     def test_ready_requires_language_and_supported_control(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

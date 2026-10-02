@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 import copy
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -34,6 +35,45 @@ _MAX_RECORDS = 128
 _MAX_CLAIMS = 256
 _MAX_EVIDENCE = 64
 _MAX_TEXT = 2048
+
+# Every fresh cognition episode starts with a small, program-seeded set of
+# semantic questions.  These are intentionally hypotheses (rather than facts):
+# seeing a frame and receiving primitive action names gives the learner a place
+# to start, but does not identify object roles, action effects, or the goal.
+# Keep this contract free of routes and coordinates so the bootstrap cannot
+# smuggle a solution into the experience ledger.
+_BOOTSTRAP_CLAIMS: tuple[dict[str, str | float], ...] = (
+    {
+        "id": "bootstrap-frame-semantics",
+        "kind": "game_type",
+        "subject": "initial-observation",
+        "claim": "The initial observation depicts a game scene whose semantic elements are not yet identified.",
+        "reason": "A frame is available at the start of a cognition episode, but its objects and rules are unknown.",
+        "falsifier": "Repeated observations provide no stable game scene or cannot be interpreted as game state.",
+        "next_test": "Inspect the initial frame and compare it with the frame after one controlled primitive action.",
+        "confidence": 0.8,
+    },
+    {
+        "id": "bootstrap-discrete-actions",
+        "kind": "control",
+        "subject": "primitive-action-interface",
+        "claim": "The game can be investigated through discrete primitive actions whose effects are not yet known.",
+        "reason": "The runtime exposes named primitive actions, while their meanings and effects still require testing.",
+        "falsifier": "The available inputs are not discrete game actions or no action produces an observable game effect.",
+        "next_test": "Select one primitive action and compare the resulting observation with the prior frame.",
+        "confidence": 0.75,
+    },
+    {
+        "id": "bootstrap-success-condition",
+        "kind": "success_condition",
+        "subject": "level-success",
+        "claim": "The level's puzzle success condition is currently unknown.",
+        "reason": "No puzzle-level completion cause has been observed at episode start.",
+        "falsifier": "A known observable event already establishes how the puzzle reaches success.",
+        "next_test": "Observe level and terminal signals while testing an information-bearing interaction.",
+        "confidence": 0.95,
+    },
+)
 
 
 class CognitionError(ValueError):
@@ -105,6 +145,7 @@ def _claim_view(claim: Mapping[str, Any]) -> dict[str, Any]:
         "reason": claim["reason"],
         "falsifier": claim["falsifier"],
         "next_test": claim["next_test"],
+        "confidence": claim.get("confidence", 0.5),
         "status": claim["status"],
         "evidence_count": len(evidence),
         "support_count": support_count,
@@ -229,7 +270,7 @@ class SemanticCognitionStore:
 
     @staticmethod
     def _normalize_claim(value: Mapping[str, Any], *, require_undetermined: bool) -> dict[str, Any]:
-        allowed = {"id", "kind", "subject", "claim", "reason", "falsifier", "next_test", "context", "status", "evidence"}
+        allowed = {"id", "kind", "subject", "claim", "reason", "falsifier", "next_test", "context", "status", "evidence", "confidence"}
         unknown = set(value) - allowed
         if unknown:
             raise CognitionError(f"unsupported cognition fields: {sorted(unknown)!r}")
@@ -240,6 +281,9 @@ class SemanticCognitionStore:
         status = value.get("status", "undetermined")
         if status not in _STATUSES or (require_undetermined and status != "undetermined"):
             raise CognitionError("LLM proposals must remain undetermined")
+        confidence = value.get("confidence", 0.5)
+        if type(confidence) not in (int, float) or isinstance(confidence, bool) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
+            raise CognitionError("confidence must be a finite number between 0 and 1")
         result = {
             "id": claim_id,
             "kind": kind,
@@ -248,6 +292,9 @@ class SemanticCognitionStore:
             "reason": _text(value.get("reason"), "reason"),
             "falsifier": _text(value.get("falsifier"), "falsifier"),
             "next_test": _text(value.get("next_test"), "next_test"),
+            # Confidence ranks a hypothesis for attention; it never changes
+            # the three-state evidence contract or grants execution authority.
+            "confidence": float(confidence),
             "status": status,
             "evidence": [],
         }
@@ -362,6 +409,28 @@ class SemanticCognitionStore:
             record["claims"] = staged
             self._persist()
         return accepted
+
+    def seed_bootstrap_claims(self) -> int:
+        """Seed the minimum unknown game model for a new cognition episode.
+
+        The claims are persisted through the same LLM proposal validator, so
+        they remain ``undetermined`` and cannot carry evidence or authority.
+        Calling this for every episode is safe: stable claim ids make the
+        operation idempotent, while any later evidence remains untouched.
+        """
+
+        record = self._record()
+        missing: list[dict[str, str | float]] = []
+        for claim in _BOOTSTRAP_CLAIMS:
+            existing = record["claims"].get(claim["id"])
+            if existing is None:
+                missing.append(dict(claim))
+                continue
+            if any(existing.get(field) != claim[field] for field in ("kind", "subject", "claim")):
+                raise CognitionError("bootstrap claim id is already bound to another claim")
+        if not missing:
+            return 0
+        return self.propose({"claims": missing})
 
     def resolve(self, claim_id: str, *, status: str, evidence: str, explanation: str) -> dict[str, Any]:
         """Resolve one hypothesis using program-owned evidence."""

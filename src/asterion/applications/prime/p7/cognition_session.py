@@ -133,6 +133,13 @@ class CognitionSession:
 
     def start_episode(self, observation: Mapping[str, Any]) -> dict[str, Any]:
         self._require_observation(observation)
+        try:
+            # Give every first observation a minimal semantic starting point.
+            # These are high/medium-confidence questions only; the store keeps
+            # them undetermined until an actual experiment supplies evidence.
+            self.store.seed_bootstrap_claims()
+        except CognitionError as exc:
+            raise CognitionSessionError(str(exc)) from None
         self._episode += 1
         self._observation = dict(observation)
         self._before_digest = _digest(observation)

@@ -24,7 +24,9 @@ and a falsifiable strategy hypothesis. Submit those hypotheses with
 Each claim must include `id`, `kind`, `subject`, `claim`, `reason`,
 `falsifier`, and `next_test`; `kind` is one of `game_type`, `object_role`,
 `control`, `success_condition`, `rule`, or `strategy`. Omit `status` and
-`evidence` from proposals. A response with `status: "rejected"` is a
+`evidence` from proposals. You may include a numeric `confidence` from 0 to 1
+to prioritize attention; it is non-authoritative and cannot change the
+`undetermined` status. A response with `status: "rejected"` is a
 recoverable validation result: correct the payload and retry. The tool accepts
 only `undetermined` hypotheses and never executes actions.
 Before a learning probe, call `p7_cognition_update({"op":"select_experiment",
@@ -387,7 +389,12 @@ strategy hypothesis. Propose only falsifiable `undetermined` claims with
 `p7_cognition_update`. For each claim, provide only `id`, `kind`, `subject`,
 `claim`, `reason`, `falsifier`, and `next_test`; use one of the kinds
 `game_type`, `object_role`, `control`, `success_condition`, `rule`, or
-`strategy`, and omit `status` and `evidence`. Select one information-bearing
+`strategy`. You may include a numeric `confidence` from 0 to 1 to rank
+attention; confidence is non-authoritative and every proposal remains
+`undetermined`, so omit `status` and `evidence`. On the first frame, propose
+several broad, falsifiable hypotheses even when their confidence differs:
+describe the scene, the discrete action interface, and the currently unknown
+success condition before selecting a probe. Select one information-bearing
 experiment with an explicit observable predicate such as
 `{"frame_changed": true}`, `{"levels_completed": 1}`, or
 `{"state": "WON"}`; include claim ids, question, information gain, and one

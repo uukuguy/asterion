@@ -41,6 +41,8 @@
 
 schema 为 `asterion.prime.p7-semantic-cognition/v1`；精确作用域为 `game_id + seed + win_levels + level`，内部 L1 的 level 为 0。每条假说包含稳定 id、kind、subject、claim、reason、falsifier、next_test、可选适用 context、status 及程序绑定的证据索引。kind 为 `game_type / object_role / control / success_condition / rule / strategy`；status 为 `undetermined / certain / falsified`。
 
+每个 cognition episode 的首个 `start_episode` 幂等写入三条基础未定假说：初始画面的语义尚未识别、离散动作的含义尚未识别、题目成功条件尚未识别。它们可以带 0 到 1 的非权威 `confidence` 以排序注意力（其中部分启动假说可有较高先验置信度），但 confidence 永远不能把 status 变成 `certain`，也不授予执行权；基础账本不保存路线或坐标。
+
 LLM 只能新建待定假说。certain 的含义是“在记录的条件和实验范围内获得实测支持”，不声称普遍真理。视觉类比可以长期待定；例如“像迷宫”不需要为了就绪强制变成确定。反例保留，不能删除原反例后把同一 id 复活；修改适用条件必须新 id。协议成功（levels_completed / WIN）和题目成功条件（如何操作会获胜）分开，协议已知不能自动确认题目目标。
 
 落盘只保存语言认知、状态和证据索引，原始画面、坐标及动作序列属于独立私有实验记录。所有加载的认知固定 `execution_authority=none`。语言 certainty 不等于模拟器证书。持久化必须原子写入、有限大小；写入失败不能对外声称更新成功。实验过程每个变化都发出图景，报告是账本的投影，不是第二个真相来源。

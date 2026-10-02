@@ -60,6 +60,41 @@ class SemanticCognitionTests(unittest.TestCase):
             self.assertNotIn('"data"', encoded)
             self.assertNotIn('"x"', encoded)
 
+    def test_confidence_is_non_authoritative_and_validated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            accepted = store.propose({
+                "claims": [{
+                    "id": "high-confidence-picture",
+                    "kind": "game_type",
+                    "subject": "initial-frame",
+                    "claim": "The initial frame is a discrete game scene.",
+                    "reason": "The runtime returned a settled frame.",
+                    "falsifier": "The frame is not stable game state.",
+                    "next_test": "Compare it after one primitive action.",
+                    "confidence": 0.9,
+                }],
+            })
+            self.assertEqual(accepted, 1)
+            claim = store.report()["claims"]["undetermined"][0]
+            self.assertEqual(claim["confidence"], 0.9)
+            self.assertEqual(claim["status"], "undetermined")
+            self.assertEqual(store.report()["execution_authority"], "none")
+
+            with self.assertRaises(CognitionError):
+                store.propose({
+                    "claims": [{
+                        "id": "invalid-confidence",
+                        "kind": "rule",
+                        "subject": "unknown",
+                        "claim": "A rule may exist.",
+                        "reason": "It is a hypothesis.",
+                        "falsifier": "No rule is observed.",
+                        "next_test": "Try one action.",
+                        "confidence": 1.1,
+                    }],
+                })
+
     def test_llm_cannot_claim_certainty_or_submit_executable_plan(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))
