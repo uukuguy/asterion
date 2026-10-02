@@ -3550,3 +3550,4 @@
 - 14:08 commit 2bf62053 deferred cognition hypothesis events until transactional claim resolution succeeds, keeping failed analyses event-consistent.
 - 14:15 commit 05ee26b5 accepted the model's `predicate` alias for cognition experiments, preventing recoverable probe selection rejection.
 - 14:22 commit d1abfee1 accepted model `id`/`result`/`evidence` analysis aliases, allowing real multi-claim probe results to persist.
+- 14:27 commit 237c49bd explicitly requires L1 displacement probes to assess `role-background-12` passability with movement claims.
