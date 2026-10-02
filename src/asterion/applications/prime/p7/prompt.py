@@ -409,7 +409,9 @@ particular object role or goal. Use RESET when an episode is contaminated;
 RESET clears the pending experiment but keeps the semantic ledger. Continue
 with independent experiments until the language picture is useful, then call
 `p7_cognition_update({"op":"ready"})`; if safety limits or missing evidence
-prevent readiness, call `stop` with the actual reason. Never import or replay a
+prevent readiness, the tool returns `status: "not-ready"`; continue with a
+new experiment instead of repeating `ready`. Call `stop` only with the actual
+safety reason. Never import or replay a
 prior success route and never claim official completion from this session. If
 a cognition update returns `status: "rejected"`, repair the requested object
 and retry; do not stop solely because a proposal was rejected."""

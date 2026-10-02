@@ -434,7 +434,17 @@ class ArcBroker:
                 self._reset_cognition_runtime()
                 return session.reset_episode()
             if op == "ready":
-                value = session.ready_for_solve()
+                try:
+                    value = session.ready_for_solve()
+                except CognitionSessionError:
+                    snapshot = session.snapshot(emit_event=False)
+                    return {
+                        "status": "not-ready",
+                        "reason": "more-evidence-required",
+                        "report": snapshot["report"],
+                        "session": snapshot["session"],
+                        "execution_authority": "none",
+                    }
                 self._terminal_reason = "cognition-ready"
                 return value
             if op == "stop":

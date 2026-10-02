@@ -758,6 +758,7 @@ class _P7BrokerClient:
             return {
                 "status": "rejected",
                 "reason": "invalid-cognition-operation",
+                "retryable": True,
                 "execution_authority": "none",
             }
         try:
@@ -1025,6 +1026,7 @@ class _P7BrokerClient:
             return {
                 "status": "rejected",
                 "reason": safe_reason,
+                "retryable": True,
                 "execution_authority": "none",
             }
         except Exception:
