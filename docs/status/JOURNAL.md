@@ -3548,3 +3548,4 @@
 - 13:53 commit 7203ce88 tightened P7 cognition validation aliases, compact-state visibility, and displacement/passability guidance.
 - 14:00 commit a8daf8f5 made multi-claim cognition evidence resolution transactional so invalid later claims cannot partially persist.
 - 14:08 commit 2bf62053 deferred cognition hypothesis events until transactional claim resolution succeeds, keeping failed analyses event-consistent.
+- 14:15 commit 05ee26b5 accepted the model's `predicate` alias for cognition experiments, preventing recoverable probe selection rejection.
