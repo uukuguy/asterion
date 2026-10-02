@@ -28,6 +28,7 @@
 - Counterfactual simulation is implemented and tested synthetically; its effect on real SP80 exploration and action efficiency is unverified.
 - A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
 - Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
+- `tu93` L1 cognition has persisted three bootstrap hypotheses plus six LLM hypotheses across runs; the latest real run was externally cancelled before any action, so cognition-to-action effectiveness remains External-limited.
 
 ## Key Files
 
