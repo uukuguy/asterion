@@ -3520,3 +3520,4 @@
 - 2026-10-02 Prime method bridge calls serialized over the shared descriptor; validated application errors remain recoverable, while transport/uncertain results poison fail-closed; regression harness pauses the socket wrapper to avoid fs.read races
 - 2026-10-02 focused verification: 178 P7 Python tests passed, Ruff/compileall/diff checks passed, and TypeScript cognition/bridge regressions passed; full npm suite remains externally limited by existing Pi-dependent tests
 - 2026-10-02 post-fix bounded `make asterion-prime-p7-cognition GAME=tu93 LEVEL=1` rebuilt the wheel and entered native live-run, then reached the 180s external execution limit without a returned public receipt; no solve claim made
+- 2026-10-02 `make promotion-check` was rerun with a 120s bound; the checker produced no final report before the bound and was not promoted to PASS (prior recorded result remains external Pi source-detachment plus existing failures)
