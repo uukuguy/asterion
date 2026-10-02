@@ -496,6 +496,13 @@ class _IpythonBridgeServer:
 
         try:
             facade = self._client
+            if self._first_probe_required(method):
+                return ok_response({
+                    "status": "blocked",
+                    "reason": "cognition-first-probe-required",
+                    "next": "p7_cognition_update select_experiment, then p7_act_checked",
+                    "execution_authority": "none",
+                })
             if method in {"observe", "status", "mechanics_prior"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
@@ -573,6 +580,36 @@ class _IpythonBridgeServer:
             )
             return error_response()
         return ok_response(value)
+
+    def _first_probe_required(self, method: str) -> bool:
+        """Force cognition mode to execute its first selected probe before detours."""
+        client = getattr(self._client, "_P7ClientFacade__client", None)
+        if not getattr(client, "_cognition_mode", False) or method in {
+            "observe", "status", "cognition", "cognition_update",
+        }:
+            return False
+        broker = getattr(client, "_broker", None)
+        if not isinstance(broker, ArcBroker):
+            return False
+        try:
+            snapshot = broker.cognition_projection().get("cognition_session")
+        except Exception:
+            return False
+        if not isinstance(snapshot, Mapping):
+            return False
+        blocked = (
+            snapshot.get("state") in {"OBSERVE", "PROPOSE"}
+            and snapshot.get("episode_actions") == 0
+            and snapshot.get("pending") is None
+        )
+        if blocked:
+            print(
+                "[p7-cognition] first-probe-blocked "
+                + json.dumps({"method": method, "state": snapshot.get("state")}, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
+        return blocked
 
 
 _COGNITION_OUTPUT_BYTES = 16 * 1024
