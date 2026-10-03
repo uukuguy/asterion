@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-03 16:30 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-03 16:34 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted three observed Pi retry bookkeeping events. The latest packaged SP80 L1 witness advanced through five current actions but still stopped unsuccessful with zero completions and a bounded native-event diagnostic. Startup now emits a bounded `cognition-refresh` record and preserves cognition in the initial context when other projections are omitted. No fresh L1 solve has been established.
+P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted three observed Pi retry bookkeeping events. The latest real packaged SP80 L1 witness emitted startup `cognition-refresh` and hypothesis/update records, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
 ## 已验证事实
 
@@ -19,6 +19,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 - `0b248e4e` fixes aggregate response overflow and clarifies unresolved-hypothesis prompt wording; `c929f162` records it. The reviewer reproduced 76,647 bytes against a 65,536-byte bridge cap before the fix. The new attachment helper budgets against the full response, removes duplicate frames and preserves primary results.
 - Earlier focused suite: **205 tests passed**; the current retry-event/diagnostic changes are covered by the **244-test** result recorded above. Ruff, `git diff --check`, and TypeScript `check-resource` also passed. Independent `/root/final_joint_review` returned **PASS** after the aggregate fix. Earlier full npm result recorded 29 pass/6 external skips; later review also encountered unchanged socket-test timeouts, so do not imply all npm runs passed.
 - Packaged SP80 L1 run `p7-live-20261002224528-2fed7267196425c57c3566e2`, using `gpt-6.1-sol`, selected an experiment, dispatched one ACTION1, analyzed it and confirmed claims `l1-controls` and `l1-player-role`. Runtime emitted hypothesis/experiment/action/analysis/cognition-state logs.
+- Real packaged SP80 L1 run `p7-live-20261003083229-fc201798c0a6e12b4e8d711e`, using `gpt-6.1-sol`, emitted startup `cognition-refresh`, selected experiments, dispatched ACTION1 and ACTION4 moves, and updated cognition from settled frames. Receipt reported `primitive_action_count=4`, `completed_level_count=0`, `status=unsuccessful`, `terminal_reason=active`, `cleanup_complete=true`, `sealed_trace=false`, and `replay_verified=false`.
 - That run was ended by the operator's **90-second timeout**, before completion. Do not blame an unexplained external RPC or call it a solve. The earlier runs used 180-second wrappers. Initial observation previously failed due to an oversized mechanics projection; that projection was fixed before the recorded run.
 - Local ignored evidence exists: `.asterion-private/prime-p7-live/cognition-live-p7-live-20261002224528-2fed7267196425c57c3566e2-cognition.jsonl`.
 - `make promotion-check` completed 3721 tests with 10 failures/5 errors, including Pi/source-detachment failures. Gate is **FAIL**, not PASS; all failure causes were not independently cleared.
@@ -39,7 +40,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 
 ## 未完成边界
 
-- No sustained post-fix live solve has shown repeated planning from updated cognition or completed L1. Three observed retry bookkeeping events are covered by exact tests, but the latest witness still reports `prime-event-type`; the triggering native event remains unconfirmed and the run ends before level completion.
+- No sustained post-fix live solve has shown repeated planning from updated cognition or completed L1. Three observed retry bookkeeping events are covered by exact tests; this latest run demonstrated cognition refresh and updates but still ended before level completion with the broker active.
 - No cold/warm comparison establishes improving proficiency. Cross-level learning and simulator benefits remain unverified.
 - `promotion-check` failures remain unresolved. Preserve their actual scope; do not infer missing Pi credentials or unavailable subscription from a test failure.
 - Handoff process audit found no P7/witness/test processes. A pre-existing editor `ruff server` was left untouched; verify process state again on resume.
@@ -48,7 +49,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
 2. Review the focused diff and commit the bounded diagnostics plus exact retry-event contract fixes.
-3. For the next live attempt, capture the remaining native event type in cognition mode or an equivalent bounded trace, then add only its exact contract regression if confirmed. Preserve the startup `cognition-refresh` line as the first cognition evidence.
+3. For the next live attempt, capture the remaining native event type in cognition mode or an equivalent bounded trace, then add only its exact contract regression if confirmed. Preserve the startup `cognition-refresh` line as the first cognition evidence; the latest run confirms that refresh and post-action cognition updates are visible.
 4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition.
 
 ## Ready-to-paste commands
