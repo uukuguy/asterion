@@ -1,15 +1,18 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-03 21:10 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-03. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
+The latest console-readability fix is committed as `f6da52b7`. A new packaged SP80 L1 witness (`p7-live-20261003143813-de375e7b03c6c1d7851f0b93`) printed Chinese cognition at startup and after each action; the 301-line log had a maximum line size of 539 bytes and contained no `semantic_ledger`, `cognition-read`, `claim_changes`, or `natural_language_context` payloads. The run stopped after three actions because analysis referenced an unselected claim; completion remained 0 and no solve is claimed.
+
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
 - Chinese cognition-context focused regression passed **218 P7 tests** after the renderer, delivery, prompt, and bridge changes. `make lint`, `make docs-check`, and `npm --prefix packages/typescript/asterion-prime-extension run check-resource` passed; the bundled `ipython-extension.mjs` was regenerated from TypeScript.
+- Readability follow-up passed **138 focused P7 tests** across cognition narrative, session, bridge, and live-command surfaces; `make lint`, `make docs-check`, and `git diff --check` passed. The full P7 discovery run reached 657 tests but remains FAIL with 5 historical digest/config/sweep failures and 4 environment/API errors; do not promote it to PASS.
 - New renderer `src/asterion/applications/prime/p7/cognition_narrative.py` bounds claims, state, pending experiment, and recent feedback; unavailable cognition is explicit and `execution_authority` remains `none`. `_initial_game_context` places its Chinese section first, and `_P7BrokerClient` refreshes the narrative after observe/action/cognition changes. Pi tool text leads with the narrative while `details` retains the exact result object.
 - Prompt contracts now require ASCII `id`/`kind`/operation/action identifiers, exact `expected` experiment predicates, and analysis results with `claim_id`, `status`, and `explanation`; `expected_result`, `expected_distinguishing_result`, `result`, and `supports` are explicitly forbidden in new model output.
 - Real packaged witness `p7-live-20261003125746-66470417131404d762804470` rebuilt the wheel, used `gpt-6.1-sol`, accepted four cognition-guided actions, and returned `primitive_action_count=4`, `completed_level_count=0`, `status=unsuccessful`, `terminal_reason=active`, `cleanup_complete=true`, `sealed_trace=false`, `replay_verified=false`.
@@ -53,8 +56,8 @@ P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidenc
 ## 下一动作
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
-2. Review and commit the Chinese cognition-context implementation, plan, tests, packaged resource, and state journal; keep `git status --short` clean.
-3. For the next live attempt, capture whether the model continues from the refreshed Chinese narrative through a level boundary; preserve the startup `cognition-refresh` line and record any rejected schema fields exactly.
+2. Keep the committed console readability behavior; if more model progress is needed, investigate the latest rejected analysis (`analysis references an unselected claim`) separately from display.
+3. For the next live attempt, capture whether the model continues from the refreshed Chinese narrative through a level boundary; preserve startup/action `cognition-refresh` lines and record any rejected schema fields exactly.
 4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition; do not promote the unsuccessful witness to a solve.
 
 ## Ready-to-paste commands
