@@ -8,6 +8,8 @@ P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidenc
 
 The latest console-readability fix is committed as `f6da52b7`. A new packaged SP80 L1 witness (`p7-live-20261003143813-de375e7b03c6c1d7851f0b93`) printed Chinese cognition at startup and after each action; the 301-line log had a maximum line size of 539 bytes and contained no `semantic_ledger`, `cognition-read`, `claim_changes`, or `natural_language_context` payloads. The run stopped after three actions because analysis referenced an unselected claim; completion remained 0 and no solve is claimed.
 
+The follow-up terminal-column fix is `58e24965`. Witness `p7-live-20261003150332-fe7b16ee6c5844a63184c8aa` produced 312 CRLF P7 lines (only five outer make lines remained LF), so cognition lines no longer staircase across the screen. It executed six actions and still completed zero levels; this is a solve outcome, not a display failure.
+
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
