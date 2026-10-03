@@ -3587,3 +3587,4 @@
 - 2026-10-03 `make promotion-check` completed 3740 tests but failed with 10 failures/5 errors; the first deterministic failure is existing source-detachment scanning of `prime-source-locator` in `context-witness.test.mjs`. Gate remains external-limited/FAIL and is not promoted to PASS. A subsequent full TypeScript run hit the existing 60-second bridge socket harness timeout; targeted P7 serialization test passed earlier.
 - 2026-10-03 State checkpoint updated with the Chinese-context implementation, witness receipt, and unresolved verification boundaries for the next resume. [6290c4a5]
 - 2026-10-03 Console cognition now stays Chinese and bounded through every observe/action refresh; full evidence remains private JSONL. [f6da52b7]
+- 2026-10-03 Resume checkpoint records the readable witness and separates display success from the unresolved solve protocol rejection. [37ba059a]
