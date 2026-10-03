@@ -1,14 +1,18 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-03 16:34 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-03 21:10 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted three observed Pi retry bookkeeping events. The latest real packaged SP80 L1 witness emitted startup `cognition-refresh` and hypothesis/update records, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
+P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
+- Chinese cognition-context focused regression passed **218 P7 tests** after the renderer, delivery, prompt, and bridge changes. `make lint`, `make docs-check`, and `npm --prefix packages/typescript/asterion-prime-extension run check-resource` passed; the bundled `ipython-extension.mjs` was regenerated from TypeScript.
+- New renderer `src/asterion/applications/prime/p7/cognition_narrative.py` bounds claims, state, pending experiment, and recent feedback; unavailable cognition is explicit and `execution_authority` remains `none`. `_initial_game_context` places its Chinese section first, and `_P7BrokerClient` refreshes the narrative after observe/action/cognition changes. Pi tool text leads with the narrative while `details` retains the exact result object.
+- Prompt contracts now require ASCII `id`/`kind`/operation/action identifiers, exact `expected` experiment predicates, and analysis results with `claim_id`, `status`, and `explanation`; `expected_result`, `expected_distinguishing_result`, `result`, and `supports` are explicitly forbidden in new model output.
+- Real packaged witness `p7-live-20261003125746-66470417131404d762804470` rebuilt the wheel, used `gpt-6.1-sol`, accepted four cognition-guided actions, and returned `primitive_action_count=4`, `completed_level_count=0`, `status=unsuccessful`, `terminal_reason=active`, `cleanup_complete=true`, `sealed_trace=false`, `replay_verified=false`.
 - Packaged run `p7-live-20261003070845-e31236d1512214af71204766`: five current actions (ACTION1, ACTION4, ACTION4, ACTION1, ACTION3), zero replay-prefix actions, zero RESET, zero completed levels, 34 actions remaining, broker terminal `active`, cleanup complete. Receipt is unsuccessful; trace is unsealed and replay is unverified. No outer timeout was applied.
 - Its startup used `strategy=replay`, `cognition_mode=false`; cognition remained enabled in solve mode. One selected ACTION3 experiment executed, but analysis did not follow before failure. Two earlier selection attempts supplied a prose expected result and were rejected; direct solve actions then bypassed the cognition experiment state.
 - Follow-up cognition run `p7-live-20261003074549-056ad6833ff15b213704428a` exposed `auto_retry_start` after `agent_end(willRetry=true)`; the next run exposed `entry_appended` after that retry marker. All three were handled with red regression tests and exact benign-event allowlist entries.
@@ -23,6 +27,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 - That run was ended by the operator's **90-second timeout**, before completion. Do not blame an unexplained external RPC or call it a solve. The earlier runs used 180-second wrappers. Initial observation previously failed due to an oversized mechanics projection; that projection was fixed before the recorded run.
 - Local ignored evidence exists: `.asterion-private/prime-p7-live/cognition-live-p7-live-20261002224528-2fed7267196425c57c3566e2-cognition.jsonl`.
 - `make promotion-check` completed 3721 tests with 10 failures/5 errors, including Pi/source-detachment failures. Gate is **FAIL**, not PASS; all failure causes were not independently cleared.
+- The fresh promotion run completed 3740 tests with 10 failures/5 errors; the first deterministic failure remains source-detachment scanning of `prime-source-locator` in the existing `context-witness.test.mjs`. Gate is **FAIL**, not PASS. A later full TypeScript run hit the existing 60-second socket bridge timeout in `serializes method calls...`; the targeted P7 result-serialization test passed before that run.
 - At handoff start, Git was clean and local main was 139 commits ahead/0 behind the locally recorded upstream. Handoff adds documentation commits; use `git rev-list --left-right --count '@{upstream}...HEAD'` for the current count. No push performed in this closeout.
 
 ## 当前判断
@@ -48,9 +53,9 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 ## 下一动作
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
-2. Review the focused diff and commit the bounded diagnostics plus exact retry-event contract fixes.
-3. For the next live attempt, capture the remaining native event type in cognition mode or an equivalent bounded trace, then add only its exact contract regression if confirmed. Preserve the startup `cognition-refresh` line as the first cognition evidence; the latest run confirms that refresh and post-action cognition updates are visible.
-4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition.
+2. Review and commit the Chinese cognition-context implementation, plan, tests, packaged resource, and state journal; keep `git status --short` clean.
+3. For the next live attempt, capture whether the model continues from the refreshed Chinese narrative through a level boundary; preserve the startup `cognition-refresh` line and record any rejected schema fields exactly.
+4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition; do not promote the unsuccessful witness to a solve.
 
 ## Ready-to-paste commands
 
