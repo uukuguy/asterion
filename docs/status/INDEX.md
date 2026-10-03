@@ -26,7 +26,8 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, level results, VC33 world-model and route-adoption diagnosis, breadth recovery boundary. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目与完成进度、官方 scorecard 和排行榜操作指南。 |
-| `DECISIONS.md` | 🟢 active | Indexed architecture and trust-boundary decisions; D-2026-09-12-01 governs native P1-P7 work. |
+| `DECISIONS.md` | 🟢 active | Native architecture decisions; D-2026-10-03-01 governs partial-cognition feedback-driven solving. |
+| `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | P7 primary cognition contract, persistent hypotheses and solve/experiment feedback loop. |
 | `PRIME-P1-P7-ACCEPTANCE.md` | 🟢 active | P1–P7 验收指南；记录 P7 组合失败与专用 provider 修复，区分无模型验证与真实求解。 |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |

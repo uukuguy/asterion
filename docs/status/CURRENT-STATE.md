@@ -7,7 +7,7 @@
 - Theme-level focus: native P7 builds persistent game knowledge and verifies whether it improves solving
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: P7 experience induction, game-wide mechanisms, and bounded counterfactual planning
+- Active work package: P7 cognition-guided solving with action feedback and persistent language hypotheses
 
 ## Current Architecture
 
@@ -17,9 +17,11 @@
 - `GameCognitionStore` remains an advisory progress cache; `SemanticCognitionStore` is the primary exact-game/L1 language cognition contract with atomic persistence and execution_authority=none.
 - `ObservationState` provides one immutable representation for frame, input surface, HUD, timers, resources, entities, relations, and events.
 - `GameMechanicsStore` persists game-wide mechanism candidates, conditions, effects, scope, evidence, and conflicts with `execution_authority=none`.
-- `CognitionSession` runs bounded hypothesis/experiment/analyze/RESET episodes; `hypothesis_simulator.search_counterfactual` compares confirmed and hypothesis branches and never dispatches actions.
+- `CognitionSession` supports partial-cognition solve attempts and renewed hypothesis/experiment/analyze cycles during solving; `hypothesis_simulator.search_counterfactual` compares confirmed and hypothesis branches and never dispatches actions.
 - `MechanismSpec`/`ModelCertificate`/`model_search` remain the only path from retrodicted local evidence to a checked executable plan.
-- P7 application tools are registered through the Operator, worker bridge, live RPC module, and prompt; offline route injection is disabled for capability runs.
+- Prime application tools are registered in the packaged TypeScript Pi extension, routed through the Python operator/worker bridges; prompt text documents usage. Offline route injection is disabled for capability runs.
+- `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
+- Runtime cognition logs print claims, statuses, confidence, evidence and next tests; the persistent ledger remains separate from bounded model projections.
 
 ## Open Problems
 
@@ -28,7 +30,7 @@
 - Counterfactual simulation is implemented and tested synthetically; its effect on real SP80 exploration and action efficiency is unverified.
 - A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
 - Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
-- `tu93` L1 cognition has persisted three bootstrap hypotheses plus six LLM hypotheses across runs; the latest real run executed one checked primitive action before external RPC cancellation, so cognition-to-action effectiveness remains External-limited.
+- Sustained L1 feedback-driven solving and improved proficiency from reused cognition remain unverified; transport or unit-test success alone does not establish these capabilities.
 
 ## Key Files
 
@@ -44,6 +46,8 @@
 - `docs/status/INDEX.md` — status-file index
 
 ### P7 implementation entry points
+
+- `docs/architecture/prime-p7-cognition-and-experience.md` — primary cognition and feedback-loop contract
 
 - `src/asterion/applications/prime/p7/broker.py` — identity, evidence, execution, and learning integration
 - `src/asterion/applications/prime/p7/observation_state.py` — immutable unified observations
@@ -72,17 +76,3 @@
 3. Run `git status --short` and `git log --oneline -5`.
 4. Run `make lint`, `make docs-check`, and the focused P7 regression suite before any live game attempt.
 5. If live work resumes, keep offline optimization disabled and report current-level steps separately from replay prefixes and total primitive actions.
-
-### 2026-10-02 cognition transport correction
-
-The prior live cognition run made four `cognition_update` calls but produced no semantic proposal/experiment/analyze events because the prompt's direct payload shape disagreed with the TypeScript wrapper and Python dispatch contract. This is now corrected: the tool schema requires top-level `op`, the bridge sends it directly, Python rejects the obsolete `{payload: ...}` wrapper, and the packaged resource is synchronized. Shared-descriptor method calls are serialized; validated application errors are retryable without poisoning the bridge, while transport and uncertain results remain fail-closed.
-
-Verification: 178 focused P7 Python tests passed; Ruff, compileall, diff checks, and `npm --prefix packages/typescript/asterion-prime-extension run check-resource` passed. The focused TypeScript bridge/cognition regressions passed. A complete npm run is still externally limited by pre-existing Pi-dependent tests/harnesses. No post-fix live cognition run has yet established semantic events or a level solve; the next bounded run is required for that evidence.
-
-A post-fix bounded run rebuilt the wheel and entered the native live-run, but the external execution did not return a public receipt before the 180-second bound. Therefore semantic-event and solve status for that run are unknown externally and are not counted as evidence.
-
-### Live cognition logging evidence (2026-10-02)
-
-The cognition pipeline now prints readable growth events from startup. Each `[p7-cognition] claim_changes` entry identifies a hypothesis, confidence, status, evidence counts, and its next test; native events separately show model turns and whether each application tool call succeeded. A real tu93 L1 run (`p7-live-20261002055614-2f3b30a5ffa10f7e27513b28`) produced more than twenty initial hypotheses covering the grid, actor, floor, wall, background, goal, cardinal controls, and success signals. They were correctly retained as `undetermined` because no experiment was completed.
-
-The run made zero primitive actions and repeatedly requested cognition updates/readiness. It was stopped by the operator after the cognition log had been captured; this is an unsuccessful cognition-only run, not an external RPC cancellation and not a solve. Earlier bridge failures were traced to returning the unbounded full semantic ledger through the 64KiB TypeScript output cap; bounded model-facing projections now keep the tool calls `isError=false` while the private persisted ledger remains complete.

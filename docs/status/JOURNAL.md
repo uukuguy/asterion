@@ -3559,3 +3559,7 @@
 - 06:52 P7 partial cognition now feeds solve planning and refreshes after experiments, enabling feedback-driven play [07223470]
 - 06:56 Evidence journal persisted for P7 feedback-loop recovery [66483d49]
 - 07:02 Aggregate P7 response budgeting preserves cognition background under bridge limits [0b248e4e]
+
+## 2026-10-03
+- 10:15 Final review PASS; 205 tests passed; cognition feedback-loop handoff supersedes stale checkpoints.
+- 10:15 correction: feedback-loop implementation is 07223470; 66483d49 only journals it.

@@ -9,6 +9,7 @@
 | Type | Status | Entry |
 |---|---|---|
 | feedback | ✅ verified-active | `handoff` means a fast, complete cross-session closeout |
+| feedback | ✅ verified-active | P7 learning must be visible during play and evaluated through improving game understanding |
 | feedback | ✅ verified-active | Reconcile diagnostics with observed successful execution before concluding setup is missing |
 | feedback | ✅ verified-active | Preserve approved architecture across sessions; P7 is the native base for rebuilding P1-P6 |
 | feedback | ✅ verified-active | Research intensity — review changed code, not the whole gate |
@@ -26,6 +27,13 @@
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
+
+### feedback — P7 cognition and visible play
+
+- The user wants P7 itself to play, explain game hypotheses, and print every cognition change in runtime logs. Assistant summaries do not replace runtime output.
+- Judge learning by accumulated game understanding and how it informs play. Do not equate experience with an old solution route or require complete cognition before attempting a level.
+- Use the existing Pi Codex subscription with `gpt-6.1-sol`; do not switch to OpenRouter. Delegate ordinary programming to Sol high and repetitive checks to Luna; independently review changes.
+- Current contract: `docs/architecture/prime-p7-cognition-and-experience.md`; current evidence and immediate action: `docs/status/RESUME-NEXT-SESSION.md`.
 
 ### feedback — complete `handoff` contract
 
