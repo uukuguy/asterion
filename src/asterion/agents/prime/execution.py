@@ -482,6 +482,9 @@ class PrimeExecutionKernel:
                 # Pi records the retry's transcript entry after the retry
                 # marker; it is private bookkeeping with no public effect.
                 "entry_appended",
+                # Pi closes the provider retry lifecycle after the retried
+                # agent cycle; this marker carries no public result.
+                "auto_retry_end",
             }:
                 # Streaming tool updates contain private partial output.
                 return

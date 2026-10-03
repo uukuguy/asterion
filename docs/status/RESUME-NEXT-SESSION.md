@@ -4,14 +4,14 @@
 
 ## TL;DR
 
-P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted two observed Pi retry bookkeeping events. The latest packaged SP80 L1 witness advanced through two current actions without the prior protocol rejection, then stopped unsuccessful with zero completions. No fresh L1 solve has been established.
+P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted three observed Pi retry bookkeeping events. The latest packaged SP80 L1 witness advanced through five current actions but still stopped unsuccessful with zero completions and a bounded native-event diagnostic. No fresh L1 solve has been established.
 
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
 - Packaged run `p7-live-20261003070845-e31236d1512214af71204766`: five current actions (ACTION1, ACTION4, ACTION4, ACTION1, ACTION3), zero replay-prefix actions, zero RESET, zero completed levels, 34 actions remaining, broker terminal `active`, cleanup complete. Receipt is unsuccessful; trace is unsealed and replay is unverified. No outer timeout was applied.
 - Its startup used `strategy=replay`, `cognition_mode=false`; cognition remained enabled in solve mode. One selected ACTION3 experiment executed, but analysis did not follow before failure. Two earlier selection attempts supplied a prose expected result and were rejected; direct solve actions then bypassed the cognition experiment state.
-- Follow-up cognition run `p7-live-20261003074549-056ad6833ff15b213704428a` exposed `auto_retry_start` after `agent_end(willRetry=true)`; the next run exposed `entry_appended` after that retry marker. Both were handled with red regression tests and exact benign-event allowlist entries.
+- Follow-up cognition run `p7-live-20261003074549-056ad6833ff15b213704428a` exposed `auto_retry_start` after `agent_end(willRetry=true)`; the next run exposed `entry_appended` after that retry marker. All three were handled with red regression tests and exact benign-event allowlist entries.
 - Bounded operator diagnostics now retain only `diagnostic_id`, `stage`, `exception_type`, and `failure_code`; exception bodies and private digests are excluded.
 - Latest packaged witness `p7-live-20261003074908-d3b79b1dbaa01071820bb43a` advanced through two current actions without the protocol rejection, then returned unsuccessful with zero completed levels, active broker, and cleanup complete.
 
@@ -39,7 +39,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 
 ## 未完成边界
 
-- No sustained post-fix live solve has shown repeated planning from updated cognition or completed L1. The latest witness confirms the native protocol no longer fails on the two observed retry bookkeeping events, but still ends before level completion.
+- No sustained post-fix live solve has shown repeated planning from updated cognition or completed L1. Three observed retry bookkeeping events are covered by exact tests, but the latest witness still reports `prime-event-type`; the triggering native event remains unconfirmed and the run ends before level completion.
 - No cold/warm comparison establishes improving proficiency. Cross-level learning and simulator benefits remain unverified.
 - `promotion-check` failures remain unresolved. Preserve their actual scope; do not infer missing Pi credentials or unavailable subscription from a test failure.
 - Handoff process audit found no P7/witness/test processes. A pre-existing editor `ruff server` was left untouched; verify process state again on resume.
@@ -48,7 +48,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
 2. Review the focused diff and commit the bounded diagnostics plus exact retry-event contract fixes.
-3. For the next live attempt, follow the runtime cognition/action log and determine why the application stops after bounded cognition updates; preserve the same fail-closed event handling.
+3. For the next live attempt, capture the remaining native event type in cognition mode or an equivalent bounded trace, then add only its exact contract regression if confirmed.
 4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition.
 
 ## Ready-to-paste commands

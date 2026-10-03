@@ -477,6 +477,7 @@ class TestAsterionPrimeSession(unittest.TestCase):
             ("agent_start", {}),
             ("turn_start", {}),
             ("agent_end", {}),
+            ("auto_retry_end", {}),
             ("agent_settled", {}),
         ))
 
