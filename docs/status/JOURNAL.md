@@ -3580,3 +3580,4 @@
 - 16:35 Recorded the real witness outcome and resume checkpoint for accurate continuation. [543fea05]
 - 16:38 Added compact human-readable cognition-display lines beside bounded JSON logs, covering startup, reads, and updates; packaged startup showed the line. [a5f76cb6]
 - 16:39 Journaled the cognition-display visibility fix for resume continuity. [9484986a]
+- 16:47 Made packaged cognition output readable: compact event/hypothesis summaries, capped terminal claims, and suppressed repeated scorecard INFO; 211 focused tests and lint passed. [3bdb5dc2]
