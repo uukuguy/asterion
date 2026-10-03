@@ -894,6 +894,49 @@ def _log_cognition_refresh(projection: object, *, phase: str) -> None:
         file=sys.stderr,
         flush=True,
     )
+    _log_cognition_display(projection, phase=phase)
+
+
+def _log_cognition_display(projection: object, *, phase: str) -> None:
+    """Print a short human-readable cognition status beside the machine record."""
+
+    if not isinstance(projection, Mapping):
+        print(
+            f"[p7-cognition] cognition-display phase={phase} status=unavailable",
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    semantic = projection.get("semantic")
+    semantic_map = semantic if isinstance(semantic, Mapping) else {}
+    claims = semantic_map.get("claims")
+    counts = {"certain": 0, "undetermined": 0, "falsified": 0}
+    total = 0
+    if isinstance(claims, Mapping):
+        for entries in claims.values():
+            if not isinstance(entries, (list, tuple)):
+                continue
+            for entry in entries:
+                if not isinstance(entry, Mapping):
+                    continue
+                total += 1
+                status = entry.get("status")
+                if status in counts:
+                    counts[status] += 1
+    session = _compact_cognition_session(projection.get("cognition_session"))
+    nested = session.get("session")
+    session_map = nested if isinstance(nested, Mapping) else session
+    context = semantic_map.get("natural_language_context")
+    context_text = " ".join(str(context).split())[:240] if context else ""
+    details = (
+        f"phase={phase} status=available state={session_map.get('state', 'unknown')} "
+        f"episode={session_map.get('episode', '?')} actions={session_map.get('episode_actions', '?')} "
+        f"claims={total} certain={counts['certain']} open={counts['undetermined']} "
+        f"falsified={counts['falsified']}"
+    )
+    if context_text:
+        details += " context=" + json.dumps(context_text, ensure_ascii=False)
+    print("[p7-cognition] cognition-display " + details, file=sys.stderr, flush=True)
 
 
 class _P7BrokerClient:
@@ -1213,6 +1256,7 @@ class _P7BrokerClient:
                 file=sys.stderr,
                 flush=True,
             )
+            _log_cognition_display(result, phase="read")
             return self._attach_planning_background(result)
         except Exception as error:
             print(
@@ -1309,6 +1353,13 @@ class _P7BrokerClient:
                     "next": result.get("next"),
                 }
                 log_update("cognition-state", op=canonical_op, cognition=cognition_state)
+                _log_cognition_display(
+                    {
+                        "semantic": result["report"],
+                        "cognition_session": result.get("session"),
+                    },
+                    phase=f"update:{canonical_op}",
+                )
             log_update(
                 "update-call",
                 op=payload.get("op"),

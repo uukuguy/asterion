@@ -307,6 +307,14 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(claim["status"], "certain")
         self.assertEqual(states[0]["cognition"]["session"]["state"], "ANALYZED")
         self.assertEqual(states[0]["cognition"]["session"]["validation"]["possible"], False)
+        displays = [
+            line for line in stream.getvalue().splitlines()
+            if line.startswith("[p7-cognition] cognition-display ")
+        ]
+        self.assertEqual(len(displays), 1)
+        self.assertIn("phase=update:analyze", displays[0])
+        self.assertIn("state=ANALYZED", displays[0])
+        self.assertIn("claims=1", displays[0])
 
     def test_compacted_session_preserves_validation_control(self):
         compacted = _compact_cognition_session({

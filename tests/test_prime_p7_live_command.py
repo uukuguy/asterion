@@ -845,6 +845,13 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         ]
         self.assertEqual(len(refresh_lines), 1)
         self.assertIn("startup-cognition-marker", refresh_lines[0])
+        display_lines = [
+            line for line in stderr.getvalue().splitlines()
+            if line.startswith("[p7-cognition] cognition-display ")
+        ]
+        self.assertEqual(len(display_lines), 1)
+        self.assertIn("phase=startup", display_lines[0])
+        self.assertIn('context="startup-cognition-marker"', display_lines[0])
 
     def test_initial_context_marks_cognition_refresh_failure(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
