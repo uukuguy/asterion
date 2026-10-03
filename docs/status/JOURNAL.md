@@ -3581,3 +3581,4 @@
 - 16:38 Added compact human-readable cognition-display lines beside bounded JSON logs, covering startup, reads, and updates; packaged startup showed the line. [a5f76cb6]
 - 16:39 Journaled the cognition-display visibility fix for resume continuity. [9484986a]
 - 16:47 Made packaged cognition output readable: compact event/hypothesis summaries, capped terminal claims, and suppressed repeated scorecard INFO; 211 focused tests and lint passed. [3bdb5dc2]
+- 19:31 Drafted the approved Chinese cognition-context design before changing LLM input behavior. [372c0b26]
