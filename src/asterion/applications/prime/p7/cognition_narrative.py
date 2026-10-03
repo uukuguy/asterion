@@ -11,6 +11,37 @@ _STATES = {
     "EXPERIMENT_SELECTED": "已选实验，等待动作", "ACTION_EXECUTED": "动作已执行，等待分析",
     "ANALYZED": "已分析反馈", "STOPPED": "已停止",
 }
+_KNOWN_CLAIMS_ZH = {
+    "bootstrap-frame-semantics": "初始画面已经观察到，但物体、动作和规则尚未确定。",
+    "bootstrap-discrete-actions": "游戏提供离散动作，可以通过比较动作前后的画面来判断效果。",
+    "bootstrap-success-condition": "当前还不知道本关的过关条件。",
+    "current-grid-band-game": "当前场景是网格街机谜题：9色横带可移动，背景以12色为主，其他彩色结构固定。",
+    "band-player": "9色横带是可控对象，4、6、11色结构固定，可能是障碍或目标。",
+    "band-role-current": "9色横带是可控对象，其他彩色结构固定，可能是障碍或目标。",
+    "cardinal-controls": "四个方向动作会在目标开放时按四格晶格移动9色横带，具体方向仍需当前画面确认。",
+    "l0-open-move": "在开放的12色区域，方向动作使9色横带移动四格，固定结构不变。",
+    "movement-lattice-current": "方向动作会在目标开放时使9色横带移动四格，固定结构保持不变。",
+    "current-cardinal-controls": "四个方向动作会使9色横带按四格晶格移动，ACTION1的具体方向仍需确认。",
+    "control-action1-direction": "ACTION1可能是方向动作，或使9色横带按固定晶格步长向上移动。",
+    "control-action2-distinct": "ACTION2与ACTION1产生不同的场景变化，可用于识别方向控制。",
+    "fresh-action1-up": "开放时ACTION1可能使9色横带向上移动四格。",
+    "fresh-l0-move": "开放时ACTION1可能使9色横带向上移动四个网格。",
+    "current-stepwise-route": "先做一次移动探针，再沿最短晶格路线接近候选目标，并在每步检查过关状态。",
+    "route-current": "沿最短方向路线接近最近的候选结构，每次移动后检查是否过关。",
+    "fresh-game-grid-band": "这是一个网格移动谜题，9色横带在有界12色区域内移动，其他结构固定。",
+    "fresh-grid-band-game": "这是一个网格移动谜题，9色横带位于12色区域，4、6、11色结构暂视为固定。",
+    "fresh-l0-grid": "当前关卡包含可移动的20×4 9色横带和固定彩色结构。",
+    "gt-bar-alignment-arcade": "场景类似横向对齐街机谜题：长条形对象需要与其他结构对齐。",
+    "gt-grid-push-puzzle": "场景也可能是网格推移或对齐谜题，9色对象和其他颜色结构的角色仍待验证。",
+    "session-controls": "四个方向动作会在可通行时按四格晶格移动9色横带，具体方向仍需当前画面验证。",
+    "contact-goal-current": "横带到达或对齐目标结构时可能完成关卡，权威条件仍待验证。",
+    "contact-success": "横带接触或对齐目标结构时可能完成关卡，权威条件仍待验证。",
+}
+_KNOWN_NEXT_TESTS_ZH = {
+    "bootstrap-frame-semantics": "检查初始画面，再与一次受控动作后的画面对比。",
+    "bootstrap-discrete-actions": "选择一个离散动作，比较动作前后的画面变化。",
+    "bootstrap-success-condition": "测试一次有信息量的动作，并观察关卡和终止信号。",
+}
 
 
 def _text(value: object, limit: int = 180) -> str:
@@ -25,6 +56,15 @@ def _prose(value: object, limit: int = 180) -> str:
     if text and not any("\u4e00" <= c <= "\u9fff" for c in text):
         return "〔历史原文，尚未中文复述〕" + text
     return text
+
+
+def _claim_prose(claim: Mapping, field: str = "claim") -> str:
+    claim_id = claim.get("id")
+    if field == "claim" and isinstance(claim_id, str) and claim_id in _KNOWN_CLAIMS_ZH:
+        return _KNOWN_CLAIMS_ZH[claim_id]
+    if field == "next_test" and isinstance(claim_id, str) and claim_id in _KNOWN_NEXT_TESTS_ZH:
+        return _KNOWN_NEXT_TESTS_ZH[claim_id]
+    return _prose(claim.get(field))
 
 
 def render_cognition_narrative_zh(
@@ -81,9 +121,9 @@ def render_cognition_narrative_zh(
     pending = session.get("pending")
     question = _prose(pending.get("question")) if isinstance(pending, Mapping) else ""
     action = _text(pending.get("action_name"), 32) if isinstance(pending, Mapping) else ""
-    next_test = question or next((_prose(c.get("next_test")) for c in claims if c.get("status") == "undetermined" and c.get("next_test")), "")
+    next_test = question or next((_claim_prose(c, "next_test") for c in claims if c.get("status") == "undetermined" and c.get("next_test")), "")
     if not next_test:
-        next_test = next((_prose(c.get("next_test")) for c in claims if c.get("next_test")), "根据最新观察选择一个能区分假设的实验。")
+        next_test = next((_claim_prose(c, "next_test") for c in claims if c.get("next_test")), "根据最新观察选择一个能区分假设的实验。")
     if action:
         next_test = f"已选 {action}；" + next_test
     footer = "下一步：" + next_test + "\n以上为认知记录，不能授权动作；过关以关卡数增加或 WIN 为准。"
@@ -105,7 +145,7 @@ def render_cognition_narrative_zh(
         if not selected and status == "certain":
             add("已确认：暂无经证据支持的游戏规则。")
         for claim in selected[:count]:
-            add(f"{label}：{_prose(claim.get('claim'))}")
+            add(f"{label}：{_claim_prose(claim)}")
         if len(selected) > count:
             add(f"{label}另有 {len(selected) - count} 条；完整记录可按需查询。")
     if not claims:

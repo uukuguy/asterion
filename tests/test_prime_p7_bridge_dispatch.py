@@ -195,7 +195,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(result["state"], "READY")
         self.assertEqual(broker._terminal_reason, "active")
 
-    def test_cognition_update_logs_complete_correlated_request_and_outcome(self):
+    def test_cognition_update_logs_compact_correlated_request_and_outcome(self):
         payload = {
             "op": "select_experiment",
             "experiment": {"expected": {"frame_changed": True, "state": "NOT_FINISHED"}, "question": "为什么？"},
@@ -222,7 +222,11 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(len(outcomes), 2)
         self.assertEqual([item["request_sequence"] for item in requests], [1, 2])
         self.assertEqual([item["request_sequence"] for item in outcomes], [1, 2])
-        self.assertEqual(requests[0]["payload"], payload)
+        self.assertEqual(requests[0]["payload_keys"], sorted(payload))
+        self.assertEqual(requests[0]["analysis_count"], 1)
+        self.assertNotIn("payload", requests[0])
+        self.assertNotIn("semantic detail", stream.getvalue())
+        self.assertLess(len(stream.getvalue().encode("utf-8")), 4096)
         self.assertEqual(outcomes[0]["reason"], result["reason"])
         self.assertEqual(json.dumps(payload, sort_keys=True), encoded_before)
 
@@ -272,7 +276,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
                         "claims": {
                             "control": [{
                                 "id": "move-right", "kind": "control", "subject": "ACTION2",
-                                "claim": "ACTION2 moves the player right.", "status": "certain", "confidence": 0.8,
+                                "claim": "ACTION2 使玩家向右移动。", "status": "certain", "confidence": 0.8,
                                 "evidence_count": 1, "support_count": 1, "counterexample_count": 0,
                                 "next_test": "Repeat ACTION2.",
                             }],
@@ -302,11 +306,11 @@ class TestP7BridgeDispatch(unittest.TestCase):
             if line.startswith("[p7-cognition] cognition-state ")
         ]
         self.assertEqual(len(states), 1)
-        claim = states[0]["cognition"]["report"]["claims"]["control"][0]
-        self.assertEqual(claim["id"], "move-right")
-        self.assertEqual(claim["status"], "certain")
-        self.assertEqual(states[0]["cognition"]["session"]["state"], "ANALYZED")
-        self.assertEqual(states[0]["cognition"]["session"]["validation"]["possible"], False)
+        self.assertEqual(states[0]["state"], "ANALYZED")
+        self.assertEqual(states[0]["claims"], 1)
+        self.assertIn("当前游戏认知", stream.getvalue())
+        self.assertIn("ACTION2 使玩家向右移动", stream.getvalue())
+        self.assertNotIn('"report"', stream.getvalue())
         displays = [
             line for line in stream.getvalue().splitlines()
             if line.startswith("[p7-cognition] cognition-display ")
@@ -315,6 +319,38 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertIn("phase=update:analyze", displays[0])
         self.assertIn("state=ANALYZED", displays[0])
         self.assertIn("claims=1", displays[0])
+
+    def test_cognition_console_logs_use_narrative_instead_of_ledger_json(self):
+        from asterion.applications.prime.p7.operator import _log_cognition_refresh
+
+        projection = {
+            "semantic": {
+                "natural_language_context": "这是一个网格移动谜题。",
+                "scope": {"level": 0},
+                "claims": {
+                    "control": [{
+                        "id": "move-right",
+                        "kind": "control",
+                        "claim": "ACTION4 使横带右移四格。",
+                        "status": "certain",
+                        "next_test": "检查下一次右移。",
+                    }],
+                },
+            },
+            "cognition_session": {
+                "session": {"state": "READY", "episode": 1, "episode_actions": 2},
+            },
+        }
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            _log_cognition_refresh(projection, phase="startup")
+        output = stream.getvalue()
+        self.assertIn("当前游戏认知", output)
+        self.assertIn("已确认", output)
+        self.assertIn("ACTION4 使横带右移四格", output)
+        self.assertNotIn('"natural_language_context"', output)
+        self.assertNotIn('"claims"', output)
+        self.assertLess(len(output.encode("utf-8")), 4096)
 
     def test_compacted_session_preserves_validation_control(self):
         compacted = _compact_cognition_session({

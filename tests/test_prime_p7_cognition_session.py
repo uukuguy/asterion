@@ -150,7 +150,7 @@ class CognitionSessionTests(unittest.TestCase):
             lines = stream.getvalue().splitlines()
             self.assertTrue(any("event type=cognition.session.started" in line for line in lines))
             self.assertTrue(any("event type=cognition.hypothesis.proposed" in line for line in lines))
-            self.assertTrue(any(line.startswith("[p7-cognition] hypothesis ") for line in lines))
+            self.assertTrue(any("hypothesis-summary count=" in line for line in lines))
             self.assertTrue(all(len(line) <= 512 for line in lines))
             self.assertNotIn('"claim_changes"', stream.getvalue())
             live_events = [

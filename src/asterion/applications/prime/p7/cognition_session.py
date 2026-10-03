@@ -34,7 +34,7 @@ _MAX_ACTIONS = 128
 _OBSERVED_STATES = {"NOT_FINISHED", "GAME_OVER", "WIN"}
 _MAX_EXPECTED_FRAME_BYTES = 64 * 1024
 _MAX_EXPECTED_BYTES = 64 * 1024
-_CONSOLE_HYPOTHESIS_LIMIT = 8
+_CONSOLE_HYPOTHESIS_LIMIT = 0
 _ANALYSIS_STATUS_ALIASES = {
     "certain": "certain",
     "confirmed": "certain",
@@ -242,25 +242,33 @@ class CognitionSession:
             file=sys.stderr,
             flush=True,
         )
-        for change in claim_changes[:_CONSOLE_HYPOTHESIS_LIMIT]:
+        if claim_changes and _CONSOLE_HYPOTHESIS_LIMIT == 0:
             print(
-                "[p7-cognition] hypothesis "
-                f"id={change.get('id', '?')} status={change.get('status', '?')} "
-                f"kind={change.get('kind', '?')} subject={change.get('subject', '?')} "
-                f"confidence={change.get('confidence', '?')} evidence={change.get('evidence_count', 0)} "
-                "claim=" + json.dumps(_compact_console_text(change.get("claim"), limit=160), ensure_ascii=False) + " "
-                "next_test=" + json.dumps(_compact_console_text(change.get("next_test"), limit=120), ensure_ascii=False),
-                file=sys.stderr,
-                flush=True,
-            )
-        omitted = len(claim_changes) - _CONSOLE_HYPOTHESIS_LIMIT
-        if omitted > 0:
-            print(
-                f"[p7-cognition] hypothesis omitted={omitted} "
+                f"[p7-cognition] hypothesis-summary count={len(claim_changes)} "
                 "detail=see-live-log",
                 file=sys.stderr,
                 flush=True,
             )
+        else:
+            for change in claim_changes[:_CONSOLE_HYPOTHESIS_LIMIT]:
+                print(
+                    "[p7-cognition] hypothesis "
+                    f"id={change.get('id', '?')} status={change.get('status', '?')} "
+                    f"kind={change.get('kind', '?')} subject={change.get('subject', '?')} "
+                    f"confidence={change.get('confidence', '?')} evidence={change.get('evidence_count', 0)} "
+                    "claim=" + json.dumps(_compact_console_text(change.get("claim"), limit=160), ensure_ascii=False) + " "
+                    "next_test=" + json.dumps(_compact_console_text(change.get("next_test"), limit=120), ensure_ascii=False),
+                    file=sys.stderr,
+                    flush=True,
+                )
+            omitted = len(claim_changes) - _CONSOLE_HYPOTHESIS_LIMIT
+            if omitted > 0:
+                print(
+                    f"[p7-cognition] hypothesis omitted={omitted} "
+                    "detail=see-live-log",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     @property
     def live_log_path(self) -> Path:

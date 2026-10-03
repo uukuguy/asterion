@@ -873,30 +873,35 @@ def _compact_planning_background(value: object, *, max_bytes: int = 48 * 1024) -
 
 
 def _log_cognition_refresh(projection: object, *, phase: str) -> None:
-    """Print the bounded current cognition whenever the model context refreshes."""
+    """Print a readable cognition refresh; full evidence stays in private JSONL."""
 
     if type(phase) is not str or not phase:
         phase = "unknown"
-    if not isinstance(projection, Mapping):
-        record: dict[str, object] = {"phase": phase, "status": "unavailable"}
-    else:
-        record = {
-            "phase": phase,
-            "status": "available",
-            "semantic": _bounded_semantic_report(
-                projection.get("semantic"), max_bytes=8 * 1024
-            ),
-            "cognition_session": _compact_cognition_session(
-                projection.get("cognition_session")
-            ),
-        }
+    record = {
+        "phase": phase,
+        "status": "available" if isinstance(projection, Mapping) else "unavailable",
+    }
     print(
         "[p7-cognition] cognition-refresh "
         + json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str),
         file=sys.stderr,
         flush=True,
     )
+    _log_cognition_narrative(projection, phase=phase)
     _log_cognition_display(projection, phase=phase)
+
+
+def _log_cognition_narrative(projection: object, *, phase: str) -> None:
+    """Print the same bounded Chinese reading surface the model receives."""
+
+    semantic = projection.get("semantic") if isinstance(projection, Mapping) else None
+    cognition_session = (
+        projection.get("cognition_session") if isinstance(projection, Mapping) else None
+    )
+    narrative = render_cognition_narrative_zh(semantic, cognition_session)
+    print(f"[p7-cognition] cognition-narrative phase={phase}", file=sys.stderr, flush=True)
+    for line in narrative.splitlines():
+        print(f"[p7-cognition] {line}", file=sys.stderr, flush=True)
 
 
 def _log_cognition_display(projection: object, *, phase: str) -> None:
@@ -928,16 +933,12 @@ def _log_cognition_display(projection: object, *, phase: str) -> None:
     session = _compact_cognition_session(projection.get("cognition_session"))
     nested = session.get("session")
     session_map = nested if isinstance(nested, Mapping) else session
-    context = semantic_map.get("natural_language_context")
-    context_text = " ".join(str(context).split())[:240] if context else ""
     details = (
         f"phase={phase} status=available state={session_map.get('state', 'unknown')} "
         f"episode={session_map.get('episode', '?')} actions={session_map.get('episode_actions', '?')} "
         f"claims={total} certain={counts['certain']} open={counts['undetermined']} "
         f"falsified={counts['falsified']}"
     )
-    if context_text:
-        details += " context=" + json.dumps(context_text, ensure_ascii=False)
     print("[p7-cognition] cognition-display " + details, file=sys.stderr, flush=True)
 
 
@@ -971,6 +972,21 @@ class _P7BrokerClient:
 
     def _count(self, name: str, increment: int = 1) -> None:
         self._counts[name] = min(5000, self._counts[name] + increment)
+
+    def _log_current_cognition(self, phase: str) -> None:
+        """Refresh the operator's bounded Chinese cognition view after a step."""
+
+        try:
+            _log_cognition_refresh(self._broker.cognition_projection(), phase=phase)
+        except Exception:
+            # Cognition is advisory; a display failure must not change the
+            # action result or turn a valid game step into an operator error.
+            print(
+                "[p7-cognition] cognition-refresh "
+                + json.dumps({"phase": phase, "status": "unavailable"}, separators=(",", ":")),
+                file=sys.stderr,
+                flush=True,
+            )
 
     def _first_probe_hint(self) -> dict[str, object] | None:
         if not self._cognition_mode:
@@ -1270,21 +1286,11 @@ class _P7BrokerClient:
                         result.get("semantic"), max_bytes=4 * 1024
                     )
                     break
-            print(
-                "[p7-cognition] cognition-read "
-                + json.dumps(
-                    {
-                        "semantic": result.get("semantic"),
-                        "cognition_session": result.get("cognition_session"),
-                    },
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    default=str,
-                ),
-                file=sys.stderr,
-                flush=True,
+            narrative = render_cognition_narrative_zh(
+                result.get("semantic"), result.get("cognition_session")
             )
+            result["cognition_narrative_zh"] = narrative
+            _log_cognition_narrative(result, phase="read")
             _log_cognition_display(result, phase="read")
             return self._attach_planning_background(result)
         except Exception as error:
@@ -1317,7 +1323,22 @@ class _P7BrokerClient:
             "record_analysis": "analyze",
             "analyze_experiment": "analyze",
         }.get(submitted_op, submitted_op)
-        log_update("update-request", payload=payload, submitted_op=submitted_op, canonical_op=canonical_op)
+        request_summary: dict[str, object] = {
+            "submitted_op": submitted_op,
+            "canonical_op": canonical_op,
+            "payload_keys": sorted(str(key) for key in payload) if isinstance(payload, Mapping) else [],
+        }
+        if isinstance(payload, Mapping):
+            proposal = payload.get("proposal")
+            if isinstance(proposal, Mapping) and isinstance(proposal.get("claims"), list):
+                request_summary["claim_count"] = len(proposal["claims"])
+            experiment = payload.get("experiment")
+            if isinstance(experiment, Mapping) and isinstance(experiment.get("action"), Mapping):
+                request_summary["action_name"] = experiment["action"].get("name")
+            analysis = payload.get("analysis")
+            if isinstance(analysis, Mapping) and isinstance(analysis.get("results"), list):
+                request_summary["analysis_count"] = len(analysis["results"])
+        log_update("update-request", **request_summary)
         if not isinstance(payload, Mapping) or type(payload.get("op")) is not str:
             result = {
                 "status": "rejected",
@@ -1375,13 +1396,33 @@ class _P7BrokerClient:
                             for key in ("claim_ids", "question", "information_gain", "action_name")
                             if key in pending
                         }
-                cognition_state = {
-                    "report": _bounded_semantic_report(result["report"], max_bytes=12 * 1024),
-                    "session": session_state,
-                    "status": result.get("status"),
-                    "next": result.get("next"),
-                }
-                log_update("cognition-state", op=canonical_op, cognition=cognition_state)
+                report = result["report"]
+                claim_count = sum(
+                    len(values) for values in report.get("claims", {}).values()
+                    if isinstance(values, list)
+                ) if isinstance(report.get("claims"), Mapping) else 0
+                log_update(
+                    "cognition-state",
+                    op=canonical_op,
+                    state=session_state.get("state"),
+                    episode=session_state.get("episode"),
+                    episode_actions=session_state.get("episode_actions"),
+                    claims=claim_count,
+                    status=result.get("status"),
+                    next=result.get("next"),
+                )
+                session_envelope = result.get("session")
+                if isinstance(session_envelope, Mapping):
+                    session_envelope = dict(session_envelope)
+                    events = result.get("events")
+                    if isinstance(events, list):
+                        session_envelope["events"] = events
+                narrative = render_cognition_narrative_zh(report, session_envelope)
+                result = {**result, "cognition_narrative_zh": narrative}
+                _log_cognition_narrative(
+                    {"semantic": report, "cognition_session": session_envelope},
+                    phase=f"update:{canonical_op}",
+                )
                 _log_cognition_display(
                     {
                         "semantic": result["report"],
@@ -1651,7 +1692,7 @@ class _P7BrokerClient:
             observation = result["observation"]
             terminal = result["terminal"]
             learning_hint = self._broker.learning_hint()
-            return self._attach_planning_background({
+            response = self._attach_planning_background({
                 # Put the bounded cue before the full observation frame; the
                 # worker output cap may truncate the latter.
                 "learning_hint": learning_hint,
@@ -1673,6 +1714,8 @@ class _P7BrokerClient:
                     "transitions": [self._transition_view(item) for item in batch.transitions],
                 },
             })
+            self._log_current_cognition("act_checked")
+            return response
         except ArcBrokerError as error:
             reason = str(error)
             if not self._cognition_mode:
@@ -1685,12 +1728,14 @@ class _P7BrokerClient:
                 "uncertain": "uncertain",
                 "cognition-experiment-mismatch": "experiment-mismatch",
             }.get(reason, "validation-failed")
-            return self._attach_planning_background({
+            response = self._attach_planning_background({
                 "status": "rejected",
                 "reason": safe_reason,
                 "retryable": True,
                 "execution_authority": "none",
             })
+            self._log_current_cognition("act_checked:rejected")
+            return response
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
@@ -1766,7 +1811,7 @@ class _P7BrokerClient:
         )[:5]
         learning_hint = self._broker.learning_hint()
         view = self._observation_view(observation)
-        return self._attach_planning_background({
+        response = self._attach_planning_background({
             # Keep the bounded semantic signal before the potentially large
             # frame so the worker bridge cannot truncate the only reusable
             # learning cue.
@@ -1784,6 +1829,8 @@ class _P7BrokerClient:
                 "top_repeated": top_tried,
             },
         })
+        self._log_current_cognition("observe")
+        return response
 
 
     def status(self) -> Mapping[str, object]:
@@ -1878,7 +1925,7 @@ class _P7BrokerClient:
                 raise P7OperatorError("P7 host services are unavailable") from None
             observation = self._broker.observe()
             status = self._broker.status()
-            return {
+            response = {
                 "applied_count": 0,
                 "level_advanced": False,
                 "levels_completed": prior_levels,
@@ -1893,6 +1940,8 @@ class _P7BrokerClient:
                 "stop_reason": "REPLAN_REQUIRED",
                 "transitions": [],
             }
+            self._log_current_cognition("act:replan-required")
+            return response
         self._record_transitions(result.transitions)
         try:
             observation = self._broker.observe()
@@ -1900,7 +1949,7 @@ class _P7BrokerClient:
         except ArcBrokerError:
             snapshot = self._broker.terminal_snapshot()
             observation, status = snapshot.observation, snapshot.status
-        return {
+        response = {
             "applied_count": result.applied_count,
             "level_advanced": result.levels_completed > prior_levels,
             "levels_completed": result.levels_completed,
@@ -1924,6 +1973,8 @@ class _P7BrokerClient:
                 for transition in result.transitions
             ],
         }
+        self._log_current_cognition("act")
+        return response
 
 
 def _apply_saved_prefix(
@@ -3781,16 +3832,11 @@ async def run_live(
             )
             print("[p7-cognition] runtime-stage {\"stage\":\"initial-context-ready\"}", file=sys.stderr, flush=True)
         broker_for_log = resources_.host_services.get("prime.arc-broker")
-        ledger_for_log = (
-            _bounded_semantic_report(broker_for_log.cognition_projection().get("semantic"))
-            if isinstance(broker_for_log, ArcBroker) else None
-        )
         print(
             "[p7-cognition] initial-context "
             + json.dumps(
                 {
                     "run_id": run_id,
-                    "semantic_ledger": ledger_for_log,
                     "prompt_bytes": len(prompt.encode("utf-8")),
                 },
                 sort_keys=True,
@@ -3799,6 +3845,10 @@ async def run_live(
             file=sys.stderr,
             flush=True,
         )
+        if isinstance(broker_for_log, ArcBroker):
+            _log_cognition_narrative(
+                broker_for_log.cognition_projection(), phase="initial-context"
+            )
         print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
         print("[p7-cognition] runtime-stage {\"stage\":\"resolve-application\"}", file=sys.stderr, flush=True)
         application = _resolve_p7_application()
