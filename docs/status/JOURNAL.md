@@ -3577,3 +3577,4 @@
 - 16:30 Hardened startup cognition visibility: oversized planning background now falls back to standalone semantic cognition, refresh failures are explicit, and bounded `cognition-refresh` logs emit current semantic/session state. 247 focused P7 tests, lint, docs-check, TypeScript resource sync, and packaged startup evidence passed; startup run printed refresh then was cleanly cancelled before actions.
 - 16:31 Startup cognition refresh and projection fallback are covered by 247 tests and packaged startup evidence. [28ff1bf7]
 - 16:34 Real packaged SP80 L1 witness `p7-live-20261003083229-fc201798c0a6e12b4e8d711e` emitted startup cognition refresh and cognition hypothesis/update records, executed 4 primitive actions, completed 0 levels, and ended `unsuccessful` with terminal reason `active`; cleanup completed, trace remained unsealed, and replay was unverified.
+- 16:35 Recorded the real witness outcome and resume checkpoint for accurate continuation. [543fea05]
