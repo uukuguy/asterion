@@ -3590,3 +3590,4 @@
 - 2026-10-03 Resume checkpoint records the readable witness and separates display success from the unresolved solve protocol rejection. [37ba059a]
 - 2026-10-03 Added Chinese renderings for persisted P7 object and control claims so warm-start cognition stays readable. [e2276e67]
 - 2026-10-03 Forced CRLF on live P7 streams; 312 cognition lines now return to column zero and remain free of raw ledger payloads. [58e24965]
+- 2026-10-03 Resume state records the second aligned-output witness and its separate zero-completion solve result. [ea6ce7a7]
