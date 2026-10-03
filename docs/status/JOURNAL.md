@@ -3588,3 +3588,4 @@
 - 2026-10-03 State checkpoint updated with the Chinese-context implementation, witness receipt, and unresolved verification boundaries for the next resume. [6290c4a5]
 - 2026-10-03 Console cognition now stays Chinese and bounded through every observe/action refresh; full evidence remains private JSONL. [f6da52b7]
 - 2026-10-03 Resume checkpoint records the readable witness and separates display success from the unresolved solve protocol rejection. [37ba059a]
+- 2026-10-03 Added Chinese renderings for persisted P7 object and control claims so warm-start cognition stays readable. [e2276e67]
