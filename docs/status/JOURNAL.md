@@ -3594,3 +3594,4 @@
 - 2026-10-03 Action analysis now clears consumed experiments, reports frame changes, and prints complete current cognition without omission markers. [267f4b77]
 - 2026-10-03 Resume checkpoint records complete cognition output and post-action progression behavior for the next live witness. [971f06f1]
 - 2026-10-03 Live validation showed complete action feedback and consumed experiments; operator-cancelled witness remained zero-completion with expected nonzero status. [267f4b77]
+- 2026-10-03 Resume checkpoint records the operator-cancelled complete-cognition validation and preserves the incomplete-witness boundary. [928d3c65]
