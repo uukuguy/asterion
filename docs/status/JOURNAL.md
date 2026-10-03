@@ -3579,3 +3579,4 @@
 - 16:34 Real packaged SP80 L1 witness `p7-live-20261003083229-fc201798c0a6e12b4e8d711e` emitted startup cognition refresh and cognition hypothesis/update records, executed 4 primitive actions, completed 0 levels, and ended `unsuccessful` with terminal reason `active`; cleanup completed, trace remained unsealed, and replay was unverified.
 - 16:35 Recorded the real witness outcome and resume checkpoint for accurate continuation. [543fea05]
 - 16:38 Added compact human-readable cognition-display lines beside bounded JSON logs, covering startup, reads, and updates; packaged startup showed the line. [a5f76cb6]
+- 16:39 Journaled the cognition-display visibility fix for resume continuity. [9484986a]
