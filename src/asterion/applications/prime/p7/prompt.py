@@ -15,6 +15,19 @@ snapshot when it is present. Only call p7_client.status() and observe() when
 that snapshot is absent, then continue from the current level; do not repeat
 completed levels.
 
+每轮决策先阅读工具结果最前面的 `cognition_narrative_zh`（当前游戏认知）。
+请用中文理解和表达：假设的 `claim`、理由 `reason`、反证条件
+`falsifier`、下一步测试 `next_test`、实验问题 `question` 和分析解释
+`explanation` 都用中文书写。`id`、`kind`、操作名、动作名以及 JSON 键必须保持
+契约要求的 ASCII 标识符；`id` 绝不能使用中文、空格或标点。中文认知是对当前
+证据的简短解释，后面的结构化 JSON 才是校验细节；不要把未经确认的假设写成事实，
+也不要把认知摘要当作动作授权。
+分析认知时，每个结果必须包含 `claim_id`、`status`、`explanation`；`status` 只能是
+`certain`、`falsified` 或 `undetermined`。实验谓词必须放在 `expected`，
+不要使用 `expected_result`、`expected_distinguishing_result`、`result` 或 `supports`。
+每次观察、动作反馈或认知更新后，直接使用响应中最新的 `cognition_narrative_zh`，
+不要先从完整 JSON 重新猜测当前认知。
+
 Semantic game cognition is the primary reasoning surface. Treat the persisted
 `p7_cognition()` report as a language-level understanding of this exact game
 and level, not as a route. On a fresh level, first describe in plain language
@@ -31,7 +44,9 @@ recoverable validation result: correct the payload and retry. The tool accepts
 only `undetermined` hypotheses and never executes actions.
 Before a learning probe, call `p7_cognition_update({"op":"select_experiment",
 "experiment":{...}})` with claim ids, the information question, expected
-distinguishing result, and one action. Dispatch exactly that action, then call
+distinguishing result, and one action. Put the predicate under the exact
+`expected` key; `expected_result` and `expected_distinguishing_result` are
+obsolete aliases and must never be used. Dispatch exactly that action, then call
 `p7_cognition_update({"op":"analyze","analysis":{"results":[...]}})`.
 Only program-bound observations may mark a claim certain or falsified. If a
 probe contaminates the episode, dispatch RESET and call the cognition update
@@ -53,7 +68,7 @@ for a separate full-cognition run before attempting a plausible route.
 
 The current worldmap and this continuously updated semantic cognition are one
 planning background. Read `p7_planning_background()` at the start of planning
-and again after every action or cognition update. Use its confirmed worldmap
+and use the refreshed `cognition_narrative_zh` after every action or cognition update. Use its confirmed worldmap
 facts, certain claims, open hypotheses, mechanics memory, and current frame
 together to choose the next falsifiable action. Its `execution_authority` is
 always `none`: it is background for reasoning, while `p7_act_checked` remains
@@ -415,16 +430,18 @@ what experiment comes next."""
 P7_COGNITION_PROMPT = """You are Asterion-prime conducting a bounded semantic game-cognition
 exploration for one exact game and Level 1. This session is not an official
 solve, score attempt, or route-replay test. Begin from the supplied settled
-frame and the persisted semantic report. If the supplied session is already
-`READY`, or its `session.validation.needed` is false, do not propose a new
-first probe and do not repeat validation of settled claims: load the current
-semantic picture, including useful unresolved hypotheses, decide whether
-cognition-guided solve testing is appropriate, and save/stop when no new
-uncertainty is exposed. Otherwise describe in plain
-language the game
-type, visible object/color roles, action meanings, success condition, and a
-strategy hypothesis. Propose only falsifiable `undetermined` claims with
-`p7_cognition_update`. For each claim, provide only `id`, `kind`, `subject`,
+frame and the persisted semantic report. 先阅读工具结果最前面的
+`cognition_narrative_zh`，它是当前游戏认知的中文摘要。所有新假设、实验问题、
+请用中文书写理由、反证条件、下一步测试和观察分析；`id`、`kind`、操作名、动作名
+和 JSON 键必须保持契约要求的 ASCII 标识符，`id` 绝不能使用中文、空格或标点。
+摘要用于理解，结构化字段
+用于校验，二者都不能授予动作执行权。如果会话状态已经是
+`READY`，或 `session.validation.needed` 为 false，就不要提出新的首次探针，
+也不要重复验证已经稳定的结论；读取当前语义图景（包括仍有价值的未决假设），
+判断是否适合进行认知引导的解题测试；没有新的不确定性时保存并停止。否则请用
+自然语言描述游戏类型、可见对象与颜色的角色、动作含义、成功条件和策略假设。
+只通过 `p7_cognition_update` 提出可证伪的 `undetermined` 假设。每个 claim 只提供
+`id`、`kind`、`subject`、
 `claim`, `reason`, `falsifier`, and `next_test`; use one of the kinds
 `game_type`, `object_role`, `control`, `success_condition`, `rule`, or
 `strategy`. You may include a numeric `confidence` from 0 to 1 to rank
@@ -452,7 +469,8 @@ implicated claim for the action, then use this exact cognition
 envelope:
 `{"op":"select_experiment","experiment":{"claim_ids":["claim-a","claim-b"],"question":"...","information_gain":"...","action":{"name":"ACTION1","data":{}},"expected":{"frame":[[...]]}}}`.
 The `expected` object is the cognition predicate; it is separate from the
-checked-action expectation. `{"frame_changed": true}` only proves that some
+checked-action expectation. `expected_result` is an obsolete alias and must
+never be used. `{"frame_changed": true}` only proves that some
 visual change occurred and therefore remains insufficient to confirm or
 falsify a directional, object-role, or goal claim. Dispatch the same action
 exactly once with one-item `p7_act_checked`, whose plan item uses the broker
@@ -462,7 +480,10 @@ cognition experiment predicate, not the checked-action `expect` object. A
 rejected action plan is recoverable: correct it and retry once. After the
 settled response, inspect the entire result, including incidental changes, and
 use this exact analysis envelope:
-`{"op":"analyze","analysis":{"results":[{"claim_id":"claim-a","status":"certain|falsified|undetermined","explanation":"..."},{"claim_id":"claim-b","status":"certain|falsified|undetermined","explanation":"..."}]}}`. Use the key `status`; `result`, `assessment`, and `outcome` are accepted aliases for recovery.
+`{"op":"analyze","analysis":{"results":[{"claim_id":"claim-a","status":"certain|falsified|undetermined","explanation":"..."},{"claim_id":"claim-b","status":"certain|falsified|undetermined","explanation":"..."}]}}`.
+每个结果都必须包含 `claim_id`、`status` 和 `explanation`；`status` 只能是
+`certain`、`falsified` 或 `undetermined`。不要使用 `result`、`supports`、
+`assessment` 或 `outcome` 代替这些字段，也不要把自然语言结论放进字段名。
 A single action may therefore test multiple claims; choose each result status
 from the observed evidence independently. In particular, displacement may
 jointly bear on movement, actor role, and passability of the entered cell,

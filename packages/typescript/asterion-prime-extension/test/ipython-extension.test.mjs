@@ -818,3 +818,17 @@ test("tampered arm material is rejected before any proposal", async () => {
     }
   }
 });
+
+test("P7 decision results lead with Chinese prose and retain exact details", async () => {
+  const narrative = "当前游戏认知\n已确认：横条可以移动。\n待验证：接触目标是否过关。";
+  for (const name of ["p7_observe", "p7_act_checked", "p7_cognition", "p7_cognition_update", "p7_planning_background"]) {
+    const result = { cognition_narrative_zh: narrative, applied_count: 1, observation: {frame: [[1]]}, semantic: {claims: {full: "LEDGER_ONLY"}}, planning_background: {semantic_cognition: {semantic: {claims: "LEDGER_ONLY"}}, revision: {primitive_actions: 1}} };
+    const tool = createAppLevelTools({callMethod: async () => result}).find(t => t.name === name);
+    const output = await tool.execute("zh", {});
+    assert.ok(output.content[0].text.startsWith(narrative));
+    assert.ok(output.content[0].text.includes('"applied_count":1'));
+    assert.ok(output.content[0].text.includes("结构化证据（程序校验用）"));
+    assert.equal(output.details, result);
+    assert.equal(result.semantic.claims.full, "LEDGER_ONLY");
+  }
+});

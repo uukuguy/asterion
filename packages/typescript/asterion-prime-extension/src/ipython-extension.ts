@@ -673,7 +673,19 @@ function makeMethodTool(
       let text: string;
       try {
         const serialized = JSON.stringify(result);
-        text = serialized === undefined ? String(result) : serialized;
+        if (
+          result !== null
+          && typeof result === "object"
+          && !Array.isArray(result)
+          && typeof (result as Record<string, unknown>).cognition_narrative_zh === "string"
+        ) {
+          const structured = { ...(result as Record<string, unknown>) };
+          const narrative = structured.cognition_narrative_zh as string;
+          delete structured.cognition_narrative_zh;
+          text = narrative + "\n\n结构化证据（程序校验用）：\n" + JSON.stringify(structured);
+        } else {
+          text = serialized === undefined ? String(result) : serialized;
+        }
       } catch {
         text = String(result);
       }

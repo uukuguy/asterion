@@ -32,6 +32,7 @@ from asterion.applications.prime.p7.broker import (
     _observation_digest,
 )
 from asterion.applications.prime.p7.cognition import GameCognitionStore
+from asterion.applications.prime.p7.cognition_narrative import render_cognition_narrative_zh
 from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
 from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
 from asterion.applications.prime.p7.diagnostics import analyze_trace
@@ -1121,18 +1122,33 @@ class _P7BrokerClient:
                 "schema": "asterion.prime.p7-planning-background/v1",
                 "execution_authority": "none",
                 "status": "unavailable",
+                "cognition_narrative_zh": render_cognition_narrative_zh(None, None),
             }
         try:
             projection = provider()
             if not isinstance(projection, Mapping):
                 raise ValueError
-            return _compact_planning_background(projection)
+            # Render before compaction so the model still receives the latest
+            # event explanation; the compact session intentionally omits the
+            # event ledger to keep structured evidence bounded.
+            raw_semantic_cognition = projection.get("semantic_cognition")
+            if isinstance(raw_semantic_cognition, Mapping):
+                narrative = render_cognition_narrative_zh(
+                    raw_semantic_cognition.get("semantic"),
+                    raw_semantic_cognition.get("cognition_session"),
+                )
+            else:
+                narrative = render_cognition_narrative_zh(None, None)
+            compact = _compact_planning_background(projection)
+            compact["cognition_narrative_zh"] = narrative
+            return compact
         except Exception:
             raise P7OperatorError("P7 host services are unavailable") from None
 
     def _attach_planning_background(self, result: Mapping[str, object]) -> dict[str, object]:
         """Attach context only within the aggregate worker response budget."""
         attached = dict(result)
+        attached.setdefault("cognition_narrative_zh", self._read_cognition_narrative())
         available = (
             _P7_RESPONSE_BUDGET_BYTES
             - _P7_RESPONSE_HEADROOM_BYTES
@@ -1179,6 +1195,18 @@ class _P7BrokerClient:
         except (P7OperatorError, ValueError):
             pass
         return attached
+
+    def _read_cognition_narrative(self) -> str:
+        try:
+            projection = self._broker.cognition_projection()
+            if isinstance(projection, Mapping):
+                return render_cognition_narrative_zh(
+                    projection.get("semantic"),
+                    projection.get("cognition_session"),
+                )
+        except Exception:
+            pass
+        return render_cognition_narrative_zh(None, None)
 
     def observation_state(self) -> dict[str, object]:
         if (hint := self._first_probe_hint()) is not None:
@@ -2405,6 +2433,7 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
         "Use this snapshot as the starting fact set. If frame_truncated is true and frame is null, call p7_observe for the current board.",
         json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
     ]
+    cognition_narrative_zh = render_cognition_narrative_zh(None, None)
     def fits(parts: list[str]) -> bool:
         return len("\n".join(parts).encode("utf-8")) <= 16384
 
@@ -2477,6 +2506,11 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
             cognition_projection = None
         print("[p7-cognition] initial-stage {\"stage\":\"cognition-projection-ready\"}", file=sys.stderr, flush=True)
         _log_cognition_refresh(cognition_projection, phase="startup")
+        if isinstance(cognition_projection, Mapping):
+            cognition_narrative_zh = render_cognition_narrative_zh(
+                cognition_projection.get("semantic"),
+                cognition_projection.get("cognition_session"),
+            )
         background_has_semantic = (
             background_included
             and isinstance(background_projection, Mapping)
@@ -2519,6 +2553,12 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
             "Treat this as evidence for a distinguishing probe, not as a route.",
             prior, "p7_mechanics_prior",
         )
+    sections.insert(
+        0,
+        "## 当前游戏认知（中文）\n"
+        + cognition_narrative_zh
+        + "\n先读这段认知，再使用下面的结构化证据；认知只用于推理，不能授权动作。",
+    )
     # A certified same-game model is executable planning evidence.  Query it
     # once while building the initial context so a live model does not need to
     # discover and call model_search before using an already verified plan.
