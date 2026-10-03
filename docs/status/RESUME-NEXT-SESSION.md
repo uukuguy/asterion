@@ -10,6 +10,8 @@ The latest console-readability fix is committed as `f6da52b7`. A new packaged SP
 
 The follow-up terminal-column fix is `58e24965`. Witness `p7-live-20261003150332-fe7b16ee6c5844a63184c8aa` produced 312 CRLF P7 lines (only five outer make lines remained LF), so cognition lines no longer staircase across the screen. It executed six actions and still completed zero levels; this is a solve outcome, not a display failure.
 
+The cognition progression fix is `267f4b77`: analyzed actions now clear the consumed pending experiment, action events report whether the frame changed, and console narratives list the complete current projection without `另有 N 条` omission markers. Focused cognition, bridge, live-command, lint, and docs checks pass.
+
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
