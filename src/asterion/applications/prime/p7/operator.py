@@ -4390,6 +4390,13 @@ def _configure_console_logging() -> None:
     """Keep third-party scorecard setup noise out of the cognition display."""
 
     configure_console_logging()
+    # Some operator terminals have ONLCR disabled.  Explicit CRLF keeps each
+    # diagnostic at column zero instead of producing staircase-shaped output.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(newline="\r\n")
+        except (AttributeError, ValueError):
+            pass
 
 
 def _run_live_with_process_signals(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:

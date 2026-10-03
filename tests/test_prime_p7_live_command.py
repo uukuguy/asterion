@@ -42,6 +42,23 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_console_logging_resets_terminal_column_on_newlines(self) -> None:
+        from asterion.applications.prime.p7 import operator
+
+        class Stream:
+            def __init__(self) -> None:
+                self.newline = None
+
+            def reconfigure(self, *, newline: str) -> None:
+                self.newline = newline
+
+        stdout = Stream()
+        stderr = Stream()
+        with mock.patch.object(operator.sys, "stdout", stdout), mock.patch.object(operator.sys, "stderr", stderr):
+            operator._configure_console_logging()
+        self.assertEqual(stdout.newline, "\r\n")
+        self.assertEqual(stderr.newline, "\r\n")
+
     def test_console_logging_quiets_repeated_arc_scorecard_info(self) -> None:
         from asterion.applications.prime.p7.operator import _configure_console_logging
 
