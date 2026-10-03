@@ -903,9 +903,20 @@ def _log_cognition_narrative(
     narrative = render_cognition_narrative_zh(
         semantic, cognition_session, max_bytes=max_bytes, complete=complete
     )
+    session = cognition_session if isinstance(cognition_session, Mapping) else {}
+    session_state = session.get("session", session)
+    session_state = session_state if isinstance(session_state, Mapping) else {}
+    episode = session_state.get("episode", "?")
+    actions = session_state.get("episode_actions", "?")
+    state = session_state.get("state", "?")
+    marker = (
+        f"phase={phase} episode={episode} actions={actions} state={state}"
+    )
+    print(f"[p7-cognition] cognition-round start {marker}", file=sys.stderr, flush=True)
     print(f"[p7-cognition] cognition-narrative phase={phase}", file=sys.stderr, flush=True)
     for line in narrative.splitlines():
         print(f"[p7-cognition] {line}", file=sys.stderr, flush=True)
+    print(f"[p7-cognition] cognition-round end {marker}", file=sys.stderr, flush=True)
 
 
 def _log_cognition_display(projection: object, *, phase: str) -> None:
