@@ -1,5 +1,6 @@
 """Native Asterion-prime application provider."""
 
+from . import _console_logging as _console_logging
 from asterion.applications.prime.provider import (
     create_prime_arc_agi_3_gameplay_provider,
     create_prime_arc_agi_3_solving_provider,

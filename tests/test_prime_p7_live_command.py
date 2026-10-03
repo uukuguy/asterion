@@ -4,6 +4,7 @@ import json
 import contextlib
 import io
 import asyncio
+import logging
 from collections.abc import Mapping
 import tempfile
 import unittest
@@ -41,6 +42,18 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_console_logging_quiets_repeated_arc_scorecard_info(self) -> None:
+        from asterion.applications.prime.p7.operator import _configure_console_logging
+
+        logger = logging.getLogger("arc_agi.scorecard")
+        previous = logger.level
+        try:
+            logger.setLevel(logging.INFO)
+            _configure_console_logging()
+            self.assertGreaterEqual(logger.level, logging.WARNING)
+        finally:
+            logger.setLevel(previous)
+
     def test_prefix_diagnostics_separate_context_from_applied_replay(self) -> None:
         from asterion.applications.prime.p7.operator import (
             _prefix_action_diagnostics, _prefix_replayed_count,

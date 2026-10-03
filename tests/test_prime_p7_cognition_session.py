@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import redirect_stderr
+import io
 import json
 import tempfile
 import unittest
@@ -136,6 +138,26 @@ class CognitionSessionTests(unittest.TestCase):
             observed = [claim for claim in changed if claim["id"] == "control-right"][-1]
             self.assertEqual(observed["status"], "certain")
             self.assertEqual(observed["confidence"], 0.5)
+
+    def test_console_cognition_progress_is_compact_while_live_log_keeps_details(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            stream = io.StringIO()
+            with redirect_stderr(stream):
+                session = CognitionSession(self._store(root), session_id="compact")
+                session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+                self._claim(session)
+            lines = stream.getvalue().splitlines()
+            self.assertTrue(any("event type=cognition.session.started" in line for line in lines))
+            self.assertTrue(any("event type=cognition.hypothesis.proposed" in line for line in lines))
+            self.assertTrue(any(line.startswith("[p7-cognition] hypothesis ") for line in lines))
+            self.assertTrue(all(len(line) <= 512 for line in lines))
+            self.assertNotIn('"claim_changes"', stream.getvalue())
+            live_events = [
+                json.loads(line)
+                for line in session.live_log_path.read_text(encoding="utf-8").splitlines()
+            ]
+            self.assertTrue(any("claim_changes" in event for event in live_events))
 
     def test_first_episode_bootstraps_unknown_game_picture_idempotently(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

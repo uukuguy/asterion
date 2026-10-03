@@ -15,6 +15,7 @@ import threading
 from types import MappingProxyType
 from typing import cast
 
+from asterion.applications.prime._console_logging import configure_console_logging
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
 from asterion.applications.prime.p7.broker import (
@@ -4295,6 +4296,12 @@ def _reject(*, reason: str | None = None) -> int:
     return 2
 
 
+def _configure_console_logging() -> None:
+    """Keep third-party scorecard setup noise out of the cognition display."""
+
+    configure_console_logging()
+
+
 def _run_live_with_process_signals(invocation: P7Invocation, run_id: str) -> live.P7LiveExecution:
     """Translate supervisor termination into cooperative evidence-preserving cancellation."""
 
@@ -4318,6 +4325,7 @@ def _run_live_with_process_signals(invocation: P7Invocation, run_id: str) -> liv
 def main(argv: list[str] | None = None) -> int:
     """The only external input is the literal Make preset invocation."""
 
+    _configure_console_logging()
     invocation: P7Invocation | None = None
     preflight_reason: str | None = None
     try:

@@ -34,6 +34,7 @@ _MAX_ACTIONS = 128
 _OBSERVED_STATES = {"NOT_FINISHED", "GAME_OVER", "WIN"}
 _MAX_EXPECTED_FRAME_BYTES = 64 * 1024
 _MAX_EXPECTED_BYTES = 64 * 1024
+_CONSOLE_HYPOTHESIS_LIMIT = 8
 _ANALYSIS_STATUS_ALIASES = {
     "certain": "certain",
     "confirmed": "certain",
@@ -66,6 +67,13 @@ def _text(value: object, name: str) -> str:
     if type(value) is not str or not value.strip() or len(value) > 2048:
         raise CognitionSessionError(f"invalid {name}")
     return value
+
+
+def _compact_console_text(value: object, *, limit: int) -> str:
+    """Bound model-authored text before it reaches the interactive terminal."""
+
+    text = " ".join(str(value or "").split())
+    return text[:limit] + ("…" if len(text) > limit else "")
 
 
 def _digest(observation: Mapping[str, Any]) -> str:
@@ -228,15 +236,28 @@ class CognitionSession:
         except OSError as error:
             raise CognitionPersistenceError("cognition live log unavailable") from error
         print(
-            "[p7-cognition] "
-            + json.dumps(logged, sort_keys=True, separators=(",", ":")),
+            "[p7-cognition] event "
+            f"type={event_type} sequence={self._sequence} episode={self._episode} "
+            f"claims_changed={len(claim_changes)}",
             file=sys.stderr,
             flush=True,
         )
-        for change in claim_changes:
+        for change in claim_changes[:_CONSOLE_HYPOTHESIS_LIMIT]:
             print(
                 "[p7-cognition] hypothesis "
-                + json.dumps(change, sort_keys=True, separators=(",", ":")),
+                f"id={change.get('id', '?')} status={change.get('status', '?')} "
+                f"kind={change.get('kind', '?')} subject={change.get('subject', '?')} "
+                f"confidence={change.get('confidence', '?')} evidence={change.get('evidence_count', 0)} "
+                "claim=" + json.dumps(_compact_console_text(change.get("claim"), limit=160), ensure_ascii=False) + " "
+                "next_test=" + json.dumps(_compact_console_text(change.get("next_test"), limit=120), ensure_ascii=False),
+                file=sys.stderr,
+                flush=True,
+            )
+        omitted = len(claim_changes) - _CONSOLE_HYPOTHESIS_LIMIT
+        if omitted > 0:
+            print(
+                f"[p7-cognition] hypothesis omitted={omitted} "
+                "detail=see-live-log",
                 file=sys.stderr,
                 flush=True,
             )
