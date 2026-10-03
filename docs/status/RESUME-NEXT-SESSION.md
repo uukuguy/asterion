@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-03 15:53 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-03 16:30 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted three observed Pi retry bookkeeping events. The latest packaged SP80 L1 witness advanced through five current actions but still stopped unsuccessful with zero completions and a bounded native-event diagnostic. No fresh L1 solve has been established.
+P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted three observed Pi retry bookkeeping events. The latest packaged SP80 L1 witness advanced through five current actions but still stopped unsuccessful with zero completions and a bounded native-event diagnostic. Startup now emits a bounded `cognition-refresh` record and preserves cognition in the initial context when other projections are omitted. No fresh L1 solve has been established.
 
 ## 已验证事实
 
@@ -48,7 +48,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
 2. Review the focused diff and commit the bounded diagnostics plus exact retry-event contract fixes.
-3. For the next live attempt, capture the remaining native event type in cognition mode or an equivalent bounded trace, then add only its exact contract regression if confirmed.
+3. For the next live attempt, capture the remaining native event type in cognition mode or an equivalent bounded trace, then add only its exact contract regression if confirmed. Preserve the startup `cognition-refresh` line as the first cognition evidence.
 4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition.
 
 ## Ready-to-paste commands

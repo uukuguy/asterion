@@ -786,6 +786,91 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("asterion.prime.p7-planning-background/v1", context)
         self.assertIn("bar is movable", context)
 
+    def test_initial_context_falls_back_to_cognition_when_background_is_omitted(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"actions_remaining": 20, "primitive_actions": 0, "target_level": 1}
+
+            def planning_background(self):
+                return {
+                    "schema": "asterion.prime.p7-planning-background/v1",
+                    "execution_authority": "none",
+                    "worldmap": {"noise": "x" * 20000},
+                    "semantic_cognition": {"semantic": {"natural_language_context": "background-marker"}},
+                }
+
+            def cognition(self):
+                return {"semantic": {"natural_language_context": "fallback-cognition-marker"}}
+
+        context = _initial_game_context(Client(), include_prior=False)
+        self.assertIn("fallback-cognition-marker", context)
+        self.assertIn("p7_cognition", context)
+
+    def test_initial_context_logs_cognition_refresh(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"actions_remaining": 20, "primitive_actions": 0, "target_level": 1}
+
+            def cognition(self):
+                return {"semantic": {"natural_language_context": "startup-cognition-marker"}}
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            _initial_game_context(Client(), include_prior=False)
+        refresh_lines = [
+            line for line in stderr.getvalue().splitlines()
+            if line.startswith("[p7-cognition] cognition-refresh ")
+        ]
+        self.assertEqual(len(refresh_lines), 1)
+        self.assertIn("startup-cognition-marker", refresh_lines[0])
+
+    def test_initial_context_marks_cognition_refresh_failure(self) -> None:
+        from asterion.applications.prime.p7.operator import _initial_game_context
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"actions_remaining": 20, "primitive_actions": 0, "target_level": 1}
+
+            def cognition(self):
+                raise RuntimeError("private cognition failure")
+
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            context = _initial_game_context(Client(), include_prior=False)
+        self.assertIn("refresh unavailable", context)
+        self.assertIn('"status":"unavailable"', stderr.getvalue())
+
     def test_initial_context_automatically_queries_confirmed_model_plan(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
 

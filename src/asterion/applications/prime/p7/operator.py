@@ -870,6 +870,32 @@ def _compact_planning_background(value: object, *, max_bytes: int = 48 * 1024) -
     return result
 
 
+def _log_cognition_refresh(projection: object, *, phase: str) -> None:
+    """Print the bounded current cognition whenever the model context refreshes."""
+
+    if type(phase) is not str or not phase:
+        phase = "unknown"
+    if not isinstance(projection, Mapping):
+        record: dict[str, object] = {"phase": phase, "status": "unavailable"}
+    else:
+        record = {
+            "phase": phase,
+            "status": "available",
+            "semantic": _bounded_semantic_report(
+                projection.get("semantic"), max_bytes=8 * 1024
+            ),
+            "cognition_session": _compact_cognition_session(
+                projection.get("cognition_session")
+            ),
+        }
+    print(
+        "[p7-cognition] cognition-refresh "
+        + json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str),
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
@@ -2344,18 +2370,21 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
     if not fits(sections):
         raise P7OperatorError("P7 host services are unavailable")
 
-    def add_projection(heading: str, instruction: str, projection: Mapping[str, object], tool: str) -> None:
+    def add_projection(heading: str, instruction: str, projection: Mapping[str, object], tool: str) -> bool:
         candidate = [
             heading, instruction,
             json.dumps(dict(projection), ensure_ascii=False, sort_keys=True, separators=(",", ":")),
         ]
         if fits([*sections, *candidate]):
             sections.extend(candidate)
+            return True
         else:
             sections.append(f"{heading}: omitted from initial context; call {tool} if needed.")
+            return False
 
     planning_background = getattr(client, "planning_background", None)
-    background_added = False
+    background_included = False
+    background_projection: Mapping[str, object] | None = None
     if callable(planning_background):
         try:
             background_projection = planning_background()
@@ -2365,16 +2394,14 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
             isinstance(background_projection, Mapping)
             and background_projection.get("schema") == "asterion.prime.p7-planning-background/v1"
         ):
-            before = len(sections)
-            add_projection(
+            background_included = add_projection(
                 "## WorldMap planning background (refreshable; advisory)",
                 "Use this single current projection to plan: worldmap facts and certain semantic claims are usable context, hypotheses and undetermined claims are priors to test. execution_authority is none. Re-read p7_planning_background after every action or cognition update before choosing the next action.",
                 background_projection,
                 "p7_planning_background",
             )
-            background_added = len(sections) > before
 
-    world_model = None if semantic_only or background_added else getattr(client, "world_model", None)
+    world_model = None if semantic_only or background_included else getattr(client, "world_model", None)
     if callable(world_model):
         try:
             model_projection = world_model()
@@ -2389,12 +2416,22 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
     cognition = getattr(client, "cognition", None)
     if callable(cognition):
         print("[p7-cognition] initial-stage {\"stage\":\"cognition-projection\"}", file=sys.stderr, flush=True)
+        cognition_projection: object = None
         try:
             cognition_projection = cognition()
         except Exception:
-            cognition_projection = {}
+            # Cognition remains advisory, but startup must make an unavailable
+            # refresh explicit in both the log and the model context.
+            cognition_projection = None
         print("[p7-cognition] initial-stage {\"stage\":\"cognition-projection-ready\"}", file=sys.stderr, flush=True)
-        if isinstance(cognition_projection, Mapping) and not background_added:
+        _log_cognition_refresh(cognition_projection, phase="startup")
+        background_has_semantic = (
+            background_included
+            and isinstance(background_projection, Mapping)
+            and isinstance(background_projection.get("semantic_cognition"), Mapping)
+            and isinstance(background_projection["semantic_cognition"].get("semantic"), Mapping)
+        )
+        if isinstance(cognition_projection, Mapping) and not background_has_semantic:
             semantic = cognition_projection.get("semantic")
             if isinstance(semantic, Mapping):
                 # The complete ledger is retained privately, but the live
@@ -2414,6 +2451,10 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
                     "Type-level knowledge is prior-only. Exact-game experience is useful only after current observations and prefix checks agree; never treat this section as a route.",
                     cognition_projection, "p7_cognition",
                 )
+        elif cognition_projection is None:
+            sections.append(
+                "## Semantic game cognition (refresh unavailable): call p7_cognition before planning."
+            )
     if include_prior:
         mechanics_prior = getattr(client, "mechanics_prior", None)
         if not callable(mechanics_prior):
