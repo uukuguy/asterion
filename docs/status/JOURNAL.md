@@ -3593,3 +3593,4 @@
 - 2026-10-03 Resume state records the second aligned-output witness and its separate zero-completion solve result. [ea6ce7a7]
 - 2026-10-03 Action analysis now clears consumed experiments, reports frame changes, and prints complete current cognition without omission markers. [267f4b77]
 - 2026-10-03 Resume checkpoint records complete cognition output and post-action progression behavior for the next live witness. [971f06f1]
+- 2026-10-03 Live validation showed complete action feedback and consumed experiments; operator-cancelled witness remained zero-completion with expected nonzero status. [267f4b77]

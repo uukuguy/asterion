@@ -12,6 +12,8 @@ The follow-up terminal-column fix is `58e24965`. Witness `p7-live-20261003150332
 
 The cognition progression fix is `267f4b77`: analyzed actions now clear the consumed pending experiment, action events report whether the frame changed, and console narratives list the complete current projection without `另有 N 条` omission markers. Focused cognition, bridge, live-command, lint, and docs checks pass.
 
+Validation after that fix reached nine primitive actions with complete post-action cognition; the run was operator-cancelled while waiting for further model progress, so its receipt correctly remained unsuccessful with zero completed levels. The nonzero witness exit is the contract signal for an incomplete target, not a hidden runtime exception.
+
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
