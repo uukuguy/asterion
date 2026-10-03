@@ -470,7 +470,18 @@ class PrimeExecutionKernel:
                 round_terminal_seen = False
                 return
             if event_type in {
-                "response", "message_start", "turn_end", "tool_execution_update",
+                "response",
+                "message_start",
+                "turn_end",
+                "tool_execution_update",
+                # Pi emits this marker after an agent_end with willRetry=true
+                # and before the retry's next agent_start. It carries no
+                # public result or tool effect; the next agent_start remains
+                # the round boundary that resets terminal tracking.
+                "auto_retry_start",
+                # Pi records the retry's transcript entry after the retry
+                # marker; it is private bookkeeping with no public effect.
+                "entry_appended",
             }:
                 # Streaming tool updates contain private partial output.
                 return

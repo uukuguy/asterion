@@ -3565,3 +3565,9 @@
 - 10:15 correction: feedback-loop implementation is 07223470; 66483d49 only journals it.
 - 10:16 Handoff committed state reconciliation, decision, memory and next-session baton [a035dec3]
 - 10:16 Handoff closure journaled; repository is ready for project-state resume [cea1b87a]
+- 15:08 P7 preflight passed: 205 focused tests, make lint, docs-check, Ruff, diff, and TypeScript resource sync.
+- 15:22 Packaged SP80 L1 witness ended unsuccessful: five current actions, zero replay/RESET/completions, active broker, cleanup complete; root cause unresolved.
+
+- 15:53 P7 failure investigation identified two concrete Pi retry bookkeeping events: `auto_retry_start` after `agent_end(willRetry=true)` and `entry_appended` before the next retry cycle. Each received a red regression test first, then an exact benign-event allowlist entry in `PrimeExecutionKernel`; no private payload is projected.
+- 15:53 Added bounded `failure_diagnostic` summary fields (`diagnostic_id`, `stage`, `exception_type`, `failure_code`) to the operator-only live diagnostics; regression asserts exception bodies and private digests remain absent.
+- 15:53 Focused P7 suite passed 244 tests; `make lint`, `make docs-check`, and TypeScript `check-resource` passed. Packaged witness `p7-live-20261003074908-d3b79b1dbaa01071820bb43a` advanced through two current actions without the prior protocol rejection but remained unsuccessful with zero completed levels, active broker, cleanup complete, and no solve claim.

@@ -1,16 +1,23 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-10-03 10:15 Asia/Shanghai. Final session closeout.
+> Updated: 2026-10-03 15:53 CST. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. Core implementation and response-budget fix are committed and independently reviewed. The next task is sustained SP80 L1 live validation of this loop, with runtime cognition logs; no fresh L1 solve has been established.
+P7 now supports partial cognition → WorldMap-guided solve attempt → new hypothesis experiment → cognition update → further planning. This session added bounded private failure diagnostics and accepted two observed Pi retry bookkeeping events. The latest packaged SP80 L1 witness advanced through two current actions without the prior protocol rejection, then stopped unsuccessful with zero completions. No fresh L1 solve has been established.
 
 ## 已验证事实
 
+- Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
+- Packaged run `p7-live-20261003070845-e31236d1512214af71204766`: five current actions (ACTION1, ACTION4, ACTION4, ACTION1, ACTION3), zero replay-prefix actions, zero RESET, zero completed levels, 34 actions remaining, broker terminal `active`, cleanup complete. Receipt is unsuccessful; trace is unsealed and replay is unverified. No outer timeout was applied.
+- Its startup used `strategy=replay`, `cognition_mode=false`; cognition remained enabled in solve mode. One selected ACTION3 experiment executed, but analysis did not follow before failure. Two earlier selection attempts supplied a prose expected result and were rejected; direct solve actions then bypassed the cognition experiment state.
+- Follow-up cognition run `p7-live-20261003074549-056ad6833ff15b213704428a` exposed `auto_retry_start` after `agent_end(willRetry=true)`; the next run exposed `entry_appended` after that retry marker. Both were handled with red regression tests and exact benign-event allowlist entries.
+- Bounded operator diagnostics now retain only `diagnostic_id`, `stage`, `exception_type`, and `failure_code`; exception bodies and private digests are excluded.
+- Latest packaged witness `p7-live-20261003074908-d3b79b1dbaa01071820bb43a` advanced through two current actions without the protocol rejection, then returned unsuccessful with zero completed levels, active broker, and cleanup complete.
+
 - `07223470` is the feedback-loop implementation: unified advisory planning background, refreshed after observe/action/cognition updates; all Prime registrations and packaged extension synchronized. `66483d49` is only its journal commit (the previous chat incorrectly called it the implementation).
 - `0b248e4e` fixes aggregate response overflow and clarifies unresolved-hypothesis prompt wording; `c929f162` records it. The reviewer reproduced 76,647 bytes against a 65,536-byte bridge cap before the fix. The new attachment helper budgets against the full response, removes duplicate frames and preserves primary results.
-- Latest focused suite: **205 tests passed**; Ruff, `git diff --check`, TypeScript `check-resource` passed. Independent `/root/final_joint_review` returned **PASS** after the aggregate fix. Earlier full npm result recorded 29 pass/6 external skips; later review also encountered unchanged socket-test timeouts, so do not imply all npm runs passed.
+- Earlier focused suite: **205 tests passed**; the current retry-event/diagnostic changes are covered by the **244-test** result recorded above. Ruff, `git diff --check`, and TypeScript `check-resource` also passed. Independent `/root/final_joint_review` returned **PASS** after the aggregate fix. Earlier full npm result recorded 29 pass/6 external skips; later review also encountered unchanged socket-test timeouts, so do not imply all npm runs passed.
 - Packaged SP80 L1 run `p7-live-20261002224528-2fed7267196425c57c3566e2`, using `gpt-6.1-sol`, selected an experiment, dispatched one ACTION1, analyzed it and confirmed claims `l1-controls` and `l1-player-role`. Runtime emitted hypothesis/experiment/action/analysis/cognition-state logs.
 - That run was ended by the operator's **90-second timeout**, before completion. Do not blame an unexplained external RPC or call it a solve. The earlier runs used 180-second wrappers. Initial observation previously failed due to an oversized mechanics projection; that projection was fixed before the recorded run.
 - Local ignored evidence exists: `.asterion-private/prime-p7-live/cognition-live-p7-live-20261002224528-2fed7267196425c57c3566e2-cognition.jsonl`.
@@ -32,7 +39,7 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 
 ## 未完成边界
 
-- No sustained post-fix live solve has shown repeated planning from updated cognition or completed L1. The recorded live run precedes aggregate response fix `0b248e4e`; that fix has unit-test and review evidence only.
+- No sustained post-fix live solve has shown repeated planning from updated cognition or completed L1. The latest witness confirms the native protocol no longer fails on the two observed retry bookkeeping events, but still ends before level completion.
 - No cold/warm comparison establishes improving proficiency. Cross-level learning and simulator benefits remain unverified.
 - `promotion-check` failures remain unresolved. Preserve their actual scope; do not infer missing Pi credentials or unavailable subscription from a test failure.
 - Handoff process audit found no P7/witness/test processes. A pre-existing editor `ruff server` was left untouched; verify process state again on resume.
@@ -40,9 +47,9 @@ P7 now supports partial cognition → WorldMap-guided solve attempt → new hypo
 ## 下一动作
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
-2. Launch one packaged `make asterion-prime-p7-level-witness GAME=sp80 LEVEL=1` under the preset's finite controls. Check existing deadline behavior before adding an outer watchdog; allow enough time for multiple model/action cycles and record any deliberate cancellation.
-3. Follow the runtime cognition/action log throughout. Verify which known or open claims inform each action, which observation changes which claims, and how the next plan uses that update. Investigate concrete failures; do not substitute assistant-chosen moves.
-4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report actual stop cause and persist latest cognition.
+2. Review the focused diff and commit the bounded diagnostics plus exact retry-event contract fixes.
+3. For the next live attempt, follow the runtime cognition/action log and determine why the application stops after bounded cognition updates; preserve the same fail-closed event handling.
+4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition.
 
 ## Ready-to-paste commands
 
@@ -54,4 +61,4 @@ npm --prefix packages/typescript/asterion-prime-extension run check-resource
 make asterion-prime-p7-level-witness GAME=sp80 LEVEL=1
 ```
 
-The recorded 205-test result already covers the final code; repeat only if code or relevant environment changes. This handoff performs state consistency checks, not another costly live run.
+The 244-test result covers the retry-event fixes and diagnostic projection. Session is active; no fresh L1 solve or promotion-check PASS is established.

@@ -101,6 +101,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
+from asterion.services.diagnostics import FailureDiagnostic
 
 
 _RUNTIME_ID = "asterion.prime"
@@ -122,6 +123,19 @@ _ROUTE_OPTIMIZER_TIME_BUDGET_SECONDS = 8.0
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
 _BRIDGE_JOIN_SECONDS = 1.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
+
+
+def _safe_failure_diagnostic(value: object) -> dict[str, str] | None:
+    """Project bounded private failure metadata without exception bodies."""
+
+    if type(value) is not FailureDiagnostic:
+        return None
+    return {
+        "diagnostic_id": value.diagnostic_id,
+        "stage": value.stage,
+        "exception_type": value.exception_type,
+        "failure_code": value.failure_code or "",
+    }
 
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
@@ -3867,6 +3881,12 @@ async def run_live(
                             playbook_saved = False
                             diagnostics["playbook_save_error"] = f"write:{type(error).__name__}"
                 diagnostics["playbook_saved"] = playbook_saved
+            evidence_for_diagnostic = resources_.host_services.get("prime.private-trace")
+            safe_diagnostic = _safe_failure_diagnostic(
+                getattr(evidence_for_diagnostic, "failure_diagnostic", None)
+            )
+            if safe_diagnostic is not None:
+                diagnostics["failure_diagnostic"] = safe_diagnostic
             # Keep the operator-only Pi stderr tail in private evidence. The
             # public receipt remains body-free, but extension-registration
             # failures otherwise collapse into an indistinguishable generic

@@ -466,6 +466,24 @@ class TestAsterionPrimeSession(unittest.TestCase):
         public = asyncio.run(collect(session))
         self.assertEqual(public[-1].payload, {"status": "completed"})
 
+    def test_auto_retry_start_is_benign_between_retry_cycles(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(
+            ("response", {"id": "py-1", "success": True}),
+            ("agent_start", {}),
+            ("turn_start", {}),
+            ("agent_end", {"willRetry": True}),
+            ("auto_retry_start", {}),
+            ("entry_appended", {}),
+            ("agent_start", {}),
+            ("turn_start", {}),
+            ("agent_end", {}),
+            ("agent_settled", {}),
+        ))
+
+        public = asyncio.run(collect(session))
+
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+
     def test_default_agent_end_terminal_completes_without_public_payload(self) -> None:
         session, _rpc, _lease = self.fixture.make(
             native_events(("agent_end", {"messages": ["PRIVATE-ANSWER"]}))

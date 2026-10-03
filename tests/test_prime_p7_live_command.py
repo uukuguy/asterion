@@ -141,6 +141,30 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             },
         )
 
+    def test_failure_diagnostic_summary_is_bounded_and_body_free(self) -> None:
+        from asterion.services.diagnostics import FailureDiagnostic
+        from asterion.applications.prime.p7.operator import _safe_failure_diagnostic
+
+        diagnostic = FailureDiagnostic(
+            "diagnostic-id",
+            "pi.prompt",
+            "RuntimeError",
+            "private-subject-digest",
+            "private-capability-digest",
+            "pi-provider-execution",
+        )
+
+        self.assertEqual(
+            _safe_failure_diagnostic(diagnostic),
+            {
+                "diagnostic_id": "diagnostic-id",
+                "stage": "pi.prompt",
+                "exception_type": "RuntimeError",
+                "failure_code": "pi-provider-execution",
+            },
+        )
+        self.assertIsNone(_safe_failure_diagnostic(RuntimeError("private detail")))
+
     def test_partial_route_hint_does_not_claim_level_completion(self) -> None:
         from asterion.applications.prime.p7.optimizer import PlannerAction
         from asterion.applications.prime.p7.operator import _summarize_partial_route_actions
