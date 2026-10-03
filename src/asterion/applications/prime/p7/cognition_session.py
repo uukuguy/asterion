@@ -181,7 +181,7 @@ class CognitionSession:
         if payload:
             # Events contain semantic references only.  Coordinates, routes,
             # frames and arbitrary action payloads are deliberately excluded.
-            event.update({key: value for key, value in payload.items() if key in {"count", "claim_ids", "question", "information_gain", "status", "explanation", "reason", "state", "action_name"}})
+            event.update({key: value for key, value in payload.items() if key in {"count", "claim_ids", "question", "information_gain", "status", "explanation", "reason", "state", "action_name", "changed", "levels_completed"}})
         self._events.append(event)
         self._events = self._events[-_MAX_EVENTS:]
         self._persist_events()
@@ -460,9 +460,16 @@ class CognitionSession:
         self._episode_actions += 1
         self._observation = dict(observation)
         after_digest = _digest(observation)
-        self._state = "ACTION_EXECUTED"
-        self._emit("cognition.action.executed", {"action_name": action["name"]})
         changed = after_digest != self._pending["before"]
+        self._state = "ACTION_EXECUTED"
+        self._emit(
+            "cognition.action.executed",
+            {
+                "action_name": action["name"],
+                "changed": changed,
+                "levels_completed": observation["levels_completed"],
+            },
+        )
         self._before_digest = after_digest
         return {"state": self._state, "changed": changed, "levels_completed": observation["levels_completed"]}
 
@@ -603,6 +610,9 @@ class CognitionSession:
             self._emit(event_type, {"claim_ids": [claim_id], "explanation": explanation})
         self._state = "ANALYZED"
         self._analyzed = True
+        # The selected experiment has now been consumed.  Keeping it pending
+        # makes the next narrative repeat the old question after analysis.
+        self._pending = None
         self._emit("cognition.observation.analyzed", {"state": self._state})
         return self.snapshot()
 

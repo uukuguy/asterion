@@ -97,6 +97,7 @@ class CognitionSessionTests(unittest.TestCase):
                 }],
             })
             self.assertEqual(analyzed["state"], "ANALYZED")
+            self.assertIsNone(analyzed["session"]["pending"])
 
     def test_event_persistence_failure_is_not_silent(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -134,6 +135,9 @@ class CognitionSessionTests(unittest.TestCase):
             self.assertIn("cognition.experiment.selected", event_types)
             self.assertIn("cognition.action.executed", event_types)
             self.assertIn("cognition.observation.analyzed", event_types)
+            action_event = next(event for event in events if event["type"] == "cognition.action.executed")
+            self.assertTrue(action_event["changed"])
+            self.assertEqual(action_event["levels_completed"], 0)
             changed = [claim for event in events for claim in event.get("claim_changes", [])]
             observed = [claim for claim in changed if claim["id"] == "control-right"][-1]
             self.assertEqual(observed["status"], "certain")

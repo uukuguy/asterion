@@ -72,6 +72,7 @@ def _claim_prose(claim: Mapping, field: str = "claim") -> str:
 
 def render_cognition_narrative_zh(
     semantic: object, cognition_session: object, *, max_bytes: int = 4096,
+    complete: bool = False,
 ) -> str:
     """Render bounded evidence, uncertainty and feedback without granting authority.
 
@@ -80,6 +81,8 @@ def render_cognition_narrative_zh(
     """
     if type(max_bytes) is not int or max_bytes < 256:
         raise ValueError("narrative budget must be at least 256 bytes")
+    if type(complete) is not bool:
+        raise ValueError("complete must be boolean")
     if not isinstance(semantic, Mapping) or semantic.get("status") == "unavailable":
         return "当前游戏认知\n认知刷新不可用；请先读取 p7_cognition。以当前观察为准，不沿用旧结论。"
     envelope = cognition_session if isinstance(cognition_session, Mapping) else {}
@@ -97,14 +100,28 @@ def render_cognition_narrative_zh(
     events = events if isinstance(events, (list, tuple)) else []
     recent_ids: set[str] = set()
     latest = ""
+    recent_action = ""
+    for event in reversed(events):
+        if not isinstance(event, Mapping):
+            continue
+        if not recent_action and event.get("type") == "cognition.action.executed":
+            action_name = _text(event.get("action_name"), 32)
+            changed = event.get("changed")
+            if action_name:
+                if changed is True:
+                    recent_action = f"{action_name} 已执行，画面发生变化。"
+                elif changed is False:
+                    recent_action = f"{action_name} 已执行，画面没有变化。"
+                else:
+                    recent_action = f"{action_name} 已执行，等待比较动作前后画面。"
+        ids = event.get("claim_ids", [])
+        if isinstance(ids, (list, tuple)):
+            recent_ids.update(i for i in ids if isinstance(i, str))
     for event in reversed(events):
         if not isinstance(event, Mapping):
             continue
         if not latest:
             latest = _prose(event.get("explanation"))
-        ids = event.get("claim_ids", [])
-        if isinstance(ids, (list, tuple)):
-            recent_ids.update(i for i in ids if isinstance(i, str))
         if latest:
             break
     claims: list[Mapping] = []
@@ -141,16 +158,17 @@ def render_cognition_narrative_zh(
             lines.append(line)
     if latest:
         add("最近反馈：" + latest)
+    if recent_action:
+        add("最近动作：" + recent_action)
     if state == "ACTION_EXECUTED":
         add("最新动作尚未分析，不能把预期当作已确认事实。")
     for status, label, count in (("certain", "已确认", 4), ("undetermined", "待验证", 4), ("falsified", "已否定", 2)):
         selected = [c for c in claims if c.get("status") == status]
         if not selected and status == "certain":
             add("已确认：暂无经证据支持的游戏规则。")
-        for claim in selected[:count]:
+        visible = selected if complete else selected[:count]
+        for claim in visible:
             add(f"{label}：{_claim_prose(claim)}")
-        if len(selected) > count:
-            add(f"{label}另有 {len(selected) - count} 条；完整记录可按需查询。")
     if not claims:
         context = _prose(semantic.get("natural_language_context"), 360)
         add("现有描述：" + context if context else "当前尚无游戏特定认知；先观察对象、动作和目标。")

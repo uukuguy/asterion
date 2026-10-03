@@ -887,18 +887,22 @@ def _log_cognition_refresh(projection: object, *, phase: str) -> None:
         file=sys.stderr,
         flush=True,
     )
-    _log_cognition_narrative(projection, phase=phase)
+    _log_cognition_narrative(projection, phase=phase, complete=True, max_bytes=128 * 1024)
     _log_cognition_display(projection, phase=phase)
 
 
-def _log_cognition_narrative(projection: object, *, phase: str) -> None:
+def _log_cognition_narrative(
+    projection: object, *, phase: str, complete: bool = False, max_bytes: int = 4096
+) -> None:
     """Print the same bounded Chinese reading surface the model receives."""
 
     semantic = projection.get("semantic") if isinstance(projection, Mapping) else None
     cognition_session = (
         projection.get("cognition_session") if isinstance(projection, Mapping) else None
     )
-    narrative = render_cognition_narrative_zh(semantic, cognition_session)
+    narrative = render_cognition_narrative_zh(
+        semantic, cognition_session, max_bytes=max_bytes, complete=complete
+    )
     print(f"[p7-cognition] cognition-narrative phase={phase}", file=sys.stderr, flush=True)
     for line in narrative.splitlines():
         print(f"[p7-cognition] {line}", file=sys.stderr, flush=True)
@@ -1290,7 +1294,7 @@ class _P7BrokerClient:
                 result.get("semantic"), result.get("cognition_session")
             )
             result["cognition_narrative_zh"] = narrative
-            _log_cognition_narrative(result, phase="read")
+            _log_cognition_narrative(result, phase="read", complete=True, max_bytes=128 * 1024)
             _log_cognition_display(result, phase="read")
             return self._attach_planning_background(result)
         except Exception as error:
@@ -1422,6 +1426,8 @@ class _P7BrokerClient:
                 _log_cognition_narrative(
                     {"semantic": report, "cognition_session": session_envelope},
                     phase=f"update:{canonical_op}",
+                    complete=True,
+                    max_bytes=128 * 1024,
                 )
                 _log_cognition_display(
                     {

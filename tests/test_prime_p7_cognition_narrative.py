@@ -11,7 +11,7 @@ class TestCognitionNarrative(unittest.TestCase):
         confirmed = {"id": "move", "kind": "control", "claim": "ACTION1 使横条向上移动。", "status": "certain", "next_test": "检验边界是否阻挡移动。"}
         pending = {"id": "goal", "kind": "success_condition", "claim": "接触色块可能过关。", "status": "undetermined", "next_test": "观察接触后关卡数是否增加。"}
         semantic = {"scope": {"level": 0}, "claims": {"control": [confirmed], "success_condition": [pending], "certain": [confirmed], "undetermined": [pending]}}
-        session = {"session": {"state": "ANALYZED", "episode_actions": 2}, "events": [{"type": "cognition.hypothesis.confirmed", "claim_ids": ["move"], "explanation": "横条上移，关卡没有增加。"}]}
+        session = {"session": {"state": "ANALYZED", "episode_actions": 2}, "events": [{"type": "cognition.action.executed", "action_name": "ACTION1", "changed": True}, {"type": "cognition.hypothesis.confirmed", "claim_ids": ["move"], "explanation": "横条上移，关卡没有增加。"}]}
         before = copy.deepcopy((semantic, session))
         result = render_cognition_narrative_zh(semantic, session)
         self.assertTrue(result.startswith("当前游戏认知"))
@@ -19,6 +19,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("已确认", result)
         self.assertIn("待验证", result)
         self.assertIn("横条上移，关卡没有增加", result)
+        self.assertIn("最近动作：ACTION1 已执行，画面发生变化", result)
         self.assertIn("下一步", result)
         self.assertEqual(result.count("ACTION1 使横条向上移动。"), 1)
         self.assertEqual((semantic, session), before)
@@ -36,6 +37,25 @@ class TestCognitionNarrative(unittest.TestCase):
         result = render_cognition_narrative_zh({"natural_language_context": "The bar moves."}, None)
         self.assertIn("历史原文", result)
         self.assertIn("The bar moves.", result)
+
+    def test_complete_mode_lists_all_claims_without_omission_marker(self):
+        claims = [
+            {"id": f"certain-{index}", "kind": "control", "claim": f"已确认规则{index}", "status": "certain"}
+            for index in range(5)
+        ] + [
+            {"id": f"open-{index}", "kind": "strategy", "claim": f"待验证假设{index}", "status": "undetermined"}
+            for index in range(5)
+        ]
+        result = render_cognition_narrative_zh(
+            {"scope": {"level": 0}, "claims": {"control": claims[:5], "strategy": claims[5:]}},
+            None,
+            max_bytes=8192,
+            complete=True,
+        )
+        for index in range(5):
+            self.assertIn(f"已确认规则{index}", result)
+            self.assertIn(f"待验证假设{index}", result)
+        self.assertNotIn("另有", result)
 
 
 class TestNarrativeDelivery(unittest.TestCase):
