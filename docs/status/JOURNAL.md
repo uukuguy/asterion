@@ -3596,3 +3596,4 @@
 - 2026-10-03 Live validation showed complete action feedback and consumed experiments; operator-cancelled witness remained zero-completion with expected nonzero status. [267f4b77]
 - 2026-10-03 Resume checkpoint records the operator-cancelled complete-cognition validation and preserves the incomplete-witness boundary. [928d3c65]
 - 2026-10-04 Added paired cognition-round start/end markers with phase, episode, actions, and state; 140 focused tests, lint, docs-check, and diff-check passed. [1e71b01c]
+- 2026-10-04 Recorded cognition-round delimiter implementation and verification in the resume checkpoint. [57d10f45]
