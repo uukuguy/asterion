@@ -193,6 +193,12 @@ class P7PrivateTraceReceipt:
 
         if type(diagnostic) is not PrimeRoundDiagnostic or self._accessed:
             raise P7PrivateTraceReceiptError("P7 model-round evidence is unavailable")
+        signals = "、".join(diagnostic.output_signals) if diagnostic.output_signals else "无"
+        print(
+            f"[p7] P7推理轮次：第 {diagnostic.round_index + 1} 轮；模型输出信号={signals}。",
+            file=sys.stderr,
+            flush=True,
+        )
         print(
             "[p7-cognition] model-round "
             + json.dumps(

@@ -626,6 +626,7 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
             completion_predicate=lambda: _p7_gameplay_terminal(broker),
+            round_diagnostic=getattr(trace_adapter, "record_model_round", None),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,
         )
         launch = None

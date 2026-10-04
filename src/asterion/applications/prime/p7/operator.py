@@ -513,15 +513,28 @@ class _IpythonBridgeServer:
                 "type": "method_result",
             }
 
+        if method == "act_checked":
+            print(
+                f"[p7] P7动作计划：{_p7_action_plan_names(params)}。",
+                file=sys.stderr,
+                flush=True,
+            )
         try:
             facade = self._client
             if self._first_probe_required(method):
-                return ok_response({
+                blocked = {
                     "status": "blocked",
                     "reason": "cognition-first-probe-required",
                     "next": "p7_cognition_update select_experiment, then p7_act_checked",
                     "execution_authority": "none",
-                })
+                }
+                if method == "act_checked":
+                    print(
+                        f"[p7] P7动作结果：{_p7_action_result_summary(blocked)}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                return ok_response(blocked)
             if method in {"observe", "status", "mechanics_prior"}:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
@@ -598,6 +611,12 @@ class _IpythonBridgeServer:
                 5000, self._method_failures.get(method, 0) + 1
             )
             return error_response()
+        if method == "act_checked":
+            print(
+                f"[p7] P7动作结果：{_p7_action_result_summary(value)}",
+                file=sys.stderr,
+                flush=True,
+            )
         return ok_response(value)
 
     def _first_probe_required(self, method: str) -> bool:
@@ -696,6 +715,44 @@ def _p7_narrative_role(line: str) -> str:
     if text.startswith("认知刷新不可用"):
         return "rejected"
     return "narrative"
+
+
+def _p7_action_plan_names(params: object) -> str:
+    """Return a public action-only summary of one model-submitted plan."""
+
+    if not isinstance(params, Mapping) or not isinstance(params.get("plan"), list):
+        return "计划格式无效"
+    names: list[str] = []
+    for item in params["plan"][:20]:
+        if not isinstance(item, Mapping):
+            continue
+        action = item.get("action")
+        if isinstance(action, Mapping) and isinstance(action.get("name"), str):
+            name = action["name"]
+            if name and name.isascii() and len(name) <= 32:
+                names.append(name)
+    return "、".join(names) if names else "空计划"
+
+
+def _p7_action_result_summary(value: object) -> str:
+    """Summarize checked-action outcome without frames or provider payloads."""
+
+    if not isinstance(value, Mapping):
+        return "结果不可用"
+    if value.get("status") == "blocked":
+        reason = value.get("reason")
+        return f"未执行；原因={str(reason)[:64] if reason else 'broker阻止'}。"
+    applied = value.get("applied_count")
+    if type(applied) is not int:
+        return "结果不可用"
+    summary = f"已执行 {applied} 步"
+    stop_reason = value.get("stop_reason")
+    if isinstance(stop_reason, str) and stop_reason:
+        summary += f"；停止原因={stop_reason[:64]}"
+    terminal = value.get("terminal")
+    if isinstance(terminal, Mapping) and type(terminal.get("levels_completed")) is int:
+        summary += f"；已完成关卡={terminal['levels_completed']}"
+    return summary + "。"
 
 
 def _p7_style_narrative_line(line: str, role: str, *, stream: object = None) -> str:

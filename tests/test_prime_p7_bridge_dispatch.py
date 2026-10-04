@@ -12,6 +12,7 @@ from asterion.applications.prime.p7.operator import (
     _compact_cognition_session,
     _compact_planning_background,
     _bounded_semantic_report,
+    _p7_action_plan_names,
     P7OperatorError,
 )
 
@@ -76,6 +77,23 @@ class TestP7BridgeDispatch(unittest.TestCase):
                 response = self.bridge._dispatch_method_call("request", method, {})
                 self.assertEqual(response["status"], "ok")
             self.assertEqual(response["type"], "method_result")
+
+    def test_action_plan_summary_keeps_only_public_action_names(self):
+        plan = [
+            {"action": {"name": "ACTION4", "data": {"x": 12}}},
+            {"action": {"name": "ACTION1", "data": {}}},
+        ]
+        self.assertEqual(_p7_action_plan_names({"plan": plan}), "ACTION4、ACTION1")
+        self.assertEqual(_p7_action_plan_names({"plan": []}), "空计划")
+
+    def test_action_dispatch_logs_model_plan_and_result(self):
+        stream = io.StringIO()
+        plan = [{"action": {"name": "ACTION4", "data": {}}}]
+        with redirect_stderr(stream):
+            response = self.bridge._dispatch_method_call("request", "act_checked", {"plan": plan})
+        self.assertEqual(response["status"], "ok")
+        self.assertIn("[p7] P7动作计划：ACTION4。", stream.getvalue())
+        self.assertIn("[p7] P7动作结果：已执行 1 步。", stream.getvalue())
 
     def test_planning_background_compaction_honors_small_cap(self):
         value = {
