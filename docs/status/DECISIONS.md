@@ -935,3 +935,18 @@
   `关键未决问题`. Cognition-record strategy lines are labeled
   `策略线索（供P7参考）`; only accepted `select_experiment`, action, and
   analysis calls count as P7's response.
+
+## D-2026-10-04-03 — Separate P7 decision logs from cognition logs
+
+- Status: 🟢 active.
+- Decision: Keep `[p7-cognition]` for the semantic ledger and stable game
+  description. Use `[p7]` for bounded, human-readable P7 activity: model-round
+  signals, submitted action names, and checked-action outcomes. Do not print
+  hidden chain-of-thought, complete prompts, provider payloads, frames, or
+  credentials.
+- Rationale: A cognition ledger explains the game, but it does not show what
+  P7 actually decided or executed. Action plans and broker outcomes are the
+  externalized reasoning boundary needed for operator diagnosis.
+- Evidence: `d158106d` adds `P7推理轮次`, `P7动作计划`, and `P7动作结果` lines;
+  accepted cognition operations already emit `P7提出`, `P7选择`, and `P7分析`.
+  Focused bridge, cognition, gameplay-trace tests and lint pass.
