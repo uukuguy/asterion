@@ -795,6 +795,17 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
             "key_probe_candidates": [item for item in raw_guidance.get("key_probe_candidates", [])[:16] if isinstance(item, str)],
             "principle": str(raw_guidance.get("principle", ""))[:512],
         }
+    raw_confirmed = value.get("confirmed_knowledge")
+    bounded_confirmed: list[dict[str, object]] = []
+    if isinstance(raw_confirmed, list):
+        for claim in raw_confirmed[:32]:
+            if not isinstance(claim, Mapping):
+                continue
+            bounded_confirmed.append({
+                key: (str(claim.get(key, ""))[:512] if key == "claim" else claim.get(key))
+                for key in ("id", "kind", "subject", "claim", "evidence_count", "support_count")
+                if key in claim
+            })
     result: dict[str, object] = {
         "schema": value.get("schema"),
         "scope": value.get("scope"),
@@ -805,6 +816,7 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
         "coverage": bounded_coverage,
         "cognition_layers": bounded_layers,
         "guidance": bounded_guidance,
+        "confirmed_knowledge": bounded_confirmed,
         "hypothesis_review": bounded_review,
     }
     # Remove claims from the end of the largest bucket until the complete

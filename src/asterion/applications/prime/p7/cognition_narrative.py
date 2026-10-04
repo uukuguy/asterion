@@ -118,6 +118,8 @@ def render_cognition_narrative_zh(
     coverage = coverage if isinstance(coverage, Mapping) else {}
     review = semantic.get("hypothesis_review")
     review = review if isinstance(review, Mapping) else {}
+    confirmed_knowledge = semantic.get("confirmed_knowledge")
+    confirmed_knowledge = confirmed_knowledge if isinstance(confirmed_knowledge, list) else []
     layers = semantic.get("cognition_layers")
     layers = layers if isinstance(layers, (list, tuple)) else []
     events = envelope.get("events", [])
@@ -212,6 +214,11 @@ def render_cognition_narrative_zh(
         )
     else:
         add("假说整理：当前未发现需要压缩或标记互斥的候选组。")
+    if confirmed_knowledge:
+        add(
+            f"固定游戏认识：已确认 {len(confirmed_knowledge)} 条；这些内容是当前规划背景，"
+            "除非出现反例，不再按开放假说重复探索。"
+        )
     if latest:
         add("最近反馈：" + latest)
     if recent_action:

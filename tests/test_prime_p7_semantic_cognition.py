@@ -267,6 +267,25 @@ class SemanticCognitionTests(unittest.TestCase):
             self.assertEqual(claim["evidence_count"], 2)
             self.assertEqual(claim["counterexample_count"], 1)
 
+    def test_confirmed_claim_becomes_deterministic_game_knowledge(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            original = "ACTION2可能使颜色9横带向下移动四格。"
+            store.propose({"claims": [{
+                "id": "action2-down", "kind": "control", "subject": "ACTION2",
+                "claim": original, "reason": "方向动作产生稳定位移。",
+                "falsifier": "横带没有向下移动。", "next_test": "再次观察ACTION2。",
+            }]})
+            store.resolve(
+                "action2-down", status="certain", evidence="runtime.frame.2",
+                explanation="动作后横带由y16..19移动到y20..23，固定结构未变。",
+            )
+            claim = next(item for item in store.report()["claims"]["certain"] if item["id"] == "action2-down")
+            self.assertEqual(claim["claim"], "ACTION2使颜色9横带向下移动四格。")
+            self.assertEqual(claim["hypothesis"], original)
+            self.assertNotIn("可能", claim["claim"])
+            self.assertEqual(store.full_report()["all_claims"]["certain"][0]["claim"], claim["claim"])
+
     def test_duplicate_evidence_reference_is_rejected_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))

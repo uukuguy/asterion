@@ -67,6 +67,11 @@ duplicate, same-scope, or explicitly mutually exclusive claims. Use those
 groups to compress reasoning while preserving separate evidence. A proposal
 may include an ASCII `hypothesis_group` to mark alternatives for review; this
 label never resolves a claim and never authorizes an action.
+Treat `confirmed_knowledge` as the stable game-understanding layer produced by
+program-bound evidence. Use it as the main planning background for solving;
+do not reopen a confirmed control, object role, or rule unless a later settled
+observation supplies a counterexample. Open hypotheses supplement this layer
+when it lacks a rule or goal, and probes should target the smallest key gap.
 For a solve test, load the current report and use supported knowledge plus
 useful open hypotheses for planning; the report is allowed to be incomplete.
 Before an action that tests an open or newly suspected claim, select its
@@ -470,6 +475,10 @@ keep game identity, controls, object representation, rules/goals, and strategy
 connected while compressing duplicate or same-scope claims. Use an ASCII
 `hypothesis_group` only to mark mutually exclusive alternatives for review;
 it never changes status or grants action authority.
+Treat the report's `confirmed_knowledge` as the fixed, evidence-backed game
+understanding that anchors the solve plan. Use open hypotheses only to fill a
+missing part of that model or explain a new observation; do not repeatedly
+retest a confirmed control without a counterexample.
 describe the scene, the discrete action interface, and the currently unknown
 success condition before selecting a probe. Treat every supplied information
 point (the first frame, visible colors/shapes, available action names,

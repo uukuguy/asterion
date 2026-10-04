@@ -121,6 +121,22 @@ def _normalized_phrase(value: object) -> str:
     return " ".join(str(value or "").casefold().split())
 
 
+def _certainty_claim(value: str) -> str:
+    """Turn a tentative proposal into the stable wording used after evidence."""
+
+    text = " ".join(value.split())
+    # Chinese proposals commonly use these modal terms.  They describe the
+    # hypothesis state, not the observed result, so remove them from the
+    # evidence-backed projection while retaining the original below.
+    text = re.sub(r"可能", "", text)
+    text = re.sub(r"(?:也许|或许|大概|推测|暂视为)", "", text)
+    # Keep common English history readable without leaving a modal verb in a
+    # claim that the program has just resolved as certain.
+    text = re.sub(r"\b(?:may|might|could|possibly|plausibly|likely)\b\s*", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bis\s+(?:a|an)\s+likely\s+", "is ", text, flags=re.IGNORECASE)
+    return " ".join(text.split()).strip(" ：:;") or value
+
+
 def _active_claim_views(views: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Choose a compact working set while retaining the full ledger privately.
 
@@ -197,11 +213,13 @@ def _claim_view(claim: Mapping[str, Any]) -> dict[str, Any]:
     evidence = claim.get("evidence", [])
     support_count = sum(item.get("status") == "certain" for item in evidence)
     counter_count = sum(item.get("status") == "falsified" for item in evidence)
+    original_claim = claim.get("original_claim")
+    displayed_claim = claim.get("canonical_claim") if claim.get("status") == "certain" else None
     result = {
         "id": claim["id"],
         "kind": claim["kind"],
         "subject": claim["subject"],
-        "claim": claim["claim"],
+        "claim": displayed_claim or claim["claim"],
         "reason": claim["reason"],
         "falsifier": claim["falsifier"],
         "next_test": claim["next_test"],
@@ -212,6 +230,8 @@ def _claim_view(claim: Mapping[str, Any]) -> dict[str, Any]:
         "counterexample_count": counter_count,
         "evidence": _copy(evidence),
     }
+    if claim.get("status") == "certain" and isinstance(original_claim, str) and original_claim != result["claim"]:
+        result["hypothesis"] = original_claim
     if claim.get("hypothesis_group"):
         result["hypothesis_group"] = claim["hypothesis_group"]
     if claim.get("context"):
@@ -332,7 +352,7 @@ class SemanticCognitionStore:
 
     @staticmethod
     def _normalize_claim(value: Mapping[str, Any], *, require_undetermined: bool) -> dict[str, Any]:
-        allowed = {"id", "kind", "subject", "claim", "reason", "falsifier", "next_test", "context", "status", "evidence", "confidence", "hypothesis_group"}
+        allowed = {"id", "kind", "subject", "claim", "reason", "falsifier", "next_test", "context", "status", "evidence", "confidence", "hypothesis_group", "original_claim", "canonical_claim"}
         unknown = set(value) - allowed
         if unknown:
             raise CognitionError(f"unsupported cognition fields: {sorted(unknown)!r}")
@@ -343,6 +363,8 @@ class SemanticCognitionStore:
         status = value.get("status", "undetermined")
         if status not in _STATUSES or (require_undetermined and status != "undetermined"):
             raise CognitionError("LLM proposals must remain undetermined")
+        if require_undetermined and ("original_claim" in value or "canonical_claim" in value):
+            raise CognitionError("LLM proposals cannot supply resolved claim wording")
         confidence = value.get("confidence", 0.5)
         if type(confidence) not in (int, float) or isinstance(confidence, bool) or not math.isfinite(confidence) or not 0 <= confidence <= 1:
             raise CognitionError("confidence must be a finite number between 0 and 1")
@@ -360,6 +382,13 @@ class SemanticCognitionStore:
             "status": status,
             "evidence": [],
         }
+        if status == "certain":
+            original_claim = value.get("original_claim", result["claim"])
+            result["original_claim"] = _text(original_claim, "original claim")
+            result["canonical_claim"] = _text(
+                value.get("canonical_claim", _certainty_claim(result["claim"])),
+                "canonical claim",
+            )
         if "context" in value:
             result["context"] = _text(value["context"], "context", required=False)
         if "hypothesis_group" in value:
@@ -553,6 +582,9 @@ class SemanticCognitionStore:
                 "explanation": explanation,
                 "status": status,
             })
+            if status == "certain":
+                claim.setdefault("original_claim", claim.get("claim", ""))
+                claim["canonical_claim"] = _certainty_claim(str(claim.get("claim", "")))
             claim["status"] = status
             views.append(_claim_view(claim))
         if not views:
@@ -626,6 +658,10 @@ class SemanticCognitionStore:
         active_views = _active_claim_views(views)
         active_by_kind = {kind: [item for item in active_views if item["kind"] == kind] for kind in _KINDS}
         active_by_status = {status: [item for item in active_views if item["status"] == status] for status in _STATUSES}
+        confirmed_knowledge = [
+            item for item in active_views
+            if item.get("status") == "certain"
+        ]
         candidate_views = [
             item for item in views
             if item.get("status") == "undetermined"
@@ -742,6 +778,7 @@ class SemanticCognitionStore:
             "coverage": coverage,
             "cognition_layers": cognition_layers,
             "guidance": guidance,
+            "confirmed_knowledge": confirmed_knowledge,
             "hypothesis_review": {
                 "compression_needed": bool(duplicate_candidates or same_scope_candidates),
                 "duplicate_candidates": duplicate_candidates,
@@ -762,6 +799,7 @@ class SemanticCognitionStore:
         if include_archived:
             report["all_claims"] = {**by_kind, **by_status}
             report["all_success_condition"] = {"protocol": protocol, "puzzle": puzzle}
+            report["all_confirmed_knowledge"] = [item for item in views if item.get("status") == "certain"]
         return report
 
     def full_report(self) -> dict[str, Any]:
