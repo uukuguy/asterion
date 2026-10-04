@@ -24,6 +24,8 @@ The latest semantic cognition change is `4ce0bc4d`: cognition is now reported in
 
 The follow-up console refinement is `7fcd35a3`: only semantic labels retain color, explanatory sentences remain neutral, and strategy entries render as working guidance rather than factual hypotheses.
 
+The working-set correction is `2acac222`: the prior witness ended unsuccessful with zero completed levels after five actions, and its 196-entry semantic ledger was overwhelming the active context. Normal cognition now selects a bounded 34-item layered working set; full claims remain available through `full_report()` and review indexes.
+
 
 ## 已验证事实
 
