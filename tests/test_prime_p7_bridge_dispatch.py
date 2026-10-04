@@ -376,6 +376,34 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertNotIn('"claims"', output)
         self.assertLess(len(output.encode("utf-8")), 4096)
 
+    def test_repeated_cognition_snapshot_is_logged_once(self):
+        from asterion.applications.prime.p7.operator import _log_cognition_refresh
+
+        projection = {
+            "semantic": {
+                "natural_language_context": "这是一个固定快照。",
+                "claims": {},
+            },
+            "cognition_session": {
+                "session": {
+                    "session_id": "dedupe-test-session",
+                    "state": "READY",
+                    "episode": 1,
+                    "episode_actions": 0,
+                },
+            },
+        }
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            _log_cognition_refresh(projection, phase="observe")
+            _log_cognition_refresh(projection, phase="read")
+            _log_cognition_refresh(projection, phase="startup")
+        output = stream.getvalue()
+        self.assertEqual(output.count("cognition-round start"), 1)
+        self.assertEqual(output.count("reason=duplicate-snapshot"), 2)
+        self.assertIn("phase=read", output)
+        self.assertIn("phase=startup", output)
+
     def test_bounded_semantic_report_exposes_stable_worldmap_description(self):
         result = _bounded_semantic_report({
             "scope": {"level": 0},

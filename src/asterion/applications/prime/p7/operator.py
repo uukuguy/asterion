@@ -1102,6 +1102,12 @@ def _log_cognition_refresh(projection: object, *, phase: str) -> None:
     _log_cognition_display(projection, phase=phase)
 
 
+_COGNITION_NARRATIVE_REPEATABLE_PHASES = frozenset(
+    {"observe", "read", "startup", "initial-context"}
+)
+_LAST_COGNITION_NARRATIVE_FINGERPRINT: tuple[str, str, str, str, str] | None = None
+
+
 def _log_cognition_narrative(
     projection: object, *, phase: str, complete: bool = False, max_bytes: int = 4096
 ) -> None:
@@ -1123,6 +1129,25 @@ def _log_cognition_narrative(
     marker = (
         f"phase={phase} episode={episode} actions={actions} state={state}"
     )
+    session_id = str(session_state.get("session_id", ""))
+    stable_description = render_stable_game_description_zh(semantic, max_bytes=16 * 1024)
+    fingerprint = (session_id, str(episode), str(actions), str(state), stable_description)
+    global _LAST_COGNITION_NARRATIVE_FINGERPRINT
+    if (
+        phase in _COGNITION_NARRATIVE_REPEATABLE_PHASES
+        and _LAST_COGNITION_NARRATIVE_FINGERPRINT == fingerprint
+    ):
+        print(
+            _p7_style(
+                f"[p7-cognition] cognition-round skipped {marker} "
+                "reason=duplicate-snapshot",
+                "round",
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        return
+    _LAST_COGNITION_NARRATIVE_FINGERPRINT = fingerprint
     print(_p7_style(f"[p7-cognition] cognition-round start {marker}", "round"), file=sys.stderr, flush=True)
     print(f"[p7-cognition] cognition-narrative phase={phase}", file=sys.stderr, flush=True)
     for line in narrative.splitlines():
