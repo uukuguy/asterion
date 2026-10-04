@@ -1546,6 +1546,32 @@ class _P7BrokerClient:
                         for key in ("status", "accepted", "reason", "next", "transition", "execution_authority", "session", "report")
                         if key in compact
                     }
+            # Make the model's accepted cognition response visible in the
+            # human log.  The candidate question and strategy lines above
+            # come from the cognition record; these lines identify the P7
+            # call that actually chose or analyzed something.
+            if isinstance(result, Mapping) and result.get("status") in {"ok", "ready"}:
+                if canonical_op == "propose":
+                    claim_count = request_summary.get("claim_count", 0)
+                    print(
+                        f"[p7-cognition] P7提出：提交 {claim_count} 条候选认知。",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                elif canonical_op == "select_experiment":
+                    action_name = request_summary.get("action_name") or "未命名动作"
+                    print(
+                        f"[p7-cognition] P7选择：提交 {action_name} 实验。",
+                        file=sys.stderr,
+                        flush=True,
+                    )
+                elif canonical_op == "analyze":
+                    analysis_count = request_summary.get("analysis_count", 0)
+                    print(
+                        f"[p7-cognition] P7分析：提交 {analysis_count} 条结果。",
+                        file=sys.stderr,
+                        flush=True,
+                    )
             # Print the post-operation semantic picture itself.  The request
             # and outcome records explain transport; this record is the
             # cognition the model actually accumulated (claims, status,

@@ -312,6 +312,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(states[0]["claims"], 1)
         self.assertIn("当前游戏认知", stream.getvalue())
         self.assertIn("ACTION2 使玩家向右移动", stream.getvalue())
+        self.assertIn("P7分析：提交 0 条结果。", stream.getvalue())
         self.assertNotIn('"report"', stream.getvalue())
         displays = [
             line for line in stream.getvalue().splitlines()
