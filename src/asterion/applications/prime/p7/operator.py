@@ -636,7 +636,11 @@ _P7_RESPONSE_HEADROOM_BYTES = 1024
 
 _P7_ANSI = {
     "round": "1;36",
-    "narrative": "0;32",
+    "narrative": "0;37",
+    "confirmed": "0;32",
+    "pending": "0;33",
+    "rejected": "0;31",
+    "action": "0;36",
     "display": "1;34",
     "stage": "0;36",
     "success": "1;32",
@@ -665,6 +669,25 @@ def _p7_style(text: str, role: str, *, stream: object = None) -> str:
     if code is None or not _p7_color_enabled(stream):
         return text
     return f"\033[{code}m{text}\033[0m"
+
+
+def _p7_narrative_role(line: str) -> str:
+    """Use a small semantic palette for Chinese cognition lines."""
+
+    text = line.strip()
+    if text.startswith(("已确认：", "已确认另有")):
+        return "confirmed"
+    if text.startswith(("待验证：", "待验证另有")):
+        return "pending"
+    if text.startswith(("已否定：", "已否定另有")):
+        return "rejected"
+    if text.startswith(("当前状态：", "本轮实验动作：")):
+        return "display"
+    if text.startswith(("最近动作：", "最新动作尚未分析", "下一步：")):
+        return "action"
+    if text.startswith("认知刷新不可用"):
+        return "rejected"
+    return "narrative"
 
 
 def _json_bytes(value: object) -> int:
@@ -947,7 +970,7 @@ def _log_cognition_narrative(
     print(_p7_style(f"[p7-cognition] cognition-round start {marker}", "round"), file=sys.stderr, flush=True)
     print(_p7_style(f"[p7-cognition] cognition-narrative phase={phase}", "narrative"), file=sys.stderr, flush=True)
     for line in narrative.splitlines():
-        print(_p7_style(f"[p7-cognition] {line}", "narrative"), file=sys.stderr, flush=True)
+        print(_p7_style(f"[p7-cognition] {line}", _p7_narrative_role(line)), file=sys.stderr, flush=True)
     print(_p7_style(f"[p7-cognition] cognition-round end {marker}", "round"), file=sys.stderr, flush=True)
 
 
