@@ -35,6 +35,16 @@ _MAX_RECORDS = 128
 _MAX_CLAIMS = 256
 _MAX_EVIDENCE = 64
 _MAX_TEXT = 2048
+_MAX_ACTIVE_OPEN_PER_SCOPE = 4
+_MAX_ACTIVE_RESOLVED_PER_SCOPE = 8
+_ACTIVE_KIND_LIMITS = {
+    "game_type": 4,
+    "object_role": 6,
+    "control": 10,
+    "success_condition": 6,
+    "rule": 4,
+    "strategy": 4,
+}
 
 # Every fresh cognition episode starts with a small, program-seeded set of
 # semantic questions.  These are intentionally hypotheses (rather than facts):
@@ -109,6 +119,52 @@ def _canonical(value: object) -> str:
 
 def _normalized_phrase(value: object) -> str:
     return " ".join(str(value or "").casefold().split())
+
+
+def _active_claim_views(views: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Choose a compact working set while retaining the full ledger privately.
+
+    Unresolved claims are ranked by confidence and resolved claims by evidence.
+    Exact semantic duplicates are represented once in the working set; the
+    review report still exposes every id so callers can inspect the full set.
+    """
+
+    by_scope: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for item in views:
+        by_scope.setdefault((str(item["kind"]), str(item["subject"]), str(item["status"])), []).append(item)
+    active: list[dict[str, Any]] = []
+    for (kind, subject, status), items in sorted(by_scope.items()):
+        ordered = sorted(
+            items,
+            key=lambda item: (
+                -float(item.get("confidence", 0)),
+                -int(item.get("evidence_count", 0)),
+                item["id"],
+            ),
+        )
+        limit = _MAX_ACTIVE_OPEN_PER_SCOPE if status == "undetermined" else _MAX_ACTIVE_RESOLVED_PER_SCOPE
+        seen_phrases: set[str] = set()
+        for item in ordered:
+            phrase = _normalized_phrase(item.get("claim"))
+            if phrase in seen_phrases or len(seen_phrases) >= limit:
+                continue
+            seen_phrases.add(phrase)
+            active.append(item)
+    compact: list[dict[str, Any]] = []
+    status_priority = {"certain": 0, "undetermined": 1, "falsified": 2}
+    for kind, limit in _ACTIVE_KIND_LIMITS.items():
+        candidates = [item for item in active if item.get("kind") == kind]
+        candidates.sort(
+            key=lambda item: (
+                status_priority.get(str(item.get("status")), 9),
+                -int(item.get("evidence_count", 0)),
+                -float(item.get("confidence", 0)),
+                item["id"],
+            )
+        )
+        compact.extend(candidates[:limit])
+    compact.sort(key=lambda item: item["id"])
+    return compact
 
 
 def _empty_state() -> dict[str, Any]:
@@ -548,7 +604,7 @@ class SemanticCognitionStore:
             pieces.append("Rejected hypotheses: " + "; ".join(rejected[:4]) + ".")
         return " ".join(pieces)
 
-    def report(self) -> dict[str, Any]:
+    def report(self, *, include_archived: bool = False) -> dict[str, Any]:
         """Return the natural-language-friendly cognition contract."""
 
         record = self._record()
@@ -567,6 +623,9 @@ class SemanticCognitionStore:
         protocol["evidence_count"] = len(protocol.get("evidence", []))
         puzzle = by_kind["success_condition"]
         context = self._context(views)
+        active_views = _active_claim_views(views)
+        active_by_kind = {kind: [item for item in active_views if item["kind"] == kind] for kind in _KINDS}
+        active_by_status = {status: [item for item in active_views if item["status"] == status] for status in _STATUSES}
         candidate_views = [
             item for item in views
             if item.get("status") == "undetermined"
@@ -610,6 +669,13 @@ class SemanticCognitionStore:
         covered_kinds = sorted({str(item["kind"]) for item in game_specific})
         coverage = {
             "landscape_claim_count": len(game_specific),
+            "active_landscape_claim_count": sum(
+                item.get("id") not in {
+                    "bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition",
+                }
+                for item in active_views
+            ),
+            "archived_claim_count": max(0, len(views) - len(active_views)),
             "covered_kinds": covered_kinds,
             "missing_kinds": sorted(required_kinds - set(covered_kinds)),
             "landscape_ready": required_kinds.issubset(set(covered_kinds)),
@@ -634,9 +700,13 @@ class SemanticCognitionStore:
             {
                 "id": layer_id,
                 "label": label,
-                "claim_ids": [item["id"] for item in game_specific if item["kind"] in kinds],
+                "claim_ids": [item["id"] for item in active_views if item.get("id") not in {
+                    "bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition",
+                } and item["kind"] in kinds],
                 "status_counts": {
-                    status: sum(1 for item in game_specific if item["kind"] in kinds and item["status"] == status)
+                    status: sum(1 for item in active_views if item.get("id") not in {
+                        "bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition",
+                    } and item["kind"] in kinds and item["status"] == status)
                     for status in _STATUSES
                 },
             }
@@ -644,14 +714,20 @@ class SemanticCognitionStore:
         ]
         key_probe_candidates = sorted(
             (
-                item for item in game_specific
+                item for item in active_views
+                if item.get("id") not in {
+                    "bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition",
+                }
                 if item.get("status") == "undetermined" and item.get("next_test")
             ),
             key=lambda item: (-float(item.get("confidence", 0)), item["id"]),
         )[:8]
         guidance = {
             "working_hypothesis_ids": [
-                item["id"] for item in game_specific
+                item["id"] for item in active_views
+                if item.get("id") not in {
+                    "bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition",
+                }
                 if item.get("status") in {"certain", "undetermined"}
             ],
             "key_probe_candidates": [item["id"] for item in key_probe_candidates],
@@ -672,8 +748,8 @@ class SemanticCognitionStore:
                 "same_scope_candidates": same_scope_candidates,
                 "mutually_exclusive_candidates": mutually_exclusive_candidates,
             },
-            "claims": {**by_kind, **by_status},
-            "success_condition": {"protocol": protocol, "puzzle": puzzle},
+            "claims": {**active_by_kind, **active_by_status},
+            "success_condition": {"protocol": protocol, "puzzle": active_by_kind["success_condition"]},
             "evidence_counts": {
                 "total": sum(item["evidence_count"] for item in views) + protocol["evidence_count"],
                 "support": sum(item["support_count"] for item in views) + protocol["evidence_count"],
@@ -682,8 +758,16 @@ class SemanticCognitionStore:
         }
         for kind in _KINDS:
             if kind != "success_condition":
-                report[kind] = by_kind[kind]
+                report[kind] = active_by_kind[kind]
+        if include_archived:
+            report["all_claims"] = {**by_kind, **by_status}
+            report["all_success_condition"] = {"protocol": protocol, "puzzle": puzzle}
         return report
+
+    def full_report(self) -> dict[str, Any]:
+        """Return the complete ledger projection for explicit inspection."""
+
+        return self.report(include_archived=True)
 
 
 __all__ = ["CognitionError", "SCHEMA", "SemanticCognitionStore"]

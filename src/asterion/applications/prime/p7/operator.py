@@ -769,7 +769,8 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
     bounded_coverage = {
         key: raw_coverage.get(key)
         for key in (
-            "landscape_claim_count", "covered_kinds", "missing_kinds",
+            "landscape_claim_count", "active_landscape_claim_count", "archived_claim_count",
+            "covered_kinds", "missing_kinds",
             "landscape_ready", "high_confidence_open_count", "guidance_ready",
         )
         if isinstance(raw_coverage, Mapping) and key in raw_coverage

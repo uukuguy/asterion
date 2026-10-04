@@ -189,13 +189,18 @@ def render_cognition_narrative_zh(
         if layer_labels:
             add("认识层次：" + "、".join(layer_labels[:5]) + "。")
     landscape_count = coverage.get("landscape_claim_count")
+    active_landscape_count = coverage.get("active_landscape_claim_count")
+    archived_count = coverage.get("archived_claim_count")
     high_confidence = coverage.get("high_confidence_open_count")
     if type(landscape_count) is int or type(high_confidence) is int:
         count_text = str(landscape_count) if type(landscape_count) is int else "当前"
+        active_text = str(active_landscape_count) if type(active_landscape_count) is int else count_text
         high_text = str(high_confidence) if type(high_confidence) is int else "若干"
+        archive_hint = "完整记录仍可按需查询；" if type(archived_count) is int and archived_count > 0 else ""
         add(
-            f"认识覆盖：已有 {count_text} 条游戏特定假说，其中 {high_text} 条是高置信开放假说；"
-            "它们可以先指导推理和规划，不要求逐条动作验证。"
+            f"认识覆盖：全量记录 {count_text} 条游戏特定认知，当前工作集 {active_text} 条；"
+            f"其中 {high_text} 条是高置信开放假说；"
+            f"{archive_hint}它们可以先指导推理和规划，不要求逐条动作验证。"
         )
     duplicate_count = len(review.get("duplicate_candidates", [])) if isinstance(review.get("duplicate_candidates"), list) else 0
     scope_count = len(review.get("same_scope_candidates", [])) if isinstance(review.get("same_scope_candidates"), list) else 0

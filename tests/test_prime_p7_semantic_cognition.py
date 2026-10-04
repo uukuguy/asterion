@@ -115,6 +115,27 @@ class SemanticCognitionTests(unittest.TestCase):
             self.assertTrue(review["compression_needed"])
             self.assertEqual(store.report()["coverage"]["landscape_claim_count"], 3)
 
+    def test_report_exposes_compact_working_set_and_full_report_on_request(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            store.propose({"claims": [
+                {
+                    "id": f"action2-option-{index}", "kind": "control", "subject": "ACTION2",
+                    "claim": f"ACTION2 may produce distinct effect {index}.",
+                    "reason": "The action is available.", "falsifier": "The settled frame contradicts it.",
+                    "next_test": "Apply ACTION2 once.", "confidence": index / 10,
+                }
+                for index in range(8)
+            ]})
+            report = store.report()
+            full = store.full_report()
+            self.assertLessEqual(len(report["claims"]["control"]), 4)
+            self.assertEqual(len(full["all_claims"]["control"]), 8)
+            self.assertEqual(report["coverage"]["archived_claim_count"], 4)
+            self.assertEqual(
+                len(report["hypothesis_review"]["same_scope_candidates"]), 1,
+            )
+
     def test_proposal_rejects_core_identity_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))
