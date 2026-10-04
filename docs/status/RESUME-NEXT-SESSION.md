@@ -16,7 +16,7 @@ A follow-up regression found that the 10 KiB compact cognition response dropped 
 
 `560ca402` separates the model-facing candidate verification question from `关键未决问题` and filters duplicate open claims that already appear in stable cognition. A confirmed game description is no longer printed as an unresolved question; 38 narrative/bridge tests and lint pass.
 
-`2780f504` corrects the source label: candidate `next_test` text is now marked `候选验证问题（供P7选择）`, because it comes from cognition records. Strategy records are marked `策略线索（供P7参考）`. P7 planning is evidenced only by accepted experiment, action, and analysis calls.
+`2780f504` corrects the source label: candidate `next_test` text is now marked `候选验证问题（供P7选择）`, because it comes from cognition records. `8d70accf` applies the same provenance rule to strategy records, marked `策略线索（供P7参考）`. P7 planning is evidenced only by accepted experiment, action, and analysis calls.
 
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
