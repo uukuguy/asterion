@@ -2240,6 +2240,24 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(receipt["status"], "unsuccessful")
         self.assertNotIn("receipt_sha256", receipt)
 
+    def test_runtime_failure_without_attempt_receipt_still_exits_nonzero(self) -> None:
+        from asterion.applications.prime.p7.game import DEFAULT_GAME
+        from asterion.applications.prime.p7.live import P7LiveSolveError
+        from asterion.applications.prime.p7.operator import main
+
+        stderr = io.StringIO()
+        with (
+            mock.patch("asterion.applications.prime.p7.operator._preflight", return_value=SimpleNamespace(game=DEFAULT_GAME)),
+            mock.patch("asterion.applications.prime.p7.operator.live.safe_run_id", return_value="p7-live-error"),
+            mock.patch("asterion.applications.prime.p7.operator.run_live", new_callable=mock.AsyncMock, side_effect=P7LiveSolveError("broker unavailable")),
+            contextlib.redirect_stdout(io.StringIO()),
+            contextlib.redirect_stderr(stderr),
+        ):
+            status = main([])
+
+        self.assertEqual(status, 1)
+        self.assertIn("[asterion-prime-p7] error", stderr.getvalue())
+
     def test_run_live_seals_replayed_first_level_failure_without_reusable_prefix(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import DEFAULT_GAME
