@@ -431,6 +431,61 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(output.count("cognition-round start"), 2)
         self.assertEqual(output.count("reason=duplicate-snapshot"), 1)
 
+    def test_action_refresh_logs_delta_without_repeating_stable_guide(self):
+        from asterion.applications.prime.p7.operator import _log_cognition_refresh
+
+        projection = {
+            "semantic": {
+                "scope": {"level": 0},
+                "confirmed_knowledge": [],
+                "claims": {},
+                "coverage": {},
+            },
+            "cognition_session": {
+                "session": {
+                    "session_id": "compact-action-session",
+                    "state": "ACTION_EXECUTED",
+                    "episode": 1,
+                    "episode_actions": 1,
+                },
+                "events": [{
+                    "sequence": 21,
+                    "type": "cognition.action.executed",
+                    "action_name": "ACTION4",
+                    "changed": True,
+                }],
+            },
+        }
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            _log_cognition_refresh(projection, phase="act_checked", compact=True)
+        output = stream.getvalue()
+        self.assertIn("动作后认知更新", output)
+        self.assertIn("最近动作：ACTION4 已执行，画面发生变化。", output)
+        self.assertNotIn("稳定游戏认知（规划背景）", output)
+
+    def test_round_diagnostic_keeps_p7_signal_when_trace_rejects_callback(self):
+        from asterion.agents.prime.execution import PrimeRoundDiagnostic
+        from asterion.applications.prime.p7.runtime_binding import _p7_round_diagnostic
+
+        class BrokenTrace:
+            def record_model_round(self, diagnostic):
+                raise RuntimeError("private trace unavailable")
+
+        diagnostic = PrimeRoundDiagnostic(
+            round_index=2,
+            prompt_bytes=100,
+            prompt_sha256="sha256:" + "a" * 64,
+            output_bytes=20,
+            output_sha256="sha256:" + "b" * 64,
+            prompt_signals=("state-guidance",),
+            output_signals=("plan", "action"),
+        )
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            _p7_round_diagnostic(BrokenTrace())(diagnostic)
+        self.assertIn("[p7] P7推理轮次：第 3 轮；模型输出信号=plan、action。", stream.getvalue())
+
     def test_bounded_semantic_report_exposes_stable_worldmap_description(self):
         result = _bounded_semantic_report({
             "scope": {"level": 0},

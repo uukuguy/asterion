@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-import json
 import re
-import sys
 from types import MappingProxyType
 
 from asterion.agents.prime.execution import PrimeRoundDiagnostic
@@ -189,32 +187,26 @@ class P7PrivateTraceReceipt:
         object.__setattr__(self, "_failure_diagnostic", diagnostic)
 
     def record_model_round(self, diagnostic: PrimeRoundDiagnostic) -> None:
-        """Print bounded per-round signals for live cognition diagnosis."""
+        """Append bounded per-round metadata without retaining model text."""
 
         if type(diagnostic) is not PrimeRoundDiagnostic or self._accessed:
             raise P7PrivateTraceReceiptError("P7 model-round evidence is unavailable")
-        signals = "、".join(diagnostic.output_signals) if diagnostic.output_signals else "无"
-        print(
-            f"[p7] P7推理轮次：第 {diagnostic.round_index + 1} 轮；模型输出信号={signals}。",
-            file=sys.stderr,
-            flush=True,
-        )
-        print(
-            "[p7-cognition] model-round "
-            + json.dumps(
+        try:
+            self._recorder.append(
+                "prime.model.round",
+                self._identities,
                 {
-                    "round": diagnostic.round_index,
+                    "round_index": diagnostic.round_index,
                     "prompt_bytes": diagnostic.prompt_bytes,
+                    "prompt_sha256": "sha256:" + diagnostic.prompt_sha256,
                     "output_bytes": diagnostic.output_bytes,
+                    "output_sha256": "sha256:" + diagnostic.output_sha256,
                     "prompt_signals": list(diagnostic.prompt_signals),
                     "output_signals": list(diagnostic.output_signals),
                 },
-                sort_keys=True,
-                separators=(",", ":"),
-            ),
-            file=sys.stderr,
-            flush=True,
-        )
+            )
+        except Exception:
+            raise P7PrivateTraceReceiptError("P7 model-round evidence is unavailable") from None
 
     def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
         """Append one validated public runtime usage event to private evidence."""

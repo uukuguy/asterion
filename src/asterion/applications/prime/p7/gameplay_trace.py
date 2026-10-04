@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
-import sys
 from types import MappingProxyType
 
 from asterion.agents.prime.execution import PrimeRoundDiagnostic
@@ -105,16 +104,26 @@ class PrimeGameplayTrace:
         return self._recorder
 
     def record_model_round(self, diagnostic: PrimeRoundDiagnostic) -> None:
-        """Print bounded model-round signals without exposing model prose."""
+        """Append bounded model-round metadata without exposing model prose."""
 
         if type(diagnostic) is not PrimeRoundDiagnostic or self._accessed:
             raise PrimeGameplayTraceError("P7 gameplay evidence is unavailable")
-        signals = "、".join(diagnostic.output_signals) if diagnostic.output_signals else "无"
-        print(
-            f"[p7] P7推理轮次：第 {diagnostic.round_index + 1} 轮；模型输出信号={signals}。",
-            file=sys.stderr,
-            flush=True,
-        )
+        try:
+            self._recorder.append(
+                "prime.model.round",
+                self._identities,
+                {
+                    "round_index": diagnostic.round_index,
+                    "prompt_bytes": diagnostic.prompt_bytes,
+                    "prompt_sha256": "sha256:" + diagnostic.prompt_sha256,
+                    "output_bytes": diagnostic.output_bytes,
+                    "output_sha256": "sha256:" + diagnostic.output_sha256,
+                    "prompt_signals": list(diagnostic.prompt_signals),
+                    "output_signals": list(diagnostic.output_signals),
+                },
+            )
+        except Exception:
+            raise PrimeGameplayTraceError("P7 model-round evidence is unavailable") from None
 
     def matches_runtime_broker(self, broker: object) -> bool:
         return broker is self._broker

@@ -639,6 +639,12 @@ class PrimeExecutionKernel:
                 emit("run.completed", {"status": "cancelled"})
                 return
             self._final_text = result.final_text
+            if os.environ.get("ASTERION_PRIME_P7_RUN_MODE") in {"solve", "witness", "cognition", "sweep"}:
+                print(
+                    f"[p7] P7模型回合已结算：第 {round_index + 1} 轮。",
+                    file=sys.stderr,
+                    flush=True,
+                )
             if self._round_diagnostic is not None:
                 try:
                     self._round_diagnostic(

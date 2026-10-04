@@ -6,10 +6,15 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 import json
 from pathlib import Path
+import sys
 from typing import cast
 
 from asterion.agents.prime.session import AsterionPrimeSession
-from asterion.agents.prime.execution import ASTERION_PRIME_LIMITS, AsterionPrimeLimits
+from asterion.agents.prime.execution import (
+    ASTERION_PRIME_LIMITS,
+    AsterionPrimeLimits,
+    PrimeRoundDiagnostic,
+)
 from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -66,6 +71,25 @@ _GAMEPLAY_OPTIONS = {
 }
 _GAMEPLAY_ARTIFACT = "prime.p7-gameplay-run.evidence"
 _GAMEPLAY_MEDIA_TYPE = "application/vnd.asterion.prime.p7-gameplay-run+json"
+
+
+def _p7_round_diagnostic(trace_adapter: object):
+    """Publish one bounded P7 round signal and retain private evidence."""
+
+    def record(diagnostic: PrimeRoundDiagnostic) -> None:
+        signals = "、".join(diagnostic.output_signals) if diagnostic.output_signals else "无"
+        print(
+            f"[p7] P7推理轮次：第 {diagnostic.round_index + 1} 轮；模型输出信号={signals}。",
+            file=sys.stderr,
+            flush=True,
+        )
+        try:
+            getattr(trace_adapter, "record_model_round")(diagnostic)
+        except Exception:
+            # Private evidence must never stop the gameplay loop.
+            pass
+
+    return record
 
 
 def _launch_selection(command: object) -> tuple[str, str] | None:
@@ -534,7 +558,7 @@ def build_p7_runtime(
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
             continuation_prompt=lambda round_index: _p7_continuation_prompt(broker, round_index),
-            round_diagnostic=getattr(trace_adapter, "record_model_round", None),
+            round_diagnostic=_p7_round_diagnostic(trace_adapter),
             failure_diagnostic=getattr(trace_adapter, "record_failure", None),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,
         )
@@ -626,7 +650,7 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
             completion_predicate=lambda: _p7_gameplay_terminal(broker),
-            round_diagnostic=getattr(trace_adapter, "record_model_round", None),
+            round_diagnostic=_p7_round_diagnostic(trace_adapter),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,
         )
         launch = None

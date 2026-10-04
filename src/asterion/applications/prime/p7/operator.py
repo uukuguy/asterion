@@ -514,11 +514,13 @@ class _IpythonBridgeServer:
             }
 
         if method == "act_checked":
-            print(
-                f"[p7] P7动作计划：{_p7_action_plan_names(params)}。",
-                file=sys.stderr,
-                flush=True,
-            )
+            plan_summary = _p7_action_plan_names(params)
+            if plan_summary != "空计划":
+                print(
+                    f"[p7] P7动作计划：{plan_summary}。",
+                    file=sys.stderr,
+                    flush=True,
+                )
         try:
             facade = self._client
             if self._first_probe_required(method):
@@ -1110,7 +1112,9 @@ def _compact_planning_background(value: object, *, max_bytes: int = 48 * 1024) -
     return result
 
 
-def _log_cognition_refresh(projection: object, *, phase: str) -> None:
+def _log_cognition_refresh(
+    projection: object, *, phase: str, compact: bool = False
+) -> None:
     """Print a readable cognition refresh; full evidence stays in private JSONL."""
 
     if type(phase) is not str or not phase:
@@ -1125,7 +1129,13 @@ def _log_cognition_refresh(projection: object, *, phase: str) -> None:
         file=sys.stderr,
         flush=True,
     )
-    _log_cognition_narrative(projection, phase=phase, complete=True, max_bytes=128 * 1024)
+    _log_cognition_narrative(
+        projection,
+        phase=phase,
+        complete=True,
+        compact=compact,
+        max_bytes=128 * 1024,
+    )
     _log_cognition_display(projection, phase=phase)
 
 
@@ -1135,8 +1145,32 @@ _COGNITION_NARRATIVE_REPEATABLE_PHASES = frozenset(
 _LAST_COGNITION_NARRATIVE_FINGERPRINT: tuple[str, str, str, str, str] | None = None
 
 
+def _compact_cognition_narrative(narrative: str) -> str:
+    """Keep only post-action changes; the stable guide is printed elsewhere."""
+
+    prefixes = (
+        "当前状态：",
+        "本轮实验动作：",
+        "最近反馈：",
+        "最近动作：",
+        "最新动作尚未分析",
+        "关键未决问题：",
+        "候选验证问题（供P7选择）：",
+        "以上为认知记录",
+    )
+    lines = [line for line in narrative.splitlines() if line.startswith(prefixes)]
+    if not lines:
+        lines = ["动作后认知更新：暂无新的可读反馈。"]
+    return "\n".join(["动作后认知更新（稳定玩法介绍不重复显示）", *lines])
+
+
 def _log_cognition_narrative(
-    projection: object, *, phase: str, complete: bool = False, max_bytes: int = 4096
+    projection: object,
+    *,
+    phase: str,
+    complete: bool = False,
+    compact: bool = False,
+    max_bytes: int = 4096,
 ) -> None:
     """Print the same bounded Chinese reading surface the model receives."""
 
@@ -1147,6 +1181,8 @@ def _log_cognition_narrative(
     narrative = render_cognition_narrative_zh(
         semantic, cognition_session, max_bytes=max_bytes, complete=complete
     )
+    if compact:
+        narrative = _compact_cognition_narrative(narrative)
     session = cognition_session if isinstance(cognition_session, Mapping) else {}
     session_state = session.get("session", session)
     session_state = session_state if isinstance(session_state, Mapping) else {}
@@ -1260,7 +1296,11 @@ class _P7BrokerClient:
         """Refresh the operator's bounded Chinese cognition view after a step."""
 
         try:
-            _log_cognition_refresh(self._broker.cognition_projection(), phase=phase)
+            _log_cognition_refresh(
+                self._broker.cognition_projection(),
+                phase=phase,
+                compact=phase.startswith("act_checked"),
+            )
         except Exception:
             # Cognition is advisory; a display failure must not change the
             # action result or turn a valid game step into an operator error.
