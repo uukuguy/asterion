@@ -3605,3 +3605,4 @@
 - 2026-10-04 Updated the active resume baton with layered cognition policy, verification evidence, and next live-run boundary. [35847d01]
 - 2026-10-04 Renamed high-confidence cognition display to “工作假说（可用于规划）” and lower-confidence display to “开放假说（待证实）” to avoid implying every claim needs its own probe. [2cabb6fc]
 - 2026-10-04 Refreshed the resume baton after working-hypothesis wording cleanup; current tree remains clean and focused checks remain green. [1d3d86d3]
+- 2026-10-04 Reduced console color emphasis to labels and separated strategy guidance from factual hypotheses; 31 renderer/bridge tests and lint passed. [7fcd35a3]

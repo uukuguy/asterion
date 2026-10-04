@@ -22,6 +22,9 @@ The cognition palette is now semantic: green means confirmed, yellow means pendi
 
 The latest semantic cognition change is `4ce0bc4d`: cognition is now reported in layers (game identity, controls, object representation, rules/goals, strategy); high-confidence open claims are explicitly shown as “工作假说（可用于规划）”; one probe can update multiple claims independently; and the read-only review reports duplicate, same-scope, and explicitly mutually exclusive candidates without deleting or merging evidence. Chinese logs display coverage, key working hypotheses, and review status after each refresh. The focused P7 suite passed 168 tests, with lint, docs-check, and TypeScript resource synchronization passing.
 
+The follow-up console refinement is `7fcd35a3`: only semantic labels retain color, explanatory sentences remain neutral, and strategy entries render as working guidance rather than factual hypotheses.
+
+
 ## 已验证事实
 
 - Current-session preflight passed: 205 focused tests, `make lint`, `make docs-check`, Ruff, diff check, and TypeScript `check-resource`. After the retry-event fixes, the focused P7 suite passed **244 tests**; lint, docs-check, and TypeScript resource synchronization passed again.
