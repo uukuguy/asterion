@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-03. **Session remains active — not a final handoff.**
+> Updated: 2026-10-04. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -19,6 +19,8 @@ Validation after that fix reached nine primitive actions with complete post-acti
 The latest console presentation fix colors the round header, Chinese cognition narrative, display summary, lifecycle stages, incomplete result, and real errors separately. `ASTERION_PRIME_P7_COLOR=always` is forwarded through the packaged guest so colors remain visible with `tee`; set it to `never` for plain logs.
 
 The cognition palette is now semantic: green means confirmed, yellow means pending verification, red means rejected or unavailable, cyan means action/next step, and neutral text carries context. This keeps the complete record readable without coloring every line differently.
+
+The latest semantic cognition change is `4ce0bc4d`: cognition is now reported in layers (game identity, controls, object representation, rules/goals, strategy); high-confidence open claims are explicitly usable working hypotheses; one probe can update multiple claims independently; and the read-only review reports duplicate, same-scope, and explicitly mutually exclusive candidates without deleting or merging evidence. Chinese logs display coverage, key working hypotheses, and review status after each refresh. The focused P7 suite passed 168 tests, with lint, docs-check, and TypeScript resource synchronization passing.
 
 ## 已验证事实
 
@@ -52,6 +54,7 @@ The cognition palette is now semantic: green means confirmed, yellow means pendi
 
 - The implemented loop is the intended direction: use current cognition while playing, learn when feedback reveals uncertainty, persist and reload understanding.
 - READY means a solve attempt is possible, not that the game is fully understood. Solve-mode cognition updates remain enabled. Hypotheses and high confidence remain distinct from confirmed evidence.
+- The intended learning policy is layered and selective: verify key claims that unlock a region of the model, use high-confidence open claims to plan before direct proof, and inspect claim compression candidates before spending another action.
 - Main contract: `docs/architecture/prime-p7-cognition-and-experience.md`; decision: D-2026-10-03-01. Runtime—not the supervising assistant—must choose actions and print cognition evolution.
 
 ## 历史归档

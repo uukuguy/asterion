@@ -3601,3 +3601,4 @@
 - 2026-10-04 Added a regression proving runtime failures without a usable receipt still return nonzero; focused P7 validation reached 142 tests. [074f0dd0]
 - 2026-10-04 Colored the successful terminal status to complete the P7 logic color map. [1c8eb3f8]
 - 2026-10-04 Assigned a restrained semantic palette to confirmed, pending, rejected, and action cognition lines. [5fff662a]
+- 2026-10-04 Layered cognition now treats high-confidence open claims as usable working hypotheses, records multi-claim probe evidence, and reviews duplicate/same-scope/mutually-exclusive groups without destructive merging; 168 focused P7 tests, lint, docs-check, and resource sync passed. [4ce0bc4d]
