@@ -102,3 +102,5 @@ The 244-test result covers the retry-event fixes and diagnostic projection. Sess
 The live witness exposed a legacy persistence edge: some older certain claims still carried modal wording. Reload now rebuilds canonical wording from the original claim, with a regression test; stable console knowledge remains deterministic.
 
 The display layer also canonicalizes known Chinese translations for certain claims; otherwise an old localized label could reintroduce “可能” after the ledger was correctly normalized.
+
+Final packaged witness `p7-live-20261004073349-db4965c15b988a3f76dbb4d8` showed the stable-knowledge-first view and no legacy “可能” translation in the sampled output; it still completed zero levels and stopped before runtime actions because P7 host services were unavailable.
