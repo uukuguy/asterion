@@ -2,6 +2,7 @@ import json
 import io
 import unittest
 from contextlib import redirect_stderr
+from unittest import mock
 
 from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 from asterion.applications.prime.p7.operator import (
@@ -354,6 +355,23 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertNotIn('"natural_language_context"', output)
         self.assertNotIn('"claims"', output)
         self.assertLess(len(output.encode("utf-8")), 4096)
+
+    def test_cognition_console_logs_can_use_logic_colors(self):
+        from asterion.applications.prime.p7.operator import _log_cognition_refresh
+
+        projection = {
+            "semantic": {"natural_language_context": "这是一个网格移动谜题。"},
+            "cognition_session": {
+                "session": {"state": "READY", "episode": 1, "episode_actions": 0},
+            },
+        }
+        stream = io.StringIO()
+        with mock.patch.dict("os.environ", {"ASTERION_PRIME_P7_COLOR": "always"}), redirect_stderr(stream):
+            _log_cognition_refresh(projection, phase="startup")
+        output = stream.getvalue()
+        self.assertIn("\x1b[", output)
+        self.assertIn("cognition-round start", output)
+        self.assertIn("cognition-round end", output)
 
     def test_compacted_session_preserves_validation_control(self):
         compacted = _compact_cognition_session({

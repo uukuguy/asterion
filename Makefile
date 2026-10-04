@@ -102,12 +102,14 @@ LEVEL ?= 1
 ASTERION_PRIME_P7_TARGET_LEVEL := $(LEVEL)
 ASTERION_PRIME_P7_SEED := 0
 ASTERION_PRIME_P7_LEVEL_EXPLICIT := $(if $(filter command line,$(origin LEVEL)),1,0)
+ASTERION_PRIME_P7_COLOR ?= always
 
 # P7 selection is forwarded through Orb by variable name, never by expanding
 # an operator-supplied value into its command line.
 export ASTERION_PRIME_P7_GAME_ID
 export ASTERION_PRIME_P7_TARGET_LEVEL
 export ASTERION_PRIME_P7_SEED
+export ASTERION_PRIME_P7_COLOR
 .PHONY: test.native-controller-core.provider-free
 
 help:

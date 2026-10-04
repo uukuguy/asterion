@@ -634,6 +634,38 @@ _COGNITION_OUTPUT_BYTES = 16 * 1024
 _P7_RESPONSE_BUDGET_BYTES = 60 * 1024
 _P7_RESPONSE_HEADROOM_BYTES = 1024
 
+_P7_ANSI = {
+    "round": "1;36",
+    "narrative": "0;32",
+    "display": "1;34",
+    "stage": "0;36",
+    "success": "1;32",
+    "incomplete": "1;33",
+    "error": "1;31",
+}
+
+
+def _p7_color_enabled(stream: object = None) -> bool:
+    """Enable readable P7 colors while allowing scripts to opt out."""
+
+    setting = os.environ.get("ASTERION_PRIME_P7_COLOR", "auto").strip().lower()
+    if setting in {"0", "false", "never", "off"}:
+        return False
+    if setting in {"1", "true", "always", "on"}:
+        return True
+    if os.environ.get("NO_COLOR") is not None:
+        return False
+    target = sys.stderr if stream is None else stream
+    isatty = getattr(target, "isatty", None)
+    return bool(isatty()) if callable(isatty) else False
+
+
+def _p7_style(text: str, role: str, *, stream: object = None) -> str:
+    code = _P7_ANSI.get(role)
+    if code is None or not _p7_color_enabled(stream):
+        return text
+    return f"\033[{code}m{text}\033[0m"
+
 
 def _json_bytes(value: object) -> int:
     return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode("utf-8"))
@@ -912,11 +944,11 @@ def _log_cognition_narrative(
     marker = (
         f"phase={phase} episode={episode} actions={actions} state={state}"
     )
-    print(f"[p7-cognition] cognition-round start {marker}", file=sys.stderr, flush=True)
-    print(f"[p7-cognition] cognition-narrative phase={phase}", file=sys.stderr, flush=True)
+    print(_p7_style(f"[p7-cognition] cognition-round start {marker}", "round"), file=sys.stderr, flush=True)
+    print(_p7_style(f"[p7-cognition] cognition-narrative phase={phase}", "narrative"), file=sys.stderr, flush=True)
     for line in narrative.splitlines():
-        print(f"[p7-cognition] {line}", file=sys.stderr, flush=True)
-    print(f"[p7-cognition] cognition-round end {marker}", file=sys.stderr, flush=True)
+        print(_p7_style(f"[p7-cognition] {line}", "narrative"), file=sys.stderr, flush=True)
+    print(_p7_style(f"[p7-cognition] cognition-round end {marker}", "round"), file=sys.stderr, flush=True)
 
 
 def _log_cognition_display(projection: object, *, phase: str) -> None:
@@ -924,7 +956,10 @@ def _log_cognition_display(projection: object, *, phase: str) -> None:
 
     if not isinstance(projection, Mapping):
         print(
-            f"[p7-cognition] cognition-display phase={phase} status=unavailable",
+            _p7_style(
+                f"[p7-cognition] cognition-display phase={phase} status=unavailable",
+                "display",
+            ),
             file=sys.stderr,
             flush=True,
         )
@@ -954,7 +989,7 @@ def _log_cognition_display(projection: object, *, phase: str) -> None:
         f"claims={total} certain={counts['certain']} open={counts['undetermined']} "
         f"falsified={counts['falsified']}"
     )
-    print("[p7-cognition] cognition-display " + details, file=sys.stderr, flush=True)
+    print(_p7_style("[p7-cognition] cognition-display " + details, "display"), file=sys.stderr, flush=True)
 
 
 class _P7BrokerClient:
@@ -3703,18 +3738,21 @@ async def run_live(
     trace_root = private / "trace"
     trace_root.mkdir(mode=0o700)
     print(
-        "[p7-cognition] startup "
-        + json.dumps(
-            {
-                "run_id": run_id,
-                "game": invocation.game.game_id,
-                "seed": invocation.game.seed,
-                "target_level": invocation.game.target_level,
-                "strategy": strategy,
-                "cognition_mode": cognition_mode,
-            },
-            sort_keys=True,
-            separators=(",", ":"),
+        _p7_style(
+            "[p7-cognition] startup "
+            + json.dumps(
+                {
+                    "run_id": run_id,
+                    "game": invocation.game.game_id,
+                    "seed": invocation.game.seed,
+                    "target_level": invocation.game.target_level,
+                    "strategy": strategy,
+                    "cognition_mode": cognition_mode,
+                },
+                sort_keys=True,
+                separators=(",", ":"),
+            ),
+            "stage",
         ),
         file=sys.stderr,
         flush=True,
@@ -3725,7 +3763,7 @@ async def run_live(
         recordings_dir=private / "recordings",
         game=invocation.game,
     )
-    print("[asterion-prime-p7] preflight", file=sys.stderr, flush=True)
+    print(_p7_style("[asterion-prime-p7] preflight", "stage"), file=sys.stderr, flush=True)
     resources_ = build_p7_operator_resources(
         environment=invocation.environment,
         pi_base_command=invocation.pi_base_command,
@@ -3841,13 +3879,13 @@ async def run_live(
                         expectations=parsed_expectations,
                     )
         if prediction_client is not None:
-            print("[p7-cognition] runtime-stage {\"stage\":\"initial-context\"}", file=sys.stderr, flush=True)
+            print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"initial-context\"}", "stage"), file=sys.stderr, flush=True)
             prompt = prompt + "\n\n" + _initial_game_context(
                 prediction_client,
                 include_prior=prefix is not None and prefix.levels_completed > 0,
                 semantic_only=strategy == "cognition",
             )
-            print("[p7-cognition] runtime-stage {\"stage\":\"initial-context-ready\"}", file=sys.stderr, flush=True)
+            print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"initial-context-ready\"}", "stage"), file=sys.stderr, flush=True)
         broker_for_log = resources_.host_services.get("prime.arc-broker")
         print(
             "[p7-cognition] initial-context "
@@ -3866,11 +3904,11 @@ async def run_live(
             _log_cognition_narrative(
                 broker_for_log.cognition_projection(), phase="initial-context"
             )
-        print("[asterion-prime-p7] live-run", file=sys.stderr, flush=True)
-        print("[p7-cognition] runtime-stage {\"stage\":\"resolve-application\"}", file=sys.stderr, flush=True)
+        print(_p7_style("[asterion-prime-p7] live-run", "stage"), file=sys.stderr, flush=True)
+        print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"resolve-application\"}", "stage"), file=sys.stderr, flush=True)
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
-        print("[p7-cognition] runtime-stage {\"stage\":\"factory\"}", file=sys.stderr, flush=True)
+        print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"factory\"}", "stage"), file=sys.stderr, flush=True)
         runtime = assembly.runtime_binding.factory(
             RuntimeFactoryContext(
                 provider_id="prime-applications",
@@ -3882,7 +3920,7 @@ async def run_live(
                 host_services=resources_.host_services,
             )
         )
-        print("[p7-cognition] runtime-stage {\"stage\":\"factory-ready\"}", file=sys.stderr, flush=True)
+        print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"factory-ready\"}", "stage"), file=sys.stderr, flush=True)
         result = await run_composed_application(
             assembly.plan,
             implementations=application.implementations,
@@ -4472,6 +4510,7 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         return 130
     except Exception as error:
+        attempt_failure = isinstance(error, P7LiveAttemptFailure)
         reason = (
             str(error)
             if isinstance(error, live.P7LiveSolveError)
@@ -4500,8 +4539,19 @@ def main(argv: list[str] | None = None) -> int:
                 sort_keys=True,
             )
         )
-        print("[asterion-prime-p7] unsuccessful", file=sys.stderr, flush=True)
-        return 1
+        print(
+            _p7_style(
+                "[asterion-prime-p7] "
+                + ("incomplete (receipt status=unsuccessful)" if attempt_failure else "error"),
+                "incomplete" if attempt_failure else "error",
+            ),
+            file=sys.stderr,
+            flush=True,
+        )
+        # A live attempt has completed and emitted its public receipt.  The
+        # receipt carries the unsuccessful outcome; reserve a nonzero process
+        # status for preflight/runtime failures that prevented a usable receipt.
+        return 0 if attempt_failure else 1
     print(
         json.dumps(
             result, allow_nan=False, separators=(",", ":"), sort_keys=True

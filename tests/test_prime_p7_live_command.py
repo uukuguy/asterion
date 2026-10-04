@@ -2231,7 +2231,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             status = main([])
 
         receipt = json.loads(output.getvalue())
-        self.assertEqual(status, 1)
+        self.assertEqual(status, 0)
         self.assertEqual(receipt["primitive_action_count"], 50)
         self.assertEqual(receipt["completed_level_count"], 0)
         self.assertEqual(receipt["terminal_reason"], "game-over")
