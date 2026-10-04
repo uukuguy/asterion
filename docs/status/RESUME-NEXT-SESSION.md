@@ -20,7 +20,7 @@ The latest console presentation fix colors the round header, Chinese cognition n
 
 The cognition palette is now semantic: green means confirmed, yellow means pending verification, red means rejected or unavailable, cyan means action/next step, and neutral text carries context. This keeps the complete record readable without coloring every line differently.
 
-The latest semantic cognition change is `4ce0bc4d`: cognition is now reported in layers (game identity, controls, object representation, rules/goals, strategy); high-confidence open claims are explicitly usable working hypotheses; one probe can update multiple claims independently; and the read-only review reports duplicate, same-scope, and explicitly mutually exclusive candidates without deleting or merging evidence. Chinese logs display coverage, key working hypotheses, and review status after each refresh. The focused P7 suite passed 168 tests, with lint, docs-check, and TypeScript resource synchronization passing.
+The latest semantic cognition change is `4ce0bc4d`: cognition is now reported in layers (game identity, controls, object representation, rules/goals, strategy); high-confidence open claims are explicitly shown as “工作假说（可用于规划）”; one probe can update multiple claims independently; and the read-only review reports duplicate, same-scope, and explicitly mutually exclusive candidates without deleting or merging evidence. Chinese logs display coverage, key working hypotheses, and review status after each refresh. The focused P7 suite passed 168 tests, with lint, docs-check, and TypeScript resource synchronization passing.
 
 ## 已验证事实
 

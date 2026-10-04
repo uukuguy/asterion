@@ -3603,3 +3603,4 @@
 - 2026-10-04 Assigned a restrained semantic palette to confirmed, pending, rejected, and action cognition lines. [5fff662a]
 - 2026-10-04 Layered cognition now treats high-confidence open claims as usable working hypotheses, records multi-claim probe evidence, and reviews duplicate/same-scope/mutually-exclusive groups without destructive merging; 168 focused P7 tests, lint, docs-check, and resource sync passed. [4ce0bc4d]
 - 2026-10-04 Updated the active resume baton with layered cognition policy, verification evidence, and next live-run boundary. [35847d01]
+- 2026-10-04 Renamed high-confidence cognition display to “工作假说（可用于规划）” and lower-confidence display to “开放假说（待证实）” to avoid implying every claim needs its own probe. [2cabb6fc]
