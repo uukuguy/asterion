@@ -418,11 +418,11 @@ def render_cognition_narrative_zh(
         next_test = next((_claim_prose(c, "next_test") for c in claims if c.get("next_test")), "根据最新观察选择一个能区分假设的实验。")
     if action:
         next_test = f"已选 {action}；" + next_test
-    footer = "P7规划建议：" + next_test + "\n以上为认知记录，不能授权动作；过关以关卡数增加或 WIN 为准。"
+    footer = "候选验证问题（供P7选择）：" + next_test + "\n以上为认知记录，不能授权动作；过关以关卡数增加或 WIN 为准。"
     # Reserve the next-test and authority boundary before adding claim prose.
     while len(("\n".join(lines) + "\n" + footer).encode()) > max_bytes:
         next_test = next_test[:len(next_test) // 2]
-        footer = "P7规划建议：" + next_test + "\n动作以 broker 校验为准。"
+        footer = "候选验证问题（供P7选择）：" + next_test + "\n动作以 broker 校验为准。"
         if not next_test:
             lines = [title]
     def add(line: str) -> None:

@@ -23,7 +23,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("探索假说（辅助）", result)
         self.assertIn("横条上移，关卡没有增加", result)
         self.assertIn("最近动作：ACTION1 已执行，画面发生变化", result)
-        self.assertIn("P7规划建议：", result)
+        self.assertIn("候选验证问题（供P7选择）：", result)
         self.assertEqual(result.count("ACTION1 使横条向上移动。"), 1)
         self.assertEqual((semantic, session), before)
 
@@ -34,7 +34,7 @@ class TestCognitionNarrative(unittest.TestCase):
             with self.subTest(limit=limit):
                 result = render_cognition_narrative_zh(report, None, max_bytes=limit)
                 self.assertLessEqual(len(result.encode()), limit)
-                self.assertIn("P7规划建议：", result)
+                self.assertIn("候选验证问题（供P7选择）：", result)
 
     def test_english_history_is_not_presented_as_translation(self):
         result = render_cognition_narrative_zh({"natural_language_context": "The bar moves."}, None)
@@ -119,7 +119,8 @@ class TestCognitionNarrative(unittest.TestCase):
             {"claims": {"game_type": [confirmed, duplicate]}, "confirmed_knowledge": [confirmed]},
             {"session": {"state": "READY"}},
         )
-        self.assertIn("P7规划建议：", result)
+        self.assertIn("候选验证问题（供P7选择）：", result)
+        self.assertNotIn("P7规划建议：", result)
         self.assertIn("关键未决问题：比较一次受控移动前后的画面。", result)
         self.assertNotIn("关键未决问题：这是一个网格移动谜题", result)
 
