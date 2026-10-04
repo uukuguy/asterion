@@ -4557,7 +4557,7 @@ def main(argv: list[str] | None = None) -> int:
             result, allow_nan=False, separators=(",", ":"), sort_keys=True
         )
     )
-    print("[asterion-prime-p7] PASS", file=sys.stderr, flush=True)
+    print(_p7_style("[asterion-prime-p7] PASS", "success"), file=sys.stderr, flush=True)
     return 0
 
 
