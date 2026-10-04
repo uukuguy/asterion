@@ -100,3 +100,5 @@ make asterion-prime-p7-level-witness GAME=sp80 LEVEL=1
 The 244-test result covers the retry-event fixes and diagnostic projection. Session is active; no fresh L1 solve or promotion-check PASS is established.
 
 The live witness exposed a legacy persistence edge: some older certain claims still carried modal wording. Reload now rebuilds canonical wording from the original claim, with a regression test; stable console knowledge remains deterministic.
+
+The display layer also canonicalizes known Chinese translations for certain claims; otherwise an old localized label could reintroduce “可能” after the ledger was correctly normalized.

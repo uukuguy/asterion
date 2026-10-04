@@ -66,6 +66,7 @@ class TestCognitionNarrative(unittest.TestCase):
             {"id": "scene", "kind": "game_type", "claim": "这是网格移动谜题。", "status": "certain"},
             {"id": "move", "kind": "control", "claim": "ACTION2使横带向下移动四格。", "status": "certain"},
             {"id": "goal", "kind": "success_condition", "claim": "过关条件尚未完全确定。", "status": "certain"},
+            {"id": "fresh-action1-up", "kind": "control", "claim": "ACTION1 moves the bar upward.", "status": "certain"},
         ]
         hypotheses = [
             {"id": f"open-{index}", "kind": "success_condition", "claim": f"待验证假设{index}", "status": "undetermined"}
@@ -85,6 +86,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertLess(result.index("稳定游戏认知（规划背景）"), result.index("探索假说（辅助）"))
         self.assertIn("游戏类型：这是网格移动谜题。", result)
         self.assertIn("动作操作：ACTION2使横带向下移动四格。", result)
+        self.assertNotIn("开放时ACTION1可能", result)
         self.assertIn("关键未决问题：", result)
         self.assertNotIn("待验证假设19", result)
 

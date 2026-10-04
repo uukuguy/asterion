@@ -5,6 +5,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 import unicodedata
 
+from .semantic_cognition import _certainty_claim
+
 _KINDS = ("game_type", "object_role", "control", "success_condition", "rule", "strategy")
 _KIND_LABELS = {
     "game_type": "游戏类型",
@@ -72,7 +74,8 @@ def _prose(value: object, limit: int = 180) -> str:
 def _claim_prose(claim: Mapping, field: str = "claim") -> str:
     claim_id = claim.get("id")
     if field == "claim" and isinstance(claim_id, str) and claim_id in _KNOWN_CLAIMS_ZH:
-        return _KNOWN_CLAIMS_ZH[claim_id]
+        text = _KNOWN_CLAIMS_ZH[claim_id]
+        return _certainty_claim(text) if claim.get("status") == "certain" else text
     if field == "next_test" and isinstance(claim_id, str) and claim_id in _KNOWN_NEXT_TESTS_ZH:
         return _KNOWN_NEXT_TESTS_ZH[claim_id]
     return _prose(claim.get(field))
