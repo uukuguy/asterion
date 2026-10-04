@@ -70,6 +70,19 @@ def _claim_prose(claim: Mapping, field: str = "claim") -> str:
     return _prose(claim.get(field))
 
 
+def _claim_label(claim: Mapping, status: str) -> str:
+    """Describe evidence state without treating confidence as proof."""
+
+    if status == "certain":
+        return "已确认"
+    if status == "falsified":
+        return "已否定"
+    confidence = claim.get("confidence", 0.0)
+    if type(confidence) in (int, float) and float(confidence) >= 0.75:
+        return "高置信假说（待验证）"
+    return "开放假说（待验证）"
+
+
 def render_cognition_narrative_zh(
     semantic: object, cognition_session: object, *, max_bytes: int = 4096,
     complete: bool = False,
@@ -96,6 +109,12 @@ def render_cognition_narrative_zh(
     actions = session.get("episode_actions")
     if type(actions) is int:
         lines.append(f"本轮实验动作：{actions} 次；动作次数不代表过关进度。")
+    coverage = semantic.get("coverage")
+    coverage = coverage if isinstance(coverage, Mapping) else {}
+    review = semantic.get("hypothesis_review")
+    review = review if isinstance(review, Mapping) else {}
+    layers = semantic.get("cognition_layers")
+    layers = layers if isinstance(layers, (list, tuple)) else []
     events = envelope.get("events", [])
     events = events if isinstance(events, (list, tuple)) else []
     recent_ids: set[str] = set()
@@ -156,19 +175,47 @@ def render_cognition_narrative_zh(
     def add(line: str) -> None:
         if len(("\n".join([*lines, line, footer])).encode()) <= max_bytes:
             lines.append(line)
+    if layers:
+        layer_labels = [
+            _text(item.get("label"), 48)
+            for item in layers
+            if isinstance(item, Mapping) and _text(item.get("label"), 48)
+        ]
+        if layer_labels:
+            add("认识层次：" + "、".join(layer_labels[:5]) + "。")
+    landscape_count = coverage.get("landscape_claim_count")
+    high_confidence = coverage.get("high_confidence_open_count")
+    if type(landscape_count) is int or type(high_confidence) is int:
+        count_text = str(landscape_count) if type(landscape_count) is int else "当前"
+        high_text = str(high_confidence) if type(high_confidence) is int else "若干"
+        add(
+            f"认识覆盖：已有 {count_text} 条游戏特定假说，其中 {high_text} 条是高置信开放假说；"
+            "它们可以先指导推理和规划，不要求逐条动作验证。"
+        )
+    duplicate_count = len(review.get("duplicate_candidates", [])) if isinstance(review.get("duplicate_candidates"), list) else 0
+    scope_count = len(review.get("same_scope_candidates", [])) if isinstance(review.get("same_scope_candidates"), list) else 0
+    exclusive_count = len(review.get("mutually_exclusive_candidates", [])) if isinstance(review.get("mutually_exclusive_candidates"), list) else 0
+    if duplicate_count or scope_count or exclusive_count:
+        add(
+            f"假说整理：重复 {duplicate_count} 组、同类 {scope_count} 组、互斥候选 {exclusive_count} 组；"
+            "只提出压缩线索，保留各自证据，不自动删除或合并。"
+        )
+    else:
+        add("假说整理：当前未发现需要压缩或标记互斥的候选组。")
     if latest:
         add("最近反馈：" + latest)
     if recent_action:
         add("最近动作：" + recent_action)
     if state == "ACTION_EXECUTED":
         add("最新动作尚未分析，不能把预期当作已确认事实。")
-    for status, label, count in (("certain", "已确认", 4), ("undetermined", "待验证", 4), ("falsified", "已否定", 2)):
+    for status, label, count in (("certain", "已确认", 4), ("undetermined", None, 6), ("falsified", "已否定", 2)):
         selected = [c for c in claims if c.get("status") == status]
         if not selected and status == "certain":
             add("已确认：暂无经证据支持的游戏规则。")
         visible = selected if complete else selected[:count]
         for claim in visible:
-            add(f"{label}：{_claim_prose(claim)}")
+            claim_label = label or _claim_label(claim, status)
+            add(f"{claim_label}：{_claim_prose(claim)}")
     if not claims:
         context = _prose(semantic.get("natural_language_context"), 360)
         add("现有描述：" + context if context else "当前尚无游戏特定认知；先观察对象、动作和目标。")

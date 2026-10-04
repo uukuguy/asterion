@@ -107,6 +107,10 @@ def _canonical(value: object) -> str:
     return json.dumps(value, ensure_ascii=True, sort_keys=True, separators=(",", ":"))
 
 
+def _normalized_phrase(value: object) -> str:
+    return " ".join(str(value or "").casefold().split())
+
+
 def _empty_state() -> dict[str, Any]:
     return {"schema": SCHEMA, "records": {}}
 
@@ -152,6 +156,8 @@ def _claim_view(claim: Mapping[str, Any]) -> dict[str, Any]:
         "counterexample_count": counter_count,
         "evidence": _copy(evidence),
     }
+    if claim.get("hypothesis_group"):
+        result["hypothesis_group"] = claim["hypothesis_group"]
     if claim.get("context"):
         result["context"] = claim["context"]
     return result
@@ -270,7 +276,7 @@ class SemanticCognitionStore:
 
     @staticmethod
     def _normalize_claim(value: Mapping[str, Any], *, require_undetermined: bool) -> dict[str, Any]:
-        allowed = {"id", "kind", "subject", "claim", "reason", "falsifier", "next_test", "context", "status", "evidence", "confidence"}
+        allowed = {"id", "kind", "subject", "claim", "reason", "falsifier", "next_test", "context", "status", "evidence", "confidence", "hypothesis_group"}
         unknown = set(value) - allowed
         if unknown:
             raise CognitionError(f"unsupported cognition fields: {sorted(unknown)!r}")
@@ -300,6 +306,10 @@ class SemanticCognitionStore:
         }
         if "context" in value:
             result["context"] = _text(value["context"], "context", required=False)
+        if "hypothesis_group" in value:
+            # This is only a review label.  Keeping it an ASCII id makes
+            # grouping deterministic without giving the group any authority.
+            result["hypothesis_group"] = _id(value["hypothesis_group"], "hypothesis_group")
         evidence = value.get("evidence", [])
         if not isinstance(evidence, list) or len(evidence) > _MAX_EVIDENCE:
             raise CognitionError("invalid cognition evidence")
@@ -404,10 +414,10 @@ class SemanticCognitionStore:
                 if any(existing.get(field) != normalized.get(field) for field in ("kind", "subject")):
                     raise CognitionError("claim id is already bound to another claim")
                 if existing.get("status") in {"certain", "falsified"}:
-                    if any(existing.get(field) != normalized.get(field) for field in ("claim", "reason", "falsifier", "next_test", "confidence", "context")):
+                    if any(existing.get(field) != normalized.get(field) for field in ("claim", "reason", "falsifier", "next_test", "confidence", "context", "hypothesis_group")):
                         raise CognitionError("resolved cognition claims cannot be rewritten")
                     continue
-                mutable = ("claim", "reason", "falsifier", "next_test", "confidence", "context")
+                mutable = ("claim", "reason", "falsifier", "next_test", "confidence", "context", "hypothesis_group")
                 if any(existing.get(field) != normalized.get(field) for field in mutable):
                     for field in mutable:
                         if field in normalized:
@@ -557,12 +567,111 @@ class SemanticCognitionStore:
         protocol["evidence_count"] = len(protocol.get("evidence", []))
         puzzle = by_kind["success_condition"]
         context = self._context(views)
+        candidate_views = [
+            item for item in views
+            if item.get("status") == "undetermined"
+        ]
+        by_scope: dict[tuple[str, str], list[dict[str, Any]]] = {}
+        by_claim: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+        by_group: dict[str, list[dict[str, Any]]] = {}
+        for item in candidate_views:
+            by_scope.setdefault((str(item["kind"]), str(item["subject"])), []).append(item)
+            by_claim.setdefault((str(item["kind"]), str(item["subject"]), _normalized_phrase(item["claim"])), []).append(item)
+            group = item.get("hypothesis_group")
+            if isinstance(group, str) and group:
+                by_group.setdefault(group, []).append(item)
+        duplicate_candidates = [
+            {"claim_ids": sorted(item["id"] for item in items), "reason": "同一类型、对象和语义文本，可能是重复假说。"}
+            for items in by_claim.values() if len(items) > 1
+        ]
+        same_scope_candidates = [
+            {
+                "kind": kind, "subject": subject,
+                "claim_ids": sorted(item["id"] for item in items),
+                "reason": "同一类型和对象，先比较反证条件再决定是否压缩。",
+            }
+            for (kind, subject), items in by_scope.items() if len(items) > 1
+        ]
+        mutually_exclusive_candidates = [
+            {
+                "group": group,
+                "claim_ids": sorted(item["id"] for item in items),
+                "reason": "同一 hypothesis_group 标记为互斥候选；保留各自证据直到观察裁决。",
+            }
+            for group, items in by_group.items() if len(items) > 1
+        ]
+        game_specific = [
+            item for item in views
+            if item.get("id") not in {
+                "bootstrap-frame-semantics", "bootstrap-discrete-actions", "bootstrap-success-condition",
+            }
+        ]
+        required_kinds = {"game_type", "object_role", "control", "success_condition", "strategy"}
+        covered_kinds = sorted({str(item["kind"]) for item in game_specific})
+        coverage = {
+            "landscape_claim_count": len(game_specific),
+            "covered_kinds": covered_kinds,
+            "missing_kinds": sorted(required_kinds - set(covered_kinds)),
+            "landscape_ready": required_kinds.issubset(set(covered_kinds)),
+            "high_confidence_open_count": sum(
+                float(item.get("confidence", 0)) >= 0.75
+                for item in views
+                if item.get("status") == "undetermined"
+            ),
+            "guidance_ready": any(
+                item.get("status") in {"certain", "undetermined"}
+                for item in game_specific
+            ),
+        }
+        layer_specs = (
+            ("game_identity", "游戏是什么", ("game_type",)),
+            ("interaction", "动作如何操作", ("control",)),
+            ("object_representation", "画面物件表示", ("object_role",)),
+            ("rules_and_goal", "规则与过关条件", ("rule", "success_condition")),
+            ("strategy", "如何继续玩", ("strategy",)),
+        )
+        cognition_layers = [
+            {
+                "id": layer_id,
+                "label": label,
+                "claim_ids": [item["id"] for item in game_specific if item["kind"] in kinds],
+                "status_counts": {
+                    status: sum(1 for item in game_specific if item["kind"] in kinds and item["status"] == status)
+                    for status in _STATUSES
+                },
+            }
+            for layer_id, label, kinds in layer_specs
+        ]
+        key_probe_candidates = sorted(
+            (
+                item for item in game_specific
+                if item.get("status") == "undetermined" and item.get("next_test")
+            ),
+            key=lambda item: (-float(item.get("confidence", 0)), item["id"]),
+        )[:8]
+        guidance = {
+            "working_hypothesis_ids": [
+                item["id"] for item in game_specific
+                if item.get("status") in {"certain", "undetermined"}
+            ],
+            "key_probe_candidates": [item["id"] for item in key_probe_candidates],
+            "principle": "验证关键假说即可打开一片相关认知；高置信未定假说可以先指导规划，不要求逐条动作验证。",
+        }
         report: dict[str, Any] = {
             "schema": SCHEMA,
             "scope": _copy(self._identity),
             "execution_authority": "none",
             "context": context,
             "natural_language_context": context,
+            "coverage": coverage,
+            "cognition_layers": cognition_layers,
+            "guidance": guidance,
+            "hypothesis_review": {
+                "compression_needed": bool(duplicate_candidates or same_scope_candidates),
+                "duplicate_candidates": duplicate_candidates,
+                "same_scope_candidates": same_scope_candidates,
+                "mutually_exclusive_candidates": mutually_exclusive_candidates,
+            },
             "claims": {**by_kind, **by_status},
             "success_condition": {"protocol": protocol, "puzzle": puzzle},
             "evidence_counts": {

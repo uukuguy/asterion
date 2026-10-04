@@ -52,6 +52,32 @@ class CognitionSessionTests(unittest.TestCase):
             self.assertEqual(after["session"]["state"], "OBSERVE")
             self.assertIn("cognition.episode.reset", [event["type"] for event in session.events])
 
+    def test_one_action_can_update_multiple_hypotheses_independently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            session = CognitionSession(self._store(Path(directory)), session_id="multi-evidence")
+            session.start_episode({"frame": [[1]], "levels_completed": 0, "state": "NOT_FINISHED"})
+            session.propose({"claims": [
+                {"id": "actor", "kind": "object_role", "subject": "color-7", "claim": "Color 7 is controlled.", "reason": "It is isolated.", "falsifier": "Another object moves.", "next_test": "Move once."},
+                {"id": "direction", "kind": "control", "subject": "ACTION2", "claim": "ACTION2 moves right.", "reason": "The action is directional.", "falsifier": "It moves elsewhere.", "next_test": "Apply ACTION2."},
+                {"id": "goal", "kind": "success_condition", "subject": "level", "claim": "The move reaches the goal.", "reason": "The target is adjacent.", "falsifier": "The level does not advance.", "next_test": "Check levels_completed."},
+            ]})
+            session.select_experiment({
+                "claim_ids": ["actor", "direction", "goal"], "question": "What changed?",
+                "information_gain": "Separates actor, direction, and goal effects.",
+                "action": {"name": "ACTION2"}, "expected": {"frame": [[2]]},
+            })
+            session.record_action({"frame": [[2]], "levels_completed": 0, "state": "NOT_FINISHED"}, action={"name": "ACTION2"})
+            snapshot = session.analyze({"results": [
+                {"claim_id": "actor", "status": "certain", "explanation": "Only color 7 moved."},
+                {"claim_id": "direction", "status": "certain", "explanation": "The settled frame is one cell right."},
+                {"claim_id": "goal", "status": "falsified", "explanation": "levels_completed stayed at zero."},
+            ]})
+            claims = {item["id"]: item for values in snapshot["report"]["claims"].values() if isinstance(values, list) for item in values}
+            self.assertEqual(claims["actor"]["status"], "certain")
+            self.assertEqual(claims["direction"]["status"], "certain")
+            self.assertEqual(claims["goal"]["status"], "falsified")
+            self.assertEqual(claims["actor"]["evidence_count"], 1)
+
     def test_stale_or_unbound_actions_are_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             session = CognitionSession(self._store(Path(directory)), session_id="s2")

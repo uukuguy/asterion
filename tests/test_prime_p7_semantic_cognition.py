@@ -85,6 +85,36 @@ class SemanticCognitionTests(unittest.TestCase):
             self.assertEqual(claim["claim"], "ACTION2 moves the actor toward the goal.")
             self.assertEqual(claim["confidence"], 0.8)
 
+    def test_report_reviews_duplicate_scope_and_explicit_exclusive_hypotheses(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            store = self._store(Path(directory))
+            store.propose({"claims": [
+                {
+                    "id": "move-right-a", "kind": "control", "subject": "ACTION2",
+                    "claim": "ACTION2 moves the player right.", "reason": "The actor is isolated.",
+                    "falsifier": "The player does not move right.", "next_test": "Apply ACTION2.",
+                    "hypothesis_group": "action2-direction",
+                },
+                {
+                    "id": "move-right-b", "kind": "control", "subject": "ACTION2",
+                    "claim": "ACTION2 moves the player right.", "reason": "The actor is isolated.",
+                    "falsifier": "The player does not move right.", "next_test": "Apply ACTION2.",
+                    "hypothesis_group": "action2-direction",
+                },
+                {
+                    "id": "move-down", "kind": "control", "subject": "ACTION2",
+                    "claim": "ACTION2 moves the player down.", "reason": "The actor is isolated.",
+                    "falsifier": "The player does not move down.", "next_test": "Apply ACTION2.",
+                    "hypothesis_group": "action2-direction",
+                },
+            ]})
+            review = store.report()["hypothesis_review"]
+            self.assertEqual(review["duplicate_candidates"][0]["claim_ids"], ["move-right-a", "move-right-b"])
+            self.assertEqual(review["same_scope_candidates"][0]["claim_ids"], ["move-down", "move-right-a", "move-right-b"])
+            self.assertEqual(review["mutually_exclusive_candidates"][0]["claim_ids"], ["move-down", "move-right-a", "move-right-b"])
+            self.assertTrue(review["compression_needed"])
+            self.assertEqual(store.report()["coverage"]["landscape_claim_count"], 3)
+
     def test_proposal_rejects_core_identity_change(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))

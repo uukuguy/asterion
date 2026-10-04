@@ -55,7 +55,27 @@ class TestCognitionNarrative(unittest.TestCase):
         for index in range(5):
             self.assertIn(f"已确认规则{index}", result)
             self.assertIn(f"待验证假设{index}", result)
-        self.assertNotIn("另有", result)
+            self.assertNotIn("另有", result)
+
+    def test_high_confidence_open_claims_and_hypothesis_review_are_explicit(self):
+        semantic = {
+            "scope": {"level": 0},
+            "claims": {
+                "control": [{"id": "move", "kind": "control", "claim": "ACTION1 moves right.", "status": "undetermined", "confidence": 0.9}],
+            },
+            "hypothesis_review": {
+                "compression_needed": True,
+                "duplicate_candidates": [{"claim_ids": ["move", "move-copy"]}],
+                "same_scope_candidates": [],
+                "mutually_exclusive_candidates": [],
+            },
+            "coverage": {"landscape_claim_count": 1, "covered_kinds": ["control"], "missing_kinds": ["game_type"]},
+        }
+        result = render_cognition_narrative_zh(semantic, {"session": {"state": "READY"}})
+        self.assertIn("高置信假说", result)
+        self.assertIn("假说整理", result)
+        self.assertIn("认识覆盖", result)
+        self.assertIn("不要求逐条动作验证", result)
 
 
 class TestNarrativeDelivery(unittest.TestCase):

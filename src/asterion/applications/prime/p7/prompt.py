@@ -57,6 +57,16 @@ game-specific hypothesis or supported claim that can guide a safe solve
 attempt; a step cap or a lucky WIN alone is not cognition readiness. The
 report may still be incomplete and must keep its open questions available for
 solve-time experiments.
+An `undetermined` claim is not unusable: confidence ranks working hypotheses,
+and a high-confidence open hypothesis may guide route selection or the next
+action before it receives direct evidence. Verify key hypotheses that unlock a
+larger part of the game, rather than spending one action per claim. The report
+also exposes cognition layers (game identity, controls, object representation,
+rules/goals, and strategy), coverage, and read-only review candidates for
+duplicate, same-scope, or explicitly mutually exclusive claims. Use those
+groups to compress reasoning while preserving separate evidence. A proposal
+may include an ASCII `hypothesis_group` to mark alternatives for review; this
+label never resolves a claim and never authorizes an action.
 For a solve test, load the current report and use supported knowledge plus
 useful open hypotheses for planning; the report is allowed to be incomplete.
 Before an action that tests an open or newly suspected claim, select its
@@ -424,8 +434,12 @@ preserving the semantic ledger. Stop with `ready` once the report has a useful
 language description or another game-specific hypothesis that can guide a
 safe solve attempt; cognition may remain incomplete and solve-time feedback
 should add new experiments. Stop with the actual safety reason when no safe
-attempt can be made. The final report must state what is known, unknown, and
-what experiment comes next."""
+attempt can be made. Build the picture in layers: identify the game family,
+then the controls, object representation, rules/goals, and a strategy for
+continuing play. A single high-information probe should update every directly
+implicated claim and may open several layers at once. The final report must
+state what is known, unknown, which working hypotheses guide play, and what
+key experiment comes next."""
 
 P7_COGNITION_PROMPT = """You are Asterion-prime conducting a bounded semantic game-cognition
 exploration for one exact game and Level 1. This session is not an official
@@ -448,6 +462,14 @@ frame and the persisted semantic report. 先阅读工具结果最前面的
 attention; confidence is non-authoritative and every proposal remains
 `undetermined`, so omit `status` and `evidence`. On the first frame, propose
 several broad, falsifiable hypotheses even when their confidence differs:
+an open claim is still a usable working hypothesis. High confidence can guide
+planning before direct verification, so select probes for key claims that open
+larger parts of the game instead of assigning one action to every claim. Read
+the report's cognition layers, coverage, and hypothesis-review candidates to
+keep game identity, controls, object representation, rules/goals, and strategy
+connected while compressing duplicate or same-scope claims. Use an ASCII
+`hypothesis_group` only to mark mutually exclusive alternatives for review;
+it never changes status or grants action authority.
 describe the scene, the discrete action interface, and the currently unknown
 success condition before selecting a probe. Treat every supplied information
 point (the first frame, visible colors/shapes, available action names,

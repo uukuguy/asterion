@@ -639,6 +639,8 @@ _P7_ANSI = {
     "narrative": "0;37",
     "confirmed": "0;32",
     "pending": "0;33",
+    "coverage": "1;35",
+    "review": "0;35",
     "rejected": "0;31",
     "action": "0;36",
     "display": "1;34",
@@ -677,10 +679,14 @@ def _p7_narrative_role(line: str) -> str:
     text = line.strip()
     if text.startswith(("已确认：", "已确认另有")):
         return "confirmed"
-    if text.startswith(("待验证：", "待验证另有")):
+    if text.startswith(("高置信假说", "开放假说", "待验证：", "待验证另有")):
         return "pending"
     if text.startswith(("已否定：", "已否定另有")):
         return "rejected"
+    if text.startswith(("认识层次：", "认识覆盖：")):
+        return "coverage"
+    if text.startswith("假说整理："):
+        return "review"
     if text.startswith(("当前状态：", "本轮实验动作：")):
         return "display"
     if text.startswith(("最近动作：", "最新动作尚未分析", "下一步：")):
@@ -727,11 +733,59 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
                     for key in (
                         "id", "kind", "subject", "claim", "status", "confidence",
                         "evidence_count", "support_count", "counterexample_count",
-                        "next_test",
+                        "next_test", "hypothesis_group",
                     )
                 })
             if selected:
                 bounded_claims[str(group)] = selected
+    raw_review = value.get("hypothesis_review")
+    bounded_review: dict[str, object] = {}
+    if isinstance(raw_review, Mapping):
+        bounded_review["compression_needed"] = bool(raw_review.get("compression_needed"))
+        for review_key in ("duplicate_candidates", "same_scope_candidates", "mutually_exclusive_candidates"):
+            candidates = raw_review.get(review_key)
+            if not isinstance(candidates, list):
+                continue
+            bounded_candidates: list[dict[str, object]] = []
+            for candidate in candidates[:8]:
+                if not isinstance(candidate, Mapping):
+                    continue
+                claim_ids = candidate.get("claim_ids")
+                bounded_candidates.append({
+                    key: ([item for item in claim_ids[:16] if isinstance(item, str)] if key == "claim_ids" and isinstance(claim_ids, list) else str(candidate.get(key, ""))[:256])
+                    for key in ("claim_ids", "kind", "subject", "group", "reason")
+                    if key in candidate
+                })
+            bounded_review[review_key] = bounded_candidates
+    raw_coverage = value.get("coverage")
+    bounded_coverage = {
+        key: raw_coverage.get(key)
+        for key in (
+            "landscape_claim_count", "covered_kinds", "missing_kinds",
+            "landscape_ready", "high_confidence_open_count", "guidance_ready",
+        )
+        if isinstance(raw_coverage, Mapping) and key in raw_coverage
+    }
+    raw_layers = value.get("cognition_layers")
+    bounded_layers = []
+    if isinstance(raw_layers, list):
+        for layer in raw_layers[:8]:
+            if not isinstance(layer, Mapping):
+                continue
+            bounded_layers.append({
+                "id": str(layer.get("id", ""))[:64],
+                "label": str(layer.get("label", ""))[:128],
+                "claim_ids": [item for item in layer.get("claim_ids", [])[:32] if isinstance(item, str)] if isinstance(layer.get("claim_ids"), list) else [],
+                "status_counts": layer.get("status_counts", {}),
+            })
+    raw_guidance = value.get("guidance")
+    bounded_guidance = {}
+    if isinstance(raw_guidance, Mapping):
+        bounded_guidance = {
+            "working_hypothesis_ids": [item for item in raw_guidance.get("working_hypothesis_ids", [])[:64] if isinstance(item, str)],
+            "key_probe_candidates": [item for item in raw_guidance.get("key_probe_candidates", [])[:16] if isinstance(item, str)],
+            "principle": str(raw_guidance.get("principle", ""))[:512],
+        }
     result: dict[str, object] = {
         "schema": value.get("schema"),
         "scope": value.get("scope"),
@@ -739,6 +793,10 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
         "evidence_counts": value.get("evidence_counts", {}),
         "claims": bounded_claims,
         "natural_language_context": str(value.get("natural_language_context", ""))[:2048],
+        "coverage": bounded_coverage,
+        "cognition_layers": bounded_layers,
+        "guidance": bounded_guidance,
+        "hypothesis_review": bounded_review,
     }
     # Remove claims from the end of the largest bucket until the complete
     # projection (including scope and context) is below the hard cap.
