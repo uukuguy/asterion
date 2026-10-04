@@ -930,3 +930,5 @@
   the `certain` status required to keep this guide stable across reads. When
   three cardinal controls are confirmed, the fourth is emitted as a separate
   planning inference and remains open to ordinary-action falsification.
+  The display labels the next test as `P7规划建议` and filters confirmed
+  descriptions out of `关键未决问题`.

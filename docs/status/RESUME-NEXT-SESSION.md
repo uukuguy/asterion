@@ -14,6 +14,8 @@ A follow-up regression found that the 10 KiB compact cognition response dropped 
 
 `107615e7` adds a separate planning inference: after ACTION1, ACTION2, and ACTION4 are confirmed as up, down, and right, ACTION3 is treated as most likely left for route planning. It is explicitly provisional and is checked by a normal later action. The renderer regression suite passes 14 tests and lint passes.
 
+`560ca402` separates the model-facing `P7规划建议` from `关键未决问题` and filters duplicate open claims that already appear in stable cognition. A confirmed game description is no longer printed as an unresolved question; 38 narrative/bridge tests and lint pass.
+
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
 The latest console-readability fix is committed as `f6da52b7`. A new packaged SP80 L1 witness (`p7-live-20261003143813-de375e7b03c6c1d7851f0b93`) printed Chinese cognition at startup and after each action; the 301-line log had a maximum line size of 539 bytes and contained no `semantic_ledger`, `cognition-read`, `claim_changes`, or `natural_language_context` payloads. The run stopped after three actions because analysis referenced an unselected claim; completion remained 0 and no solve is claimed.
