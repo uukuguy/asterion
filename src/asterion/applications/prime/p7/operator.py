@@ -980,6 +980,9 @@ def _compact_cognition_session(value: object) -> dict[str, object]:
         for key in ("state", "episode", "episode_actions", "resets")
         if key in value
     }
+    event_sequence = _cognition_event_sequence(value)
+    if event_sequence:
+        compact["event_sequence"] = event_sequence
     nested_session = value.get("session")
     if isinstance(nested_session, Mapping):
         # CognitionSession.snapshot() is an envelope: the actionable control
@@ -991,6 +994,30 @@ def _compact_cognition_session(value: object) -> dict[str, object]:
         if "validation" in value:
             compact["validation"] = _bounded_validation(value.get("validation"))
     return compact
+
+
+def _cognition_event_sequence(value: object) -> int:
+    """Return the durable cognition snapshot sequence from full or compact state."""
+
+    if not isinstance(value, Mapping):
+        return 0
+    direct = value.get("event_sequence")
+    if type(direct) is int and direct >= 0:
+        return direct
+    events = value.get("events")
+    if isinstance(events, (list, tuple)):
+        return max(
+            (
+                event.get("sequence", 0)
+                for event in events
+                if isinstance(event, Mapping) and type(event.get("sequence")) is int
+            ),
+            default=0,
+        )
+    nested = value.get("session")
+    if isinstance(nested, Mapping):
+        return _cognition_event_sequence(nested)
+    return 0
 
 
 def _compact_planning_background(value: object, *, max_bytes: int = 48 * 1024) -> dict[str, object]:
@@ -1130,12 +1157,7 @@ def _log_cognition_narrative(
         f"phase={phase} episode={episode} actions={actions} state={state}"
     )
     session_id = str(session_state.get("session_id", ""))
-    events = cognition_session.get("events") if isinstance(cognition_session, Mapping) else None
-    event_sequence = 0
-    if isinstance(events, (list, tuple)):
-        for event in events:
-            if isinstance(event, Mapping) and type(event.get("sequence")) is int:
-                event_sequence = max(event_sequence, event["sequence"])
+    event_sequence = _cognition_event_sequence(cognition_session)
     snapshot_identity = f"event:{event_sequence}" if event_sequence else "state"
     fingerprint = (session_id, str(episode), str(actions), str(state), snapshot_identity)
     global _LAST_COGNITION_NARRATIVE_FINGERPRINT

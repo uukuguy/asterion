@@ -487,6 +487,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
     def test_compacted_session_preserves_validation_control(self):
         compacted = _compact_cognition_session({
             "state": "ANALYZED", "episode": 2, "episode_actions": 4, "resets": 1,
+            "events": [{"sequence": 9, "type": "cognition.snapshot"}],
             "validation": {
                 "needed": True, "possible": False, "reason": "no-actionable-hypotheses",
                 "actionable_claim_ids": ["a", 3, "b"],
@@ -498,6 +499,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
             "reason": "no-actionable-hypotheses",
             "actionable_claim_ids": ["a", "b"],
         })
+        self.assertEqual(compacted["event_sequence"], 9)
 
     def test_cognition_compaction_keeps_validation(self):
         class Broker:
