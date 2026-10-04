@@ -380,7 +380,7 @@ def render_cognition_narrative_zh(
         add("关键未决问题：" + unresolved)
     else:
         add("关键未决问题：当前没有待验证假说。")
-    if not claims:
+    if not claims and not _stable_claims(semantic):
         context = _prose(semantic.get("natural_language_context"), 360)
         add("现有描述：" + context if context else "当前尚无游戏特定认知；先观察对象、动作和目标。")
     return "\n".join([*lines, footer])

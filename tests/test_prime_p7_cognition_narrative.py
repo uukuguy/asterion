@@ -112,6 +112,8 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("ACTION2使颜色9横带向下移动四格", description)
         self.assertNotIn("可能", description)
         self.assertNotIn("历史原文", description)
+        narrative = render_cognition_narrative_zh(semantic, {"session": {"state": "READY"}})
+        self.assertNotIn("当前尚无游戏特定认知", narrative)
 
     def test_high_confidence_open_claims_and_hypothesis_review_are_explicit(self):
         semantic = {
