@@ -1,10 +1,14 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-04 08:10. **Session remains active — not a final handoff.**
+> Updated: 2026-10-04 10:20. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-The initial-context failure was traced to a hard-coded 16 KiB application budget in `_initial_game_context`, not to the `gpt-6.1-sol` context window. The active budget is now 64 KiB. A 14.8 KiB and a 20 KiB WorldMap projection remain available with stable cognition, and oversized optional projections degrade to explicit refresh instructions instead of a false host-service outage. The fixed packaged witness reached runtime and executed one action before operator cancellation; it still completed zero levels.
+The initial-context failure was traced to a hard-coded 16 KiB application budget in `_initial_game_context`, not to the `gpt-6.1-sol` context window. The active budget is now 64 KiB. The complete solver/backend input bound is now 256 KiB, so the observed 81 KiB prompt is accepted. A 14.8 KiB and a 20 KiB WorldMap projection remain available with stable cognition, and oversized optional projections degrade to explicit refresh instructions instead of a false host-service outage.
+
+Stable cognition is now compiled into one deduplicated gameplay guide with fixed slots for game type, objects, controls, rules, goal, and current play. It grows from explicit incomplete wording as evidence arrives. Hypotheses remain auxiliary planning evidence; contact or alignment candidates do not become stable goal facts without level progress or WIN.
+
+The latest packaged witness (`p7-live-20261004100259-0bc0e2a440bd9102209a17d2`) accepted an 81,450-byte initial prompt, reached the live model, executed 10 primitive actions, and refreshed cognition after settled feedback. It completed zero levels and stopped at native `_CallbackRejected` with failure code `prime-event-type` during `pi.prompt`; this is now the next runtime boundary to diagnose.
 
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
@@ -89,9 +93,10 @@ The latest packaged witness is `p7-live-20261004080327-994567c1588b71806de6eb4c`
 ## 下一动作
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
-2. Keep the committed console readability behavior; if more model progress is needed, investigate the latest rejected analysis (`analysis references an unselected claim`) separately from display.
-3. For the next live attempt, capture whether the model continues from the refreshed Chinese narrative through a level boundary; preserve startup/action `cognition-refresh` lines and record any rejected schema fields exactly.
-4. Record level result, current actions, RESET count and replay-prefix actions separately. If incomplete, report the actual stop cause and persist the latest cognition; do not promote the unsuccessful witness to a solve.
+2. Investigate the native `_CallbackRejected` `prime-event-type` after the 10-action witness. Identify the emitted event type from the Pi/native trace before widening any event allowlist.
+3. Keep the gameplay-guide renderer as the model-facing WorldMap summary. If more model progress is needed, preserve the fixed slots and update only the slot supported by new evidence.
+4. For the next live attempt, capture whether the model continues from the refreshed Chinese guide through a level boundary; preserve startup/action cognition refresh lines and record rejected schema fields exactly.
+5. Record level result, current actions, RESET count, replay-prefix actions, and native failure stage separately. If incomplete, report the actual stop cause and persist the latest cognition; do not promote the unsuccessful witness to a solve.
 
 ## Ready-to-paste commands
 

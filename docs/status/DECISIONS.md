@@ -905,3 +905,25 @@
 - Decision: The P7 initial model-facing context uses a finite 64 KiB application budget. It is separate from the model context window and from 16 KiB caps on single cognition reports, history pages, and bridge payloads. When the initial context exceeds 64 KiB, preserve the Chinese stable cognition and settled broker state, then omit optional projections with an explicit refresh instruction.
 - Rationale: The former 16 KiB initial-context cap was an inherited transport safeguard, not a `gpt-6.1-sol` capability limit. A real packaged witness showed that it rejected a valid stable-cognition plus WorldMap context before runtime and misreported the condition as unavailable host services. A larger finite budget uses available model capacity while keeping prompt growth bounded and degradation readable.
 - Evidence: `_P7_INITIAL_CONTEXT_BYTES = 64 * 1024`; the regression suite preserves 14.8 KiB and 20 KiB WorldMap projections, keeps a 64×64 board and model projection, and retains bounded fallback behavior. The fixed packaged witness reached runtime and executed one action before operator cancellation; it did not complete a level.
+
+## D-2026-10-04-02 — Compile stable cognition into a gameplay guide
+
+- Status: 🟢 active.
+- Decision: Render stable cognition as one short, deduplicated gameplay guide
+  with fixed slots for game type, objects, controls, rules, goal, and current
+  play. Keep the claim ledger and hypotheses as evidence and planning support.
+  Do not promote contact or alignment guesses into the goal slot without
+  authoritative level progress or WIN evidence.
+- Rationale: A list of claim confirmations is difficult to read and does not
+  give P7 a usable world description. A player can start with an incomplete
+  guide and improve it after meaningful observations; P7 should use the same
+  progression.
+- Consequence: Missing guide slots use explicit incomplete wording. One
+  canonical sentence is selected per slot, while full evidence remains
+  queryable. The solver and backend accept a bounded 256 KiB complete prompt;
+  the 64 KiB initial-context budget remains separate.
+- Evidence: `cognition_narrative.py`, its deduplication regressions, and the
+  packaged witness `p7-live-20261004100259-0bc0e2a440bd9102209a17d2` reached
+  10 real actions with post-action cognition updates and zero completed levels;
+  it stopped on native `_CallbackRejected` (`prime-event-type`) after the
+  context-cap rejection was removed.
