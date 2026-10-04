@@ -679,7 +679,7 @@ def _p7_narrative_role(line: str) -> str:
     text = line.strip()
     if text.startswith(("已确认：", "已确认另有")):
         return "confirmed"
-    if text.startswith(("高置信假说", "开放假说", "待验证：", "待验证另有")):
+    if text.startswith(("高置信工作假说", "开放假说", "待验证：", "待验证另有")):
         return "pending"
     if text.startswith(("已否定：", "已否定另有")):
         return "rejected"

@@ -17,7 +17,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertTrue(result.startswith("当前游戏认知"))
         self.assertIn("第 1 关", result)
         self.assertIn("已确认", result)
-        self.assertIn("待验证", result)
+        self.assertIn("开放假说", result)
         self.assertIn("横条上移，关卡没有增加", result)
         self.assertIn("最近动作：ACTION1 已执行，画面发生变化", result)
         self.assertIn("下一步", result)
@@ -72,7 +72,7 @@ class TestCognitionNarrative(unittest.TestCase):
             "coverage": {"landscape_claim_count": 1, "covered_kinds": ["control"], "missing_kinds": ["game_type"]},
         }
         result = render_cognition_narrative_zh(semantic, {"session": {"state": "READY"}})
-        self.assertIn("高置信假说", result)
+        self.assertIn("高置信工作假说", result)
         self.assertIn("假说整理", result)
         self.assertIn("认识覆盖", result)
         self.assertIn("不要求逐条动作验证", result)

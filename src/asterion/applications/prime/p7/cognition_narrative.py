@@ -79,8 +79,8 @@ def _claim_label(claim: Mapping, status: str) -> str:
         return "已否定"
     confidence = claim.get("confidence", 0.0)
     if type(confidence) in (int, float) and float(confidence) >= 0.75:
-        return "高置信假说（待验证）"
-    return "开放假说（待验证）"
+        return "高置信工作假说（可用于规划）"
+    return "开放假说（待证实）"
 
 
 def render_cognition_narrative_zh(
