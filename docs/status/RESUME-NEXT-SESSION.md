@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-04. **Session remains active — not a final handoff.**
+> Updated: 2026-10-04 08:10. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -29,6 +29,10 @@ The working-set correction is `2acac222`: the prior witness ended unsuccessful w
 The confirmed-knowledge correction is `1bd95bbc`: evidence-backed claims now receive deterministic wording and appear in `confirmed_knowledge`, the stable planning layer for P7. Original tentative wording remains under `hypothesis`; P7 should reopen a confirmed rule only after a counterexample.
 
 The latest log-focus correction keeps stable game knowledge visible at the top of every cognition narrative, grouped by category; action feedback follows; hypotheses are reduced to counts, one key unresolved question, and a few planning suggestions. Full hypothesis history remains queryable in the private JSONL.
+
+The latest stable-description change is `849c21cd`, with deterministic wording hardening in `b2123818`: `stable_game_description_zh` is now the main WorldMap text for P7, grouped into short Chinese sentences for game type, objects, controls, rules, goals, and planning. Raw confirmed claims and complete hypothesis evidence remain queryable. Focused P7 cognition, bridge, narrative, and broker tests passed 124 tests; lint and docs-check passed.
+
+The latest packaged witness is `p7-live-20261004080327-994567c1588b71806de6eb4c`. It displayed the stable description first and injected it into startup planning context, but host services became unavailable before actions. The receipt is unsuccessful with zero completed levels and zero primitive actions; no solve is established.
 
 
 ## 已验证事实
