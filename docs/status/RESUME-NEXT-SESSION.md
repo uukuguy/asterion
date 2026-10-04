@@ -28,6 +28,8 @@ The working-set correction is `2acac222`: the prior witness ended unsuccessful w
 
 The confirmed-knowledge correction is `1bd95bbc`: evidence-backed claims now receive deterministic wording and appear in `confirmed_knowledge`, the stable planning layer for P7. Original tentative wording remains under `hypothesis`; P7 should reopen a confirmed rule only after a counterexample.
 
+The latest log-focus correction keeps stable game knowledge visible at the top of every cognition narrative, grouped by category; action feedback follows; hypotheses are reduced to counts, one key unresolved question, and a few planning suggestions. Full hypothesis history remains queryable in the private JSONL.
+
 
 ## 已验证事实
 

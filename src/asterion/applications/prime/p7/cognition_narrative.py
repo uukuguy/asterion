@@ -6,6 +6,14 @@ from collections.abc import Mapping
 import unicodedata
 
 _KINDS = ("game_type", "object_role", "control", "success_condition", "rule", "strategy")
+_KIND_LABELS = {
+    "game_type": "游戏类型",
+    "object_role": "画面物件",
+    "control": "动作操作",
+    "rule": "游戏规则",
+    "success_condition": "过关条件",
+    "strategy": "规划背景",
+}
 _STATES = {
     "OBSERVE": "观察中", "PROPOSE": "已提出假设", "READY": "可尝试解题（不代表已理解全部规则）",
     "EXPERIMENT_SELECTED": "已选实验，等待动作", "ACTION_EXECUTED": "动作已执行，等待分析",
@@ -182,6 +190,30 @@ def render_cognition_narrative_zh(
     def add(line: str) -> None:
         if len(("\n".join([*lines, line, footer])).encode()) <= max_bytes:
             lines.append(line)
+    stable_claims: list[Mapping] = []
+    stable_seen: set[str] = set()
+    raw_stable = confirmed_knowledge or [c for c in claims if c.get("status") == "certain"]
+    for claim in raw_stable:
+        if not isinstance(claim, Mapping):
+            continue
+        text = _claim_prose(claim)
+        key = " ".join(text.split())
+        if not text or key in stable_seen:
+            continue
+        stable_seen.add(key)
+        stable_claims.append(claim)
+    if stable_claims:
+        add(f"稳定游戏认知（规划背景）：已确认 {len(stable_claims)} 条。")
+        # The private JSONL keeps the complete ledger.  Console output always
+        # stays focused, including the refresh path that asks for `complete`.
+        stable_limit = min(12, len(stable_claims))
+        for claim in stable_claims[:stable_limit]:
+            kind = _KIND_LABELS.get(str(claim.get("kind")), "游戏认识")
+            add(f"{kind}：{_claim_prose(claim)}")
+        if len(stable_claims) > stable_limit:
+            add(f"稳定游戏认知其余 {len(stable_claims) - stable_limit} 条已保留，可按需查询。")
+    else:
+        add("稳定游戏认知（规划背景）：当前暂无经证据支持的固定规则。")
     if layers:
         layer_labels = [
             _text(item.get("label"), 48)
@@ -214,25 +246,34 @@ def render_cognition_narrative_zh(
         )
     else:
         add("假说整理：当前未发现需要压缩或标记互斥的候选组。")
-    if confirmed_knowledge:
-        add(
-            f"固定游戏认识：已确认 {len(confirmed_knowledge)} 条；这些内容是当前规划背景，"
-            "除非出现反例，不再按开放假说重复探索。"
-        )
     if latest:
         add("最近反馈：" + latest)
     if recent_action:
         add("最近动作：" + recent_action)
     if state == "ACTION_EXECUTED":
         add("最新动作尚未分析，不能把预期当作已确认事实。")
-    for status, label, count in (("certain", "已确认", 4), ("undetermined", None, 6), ("falsified", "已否定", 2)):
-        selected = [c for c in claims if c.get("status") == status]
-        if not selected and status == "certain":
-            add("已确认：暂无经证据支持的游戏规则。")
-        visible = selected if complete else selected[:count]
-        for claim in visible:
-            claim_label = label or _claim_label(claim, status)
-            add(f"{claim_label}：{_claim_prose(claim)}")
+    strategy_claims = [c for c in claims if c.get("kind") == "strategy"]
+    if strategy_claims:
+        add("当前规划建议：")
+        strategy_limit = min(3, len(strategy_claims))
+        for claim in strategy_claims[:strategy_limit]:
+            add(f"工作策略（可用于规划）：{_claim_prose(claim)}")
+    open_claims = [
+        c for c in claims
+        if c.get("status") == "undetermined" and c.get("kind") != "strategy"
+    ]
+    high_open = [c for c in open_claims if type(c.get("confidence")) in (int, float) and float(c.get("confidence")) >= 0.75]
+    add(
+        f"探索假说（辅助）：当前活动 {len(open_claims)} 条，高置信 {len(high_open)} 条；"
+        "只用于补足未知，不作为已确认规则。"
+    )
+    if open_claims:
+        recent_open = [c for c in open_claims if c.get("id") in recent_ids]
+        non_bootstrap = [c for c in open_claims if not str(c.get("id", "")).startswith("bootstrap-")]
+        unresolved = question or _claim_prose((recent_open or non_bootstrap or open_claims)[0])
+        add("关键未决问题：" + unresolved)
+    else:
+        add("关键未决问题：当前没有待验证假说。")
     if not claims:
         context = _prose(semantic.get("natural_language_context"), 360)
         add("现有描述：" + context if context else "当前尚无游戏特定认知；先观察对象、动作和目标。")

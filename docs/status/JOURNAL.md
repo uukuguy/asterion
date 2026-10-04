@@ -3608,3 +3608,6 @@
 - 2026-10-04 Reduced console color emphasis to labels and separated strategy guidance from factual hypotheses; 31 renderer/bridge tests and lint passed. [7fcd35a3]
 - 2026-10-04 Compacted P7 into a 34-item layered working set while preserving the full semantic ledger for explicit queries; 170 focused tests, lint, docs-check passed. [2acac222]
 - 2026-10-04 Promoted evidence-backed claims into deterministic `confirmed_knowledge` for P7 planning; tentative wording remains available as audit history. 171 focused tests passed. [1bd95bbc]
+
+## 2026-10-04
+- 2026-10-04 将控制台认知改为稳定游戏认知置顶、动作变化次之、假说压缩摘要；完整假说继续保留在私有查询记录，104 个相关测试、lint、docs-check 通过。

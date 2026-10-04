@@ -17,7 +17,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertTrue(result.startswith("当前游戏认知"))
         self.assertIn("第 1 关", result)
         self.assertIn("已确认", result)
-        self.assertIn("开放假说", result)
+        self.assertIn("探索假说（辅助）", result)
         self.assertIn("横条上移，关卡没有增加", result)
         self.assertIn("最近动作：ACTION1 已执行，画面发生变化", result)
         self.assertIn("下一步", result)
@@ -47,15 +47,46 @@ class TestCognitionNarrative(unittest.TestCase):
             for index in range(5)
         ]
         result = render_cognition_narrative_zh(
-            {"scope": {"level": 0}, "claims": {"control": claims[:5], "strategy": claims[5:]}},
+            {
+                "scope": {"level": 0},
+                "claims": {"control": claims[:5], "strategy": claims[5:]},
+                "confirmed_knowledge": claims[:5],
+            },
             None,
             max_bytes=8192,
             complete=True,
         )
         for index in range(5):
             self.assertIn(f"已确认规则{index}", result)
-            self.assertIn(f"待验证假设{index}", result)
-            self.assertNotIn("另有", result)
+        self.assertIn("探索假说（辅助）", result)
+        self.assertNotIn("待验证假设4", result)
+
+    def test_stable_game_knowledge_is_primary_and_hypotheses_are_compact(self):
+        stable = [
+            {"id": "scene", "kind": "game_type", "claim": "这是网格移动谜题。", "status": "certain"},
+            {"id": "move", "kind": "control", "claim": "ACTION2使横带向下移动四格。", "status": "certain"},
+            {"id": "goal", "kind": "success_condition", "claim": "过关条件尚未完全确定。", "status": "certain"},
+        ]
+        hypotheses = [
+            {"id": f"open-{index}", "kind": "success_condition", "claim": f"待验证假设{index}", "status": "undetermined"}
+            for index in range(20)
+        ]
+        result = render_cognition_narrative_zh(
+            {
+                "scope": {"level": 0},
+                "claims": {"game_type": [stable[0]], "control": [stable[1]], "success_condition": [stable[2], *hypotheses]},
+                "confirmed_knowledge": stable,
+                "coverage": {"landscape_claim_count": 23, "active_landscape_claim_count": 23},
+            },
+            {"session": {"state": "READY"}},
+            max_bytes=8192,
+            complete=True,
+        )
+        self.assertLess(result.index("稳定游戏认知（规划背景）"), result.index("探索假说（辅助）"))
+        self.assertIn("游戏类型：这是网格移动谜题。", result)
+        self.assertIn("动作操作：ACTION2使横带向下移动四格。", result)
+        self.assertIn("关键未决问题：", result)
+        self.assertNotIn("待验证假设19", result)
 
     def test_high_confidence_open_claims_and_hypothesis_review_are_explicit(self):
         semantic = {
@@ -72,7 +103,7 @@ class TestCognitionNarrative(unittest.TestCase):
             "coverage": {"landscape_claim_count": 1, "covered_kinds": ["control"], "missing_kinds": ["game_type"]},
         }
         result = render_cognition_narrative_zh(semantic, {"session": {"state": "READY"}})
-        self.assertIn("高置信工作假说", result)
+        self.assertIn("探索假说（辅助）：当前活动 1 条，高置信 1 条", result)
         self.assertIn("假说整理", result)
         self.assertIn("认识覆盖", result)
         self.assertIn("不要求逐条动作验证", result)
@@ -85,6 +116,7 @@ class TestCognitionNarrative(unittest.TestCase):
             }]}},
             None,
         )
+        self.assertIn("当前规划建议：", result)
         self.assertIn("工作策略（可用于规划）", result)
         self.assertNotIn("工作假说（可用于规划）", result)
 
