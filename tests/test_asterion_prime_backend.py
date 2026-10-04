@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from asterion.agents.prime.backend import (
+    _PRIME_PROMPT_BYTES,
     PrimeBackendError,
     PrimePromptRequest,
     PrimeSessionBackend,
@@ -445,7 +446,8 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.rpc.calls, 0)
 
     def test_invalid_private_prompt_is_redacted(self):
-        for text in ("\ud800PRIVATE", "x" * (65536 + 1)):
+        self.request(text="x" * 200_000)
+        for text in ("\ud800PRIVATE", "x" * (_PRIME_PROMPT_BYTES + 1)):
             with self.subTest(size=len(text)), self.assertRaises(PrimeBackendError):
                 self.request(text=text)
 

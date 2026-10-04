@@ -30,6 +30,7 @@ CAPABILITY_REF = CapabilityRef("prime.arc-agi-3-solving", "1.0.0")
 _ARTIFACT_ID = "prime.p7-solving.receipt"
 _MEDIA_TYPE = "application/vnd.asterion.prime.p7-solving-receipt+json"
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_P7_INPUT_BYTES = 256 * 1024
 
 
 def _valid_p7_input(value: object) -> bool:
@@ -37,7 +38,7 @@ def _valid_p7_input(value: object) -> bool:
     if type(value) is not str or not value.strip():
         return False
     try:
-        return len(value.encode("utf-8", "strict")) <= 65536
+        return len(value.encode("utf-8", "strict")) <= _P7_INPUT_BYTES
     except UnicodeError:
         return False
 

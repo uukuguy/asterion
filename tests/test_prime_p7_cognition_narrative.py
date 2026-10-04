@@ -61,9 +61,37 @@ class TestCognitionNarrative(unittest.TestCase):
         )
         self.assertIn("稳定游戏认知（规划背景）", result)
         self.assertIn("动作操作：", result)
-        self.assertIn("已编入描述：5 条", result)
+        self.assertNotIn("已编入描述：", result)
         self.assertIn("探索假说（辅助）", result)
         self.assertNotIn("待验证假设4", result)
+
+    def test_stable_description_is_a_deduplicated_play_guide(self):
+        result = render_stable_game_description_zh(
+            {
+                "confirmed_knowledge": [
+                    {"id": "current-grid-band-game", "kind": "game_type", "status": "certain"},
+                    {"id": "fresh-grid-band-game", "kind": "game_type", "status": "certain"},
+                    {"id": "current-color9-actor", "kind": "object_role", "status": "certain"},
+                    {"id": "fresh-band-role", "kind": "object_role", "status": "certain"},
+                    {"id": "l0_object_roles", "kind": "object_role", "status": "certain"},
+                    {"id": "action2_down_current", "kind": "control", "status": "certain"},
+                    {"id": "witness_down", "kind": "control", "status": "certain"},
+                    {"id": "prime26-bar-fourcell", "kind": "rule", "status": "certain"},
+                    {"id": "movement-lattice-current", "kind": "rule", "status": "certain"},
+                    {"id": "l0-target-alignment", "kind": "strategy", "status": "certain"},
+                ]
+            }
+        )
+        self.assertEqual(result.count("游戏类型："), 1)
+        self.assertEqual(result.count("画面物件："), 1)
+        self.assertEqual(result.count("动作操作："), 1)
+        self.assertEqual(result.count("游戏规则："), 1)
+        self.assertEqual(result.count("过关条件："), 1)
+        self.assertEqual(result.count("当前玩法："), 1)
+        self.assertEqual(result.count("ACTION2使颜色9横带向下移动四格。"), 1)
+        self.assertNotIn("已编入描述：", result)
+        self.assertIn("过关条件：尚未完全确定", result)
+        self.assertLessEqual(len(result.encode()), 4096)
 
     def test_stable_game_knowledge_is_primary_and_hypotheses_are_compact(self):
         stable = [
@@ -89,7 +117,7 @@ class TestCognitionNarrative(unittest.TestCase):
         )
         self.assertLess(result.index("稳定游戏认知（规划背景）"), result.index("探索假说（辅助）"))
         self.assertIn("游戏类型：这是网格移动谜题。", result)
-        self.assertIn("动作操作：ACTION2使横带向下移动四格。", result)
+        self.assertIn("ACTION2使横带向下移动四格。", result)
         self.assertNotIn("开放时ACTION1可能", result)
         self.assertIn("关键未决问题：", result)
         self.assertNotIn("待验证假设19", result)

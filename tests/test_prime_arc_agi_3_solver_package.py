@@ -76,13 +76,14 @@ class TestPrimeArcAgi3SolveReceipt(unittest.TestCase):
     def test_capability_validates_input_bounds_without_owning_prompt(self) -> None:
         self.assertTrue(solver_provider._valid_p7_input(P7_SOLVE_PROMPT))
         self.assertTrue(solver_provider._valid_p7_input("another application task"))
+        self.assertTrue(solver_provider._valid_p7_input("x" * 200_000))
         receipt = PrimeArcAgi3SolveReceipt.create(
             run_id="native-reject",
             completed_level_count=1,
             primitive_action_count=2,
             partial_game_score="1.000000",
         )
-        for rejected in ("", "  ", "x" * 65537):
+        for rejected in ("", "  ", "x" * (solver_provider._P7_INPUT_BYTES + 1)):
             with self.subTest(rejected=rejected):
                 runtime = _NativeRuntime(receipt)
                 invocation = CapabilityInvocation(

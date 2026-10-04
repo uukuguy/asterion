@@ -108,6 +108,32 @@ _KNOWN_NEXT_TESTS_ZH = {
     "bootstrap-success-condition": "测试一次有信息量的动作，并观察关卡和终止信号。",
 }
 
+_PREFERRED_IDS = {
+    "game_type": (
+        "l1_scene_band_puzzle", "current-grid-band-game", "fresh-l0-grid",
+        "fresh-grid-band-game", "fresh-game-grid-band", "gt-bar-alignment-arcade",
+    ),
+    "object_role": (
+        "l0_object_roles", "current_band_actor", "current-color9-actor",
+        "fresh-band-role", "fresh-color9-role", "band-player", "band-role-current",
+    ),
+    "rule": (
+        "l1-cardinal-lattice", "prime26-bar-fourcell", "l0-open-move",
+        "movement-lattice-current", "session-cardinal-step",
+    ),
+    "strategy": (
+        "l0-target-alignment", "l0-upward-route", "l1-route-upward",
+        "align_interact_goal", "route-current", "current-stepwise-route",
+    ),
+}
+_ACTION_PREFERRED_IDS = {
+    "ACTION1": ("action1_up_current", "current-action1-up", "level1-action1-up-current", "current_up", "fresh-l0-move"),
+    "ACTION2": ("action2_down_current", "level1-action2-down", "witness_down", "rule-action2-repeatable-down"),
+    "ACTION3": ("action3_left_current", "rule-action3-repeatable-left"),
+    "ACTION4": ("action4_right_test", "ap2026_right", "l0-action4-right", "level1-action4-horizontal", "l1_action4_right", "prime-right"),
+}
+_ACTION_WORDS = {"ACTION1": "向上", "ACTION2": "向下", "ACTION3": "向左", "ACTION4": "向右"}
+
 
 def _text(value: object, limit: int = 180) -> str:
     if not isinstance(value, str):
@@ -162,6 +188,71 @@ def _stable_claims(semantic: Mapping) -> list[Mapping]:
     return result
 
 
+def _stable_sentence(claim: Mapping) -> str:
+    """Return only confirmed, translated prose suitable for the stable guide."""
+
+    if claim.get("status") != "certain":
+        return ""
+    sentence = _ste_sentence(_claim_prose(claim))
+    if not sentence or sentence.startswith("〔历史原文"):
+        return ""
+    if any(marker in sentence for marker in ("可能", "也许", "或许")):
+        return ""
+    return sentence
+
+
+def _pick_sentence(claims: list[Mapping], kind: str) -> str:
+    preferred = {claim_id: index for index, claim_id in enumerate(_PREFERRED_IDS.get(kind, ()), start=1)}
+    candidates = [
+        (preferred.get(str(claim.get("id")), 10_000), -int(claim.get("evidence_count", 0)), _stable_sentence(claim))
+        for claim in claims
+    ]
+    candidates = [item for item in candidates if item[2]]
+    if not candidates:
+        return ""
+    return min(candidates)[2]
+
+
+def _action_name(claim: Mapping, sentence: str) -> str:
+    claim_id = str(claim.get("id", ""))
+    for action in _ACTION_WORDS:
+        if action in claim_id.upper() or action in sentence.upper():
+            return action
+    return ""
+
+
+def _pick_actions(claims: list[Mapping]) -> list[str]:
+    selected: dict[str, tuple[int, str]] = {}
+    for claim in claims:
+        sentence = _stable_sentence(claim)
+        action = _action_name(claim, sentence)
+        if not action or not sentence:
+            continue
+        preferred = {claim_id: index for index, claim_id in enumerate(_ACTION_PREFERRED_IDS.get(action, ()), start=1)}
+        score = preferred.get(str(claim.get("id")), 10_000)
+        previous = selected.get(action)
+        if previous is None or score < previous[0]:
+            selected[action] = (score, sentence)
+    return [selected[action][1] for action in _ACTION_WORDS if action in selected]
+
+
+def _goal_sentence(claims: list[Mapping]) -> str:
+    """Only runtime completion evidence can populate a stable goal fact."""
+
+    for claim in claims:
+        sentence = _stable_sentence(claim)
+        evidence = claim.get("evidence")
+        if not sentence or not isinstance(evidence, (list, tuple)):
+            continue
+        references = {
+            str(item.get("reference")) for item in evidence
+            if isinstance(item, Mapping) and item.get("status") == "certain"
+        }
+        if references.intersection({"runtime.levels_completed", "runtime.WIN", "runtime.win"}):
+            return sentence
+    return ""
+
+
 def _ste_sentence(value: str) -> str:
     """Keep the readable surface short: one subject and one action per line."""
 
@@ -174,32 +265,29 @@ def _ste_sentence(value: str) -> str:
 
 
 def render_stable_game_description_zh(semantic: object, *, max_bytes: int = 4096) -> str:
-    """Compile confirmed claims into the short Chinese WorldMap description."""
+    """Compile confirmed evidence into one evolving Chinese gameplay guide."""
 
     if not isinstance(semantic, Mapping):
         return "稳定游戏认知（规划背景）\n当前没有可用的已确认游戏规则。"
     stable = _stable_claims(semantic)
-    lines = ["稳定游戏认知（规划背景）", "以下句子来自已确认观察。它们是当前规划的主要背景。"]
-    if not stable:
-        lines.append("当前没有可用的已确认游戏规则。")
-        return "\n".join(lines)
-    grouped: dict[str, list[str]] = {kind: [] for kind in _KINDS}
-    rendered_count = 0
-    for claim in stable:
-        sentence = _ste_sentence(_claim_prose(claim))
-        # A confirmed surface must not repeat tentative wording.  Keep that
-        # wording in the underlying ledger until a deterministic translation
-        # or a new observation makes it suitable for the stable description.
-        if sentence and not any(marker in sentence for marker in ("可能", "也许", "或许")):
-            grouped.setdefault(str(claim.get("kind")), []).append(sentence)
-            rendered_count += 1
-    for kind in _KINDS:
-        sentences = grouped.get(kind, [])
-        if not sentences:
-            continue
-        label = _KIND_LABELS.get(kind, "游戏认识")
-        lines.append(f"{label}：" + " ".join(sentences[:4]))
-    lines.append(f"已编入描述：{rendered_count} 条。其余证据保留在认知记录中。")
+    by_kind = {kind: [claim for claim in stable if claim.get("kind") == kind] for kind in _KINDS}
+    lines = ["稳定游戏认知（规划背景）", "以下内容是当前已确认的玩法介绍。缺少的部分会随实测逐步补全。"]
+    game = _pick_sentence(by_kind["game_type"], "game_type")
+    objects = _pick_sentence(by_kind["object_role"], "object_role")
+    actions = _pick_actions(by_kind["control"])
+    rule = _pick_sentence(by_kind["rule"], "rule")
+    goal = _goal_sentence(by_kind["success_condition"])
+    strategy = _pick_sentence(by_kind["strategy"], "strategy")
+    lines.append("游戏类型：" + (game or "当前类型尚未完全确定。"))
+    lines.append("画面物件：" + (objects or "可控对象和固定结构尚未完全确定。"))
+    if actions:
+        lines.append("动作操作：" + " ".join(actions) + " 未确认的方向会在后续观察中补全。")
+    else:
+        lines.append("动作操作：方向动作的具体作用尚未确定。")
+    lines.append("游戏规则：" + (rule or "移动限制和碰撞规则尚未完全确定。"))
+    lines.append("过关条件：" + (goal or "尚未完全确定；只有关卡数增加或 WIN 才能确认过关。"))
+    if strategy:
+        lines.append("当前玩法：" + strategy)
     result = "\n".join(lines)
     while len(result.encode()) > max_bytes and len(lines) > 3:
         lines.pop(-2)

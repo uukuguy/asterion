@@ -46,10 +46,15 @@ from asterion.control.session_context import (
     SessionContextCommand,
     SessionContextReceipt,
 )
+
+
 from asterion.runtime.host import CancellationSignal, RunRequest
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcCompactResult, PiRpcEvent, PiRpcSession
 from asterion.services.diagnostics import DiagnosticSink, capture_failure
+
+
+_PRIME_PROMPT_BYTES = 256 * 1024
 
 
 class PrimeBackendError(RuntimeError):
@@ -122,7 +127,7 @@ class PrimePromptRequest:
         if type(self.input_text) is not str or not self.input_text:
             raise PrimeBackendError("Prime backend prompt is invalid")
         try:
-            if len(self.input_text.encode()) > 65536:
+            if len(self.input_text.encode()) > _PRIME_PROMPT_BYTES:
                 raise ValueError
         except (ValueError, UnicodeError):
             raise PrimeBackendError("Prime backend prompt is invalid") from None
