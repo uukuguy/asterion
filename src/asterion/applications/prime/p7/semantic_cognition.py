@@ -385,10 +385,11 @@ class SemanticCognitionStore:
         if status == "certain":
             original_claim = value.get("original_claim", result["claim"])
             result["original_claim"] = _text(original_claim, "original claim")
-            result["canonical_claim"] = _text(
-                value.get("canonical_claim", _certainty_claim(result["claim"])),
-                "canonical claim",
-            )
+            # Rebuild the deterministic wording on every load.  Older ledgers
+            # may contain a tentative canonical string from before promotion
+            # rules were tightened; persisted text must not reintroduce modal
+            # wording into the stable game-knowledge layer.
+            result["canonical_claim"] = _certainty_claim(result["original_claim"])
         if "context" in value:
             result["context"] = _text(value["context"], "context", required=False)
         if "hypothesis_group" in value:

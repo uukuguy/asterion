@@ -286,6 +286,31 @@ class SemanticCognitionTests(unittest.TestCase):
             self.assertNotIn("可能", claim["claim"])
             self.assertEqual(store.full_report()["all_claims"]["certain"][0]["claim"], claim["claim"])
 
+    def test_loading_old_confirmed_claim_rebuilds_deterministic_wording(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = self._store(root)
+            store.propose({"claims": [{
+                "id": "action1-up", "kind": "control", "subject": "ACTION1",
+                "claim": "开放时ACTION1可能使横带向上移动四格。",
+                "reason": "历史动作记录支持该方向。", "falsifier": "横带没有向上移动。",
+                "next_test": "检查ACTION1的实际位移。",
+            }]})
+            store.resolve(
+                "action1-up", status="certain", evidence="runtime.frame.3",
+                explanation="动作后横带向上移动四格。",
+            )
+            path = root / ".asterion-private" / "prime-p7-live" / "semantic-cognition.json"
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            record = payload["records"]["synthetic-game|0|2|0"]
+            record["claims"]["action1-up"]["canonical_claim"] = "开放时ACTION1可能使横带向上移动四格。"
+            path.write_text(json.dumps(payload), encoding="utf-8")
+
+            reloaded = self._store(root)
+            claim = next(item for item in reloaded.report()["claims"]["certain"] if item["id"] == "action1-up")
+            self.assertEqual(claim["claim"], "开放时ACTION1使横带向上移动四格。")
+            self.assertNotIn("可能", claim["claim"])
+
     def test_duplicate_evidence_reference_is_rejected_atomically(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             store = self._store(Path(directory))
