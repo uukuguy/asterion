@@ -10,6 +10,8 @@ Stable cognition is now compiled into one deduplicated gameplay guide with fixed
 
 The latest packaged witness (`p7-live-20261004100259-0bc0e2a440bd9102209a17d2`) accepted an 81,450-byte initial prompt, reached the live model, executed 10 primitive actions, and refreshed cognition after settled feedback. It completed zero levels and stopped at native `_CallbackRejected` with failure code `prime-event-type` during `pi.prompt`; this is now the next runtime boundary to diagnose.
 
+A follow-up regression found that the 10 KiB compact cognition response dropped `status` from `confirmed_knowledge`, so later reads temporarily showed an empty guide. `c1e1c98f` preserves that status and keeps the stable description across compact refreshes; 222 focused P7 tests, lint, docs-check, and diff-check pass.
+
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
 The latest console-readability fix is committed as `f6da52b7`. A new packaged SP80 L1 witness (`p7-live-20261003143813-de375e7b03c6c1d7851f0b93`) printed Chinese cognition at startup and after each action; the 301-line log had a maximum line size of 539 bytes and contained no `semantic_ledger`, `cognition-read`, `claim_changes`, or `natural_language_context` payloads. The run stopped after three actions because analysis referenced an unselected claim; completion remained 0 and no solve is claimed.
@@ -94,7 +96,7 @@ The latest packaged witness is `p7-live-20261004080327-994567c1588b71806de6eb4c`
 
 1. Read the contract and resume state; inspect git/process state. Use the configured Pi Codex subscription (`gpt-6.1-sol`), never OpenRouter, and keep exact-route injection disabled.
 2. Investigate the native `_CallbackRejected` `prime-event-type` after the 10-action witness. Identify the emitted event type from the Pi/native trace before widening any event allowlist.
-3. Keep the gameplay-guide renderer as the model-facing WorldMap summary. If more model progress is needed, preserve the fixed slots and update only the slot supported by new evidence.
+3. Keep the gameplay-guide renderer as the model-facing WorldMap summary. Compact refreshes now retain confirmed statuses; update only the slot supported by new evidence.
 4. For the next live attempt, capture whether the model continues from the refreshed Chinese guide through a level boundary; preserve startup/action cognition refresh lines and record rejected schema fields exactly.
 5. Record level result, current actions, RESET count, replay-prefix actions, and native failure stage separately. If incomplete, report the actual stop cause and persist the latest cognition; do not promote the unsuccessful witness to a solve.
 

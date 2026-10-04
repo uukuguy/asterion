@@ -926,4 +926,5 @@
   packaged witness `p7-live-20261004100259-0bc0e2a440bd9102209a17d2` reached
   10 real actions with post-action cognition updates and zero completed levels;
   it stopped on native `_CallbackRejected` (`prime-event-type`) after the
-  context-cap rejection was removed.
+  context-cap rejection was removed. Compact cognition refreshes now preserve
+  the `certain` status required to keep this guide stable across reads.
