@@ -898,3 +898,10 @@
 - Rationale: Familiarity grows through playing; complete knowledge is neither available nor necessary for early levels. Stored experience is semantic understanding and evidence, not a copied successful route.
 - Integration: `planning_background` combines current cognition, WorldMap, simulator and retrodiction after observe/action/update. It remains advisory (`execution_authority=none`); action validation remains at the broker. RESET clears episode-local state while preserving semantic cognition.
 - Evidence: design contract `docs/architecture/prime-p7-cognition-and-experience.md`; implementation `07223470`, aggregate response fix `0b248e4e`; 205 focused Python tests and independent final review PASS. One SP80 L1 experiment ran and updated claims; sustained solving and proficiency gains remain unverified.
+
+## D-2026-10-04-01 — Separate model context capacity from application budgets
+
+- Status: 🟢 active.
+- Decision: The P7 initial model-facing context uses a finite 64 KiB application budget. It is separate from the model context window and from 16 KiB caps on single cognition reports, history pages, and bridge payloads. When the initial context exceeds 64 KiB, preserve the Chinese stable cognition and settled broker state, then omit optional projections with an explicit refresh instruction.
+- Rationale: The former 16 KiB initial-context cap was an inherited transport safeguard, not a `gpt-6.1-sol` capability limit. A real packaged witness showed that it rejected a valid stable-cognition plus WorldMap context before runtime and misreported the condition as unavailable host services. A larger finite budget uses available model capacity while keeping prompt growth bounded and degradation readable.
+- Evidence: `_P7_INITIAL_CONTEXT_BYTES = 64 * 1024`; the regression suite preserves 14.8 KiB and 20 KiB WorldMap projections, keeps a 64×64 board and model projection, and retains bounded fallback behavior. The fixed packaged witness reached runtime and executed one action before operator cancellation; it did not complete a level.

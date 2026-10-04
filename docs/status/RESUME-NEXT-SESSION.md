@@ -4,6 +4,8 @@
 
 ## TL;DR
 
+The initial-context failure was traced to a hard-coded 16 KiB application budget in `_initial_game_context`, not to the `gpt-6.1-sol` context window. The active budget is now 64 KiB. A 14.8 KiB and a 20 KiB WorldMap projection remain available with stable cognition, and oversized optional projections degrade to explicit refresh instructions instead of a false host-service outage. The fixed packaged witness reached runtime and executed one action before operator cancellation; it still completed zero levels.
+
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
 The latest console-readability fix is committed as `f6da52b7`. A new packaged SP80 L1 witness (`p7-live-20261003143813-de375e7b03c6c1d7851f0b93`) printed Chinese cognition at startup and after each action; the 301-line log had a maximum line size of 539 bytes and contained no `semantic_ledger`, `cognition-read`, `claim_changes`, or `natural_language_context` payloads. The run stopped after three actions because analysis referenced an unselected claim; completion remained 0 and no solve is claimed.

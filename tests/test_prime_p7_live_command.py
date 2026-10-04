@@ -816,7 +816,61 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("asterion.prime.p7-planning-background/v1", context)
         self.assertIn("bar is movable", context)
 
-    def test_initial_context_falls_back_to_cognition_when_background_is_omitted(self) -> None:
+    def test_initial_context_keeps_background_when_old_16k_budget_would_have_dropped_it(self) -> None:
+        from asterion.applications.prime.p7.operator import (
+            _P7_INITIAL_CONTEXT_BYTES, _initial_game_context,
+        )
+
+        class Client:
+            def observe(self):
+                return {
+                    "available_actions": ["ACTION1"],
+                    "frame": [[[7]]],
+                    "levels_completed": 0,
+                    "state": "NOT_FINISHED",
+                    "win_levels": 1,
+                }
+
+            def status(self):
+                return {"actions_remaining": 20, "primitive_actions": 0, "target_level": 1}
+
+            def planning_background(self):
+                return {
+                    "schema": "asterion.prime.p7-planning-background/v1",
+                    "execution_authority": "none",
+                    "worldmap": {"evidence": "x" * 14800},
+                    "semantic_cognition": {
+                        "semantic": {
+                            "scope": {"level": 0},
+                            "confirmed_knowledge": [{
+                                "id": "scene", "kind": "game_type",
+                                "claim": "这是网格游戏。", "status": "certain",
+                            }],
+                            "stable_game_description_zh": "稳定游戏认知（规划背景）\n游戏类型：这是网格游戏。",
+                        },
+                        "cognition_session": {},
+                    },
+                }
+
+            def cognition(self):
+                return {
+                    "semantic": {
+                        "scope": {"level": 0},
+                        "confirmed_knowledge": [{
+                            "id": "scene", "kind": "game_type",
+                            "claim": "这是网格游戏。", "status": "certain",
+                        }],
+                    },
+                    "cognition_session": {},
+                }
+
+        context = _initial_game_context(Client(), include_prior=False)
+        self.assertLessEqual(len(context.encode()), _P7_INITIAL_CONTEXT_BYTES)
+        self.assertIn("稳定游戏认知（规划背景）", context)
+        self.assertIn("WorldMap planning background", context)
+        self.assertNotIn("Initial optional projections omitted", context)
+
+    def test_initial_context_keeps_20k_background_and_current_cognition(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
 
         class Client:
@@ -844,8 +898,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 return {"semantic": {"natural_language_context": "fallback-cognition-marker"}}
 
         context = _initial_game_context(Client(), include_prior=False)
+        self.assertIn("background-marker", context)
+        self.assertIn("WorldMap planning background", context)
         self.assertIn("fallback-cognition-marker", context)
-        self.assertIn("p7_cognition", context)
 
     def test_initial_context_logs_cognition_refresh(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
@@ -949,7 +1004,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("Automatic verified model plan", context)
         self.assertIn('"status":"found"', context)
 
-    def test_initial_context_keeps_board_when_optional_projection_exceeds_budget(self) -> None:
+    def test_initial_context_keeps_board_and_model_within_64k_budget(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
 
         class Client:
@@ -972,11 +1027,13 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             def cognition(self):
                 return {"experience": "y" * 8192}
 
+        from asterion.applications.prime.p7.operator import _P7_INITIAL_CONTEXT_BYTES
+
         context = _initial_game_context(Client(), include_prior=False)
-        self.assertLessEqual(len(context.encode()), 16384)
+        self.assertLessEqual(len(context.encode()), _P7_INITIAL_CONTEXT_BYTES)
         self.assertIn('"frame":[[7,7,7', context)
         self.assertIn("inspect_candidates", context)
-        self.assertIn("p7_world_model", context)
+        self.assertIn("Same-game world model", context)
 
     def test_continue_prompt_reestablishes_action_whitelist_after_retry(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_CONTINUE_PROMPT

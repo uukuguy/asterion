@@ -634,6 +634,10 @@ class _IpythonBridgeServer:
 
 
 _COGNITION_OUTPUT_BYTES = 16 * 1024
+# The model-facing initial context is an application budget, not the model's
+# context window.  Keep it large enough for the stable game description,
+# current board, and one WorldMap projection while retaining a finite bound.
+_P7_INITIAL_CONTEXT_BYTES = 64 * 1024
 _P7_RESPONSE_BUDGET_BYTES = 60 * 1024
 _P7_RESPONSE_HEADROOM_BYTES = 1024
 
@@ -2657,7 +2661,7 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
     ]
     cognition_narrative_zh = render_cognition_narrative_zh(None, None)
     def fits(parts: list[str]) -> bool:
-        return len("\n".join(parts).encode("utf-8")) <= 16384
+        return len("\n".join(parts).encode("utf-8")) <= _P7_INITIAL_CONTEXT_BYTES
 
     if not fits(sections):
         hint = state["learning_hint"]
@@ -2805,8 +2809,42 @@ def _initial_game_context(client: object, *, include_prior: bool, semantic_only:
             # ordinary exploration or hide the rest of the initial context.
             pass
     value = "\n".join(sections)
-    if len(value.encode("utf-8")) > 16384:
-        raise P7OperatorError("P7 host services are unavailable")
+    if len(value.encode("utf-8")) > _P7_INITIAL_CONTEXT_BYTES:
+        # The Chinese cognition block is the primary planning surface.  An
+        # optional WorldMap or mechanics projection can fit before that block
+        # is added and then push the complete prompt over the application
+        # initial-context budget.  Drop optional projections as one bounded fallback;
+        # do not report this prompt-size condition as a host-service outage.
+        cognition_section = next(
+            (item for item in sections if item.startswith("## 当前游戏认知（中文）")),
+            sections[0] if sections else "",
+        )
+        initial_index = next(
+            (
+                index for index, item in enumerate(sections)
+                if item.startswith("## Initial broker state ")
+            ),
+            None,
+        )
+        reduced = [cognition_section]
+        if initial_index is not None:
+            reduced.extend(sections[initial_index:initial_index + 3])
+        reduced.append(
+            "## Initial optional projections omitted; call p7_planning_background or p7_cognition if needed."
+        )
+        value = "\n".join(reduced)
+        if len(value.encode("utf-8")) > _P7_INITIAL_CONTEXT_BYTES:
+            # Keep the settled board and the stable cognition heading.  The
+            # broker can provide the full frame again through p7_observe.
+            compact_reduced = [cognition_section]
+            if initial_index is not None:
+                compact_reduced.extend((sections[initial_index], sections[initial_index + 2]))
+            compact_reduced.append(
+                "## Initial optional projections omitted; call p7_observe or p7_planning_background if needed."
+            )
+            value = "\n".join(compact_reduced)
+        if len(value.encode("utf-8")) > _P7_INITIAL_CONTEXT_BYTES:
+            raise P7OperatorError("P7 initial context is too large")
     return value
 
 
