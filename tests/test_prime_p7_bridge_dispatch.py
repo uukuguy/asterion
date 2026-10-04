@@ -5,6 +5,7 @@ from contextlib import redirect_stderr
 from unittest import mock
 
 from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+from asterion.applications.prime.p7.cognition_narrative import render_cognition_narrative_zh
 from asterion.applications.prime.p7.operator import (
     _IpythonBridgeServer,
     _P7BrokerClient,
@@ -374,6 +375,19 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertIn("稳定游戏认知（规划背景）", description)
         self.assertIn("游戏类型：", description)
         self.assertNotIn("历史原文", description)
+
+    def test_bounded_semantic_report_keeps_confirmed_status_for_refreshes(self):
+        bounded = _bounded_semantic_report({
+            "scope": {"level": 0},
+            "confirmed_knowledge": [{
+                "id": "current-grid-band-game", "kind": "game_type",
+                "claim": "这是网格街机谜题。", "status": "certain",
+            }],
+        })
+        self.assertEqual(bounded["confirmed_knowledge"][0]["status"], "certain")
+        narrative = render_cognition_narrative_zh(bounded, None)
+        self.assertIn("游戏类型：", narrative)
+        self.assertIn("网格街机谜题", narrative)
 
     def test_cognition_console_logs_can_use_logic_colors(self):
         from asterion.applications.prime.p7.operator import _log_cognition_refresh, _p7_narrative_role

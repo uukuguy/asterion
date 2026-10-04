@@ -810,7 +810,7 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
                 continue
             bounded_confirmed.append({
                 key: (str(claim.get(key, ""))[:512] if key == "claim" else claim.get(key))
-                for key in ("id", "kind", "subject", "claim", "evidence_count", "support_count")
+                for key in ("id", "kind", "subject", "claim", "status", "evidence_count", "support_count")
                 if key in claim
             })
     result: dict[str, object] = {
