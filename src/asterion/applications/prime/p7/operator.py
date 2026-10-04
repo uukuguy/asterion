@@ -636,7 +636,6 @@ _P7_RESPONSE_HEADROOM_BYTES = 1024
 
 _P7_ANSI = {
     "round": "1;36",
-    "narrative": "0;37",
     "confirmed": "0;32",
     "pending": "0;33",
     "coverage": "1;35",
@@ -679,14 +678,10 @@ def _p7_narrative_role(line: str) -> str:
     text = line.strip()
     if text.startswith(("已确认：", "已确认另有")):
         return "confirmed"
-    if text.startswith(("高置信工作假说", "开放假说", "待验证：", "待验证另有")):
+    if text.startswith(("高置信工作假说", "开放假说", "工作策略", "开放策略", "待验证：", "待验证另有")):
         return "pending"
     if text.startswith(("已否定：", "已否定另有")):
         return "rejected"
-    if text.startswith(("认识层次：", "认识覆盖：")):
-        return "coverage"
-    if text.startswith("假说整理："):
-        return "review"
     if text.startswith(("当前状态：", "本轮实验动作：")):
         return "display"
     if text.startswith(("最近动作：", "最新动作尚未分析", "下一步：")):
@@ -694,6 +689,19 @@ def _p7_narrative_role(line: str) -> str:
     if text.startswith("认知刷新不可用"):
         return "rejected"
     return "narrative"
+
+
+def _p7_style_narrative_line(line: str, role: str, *, stream: object = None) -> str:
+    """Color only the semantic label; keep the explanatory sentence neutral."""
+
+    if role in {"confirmed", "pending", "rejected", "action"}:
+        separator = line.find("：")
+        if separator >= 0:
+            marker_end = line.find("] ")
+            body_start = marker_end + 2 if marker_end >= 0 else 0
+            prefix = line[body_start: separator + 1]
+            return line[:body_start] + _p7_style(prefix, role, stream=stream) + line[separator + 1:]
+    return _p7_style(line, role, stream=stream)
 
 
 def _json_bytes(value: object) -> int:
@@ -1026,9 +1034,10 @@ def _log_cognition_narrative(
         f"phase={phase} episode={episode} actions={actions} state={state}"
     )
     print(_p7_style(f"[p7-cognition] cognition-round start {marker}", "round"), file=sys.stderr, flush=True)
-    print(_p7_style(f"[p7-cognition] cognition-narrative phase={phase}", "narrative"), file=sys.stderr, flush=True)
+    print(f"[p7-cognition] cognition-narrative phase={phase}", file=sys.stderr, flush=True)
     for line in narrative.splitlines():
-        print(_p7_style(f"[p7-cognition] {line}", _p7_narrative_role(line)), file=sys.stderr, flush=True)
+        role = _p7_narrative_role(line)
+        print(_p7_style_narrative_line(f"[p7-cognition] {line}", role), file=sys.stderr, flush=True)
     print(_p7_style(f"[p7-cognition] cognition-round end {marker}", "round"), file=sys.stderr, flush=True)
 
 

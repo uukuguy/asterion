@@ -77,6 +77,11 @@ def _claim_label(claim: Mapping, status: str) -> str:
         return "已确认"
     if status == "falsified":
         return "已否定"
+    if claim.get("kind") == "strategy":
+        confidence = claim.get("confidence", 0.0)
+        if type(confidence) in (int, float) and float(confidence) >= 0.75:
+            return "工作策略（可用于规划）"
+        return "开放策略（待调整）"
     confidence = claim.get("confidence", 0.0)
     if type(confidence) in (int, float) and float(confidence) >= 0.75:
         return "高置信工作假说（可用于规划）"

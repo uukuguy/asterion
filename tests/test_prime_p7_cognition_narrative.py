@@ -77,6 +77,17 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("认识覆盖", result)
         self.assertIn("不要求逐条动作验证", result)
 
+    def test_strategy_is_rendered_as_guidance_not_as_fact_hypothesis(self):
+        result = render_cognition_narrative_zh(
+            {"claims": {"strategy": [{
+                "id": "route", "kind": "strategy", "claim": "先验证方向，再走短路线。",
+                "status": "undetermined", "confidence": 0.8,
+            }]}},
+            None,
+        )
+        self.assertIn("工作策略（可用于规划）", result)
+        self.assertNotIn("工作假说（可用于规划）", result)
+
 
 class TestNarrativeDelivery(unittest.TestCase):
     def test_initial_context_places_narrative_before_structured_state(self):
