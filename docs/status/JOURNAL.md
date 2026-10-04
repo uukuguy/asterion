@@ -3607,3 +3607,4 @@
 - 2026-10-04 Refreshed the resume baton after working-hypothesis wording cleanup; current tree remains clean and focused checks remain green. [1d3d86d3]
 - 2026-10-04 Reduced console color emphasis to labels and separated strategy guidance from factual hypotheses; 31 renderer/bridge tests and lint passed. [7fcd35a3]
 - 2026-10-04 Compacted P7 into a 34-item layered working set while preserving the full semantic ledger for explicit queries; 170 focused tests, lint, docs-check passed. [2acac222]
+- 2026-10-04 Promoted evidence-backed claims into deterministic `confirmed_knowledge` for P7 planning; tentative wording remains available as audit history. 171 focused tests passed. [1bd95bbc]

@@ -26,6 +26,8 @@ The follow-up console refinement is `7fcd35a3`: only semantic labels retain colo
 
 The working-set correction is `2acac222`: the prior witness ended unsuccessful with zero completed levels after five actions, and its 196-entry semantic ledger was overwhelming the active context. Normal cognition now selects a bounded 34-item layered working set; full claims remain available through `full_report()` and review indexes.
 
+The confirmed-knowledge correction is `1bd95bbc`: evidence-backed claims now receive deterministic wording and appear in `confirmed_knowledge`, the stable planning layer for P7. Original tentative wording remains under `hypothesis`; P7 should reopen a confirmed rule only after a counterexample.
+
 
 ## 已验证事实
 
