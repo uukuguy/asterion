@@ -691,7 +691,7 @@ def _p7_narrative_role(line: str) -> str:
         return "rejected"
     if text.startswith(("当前状态：", "本轮实验动作：")):
         return "display"
-    if text.startswith(("最近动作：", "最新动作尚未分析", "下一步：")):
+    if text.startswith(("最近动作：", "最新动作尚未分析", "下一步：", "P7规划建议：")):
         return "action"
     if text.startswith("认知刷新不可用"):
         return "rejected"

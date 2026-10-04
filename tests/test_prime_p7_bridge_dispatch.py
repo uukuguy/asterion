@@ -408,7 +408,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(_p7_narrative_role("已确认：横带可移动。"), "confirmed")
         self.assertEqual(_p7_narrative_role("待验证：目标规则尚未确认。"), "pending")
         self.assertEqual(_p7_narrative_role("已否定：ACTION1向下移动。"), "rejected")
-        self.assertEqual(_p7_narrative_role("下一步：检查下一次动作。"), "action")
+        self.assertEqual(_p7_narrative_role("P7规划建议：检查下一次动作。"), "action")
 
     def test_compacted_session_preserves_validation_control(self):
         compacted = _compact_cognition_session({

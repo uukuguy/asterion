@@ -23,7 +23,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("探索假说（辅助）", result)
         self.assertIn("横条上移，关卡没有增加", result)
         self.assertIn("最近动作：ACTION1 已执行，画面发生变化", result)
-        self.assertIn("下一步", result)
+        self.assertIn("P7规划建议：", result)
         self.assertEqual(result.count("ACTION1 使横条向上移动。"), 1)
         self.assertEqual((semantic, session), before)
 
@@ -34,7 +34,7 @@ class TestCognitionNarrative(unittest.TestCase):
             with self.subTest(limit=limit):
                 result = render_cognition_narrative_zh(report, None, max_bytes=limit)
                 self.assertLessEqual(len(result.encode()), limit)
-                self.assertIn("下一步", result)
+                self.assertIn("P7规划建议：", result)
 
     def test_english_history_is_not_presented_as_translation(self):
         result = render_cognition_narrative_zh({"natural_language_context": "The bar moves."}, None)
@@ -104,6 +104,24 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("规划推断：", result)
         self.assertIn("ACTION3最可能向左", result)
         self.assertIn("后续动作反馈再校验", result)
+
+    def test_key_open_question_does_not_repeat_a_confirmed_description(self):
+        confirmed = {
+            "id": "scene-certain", "kind": "game_type", "status": "certain",
+            "claim": "这是一个网格移动谜题。",
+        }
+        duplicate = {
+            "id": "scene-open", "kind": "game_type", "status": "undetermined",
+            "claim": "这是一个网格移动谜题。",
+            "next_test": "比较一次受控移动前后的画面。",
+        }
+        result = render_cognition_narrative_zh(
+            {"claims": {"game_type": [confirmed, duplicate]}, "confirmed_knowledge": [confirmed]},
+            {"session": {"state": "READY"}},
+        )
+        self.assertIn("P7规划建议：", result)
+        self.assertIn("关键未决问题：比较一次受控移动前后的画面。", result)
+        self.assertNotIn("关键未决问题：这是一个网格移动谜题", result)
 
     def test_stable_game_knowledge_is_primary_and_hypotheses_are_compact(self):
         stable = [
@@ -221,7 +239,7 @@ class TestNarrativeDelivery(unittest.TestCase):
             before = client.observe()
             self.assertIn("cognition_narrative_zh", before)
             proposal = client.cognition_update({"op": "propose", "proposal": {"claims": [{"id": "move", "kind": "control", "subject": "ACTION1", "claim": "ACTION1 可能改变画面。", "reason": "它是可用动作。", "falsifier": "画面不变。", "next_test": "执行一次 ACTION1 并比较。"}]}})
-            self.assertIn("ACTION1 可能改变画面", proposal["cognition_narrative_zh"])
+            self.assertIn("关键未决问题：执行一次 ACTION1 并比较", proposal["cognition_narrative_zh"])
             selected = client.cognition_update({"op": "select_experiment", "experiment": {"claim_ids": ["move"], "question": "画面是否改变？", "information_gain": "区分有效动作。", "action": {"name": "ACTION1"}, "expected": {"cell": {"x": 0, "y": 0, "value": 1}}}})
             self.assertIn("已选 ACTION1", selected["cognition_narrative_zh"])
             action = client.act_checked([{"action": {"name": "ACTION1", "data": {}}, "expect": {"cell": {"x": 0, "y": 0, "value": 1}}}])

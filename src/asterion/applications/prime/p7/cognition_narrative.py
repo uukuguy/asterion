@@ -418,11 +418,11 @@ def render_cognition_narrative_zh(
         next_test = next((_claim_prose(c, "next_test") for c in claims if c.get("next_test")), "根据最新观察选择一个能区分假设的实验。")
     if action:
         next_test = f"已选 {action}；" + next_test
-    footer = "下一步：" + next_test + "\n以上为认知记录，不能授权动作；过关以关卡数增加或 WIN 为准。"
+    footer = "P7规划建议：" + next_test + "\n以上为认知记录，不能授权动作；过关以关卡数增加或 WIN 为准。"
     # Reserve the next-test and authority boundary before adding claim prose.
     while len(("\n".join(lines) + "\n" + footer).encode()) > max_bytes:
         next_test = next_test[:len(next_test) // 2]
-        footer = "下一步：" + next_test + "\n动作以 broker 校验为准。"
+        footer = "P7规划建议：" + next_test + "\n动作以 broker 校验为准。"
         if not next_test:
             lines = [title]
     def add(line: str) -> None:
@@ -487,7 +487,17 @@ def render_cognition_narrative_zh(
     if open_claims:
         recent_open = [c for c in open_claims if c.get("id") in recent_ids]
         non_bootstrap = [c for c in open_claims if not str(c.get("id", "")).startswith("bootstrap-")]
-        unresolved = question or _claim_prose((recent_open or non_bootstrap or open_claims)[0])
+        stable_texts = {
+            " ".join(_claim_prose(claim).split())
+            for claim in _stable_claims(semantic)
+        }
+        candidates = recent_open or non_bootstrap or open_claims
+        candidates = [
+            claim for claim in candidates
+            if " ".join(_claim_prose(claim).split()) not in stable_texts
+        ] or candidates
+        unresolved_claim = candidates[0]
+        unresolved = question or _claim_prose(unresolved_claim, "next_test") or _claim_prose(unresolved_claim)
         add("关键未决问题：" + unresolved)
     else:
         add("关键未决问题：当前没有待验证假说。")
