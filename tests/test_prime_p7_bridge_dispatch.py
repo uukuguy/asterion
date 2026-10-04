@@ -95,6 +95,14 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertIn("[p7] P7动作计划：ACTION4。", stream.getvalue())
         self.assertIn("[p7] P7动作结果：已执行 1 步。", stream.getvalue())
 
+        stream.seek(0)
+        stream.truncate(0)
+        with redirect_stderr(stream):
+            response = self.bridge._dispatch_method_call("request", "act_checked", {"plan": []})
+        self.assertEqual(response["status"], "ok")
+        self.assertNotIn("P7动作计划", stream.getvalue())
+        self.assertIn("[p7] P7动作结果：已执行 0 步。", stream.getvalue())
+
     def test_planning_background_compaction_honors_small_cap(self):
         value = {
             "schema": "asterion.prime.p7-planning-background/v1",
