@@ -3600,3 +3600,4 @@
 - 2026-10-04 Added colored cognition/lifecycle logs and clean incomplete-receipt exit handling; 141 focused tests plus lint/docs checks passed. [c8609f78]
 - 2026-10-04 Added a regression proving runtime failures without a usable receipt still return nonzero; focused P7 validation reached 142 tests. [074f0dd0]
 - 2026-10-04 Colored the successful terminal status to complete the P7 logic color map. [1c8eb3f8]
+- 2026-10-04 Assigned a restrained semantic palette to confirmed, pending, rejected, and action cognition lines. [5fff662a]
