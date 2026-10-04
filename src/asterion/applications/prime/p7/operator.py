@@ -1130,8 +1130,14 @@ def _log_cognition_narrative(
         f"phase={phase} episode={episode} actions={actions} state={state}"
     )
     session_id = str(session_state.get("session_id", ""))
-    stable_description = render_stable_game_description_zh(semantic, max_bytes=16 * 1024)
-    fingerprint = (session_id, str(episode), str(actions), str(state), stable_description)
+    events = cognition_session.get("events") if isinstance(cognition_session, Mapping) else None
+    event_sequence = 0
+    if isinstance(events, (list, tuple)):
+        for event in events:
+            if isinstance(event, Mapping) and type(event.get("sequence")) is int:
+                event_sequence = max(event_sequence, event["sequence"])
+    snapshot_identity = f"event:{event_sequence}" if event_sequence else "state"
+    fingerprint = (session_id, str(episode), str(actions), str(state), snapshot_identity)
     global _LAST_COGNITION_NARRATIVE_FINGERPRINT
     if (
         phase in _COGNITION_NARRATIVE_REPEATABLE_PHASES

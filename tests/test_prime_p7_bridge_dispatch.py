@@ -391,6 +391,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
                     "episode": 1,
                     "episode_actions": 0,
                 },
+                "events": [{"sequence": 4, "type": "cognition.snapshot"}],
             },
         }
         stream = io.StringIO()
@@ -403,6 +404,32 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertEqual(output.count("reason=duplicate-snapshot"), 2)
         self.assertIn("phase=read", output)
         self.assertIn("phase=startup", output)
+
+    def test_cognition_snapshot_sequence_controls_deduplication(self):
+        from asterion.applications.prime.p7.operator import _log_cognition_refresh
+
+        def projection(sequence, text):
+            return {
+                "semantic": {"natural_language_context": text, "claims": {}},
+                "cognition_session": {
+                    "session": {
+                        "session_id": "sequence-test-session",
+                        "state": "READY",
+                        "episode": 1,
+                        "episode_actions": 0,
+                    },
+                    "events": [{"sequence": sequence, "type": "cognition.snapshot"}],
+                },
+            }
+
+        stream = io.StringIO()
+        with redirect_stderr(stream):
+            _log_cognition_refresh(projection(7, "第一版描述"), phase="observe")
+            _log_cognition_refresh(projection(7, "第二版描述"), phase="read")
+            _log_cognition_refresh(projection(8, "第三版描述"), phase="read")
+        output = stream.getvalue()
+        self.assertEqual(output.count("cognition-round start"), 2)
+        self.assertEqual(output.count("reason=duplicate-snapshot"), 1)
 
     def test_bounded_semantic_report_exposes_stable_worldmap_description(self):
         result = _bounded_semantic_report({
