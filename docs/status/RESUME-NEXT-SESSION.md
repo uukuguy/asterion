@@ -18,6 +18,8 @@ A follow-up regression found that the 10 KiB compact cognition response dropped 
 
 `2780f504` corrects the source label: candidate `next_test` text is now marked `候选验证问题（供P7选择）`, because it comes from cognition records. `8d70accf` applies the same provenance rule to strategy records, marked `策略线索（供P7参考）`. P7 planning is evidenced only by accepted experiment, action, and analysis calls.
 
+`d2e8a2fe` adds readable accepted-response lines: `P7提出`, `P7选择`, and `P7分析`. Rejected broker calls do not receive these lines.
+
 P7 now puts a bounded Chinese `cognition_narrative_zh` before structured evidence in every decision response, and the prompt requires Chinese semantic prose while preserving ASCII contract identifiers. The latest real packaged SP80 L1 witness accepted Chinese proposals, an `expected` experiment predicate, and `claim_id/status/explanation` analysis, executed four primitive actions, then stopped unsuccessful with zero completions and terminal reason `active`; cleanup completed, but the trace was unsealed and replay unverified. No fresh L1 solve has been established.
 
 The latest console-readability fix is committed as `f6da52b7`. A new packaged SP80 L1 witness (`p7-live-20261003143813-de375e7b03c6c1d7851f0b93`) printed Chinese cognition at startup and after each action; the 301-line log had a maximum line size of 539 bytes and contained no `semantic_ledger`, `cognition-read`, `claim_changes`, or `natural_language_context` payloads. The run stopped after three actions because analysis referenced an unselected claim; completion remained 0 and no solve is claimed.
