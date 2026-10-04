@@ -930,5 +930,8 @@
   the `certain` status required to keep this guide stable across reads. When
   three cardinal controls are confirmed, the fourth is emitted as a separate
   planning inference and remains open to ordinary-action falsification.
-  The display labels the next test as `P7规划建议` and filters confirmed
-  descriptions out of `关键未决问题`.
+  The display labels cognition-record next tests as
+  `候选验证问题（供P7选择）` and filters confirmed descriptions out of
+  `关键未决问题`. Cognition-record strategy lines are labeled
+  `策略线索（供P7参考）`; only accepted `select_experiment`, action, and
+  analysis calls count as P7's response.

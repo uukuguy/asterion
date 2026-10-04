@@ -202,8 +202,9 @@ class TestCognitionNarrative(unittest.TestCase):
             }]}},
             None,
         )
-        self.assertIn("当前规划建议：", result)
-        self.assertIn("工作策略（可用于规划）", result)
+        self.assertIn("认知记录中的策略线索（供P7参考）：", result)
+        self.assertIn("策略线索（供P7参考）", result)
+        self.assertNotIn("当前规划建议：", result)
         self.assertNotIn("工作假说（可用于规划）", result)
 
 

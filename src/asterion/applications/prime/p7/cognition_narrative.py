@@ -471,10 +471,10 @@ def render_cognition_narrative_zh(
         add("最新动作尚未分析，不能把预期当作已确认事实。")
     strategy_claims = [c for c in claims if c.get("kind") == "strategy"]
     if strategy_claims:
-        add("当前规划建议：")
+        add("认知记录中的策略线索（供P7参考）：")
         strategy_limit = min(3, len(strategy_claims))
         for claim in strategy_claims[:strategy_limit]:
-            add(f"工作策略（可用于规划）：{_claim_prose(claim)}")
+            add(f"策略线索（供P7参考）：{_claim_prose(claim)}")
     open_claims = [
         c for c in claims
         if c.get("status") == "undetermined" and c.get("kind") != "strategy"
