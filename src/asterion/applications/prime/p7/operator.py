@@ -32,7 +32,10 @@ from asterion.applications.prime.p7.broker import (
     _observation_digest,
 )
 from asterion.applications.prime.p7.cognition import GameCognitionStore
-from asterion.applications.prime.p7.cognition_narrative import render_cognition_narrative_zh
+from asterion.applications.prime.p7.cognition_narrative import (
+    render_cognition_narrative_zh,
+    render_stable_game_description_zh,
+)
 from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
 from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
 from asterion.applications.prime.p7.diagnostics import analyze_trace
@@ -817,6 +820,7 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
         "cognition_layers": bounded_layers,
         "guidance": bounded_guidance,
         "confirmed_knowledge": bounded_confirmed,
+        "stable_game_description_zh": render_stable_game_description_zh(value),
         "hypothesis_review": bounded_review,
     }
     # Remove claims from the end of the largest bucket until the complete
@@ -833,6 +837,10 @@ def _bounded_semantic_report(value: object, *, max_bytes: int = _COGNITION_OUTPU
         context = result.get("natural_language_context")
         if isinstance(context, str) and context:
             result["natural_language_context"] = context[: max(0, len(context) // 2)]
+            continue
+        description = result.get("stable_game_description_zh")
+        if isinstance(description, str) and description:
+            result["stable_game_description_zh"] = description[: max(0, len(description) // 2)]
             continue
         # Scope and counters are useful identity metadata, but can still be
         # oversized if a malformed provider supplied arbitrary values.
@@ -1003,6 +1011,14 @@ def _compact_planning_background(value: object, *, max_bytes: int = 48 * 1024) -
             if _json_bytes(authority_only) > max_bytes:
                 raise ValueError("planning background size is too small")
             result = authority_only
+    # Enforce the cap after every fallback path.  Provider metadata can still
+    # exceed a small caller cap after the identity-preserving projection.
+    if _json_bytes(result) > max_bytes or len(json.dumps(result, separators=(",", ":")).encode()) > max_bytes:
+        result = {
+            "schema": "asterion.prime.p7-planning-background/v1",
+            "execution_authority": "none",
+            "projection_truncated": True,
+        }
     return result
 
 

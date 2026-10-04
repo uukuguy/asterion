@@ -475,10 +475,18 @@ keep game identity, controls, object representation, rules/goals, and strategy
 connected while compressing duplicate or same-scope claims. Use an ASCII
 `hypothesis_group` only to mark mutually exclusive alternatives for review;
 it never changes status or grants action authority.
-Treat the report's `confirmed_knowledge` as the fixed, evidence-backed game
-understanding that anchors the solve plan. Use open hypotheses only to fill a
-missing part of that model or explain a new observation; do not repeatedly
-retest a confirmed control without a counterexample.
+Treat `stable_game_description_zh` as the main WorldMap description. It is a
+short, human-readable description compiled from evidence-backed claims. Read
+it before the lower-level claim arrays. Treat the report's
+`confirmed_knowledge` as the supporting fixed facts that anchor the solve plan.
+Use open hypotheses only to fill a missing part of that model or explain a new
+observation; do not repeatedly retest a confirmed control without a
+counterexample. Write the description and every new hypothesis in short
+sentences. 请使用短句。每句只写一个事实。Put one fact in each sentence. Use one subject and one action when
+possible. Use the same name for the same object. State the evidence, the
+falsifier, and the next test in separate short sentences. This follows the
+ASD-STE100 style target: simple words, active voice, no nested clauses, and
+one instruction or fact per sentence.
 describe the scene, the discrete action interface, and the currently unknown
 success condition before selecting a probe. Treat every supplied information
 point (the first frame, visible colors/shapes, available action names,

@@ -3,7 +3,10 @@ from __future__ import annotations
 import copy
 import unittest
 
-from asterion.applications.prime.p7.cognition_narrative import render_cognition_narrative_zh
+from asterion.applications.prime.p7.cognition_narrative import (
+    render_cognition_narrative_zh,
+    render_stable_game_description_zh,
+)
 
 
 class TestCognitionNarrative(unittest.TestCase):
@@ -38,7 +41,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("历史原文", result)
         self.assertIn("The bar moves.", result)
 
-    def test_complete_mode_lists_all_claims_without_omission_marker(self):
+    def test_complete_mode_keeps_stable_description_compact(self):
         claims = [
             {"id": f"certain-{index}", "kind": "control", "claim": f"已确认规则{index}", "status": "certain"}
             for index in range(5)
@@ -56,8 +59,9 @@ class TestCognitionNarrative(unittest.TestCase):
             max_bytes=8192,
             complete=True,
         )
-        for index in range(5):
-            self.assertIn(f"已确认规则{index}", result)
+        self.assertIn("稳定游戏认知（规划背景）", result)
+        self.assertIn("动作操作：", result)
+        self.assertIn("已编入描述：5 条", result)
         self.assertIn("探索假说（辅助）", result)
         self.assertNotIn("待验证假设4", result)
 
@@ -89,6 +93,25 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertNotIn("开放时ACTION1可能", result)
         self.assertIn("关键未决问题：", result)
         self.assertNotIn("待验证假设19", result)
+
+    def test_stable_knowledge_is_compiled_into_a_short_worldmap_description(self):
+        semantic = {
+            "confirmed_knowledge": [
+                {"id": "current-grid-band-game", "kind": "game_type", "claim": "English source", "status": "certain"},
+                {"id": "current-color9-actor", "kind": "object_role", "claim": "English source", "status": "certain"},
+                {"id": "action2_down_current", "kind": "control", "claim": "ACTION2使颜色9横带向下移动四格。", "status": "certain"},
+                {"id": "prime26-success-touch-target", "kind": "success_condition", "claim": "English source", "status": "certain"},
+            ]
+        }
+        description = render_stable_game_description_zh(semantic)
+        self.assertTrue(description.startswith("稳定游戏认知（规划背景）"))
+        self.assertIn("游戏类型：", description)
+        self.assertIn("画面物件：", description)
+        self.assertIn("动作操作：", description)
+        self.assertIn("过关条件：", description)
+        self.assertIn("ACTION2使颜色9横带向下移动四格", description)
+        self.assertNotIn("可能", description)
+        self.assertNotIn("历史原文", description)
 
     def test_high_confidence_open_claims_and_hypothesis_review_are_explicit(self):
         semantic = {

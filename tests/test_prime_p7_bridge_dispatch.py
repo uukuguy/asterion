@@ -356,6 +356,25 @@ class TestP7BridgeDispatch(unittest.TestCase):
         self.assertNotIn('"claims"', output)
         self.assertLess(len(output.encode("utf-8")), 4096)
 
+    def test_bounded_semantic_report_exposes_stable_worldmap_description(self):
+        result = _bounded_semantic_report({
+            "scope": {"level": 0},
+            "claims": {
+                "game_type": [{
+                    "id": "current-grid-band-game", "kind": "game_type",
+                    "claim": "English source", "status": "certain",
+                }],
+            },
+            "confirmed_knowledge": [{
+                "id": "current-grid-band-game", "kind": "game_type",
+                "claim": "English source", "status": "certain",
+            }],
+        })
+        description = result["stable_game_description_zh"]
+        self.assertIn("稳定游戏认知（规划背景）", description)
+        self.assertIn("游戏类型：", description)
+        self.assertNotIn("历史原文", description)
+
     def test_cognition_console_logs_can_use_logic_colors(self):
         from asterion.applications.prime.p7.operator import _log_cognition_refresh, _p7_narrative_role
 

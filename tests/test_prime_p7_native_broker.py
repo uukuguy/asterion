@@ -1370,6 +1370,9 @@ class TestP7ToolRegistry(unittest.TestCase):
         self.assertIn('"claim_id":"claim-a"', P7_COGNITION_PROMPT)
         self.assertIn('"status":"certain|falsified|undetermined"', P7_COGNITION_PROMPT)
         self.assertIn('"explanation":"..."', P7_COGNITION_PROMPT)
+        self.assertIn("stable_game_description_zh", P7_COGNITION_PROMPT)
+        self.assertIn("短句", P7_COGNITION_PROMPT)
+        self.assertIn("一个事实", P7_COGNITION_PROMPT)
         self.assertNotIn("color-12", P7_COGNITION_PROMPT)
         self.assertNotIn("role-background-12", P7_COGNITION_PROMPT)
 

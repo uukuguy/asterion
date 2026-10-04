@@ -50,6 +50,58 @@ _KNOWN_CLAIMS_ZH = {
     "contact-goal-current": "横带到达或对齐目标结构时可能完成关卡，权威条件仍待验证。",
     "contact-success": "横带接触或对齐目标结构时可能完成关卡，权威条件仍待验证。",
 }
+_KNOWN_CONFIRMED_CLAIMS_ZH = {
+    "action1_up_current": "在当前关卡，ACTION1使颜色9横带向上移动四格。",
+    "action2_down_current": "在当前开放区域，ACTION2使颜色9横带向下移动四格。",
+    "action4_right_test": "在当前开放位置，ACTION4使颜色9横带向右移动四格。",
+    "align_interact_goal": "当前规划将颜色9横带移到顶部结构附近，并测试ACTION5。",
+    "ap2026_right": "ACTION4使颜色9横带向右移动四格。",
+    "band-player": "9色横带是可控对象。其他彩色结构固定。它们的具体作用仍在确认。",
+    "band-role-current": "9色横带是可控对象。其他彩色结构是固定结构或候选目标。",
+    "cardinal-controls": "方向动作在目的地开放时使9色横带沿四格晶格移动。具体方向由当前画面确定。",
+    "current-color9-actor": "9色横带是可控的玩家对象。4、6、11色结构是固定结构或目标。",
+    "current-action1-up": "在当前关卡，ACTION1使颜色9横带向上移动四格。",
+    "current-cardinal-controls": "四个方向动作在目的地开放时按四格晶格移动颜色9横带。",
+    "current_band_actor": "颜色9的20×4横带是可控对象。其他颜色结构固定。",
+    "current_up": "ACTION1在当前横带位置使横带向上移动四格。",
+    "current-grid-band-game": "这是一个网格街机谜题。场景包含可移动的9色横带、12色场地和固定彩色结构。",
+    "fresh-l0-move": "目的地开放时，ACTION1使9色横带向上移动四格。",
+    "fresh-band-role": "20×4的9色横带是可控对象。其他彩色结构固定。",
+    "fresh-color9-role": "9色横带是玩家控制的对象。",
+    "fresh-cardinal-control": "四个方向动作在目的地开放时使颜色9横带沿四格晶格移动。",
+    "l0-action4-right": "目的地开放时，ACTION4使颜色9横带向右移动四格。",
+    "l0-band-actor": "20×4的9色横带是当前网格中的可移动玩家对象。",
+    "l0-open-move": "在开放的12色区域，方向动作使颜色9横带移动四格。固定结构不变。",
+    "l0_band_motion": "四个方向动作在目的地开放时使颜色9横带沿四格晶格移动。",
+    "movement-lattice-current": "目的地开放时，方向动作使颜色9横带移动四格。固定结构保持不变。",
+    "l0-target-alignment": "将横带向右移动，使横带覆盖顶部结构的列。然后向上移动。",
+    "l0-upward-route": "向顶部彩色结构移动是当前最短路线。移动时避开阻挡重叠。",
+    "l1-route-upward": "向顶部彩色结构移动是当前最短路线。移动时避开阻挡重叠。",
+    "l1-action4-right-shift": "ACTION4在目的地开放时使颜色9横带向右移动四格。",
+    "l1-controls": "ACTION1和ACTION2使横带垂直移动。ACTION3和ACTION4使横带水平移动。",
+    "l1-cardinal-lattice": "在开放的颜色12区域，四个方向动作使颜色9横带沿四格晶格移动。固定图形不变。",
+    "l1-player-role": "颜色9横带是可控对象。颜色4、6、11结构固定。",
+    "l1_scene_band_puzzle": "当前关卡是64×64网格移动谜题。颜色9的20×4横带位于颜色12开放区域。颜色4、6、11结构固定。",
+    "level1-action1-up-current": "在当前开放位置，ACTION1使颜色9横带向上移动四格。",
+    "level1-action2-down": "在当前开放位置，ACTION2使颜色9横带向下移动四格。",
+    "level1-action4-horizontal": "在当前开放区域，ACTION4使颜色9横带向右移动四格。",
+    "l1-visual-band-control": "ACTION1到ACTION4在四格晶格上移动20×4的9色横带。",
+    "l0_object_roles": "颜色12区域是可通行背景。颜色9横带是玩家对象。颜色4、6、11结构固定。",
+    "prime26-bar-fourcell": "在12色开放区域，ACTION1和ACTION2使横带上下移动四格。ACTION3和ACTION4使横带左右移动四格。",
+    "prime26-success-touch-target": "过关需要让可控横带接触彩色结构。单纯存活计时不能过关。",
+    "prime26-role-color9-actor": "长条形的颜色9横带是可控对象。",
+    "prime-right": "ACTION4在开放区域使颜色9横带向右移动四格。",
+    "role-background-12": "颜色12区域是可通行背景。",
+    "rule-action1-repeatable-up": "在记录的位置，ACTION1使横带向上移动三行。结算后坐标(12,13)为9色。",
+    "rule-action2-repeatable-down": "在记录的位置，ACTION2使横带向下移动三行。结算后坐标(12,16)为9色。",
+    "rule-action3-repeatable-left": "在记录的位置，ACTION3使横带向左移动四列。结算后坐标(8,16)为9色。",
+    "l1_action4_right": "在当前开放位置，ACTION4使颜色9横带向右移动四格。",
+    "session-cardinal-step": "方向动作在目的地开放时使颜色9横带移动四格。固定结构不变。",
+    "session-band-role": "9色横带是可控对象。其他彩色结构是障碍或候选目标。",
+    "session-controls": "四个方向动作控制颜色9横带移动。具体方向由当前画面确定。",
+    "success-overlap-target": "过关条件是颜色9与4/6结构接触或重叠。",
+    "witness_down": "ACTION2在当前开放区域使颜色9横带向下移动四格。",
+}
 _KNOWN_NEXT_TESTS_ZH = {
     "bootstrap-frame-semantics": "检查初始画面，再与一次受控动作后的画面对比。",
     "bootstrap-discrete-actions": "选择一个离散动作，比较动作前后的画面变化。",
@@ -73,12 +125,86 @@ def _prose(value: object, limit: int = 180) -> str:
 
 def _claim_prose(claim: Mapping, field: str = "claim") -> str:
     claim_id = claim.get("id")
+    if field == "claim" and claim.get("status") == "certain" and isinstance(claim_id, str) and claim_id in _KNOWN_CONFIRMED_CLAIMS_ZH:
+        return _KNOWN_CONFIRMED_CLAIMS_ZH[claim_id]
     if field == "claim" and isinstance(claim_id, str) and claim_id in _KNOWN_CLAIMS_ZH:
         text = _KNOWN_CLAIMS_ZH[claim_id]
         return _certainty_claim(text) if claim.get("status") == "certain" else text
     if field == "next_test" and isinstance(claim_id, str) and claim_id in _KNOWN_NEXT_TESTS_ZH:
         return _KNOWN_NEXT_TESTS_ZH[claim_id]
     return _prose(claim.get(field))
+
+
+def _stable_claims(semantic: Mapping) -> list[Mapping]:
+    confirmed = semantic.get("confirmed_knowledge")
+    if not isinstance(confirmed, list) or not confirmed:
+        groups = semantic.get("claims", {})
+        confirmed = []
+        if isinstance(groups, Mapping):
+            for kind in (*_KINDS, "certain"):
+                entries = groups.get(kind, [])
+                if isinstance(entries, (list, tuple)):
+                    confirmed.extend(
+                        claim for claim in entries
+                        if isinstance(claim, Mapping) and claim.get("status") == "certain"
+                    )
+    result: list[Mapping] = []
+    seen: set[str] = set()
+    for claim in confirmed:
+        if not isinstance(claim, Mapping):
+            continue
+        text = _claim_prose(claim)
+        key = " ".join(text.split())
+        if not text or key in seen:
+            continue
+        seen.add(key)
+        result.append(claim)
+    return result
+
+
+def _ste_sentence(value: str) -> str:
+    """Keep the readable surface short: one subject and one action per line."""
+
+    text = " ".join(value.replace("；", "。 ").split())
+    if text.startswith("〔历史原文，尚未中文复述〕"):
+        return ""
+    if text and text[-1] not in "。！？":
+        text += "。"
+    return text
+
+
+def render_stable_game_description_zh(semantic: object, *, max_bytes: int = 4096) -> str:
+    """Compile confirmed claims into the short Chinese WorldMap description."""
+
+    if not isinstance(semantic, Mapping):
+        return "稳定游戏认知（规划背景）\n当前没有可用的已确认游戏规则。"
+    stable = _stable_claims(semantic)
+    lines = ["稳定游戏认知（规划背景）", "以下句子来自已确认观察。它们是当前规划的主要背景。"]
+    if not stable:
+        lines.append("当前没有可用的已确认游戏规则。")
+        return "\n".join(lines)
+    grouped: dict[str, list[str]] = {kind: [] for kind in _KINDS}
+    rendered_count = 0
+    for claim in stable:
+        sentence = _ste_sentence(_claim_prose(claim))
+        # A confirmed surface must not repeat tentative wording.  Keep that
+        # wording in the underlying ledger until a deterministic translation
+        # or a new observation makes it suitable for the stable description.
+        if sentence and not any(marker in sentence for marker in ("可能", "也许", "或许")):
+            grouped.setdefault(str(claim.get("kind")), []).append(sentence)
+            rendered_count += 1
+    for kind in _KINDS:
+        sentences = grouped.get(kind, [])
+        if not sentences:
+            continue
+        label = _KIND_LABELS.get(kind, "游戏认识")
+        lines.append(f"{label}：" + " ".join(sentences[:4]))
+    lines.append(f"已编入描述：{rendered_count} 条。其余证据保留在认知记录中。")
+    result = "\n".join(lines)
+    while len(result.encode()) > max_bytes and len(lines) > 3:
+        lines.pop(-2)
+        result = "\n".join(lines)
+    return result
 
 
 def _claim_label(claim: Mapping, status: str) -> str:
@@ -129,8 +255,6 @@ def render_cognition_narrative_zh(
     coverage = coverage if isinstance(coverage, Mapping) else {}
     review = semantic.get("hypothesis_review")
     review = review if isinstance(review, Mapping) else {}
-    confirmed_knowledge = semantic.get("confirmed_knowledge")
-    confirmed_knowledge = confirmed_knowledge if isinstance(confirmed_knowledge, list) else []
     layers = semantic.get("cognition_layers")
     layers = layers if isinstance(layers, (list, tuple)) else []
     events = envelope.get("events", [])
@@ -193,30 +317,9 @@ def render_cognition_narrative_zh(
     def add(line: str) -> None:
         if len(("\n".join([*lines, line, footer])).encode()) <= max_bytes:
             lines.append(line)
-    stable_claims: list[Mapping] = []
-    stable_seen: set[str] = set()
-    raw_stable = confirmed_knowledge or [c for c in claims if c.get("status") == "certain"]
-    for claim in raw_stable:
-        if not isinstance(claim, Mapping):
-            continue
-        text = _claim_prose(claim)
-        key = " ".join(text.split())
-        if not text or key in stable_seen:
-            continue
-        stable_seen.add(key)
-        stable_claims.append(claim)
-    if stable_claims:
-        add(f"稳定游戏认知（规划背景）：已确认 {len(stable_claims)} 条。")
-        # The private JSONL keeps the complete ledger.  Console output always
-        # stays focused, including the refresh path that asks for `complete`.
-        stable_limit = min(12, len(stable_claims))
-        for claim in stable_claims[:stable_limit]:
-            kind = _KIND_LABELS.get(str(claim.get("kind")), "游戏认识")
-            add(f"{kind}：{_claim_prose(claim)}")
-        if len(stable_claims) > stable_limit:
-            add(f"稳定游戏认知其余 {len(stable_claims) - stable_limit} 条已保留，可按需查询。")
-    else:
-        add("稳定游戏认知（规划背景）：当前暂无经证据支持的固定规则。")
+    stable_description = render_stable_game_description_zh(semantic)
+    for description_line in stable_description.splitlines():
+        add(description_line)
     if layers:
         layer_labels = [
             _text(item.get("label"), 48)
