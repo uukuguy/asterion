@@ -927,4 +927,6 @@
   10 real actions with post-action cognition updates and zero completed levels;
   it stopped on native `_CallbackRejected` (`prime-event-type`) after the
   context-cap rejection was removed. Compact cognition refreshes now preserve
-  the `certain` status required to keep this guide stable across reads.
+  the `certain` status required to keep this guide stable across reads. When
+  three cardinal controls are confirmed, the fourth is emitted as a separate
+  planning inference and remains open to ordinary-action falsification.
