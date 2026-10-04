@@ -93,6 +93,18 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("过关条件：尚未完全确定", result)
         self.assertLessEqual(len(result.encode()), 4096)
 
+    def test_stable_description_infers_missing_cardinal_control_for_planning(self):
+        result = render_stable_game_description_zh({
+            "confirmed_knowledge": [
+                {"id": "action1_up_current", "kind": "control", "status": "certain"},
+                {"id": "action2_down_current", "kind": "control", "status": "certain"},
+                {"id": "action4_right_test", "kind": "control", "status": "certain"},
+            ]
+        })
+        self.assertIn("规划推断：", result)
+        self.assertIn("ACTION3最可能向左", result)
+        self.assertIn("后续动作反馈再校验", result)
+
     def test_stable_game_knowledge_is_primary_and_hypotheses_are_compact(self):
         stable = [
             {"id": "scene", "kind": "game_type", "claim": "这是网格移动谜题。", "status": "certain"},

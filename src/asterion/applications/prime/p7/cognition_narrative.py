@@ -236,6 +236,26 @@ def _pick_actions(claims: list[Mapping]) -> list[str]:
     return [selected[action][1] for action in _ACTION_WORDS if action in selected]
 
 
+def _infer_missing_cardinal_control(claims: list[Mapping]) -> str:
+    """Use a nearly complete cardinal mapping as a planning prior.
+
+    This is deliberately kept separate from the stable fact sentence.  P7 may
+    use the inference to choose a route, while the next ordinary action can
+    confirm or falsify it without spending a dedicated probe.
+    """
+
+    known: set[str] = set()
+    for claim in claims:
+        sentence = _stable_sentence(claim)
+        if sentence:
+            action = _action_name(claim, sentence)
+            if action:
+                known.add(action)
+    if {"ACTION1", "ACTION2", "ACTION4"}.issubset(known) and "ACTION3" not in known:
+        return "ACTION1、ACTION2、ACTION4已分别对应向上、向下、向右；按四方向控制的完整性，ACTION3最可能向左。可先用于规划，后续动作反馈再校验。"
+    return ""
+
+
 def _goal_sentence(claims: list[Mapping]) -> str:
     """Only runtime completion evidence can populate a stable goal fact."""
 
@@ -275,6 +295,7 @@ def render_stable_game_description_zh(semantic: object, *, max_bytes: int = 4096
     game = _pick_sentence(by_kind["game_type"], "game_type")
     objects = _pick_sentence(by_kind["object_role"], "object_role")
     actions = _pick_actions(by_kind["control"])
+    inferred_control = _infer_missing_cardinal_control(by_kind["control"])
     rule = _pick_sentence(by_kind["rule"], "rule")
     goal = _goal_sentence(by_kind["success_condition"])
     strategy = _pick_sentence(by_kind["strategy"], "strategy")
@@ -286,6 +307,8 @@ def render_stable_game_description_zh(semantic: object, *, max_bytes: int = 4096
         lines.append("动作操作：方向动作的具体作用尚未确定。")
     lines.append("游戏规则：" + (rule or "移动限制和碰撞规则尚未完全确定。"))
     lines.append("过关条件：" + (goal or "尚未完全确定；只有关卡数增加或 WIN 才能确认过关。"))
+    if inferred_control:
+        lines.append("规划推断：" + inferred_control)
     if strategy:
         lines.append("当前玩法：" + strategy)
     result = "\n".join(lines)
