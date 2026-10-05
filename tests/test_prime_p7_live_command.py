@@ -936,7 +936,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 return {"semantic": {"natural_language_context": "startup-cognition-marker"}}
 
         stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr):
+        with mock.patch.dict('os.environ', {'ASTERION_PRIME_P7_COLOR': 'never'}), contextlib.redirect_stderr(stderr):
             _initial_game_context(Client(), include_prior=False)
         refresh_lines = [
             line for line in stderr.getvalue().splitlines()

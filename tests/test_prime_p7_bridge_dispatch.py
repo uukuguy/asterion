@@ -326,7 +326,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
         client = object.__new__(_P7BrokerClient)
         client._broker = Broker()
         stream = io.StringIO()
-        with redirect_stderr(stream):
+        with mock.patch.dict('os.environ', {'ASTERION_PRIME_P7_COLOR': 'never'}), redirect_stderr(stream):
             client.cognition_update({"op": "analyze"})
         states = [
             json.loads(line.removeprefix("[p7-cognition] cognition-state "))
@@ -465,7 +465,7 @@ class TestP7BridgeDispatch(unittest.TestCase):
             },
         }
         stream = io.StringIO()
-        with redirect_stderr(stream):
+        with mock.patch.dict('os.environ', {'ASTERION_PRIME_P7_COLOR': 'never'}), redirect_stderr(stream):
             _log_cognition_refresh(projection, phase="act_checked", compact=True)
         output = stream.getvalue()
         self.assertIn("动作后认知更新", output)
