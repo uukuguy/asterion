@@ -117,31 +117,36 @@ test('read-only action panel follows frame availability and preserves final mean
   level.frames[1].available_actions = ['ACTION1', 'ACTION4'];
   level.frames[2].available_actions = ['ACTION1', 'ACTION5'];
   level.cognition.action_meanings = {
-    ACTION1: [{ status: 'certain', claim: '记录中的向上动作。' }],
-    ACTION4: [{ status: 'undetermined', claim: '可能向右移动。' }, { status: 'falsified', claim: '不会直接完成关卡。' }],
+    ACTION1: [{ status: 'certain', claim: 'ACTION1使画面物件向上移动。' }],
+    ACTION4: [{ status: 'undetermined', claim: 'ACTION4可能向右移动。' }, { status: 'falsified', claim: '不会直接完成关卡。' }],
   };
   const app = launch(snapshot); const { dom, $ } = app;
   const availableNames = () => [...$('available-actions').querySelectorAll('[data-available-action]')].map((card) => card.dataset.availableAction);
   const highlighted = () => dom.window.document.querySelectorAll('.available-action[aria-current="true"]');
   assert.deepEqual(availableNames(), ['ACTION1', 'ACTION4', 'ACTION5']);
   assert.equal(highlighted().length, 0);
-  assert.match($('available-actions').textContent, /ACTION1已识别记录中的向上动作/);
-  assert.match($('available-actions').textContent, /ACTION4推测已否定可能向右移动/);
-  assert.match($('available-actions').textContent, /已否定不会直接完成关卡/);
-  assert.match($('available-actions').textContent, /ACTION5含义未知/);
-  assert.equal($('available-actions').querySelector('button'), null);
-  assert.match(dom.window.document.querySelector('.available-actions-note').textContent, /含义来自最终认知，未与历史帧对齐/);
+  assert.match($('available-actions').textContent, /ACTION1上移已识别/);
+  assert.match($('available-actions').textContent, /ACTION4右移推测/);
+  assert.match($('available-actions').textContent, /ACTION5未识别\?/);
+  assert.equal($('available-actions').querySelectorAll('button').length, 3);
+  assert.equal($('available-actions').querySelector('p, details'), null);
+  assert.equal($('available-actions').querySelector('[data-available-action="ACTION1"]').disabled, true);
+  assert.equal($('available-actions').querySelector('[data-available-action="ACTION4"]').disabled, false);
+  assert.match(dom.window.document.querySelector('.available-actions-note').textContent, /点击定位已录动作/);
+  assert.match($('panel-cognition').textContent, /含义来自最终认知，未与历史帧对齐/);
+  assert.match($('panel-cognition').textContent, /已否定不会直接完成关卡/);
   $('next-frame').click();
   assert.deepEqual(availableNames(), ['ACTION1', 'ACTION4']);
   assert.equal(highlighted().length, 1);
   assert.equal(highlighted()[0].dataset.availableAction, 'ACTION4');
-  assert.match(highlighted()[0].textContent, /当前动作/);
+  assert.match(highlighted()[0].parentElement.textContent, /当前动作/);
   assert.equal($('unavailable-current-action').hidden, true);
   $('next-frame').click();
   assert.deepEqual(availableNames(), ['ACTION1', 'ACTION5']);
   assert.equal(highlighted().length, 1);
   assert.equal($('unavailable-current-action').hidden, false);
-  assert.match($('unavailable-current-action').textContent, /ACTION4已执行／当前不可用/);
+  assert.match($('unavailable-current-action').textContent, /已执行／当前不可用/);
+  assert.equal($('unavailable-current-action').querySelector('button').disabled, true);
   $('level-2').click();
   assert.deepEqual(availableNames(), []);
   assert.match($('available-actions').textContent, /未记录可用动作/);
@@ -156,7 +161,7 @@ test('action panel does not invent availability or use cognition without final s
   snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
   snapshot.levels[0].cognition = { scope: 'unavailable', action_meanings: { ACTION4: [{ status: 'certain', claim: '不得展示的记录。' }] } };
   const app = launch(snapshot);
-  assert.match(app.$('available-actions').textContent, /ACTION4含义未知/);
+  assert.match(app.$('available-actions').textContent, /ACTION4未识别\?/);
   assert.doesNotMatch(app.$('available-actions').textContent, /不得展示/);
   app.$('next-frame').click();
   assert.match(app.$('available-actions').textContent, /未记录可用动作/);
@@ -165,29 +170,91 @@ test('action panel does not invent availability or use cognition without final s
   app.dom.window.close();
 });
 
-test('action cards summarize one original claim while exposing all conflicting statuses', () => {
+test('compact keys leave full original and conflicting claims in the cognition tab', () => {
   const snapshot = fixture();
   snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
   const entries = [
-    { status: 'undetermined', claim: '第一条推测。' },
-    { status: 'falsified', claim: '已否定的说明。' },
-    { status: 'certain', claim: '第一条已识别的原始说明。' },
-    { status: 'certain', claim: '相近的另一条原始说明。' },
+    { status: 'undetermined', claim: 'ACTION4可能向右移动。' },
+    { status: 'falsified', claim: 'ACTION4向左移动。' },
+    { status: 'certain', claim: 'ACTION4使蓝色物件向右移动四格。' },
+    { status: 'certain', claim: '在这个位置，ACTION4向右移动。' },
   ];
   snapshot.levels[0].cognition.action_meanings = { ACTION4: entries };
   const app = launch(snapshot);
   const card = app.$('available-actions').querySelector('[data-available-action="ACTION4"]');
-  const summary = card.querySelector('.action-meaning-summary');
-  assert.equal(summary.textContent, '已识别推测已否定第一条已识别的原始说明。');
-  assert.doesNotMatch(summary.textContent, /相近|第一条推测/);
-  const details = card.querySelector('details');
+  assert.equal(card.textContent, 'ACTION4右移已识别');
+  assert.equal(card.querySelector('p, details'), null);
+  const details = app.$('panel-cognition').querySelector('[data-meaning-action="ACTION4"] details');
   assert.equal(details.open, false);
   assert.equal(details.querySelector('summary').textContent, '认知依据（4）');
-  assert.equal(details.querySelectorAll('.action-meaning').length, entries.length);
+  assert.equal(details.querySelectorAll('.claim-list li').length, entries.length);
   entries.forEach((entry) => assert.ok(details.textContent.includes(entry.claim)));
   assert.equal(app.$('available-actions').querySelector('.is-current'), null);
   assert.deepEqual(app.errors, []);
   app.dom.window.close();
+});
+
+test('compact action keys seek recorded actions, wrap, pause, and keep unsupported meanings unknown', () => {
+  const snapshot = fixture(); const level = snapshot.levels[0];
+  level.frames.forEach((frame) => { frame.available_actions = ['ACTION4', 'ACTION5', 'ACTION6', 'ACTION7']; });
+  level.actions = [
+    { id: 'a1', name: 'ACTION4', before_frame: 'f0', after_frame: 'f1', data: {} },
+    { id: 'a2', name: 'ACTION4', before_frame: 'f1', after_frame: 'f2', data: {} },
+  ];
+  level.cognition.action_meanings = {
+    ACTION4: [{ status: 'certain', claim: 'ACTION4使对象向右移动。' }],
+    ACTION5: [{ status: 'falsified', claim: 'ACTION5向上移动。' }],
+    ACTION6: [{ status: 'certain', claim: 'ACTION6不会向左移动。' }],
+    ACTION7: [{ status: 'certain', claim: 'ACTION7向左移动。' }, { status: 'undetermined', claim: 'ACTION7可能向右移动。' }],
+  };
+  const app = launch(snapshot); const { dom, $ } = app;
+  const key = (name) => $('available-actions').querySelector(`[data-available-action="${name}"]`);
+  ['ACTION5', 'ACTION6', 'ACTION7'].forEach((name) => {
+    assert.equal(key(name).textContent, `${name}未识别?`);
+    assert.equal(key(name).disabled, true);
+  });
+  $('play-toggle').click(); assert.equal(app.timers.size, 1);
+  key('ACTION4').click(); assert.equal($('frame-counter').textContent, '2 / 3');
+  assert.equal(app.timers.size, 0);
+  key('ACTION4').click(); assert.equal($('frame-counter').textContent, '3 / 3');
+  key('ACTION4').click(); assert.equal($('frame-counter').textContent, '2 / 3');
+  assert.deepEqual(app.requests, []); assert.deepEqual(app.errors, []);
+  dom.window.close();
+});
+
+test('compact directional labels support Chinese neighbors and explicit movement abbreviations', () => {
+  for (const [claim, expected] of [
+    ['当前位置ACTION4使蓝色（9）横条向右移动四格。', '右移已识别'],
+    ['ACTION4在空地将横条右移四格。', '右移已识别'],
+    ['ACTION4在空地无法右移四格。', '未识别?'],
+    ['CUSTOM_ACTION4使横条右移四格。', '未识别?'],
+  ]) {
+    const snapshot = fixture();
+    snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
+    snapshot.levels[0].cognition.action_meanings = { ACTION4: [{ status: 'certain', claim }] };
+    const app = launch(snapshot);
+    assert.equal(app.$('available-actions').querySelector('button').textContent, `ACTION4${expected}`, claim);
+    assert.deepEqual(app.errors, []);
+    app.dom.window.close();
+  }
+});
+
+test('explicit directional denials constrain compact meanings without reversing falsified negatives', () => {
+  for (const [entries, expected] of [
+    [[{ status: 'certain', claim: 'ACTION4向右移动。' }, { status: 'certain', claim: 'ACTION4不会向右移动。' }], '未识别?'],
+    [[{ status: 'certain', claim: 'ACTION4右移。' }, { status: 'certain', claim: 'ACTION4无法右移。' }], '未识别?'],
+    [[{ status: 'certain', claim: 'ACTION4向右移动。' }, { status: 'undetermined', claim: 'ACTION4可能不会向右移动。' }], '未识别?'],
+    [[{ status: 'falsified', claim: 'ACTION4不会向右移动。' }], '未识别?'],
+    [[{ status: 'certain', claim: 'ACTION4向右移动。' }, { status: 'certain', claim: 'ACTION4不会向左移动。' }], '右移已识别'],
+  ]) {
+    const snapshot = fixture();
+    snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
+    snapshot.levels[0].cognition.action_meanings = { ACTION4: entries };
+    const app = launch(snapshot);
+    assert.equal(app.$('available-actions').querySelector('button').textContent, `ACTION4${expected}`, JSON.stringify(entries));
+    assert.deepEqual(app.errors, []);
+    app.dom.window.close();
+  }
 });
 
 test('real assets: slider, animation/action link, tabs, compare, level switch, playback', () => {

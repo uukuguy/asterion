@@ -177,6 +177,30 @@
     $('palette-legend').hidden = used.size === 0;
   }
 
+  const actionMeanings = () => object(currentLevel().cognition).scope === 'final' ? object(object(currentLevel().cognition).action_meanings) : {};
+  const meaningEntries = (entries) => array(entries).filter((entry) => entry && ['certain', 'undetermined', 'falsified'].includes(entry.status) && typeof entry.claim === 'string' && entry.claim);
+
+  function shortActionMeaning(name, entries) {
+    const directions = { 上: '上移', 下: '下移', 左: '左移', 右: '右移' };
+    const candidates = [];
+    entries.forEach((entry) => {
+      entry.claim.split(/[。；;\n]/).forEach((clause) => {
+        const names = [...new Set(clause.match(/(?<![A-Za-z0-9_])ACTION[1-7](?![A-Za-z0-9_])/g) || [])];
+        if (names.length !== 1 || names[0] !== name) return;
+        const denied = [...new Set([...clause.matchAll(/(?:不会|不能|无法|并非|没有|未曾|不曾|不|未)\s*(?:向([上下左右])(?:移动|平移)|([上下左右])移)/g)].map((match) => match[1] || match[2]))];
+        denied.forEach((direction) => candidates.push({ status: entry.status, direction, affirmative: false }));
+        if (/不|未|无|否|并非/.test(clause)) return;
+        const found = [...new Set([...clause.matchAll(/(?:向([上下左右])(?:移动|平移)|([上下左右])移)/g)].map((match) => match[1] || match[2]))];
+        if (found.length === 1) candidates.push({ status: entry.status, direction: found[0], affirmative: true });
+      });
+    });
+    const supported = candidates.filter((entry) => entry.affirmative && entry.status !== 'falsified');
+    const found = [...new Set(supported.map((entry) => entry.direction))];
+    const contradicted = candidates.some((entry) => entry.direction === found[0] && (entry.affirmative ? entry.status === 'falsified' : entry.status !== 'falsified'));
+    if (found.length !== 1 || contradicted) return { meaning: '未识别', status: '?' };
+    return { meaning: directions[found[0]], status: supported.some((entry) => entry.status === 'certain') ? '已识别' : '推测' };
+  }
+
   function renderAvailableActions(frame, action) {
     const hasAvailability = Boolean(frame && Array.isArray(frame.available_actions));
     const available = [...new Set(array(frame && frame.available_actions).filter((name) => typeof name === 'string' && name))];
@@ -184,44 +208,34 @@
     const afterIndex = action ? frames().findIndex((item) => item.id === action.after_frame) : -1;
     const linked = action && frame && (frame.id === action.after_frame || (beforeIndex >= 0 && afterIndex >= beforeIndex && state.frameIndex > beforeIndex && state.frameIndex <= afterIndex));
     const activeName = linked ? action.name : null;
-    const cognition = object(currentLevel().cognition);
-    const meanings = cognition.scope === 'final' ? object(cognition.action_meanings) : {};
-    const labels = { certain: '已识别', undetermined: '推测', falsified: '已否定' };
+    const meanings = actionMeanings();
     const card = (name, availability) => {
       const active = name === activeName;
-      const item = node('article', undefined, `available-action${active ? ' is-current' : ''}`);
+      const wrapper = node('div');
+      wrapper.setAttribute('role', 'listitem');
+      const item = node('button', undefined, `available-action${active ? ' is-current' : ''}`);
+      item.type = 'button';
+      const recorded = actions().filter((entry) => entry.name === name).map((entry) => ({
+        action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
+      })).filter((entry) => entry.index >= 0);
+      item.disabled = Boolean(availability) || recorded.length === 0;
+      item.title = availability || (recorded.length ? '定位该动作的下一条回放记录' : '没有可定位的已录动作');
+      item.addEventListener('click', () => {
+        const target = recorded.find((entry) => entry.index > state.frameIndex) || recorded[0];
+        if (!item.disabled && target) locateAction(target.action);
+      });
       item.dataset.availableAction = name;
-      item.setAttribute('role', 'listitem');
       if (active) item.setAttribute('aria-current', 'true');
-      const heading = node('div', undefined, 'available-action-heading');
-      heading.append(node('strong', name));
-      if (active) heading.append(node('span', availability || '当前动作', 'current-action-label'));
-      item.append(heading);
-      const entries = array(meanings[name]).filter((entry) => entry && labels[entry.status] && typeof entry.claim === 'string' && entry.claim);
-      if (!entries.length) item.append(node('p', '含义未知', 'action-meaning-unknown'));
-      else {
-        const statuses = ['certain', 'undetermined', 'falsified'].filter((status) => entries.some((entry) => entry.status === status));
-        const representative = entries.find((entry) => entry.status === statuses[0]);
-        const summary = node('p', undefined, 'action-meaning action-meaning-summary');
-        statuses.forEach((status) => summary.append(node('span', labels[status], 'action-meaning-status')));
-        summary.append(node('span', representative.claim));
-        item.append(summary);
-        if (entries.length > 1) {
-          const details = node('details', undefined, 'action-meaning-details');
-          details.append(node('summary', `认知依据（${entries.length}）`));
-          entries.forEach((entry) => {
-            const meaning = node('p', undefined, 'action-meaning');
-            meaning.append(node('span', labels[entry.status], 'action-meaning-status'), node('span', entry.claim));
-            details.append(meaning);
-          });
-          item.append(details);
-        }
-      }
-      return item;
+      const short = shortActionMeaning(name, meaningEntries(meanings[name]));
+      item.append(node('strong', name, 'action-key-label'), node('span', short.meaning, 'action-key-meaning'), node('span', short.status, 'action-key-status'));
+      item.setAttribute('aria-label', `${name}，${short.meaning}，${short.status === '?' ? '含义未知' : short.status}，定位已录动作${active ? `，${availability || '当前动作'}` : ''}`);
+      wrapper.append(item);
+      if (active) wrapper.append(node('span', availability || '当前动作', 'current-action-label'));
+      return wrapper;
     };
     const list = $('available-actions');
     list.replaceChildren();
-    if (!available.length) list.append(node('p', hasAvailability ? '当前帧没有可用动作。' : '未记录可用动作。', 'available-actions-empty'));
+    if (!available.length) list.append(node('span', hasAvailability ? '当前帧没有可用动作。' : '未记录可用动作。', 'available-actions-empty'));
     available.forEach((name) => list.append(card(name)));
     const unavailable = $('unavailable-current-action');
     unavailable.replaceChildren();
@@ -416,9 +430,10 @@
     array(snapshot.decisions).forEach((decision) => { if (!decisionMap.has(decision.id)) decisionMap.set(decision.id, decision); });
     const decisions = [...decisionMap.values()];
     const updates = array(object(level.cognition).updates);
+    const meaningRecords = Object.entries(actionMeanings()).map(([name, entries]) => [name, meaningEntries(entries)]).filter(([, entries]) => entries.length);
     write('decision-count', decisions.length);
     write('actions-count', actions().length);
-    write('cognition-count', updates.length);
+    write('cognition-count', updates.length + meaningRecords.length);
     decisionsPanel.append(node('p', '这里只展示模型轮次与输入 / 输出信号。信号不是详细决策解释；缺失的规划目标、依据和下一步判断不会被补写。', 'process-note'));
     if (!decisions.length) emptyPanel(decisionsPanel, '没有可审计的 P7 决策信号', '动作记录本身不能证明某一轮次的规划内容。');
     decisions.forEach((decision, index) => {
@@ -465,7 +480,25 @@
       actionsPanel.append(card);
     });
     cognitionPanel.append(node('p', '认知事件是最终会话的记录，未与回放帧、动作或模型轮次建立时间关联。展开后可查看保留的认知条目。', 'process-note'));
-    if (!updates.length) emptyPanel(cognitionPanel, '没有可展示的认知更新事件', '没有事件证据时，不从最终快照倒推历史认知。');
+    if (meaningRecords.length) cognitionPanel.append(node('p', '动作含义来自最终认知，未与历史帧对齐。按键上的简短含义只采用明确的方向记录；完整原始记录保留如下。', 'process-note'));
+    const meaningStatuses = { certain: '已识别', undetermined: '推测', falsified: '已否定' };
+    meaningRecords.forEach(([name, entries]) => {
+      const card = node('article', undefined, 'event-card');
+      card.dataset.meaningAction = name;
+      const heading = node('div', undefined, 'event-heading');
+      heading.append(node('h3', name), node('span', '最终动作认知', 'neutral-tag'));
+      card.append(heading);
+      const details = node('details');
+      details.append(node('summary', `认知依据（${entries.length}）`));
+      const list = node('ul', undefined, 'claim-list');
+      entries.forEach((entry) => {
+        const row = node('li');
+        row.append(node('span', meaningStatuses[entry.status], 'claim-label'), node('p', entry.claim));
+        list.append(row);
+      });
+      details.append(list); card.append(details); cognitionPanel.append(card);
+    });
+    if (!updates.length && !meaningRecords.length) emptyPanel(cognitionPanel, '没有可展示的认知更新事件', '没有事件证据时，不从最终快照倒推历史认知。');
     const types = { 'cognition.hypothesis.confirmed': '确认事实', 'cognition.hypothesis.falsified': '否定事实', 'cognition.hypothesis.remains_undetermined': '保留未决假说' };
     const claimStatuses = { certain: '已确认', falsified: '已否定', undetermined: '未决假说', superseded: '已替代' };
     const claimKinds = { game_type: '游戏类型', object_role: '物件角色', control: '动作操作', rule: '游戏规则', success_condition: '过关条件', strategy: '规划策略' };
