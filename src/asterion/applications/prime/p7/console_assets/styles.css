@@ -21,3 +21,5 @@
 
 .level-saved-badge{font-size:9px;white-space:nowrap;color:var(--accent);background:var(--accent-soft);border-radius:3px;padding:1px 4px}.manual-save-status{font-size:11px}
 .manual-restart{border:1px solid var(--line);min-height:34px;white-space:nowrap}
+
+.research-workspace{background:var(--paper);border:1px solid var(--line);padding:20px;margin-bottom:22px}.research-workspace p{font-size:12px;line-height:1.7;overflow-wrap:anywhere}.research-event{border-top:1px solid var(--line);padding:10px 0;font-size:12px}.research-event summary{cursor:pointer;line-height:1.7}.research-event p{color:var(--muted);margin-top:5px}

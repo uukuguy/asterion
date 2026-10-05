@@ -3709,3 +3709,5 @@
 - 20:45 Approved Prime/P7 ownership and implementation contracts to begin the whole redesign [447bb65a].
 - 20:55 Prime 工作区16项测试通过；模型轮次准入40项与跨组件研究/行动2项通过，均为无provider验证，未证明过关。
 - 21:04 Astra复核通用kernel/轮次准入修复及console通过；部署接线与真实求解仍待验收。
+- 21:10 Committed generic persistent kernel and bounded round admission after review; no solving claim [209baf19].
+- 21:13 Console/control 105 Python tests passed; 74 DOM checks passed earlier; actual browser and deployment remain pending.

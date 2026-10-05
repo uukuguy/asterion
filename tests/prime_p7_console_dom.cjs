@@ -1712,3 +1712,85 @@ test('render failure rolls back snapshot and leaves accepted revision available 
     assert.deepEqual(app.errors,[]);
   } finally { app.dom.window.close(); }
 });
+
+function researchStory() {
+  const snapshot = fixture();
+  snapshot.levels[0].frames = [snapshot.levels[0].frames[0]];
+  snapshot.levels[0].actions = [];
+  const common = { source_action_sequence: 0, observation_sha256: `sha256:${'a'.repeat(64)}`,
+    level: 1, workspace_revision: 'model-1', task_id: 'task-1', origin: 'actor' };
+  const entries = [
+    ['compute_task', { ...common, status: 'started', operation: 'search', goal: '先打开门', obstacles: ['门未打开'], question: '开关是否持续有效', summary: '', elapsed_ms: null, completed_units: null }],
+    ['model_revision', { ...common, revision: 'model-1', parent_revision: null, description_zh: '游戏规则：门保持开放。', state_summary: '角色在门外', rule_summaries: [], unknowns: ['终点条件'], coverage_summary: '只覆盖门附近', validation_summary: '已检查观察0', correction_summary: '', evidence_sequences: [0] }],
+    ['plan', { ...common, plan_id: 'plan-1', status: 'proposed', goal: '进入门内', assumptions: ['门保持开放'], actions: [{name:'ACTION4',data:{}},{name:'ACTION1',data:{}}], applied_count: 0, stop_reason: null }],
+    ['feedback', { ...common, origin: 'environment', plan_id: 'plan-1', expected_summary: '角色进入门内', actual_summary: '角色仍在门外', mismatch_kind: 'dynamics', unexecuted_count: 1, counterexample_sequence: 0 }],
+    ['model_revision', { ...common, workspace_revision: 'model-2', revision: 'model-2', parent_revision: 'model-1', description_zh: '游戏规则：门仅开放一步。', state_summary: '角色仍在门外', rule_summaries: [], unknowns: ['终点条件'], coverage_summary: '只覆盖门附近', validation_summary: '反例观察0', correction_summary: '动作后门立即关闭', evidence_sequences: [0] }],
+    ['compute_task', { ...common, workspace_revision: 'model-2', origin: 'calculation', status: 'completed', operation: 'search', goal: '先打开门', obstacles: ['门未打开'], question: '开关是否持续有效', summary: '找到一条待检验路线', elapsed_ms: 12, completed_units: 8 }],
+  ];
+  snapshot.process_events = entries.map(([kind,payload],i) => ({event_sequence:i+1,kind,payload,source_action_sequence:0,frame_id:'f0',level:1}));
+  return snapshot;
+}
+
+test('actual event cursor distinguishes model revisions at one frame and incomplete task remains incomplete', () => {
+  const app = launch(researchStory()); const { dom, $ } = app;
+  const seek = (index) => { $('event-slider').value=String(index); $('event-slider').dispatchEvent(new dom.window.Event('input')); };
+  assert.equal($('event-counter').textContent, '事件 6');
+  assert.match($('world-guide').textContent, /门仅开放一步/);
+  assert.match($('research-events').textContent, /模型预期：角色进入门内/);
+  assert.match($('research-events').textContent, /实际结果：角色仍在门外/);
+  assert.match($('research-events').textContent, /未执行后缀 1/);
+  assert.match($('research-events').textContent, /实际用时 12 ms/);
+  seek(1);
+  assert.equal($('frame-counter').textContent, '1 / 1');
+  assert.match($('world-guide').textContent, /门保持开放/);
+  assert.doesNotMatch($('world-guide').textContent, /门仅开放一步/);
+  assert.doesNotMatch($('research-events').textContent, /真实反馈|实际用时 12/);
+  assert.match($('research-events').textContent, /尚无结束记录/);
+  seek(0);
+  assert.doesNotMatch($('world-guide').textContent, /使物件向右移动|门保持开放|门仅开放一步/);
+  assert.equal($('research-revision').textContent, '模型版本未关联');
+  seek(4);
+  assert.equal($('research-revision').textContent, '模型 model-2');
+  assert.match($('research-events').textContent, /差异类别：dynamics/);
+  assert.deepEqual(app.errors, []); dom.window.close();
+});
+
+test('live historical event cursor stays read-only across polls and pause/resume requires acknowledged lifecycle', async () => {
+  let current = { ...view(researchStory()), state: 'running', revision: 1 };
+  const app = launch(researchStory(), { liveConfig, fetch: async (url, options={}) => {
+    if (url === '/api/runs') return response({ runs: [] });
+    if (['/api/pause','/api/resume','/api/stop'].includes(url)) {
+      const body = JSON.parse(options.body);
+      assert.equal(body.session_id, 'session-1');
+      current = {...current, revision: current.revision+1, state: url==='/api/pause' ? 'pause_requested' : url==='/api/resume' ? 'resume_requested' : 'stopping'};
+      return response(current);
+    }
+    return response(current);
+  }});
+  await settle();
+  app.$('event-slider').value='1'; app.$('event-slider').dispatchEvent(new app.dom.window.Event('input'));
+  assert.equal(app.$('run-pause').disabled, true);
+  assert.equal(app.$('event-return-current').hidden, false);
+  current={...current,revision:2}; app.tick(); await settle();
+  assert.equal(app.$('event-counter').textContent,'事件 2');
+  assert.match(app.$('world-guide').textContent,/门保持开放/);
+  assert.equal(app.requests.some((request)=>request.url==='/api/pause'), false);
+  app.$('event-return-current').click();
+  assert.equal(app.$('event-counter').textContent,'事件 6');
+  assert.equal(app.$('run-pause').disabled,false);
+  app.$('run-pause').click(); await settle();
+  assert.match(app.$('service-status').textContent,/暂停已请求/);
+  assert.equal(app.$('run-resume').disabled,true);
+  assert.equal(app.$('run-start').disabled,true);
+  app.$('console-mode').value='manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+  assert.equal(app.$('console-mode').value,'live');
+  current={...current,state:'paused',revision:current.revision+1}; app.tick(); await settle();
+  assert.equal(app.$('run-resume').disabled,false);
+  app.$('run-resume').click(); await settle();
+  assert.match(app.$('service-status').textContent,/继续已请求/);
+  current={...current,state:'running',revision:current.revision+1}; app.tick(); await settle();
+  app.$('event-slider').value='1'; app.$('event-slider').dispatchEvent(new app.dom.window.Event('input'));
+  app.$('run-stop').click(); await settle();
+  assert.equal(app.requests.filter((request)=>request.url==='/api/stop').length,1);
+  assert.deepEqual(app.errors,[]);app.dom.window.close();
+});

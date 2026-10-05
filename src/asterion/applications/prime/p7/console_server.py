@@ -127,7 +127,7 @@ class _Handler(BaseHTTPRequestHandler):
                 or not secrets.compare_digest(token, self.server.token)):
             self._error(403, "write-rejected")
             return
-        if self.path not in {"/api/start", "/api/stop", "/api/manual/open", "/api/manual/action",
+        if self.path not in {"/api/start", "/api/stop", "/api/pause", "/api/resume", "/api/manual/open", "/api/manual/action",
                              "/api/manual/close", "/api/manual/restart"}:
             self._error(404, "not-found")
             return
@@ -176,6 +176,9 @@ class _Handler(BaseHTTPRequestHandler):
                 result = self.server.session.start(value["game_id"], value["command_id"])
             elif self.path == "/api/stop":
                 result = self.server.session.stop(value["session_id"], value["command_id"])
+            elif self.path in {"/api/pause", "/api/resume"}:
+                method = self.server.session.pause if self.path == "/api/pause" else self.server.session.resume
+                result = method(value["session_id"], value["command_id"])
             elif self.path == "/api/manual/open":
                 result = self.server.session.manual_open(value["game_id"], value["command_id"], value.get("level", 1))
             elif self.path == "/api/manual/action":

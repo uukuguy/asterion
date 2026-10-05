@@ -335,3 +335,45 @@ class TestPrimeP7ConsoleSession(ConsoleSessionFixture):
         with self.assertRaises(ConsoleSessionError):
             session.replay(RUN_ID)
         self.assertEqual(session.recorded_runs(), [])
+
+
+class TestP7ConsoleControlHandshake(ConsoleSessionFixture):
+    def test_request_is_pending_until_matching_guest_ack_and_stop_stays_global(self):
+        from asterion.applications.prime.p7.solver_control import SolverControl
+        session = self.session()
+        started = session.start('test-1', 'start')
+        self.wait_state(session, 'running')
+        run_root = session._run_path(RUN_ID)
+        run_root.mkdir(parents=True)
+        control = SolverControl(run_root, RUN_ID, time.monotonic() + 30)
+        self.assertTrue(control.enter('action'))
+        requested = session.pause(started['session_id'], 'pause')
+        self.assertEqual(requested['state'], 'pause_requested')
+        self.assertEqual(session.pause(started['session_id'], 'pause'), requested)
+        with self.assertRaises(ConsoleSessionError):
+            session.resume(started['session_id'], 'early-resume')
+        control.poll(0, 'sha256:' + 'a' * 64)
+        session._refresh_control(RUN_ID)
+        self.assertEqual(session.view()['state'], 'pause_requested')
+        ack_path = run_root / 'control-ack.json'
+        ack = json.loads(ack_path.read_text())
+        ack_path.write_text(json.dumps({**ack, 'state': 'paused', 'command_id': 'wrong-command'}))
+        session._refresh_control(RUN_ID)
+        self.assertEqual(session.view()['state'], 'pause_requested')
+        control.leave('action')
+        self.wait_state(session, 'paused')
+        with self.assertRaises(ConsoleSessionError):
+            session.start('test-1', 'another-start')
+        with self.assertRaises(ConsoleSessionError):
+            session.resume('wrong-session', 'wrong-resume')
+        self.assertEqual(session.resume(started['session_id'], 'resume')['state'], 'resume_requested')
+        self.assertEqual(session.view()['state'], 'resume_requested')
+        control.poll(0, 'sha256:' + 'a' * 64)
+        self.wait_state(session, 'running')
+        session.pause(started['session_id'], 'pause-again')
+        control.poll(0, 'sha256:' + 'a' * 64)
+        self.wait_state(session, 'paused')
+        session.stop(started['session_id'], 'stop')
+        self.wait_state(session, 'cancelled')
+        self.assertEqual(len(self.calls), 1)
+        self.assertTrue(session.view()['cleanup_confirmed'])

@@ -260,7 +260,7 @@ def test_research_wire_cannot_dispatch(self):
 
 **Interfaces:** 实现 D；消费 Task 2 的 solver events，输出 console public snapshot 和 operator 可读取的控制命令。不要解析 arbitrary stdout 补猜事件。
 
-- [ ] 实现独立 `SolverControl`：幂等 pause/resume/stop、活动计数、边界确认及绝对期限。暂停中的行动派发必须零增长；当前动作返回后才进入 paused，停止尚未清理时不能显示 stopped。
+- [x] 实现独立 `SolverControl`：幂等 pause/resume/stop、活动计数、边界确认及绝对期限。暂停中的行动派发必须零增长；当前动作返回后才进入 paused，停止尚未清理时不能显示 stopped。
 
 ```python
 def test_pause_waits_for_dispatched_action(self):
@@ -274,11 +274,11 @@ def test_pause_waits_for_dispatched_action(self):
     self.assertEqual(self.control.snapshot()['state'], 'paused')
 ```
 
-- [ ] ConsoleSession/server 增加 pause/resume 路由与确认回执；控制请求到 operator 的路径复用本 run guest 映射，不能写入 worker 可发布产物集合。断连或未知回执显示请求未确认，不猜为成功。
-- [ ] 消费公共事件构建画面/任务/WorldMap/研究计划/反馈五区：真实帧与预测区分，已执行/未执行后缀明确；修订链接到反例，错误来源可区分状态/动力学/目标/实现。
-- [ ] 使用同一 Task 2 fixture 检查历史 event N 展示 revision N，而不是最终 revision；现场停止按钮不作用于被查看的历史 run。HUMAN 试玩与自主证据保持独立。
+- [x] ConsoleSession/server 增加 pause/resume 路由与确认回执；控制请求到 operator 的路径复用本 run guest 映射，不能写入 worker 可发布产物集合。断连或未知回执显示请求未确认，不猜为成功。
+- [x] 消费公共事件构建画面/任务/WorldMap/研究计划/反馈五区：真实帧与预测区分，已执行/未执行后缀明确；修订链接到反例，错误来源可区分状态/动力学/目标/实现。
+- [x] 使用同一 Task 2 fixture 检查历史 event N 展示 revision N，而不是最终 revision；现场停止按钮不作用于被查看的历史 run。HUMAN 试玩与自主证据保持独立。
 - [ ] 在浏览器当前已登录实例验证开始、暂停请求、已暂停、继续、停止请求、已清理状态以及历史回看；只用 provider-free fixture/synthetic adapter 做 UI 阶段验证，不能称为真实求解胜利。无可计算总量时不显示百分比。
-- [ ] 跑针对 console/control unittest。用 sentinel 对公共 snapshot 断言不出现 stdout、prompt、provider payload、路径、源码；提交所属文件并交付 Task 4 控制握手格式。
+- [x] 跑针对 console/control unittest。用 sentinel 对公共 snapshot 断言不出现 stdout、prompt、provider payload、路径、源码；提交所属文件并交付 Task 4 控制握手格式。
 
 ## Task 4: 实际接线、共同复审与有限真实验证
 

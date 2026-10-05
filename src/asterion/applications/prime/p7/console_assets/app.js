@@ -36,6 +36,10 @@
   function validSnapshot(value) {
     if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-console/v1' || !isRecord(value.run) || !Array.isArray(value.levels)) return false;
     if (!optionalRecords(value.decisions, validDecision) || !stringFields(value.run, ['status', 'game_id', 'run_id']) || !optionalString(value.generated_at)) return false;
+    if (value.process_events !== undefined && (!Array.isArray(value.process_events) || value.process_events.length > 16384 ||
+      value.process_events.some((event, index, events) => !isRecord(event) || !Number.isInteger(event.event_sequence) || event.event_sequence < 1 ||
+        (index > 0 && event.event_sequence <= events[index - 1].event_sequence) || !['observation', 'action', 'decision', 'cognition', 'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind) ||
+        typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload)))) return false;
     const run = value.run;
     if (run.win_levels != null && (!Number.isInteger(run.win_levels) || run.win_levels < 0 || run.win_levels > 1000)) return false;
     const ids = new Set();
@@ -77,7 +81,7 @@
   let liveConfig = null;
   try { liveConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   if (!isRecord(liveConfig) || typeof liveConfig.token !== 'string' || !liveConfig.token) liveConfig = null;
-  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
+  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
   const currentLevel = () => levels[state.levelIndex] || emptyLevel;
@@ -85,6 +89,9 @@
   const actions = () => array(currentLevel().actions);
   const currentFrame = () => frames()[state.frameIndex];
   const frameById = (id) => (state.mode === 'manual' && run.status === 'manual' ? levels.flatMap((level) => array(level.frames)) : frames()).find((frame) => frame.id === id);
+  const processEvents = () => state.mode === 'manual' ? [] : array(snapshot.process_events).filter((event) => event.level === currentLevel().level && frames().some((frame) => frame.id === event.frame_id));
+  const cursorSequence = () => state.eventSequence ?? processEvents().filter((event) => frames().findIndex((frame) => frame.id === event.frame_id) <= state.frameIndex).at(-1)?.event_sequence ?? null;
+  const researchEvents = () => processEvents().filter((event) => event.event_sequence <= cursorSequence() && ['compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind));
   const selectedAction = () => actions().find((action) => action.id === state.actionId) || null;
   const manualPlayable = () => state.mode === 'manual' && run.status === 'manual' && state.manualView?.state === 'ready' &&
     state.manualView.game_id === run.game_id && manualLevel(state.manualView) === currentLevel().level && !state.manualBusy && !state.manualPending && !state.manualError &&
@@ -286,6 +293,7 @@
   function selectLevel(index, { pausePlayback = true } = {}) {
     if (pausePlayback) pause();
     state.levelIndex = index;
+    state.eventSequence = null;
     state.frameIndex = 0;
     state.actionId = null;
     renderRail();
@@ -297,6 +305,7 @@
     renderReceipt();
     renderFrame();
     write('playback-announcement', currentLevel().level === null ? '没有可验证的关卡记录。' : `已选择关卡 ${currentLevel().level}，${frames().length} 帧。`);
+    renderSessionControls();
   }
 
   function draw(canvas, frame, before, action) {
@@ -450,6 +459,7 @@
     const frame = currentFrame();
     const action = selectedAction();
     renderWorld();
+    renderResearch();
     renderAvailableActions(frame, action);
     const before = action && frameById(action.before_frame);
     const after = action && frameById(action.after_frame);
@@ -509,6 +519,7 @@
     if (manualHistoryActive()) { setManualFrame(index, actionId); return; }
     if (!frames().length) return;
     state.frameIndex = Math.max(0, Math.min(frames().length - 1, index));
+    state.eventSequence = null;
     if (actionId !== undefined) state.actionId = actionId;
     else {
       const linked = actions().filter((action) => {
@@ -519,6 +530,12 @@
       state.actionId = linked.length ? linked[linked.length - 1].id : null;
     }
     renderFrame();
+    renderSessionControls();
+  }
+
+  function seekFrame(index, actionId) {
+    setFrame(index, actionId);
+    if (state.mode === 'live' && processEvents().length) { state.eventSequence = cursorSequence(); renderFrame(); renderSessionControls(); }
   }
 
   function locateAction(action) {
@@ -526,7 +543,7 @@
     if (manualHistoryActive()) { const index = state.manualHistory.entries.findIndex((entry) => entry.frame.id === action.after_frame); if (index >= 0) setManualFrame(index, action.id); return; }
     const target = frames().findIndex((frame) => frame.id === action.after_frame);
     const fallback = frames().findIndex((frame) => frame.id === action.before_frame);
-    if (target >= 0 || fallback >= 0) setFrame(target >= 0 ? target : fallback, action.id);
+    if (target >= 0 || fallback >= 0) seekFrame(target >= 0 ? target : fallback, action.id);
     else { state.actionId = action.id; renderFrame(); }
   }
 
@@ -568,13 +585,17 @@
   function observationCognition() {
     const timeline = array(currentLevel().cognition_timeline);
     return timeline.filter((entry) => entry.scope === 'observation').map((entry) => ({ entry, index: frames().findIndex((frame) => frame.id === entry.frame_id) }))
-      .filter(({ index }) => index >= 0 && index <= state.frameIndex)
+      .filter(({ entry, index }) => index >= 0 && index <= state.frameIndex && (state.eventSequence === null || !Number.isInteger(entry.event_sequence) || entry.event_sequence <= state.eventSequence))
       .sort((a, b) => a.index - b.index || number(a.entry.event_sequence) - number(b.entry.event_sequence)).pop()?.entry || null;
   }
 
   function renderWorld() {
     const timeline = array(currentLevel().cognition_timeline);
-    const cognition = timeline.length ? observationCognition() || {} : object(currentLevel().cognition);
+    const revision = researchEvents().filter((event) => event.kind === 'model_revision').at(-1);
+    const cognition = revision ? { scope: 'observation', frame_id: revision.frame_id,
+      source_action_sequence: revision.source_action_sequence, cognition_revision: revision.event_sequence,
+      stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary }
+      : timeline.length ? observationCognition() || {} : state.eventSequence !== null ? {} : object(currentLevel().cognition);
     const guide = $('world-guide');
     const facts = $('world-facts');
     guide.replaceChildren(); facts.replaceChildren();
@@ -613,6 +634,69 @@
     const update = node('section', undefined, 'guide-section');
     update.append(node('h3', '最近一次稳定更新'), node('p', cognition.scope === 'observation' ? string(cognition.cognition_narrative_zh, '该观察未记录更新说明。') : '最终快照；具体更新时间未与回放帧对齐。'));
     guide.append(update);
+  }
+
+  function setEvent(index) {
+    const event = processEvents()[index];
+    if (!event) return;
+    pause();
+    const frameIndex = frames().findIndex((frame) => frame.id === event.frame_id);
+    setFrame(frameIndex);
+    state.eventSequence = event.event_sequence;
+    renderFrame(); renderSessionControls();
+  }
+
+  function renderResearch() {
+    const events = processEvents(), cursor = cursorSequence();
+    $('event-timeline').hidden = !events.length;
+    $('event-slider').max = String(Math.max(0, events.length - 1));
+    $('event-slider').value = String(Math.max(0, events.findIndex((event) => event.event_sequence === cursor)));
+    $('event-slider').disabled = events.length < 2;
+    write('event-counter', cursor === null ? '' : `事件 ${cursor}`);
+    const visible = researchEvents();
+    $('research-workspace').hidden = !visible.length;
+    const task = visible.filter((event) => event.kind === 'compute_task').at(-1);
+    const revision = visible.filter((event) => event.kind === 'model_revision').at(-1);
+    write('research-revision', revision ? `模型 ${revision.payload.revision}` : '模型版本未关联');
+    const current = $('research-task'); current.replaceChildren();
+    if (task) {
+      current.append(node('p', `目标：${task.payload.goal || '尚未声明'}`));
+      if (array(task.payload.obstacles).length) current.append(node('p', `障碍：${task.payload.obstacles.join('；')}`));
+      if (task.payload.question) current.append(node('p', `关键未知：${task.payload.question}`));
+    }
+    const panel = $('research-events'); panel.replaceChildren();
+    const kinds = { compute_task: '研究任务', model_revision: '模型修订', plan: '候选计划', feedback: '真实反馈', run_control: '运行控制' };
+    const statuses = { declared: '已声明', started: '已开始', completed: '已完成', failed: '失败', interrupted: '已中断', proposed: '待执行', executing: '执行中', stopped: '已停止', pause_requested: '暂停请求待确认', paused: '已暂停', running: '运行中', stop_requested: '结束请求待确认', stopping: '清理中', cleanup_failed: '清理未确认' };
+    const origins = { actor: '模型声明', calculation: '计算结果', environment: '真实观察', operator: '运行记录' };
+    visible.forEach((event) => {
+      const payload = event.payload, item = node('details', undefined, 'research-event');
+      item.dataset.eventSequence = String(event.event_sequence);
+      item.append(node('summary', `事件 ${event.event_sequence} · ${kinds[event.kind]} · ${statuses[payload.status || payload.state] || ''} · ${origins[payload.origin] || ''}`));
+      const add = (label, value) => { if (typeof value === 'string' && value) item.append(node('p', `${label}：${value}`)); };
+      if (event.kind === 'compute_task') {
+        add('计算目的', payload.operation); add('结果', payload.summary);
+        if (Number.isFinite(payload.elapsed_ms)) item.append(node('p', `实际用时 ${payload.elapsed_ms} ms`));
+        if (Number.isFinite(payload.completed_units)) item.append(node('p', `已完成工作量 ${payload.completed_units}`));
+        if (payload.status === 'started' && !visible.some((other) => other.event_sequence > event.event_sequence && other.kind === 'compute_task' && other.payload.task_id === payload.task_id && ['completed', 'failed', 'interrupted'].includes(other.payload.status))) item.append(node('p', '尚无结束记录；计算完成不代表关卡完成。'));
+      } else if (event.kind === 'model_revision') {
+        add('当前状态', payload.state_summary); add('覆盖', payload.coverage_summary); add('检验', payload.validation_summary); add('修订', payload.correction_summary);
+        array(payload.unknowns).forEach((unknown) => add('未知', unknown));
+      } else if (event.kind === 'plan') {
+        add('计划', payload.plan_id); add('目标', payload.goal);
+        array(payload.assumptions).forEach((assumption) => add('假设', assumption));
+        item.append(node('p', `候选动作：${array(payload.actions).map((action) => action.name + (action.name === 'ACTION6' ? `(${action.data.x},${action.data.y})` : '')).join(' → ')}`));
+        item.append(node('p', `已执行 ${payload.applied_count} / ${array(payload.actions).length}；未执行 ${Math.max(0, array(payload.actions).length - payload.applied_count)}`));
+        add('停止原因', payload.stop_reason);
+      } else if (event.kind === 'feedback') {
+        add('模型预期', payload.expected_summary); add('实际结果', payload.actual_summary); add('差异类别', payload.mismatch_kind);
+        item.append(node('p', `未执行后缀 ${payload.unexecuted_count}`));
+        if (payload.counterexample_sequence !== null) item.append(node('p', `反例观察 ${payload.counterexample_sequence}`));
+      } else add('原因', payload.reason);
+      add('模型版本', payload.workspace_revision);
+      const link = node('button', '定位此事件', 'event-link'); link.type = 'button';
+      link.addEventListener('click', () => setEvent(events.findIndex((candidate) => candidate.event_sequence === event.event_sequence)));
+      item.append(link); panel.append(item);
+    });
   }
 
   function emptyPanel(panel, title, detail) {
@@ -806,9 +890,9 @@
       if (target) { event.preventDefault(); event.stopPropagation(); selectTab(target, true); }
     });
   });
-  $('frame-slider').addEventListener('input', () => { pause(); setFrame(Number($('frame-slider').value)); });
-  $('previous-frame').addEventListener('click', () => { pause(); setFrame(timelinePosition() - 1); });
-  $('next-frame').addEventListener('click', () => { pause(); setFrame(timelinePosition() + 1); });
+  $('frame-slider').addEventListener('input', () => { pause(); seekFrame(Number($('frame-slider').value)); });
+  $('previous-frame').addEventListener('click', () => { pause(); seekFrame(timelinePosition() - 1); });
+  $('next-frame').addEventListener('click', () => { pause(); seekFrame(timelinePosition() + 1); });
   $('manual-return-current').addEventListener('click', () => { pause(); if (manualHistoryActive()) setManualFrame(state.manualHistory.entries.length - 1); });
   $('play-toggle').addEventListener('click', () => state.timer === null ? play() : pause());
   $('play-speed').addEventListener('change', () => { if (state.timer !== null) play(); });
@@ -834,7 +918,7 @@
     }
     if (state.mode !== 'replay') return;
     if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-      event.preventDefault(); pause(); setFrame(state.frameIndex + (event.key === 'ArrowRight' ? 1 : -1));
+      event.preventDefault(); pause(); seekFrame(state.frameIndex + (event.key === 'ArrowRight' ? 1 : -1));
     } else if (event.code === 'Space' && !event.repeat) { event.preventDefault(); state.timer === null ? play() : pause(); }
   });
   $('board-canvas').addEventListener('click', (event) => {
@@ -851,6 +935,8 @@
   window.addEventListener('pagehide', pause);
   function replaceSnapshot(next, { follow = state.mode === 'live', manualPosition = null } = {}) {
     if (!validSnapshot(next)) throw new Error('invalid-response');
+    follow = follow && state.eventSequence === null;
+    const previousEvent = state.eventSequence;
     const previous = { snapshot, run, recordedLevels, levelCount, levels,
       levelIndex: state.levelIndex, frameIndex: state.frameIndex, actionId: state.actionId };
     const previousRun = run.run_id, previousLevel = currentLevel().level, previousFrame = currentFrame()?.id, previousAction = state.actionId;
@@ -871,22 +957,25 @@
       if (manualPosition !== null) setManualFrame(manualPosition);
       else setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
         preserve && actions().some((action) => action.id === previousAction) ? previousAction : undefined);
+      if (preserve && processEvents().some((event) => event.event_sequence === previousEvent)) { state.eventSequence = previousEvent; renderFrame(); }
     } catch (_) {
       snapshot = previous.snapshot; run = previous.run; recordedLevels = previous.recordedLevels;
       levelCount = previous.levelCount; levels = previous.levels;
-      state.levelIndex = previous.levelIndex; state.frameIndex = previous.frameIndex; state.actionId = previous.actionId;
+      state.levelIndex = previous.levelIndex; state.frameIndex = previous.frameIndex; state.actionId = previous.actionId; state.eventSequence = previousEvent;
       // Restore the old rendered frame if the failing canvas/DOM operation was transient.
       try {
         renderRunHeader(); selectLevel(previous.levelIndex); setFrame(previous.frameIndex, previous.actionId);
       } catch (_) { /* Persistent rendering failure must not commit data or revision. */ }
-      state.levelIndex = previous.levelIndex; state.frameIndex = previous.frameIndex; state.actionId = previous.actionId;
+      state.levelIndex = previous.levelIndex; state.frameIndex = previous.frameIndex; state.actionId = previous.actionId; state.eventSequence = previousEvent;
       throw new Error('invalid-response');
     }
     window.__ASTERION_STATE__ = snapshot;
   }
 
-  const sessionLabels = { idle: '就绪 · 尚未启动', starting: '启动中', running: 'P7 运行中', stopping: '结束中 · 等待清理确认', completed: '运行完成 · 有完成证据', incomplete: '运行未完成', cancelled: '运行已结束', 'timed-out': '运行超时', failed: '运行失败', 'cleanup-unconfirmed': '清理未确认 · 无法启动新运行' };
-  const activeSession = () => ['starting', 'running', 'stopping', 'cleanup-unconfirmed'].includes(state.liveView?.state);
+  const sessionLabels = { idle: '就绪 · 尚未启动', starting: '启动中', running: 'P7 运行中', pause_requested: '暂停已请求 · 等待真实边界', paused: '已暂停 · 期限继续计时', resume_requested: '继续已请求 · 等待确认', stopping: '结束中 · 等待清理确认', completed: '运行完成 · 有完成证据', incomplete: '运行未完成', cancelled: '运行已结束', 'timed-out': '运行超时', failed: '运行失败', 'cleanup-unconfirmed': '清理未确认 · 无法启动新运行' };
+  const liveAtCurrent = () => state.mode === 'live' && state.eventSequence === null && run.run_id === state.liveView?.run_id &&
+    state.levelIndex === levels.map((level, index) => array(level.frames).length ? index : -1).filter((index) => index >= 0).at(-1) && state.frameIndex === frames().length - 1;
+  const activeSession = () => ['starting', 'running', 'pause_requested', 'paused', 'resume_requested', 'stopping', 'cleanup-unconfirmed'].includes(state.liveView?.state);
   const manualUnsaved = () => state.manualView?.state === 'ready' && state.manualView.save_status === 'failed';
   const manualSelectionLocked = () => manualUnsaved() || !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
   function validChoice(choice) {
@@ -926,7 +1015,10 @@
     });
     $('run-start').disabled = manualUnsaved() || !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
     $('game-select').disabled = manualUnsaved() || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
-    $('run-stop').disabled = !state.liveView?.session_id || !['starting', 'running'].includes(state.liveView?.state) || state.commandBusy || Boolean(state.pendingCommand);
+    $('run-stop').disabled = !state.liveView?.session_id || !['starting', 'running', 'pause_requested', 'paused', 'resume_requested'].includes(state.liveView?.state) || state.commandBusy || Boolean(state.pendingCommand);
+    $('run-pause').disabled = !liveAtCurrent() || state.liveView?.state !== 'running' || state.commandBusy || Boolean(state.pendingCommand);
+    $('event-return-current').hidden = state.mode !== 'live' || liveAtCurrent();
+    $('run-resume').disabled = !liveAtCurrent() || state.liveView?.state !== 'paused' || state.commandBusy || Boolean(state.pendingCommand);
     $('manual-close').hidden = !manual;
     $('manual-close').textContent = state.manualView?.state === 'ready' && !state.manualError ? '结束试玩' : '重新打开试玩';
     $('manual-close').disabled = !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
@@ -1249,7 +1341,7 @@
       if (['/api/manual/action', '/api/manual/restart'].includes(state.manualPending?.path)) { renderSessionControls(); return; }
       pause(); invalidateManual(); state.manualPending = null; state.mode = $('console-mode').value; state.replayRun = null; state.replayGeneration += 1;
       if (state.mode === 'manual' && activeSession()) { state.mode = 'live'; write('service-status', 'P7 运行期间无法打开人工试玩'); }
-      if (state.mode === 'live' && state.liveView) replaceSnapshot(snapshotForView(state.liveView), { follow: true });
+      if (state.mode === 'live' && state.liveView) { state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); }
       else if (state.mode === 'manual' && ['ready', 'uncertain'].includes(state.manualView?.state) && state.manualView.snapshot) { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
       else if (state.mode === 'manual') openManual(rememberedManualLevel());
       else renderFrame();
@@ -1265,6 +1357,7 @@
       state.mode = 'live'; state.manualView = null;
       sendCommand({ path: '/api/start', body: { game_id: $('game-select').value, command_id: window.crypto.randomUUID() } });
     });
+    ['pause', 'resume'].forEach((operation) => $('run-' + operation).addEventListener('click', () => sendCommand({ path: '/api/' + operation, body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } })));
     $('run-stop').addEventListener('click', () => sendCommand({ path: '/api/stop', body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } }));
     $('retry-command').addEventListener('click', () => { if (state.pendingCommand) sendCommand(state.pendingCommand); else if (state.mode === 'manual' && state.manualPending) sendManualCommand(state.manualPending); else if (state.mode === 'manual' && state.manualSaveRetry) sendManualCommand(state.manualSaveRetry); });
     $('manual-restart').addEventListener('click', () => {
@@ -1297,5 +1390,7 @@
     window.addEventListener('pagehide', () => { if (state.pollTimer !== null) window.clearInterval(state.pollTimer); });
   }
 
+  $('event-return-current').addEventListener('click', () => { if (state.liveView) { state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); renderSessionControls(); } });
+  $('event-slider').addEventListener('input', () => setEvent(Number($('event-slider').value)));
   initializeLive();
 })();

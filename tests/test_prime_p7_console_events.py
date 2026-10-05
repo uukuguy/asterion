@@ -550,3 +550,88 @@ class TestDecisionSource(unittest.TestCase):
                     stream.close()
         with tempfile.TemporaryDirectory() as temp:
             asyncio.run(exercise(Path(temp)))
+
+
+def research_payloads(observation_hash='sha256:' + 'a' * 64):
+    common = dict(source_action_sequence=0, observation_sha256=observation_hash, level=1,
+                  workspace_revision='model-1', task_id='task-1', origin='actor')
+    return {
+        'compute_task': {**common, 'status': 'started', 'operation': 'search', 'goal': '先打开门',
+                         'obstacles': ['门未打开'], 'question': '开关是否持续有效', 'summary': '',
+                         'elapsed_ms': None, 'completed_units': None},
+        'model_revision': {**common, 'revision': 'model-1', 'parent_revision': None,
+                           'description_zh': '游戏规则：开关使门暂时开放。\n未知：终点条件。',
+                           'state_summary': '角色在门外', 'rule_summaries': ['开关使门开放'],
+                           'unknowns': ['终点条件'], 'coverage_summary': '仅覆盖门附近',
+                           'validation_summary': '已检查观察0', 'correction_summary': '', 'evidence_sequences': [0]},
+        'plan': {**common, 'plan_id': 'plan-1', 'status': 'proposed', 'goal': '先打开门',
+                 'assumptions': ['门在执行期间保持开放'], 'actions': [{'name': 'ACTION4', 'data': {}}],
+                 'applied_count': 0, 'stop_reason': None},
+        'feedback': {**common, 'origin': 'environment', 'plan_id': 'plan-1',
+                     'expected_summary': '角色进入门内', 'actual_summary': '角色仍在门外',
+                     'mismatch_kind': 'dynamics', 'unexecuted_count': 1, 'counterexample_sequence': 0},
+        'run_control': {**common, 'origin': 'operator', 'state': 'paused', 'command_id': 'pause-1',
+                        'request_sequence': 1, 'reason': None},
+    }
+
+
+class TestConsoleResearchEvents(unittest.TestCase):
+    setUp = TestConsoleEvents.setUp
+    decision = TestConsoleEvents.decision
+    def test_v1_and_v2_share_real_contiguous_sequence(self):
+        self.writer.append('decision', self.decision())
+        for kind, payload in research_payloads().items():
+            self.writer.append(kind, payload)
+        rows = read_console_events(self.root, 'run-test', 'sp80-test')
+        self.assertEqual([row['sequence'] for row in rows], list(range(1, 7)))
+        self.assertTrue(rows[0]['schema'].endswith('/v1'))
+        self.assertTrue(all(row['schema'].endswith('/v2') for row in rows[1:]))
+        path = self.root / 'console-events.jsonl'
+        copied = [dict(row) for row in rows]
+        copied[1]['schema'] = copied[0]['schema']
+        path.write_text(''.join(json.dumps(row) + '\n' for row in copied))
+        self.assertEqual(len(read_console_events(self.root, 'run-test', 'sp80-test')), 1)
+
+    def test_research_is_closed_public_and_rejects_fake_shape(self):
+        for kind, payload in research_payloads().items():
+            for changes in ({'stdout': 'SENTINEL'}, {'origin': []}, {'level': True},
+                            {'workspace_revision': '/private/SENTINEL'}):
+                with self.subTest(kind=kind, changes=changes), self.assertRaises(ValueError):
+                    self.writer.append(kind, {**payload, **changes})
+        for field in ('description_zh', 'state_summary', 'validation_summary'):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.writer.append('model_revision', {**research_payloads()['model_revision'],
+                                   field: 'TOKEN=SENTINEL'})
+        self.assertFalse((self.root / 'console-events.jsonl').exists())
+
+
+class TestConsoleResearchProjection(unittest.TestCase):
+    setUp = TestConsoleSourceProjection.setUp
+    write_summary = TestConsoleSourceProjection.write_summary
+    observation = TestConsoleSourceProjection.observation
+    write_recording = TestConsoleSourceProjection.write_recording
+    observation_hash = TestConsoleSourceProjection.observation_hash
+    def test_same_observation_keeps_distinct_model_revisions_and_real_event_cursor(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        initial = self.observation()
+        self.write_recording([initial])
+        writer = ConsoleEventWriter(self.root, self.root.name, 'sp80-test')
+        payloads = research_payloads(self.observation_hash(initial))
+        writer.append('compute_task', payloads['compute_task'])
+        writer.append('model_revision', payloads['model_revision'])
+        writer.append('plan', payloads['plan'])
+        writer.append('feedback', payloads['feedback'])
+        writer.append('model_revision', {**payloads['model_revision'], 'revision': 'model-2',
+                      'parent_revision': 'model-1', 'workspace_revision': 'model-2',
+                      'description_zh': '游戏规则：门仅开放一步。', 'correction_summary': '动作后的门立即关闭'})
+        snapshot = build_console_snapshot(self.root)
+        events = snapshot['process_events']
+        self.assertEqual([event['event_sequence'] for event in events], [1, 2, 3, 4, 5])
+        self.assertEqual(len({event['frame_id'] for event in events}), 1)
+        self.assertEqual(snapshot['levels'][0]['research_timeline'], events)
+        self.assertEqual(events[1]['payload']['revision'], 'model-1')
+        self.assertEqual(events[-1]['payload']['revision'], 'model-2')
+        self.assertNotIn('description_zh', snapshot['levels'][0]['cognition'])
+        writer.append('model_revision', {**payloads['model_revision'], 'revision': 'unlinked',
+                      'observation_sha256': 'sha256:' + '0' * 64})
+        self.assertEqual(len(build_console_snapshot(self.root)['process_events']), 5)

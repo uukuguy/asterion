@@ -74,6 +74,29 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
         self.assertEqual(self.write('/api/stop', {'session_id': 'wrong', 'command_id': 'stop'})[0], 409)
         self.assertEqual(self.write('/api/stop', {'session_id': started['session_id'], 'command_id': 'stop'})[0], 202)
 
+    def test_pause_resume_are_closed_authenticated_session_commands(self):
+        import time
+        from asterion.applications.prime.p7.solver_control import SolverControl
+        status, _, raw = self.write('/api/start', {'game_id': 'test-1', 'command_id': 'start-control'})
+        self.assertEqual(status, 202)
+        started = json.loads(raw)
+        self.wait_state(self.session_, 'running')
+        root = self.session_._run_path(started['run_id'])
+        root.mkdir(parents=True)
+        control = SolverControl(root, started['run_id'], time.monotonic() + 30)
+        for path, command in (('/api/pause', 'pause'), ('/api/resume', 'resume')):
+            value = {'session_id': started['session_id'], 'command_id': command}
+            self.assertEqual(self.write(path, value, Origin='http://evil.test')[0], 403)
+            self.assertEqual(self.write(path, {**value, 'code': 'SENTINEL'})[0], 400)
+            self.assertEqual(self.request('GET', path)[0], 404)
+            self.assertEqual(self.write(path, {**value, 'session_id': 'wrong-session'})[0], 409)
+            status, _, response = self.write(path, value)
+            self.assertEqual(status, 202)
+            self.assertEqual(json.loads(response)['state'], 'pause_requested' if command == 'pause' else 'resume_requested')
+            control.poll(0, 'sha256:' + 'a' * 64)
+            self.wait_state(self.session_, 'paused' if command == 'pause' else 'running')
+        self.assertEqual(self.manual.calls, [('close', None, None)])
+
     def test_private_paths_and_arbitrary_files_are_never_served(self):
         for path in ('/.env', '/api/replay/../.env', '/api/replay/%2e%2e', '/api/state?path=secret'):
             with self.subTest(path=path):

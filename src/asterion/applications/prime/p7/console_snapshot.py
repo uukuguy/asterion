@@ -475,6 +475,7 @@ def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict
                 'data': pending.get('data', {}) if pending else {},
                 'hash': payload['observation_sha256'], 'hashes': {payload['observation_sha256']},
                 'source_action_sequence': sequence, 'source_action': pending,
+                'event_sequence': event['sequence'],
             })
             pending = None
         retained.append(event)
@@ -535,7 +536,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     def level(number: int) -> dict:
         if number not in levels:
             levels[number] = {"level": number, "status": "not-run", "frames": [], "actions": [], "decisions": [],
-                              "cognition_timeline": [], "cognition": {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}, "receipt": None}
+                              "research_timeline": [], "cognition_timeline": [], "cognition": {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}, "receipt": None}
         return levels[number]
 
     observation_positions: dict[int, dict] = {}
@@ -569,6 +570,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             frame_count += 1
             new_frames.append({"id": f"f{frame_count:06d}", "grid": grid, "timestamp": observation["timestamp"],
                                "available_actions": observation["available_actions"],
+                               "event_sequence": observation.get("event_sequence"),
                                "state": observation["state"], "levels_completed": observation["levels"]})
         bucket["frames"].extend(new_frames)
         if previous:
@@ -638,11 +640,31 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         if receipt and completed >= 1:
             level(min(completed, wins or 100))["receipt"] = receipt
     source_decisions = []
+    process_events = []
     decisions_by_id = {}
     for event in source_events:
         payload = event["payload"]
         position = payload.get("source_action_sequence")
         observation = observation_positions.get(position)
+        event_observation = observation_positions.get(payload.get('sequence')) if event['kind'] == 'action' else observation
+        if event_observation:
+            actual = action_positions.get(payload.get('sequence'))
+            aligned = (payload.get('observation_sha256') in event_observation['hashes'] if event['kind'] != 'action'
+                       else actual is not None and actual['name'] == payload['action']
+                       and actual['data'] == payload.get('data', {})
+                       and payload['after_sha256'] in event_observation['hashes'])
+            number = min(event_observation['levels'] + 1, wins or 100)
+            if aligned and (payload.get('level') is None or payload['level'] == number):
+                public_payload = dict(payload)
+                if event['kind'] == 'observation':
+                    public_payload = {key: payload[key] for key in ('source_action_sequence', 'observation_sha256')}
+                projected_event = {'event_sequence': event['sequence'], 'kind': event['kind'],
+                                   'source_action_sequence': position if position is not None else payload.get('sequence'),
+                                   'frame_id': event_observation['frame_id'], 'level': number,
+                                   'payload': public_payload}
+                process_events.append(projected_event)
+                if event['kind'] in {'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'}:
+                    level(number)['research_timeline'].append(projected_event)
         if event["kind"] == "decision":
             # A summary is public model output at one exact observed position.
             if not observation or payload["observation_sha256"] not in observation["hashes"] or payload["decision_id"] in decisions_by_id:
@@ -712,6 +734,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                     "replay_verified": replay_verified, "sealed_trace": sealed,
                     "model": _identifier(experiment.get("model"))},
             "levels": [levels[n] for n in sorted(levels)], "decisions": source_decisions + rounds,
+            "process_events": process_events,
             "warnings": [_WARNINGS[code] for code in dict.fromkeys(warn)]}
 
 

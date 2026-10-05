@@ -15,6 +15,7 @@ import threading
 import time
 
 from .console_snapshot import build_console_snapshot
+from .solver_control import read_control_ack, write_control_request
 from .console_preferences import read_selection, valid_selection, write_selection
 from .game import public_game_catalog
 from .live import safe_run_id
@@ -23,7 +24,7 @@ from .live import safe_run_id
 _RUN_ID = re.compile(r"p7-live-[0-9]{14}-[0-9a-f]{24}\Z")
 _COMMAND_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _SECONDS = 900
-_ACTIVE = {"starting", "running", "stopping"}
+_ACTIVE = {"starting", "running", "pause_requested", "paused", "resume_requested", "stopping"}
 _MANUAL_ERRORS = {"session-busy", "command-invalid", "command-conflict", "command-limit",
                   "game-unavailable", "level-unavailable", "session-mismatch", "observation-stale", "action-invalid",
                   "action-unavailable", "manual-unavailable", "manual-uncertain",
@@ -121,6 +122,8 @@ class ConsoleSession:
         self._closed = False
         self._commands: dict[str, tuple[tuple[str, ...], dict]] = {}
         self._snapshot_key = None
+        self._control_sequence = 0
+        self._control_pending = None
         self._view = {"session_id": None, "state": "idle", "game_id": None,
                       "run_id": None, "cleanup_confirmed": True, "snapshot": None,
                       "revision": 0}
@@ -264,6 +267,8 @@ class ConsoleSession:
         unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
         self._stop = threading.Event()
         self._snapshot_key = None
+        self._control_sequence = 0
+        self._control_pending = None
         self._change(session_id="p7-console-" + secrets.token_hex(16), state="starting",
                      game_id=game_id, run_id=run_id, cleanup_confirmed=False, snapshot=None)
         self._thread = threading.Thread(target=self._run, args=(game_id, run_id, unit),
@@ -284,6 +289,57 @@ class ConsoleSession:
                 self._stop.set()
                 self._change(state="stopping")
             return self._remember(command_id, signature)
+
+    def _control(self, operation: str, session_id: str, command_id: str) -> dict:
+        with self._lock:
+            signature = (operation, session_id)
+            prior = self._prior(command_id, signature)
+            if prior is not None:
+                return prior
+            if type(session_id) is not str or session_id != self._view['session_id']:
+                raise ConsoleSessionError('session-mismatch')
+            expected = 'running' if operation == 'pause' else 'paused'
+            if self._view['state'] != expected or self._control_pending is not None:
+                raise ConsoleSessionError('session-busy')
+            sequence = self._control_sequence + 1
+            try:
+                request = write_control_request(self._run_path(self._view['run_id']),
+                    run_id=self._view['run_id'], command_id=command_id,
+                    request_sequence=sequence, operation=operation)
+            except (OSError, ValueError, TypeError):
+                raise ConsoleSessionError('control-unavailable') from None
+            self._control_sequence = sequence
+            self._control_pending = request
+            self._change(state='pause_requested' if operation == 'pause' else 'resume_requested')
+            return self._remember(command_id, signature)
+
+    def pause(self, session_id: str, command_id: str) -> dict:
+        return self._control('pause', session_id, command_id)
+
+    def resume(self, session_id: str, command_id: str) -> dict:
+        return self._control('resume', session_id, command_id)
+
+    def _refresh_control(self, run_id: str) -> None:
+        with self._lock:
+            pending = self._control_pending
+            if pending is None or self._view['run_id'] != run_id or self._view['state'] == 'stopping':
+                return
+        try:
+            ack = read_control_ack(self._run_path(run_id), run_id=run_id)
+        except (OSError, ValueError, TypeError):
+            return
+        if ack is None or any(ack[key] != pending[key] for key in ('run_id', 'command_id', 'request_sequence')):
+            return
+        with self._lock:
+            if self._control_pending != pending or self._view['state'] == 'stopping':
+                return
+            target = 'paused' if pending['operation'] == 'pause' else 'running'
+            if ack['state'] == target:
+                self._control_pending = None
+                self._change(state=target)
+            elif ack['state'] == 'stop_requested':
+                self._stop.set()
+                self._change(state='stopping')
 
     def _cleanup_guest(self, unit: str) -> bool:
         result = subprocess.run(
@@ -333,6 +389,7 @@ class ConsoleSession:
                     self._change(state="running")
             while True:
                 self._refresh(run_id, game_id)
+                self._refresh_control(run_id)
                 if self._stop.is_set():
                     outcome = "cancelled"
                     break

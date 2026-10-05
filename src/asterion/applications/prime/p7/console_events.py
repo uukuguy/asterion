@@ -11,6 +11,8 @@ from .observation_state import ObservationState
 from .score import digest
 
 SCHEMA = 'asterion.prime.p7-console-event/v1'
+SCHEMA_V2 = 'asterion.prime.p7-console-event/v2'
+RESEARCH_KINDS = frozenset({'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'})
 _MAX_ROW_BYTES = 1100 * 1024
 _MAX_FILE_BYTES = 32 * 1024 * 1024
 _MAX_ROWS = 16384
@@ -73,11 +75,83 @@ def _observation(value: object) -> bool:
     return True
 
 
+def _texts(value: object, *, count: int = 32, limit: int = 600) -> bool:
+    return (type(value) is list and len(value) <= count
+            and all(type(v) is str and len(v) <= limit and public_text(v, limit) == v for v in value))
+
+
+def _optional_id(value: object) -> bool:
+    return value is None or _id(value)
+
+
+def _public_prose(value: object, limit: int = 600) -> bool:
+    return type(value) is str and len(value) <= limit and public_narrative(value, limit) == value
+
+
+def _research_payload(kind: str, value: dict) -> bool:
+    common = {'source_action_sequence', 'observation_sha256', 'level', 'workspace_revision', 'task_id', 'origin'}
+    fields = {
+        'compute_task': {'status', 'operation', 'goal', 'obstacles', 'question', 'summary', 'elapsed_ms', 'completed_units'},
+        'model_revision': {'revision', 'parent_revision', 'description_zh', 'state_summary', 'rule_summaries', 'unknowns',
+                           'coverage_summary', 'validation_summary', 'correction_summary', 'evidence_sequences'},
+        'plan': {'plan_id', 'status', 'goal', 'assumptions', 'actions', 'applied_count', 'stop_reason'},
+        'feedback': {'plan_id', 'expected_summary', 'actual_summary', 'mismatch_kind', 'unexecuted_count', 'counterexample_sequence'},
+        'run_control': {'state', 'command_id', 'request_sequence', 'reason'},
+    }
+    if (set(value) != common | fields[kind] or not _int(value['source_action_sequence'])
+        or not _hash(value['observation_sha256']) or not _int(value['level']) or value['level'] < 1
+        or not _optional_id(value['workspace_revision']) or not _optional_id(value['task_id'])
+        or value['origin'] not in {'actor', 'calculation', 'environment', 'operator'}):
+        return False
+    if kind == 'compute_task':
+        return (value['status'] in {'declared', 'started', 'completed', 'failed', 'interrupted'}
+                and value['operation'] in {'analyze', 'model', 'validate', 'search', 'probe', 'execute'}
+                and all(_public_prose(value[k]) for k in ('goal', 'question', 'summary'))
+                and _texts(value['obstacles']) and all(value[k] is None or _int(value[k]) for k in ('elapsed_ms', 'completed_units')))
+    if kind == 'model_revision':
+        return (_id(value['revision']) and _optional_id(value['parent_revision'])
+                and _public_prose(value['description_zh'], 8000)
+                and all(_public_prose(value[k]) for k in ('state_summary', 'coverage_summary', 'validation_summary', 'correction_summary'))
+                and _texts(value['rule_summaries']) and _texts(value['unknowns'])
+                and type(value['evidence_sequences']) is list and len(value['evidence_sequences']) <= 128
+                and all(_int(v) and v <= value['source_action_sequence'] for v in value['evidence_sequences'])
+                and value['evidence_sequences'] == sorted(set(value['evidence_sequences'])))
+    if kind == 'plan':
+        actions = value['actions']
+        valid_actions = type(actions) is list and 1 <= len(actions) <= 20
+        if valid_actions:
+            for action in actions:
+                if type(action) is not dict or set(action) != {'name', 'data'} or action['name'] not in {'RESET', *(f'ACTION{i}' for i in range(1, 8))}:
+                    valid_actions = False
+                    break
+                data = action['data']
+                if type(data) is not dict or not ((action['name'] != 'ACTION6' and data == {}) or (action['name'] == 'ACTION6' and set(data) == {'x', 'y'} and all(type(v) is int and 0 <= v <= 63 for v in data.values()))):
+                    valid_actions = False
+                    break
+        return (_id(value['plan_id']) and value['status'] in {'proposed', 'executing', 'completed', 'stopped'}
+                and _public_prose(value['goal']) and _texts(value['assumptions']) and valid_actions
+                and _int(value['applied_count']) and value['applied_count'] <= len(actions)
+                and (value['stop_reason'] is None or _public_prose(value['stop_reason'])))
+    if kind == 'feedback':
+        return (_id(value['plan_id']) and _public_prose(value['expected_summary']) and _public_prose(value['actual_summary'])
+                and value['mismatch_kind'] in {'none', 'state', 'dynamics', 'goal', 'implementation', 'unknown'}
+                and _int(value['unexecuted_count']) and value['unexecuted_count'] <= 20
+                and (value['counterexample_sequence'] is None or (_int(value['counterexample_sequence']) and value['counterexample_sequence'] <= value['source_action_sequence'])))
+    return (value['state'] in {'running', 'pause_requested', 'paused', 'stop_requested', 'stopping', 'stopped', 'cleanup_failed'}
+            and _optional_id(value['command_id']) and _int(value['request_sequence'])
+            and (value['reason'] is None or _public_prose(value['reason'])))
+
+
 def _payload(kind: str, payload: Mapping[str, object]) -> dict:
     if not isinstance(payload, Mapping):
         raise ValueError('console event unavailable')
     value = dict(payload)
-    if kind == 'decision':
+    if kind in RESEARCH_KINDS:
+        try:
+            valid = _research_payload(kind, value)
+        except (TypeError, KeyError):
+            valid = False
+    elif kind == 'decision':
         valid = (set(value) == {'decision_id', 'source_action_sequence', 'observation_sha256', 'goal', 'basis', 'expected'}
                  and _id(value.get('decision_id')) and _int(value.get('source_action_sequence'))
                  and _hash(value.get('observation_sha256')))
@@ -147,7 +221,7 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
                     raise ValueError('console identity unavailable')
                 if rows and row['game_id'] != rows[0]['game_id']:
                     raise ValueError('console identity unavailable')
-                if row['schema'] != SCHEMA or not _id(row['game_id']) or type(row['sequence']) is not int or row['sequence'] != len(rows) + 1:
+                if row['schema'] not in {SCHEMA, SCHEMA_V2} or (row['schema'] == SCHEMA and row['kind'] in RESEARCH_KINDS) or not _id(row['game_id']) or type(row['sequence']) is not int or row['sequence'] != len(rows) + 1:
                     invalid()
                     break
                 if type(row['payload']) is not dict:
@@ -182,7 +256,7 @@ class ConsoleEventWriter:
     def append(self, kind: str, payload: Mapping[str, object]) -> None:
         safe = _payload(kind, payload)
         with self._lock:
-            row = {'schema': SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
+            row = {'schema': SCHEMA_V2 if kind in RESEARCH_KINDS else SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
                    'sequence': self._sequence + 1, 'kind': kind, 'payload': safe}
             line = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(',', ':')) + '\n').encode()
             if len(line) > _MAX_ROW_BYTES or self._sequence >= _MAX_ROWS or self._bytes + len(line) > _MAX_FILE_BYTES:
