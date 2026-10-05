@@ -3772,3 +3772,15 @@
 - 2026-10-06 — Verified ordered extension 34 PASS/six existing skips, related Python 256 PASS, lint/docs PASS before final promotion.
 - 2026-10-06 — Saved DC22 79-action/two-level prefix; diagnosed in-turn Pi compaction interruption, preserving zero L3 reasoning failures.
 - 2026-10-06 — Corrected replay seed and exported fixed DC22/latest HTML through normal validation; preserved separate SP80 full replay.
+- 2026-10-06 — dd766bbd: Recorded saved DC22 progress and verification boundaries for timely main integration.
+- 2026-10-06 — Final promotion ran 4016 test cases; three failures came from inherited ANSI color, no errors.
+- 2026-10-06 — 62de21ff: Isolated plaintext cognition assertions from terminal color; reproduced cases and related 127 tests pass.
+- 2026-10-06 — Diagnosed missing SP80 L1–5 cognition: verified ancestor revisions were omitted from the final restored-prefix projection.
+- 2026-10-06 — b074b5f4: Restored per-level WorldMap provenance through verified resume chains, preserving historical replay cognition.
+- 2026-10-06 — Full promotion at b074b5f4 PASS25 commands; fast-forwarded local main and switched without losing parallel edits.
+- 2026-10-06 — ebc4542c: Recorded explicit startup provenance so live continuations retain earlier per-level cognition before finalization.
+- 2026-10-06 — 002f37a0: Preserved replay timers across same-run refreshes so playback continues through appended frames.
+- 2026-10-06 — Fixed57515 HTTP verifies restored SP80/DC22 cognition; active DC22 reaches4/6 while final console promotion runs.
+- 2026-10-06 — Final002f37a0 full promotion PASS25 commands;21 actual cognition DOM checkpoints pass; DC22 saved4/6 and L5 attempt2 launched.
+- 2026-10-06 — Recorded user-correctedDC22 L5/L6 reference127/159; savedL4 route66 actions, with warm/all-attempt accounting kept separate.
+- 2026-10-06 — PackagedL5 witness emits exact startupcontext after191 restored actions, confirming generic live provenance deployment.

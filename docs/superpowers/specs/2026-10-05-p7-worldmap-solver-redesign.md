@@ -296,7 +296,7 @@ DC22 的当前 fresh run 因 `_CallbackRejected` / `prime-event-type` (`pi.promp
 
 Failure-experience implementation is committed as `12542476`: focused tests 37 PASS, joint checks 43 PASS, and an inert subprocess regression PASS (computed result 42). This verifies bounded loading and source boundaries, not guaranteed solving or automatic program execution. Complete-25 official preparation is committed as `c261633c`; preflight has 25 exact task IDs, but no card was opened and no submission occurred.
 
-At the earlier 37-action checkpoint, DC22 run was `p7-live-20261006005914-31079cf165a443c496c180a1`, active at 37 actions after entering Level 2. Its revisions consumed negative hypotheses and retained evidence-backed movement/discard-click assumptions. The old prior source has five cells and is correctly excluded; the new run archive contains six cells and four exports. That checkpoint preceded the sealed 79-action / two-level outcome in the current session checkpoint. Console acceptance is complete; commits remain on `feat/p7-live-console` pending root integration to `main`, which the user prefers to happen promptly after closure.
+At the earlier 37-action checkpoint, DC22 run was `p7-live-20261006005914-31079cf165a443c496c180a1`, active at 37 actions after entering Level 2. Its revisions consumed negative hypotheses and retained evidence-backed movement/discard-click assumptions. The prior run has five missing cell sources, while its semantic/history evidence was loaded; the new run archive contains six cells and four exports. That checkpoint preceded the sealed 79-action / two-level outcome in the current session checkpoint. Console acceptance is complete; commits remain on `feat/p7-live-console` pending root integration to `main`, which the user prefers to happen promptly after closure.
 
 
 ### 12.8 DC22 sealed attempt and remaining runtime boundary (2026-10-06)
@@ -307,3 +307,8 @@ The callback path remains unresolved: event 271 `compaction_start` followed 270 
 
 
 `ca471c31` implements the observed in-turn/pre-prompt compaction fix (82 native checks PASS); `3c1869ea` completes source-omission visibility and public experience timeline facts; `670ff905` preserves partial replay seed identity. Related ordered checks: 256 PASS. Final promotion, main integration and real continuation are tracked in `RESUME-NEXT-SESSION.md`.
+
+
+### 2026-10-06 live-console follow-up closure
+
+Local main now includes completed WorldMap/experience/console work, generic live/finalized per-level cognition provenance (`b074b5f4`/`ebc4542c`), and refresh-safe playback (`002f37a0`). Final full promotion PASS25 commands, related Python205 PASS, DOM86 PASS/one existing skip, actual served-HTML cognition21 checkpoints PASS. Chrome visual acceptance remains external-limited. DC22 is sealed/replayed4/6 (197 actual/191 completed-prefix actions); L5 attempt2 is active. Keep the two-unfinished-attempt rule and the one official25-task submission gate after finite DC22/VC33. The recovery checkpoint owns current processes, attempts and evidence limits; earlier pending-main/held-launch addenda are historical.
