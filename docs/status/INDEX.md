@@ -28,6 +28,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目与完成进度、离线单 HTML 控制台、官方 scorecard 和排行榜操作指南。 |
 | `DECISIONS.md` | 🟢 active | Native architecture decisions; D-2026-10-03-01 governs partial-cognition feedback-driven solving. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | P7 primary cognition contract, persistent hypotheses and solve/experiment feedback loop. |
+| `../superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` | 🟢 active | Proposed replay/live P7/manual console design; pending user review, live modes not implemented. |
 | `PRIME-P1-P7-ACCEPTANCE.md` | 🟢 active | P1–P7 验收指南；记录 P7 组合失败与专用 provider 修复，区分无模型验证与真实求解。 |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |

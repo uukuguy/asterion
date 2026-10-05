@@ -20,6 +20,8 @@
 - Solve and cognition prompts now remind P7 to notice important objects and potential score/progress/timer/resource/state displays, then use normal feedback to form and revise planning hypotheses. No SP80/green-bar meaning was added to prompts or cognition.
 - Inspected source run `p7-live-20261004140407-76efe9d22e179d6db7810496`: first ACTION4 moves blue pixels right four cells and green pixels decrease 64 to 62. No corresponding new action-specific cognition analysis was saved. These are retrospective pixel measurements, not P7 discoveries. No new live solve was launched for this change.
 - Follow-up focused suite: 78 Python tests PASS; 9 DOM checks and final isolated wheel export PASS. Promotion rerun (before the added action panel) remains FAIL: 3809 tests, 13 failures, 5 errors, 4 skips; `/tmp/p7-console-overlay-promotion.log` retains the source-detachment failure tail. No final full-gate PASS is claimed.
+- Compact replay action keys now show only ID, short direction and recognition status. They locate recorded actions and pause playback; no live action is dispatched. Full original meanings remain in the cognition process tab, with final-snapshot scope. Conflicting or explicitly denied directions display as unknown. Final focused checks: 39 Python tests, 12 DOM tests including actual exported HTML, lint, docs-check and isolated wheel export PASS. Independent code review approved after the denial-polarity fix. These are interaction checks, not visual browser acceptance.
+- Compact-panel promotion rerun remains FAIL: 3811 tests, 13 failures, 5 errors, 4 skips; `/tmp/p7-console-compact-promotion.log` retains the source-detachment failure tail. Other failure causes are not individually diagnosed here. No full-gate PASS is claimed.
 
 ## 当前判断
 
@@ -27,6 +29,7 @@
 - The single-run console makes existing evidence inspectable. It does not create decision explanations or historically aligned world-model snapshots that the source run never recorded.
 - The prior 16 KiB limit was an application budget, not a model context limit. Initial game context is bounded at 64 KiB and complete solver/backend input at 256 KiB. Earlier real runs accepted approximately 81 KiB prompts.
 - Primary cognition contract: `docs/architecture/prime-p7-cognition-and-experience.md`; decision D-2026-10-03-01. Chinese gameplay descriptions should use short, consistent statements, distinguish observations from inference, and remain incomplete where evidence is missing.
+- User now requires three modes: replay, live P7 solving and human play. Proposed design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`. One Python-owned game session, separate solver segments, serialized broker actions and explicit control epochs allow same-game takeover. This is a reviewed architectural proposal awaiting user review, not implemented live capability.
 
 ## 历史归档
 
@@ -38,14 +41,15 @@
 
 - No fresh SP80 L1 completion or cold/warm proficiency comparison is established by this work. Cross-level learning and simulator benefit remain unverified.
 - This approved first console exports one run; it is not a live multi-game scheduler or an aggregate of all historical runs.
+- Live human/P7 controls, same-session takeover, source-linked decision summaries and Mac/Orb console service are not implemented. Current `run_live` closes the game when the solve run ends; cancellation is not a resumable pause. Stage completion must not seal a continuing game; RESET is current-level retry with a new episode, not a new session.
 - Historical P7 decision prose and per-frame cognition cannot be reconstructed from missing data. The UI shows the available signals and marks those limits.
 - Full promotion failures and actual Chrome visual/mobile acceptance remain open.
 
 ## 下一动作
 
-1. Open the delivered HTML and inspect the recorded game process. If continuing UI work, obtain a functioning existing Chrome transport for actual visual/mobile checks.
-2. For a different recorded run, use the export command below. The exporter is read-only with respect to game evidence.
-3. If live process detail is extended later, capture explicit P7 decision summaries and cognition revisions at source. Keep evidence alignment explicit and avoid retrospective invented reasoning.
+1. Obtain user review of the written three-mode design. If approved, create an implementation plan for the first package: human live session with shared UI and broker-validated actions. Do not claim real controls are provided by the current offline HTML.
+2. Follow with P7 solver attachment, safe pause and same-game takeover as separate packages. Preserve independent witness receipt semantics and attribute human/mixed results correctly.
+3. Open the delivered replay with `make p7-console`. Actual visual/mobile checks still require a functioning existing Chrome transport.
 4. For subsequent real solving, use configured Pi Codex `gpt-6.1-sol`, keep exact-route injection disabled, and report current actions, replay prefixes, level progress and stop cause separately.
 5. Diagnose promotion failures from complete retained test output before claiming a release gate PASS.
 
