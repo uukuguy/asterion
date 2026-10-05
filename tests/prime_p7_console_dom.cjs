@@ -1937,6 +1937,51 @@ test('recording overview watches the unsealed external attempt before best saved
   }finally{app.dom.window.close();}
 });
 
+test('unsealed replay polling keeps active playback and its pinned frame cursor', async () => {
+  const overview = overviewFixture(catalog25);
+  overview.guest_busy = true; overview.start_ready = false; overview.start_block_reason = 'session-busy';
+  overview.games[0] = { ...overview.games[0], runs: [{ ...catalogRun('playing-recording', 'unverified', false), recording: true }] };
+  let replay = { ...fixture(), run: { ...fixture().run, game_id: 'game0-catalog', run_id: 'playing-recording', sealed_trace: false } };
+  const app = launch(fixture(), { liveConfig: catalog25, overview, fetch: async url =>
+    url === '/api/manual/open' ? response({}, 503) : response(url.startsWith('/api/replay/') ? replay : idleView()) });
+  try {
+    await settle();
+    overviewRow(app).querySelector('[data-overview-watch]').click();
+    await settle();
+
+    app.$('frame-slider').value = '0';
+    app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    app.$('play-toggle').click();
+    assert.equal(app.$('play-toggle').textContent, '暂停');
+    const playbackTimer = [...app.timers.entries()].find(([, fn]) => fn.intervalMs < 1000);
+    assert.ok(playbackTimer, 'playback timer is active');
+    playbackTimer[1]();
+    assert.equal(app.$('frame-counter').textContent, '2 / 3');
+
+    replay = { ...replay, levels: replay.levels.map((level, index) => index === 0 ? {
+      ...level, frames: [...level.frames, { id: 'f4', grid: [[14]], state: 'NOT_FINISHED' }],
+    } : level) };
+    const replayPoll = [...app.timers.values()].find(fn => fn.intervalMs === 2000);
+    assert.ok(replayPoll, 'unsealed replay refresh timer is active');
+    replayPoll();
+    await settle();
+
+    assert.equal(app.$('frame-counter').textContent, '2 / 4');
+    assert.equal(app.$('play-toggle').textContent, '暂停');
+    assert.equal(app.$('play-toggle').getAttribute('aria-pressed'), 'true');
+    assert.equal([...app.timers.values()].includes(playbackTimer[1]), true);
+    assert.equal(app.requests.some(request => ['/api/start', '/api/pause', '/api/stop'].includes(request.url)), false);
+    playbackTimer[1]();
+    assert.equal(app.$('frame-counter').textContent, '3 / 4');
+    assert.equal(app.$('play-toggle').textContent, '暂停');
+    playbackTimer[1]();
+    assert.equal(app.$('frame-counter').textContent, '4 / 4');
+    assert.equal(app.$('play-toggle').textContent, '播放');
+    assert.equal([...app.timers.values()].includes(playbackTimer[1]), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
 
 test('replay frame and user level cursors pin the existing event when new revisions arrive at the same frame',async()=>{
   const overview=overviewFixture(catalog25);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';

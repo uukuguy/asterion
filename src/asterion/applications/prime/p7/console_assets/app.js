@@ -963,9 +963,10 @@
     if (follow) index = nextLevels.map((level, i) => array(level.frames).length ? i : -1).filter((i) => i >= 0).pop() ?? 0;
     else if (previousRun !== nextRun.run_id || index < 0) index = Math.max(0, nextLevels.findIndex((level) => array(level.frames).length));
     const preserve = !follow && previousRun === nextRun.run_id;
+    const preservePlayback = state.timer !== null && state.mode === 'replay' && previousRun === nextRun.run_id && index === state.levelIndex;
     try {
       snapshot = next; run = nextRun; recordedLevels = nextRecordedLevels; levelCount = nextCount; levels = nextLevels;
-      renderRunHeader(); selectLevel(index);
+      renderRunHeader(); selectLevel(index, { pausePlayback: !preservePlayback });
       const historical = preserve ? frames().findIndex((frame) => frame.id === previousFrame) : -1;
       if (manualPosition !== null) setManualFrame(manualPosition);
       else setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
