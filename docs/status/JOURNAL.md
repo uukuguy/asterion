@@ -3833,3 +3833,5 @@
 - 07:37 e07cfc7f: Expand all25 game rows and compact spacing so the complete catalog is visible.
 - 07:46 Root integration70 PASS and console DOM99 PASS/one environment skip; authenticated animation replay and compact two-decimal/first-game UI reviewed on main, formal LF52 recovery pending.
 - 07:47 9afd2206: Authenticate animation replay and cognition lineage to retain verified wins without modifying original native evidence.
+- 07:49 7a2eb5cc: Compact overview actions and scores; default idle viewing to first catalog game while preserving explicit manual choices.
+- 07:50 Formal LF520-model recovery passed64 actions [8,56], cognition/provenance and immutable original hashes; authorized two-slot L3 resumption.
