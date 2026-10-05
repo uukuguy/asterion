@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated 2026-10-06 04:32 CST. Active work, not a handoff. Branch `main`; implementation committed through `c45ad79f`. Console57515 shows live level progress; one efficiency retry queue deployed; background has two games with EACH LEVEL ATTEMPT bounded900seconds. Efficiency/operator full promotion passed25 provider-free commands; the later resumed-progress parser fix passed27 focused Python checks.
+Updated 2026-10-06 04:31 CST. Active work, not a handoff. Branch `main`; implementation committed through `2d9a5651`. Console57515 shows live level progress; one efficiency retry queue deployed; background has two games with EACH LEVEL ATTEMPT bounded900seconds. Efficiency/operator full promotion passed25 provider-free commands; the later resumed-progress parser fix passed27 focused Python checks.
 
 ## 已验证事实
 
@@ -16,7 +16,7 @@ Updated 2026-10-06 04:32 CST. Active work, not a handoff. Branch `main`; impleme
 - Shared cognition projection now supports strict offline recovery/composition recordings as well as live resumed events. Actual DC22 counts5/1/4/11/13/10; VC33 counts2/2/1/1/2/3/3; both warnings empty. Preserve source provenance/hash and remap only display sequence. No per-game patch or invented knowledge.
 - Actual SDK initial previews for unplayed ls20 L1/L2/L7 are64×64,0 actions,0 completed levels,run_id null; no model/guest/manual session started. Preview implementation Python40PASS,DOM93PASS/one existing optional skip before statistics/default-route changes.
 - Integrated route/solutions/recovery/official/preview/server/session/control/runtime88 Python tests PASS; cognition focused62PASS. Earlier extension34PASS/6existing skips. A prior full promotion failed one pause-test timing assertion; tests-only actual-cell synchronization fix passed the exact case and related control module. Final make promotion-check PASS25 commands/provider_operations0/full_datasetno; log launches/p7-console-final-promotion.log.
-- Last known server metadata PID3005 on57515; controller/manual idle during reload; solver guests are independent. Verify actual metadata/process ownership before reload. Chrome existing-session connector times out on tab access; HTTP/served-DOM evidence does not establish Chrome visual acceptance.
+- Last known server metadata PID16646 on57515; controller/manual idle during reload; solver guests are independent. Verify actual metadata/process ownership before reload. Chrome existing-session connector times out on tab access; HTTP/served-DOM evidence does not establish Chrome visual acceptance.
 
 ## 当前判断 / 下一动作
 
