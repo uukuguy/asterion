@@ -3697,3 +3697,4 @@
 - 2026-10-05: Added current-level human clear/restart to remove old action history while preserving other saves [bc01bd80]
 - 19:20 Closed idle console for handoff; SP80 L2 85-action save and both persistent files remain unchanged.
 - 19:20 Consolidated final console evidence and recovery boundaries; next session starts operator acceptance, with full gate non-PASS.
+- 19:20 Closed console and committed verified recovery facts so next session resumes without chat memory [a46f4c21]
