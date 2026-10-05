@@ -22,6 +22,7 @@
 - Prime application tools are registered in the packaged TypeScript Pi extension, routed through the Python operator/worker bridges; prompt text documents usage. Offline route injection is disabled for capability runs.
 - `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
 - Runtime cognition logs print claims, statuses, confidence, evidence and next tests; the persistent ledger remains separate from bounded model projections.
+- `asterion arc-console` exports one P7 run as an offline HTML level console; final cognition and unaligned model signals remain explicitly scoped evidence.
 
 ## Open Problems
 
@@ -60,6 +61,9 @@
 - `src/asterion/applications/prime/p7/model_search.py` — certificate-gated bounded search
 - `src/asterion/applications/prime/p7/operator.py` — P7 tools and host wiring
 - `src/asterion/applications/prime/p7/live.py` — live RPC and worker plumbing
+- `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
+- `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
+- `src/asterion/applications/prime/p7/console_assets/` — packaged Tailwind CSS, canvas playback and Chinese process UI
 
 ## Execution and evidence boundary
 

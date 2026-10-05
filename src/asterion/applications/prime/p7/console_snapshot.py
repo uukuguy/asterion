@@ -1,0 +1,526 @@
+"""Bounded, public-safe replay projection of one possibly incomplete P7 run.
+
+This reader deliberately does not provide the sealed run-story guarantee. Missing
+or unaligned evidence remains visible, with fixed warnings rather than private
+diagnostics. It never searches replay directories or reconstructs model prose.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from datetime import datetime, timezone
+from hashlib import sha256
+from pathlib import Path
+
+from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
+from asterion.applications.prime.p7.cognition_narrative import render_stable_game_description_zh
+from asterion.applications.prime.p7.observation_state import ObservationState
+from asterion.applications.prime.p7.score import digest
+from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
+
+
+_MAX_FILE = 32 * 1024 * 1024
+_MAX_ROWS = 4096
+_MAX_FRAMES = 8192
+_KINDS = {"game_type", "object_role", "control", "rule", "success_condition", "strategy"}
+_STATUSES = {"certain", "falsified", "undetermined"}
+_ACTIONS = {"RESET", *(f"ACTION{i}" for i in range(1, 8))}
+_PROMPT_SIGNALS = {"tool-guidance", "mechanics-prior", "state-guidance", "application-state", "completion-guidance"}
+_OUTPUT_SIGNALS = {"plan", "observation", "prior", "action", "progress"}
+_IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z")
+_PRIVATE_TEXT = re.compile(r"(?:https?://|(?<![A-Za-z0-9])/[A-Za-z0-9_.~+-]+(?:/|(?=\s|[。；，]|$))|[A-Za-z]:\\|\b(?:Bearer\s+|sk-[A-Za-z0-9]|api[_ -]?key\s*[:=]|password\s*[:=]|authorization\s*[:=]))", re.IGNORECASE)
+_WARNINGS = {
+    "summary-missing": "运行摘要缺失或不可读取。",
+    "recording-missing": "没有可验证的游戏录制。",
+    "recording-ambiguous": "存在多份录制，无法确定本次游戏身份；未合并录制。",
+    "recording-invalid": "部分录制格式或身份无效；没有跨缺口连接动作。",
+    "evidence-bounded": "证据超过导出大小限制，仅保留允许范围内的数据。",
+    "trace-missing": "没有可验证的过程轨迹；游戏录制仍可回放。",
+    "trace-invalid": "部分过程轨迹无效，仅保留可验证前缀。",
+    "trace-identity": "过程轨迹身份不一致；未用于动作或决策关联。",
+    "trace-unsealed": "过程轨迹尚未完成封存，不能视为完整成功证据。",
+    "action-unaligned": "部分录制动作没有唯一匹配的轨迹证据。",
+    "decision-unaligned": "模型轮次只有审计信号，缺少可证明的动作或关卡关联。",
+    "cognition-final": "稳定认知是运行结束时的规划背景快照，未与历史画面对齐。",
+    "cognition-missing": "没有身份匹配的稳定认知。",
+    "cognition-events-invalid": "部分认知事件格式或会话身份不匹配；未使用这些事件。",
+    "receipt-missing": "没有经过核对的最终回执；录制进度不等于完整运行成功。",
+}
+
+
+def _integer(value: object, maximum: int = 10**9) -> int | None:
+    return value if type(value) is int and 0 <= value <= maximum else None
+
+
+def _identifier(value: object) -> str | None:
+    return value if type(value) is str and _IDENTIFIER.fullmatch(value) else None
+
+
+def _prose(value: object, limit: int = 600) -> str:
+    if type(value) is not str or _PRIVATE_TEXT.search(value):
+        return ""
+    return " ".join("".join(c for c in value if c >= " " and c != "\x7f").split())[:limit]
+
+
+def _regular(path: Path) -> bool:
+    return not any(part.is_symlink() for part in (path, *path.parents)) and path.is_file()
+
+
+def _read(path: Path, warn: list[str], missing: str) -> str | None:
+    try:
+        if not _regular(path):
+            raise OSError
+        if path.stat().st_size > _MAX_FILE:
+            warn.append("evidence-bounded")
+            return None
+        return path.read_text(encoding="utf-8")
+    except (OSError, UnicodeError):
+        warn.append(missing)
+        return None
+
+
+def _object(path: Path, warn: list[str], missing: str) -> dict:
+    raw = _read(path, warn, missing)
+    try:
+        value = json.loads(raw) if raw is not None else None
+    except (ValueError, RecursionError):
+        value = None
+    if not isinstance(value, dict):
+        if raw is not None:
+            warn.append(missing)
+        return {}
+    return value
+
+
+def _rows(path: Path, warn: list[str], missing: str, invalid: str) -> list[dict | None]:
+    raw = _read(path, warn, missing)
+    if raw is None:
+        return []
+    result: list[dict | None] = []
+    for index, line in enumerate(raw.splitlines()):
+        if index >= _MAX_ROWS:
+            warn.append("evidence-bounded")
+            break
+        try:
+            value = json.loads(line)
+        except (ValueError, RecursionError):
+            value = None
+        if not isinstance(value, dict):
+            warn.append(invalid)
+            result.append(None)
+        else:
+            result.append(value)
+    return result
+
+
+def _observation(row: dict | None) -> dict | None:
+    if row is None or not isinstance(row.get("data"), dict):
+        return None
+    data = row["data"]
+    action = data.get("action_input")
+    layers = data.get("frame")
+    available = data.get("available_actions")
+    game_id = _identifier(data.get("game_id"))
+    guid = _identifier(data.get("guid"))
+    levels = _integer(data.get("levels_completed"), 100)
+    wins = _integer(data.get("win_levels"), 100)
+    state = data.get("state")
+    timestamp = row.get("timestamp")
+    if (not game_id or not guid or levels is None or not wins or levels > wins
+        or type(state) is not str or state not in {"NOT_STARTED", "NOT_FINISHED", "WIN", "GAME_OVER"}
+        or not isinstance(action, dict) or type(action.get("id")) is not str or action.get("id") not in _ACTIONS
+        or not isinstance(action.get("data"), dict)
+        or type(timestamp) is not str or len(timestamp) > 64
+        or type(available) is not list or any(type(a) is not int or not 1 <= a <= 7 for a in available)
+        or available != sorted(set(available))
+        or type(layers) is not list or not 1 <= len(layers) <= 64):
+        return None
+    try:
+        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    for grid in layers:
+        if (type(grid) is not list or len(grid) != 64
+            or any(type(r) is not list or len(r) != 64
+                   or any(type(c) is not int or not 0 <= c <= 255 for c in r) for r in grid)):
+            return None
+    coordinates = action["data"]
+    if action["id"] == "ACTION6":
+        if any(type(coordinates.get(k)) is not int or not 0 <= coordinates[k] <= 63 for k in ("x", "y")):
+            return None
+        coordinates = {k: coordinates[k] for k in ("x", "y")}
+    else:
+        coordinates = {}
+    legacy = {"available_actions": [f"ACTION{i}" for i in available], "frame": layers,
+              "levels_completed": levels, "state": state, "win_levels": wins}
+    hashes = {digest(legacy)}
+    try:
+        unified = ObservationState.from_observation({**legacy, **{k: data[k] for k in
+            ("hud", "timers", "resources", "entities", "relations", "events") if k in data}})
+        hashes.add(digest(unified.to_projection()))
+    except (TypeError, ValueError):
+        pass
+    return {
+        "game_id": game_id, "guid": guid, "wins": wins, "levels": levels,
+        "state": state, "timestamp": timestamp, "layers": layers,
+        "action": action["id"], "data": coordinates,
+        "hash": digest(legacy), "hashes": hashes,
+    }
+
+
+def _trace(root: Path, summary: dict, game: str | None, warn: list[str]) -> tuple[list[dict], bool]:
+    rows = _rows(root / "trace" / "prime-trace.jsonl", warn, "trace-missing", "trace-invalid")
+    previous = None
+    identities = None
+    retained: list[dict] = []
+    for row in rows:
+        if row is None:
+            break
+        required = {"sequence", "kind", "identities", "payload", "previous_sha256", "sha256"}
+        if (set(row) != required or type(row["sequence"]) is not int
+            or row["sequence"] != len(retained) + 1 or row["previous_sha256"] != previous
+            or not isinstance(row["identities"], dict) or not isinstance(row["payload"], dict)
+            or not _identifier(row["kind"])):
+            warn.append("trace-invalid")
+            break
+        identity = row["identities"]
+        model = summary.get("experiment", {}).get("model") if isinstance(summary.get("experiment"), dict) else None
+        if (identity.get("application_id") != "prime.arc-agi-3-solving"
+            or (identities is not None and identities != identity)
+            or (model is not None and identity.get("model_id") != model)
+            or ("run_id" in identity and identity["run_id"] != root.name)
+            or ("game_id" in identity and identity["game_id"] != game)
+            or (row["kind"] == "arc.run.completed" and "game_id" in row["payload"] and row["payload"]["game_id"] != game)):
+            warn.append("trace-identity")
+            return [], False
+        try:
+            canonical = json.dumps({k: row[k] for k in required - {"sha256"}}, sort_keys=True,
+                                   separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode()
+        except (ValueError, UnicodeError, RecursionError):
+            warn.append("trace-invalid")
+            break
+        if len(canonical) > 64 * 1024 or row["sha256"] != "sha256:" + sha256(canonical).hexdigest():
+            warn.append("trace-invalid")
+            break
+        retained.append(row)
+        previous = row["sha256"]
+        identities = identity
+    sealed = False
+    if retained and retained[-1]["kind"] == "trace.sealed" and len(retained) == len(rows):
+        try:
+            validate_trace(tuple(PrimeTraceEntry(**entry) for entry in retained))
+            seal = _object(root / "trace" / "prime-trace.seal.json", warn, "trace-invalid")
+            sealed = seal.get("entry_count") == len(retained) and seal.get("final_sha256") == retained[-1]["sha256"]
+        except Exception:
+            warn.append("trace-invalid")
+    if not sealed:
+        warn.append("trace-unsealed")
+    return retained, sealed
+
+
+def _claim(value: object) -> dict | None:
+    if (not isinstance(value, dict) or not _identifier(value.get("id"))
+        or type(value.get("kind")) is not str or value.get("kind") not in _KINDS
+        or type(value.get("status")) is not str or value.get("status") not in _STATUSES):
+        return None
+    claim = {key: value[key] for key in ("id", "kind", "status")}
+    claim["claim"] = _prose(value.get("claim"))
+    claim["evidence_count"] = _integer(value.get("evidence_count")) or 0
+    # Only these runtime references authorize a stable completion sentence.
+    evidence = value.get("evidence", [])
+    claim["evidence"] = [{"reference": e["reference"], "status": "certain"}
+                         for e in evidence[:128] if isinstance(e, dict)
+                         and e.get("status") == "certain"
+                         and type(e.get("reference")) is str
+                         and e.get("reference") in {"runtime.levels_completed", "runtime.WIN", "runtime.win"}] if isinstance(evidence, list) else []
+    return claim
+
+
+def _cognition(root: Path, diagnostics: dict, experiment: dict, game: str | None,
+               wins: int | None, current_level: int | None, warn: list[str]) -> dict:
+    unavailable = {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}
+    projection = diagnostics.get("semantic_cognition")
+    if not isinstance(projection, dict):
+        warn.append("cognition-missing")
+        return unavailable
+    session = projection.get("cognition_session")
+    expected_session = root.name + "-cognition"
+    if (not isinstance(session, dict) or not isinstance(session.get("session"), dict)
+        or session["session"].get("session_id") != expected_session
+        or not isinstance(projection.get("semantic"), dict)):
+        warn.append("cognition-missing")
+        return unavailable
+    semantic = projection["semantic"]
+    scope = semantic.get("scope")
+    if (not isinstance(scope, dict) or scope.get("game_id") != game
+        or _integer(scope.get("level"), 100) is None or scope["level"] + 1 != current_level
+        or _integer(scope.get("win_levels"), 100) != wins
+        or type(scope.get("seed")) is not int or scope["seed"] != experiment.get("seed")):
+        warn.append("cognition-missing")
+        return unavailable
+    groups = semantic.get("claims", {})
+    sources = list(semantic.get("confirmed_knowledge", [])) if isinstance(semantic.get("confirmed_knowledge"), list) else []
+    if isinstance(groups, dict):
+        for group in groups.values():
+            if isinstance(group, list):
+                sources.extend(group[:256])
+    claims = {}
+    for source in sources[:2048]:
+        safe = _claim(source)
+        if safe:
+            claims[(safe["id"], safe["status"])] = safe
+    description = render_stable_game_description_zh({"claims": {"certain": [c for c in claims.values() if c["status"] == "certain"]}})
+    events = session.get("events", [])
+    live_sibling = root.parent / f"cognition-live-{expected_session}.jsonl"
+    sibling = root.parent / f"semantic-events-{expected_session}.json"
+    if live_sibling.exists() or live_sibling.is_symlink():
+        events = _rows(live_sibling, warn, "cognition-events-invalid", "cognition-events-invalid")
+    elif sibling.exists() or sibling.is_symlink():
+        event_document = _object(sibling, warn, "cognition-events-invalid")
+        if event_document.get("schema") == "asterion.prime.p7-semantic-cognition-events/v1":
+            events = event_document.get("events", [])
+        else:
+            events = []
+            warn.append("cognition-events-invalid")
+    updates = []
+    if (not isinstance(events, list) or len(events) > _MAX_ROWS
+        or any(not isinstance(e, dict) or e.get("session_id") != expected_session for e in events)):
+        warn.append("cognition-events-invalid")
+        events = []
+    event_statuses = {"cognition.hypothesis.confirmed": "certain", "cognition.hypothesis.falsified": "falsified",
+                      "cognition.hypothesis.remains_undetermined": "undetermined"}
+    previous = 0
+    for event in events:
+        sequence = _integer(event.get("sequence"))
+        if sequence is None or sequence <= previous:
+            warn.append("cognition-events-invalid")
+            break
+        previous = sequence
+        kind = event.get("type")
+        if type(kind) is not str or not kind.startswith("cognition.") or not _identifier(kind):
+            continue
+        status = event_statuses.get(kind)
+        changed_claims = event.get("claim_changes", [])
+        changes = []
+        if isinstance(changed_claims, list):
+            for raw_claim in changed_claims[:256]:
+                safe = _claim(raw_claim)
+                if safe:
+                    changes.append({key: safe[key] for key in ("id", "kind", "status", "claim")})
+        ids = event.get("claim_ids", [])
+        if status and isinstance(ids, list):
+            for claim_id in ids[:256]:
+                if not _identifier(claim_id) or any(c["id"] == claim_id and c["status"] == status for c in changes):
+                    continue
+                changes.append({"id": claim_id, "kind": "unknown", "status": status,
+                                "claim": _prose(event.get("explanation"))})
+        if changes:
+            updates.append({"type": kind, "sequence": sequence, "changes": changes})
+    raw_facts = diagnostics.get("world_model_facts", {})
+    facts: dict[str, object] = {}
+    if (isinstance(raw_facts, dict) and _integer(raw_facts.get("current_level"), 100) == scope["level"]):
+        for key in ("conflicts", "hypotheses", "version", "current_level"):
+            if _integer(raw_facts.get(key)) is not None:
+                facts[key] = raw_facts[key]
+        confirmed = raw_facts.get("confirmed")
+        if isinstance(confirmed, dict):
+            facts["confirmed"] = {k: confirmed[k] for k in ("entities", "mechanics", "relations") if _integer(confirmed.get(k)) is not None}
+    warn.append("cognition-final")
+    return {"stable_description": description, "scope": "final", "updates": updates, "world_map_facts": facts}
+
+
+def _receipt(summary: dict, run_id: str, completed: int, actions: int, warn: list[str]) -> dict | None:
+    raw = summary.get("receipt")
+    if isinstance(raw, dict) and raw:
+        try:
+            if raw.get("run_id", run_id) != run_id:
+                raise ValueError
+            expected = PrimeArcAgi3SolveReceipt.create(run_id=run_id, completed_level_count=completed,
+                                                      primitive_action_count=actions, partial_game_score=raw.get("partial_game_score"))
+            if (raw.get("completed_level_count") != completed or raw.get("primitive_action_count") != actions
+                or raw.get("scope") != expected.scope or raw.get("promotion") != expected.promotion
+                or raw.get("receipt_sha256") != expected.receipt_sha256.removeprefix("sha256:")):
+                raise ValueError
+            return {"completed_level_count": completed, "primitive_action_count": actions,
+                    "partial_game_score": expected.partial_game_score, "scope": expected.scope, "promotion": expected.promotion}
+        except (TypeError, ValueError):
+            pass
+    warn.append("receipt-missing")
+    return None
+
+
+def _completion_proof(summary: dict, trace: list[dict], game: str | None,
+                      wins: int | None, completed: int, actions: list[dict]) -> bool:
+    """Require one coherent completed run, rather than summary flag promotion."""
+    completions = [entry["payload"] for entry in trace if entry["kind"] == "arc.run.completed"]
+    trace_actions = [entry for entry in trace if entry["kind"] == "arc.action"]
+    broker = summary.get("broker")
+    experiment = summary.get("experiment", {})
+    if (len(completions) != 1 or not isinstance(broker, dict) or not isinstance(experiment, dict)
+        or not actions or len(trace_actions) != len(actions)
+        or any(action["trace_sequence"] is None for action in actions)):
+        return False
+    completion = completions[0]
+    for record in (completion, broker):
+        if (_identifier(record.get("game_id")) != game
+            or type(record.get("seed")) is not int or record["seed"] != experiment.get("seed")
+            or _integer(record.get("win_levels"), 100) != wins
+            or _integer(record.get("levels_completed"), 100) != completed
+            or _integer(record.get("primitive_actions")) != len(actions)
+            or type(record.get("replay_sha256")) is not str
+            or re.fullmatch(r"sha256:[0-9a-f]{64}", record["replay_sha256"]) is None
+            or record.get("terminal_reason") not in ("level-completed", "game-won")):
+            return False
+    return all(completion[key] == broker[key] for key in
+               ("game_id", "seed", "win_levels", "levels_completed", "primitive_actions", "replay_sha256", "terminal_reason"))
+
+
+def build_console_snapshot(run_root: Path) -> dict[str, object]:
+    """Project explicitly selected evidence without modifying it or running P7."""
+    if not isinstance(run_root, Path) or run_root.is_symlink() or not run_root.is_dir():
+        raise ValueError("console evidence unavailable")
+    # Canonicalize the operator-selected directory (macOS /var is an OS
+    # symlink); evidence descendants themselves must remain regular files.
+    root = run_root.resolve()
+    if not _identifier(root.name):
+        raise ValueError("console evidence unavailable")
+    warn: list[str] = []
+    summary = _object(root / "summary.json", warn, "summary-missing")
+    if summary and (summary.get("schema") != "asterion.prime.p7-live-private-summary/v1" or summary.get("run_id") != root.name):
+        raise ValueError("console evidence unavailable")
+    experiment = summary.get("experiment", {})
+    experiment = experiment if isinstance(experiment, dict) else {}
+    game = _identifier(experiment.get("game_id"))
+    wins = None
+    observations: list[dict | None] = []
+    directory = root / "recordings"
+    recordings = sorted(directory.glob("*/*.jsonl")) if directory.is_dir() and not directory.is_symlink() else []
+    if len(recordings) > 1:
+        warn.append("recording-ambiguous")
+    elif not recordings:
+        warn.append("recording-missing")
+    else:
+        rows = _rows(recordings[0], warn, "recording-missing", "recording-invalid")
+        observations = [_observation(row) for row in rows]
+        valid = [o for o in observations if o]
+        identities = {(o["game_id"], o["guid"], o["wins"]) for o in valid}
+        if len(identities) > 1 or (valid and game is not None and valid[0]["game_id"] != game):
+            observations = []
+            warn.append("recording-invalid")
+        elif valid:
+            game, _, wins = valid[0]["game_id"], valid[0]["guid"], valid[0]["wins"]
+        if any(o is None for o in observations):
+            warn.append("recording-invalid")
+    trace, sealed = _trace(root, summary, game, warn)
+    trace_actions = [e for e in trace if e["kind"] == "arc.action"]
+    levels: dict[int, dict] = {}
+
+    def level(number: int) -> dict:
+        if number not in levels:
+            levels[number] = {"level": number, "status": "not-run", "frames": [], "actions": [], "decisions": [],
+                              "cognition": {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}, "receipt": None}
+        return levels[number]
+
+    previous = None
+    frame_count = 0
+    action_count = 0
+    completed = 0
+    last_level = None
+    for observation in observations:
+        if observation is None:
+            previous = None
+            continue
+        if previous and observation["action"] == "RESET" and observation["hash"] == previous["hash"]:
+            continue
+        if frame_count + len(observation["layers"]) > _MAX_FRAMES:
+            warn.append("evidence-bounded")
+            break
+        action_level = previous["levels"] + 1 if previous else observation["levels"] + 1
+        action_level = min(action_level, wins or 100)
+        bucket = level(action_level)
+        new_frames = []
+        for grid in observation["layers"]:
+            frame_count += 1
+            new_frames.append({"id": f"f{frame_count:06d}", "grid": grid, "timestamp": observation["timestamp"],
+                               "state": observation["state"], "levels_completed": observation["levels"]})
+        bucket["frames"].extend(new_frames)
+        if previous:
+            action_count += 1
+            matches = [e for e in trace_actions if e["payload"].get("action") == observation["action"]
+                       and type(e["payload"].get("before_sha256")) is str and e["payload"]["before_sha256"] in previous["hashes"]
+                       and type(e["payload"].get("after_sha256")) is str and e["payload"]["after_sha256"] in observation["hashes"]
+                       and e["payload"].get("sequence") == action_count
+                       and e["payload"].get("levels_completed") == observation["levels"]
+                       and e["payload"].get("data", {}) == observation["data"]]
+            matched = matches[0] if len(matches) == 1 else None
+            if matched is None:
+                warn.append("action-unaligned")
+            changed = sum(a != b for row_a, row_b in zip(previous["layers"][-1], observation["layers"][-1], strict=True)
+                          for a, b in zip(row_a, row_b, strict=True))
+            bucket["actions"].append({"id": f"a{action_count:06d}", "name": observation["action"],
+                                      "before_frame": previous["frame_id"], "after_frame": new_frames[-1]["id"],
+                                      "data": observation["data"], "levels_completed": observation["levels"],
+                                      "changed_cells": changed, "trace_sequence": matched["sequence"] if matched else None,
+                                      "decision_id": None})
+        elif observation["action"] != "RESET":
+            warn.append("recording-invalid")
+        completed = observation["levels"]
+        last_level = min(completed + 1, wins or 100)
+        if completed >= action_level:
+            bucket["status"] = "successful"
+        if last_level != action_level:
+            level(last_level)["frames"].append(new_frames[-1])
+        observation["frame_id"] = new_frames[-1]["id"]
+        previous = observation
+    target = _integer(experiment.get("target_level"), 100) or 1
+    for number in range(1, (wins or max(levels, default=target)) + 1):
+        level(number)
+    all_actions = [action for bucket in levels.values() for action in bucket["actions"]]
+    completion_proof = _completion_proof(summary, trace, game, wins, completed, all_actions)
+    receipt = _receipt(summary, root.name, completed, action_count, warn)
+    if receipt and not completion_proof:
+        receipt = None
+        warn.append("receipt-missing")
+    diagnostics = summary.get("diagnostics", {})
+    diagnostics = diagnostics if isinstance(diagnostics, dict) else {}
+    cognition = _cognition(root, diagnostics, experiment, game, wins, last_level, warn)
+    if last_level is not None:
+        level(last_level)["cognition"] = cognition
+        if level(last_level)["status"] != "successful":
+            level(last_level)["status"] = "unsuccessful" if previous and previous["state"] == "GAME_OVER" else "incomplete"
+        if receipt and completed >= 1:
+            level(min(completed, wins or 100))["receipt"] = receipt
+    rounds = []
+    for entry in trace:
+        if entry["kind"] != "prime.model.round":
+            continue
+        payload = entry["payload"]
+        index = _integer(payload.get("round_index"))
+        if index is None:
+            continue
+        rounds.append({"id": f"d{entry['sequence']:06d}", "round_index": index,
+                       "trace_sequence": entry["sequence"], "action_ids": [],
+                       "prompt_signals": [s for s in payload.get("prompt_signals", []) if type(s) is str and s in _PROMPT_SIGNALS] if isinstance(payload.get("prompt_signals"), list) else [],
+                       "output_signals": [s for s in payload.get("output_signals", []) if type(s) is str and s in _OUTPUT_SIGNALS] if isinstance(payload.get("output_signals"), list) else []})
+    if rounds:
+        # A single observed level is the only unambiguous level assignment. For
+        # multi-level runs the run-level array keeps unaligned rounds visible.
+        observed_levels = [item for item in levels.values() if item["frames"]]
+        if len(observed_levels) == 1:
+            observed_levels[0]["decisions"] = rounds
+        warn.append("decision-unaligned")
+    replay_verified = (completion_proof and sealed and summary.get("sealed_trace") is True
+                       and summary.get("replay_verified") is True)
+    successful = receipt is not None and replay_verified and completed >= target
+    status = "successful" if successful else "unsuccessful" if previous and previous["state"] == "GAME_OVER" else "incomplete"
+    return {"schema": "asterion.arc-agi3-p7-console/v1", "generated_at": datetime.now(timezone.utc).isoformat(),
+            "run": {"run_id": root.name, "game_id": game, "status": status, "completed_level_count": completed,
+                    "win_levels": wins, "target_level": target, "primitive_action_count": action_count,
+                    "replay_verified": replay_verified, "sealed_trace": sealed,
+                    "model": _identifier(experiment.get("model"))},
+            "levels": [levels[n] for n in sorted(levels)], "decisions": rounds,
+            "warnings": [_WARNINGS[code] for code in dict.fromkeys(warn)]}
+
+
+__all__ = ("build_console_snapshot",)

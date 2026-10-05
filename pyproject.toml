@@ -56,6 +56,7 @@ artifacts = [
     "src/asterion/applications/prime/resources/*.mjs",
     "src/asterion/runtimes/resources/*.mjs",
     "src/asterion/applications/prime/p7/run_story/assets/*",
+    "src/asterion/applications/prime/p7/console_assets/*",
     "src/asterion/capabilities/dci/resources/pi/*.ts",
     "src/asterion/capabilities/dci/resources/pi/*.mjs",
     "src/asterion/control/providers/native/resources/control-plane.json",
@@ -95,4 +96,5 @@ artifacts = [
     ".asterion-prime-extension-build.json",
     "src/asterion/applications/prime/resources/ipython-extension.mjs",
     "src/asterion/applications/prime/p7/run_story/assets/*",
+    "src/asterion/applications/prime/p7/console_assets/*",
 ]

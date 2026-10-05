@@ -310,6 +310,17 @@ asterion-prime-p7-games:
 asterion-prime-p7-stories:
 	@$(UV_BIN) run asterion arc-story serve --open-browser
 
+.PHONY: asterion-prime-p7-console
+asterion-prime-p7-console: export ASTERION_CONSOLE_RUN = $(RUN)
+asterion-prime-p7-console: export ASTERION_CONSOLE_OUTPUT = $(OUTPUT)
+asterion-prime-p7-console:
+	@test -n "$$ASTERION_CONSOLE_RUN" || { printf '请指定 RUN=<P7运行目录>\n' >&2; exit 2; }
+	@if [ -n "$$ASTERION_CONSOLE_OUTPUT" ]; then \
+		$(UV_BIN) run asterion arc-console "$$ASTERION_CONSOLE_RUN" --output "$$ASTERION_CONSOLE_OUTPUT"; \
+	else \
+		$(UV_BIN) run asterion arc-console "$$ASTERION_CONSOLE_RUN"; \
+	fi
+
 asterion-prime-p7-sync-games:
 	@python3 tools/sync_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --env-file "$(CURDIR)/.env"
 

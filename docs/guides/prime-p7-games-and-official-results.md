@@ -23,6 +23,20 @@ make asterion-prime-p7-games
 
 ## 2. 本地选择题目和关卡
 
+### 单 HTML 过程回放
+
+一次运行结束或中断后，可以导出关卡控制台：
+
+```bash
+make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id>
+```
+
+打开运行目录内的 `p7-console.html`。文件内含画面、Tailwind CSS、JavaScript 和证据数据，无需联网或构建。
+滑块和播放按钮查看动作画面，过程区查看 P7 回合信号、动作结果和认知更新。`OUTPUT=/tmp/p7-console.html` 可改输出位置。
+
+每份文件展示一次运行中一个游戏的各关卡。新动作发生后须重新导出。旧记录没有保存的规划文字显示为未记录。
+最终认知不代表较早帧当时的知识；缺少轮次关联的模型信号也不会强行绑定到动作。导出不调用模型、不执行游戏动作。
+
 从第 1 关开始解一题：
 
 ```bash

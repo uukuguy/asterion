@@ -118,6 +118,24 @@ uv run asterion arc-story serve
 
 `analyze` is the model-backed stage; compile, render, export, and serving operate on retained evidence. Local research artifacts use the stable `artifacts/arc-agi-3/` hierarchy and remain outside the package distribution.
 
+### P7 离线关卡控制台
+
+也可直接把一次 P7 运行导出为单个自包含 HTML。未过关和中断的运行同样可看。
+
+```bash
+uv run asterion arc-console .asterion-private/prime-p7-live/<run-id>
+# 可指定输出文件：
+make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id> OUTPUT=/tmp/p7-console.html
+```
+
+默认输出为运行目录内的 `p7-console.html`。双击即可打开，无需网络、npm 构建或本地服务。
+中央显示关卡画面，滑块和播放按钮回放动作，侧栏显示游戏认知，过程区展示 P7 回合信号、动作结果和认知记录。
+控制台是导出时的快照；新动作发生后须重新导出。首版每份文件对应一次运行、一个游戏的多个关卡。
+
+旧记录未保存的规划文字显示“未记录”。无法精确关联动作的模型回合单独展示。
+只保存最终认知时，页面明确标为最终快照，不把结束时知识当作早期决策依据。
+页面嵌入实际 [Tailwind CSS](https://v3.tailwindcss.com/docs/installation) 样式和原生 JS，不调用模型或执行新游戏动作。
+
 ## Install and inspect
 
 Python 3.10 or newer and [`uv`](https://docs.astral.sh/uv/) are required. Node.js 22.x plus npm are needed for Pi and TypeScript integration; Rust is needed for controlled-executor checks.
