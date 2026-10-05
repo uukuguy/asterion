@@ -67,7 +67,8 @@ class TestConsoleOverview(unittest.TestCase):
         (research / 'revisions' / (revision[7:] + '.json')).write_text(json.dumps(snapshot))
         return run
 
-    def write_recording(self, name, game_id='test-1', levels=2, context_update=None, gap=False):
+    def write_recording(self, name, game_id='test-1', levels=2, context_update=None, gap=False,
+                        restoration_actions=0, pre_context_kind=None, duplicate_context=False):
         run = self.write_run(name)
         (run / 'summary.json').unlink()
         import shutil
@@ -77,17 +78,25 @@ class TestConsoleOverview(unittest.TestCase):
         win = next(game['win_levels'] for game in self.catalog if game['game_id'] == game_id)
         context = {'run_id': name, 'game_id': game_id, 'model_id': 'gpt-6.1-sol',
                    'seed': 0, 'win_levels': win, 'target_level': win,
-                   'restoration_actions': 0, 'source_run_id': None}
+                   'restoration_actions': restoration_actions,
+                   'source_run_id': 'saved-source' if restoration_actions else None}
         context.update(context_update or {})
         self.recorders[name] = recorder
         self.addCleanup(recorder.close)
-        recorder.append('arc.run.context', trace_identities_for('gpt-6.1-sol'), context)
+        if pre_context_kind:
+            recorder.append(pre_context_kind, trace_identities_for('gpt-6.1-sol'), {})
+        if restoration_actions == 0:
+            recorder.append('arc.run.context', trace_identities_for('gpt-6.1-sol'), context)
         for index in range(1, levels + 2):
             recorder.append('arc.action', trace_identities_for('gpt-6.1-sol'), {
                 'sequence': index + int(gap and index > 1), 'action': 'ACTION1',
                 'before_sha256': 'sha256:' + str(index - 1) * 64,
                 'after_sha256': 'sha256:' + str(index) * 64,
                 'levels_completed': min(index, levels)})
+            if index == restoration_actions:
+                recorder.append('arc.run.context', trace_identities_for('gpt-6.1-sol'), context)
+        if duplicate_context:
+            recorder.append('arc.run.context', trace_identities_for('gpt-6.1-sol'), context)
         if game_id != 'test-1':
             shutil.rmtree(run / 'research')
             scope = {'game_id': game_id, 'seed': 0, 'win_levels': win, 'run_id': name, 'attempt_id': name}
@@ -99,6 +108,40 @@ class TestConsoleOverview(unittest.TestCase):
             (research / 'current.json').write_text(json.dumps({'scope': scope, 'revision': revision}))
             (research / 'revisions' / (revision[7:] + '.json')).write_text(json.dumps(snapshot))
         return run
+
+    def test_resumed_progress_accepts_exact_pre_context_restoration(self):
+        for restored in (1, 2):
+            with self.subTest(restored=restored):
+                self.write_recording(f'restored-{restored}', levels=3, restoration_actions=restored)
+        value = self.overview().build()
+        self.assertEqual([run['observed_completed_levels'] for run in value['games'][0]['runs']], [3, 3])
+        self.assertEqual(value['games'][0]['display_completed_levels'], 3)
+        self.assertEqual(value['totals']['completed_levels'], 0)
+        self.assertEqual(value['totals']['saved_route_actions'], 0)
+        self.assertIsNone(value['games'][0]['resume_run_id'])
+
+    def test_fresh_and_restored_context_boundaries_reject_inconsistent_journals(self):
+        cases = (
+            {'restoration_actions': 1, 'context_update': {'restoration_actions': 0}},
+            {'restoration_actions': 1, 'context_update': {'restoration_actions': 2}},
+            {'restoration_actions': 1, 'context_update': {'source_run_id': None}},
+            {'restoration_actions': 1, 'context_update': {'source_run_id': 'bad/path'}},
+            {'restoration_actions': 1, 'context_update': {'source_run_id': 'invalid'}},
+            {'restoration_actions': 1, 'context_update': {'target_level': 1}},
+            {'restoration_actions': 1, 'pre_context_kind': 'arc.usage.reported'},
+            {'restoration_actions': 1, 'gap': True},
+            {'restoration_actions': 1, 'duplicate_context': True},
+            {'context_update': {'source_run_id': 'saved-source'}},
+            {'context_update': {'restoration_actions': 1}},
+            {'pre_context_kind': 'arc.usage.reported'},
+        )
+        import shutil
+        for case in cases:
+            with self.subTest(case=case):
+                run = self.write_recording('invalid', levels=3, **case)
+                self.assertEqual(self.overview().build()['games'][0]['display_completed_levels'], 0)
+                self.recorders['invalid'].close()
+                shutil.rmtree(run)
 
     def test_parallel_live_progress_is_display_only_and_does_not_duplicate_attempts(self):
         self.write_recording('first', levels=2)

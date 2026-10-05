@@ -113,7 +113,7 @@ def _observed_completed_levels(run: Path, game: dict) -> int:
     try:
         entries = _recorded_entries(run / 'trace' / 'prime-trace.jsonl', strict=True)
         contexts = [entry for entry in entries if entry.kind == 'arc.run.context']
-        if len(contexts) != 1 or not entries or contexts[0] != entries[0]:
+        if len(contexts) != 1 or not entries:
             return 0
         context = contexts[0].payload
         if (set(context) != {'run_id', 'game_id', 'model_id', 'seed', 'win_levels',
@@ -128,7 +128,16 @@ def _observed_completed_levels(run: Path, game: dict) -> int:
                 or not (context['source_run_id'] is None or
                         type(context['source_run_id']) is str and _ID.fullmatch(context['source_run_id']))):
             return 0
+        before_context = entries[:entries.index(contexts[0])]
+        restored = context['restoration_actions']
+        source = context['source_run_id']
+        if (len(before_context) != restored or any(entry.kind != 'arc.action' for entry in before_context)
+                or restored == 0 and source is not None
+                or restored > 0 and (source is None or source == run.name)):
+            return 0
         transitions = _transitions(entries)
+        if restored and not 0 < transitions[restored - 1].levels_completed < context['target_level']:
+            return 0
         previous_hash, previous_level, completed = None, 0, 0
         for item in transitions:
             if (type(item.sequence) is not int or type(item.levels_completed) is not int

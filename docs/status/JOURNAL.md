@@ -3810,3 +3810,6 @@
 - 04:22 c898e9da: Show live completed levels in overview without changing saved-route scores or playback position.
 - 04:27 Efficiency retry policy committed: one target witness, exact restoration and improvement-only saved-route admission [e543 placeholder].
 - 04:27 c45ad79f: Efficiency queue preserves completed routes while retrying low-scoring targets once; preceding placeholder hash is invalid.
+- 04:28 d529cfe0: Checkpoint per-level900-second dispatch, efficiency queue and two active owned workspaces for recovery.
+- 04:30 AR25 L6 sealed/replayed53 actions; per-level dispatcher started L7 with a fresh900-second timer.
+- 04:31 Efficiency/operator promotion fullPASS25 provider-free commands; later resumed-progress parser27 focused testsPASS, exact real records accepted.
