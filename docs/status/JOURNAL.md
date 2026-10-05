@@ -3698,3 +3698,7 @@
 - 19:20 Closed idle console for handoff; SP80 L2 85-action save and both persistent files remain unchanged.
 - 19:20 Consolidated final console evidence and recovery boundaries; next session starts operator acceptance, with full gate non-PASS.
 - 19:20 Closed console and committed verified recovery facts so next session resumes without chat memory [a46f4c21]
+
+- 20:18 用户指定整体WorldMap/IPython重设计，纳入console，放弃PNG优先及迁就旧实现的方向。
+- 20:18 固定Tycho/Retrodict源码，完成整体设计与独立复审；没有新模型运行或求解代码改动。
+- 20:18 make docs-check通过：272 Markdown/63本地链接；git diff --check通过，能力仍未新增验证。

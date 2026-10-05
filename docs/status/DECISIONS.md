@@ -53,6 +53,7 @@
 - Evidence: `docs/architecture/prime-p7-world-model-simulator.md`,
   `src/asterion/applications/prime/p7/model_search.py`, focused P7 model-search
   tests, and the Tycho/Retrodict references recorded in that design.
+- Review context (2026-10-05, not an adopted replacement): `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md` compares the actual reference code; `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` proposes a whole IPython-centered solver/console redesign without retaining current implementation shape. Ordinary checked exploration remains available; any change to this certified planner contract must be stated explicitly before implementation.
 
 ## D-2026-07-26-01 — Operator configuration root
 
