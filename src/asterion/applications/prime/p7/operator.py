@@ -3800,6 +3800,35 @@ def _resume_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
     )
 
 
+def _resume_prefix_for_target(
+    game: P7GameSelection, prefix: object, *, witness_only: bool,
+) -> object:
+    """Clip an already SDK-verified route only for an explicit level witness.
+
+    The source remains immutable.  A full source is validated before this
+    function runs; only its exact actions before the target are restored.
+    Level-one optimization uses a fresh invocation and inert experience.
+    """
+    from .solutions import VerifiedPrefix, _truncate
+
+    if (
+        witness_only and type(game) is P7GameSelection
+        and type(prefix) is VerifiedPrefix and game.target_level > 1
+        and prefix.game_id == game.game_id and prefix.seed == game.seed
+        and prefix.win_levels == game.win_levels
+        and prefix.levels_completed >= game.target_level
+    ):
+        transitions = _truncate(prefix.transitions, game.target_level - 1)
+        if not transitions:
+            raise P7OperatorError("P7 resume source is unavailable")
+        prefix = replace(
+            prefix, levels_completed=game.target_level - 1, transitions=transitions,
+            replay_sha256=replay_sha256(transitions, terminal_reason="level-completed"),
+        )
+    _resume_game(game, prefix)
+    return prefix
+
+
 def _select_game_for_mode(
     process_environment: Mapping[str, str],
     resolved_environment: Mapping[str, str],
@@ -4265,10 +4294,14 @@ async def run_live(
             invocation.game.game_id, invocation.game.seed,
             expected_model_id=declared_model_selection(invocation.environment).model,
         )
-        invocation = replace(invocation, game=_resume_game(invocation.game, resume_prefix))
         resume_prior = load_resume_worldmap(runs_root / source_run_id, resume_prefix)
         if resume_prior is None:
             raise P7OperatorError("P7 resume source is unavailable")
+        resume_prefix = _resume_prefix_for_target(
+            invocation.game, resume_prefix,
+            witness_only=invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "witness",
+        )
+        invocation = replace(invocation, game=_resume_game(invocation.game, resume_prefix))
     playbook_snapshot: PlaybookSnapshot | None = None
     playbook_loaded = False
     playbook_saved = False

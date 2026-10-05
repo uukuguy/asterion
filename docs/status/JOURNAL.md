@@ -3807,3 +3807,4 @@
 - 2026-10-06 04:08 CST — Final make promotion-check PASS25 commands/provider_operations0/full_datasetno; packaged console/route changes verified.
 - 2026-10-06 04:11 CST — AR25/BP35 actual concurrent model/action/IPython evidence verified; single-writer two-slot pool90979 preserves the originalAR25 guest.
 - 2026-10-06 04:12 CST — 14ab9e61: Checkpoint verified console, official receipt and two-game live pool for safe continuation.
+- 04:22 c898e9da: Show live completed levels in overview without changing saved-route scores or playback position.

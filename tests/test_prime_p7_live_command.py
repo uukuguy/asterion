@@ -71,6 +71,37 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             with self.subTest(prefix=invalid), self.assertRaisesRegex(operator.P7OperatorError, "^P7 resume source is unavailable$"):
                 binder(game, invalid)
 
+    def test_explicit_witness_clips_verified_full_source_before_target(self) -> None:
+        from asterion.applications.prime.p7 import operator
+        from asterion.applications.prime.p7.broker import ArcTransition
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.score import replay_sha256
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+
+        game = P7GameSelection("sp80-589a99af", 0, 3, (6, 10, 51, 73, 93, 204), 6)
+        transitions = tuple(ArcTransition(i, "ACTION1", f"before-{i}", f"after-{i}", i)
+                            for i in range(1, 7))
+        source = VerifiedPrefix(game.game_id, 0, 6, 6, transitions, "source", "full-digest")
+        clipped = operator._resume_prefix_for_target(game, source, witness_only=True)
+        self.assertEqual(clipped.transitions, transitions[:2])
+        self.assertEqual(clipped.levels_completed, 2)
+        self.assertEqual(clipped.source_run_id, source.source_run_id)
+        self.assertEqual(clipped.replay_sha256, replay_sha256(transitions[:2], terminal_reason="level-completed"))
+        self.assertEqual(operator._resume_game(game, clipped).action_cap, 53)
+        self.assertEqual(source.transitions, transitions)
+        self.assertEqual(source.replay_sha256, "full-digest")
+        with self.assertRaises(operator.P7OperatorError):
+            operator._resume_prefix_for_target(game, source, witness_only=False)
+        from dataclasses import replace
+        for invalid_game, invalid_prefix in (
+            (replace(game, target_level=1), source),
+            (replace(game, seed=1), source),
+            (game, replace(source, transitions=(transitions[-1],))),
+        ):
+            with self.subTest(game=invalid_game), self.assertRaises(operator.P7OperatorError):
+                operator._resume_prefix_for_target(invalid_game, invalid_prefix, witness_only=True)
+        self.assertIs(operator._resume_prefix_for_target(game, clipped, witness_only=True), clipped)
+
     def test_console_logging_resets_terminal_column_on_newlines(self) -> None:
         from asterion.applications.prime.p7 import operator
 
