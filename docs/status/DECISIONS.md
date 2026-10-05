@@ -950,3 +950,12 @@
 - Evidence: `d158106d` adds `P7推理轮次`, `P7动作计划`, and `P7动作结果` lines;
   accepted cognition operations already emit `P7提出`, `P7选择`, and `P7分析`.
   Focused bridge, cognition, gameplay-trace tests and lint pass.
+
+## D-2026-10-05-01 — P7 autonomous console and exact source process evidence
+
+- Status: 🟢 active.
+- Decision: The console defaults to P7 autonomous solving. Replay has independent controls. Future human validation uses an independent instance and record without entering P7 context, history or learning. The first package implements finite start/stop; resumable pause and human execution remain future work.
+- Rationale: The user wants observable autonomous gameplay. A hypothesis ledger supports a gradually updated gameplay description, while P7 chooses its own actions. Public goal/basis/expected summaries provide readable decisions without private model reasoning.
+- Evidence contract: Initial and every settled public observation carry exact source sequence and canonical hash. Repeated pixels remain distinct observations. Missing source evidence cannot be inferred from SDK row positions. Capture is advisory and cannot change game execution authority.
+- Deployment: The Mac supervisor and exact guest unit retain a fixed 900-second limit and independent cleanup. Guest launch inherits only fixed Orb-resolved proxy names; values remain outside argv. This keeps Orb's address mapping intact and restores the observed model connection without changing provider, credentials or CA configuration.
+- Evidence: `ed6fa64b`, `004442f2`, `9e98b49e`; final packaged process verification in `ASTERION-PRIME-P7-EVIDENCE.md`. No fresh SP80 completion or full promotion PASS is implied.

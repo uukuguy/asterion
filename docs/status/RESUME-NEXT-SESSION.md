@@ -1,71 +1,48 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05. Active checkpoint during realtime console implementation, not a final handoff.
+> Updated: 2026-10-05. First realtime package delivered; no owned process remains.
 
 ## 已验证事实
 
-- `60c67ba2` implements the approved single-file ARC-AGI-3 P7 console. Design: `docs/superpowers/specs/2026-10-05-prime-p7-arc-console-design.md`; implementation plan and verification: `docs/superpowers/plans/2026-10-05-prime-p7-arc-console.md`.
-- `make p7-console` selects the newest recorded P7 run, exports it and opens the HTML in the default browser. `RUN=...` remains an optional historical override. `make asterion-prime-p7-console` exports without opening; `asterion arc-console [RUN_ROOT]` also supports selection. Packaged Tailwind CSS, JavaScript and data are embedded. No browser network requests, build step or model invocation is needed.
-- Main view is the actual game canvas. Level navigation, frame slider, playback speed, action jumps, changed-cell highlighting, before/after comparison, stable cognition and P7/action/cognition tabs are implemented.
-- Final artifact: `.asterion-private/prime-p7-live/p7-live-20261004130719-6ff8ee64f2d4c2c8fb971b1b/p7-console.html`. It contains real SP80 evidence: 6 level slots, 33 recorded frames, 5 actions, 3 model rounds and 4 cognition updates. Only level 1 has observed gameplay. Zero levels completed; source run is interrupted, unsealed and replay unverified.
-- All five actions match their recorded trace observations. Intermediate animation frames retain action ownership. Final cognition is labelled as final; unaligned model-round signals are not assigned to actions by guesswork. Missing P7 decision prose is explicitly unavailable.
-- Initial console focused suite: 29 tests PASS. No-argument launch follow-up: 35 snapshot/export tests PASS; actual Make export selected the latest recording successfully; Make browser-flag forwarding and browser success/failure branches were checked without opening a browser. Four jsdom interaction tests PASS, including actual exported HTML with zero external resource requests. These are DOM checks, not visual browser checks.
-- `make lint`, `make docs-check`, and `git diff --check` PASS. Independent final code review approved after fixes to cognition scope, completion proof, intermediate-frame action selection and path redaction.
-- Final wheel built with `uv build --wheel --out-dir /tmp/p7-console-wheel`; isolated `python -I` export from `/tmp` succeeded. Eight source/resource files were compared with wheel contents and match.
-- `make promotion-check` is FAIL: 3794 tests, 13 failures, 5 errors, 4 skips. Wrapper log: `/tmp/p7-console-promotion.log`. Retained tail identifies `prime-source-locator` in `packages/typescript/asterion-prime-extension/test/context-witness.test.mjs` lines 23/25/27. The wrapper retained only the failure tail; the other failures are not individually diagnosed in this session. Do not claim the full gate passed or that all failures are unrelated.
-- Chrome discovery and extension diagnostics passed, but extension transport repeatedly timed out. Actual browser visual/mobile acceptance is external-limited. No alternate browser profile was launched.
-- This export change did not alter solver behavior, tool registration or the Pi extension. No fresh live model witness was run.
-
-- 2026-10-05 console follow-up: replay overlays now default off; color prose and palette legend use names plus IDs. Literal pixel measurements remain separate from P7 analysis; absent action-linked cognition is explicitly missing. The action panel reads each frame's available actions, highlights the replayed action and preserves final-scope recognized/provisional/rejected meanings without supplying default direction semantics.
-- Solve and cognition prompts now remind P7 to notice important objects and potential score/progress/timer/resource/state displays, then use normal feedback to form and revise planning hypotheses. No SP80/green-bar meaning was added to prompts or cognition.
-- Inspected source run `p7-live-20261004140407-76efe9d22e179d6db7810496`: first ACTION4 moves blue pixels right four cells and green pixels decrease 64 to 62. No corresponding new action-specific cognition analysis was saved. These are retrospective pixel measurements, not P7 discoveries. No new live solve was launched for this change.
-- Follow-up focused suite: 78 Python tests PASS; 9 DOM checks and final isolated wheel export PASS. Promotion rerun (before the added action panel) remains FAIL: 3809 tests, 13 failures, 5 errors, 4 skips; `/tmp/p7-console-overlay-promotion.log` retains the source-detachment failure tail. No final full-gate PASS is claimed.
-- Compact replay action keys now show only ID, short direction and recognition status. They locate recorded actions and pause playback; no live action is dispatched. Full original meanings remain in the cognition process tab, with final-snapshot scope. Conflicting or explicitly denied directions display as unknown. Final focused checks: 39 Python tests, 12 DOM tests including actual exported HTML, lint, docs-check and isolated wheel export PASS. Independent code review approved after the denial-polarity fix. These are interaction checks, not visual browser acceptance.
-- Compact-panel promotion rerun remains FAIL: 3811 tests, 13 failures, 5 errors, 4 skips; `/tmp/p7-console-compact-promotion.log` retains the source-detachment failure tail. Other failure causes are not individually diagnosed here. No full-gate PASS is claimed.
+- Branch `feat/p7-live-console`. Plan `6c494834`, feature `ed6fa64b`, source-frame fix `004442f2`, guest transport fix `9e98b49e`. Task1–4 completed within the approved first-package boundary; independent source reviews PASS.
+- `make p7-console` opens the local autonomous P7 workspace. The page reads 25 local game records and starts no model until the user selects a game and clicks start. The first preset runs L1 with a fixed 900-second bound. Offline single HTML replay remains available.
+- Source public observations, decisions, actual actions and cognition revisions use exact run/game/sequence/hash links. New source records retain repeated/no-effect frames. SDK-only historical records keep honest final-scope/association limitations. Optional display failures cannot change action authority.
+- Final installed-wheel run `p7-live-20261005063214-b9a30b6cbfd609490469887f` through the live service: 2 genuine P7 public decisions, 5 actual actions, 33 real frames, 5 cognition versions. Every action has a source sequence and decision link. Explicit HTTP stop returns stopping then cancelled, cleanup true. Exact unit not-found/inactive, cgroup and host parent absent. Service stopped. Zero completed levels.
+- Final real-run offline HTML `/tmp/p7-live-console-final-run.html`: 28 DOM tests PASS. Root guest/CLI/session suite: 29 OK, one existing opt-in Orb skip. Broader source suite: 297 OK, one skip; service/CLI suite: 21 OK. Lint, docs and diff checks PASS.
+- Final full promotion non-PASS: 3861 tests, 13 failures, 5 errors, 4 skips. Full log `/tmp/p7-live-console-promotion-full.log`. Same named failures remain in source-detachment literals, old preset/fixture/API, cognition ANSI logging, replay digests and sweep contracts. Full npm also non-PASS: 29 pass, 2 descriptor timeouts, 6 skips; focused actual tool/resource checks passed.
+- Browser visual acceptance remains external-limited: cached browser runtime module missing; no new or isolated profile was created. DOM evidence does not prove visual acceptance.
 
 ## 当前判断
 
-- P7 owns planning and game actions. Stable game description is the main WorldMap background. Hypotheses fill gaps and support reasoning; every hypothesis need not be individually proved before play. Normal gameplay can confirm or falsify useful inferences.
-- The single-run console makes existing evidence inspectable. It does not create decision explanations or historically aligned world-model snapshots that the source run never recorded.
-- The prior 16 KiB limit was an application budget, not a model context limit. Initial game context is bounded at 64 KiB and complete solver/backend input at 256 KiB. Earlier real runs accepted approximately 81 KiB prompts.
-- Primary cognition contract: `docs/architecture/prime-p7-cognition-and-experience.md`; decision D-2026-10-03-01. Chinese gameplay descriptions should use short, consistent statements, distinguish observations from inference, and remain incomplete where evidence is missing.
-- User clarified that autonomous P7 solving is the core; manual play is independent validation and must not enter the P7 workflow. Revised design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`. P7 and manual modes have distinct game instances and records. Manual observations/actions must not write P7 cognition or experience or enter model context. Same-game takeover and mixed control are withdrawn. Real-time modes remain unimplemented.
+- P7自主过关是核心。稳定认知是一份逐步完善的中文玩法介绍。假说针对认识缺口；常识与高置信推断可用于规划，再随正常动作检视。P7公开摘要不等于私有思维链。
+- 人工验证必须有独立游戏、记录和无学习路径，不进入P7内部工作流。首包不实现人工动作或可恢复暂停。取消不会保留可继续的模型会话。
+- The first live package is implemented and verified at the process/lifecycle boundary. It is not a new solving-proficiency result or a full release PASS.
 
 ## 历史归档
 
-- Older log-rendering revisions and unsuccessful witness details remain in Git history and `JOURNAL.md`. The former checkpoint accumulated contradictory “latest run” paragraphs; it is replaced by this current checkpoint.
-- Reprinting the whole cognition ledger, treating strategies as factual hypotheses, or requiring complete cognition before solving are superseded directions.
-- Replay prefixes and injected known routes do not establish fresh P7 solving ability. Successful export, DOM checks and unit tests do not establish game completion.
+- Whole-branch review found repeated-frame source links could disappear; `004442f2` replaced pixel matching with actual source observations. Keep conservative legacy behavior rather than infer missing identity.
+- First two real console attempts returned only initial frames/cognition and zero actions. Failure-only diagnostics plus no-auth GET comparison isolated systemd dropping Orb's rewritten proxy. `9e98b49e` keeps guest proxy names only; normal real model/tool operation then resumed. Do not change credentials/model/CA based on the generic RPC error.
+- The temporary private probe entry was deleted; all probe/console processes and units are stopped. Only private failure evidence remains. Operator `.env` and persistent Pi configuration were never changed.
+- Earlier capture wrappers accidentally exported UV_BIN into nested Make tests. The final wrapper clears UV_BIN and Make flags; the final 3861-test result is clean of that instrumentation pollution. Do not use prior polluted totals.
+- Shared human/P7 takeover, manual-first flow, full hypothesis dumps and mandatory per-hypothesis action proof are superseded.
 
 ## 未完成边界
 
-- No fresh SP80 L1 completion or cold/warm proficiency comparison is established by this work. Cross-level learning and simulator benefit remain unverified.
-- This approved first console exports one run; it is not a live multi-game scheduler or an aggregate of all historical runs.
-- Live P7 control, independent manual validation, source-linked decision summaries and Mac/Orb console service are not implemented. Current `run_live` closes the game when the solve run ends; cancellation is not a resumable pause. Existing witness receipt/target semantics remain intact. RESET is current-level retry with a new episode; human and P7 never share a game session.
-- Historical P7 decision prose and per-frame cognition cannot be reconstructed from missing data. The UI shows the available signals and marks those limits.
-- Full promotion failures and actual Chrome visual/mobile acceptance remain open.
-
-## 当前执行检查点
-
-- Branch `feat/p7-live-console`; plan commit `6c494834`. Task1 source events/real `p7_decision`, Task2 supervisor/HTTP, Task3 live UI, root CLI/Make are implemented in the shared working tree, not yet committed or deployment-verified.
-- Provider-free focused run: 79 tests OK (one optional Orb probe skipped); reports in `.superpowers/sdd/task-{1,2,3}-report.md`. Extension full test has two descriptor timeouts; full output `/tmp/p7-task1-npm-full.log`.
-- Independent reviews in progress. Material findings: Task2 TERM-exiting parent can leave TERM-ignoring group child; Task3 late replay response can overwrite live and malformed decisions can corrupt revision. Assigned to original transport/UI workers. Task1 reviewer is checking gap identity and prose redaction. Do not mark any task reviewed complete until fixes and re-review.
-- Next: finish review fixes, focused checks and commits; full promotion with full failure capture; isolated wheel HTTP smoke; one real fixed finite SP80 L1 through live API; stop and confirm owned guest cleanup. No real model run has started in this package.
-- Browser retry now failed before connection: runtime imports a missing cached browser-service module. Visual acceptance remains external-limited; no alternate profile launched.
+- Resumable P7 pause and independent manual execution remain subsequent packages. Keep manual state out of P7 cognition/history/experience and do not rename cancellation as pause.
+- Full repository promotion/extension checks still fail; exact recorded failures need separate scoped repairs. Do not silently label them PASS or expand this console task into a full framework audit.
+- Fresh SP80 completion, cold/warm proficiency comparison, cross-level learning and simulator benefit remain unproven. The final run deliberately stopped after live evidence, before any completed level.
+- Actual browser visual/mobile acceptance remains unverified due the external browser tool failure.
 
 ## 下一动作
 
-1. User approved the P7-first design. Implement the first package using `docs/superpowers/plans/2026-10-05-prime-p7-live-console.md` on `feat/p7-live-console`: fixed bounded P7 start/stop, actual frames, source decision summaries and cognition revisions. No manual mode or resumable pause in this first package. Source events are the first task; do not repeat completed offline UI tasks.
-2. Follow with genuine P7 pause/resume and then independent manual validation. Keep manual persistence, history, model calls and game results isolated from P7; verify isolation rather than handoff.
-3. Open the delivered replay with `make p7-console`. Actual visual/mobile checks still require a functioning existing Chrome transport.
-4. For subsequent real solving, use configured Pi Codex `gpt-6.1-sol`, keep exact-route injection disabled, and report current actions, replay prefixes, level progress and stop cause separately.
-5. Diagnose promotion failures from complete retained test output before claiming a release gate PASS.
+1. Use `make p7-console` for operator UAT of the delivered autonomous workspace. Its live endpoint is selected dynamically; prior `/tmp` URLs are stopped. Inspect actual public P7 decisions/actions and matching current cognition, keeping overlays off by default.
+2. Plan resumable pause or independent manual validation as separate packages under the approved three-mode design. Do not re-dispatch the completed Task1–3 or introduce human assistance into P7.
+3. If investigating full-gate failures, use the named final log and narrow ownership. Preserve operator/backend configuration and compare against observed successful model/tool execution before declaring host wiring unavailable.
 
-## Commands
+## Key references
 
-```bash
-make p7-console
-uv run python -m unittest -q tests.test_prime_p7_console tests.test_prime_p7_console_export
-# Optional developer interaction checks; jsdom was installed only in this temporary directory:
-NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs
-```
+- Design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`
+- Plan/evidence: `docs/superpowers/plans/2026-10-05-prime-p7-live-console.md`, `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`
+- Cognition contract: `docs/architecture/prime-p7-cognition-and-experience.md`
+- Operator guide: `docs/guides/prime-p7-games-and-official-results.md`
+- Runtime: `console_export.py`, `console_server.py`, `console_session.py`, `console_events.py`, `console_snapshot.py` under `src/asterion/applications/prime/p7/`; guest containment `tools/run_prime_p7_guest.py`.

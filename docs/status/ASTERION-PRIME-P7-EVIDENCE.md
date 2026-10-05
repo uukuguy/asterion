@@ -771,3 +771,24 @@ This correction applies to the whole world-model VC33 phase, not only the final 
 ## 2026-10-01 correction — successful runs no longer receive a failure label
 
 `classify_failure_cause` now returns `{"category": "none", "evidence": {}}` when the live run has no failure. `application_failure` remains reserved for an actual failed run. The regression is covered by `TestPrimeP7LiveCommand.test_failure_classification_is_explicit_and_evidence_backed`; the SP80 run predates this correction and its private summary remains historical evidence.
+
+## Realtime P7 console — 2026-10-05
+
+**Verified process boundary:** Installed final wheel, live HTTP start, `sp80-589a99af` L1, `openai-codex/gpt-6.1-sol`, run `p7-live-20261005063214-b9a30b6cbfd609490469887f`. The live HTTP snapshot contains 2 P7 public decisions, 5 actual actions, 33 real frames and 5 source cognition versions. Each action keeps an actual source position and decision link.
+
+The bounded verification explicitly requests stop after process evidence. State changes from stopping to cancelled, with cleanup confirmed. Independent checks find the owned guest unit not-found/inactive, its cgroup absent and the host parent absent. The console service then exits cleanly. Completed levels: 0. This establishes actual process observability and lifecycle behavior; it does not establish new SP80 completion or improved proficiency.
+
+The first two attempts recorded initial frames/cognition but no actions. A private failure-only probe and unauthenticated connection comparison identified lost Orb proxy settings in the new systemd unit. Commit `9e98b49e` preserves only guest-resolved proxy names, with values absent from argv. The normal final run succeeds at the model/tool/process boundary. The temporary probe entry was removed; model, credential, CA and shared ORBENV settings were unchanged.
+
+| Status | Verification | Boundary |
+|---|---|---|
+| PASS | Final independent source reviews; `004442f2`, `9e98b49e` | Repeated-frame identity, closed evidence chain, advisory capture, guest transport and finite cleanup |
+| PASS | 29 guest/CLI/session Python checks, 1 existing opt-in Orb skip | Guest proxy preservation and fixed 900-second console contract |
+| PASS | Final installed real-run HTML, 28 DOM checks | Actual assets, source timeline, live/replay controls, offline zero requests |
+| PASS | `make lint`, `make docs-check`, `git diff --check` | Changed implementation and documentation |
+| Non-PASS | Final promotion: 3861 tests, 13 failures, 5 errors, 4 skips | Complete output retained; full release gate remains open |
+| Non-PASS | Extension npm: 29 pass, 2 descriptor timeouts, 6 skips | Targeted registered tool/resource checks pass; full suite does not |
+| External-limited | Browser visual acceptance | Cached browser runtime unavailable; no alternate profile used |
+| Not implemented | Resumable P7 pause and independent manual play | Subsequent packages; no human input enters P7 workflow |
+
+Private source evidence remains under the selected run directory. `/tmp/p7-live-console-final-run.html` is a self-contained safe replay export from the actual final run. Full promotion output: `/tmp/p7-live-console-promotion-full.log`.

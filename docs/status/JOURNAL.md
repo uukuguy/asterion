@@ -3669,3 +3669,12 @@
 - 12:55 固定实时主流程的部署与证据计划，保持人工隔离。[6c494834]
 
 - 2026-10-05 — Realtime console integration: 184 Python checks PASS (1 skip), 28 actual-HTML DOM checks PASS.
+
+- 2026-10-05 — ed6fa64b implements finite autonomous P7 console with source-linked process evidence; reviewed start/stop and UI boundaries.
+
+- 13:52 Source observations preserve action/cognition links across repeated frames; final independent code review passed. `004442f2`
+- 14:04 Installed final console wheel: idle/API/assets verified; 28 DOM checks passed. Full promotion: 3859 tests, 13 failures, 5 errors.
+- 14:11 Real console witness showed initial frame/cognition; model RPC failed before actions. Owned guest unit/cgroup and host parent absent.
+- 14:23 Diagnostic witness reproduced fetch failure; no-auth probes isolate lost Orb proxy in systemd containment. Guest-only preservation fix authorized.
+- 14:26 Preserve Orb-resolved guest proxy in contained P7; avoid direct network timeout and argv credential exposure. `9e98b49e`
+- 14:38 Normal packaged console verified 2 P7 decisions, 5 actions, 33 frames, 5 cognition versions; explicit stop and cleanup passed.
