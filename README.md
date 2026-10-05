@@ -123,8 +123,9 @@ uv run asterion arc-story serve
 也可直接把一次 P7 运行导出为单个自包含 HTML。未过关和中断的运行同样可看。
 
 ```bash
-uv run asterion arc-console .asterion-private/prime-p7-live/<run-id>
-# 可指定输出文件：
+make p7-console
+# 默认选择最近一次有记录的运行，生成 HTML 并打开浏览器。
+# 可指定历史运行和输出文件（仅导出）：
 make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id> OUTPUT=/tmp/p7-console.html
 ```
 

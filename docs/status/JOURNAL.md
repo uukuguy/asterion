@@ -3653,3 +3653,4 @@
 - 单 HTML 控制台完整 promotion 检查未通过：3794 项测试，13 failures / 5 errors / 4 skipped；保留日志尾部指出 context-witness.test.mjs 的 source-detachment 失败，其余失败未逐项归因。更新活动 checkpoint，保留无新过关证据和浏览器视觉验收受限边界。
 - 09:39 更新控制台恢复记录，明确验证结果和未完成边界。[8738a59c]
 - 09:40 记录恢复文档提交，保持变更可追溯。[59ff5cae]
+- 10:56 增加 p7-console 快捷入口和 Make 帮助；真实导出及缺参提示验证通过。[93ed6513]

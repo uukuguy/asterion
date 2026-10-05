@@ -25,13 +25,14 @@ make asterion-prime-p7-games
 
 ### 单 HTML 过程回放
 
-一次运行结束或中断后，可以导出关卡控制台：
+一次运行结束或中断后，一条命令打开最近运行的关卡控制台：
 
 ```bash
-make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id>
+make p7-console
 ```
 
-打开运行目录内的 `p7-console.html`。文件内含画面、Tailwind CSS、JavaScript 和证据数据，无需联网或构建。
+默认自动选择最近一次有记录的运行，生成并打开运行目录内的 `p7-console.html`。
+可选 `RUN=<历史运行目录>`；只导出、不打开浏览器时使用 `make asterion-prime-p7-console`。文件内含画面、Tailwind CSS、JavaScript 和证据数据，无需联网或构建。
 滑块和播放按钮查看动作画面，过程区查看 P7 回合信号、动作结果和认知更新。`OUTPUT=/tmp/p7-console.html` 可改输出位置。
 
 每份文件展示一次运行中一个游戏的各关卡。新动作发生后须重新导出。旧记录没有保存的规划文字显示为未记录。

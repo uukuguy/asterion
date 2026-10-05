@@ -141,8 +141,8 @@ help:
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime local ARC-AGI-3 solved-game story pages: asterion-prime-p7-stories"
-	@echo "P7 离线单 HTML 控制台: p7-console RUN=<运行目录> [OUTPUT=<输出.html>]"
-	@echo "  完整入口: asterion-prime-p7-console；默认输出 <运行目录>/p7-console.html；不启动游戏或调用模型"
+	@echo "P7 控制台: p7-console（自动打开最近一次运行）"
+	@echo "  可选 RUN=<历史运行目录> OUTPUT=<输出.html>；仅导出用 asterion-prime-p7-console"
 	@echo "Asterion Prime sync official public games without a scorecard: asterion-prime-p7-sync-games"
 	@echo "Asterion Prime official ARC-AGI-3 catalog readiness: asterion-prime-p7-official-preflight"
 	@echo "Asterion Prime submit saved verified actions: asterion-prime-p7-official-submit GAME=<alias-or-all>"
@@ -315,17 +315,18 @@ asterion-prime-p7-stories:
 	@$(UV_BIN) run asterion arc-story serve --open-browser
 
 # Read-only single-file export. Keep operator paths in quoted environment values.
+p7-console: export ASTERION_CONSOLE_OPEN = 1
 p7-console: asterion-prime-p7-console
 
 asterion-prime-p7-console: export ASTERION_CONSOLE_RUN = $(RUN)
 asterion-prime-p7-console: export ASTERION_CONSOLE_OUTPUT = $(OUTPUT)
+asterion-prime-p7-console: export ASTERION_CONSOLE_RUNS_ROOT = $(ASTERION_PRIME_OPERATOR_ROOT)/.asterion-private/prime-p7-live
 asterion-prime-p7-console:
-	@test -n "$$ASTERION_CONSOLE_RUN" || { printf '请指定 RUN=<P7运行目录>\n' >&2; exit 2; }
-	@if [ -n "$$ASTERION_CONSOLE_OUTPUT" ]; then \
-		$(UV_BIN) run asterion arc-console "$$ASTERION_CONSOLE_RUN" --output "$$ASTERION_CONSOLE_OUTPUT"; \
-	else \
-		$(UV_BIN) run asterion arc-console "$$ASTERION_CONSOLE_RUN"; \
-	fi
+	@set -- $(UV_BIN) run asterion arc-console --runs-root "$$ASTERION_CONSOLE_RUNS_ROOT"; \
+	if [ -n "$$ASTERION_CONSOLE_RUN" ]; then set -- "$$@" "$$ASTERION_CONSOLE_RUN"; fi; \
+	if [ -n "$$ASTERION_CONSOLE_OUTPUT" ]; then set -- "$$@" --output "$$ASTERION_CONSOLE_OUTPUT"; fi; \
+	if [ "$$ASTERION_CONSOLE_OPEN" = 1 ]; then set -- "$$@" --open-browser; fi; \
+	exec "$$@"
 
 asterion-prime-p7-sync-games:
 	@python3 tools/sync_prime_p7_games.py --arc-root "$(ASTERION_PRIME_ARC_ROOT)" --env-file "$(CURDIR)/.env"

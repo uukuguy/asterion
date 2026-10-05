@@ -5,11 +5,11 @@
 ## 已验证事实
 
 - `60c67ba2` implements the approved single-file ARC-AGI-3 P7 console. Design: `docs/superpowers/specs/2026-10-05-prime-p7-arc-console-design.md`; implementation plan and verification: `docs/superpowers/plans/2026-10-05-prime-p7-arc-console.md`.
-- `asterion arc-console RUN_ROOT` and `make asterion-prime-p7-console RUN=...` export one recorded run as an offline HTML file. Packaged Tailwind CSS, JavaScript and data are embedded. No browser network requests, build step or model invocation is needed.
+- `make p7-console` selects the newest recorded P7 run, exports it and opens the HTML in the default browser. `RUN=...` remains an optional historical override. `make asterion-prime-p7-console` exports without opening; `asterion arc-console [RUN_ROOT]` also supports selection. Packaged Tailwind CSS, JavaScript and data are embedded. No browser network requests, build step or model invocation is needed.
 - Main view is the actual game canvas. Level navigation, frame slider, playback speed, action jumps, changed-cell highlighting, before/after comparison, stable cognition and P7/action/cognition tabs are implemented.
 - Final artifact: `.asterion-private/prime-p7-live/p7-live-20261004130719-6ff8ee64f2d4c2c8fb971b1b/p7-console.html`. It contains real SP80 evidence: 6 level slots, 33 recorded frames, 5 actions, 3 model rounds and 4 cognition updates. Only level 1 has observed gameplay. Zero levels completed; source run is interrupted, unsealed and replay unverified.
 - All five actions match their recorded trace observations. Intermediate animation frames retain action ownership. Final cognition is labelled as final; unaligned model-round signals are not assigned to actions by guesswork. Missing P7 decision prose is explicitly unavailable.
-- Final focused command `uv run python -m unittest -q tests.test_prime_p7_console tests.test_prime_p7_console_export`: 29 tests PASS. Four jsdom interaction tests PASS, including actual exported HTML with zero external resource requests. These are DOM checks, not visual browser checks.
+- Initial console focused suite: 29 tests PASS. No-argument launch follow-up: 35 snapshot/export tests PASS; actual Make export selected the latest recording successfully; Make browser-flag forwarding and browser success/failure branches were checked without opening a browser. Four jsdom interaction tests PASS, including actual exported HTML with zero external resource requests. These are DOM checks, not visual browser checks.
 - `make lint`, `make docs-check`, and `git diff --check` PASS. Independent final code review approved after fixes to cognition scope, completion proof, intermediate-frame action selection and path redaction.
 - Final wheel built with `uv build --wheel --out-dir /tmp/p7-console-wheel`; isolated `python -I` export from `/tmp` succeeded. Eight source/resource files were compared with wheel contents and match.
 - `make promotion-check` is FAIL: 3794 tests, 13 failures, 5 errors, 4 skips. Wrapper log: `/tmp/p7-console-promotion.log`. Retained tail identifies `prime-source-locator` in `packages/typescript/asterion-prime-extension/test/context-witness.test.mjs` lines 23/25/27. The wrapper retained only the failure tail; the other failures are not individually diagnosed in this session. Do not claim the full gate passed or that all failures are unrelated.
@@ -47,7 +47,7 @@
 ## Commands
 
 ```bash
-make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/p7-live-20261004130719-6ff8ee64f2d4c2c8fb971b1b
+make p7-console
 uv run python -m unittest -q tests.test_prime_p7_console tests.test_prime_p7_console_export
 # Optional developer interaction checks; jsdom was installed only in this temporary directory:
 NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs
