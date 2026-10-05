@@ -7,12 +7,14 @@ import unittest
 
 from asterion.applications.prime.p7.console_server import create_console_server
 from tests.test_prime_p7_console_session import ConsoleSessionFixture
+from tests.test_prime_p7_console_manual_session import FakeManualController
 
 
 class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
     def setUp(self):
         super().setUp()
-        self.session_ = self.session()
+        self.manual = FakeManualController()
+        self.session_ = self.session(manual_controller=self.manual)
         self.config = None
         def render(snapshot, *, live_config):
             self.config = live_config
@@ -79,6 +81,47 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
                 self.assertEqual(status, 404)
                 self.assertNotIn(str(self.root).encode(), body)
                 self.assertNotIn('Access-Control-Allow-Origin', headers)
+
+    def test_manual_open_action_close_require_write_protections_without_model(self):
+        opened = {'game_id': 'test-1', 'command_id': 'open'}
+        self.assertEqual(self.write('/api/manual/open', opened, Origin='http://evil.test')[0], 403)
+        self.assertEqual(self.request('GET', '/api/manual/open')[0], 404)
+        status, headers, body = self.write('/api/manual/open', opened)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['state'], 'ready')
+        self.assertEqual(headers['Cache-Control'], 'no-store')
+        action = {'session_id': 'manual-1', 'command_id': 'action', 'observation_version': 1,
+                  'action': 'ACTION1', 'data': {}}
+        self.assertEqual(self.write('/api/manual/action', action)[0], 200)
+        status, _, body = self.request('GET', '/api/state')
+        self.assertEqual(status, 200)
+        value = json.loads(body)
+        self.assertEqual(value['manual']['action_count'], 1)
+        self.assertEqual(value['state'], 'idle')
+        self.assertIsNone(value['run_id'])
+        self.assertEqual(self.write('/api/manual/close', {'session_id': 'manual-1', 'command_id': 'close'})[0], 200)
+        self.assertFalse(self.calls)
+        self.write('/api/start', {'game_id': 'test-1', 'command_id': 'start'})
+        status, _, body = self.write('/api/manual/open', {'game_id': 'test-1', 'command_id': 'open2'})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body), {'error': 'session-busy'})
+
+    def test_manual_shapes_and_private_failures_are_rejected(self):
+        action = {'session_id': 'manual-1', 'command_id': 'action', 'observation_version': 1,
+                  'action': 'ACTION1', 'data': {}}
+        for change in ({'observation_version': True}, {'observation_version': '1'},
+                       {'observation_version': -1}, {'data': []}, {'provider': 'secret'}):
+            with self.subTest(change=change):
+                self.assertEqual(self.write('/api/manual/action', {**action, **change})[0], 400)
+        self.assertEqual(self.write('/api/manual/open', {'game_id': 'test', 'command_id': 'open'})[0], 409)
+        self.assertEqual(self.manual.calls, [])
+        def fail(*args):
+            raise RuntimeError('/private/secret-sentinel')
+        self.manual.open = fail
+        status, _, body = self.write('/api/manual/open', {'game_id': 'test-1', 'command_id': 'open'})
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(body), {'error': 'manual-unavailable'})
+        self.assertEqual(self.session_.view()['revision'], 0)
 
     def test_real_renderer_serves_only_same_origin_connections_and_hashed_assets(self):
         from asterion.applications.prime.p7.console_export import render_console

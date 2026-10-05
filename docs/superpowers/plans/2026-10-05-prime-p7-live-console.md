@@ -108,3 +108,15 @@ This plan implements the first approved package and its deployment proof. Resuma
 - Full promotion non-PASS: 3861 tests, 13 failures, 5 errors, 4 skips. Complete log `/tmp/p7-live-console-promotion-full.log`. Known failures remain in source-detachment test literals, legacy preset/fixture/API, cognition ANSI logging, replay digests and sweep boundaries. Full npm also remains non-PASS (29 pass, 2 descriptor timeouts, 6 skips); targeted real tool/resource checks passed. No full-gate PASS or merge claim.
 - Initial two deployment runs stopped before actions because systemd dropped Orb-resolved proxy environment. No-auth probes isolated that boundary; the guest-only fix restored actual model/decision/action operation. No model, credentials, CA or shared ORBENV change. Temporary diagnostic entry removed; all owned services stopped.
 - Browser visual acceptance remains external-limited by unavailable cached browser runtime. No alternate profile was created. Resumable pause and independent manual execution remain future packages.
+
+
+## Follow-up: open a playable independent game — 2026-10-05
+
+User requests selection to show the real initial frame and immediately permit human play. This activates the independent manual package without changing P7 autonomy.
+
+- [x] Isolated SDK-only manual worker. Temporary recordings, no broker/model/cognition/experience access. Finite actions, command deadlines, idle expiration and verified shutdown.
+- [x] Same-origin protected open/action/close API. Exact catalog, session and observation identity; command deduplication; no queued stale clicks. P7 start closes manual first and opens a fresh solver run.
+- [x] Selection opens a clearly marked manual game. Compact action buttons and explicit coordinate input update real frames. P7 live remains read-only; replay remains independent.
+- [x] Focused Python/actual-asset DOM checks, source review, installed-wheel real manual actions, lifecycle cleanup, lint/docs/promotion checks. Report boundaries and commit code/state.
+
+Evidence: 79 focused Python PASS; actual SDK HTTP SP80 3 independent actions and cleanup PASS; independent review fixes verified; 39 DOM and wheel checks passed. Full promotion remains non-PASS (3879 tests, 13 failures, 5 errors, 4 skips). No new P7 completion or manual trajectory export.

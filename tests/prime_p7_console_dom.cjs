@@ -328,23 +328,256 @@ test('exported real HTML loads with zero external resource requests', { skip: !p
   dom.window.close();
 });
 
-const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+const settle = async () => { for (let i = 0; i < 24; i++) await Promise.resolve(); };
 const liveConfig = { token: 'test-token', games: [{ game_id: 'sp80-test', alias: 'SP80', win_levels: 3 }, { game_id: 'ls20-test', alias: 'LS20', win_levels: 7 }] };
 const view = (snapshot = fixture(), state = 'running') => ({ session_id: 'session-1', state, game_id: snapshot.run.game_id, run_id: snapshot.run.run_id, cleanup_confirmed: false, snapshot, revision: 1 });
 const response = (value, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => value });
+const idleView = () => ({ session_id: null, state: 'idle', game_id: null, run_id: null, cleanup_confirmed: true, snapshot: null, revision: 0 });
+const manualView = (game_id = 'sp80-test', color = 12, version = 0) => ({
+  session_id: `manual-${game_id}`, game_id, state: 'ready', observation_version: version,
+  episode_id: 1, action_count: version, last_action: version ? { action: 'ACTION4', data: {}, observation_version: version } : null,
+  snapshot: { schema: 'asterion.arc-agi3-p7-console/v1', generated_at: null,
+    run: { game_id, run_id: null, status: 'manual', win_levels: 3, completed_level_count: 0, primitive_action_count: version },
+    levels: [{ level: 1, status: 'manual', frames: [{ id: `manual-${version}`, grid: [[color, color], [color, color]], available_actions: ['ACTION1', 'ACTION4', 'ACTION6', 'RESET'], state: 'NOT_FINISHED', levels_completed: 0 }], actions: [], decisions: [], cognition: { scope: 'unavailable' } }],
+    decisions: [], warnings: [] },
+});
+const changeGame = (app, game) => { app.$('game-select').value = game; app.$('game-select').dispatchEvent(new app.dom.window.Event('change')); };
+const stateWithManual = (manual) => ({ ...idleView(), manual });
+
+test('selected game opens real playable manual session without P7 and idle polls retain it', async () => {
+  let manual = null;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/open') { const game = JSON.parse(options.body).game_id; manual = manualView(game, game === 'ls20-test' ? 9 : 12); return response(manual); }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle();
+    assert.equal(app.$('console-mode').value, 'manual');
+    assert.match(app.$('board-title').textContent, /人工试玩/);
+    assert.match(app.$('world-guide').textContent, /人工试玩不生成 P7 认知/);
+    assert.deepEqual([...app.$('available-actions').querySelectorAll('button')].map((button) => button.dataset.availableAction), ['ACTION1', 'ACTION4', 'ACTION6', 'RESET']);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => !button.disabled));
+    changeGame(app, 'ls20-test');
+    assert.equal(app.$('board-empty').hidden, false);
+    assert.equal(app.$('game-title').textContent, 'ls20-test');
+    assert.doesNotMatch(app.$('world-guide').textContent, /网格移动游戏/);
+    await settle(); app.tick(); await settle();
+    assert.equal(app.$('game-title').textContent, 'ls20-test');
+    assert.equal(app.$('frame-counter').textContent, '1 / 1');
+    assert.equal(app.paints.at(-1), '#1E93FF');
+    assert.equal(app.$('run-start').disabled, false);
+    app.$('level-2').click();
+    assert.equal(app.$('board-empty').hidden, false);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    assert.equal(app.requests.some((entry) => entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('startup resumes existing manual game and observation without opening or resetting it', async () => {
+  const manual = manualView('ls20-test', 9, 4);
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+  try {
+    await settle();
+    assert.equal(app.$('console-mode').value, 'manual');
+    assert.equal(app.$('game-select').value, 'ls20-test');
+    assert.equal(app.$('action-total').textContent, '4');
+    assert.equal(app.dom.window.__ASTERION_STATE__.levels[0].frames[0].id, 'manual-4');
+    assert.equal(app.requests.some((entry) => entry.url === '/api/manual/open'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('startup with active P7 session never requests manual open', async () => {
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : view()) });
+  try {
+    await settle();
+    assert.equal(app.$('console-mode').value, 'live');
+    assert.equal(app.$('run-id').textContent, 'test-run');
+    assert.equal(app.requests.some((entry) => entry.url === '/api/manual/open'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('poll captured before successful manual close cannot reopen the closed observation', async () => {
+  let manual = manualView(), hold = false, releasePoll;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/runs') return response({ runs: [] });
+    if (url === '/api/manual/close') { manual = { ...manual, state: 'closed' }; return response(manual); }
+    if (hold) { const stale = { ...manual }; return new Promise((resolve) => { releasePoll = () => resolve(response(stateWithManual(stale))); }); }
+    return response(stateWithManual(manual));
+  } });
+  try {
+    await settle(); hold = true; app.tick(); await settle();
+    app.$('manual-close').click(); await settle(); releasePoll(); await settle();
+    assert.match(app.$('service-status').textContent, /试玩已结束/);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual opening disables selection and active session poll rejects its delayed response', async () => {
+  let releaseOpen, current = idleView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/open') return new Promise((resolve) => { releaseOpen = resolve; });
+    return response(url === '/api/runs' ? { runs: [] } : current);
+  } });
+  try {
+    await settle(); assert.equal(app.$('run-start').disabled, true);
+    assert.equal(app.$('game-select').disabled, true);
+    current = view(); app.tick(); await settle(); releaseOpen(response(manualView())); await settle();
+    assert.equal(app.$('run-id').textContent, 'test-run');
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.equal(app.$('console-mode').value, 'live');
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual open failure does not prevent independent fresh P7 start', async () => {
+  let current = idleView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/open') return response({ error: '/private/sentinel' }, 503);
+    if (url === '/api/start') { current = view(); return response(current, 202); }
+    return response(url === '/api/runs' ? { runs: [] } : current);
+  } });
+  try {
+    await settle(); assert.equal(app.$('run-start').disabled, false);
+    assert.equal(app.$('frame-counter').textContent, '0 / 0');
+    assert.doesNotMatch(app.$('board-empty').textContent, /private|sentinel/);
+    app.$('run-start').click(); await settle();
+    assert.equal(app.$('console-mode').value, 'live');
+    assert.equal(app.$('run-id').textContent, 'test-run');
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('replay rejects pending manual open and returning to manual reopens playable session', async () => {
+  const releases = [];
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/open') return new Promise((resolve) => { releases.push(resolve); });
+    if (url === '/api/runs') return response({ runs: [{ run_id: 'old-run', game_id: 'sp80-test' }] });
+    if (url === '/api/replay/old-run') return response({ ...fixture(), run: { ...fixture().run, run_id: 'old-run' } });
+    return response(idleView());
+  } });
+  try {
+    await settle(); app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    app.$('replay-load').click(); await settle(); releases[0](response(manualView())); await settle();
+    assert.equal(app.$('run-id').textContent, 'old-run');
+    app.$('console-mode').value = 'manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+    assert.equal(releases.length, 2); releases[1](response(manualView())); await settle(); app.tick(); await settle();
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.status, 'manual');
+    assert.match(app.$('board-title').textContent, /人工试玩/);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual buttons send versioned actions once and transport retry retains exact identity', async () => {
+  let manual = manualView(), failAction = true;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/open') return response(manual);
+    if (url === '/api/manual/action') { if (failAction) { failAction = false; throw new Error('/private/secret'); } manual = manualView('sp80-test', 9, 1); return response(manual); }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    assert.equal(app.$('retry-command').hidden, false);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    app.$('retry-command').click(); await settle();
+    const actions = app.requests.filter((entry) => entry.url === '/api/manual/action');
+    assert.equal(actions.length, 2);
+    assert.deepEqual(JSON.parse(actions[0].options.body), JSON.parse(actions[1].options.body));
+    const body = JSON.parse(actions[0].options.body);
+    assert.equal(body.session_id, 'manual-sp80-test'); assert.equal(body.observation_version, 0); assert.equal(body.action, 'ACTION4'); assert.deepEqual(body.data, {});
+    assert.equal(app.$('action-total').textContent, '1');
+    assert.equal(app.$('current-action').textContent, '人工操作 · ACTION4');
+    assert.equal(app.paints.at(-1), '#1E93FF');
+    assert.equal(app.$('decision-count').textContent, '0');
+    assert.equal(app.$('cognition-count').textContent, '0');
+    assert.equal(app.requests.some((entry) => entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual ACTION6 waits for board click and sends exact grid coordinates; keyboard stays board-scoped', async () => {
+  let manual = manualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url.startsWith('/api/manual/') ? manual : stateWithManual(manual)) });
+  try {
+    await settle();
+    const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 100, height: 100 });
+    app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click(); await settle();
+    assert.equal(app.requests.some((entry) => entry.url === '/api/manual/action'), false);
+    canvas.dispatchEvent(new app.dom.window.MouseEvent('click', { clientX: 85, clientY: 45, bubbles: true })); await settle();
+    const request = app.requests.find((entry) => entry.url === '/api/manual/action');
+    assert.deepEqual(JSON.parse(request.options.body).data, { x: 1, y: 0 });
+    app.dom.window.document.body.dispatchEvent(new app.dom.window.KeyboardEvent('keydown', { key: '1', bubbles: true })); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+    app.$('board-section').dispatchEvent(new app.dom.window.KeyboardEvent('keydown', { key: '1', repeat: true, bubbles: true })); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual busy operation rejects extra clicks and closed or uncertain sessions stay locked', async () => {
+  for (const terminal of ['closed', 'uncertain']) {
+    let manual = manualView(), releaseAction;
+    const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+      if (url === '/api/manual/open') return response(manual);
+      if (url === '/api/manual/action') return new Promise((resolve) => { releaseAction = resolve; });
+      return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+    } });
+    try {
+      await settle(); const button = app.$('available-actions').querySelector('[data-available-action="ACTION1"]');
+      button.click(); button.click(); await settle();
+      assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+      manual = { ...manual, state: terminal }; releaseAction(response(manual)); await settle(); app.tick(); await settle();
+      assert.ok([...app.$('available-actions').querySelectorAll('button')].every((item) => item.disabled), terminal);
+      assert.equal(app.$('run-start').disabled, false, terminal);
+      assert.equal(app.$('manual-close').disabled, false, terminal);
+      assert.equal(app.$('manual-close').textContent, '重新打开试玩', terminal);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('closed manual session reopens selected game with a fresh command and no P7 start', async () => {
+  let manual = manualView('ls20-test'), opens = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/runs') return response({ runs: [] });
+    if (url === '/api/manual/close') { manual = { ...manual, state: 'closed' }; return response(manual); }
+    if (url === '/api/manual/open') { opens += 1; manual = manualView(JSON.parse(options.body).game_id); return response(manual); }
+    return response(stateWithManual(manual));
+  } });
+  try {
+    await settle();
+    app.$('manual-close').click(); await settle();
+    const close = app.requests.find((entry) => entry.url === '/api/manual/close');
+    assert.equal(app.$('manual-close').textContent, '重新打开试玩');
+    app.$('manual-close').click(); await settle();
+    const open = app.requests.find((entry) => entry.url === '/api/manual/open');
+    assert.equal(opens, 1);
+    assert.equal(JSON.parse(open.options.body).game_id, 'ls20-test');
+    assert.notEqual(JSON.parse(open.options.body).command_id, JSON.parse(close.options.body).command_id);
+    assert.equal(app.$('manual-close').textContent, '结束试玩');
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => !button.disabled));
+    assert.equal(app.requests.some((entry) => entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
 
 test('live initialization polls without starting, start uses exact game, retry preserves command identity, stop owns session', async () => {
   let current = view(fixture(), 'idle'), rejectStart = true;
   const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
     if (url === '/api/state') return response(current);
+    if (url === '/api/manual/open') return response(manualView());
     if (url === '/api/runs') return response({ runs: [] });
     if (url === '/api/start') { if (rejectStart) { rejectStart = false; throw new Error('private-error'); } current = view(); return response(current, 202); }
     if (url === '/api/stop') { current = view(fixture(), 'stopping'); return response(current, 202); }
     throw new Error('unexpected route');
   } });
   await settle();
-  assert.equal(app.$('console-mode').value, 'live');
-  assert.equal(app.requests.filter((request) => request.options.method === 'POST').length, 0);
+  assert.equal(app.$('console-mode').value, 'manual');
+  assert.equal(app.requests.filter((request) => request.url === '/api/start').length, 0);
   app.$('game-select').value = 'ls20-test'; app.$('run-start').click(); await settle();
   assert.match(app.$('service-status').textContent, /连接中断/);
   assert.equal(app.$('retry-command').hidden, false);
@@ -359,7 +592,7 @@ test('live initialization polls without starting, start uses exact game, retry p
   const stop = app.requests.find((request) => request.url === '/api/stop');
   assert.equal(JSON.parse(stop.options.body).session_id, 'session-1');
   assert.match(app.$('service-status').textContent, /结束中/);
-  assert.match(app.$('manual-note').textContent, /尚未实现/);
+  assert.match(app.$('manual-note').textContent, /独立于 P7/);
   assert.deepEqual(app.errors, []); app.dom.window.close();
 });
 
@@ -391,6 +624,7 @@ test('disconnected or malformed live state retains frame and shows public safe s
   let result = view();
   const app = launch(fixture(), { liveConfig, fetch: async (url) => {
     if (url === '/api/runs') return response({runs:[]});
+    if (url === '/api/manual/open') return response({}, 503);
     if (result instanceof Error) throw result;
     return response(result);
   } });
@@ -438,6 +672,7 @@ test('late polling response cannot revert a successful start to an idle session'
   const idle = {...view(fixture(), 'idle'), revision: 0};
   const app = launch(fixture(), { liveConfig, fetch: async (url) => {
     if (url === '/api/runs') return response({runs:[]});
+    if (url === '/api/manual/open') return response({}, 503);
     if (url === '/api/start') return response(view(), 202);
     if (hold) return new Promise((resolve) => { releasePoll = () => resolve(response(idle)); });
     return response(idle);

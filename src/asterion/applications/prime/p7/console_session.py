@@ -23,6 +23,12 @@ _RUN_ID = re.compile(r"p7-live-[0-9]{14}-[0-9a-f]{24}\Z")
 _COMMAND_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _SECONDS = 900
 _ACTIVE = {"starting", "running", "stopping"}
+_MANUAL_ERRORS = {"session-busy", "command-invalid", "command-conflict", "command-limit",
+                  "game-unavailable", "session-mismatch", "observation-stale", "action-invalid",
+                  "action-unavailable", "manual-unavailable", "manual-uncertain",
+                  "manual-cleanup-unconfirmed", "manual-expired"}
+_MANUAL_IDLE = {"session_id": None, "game_id": None, "state": "idle", "observation_version": 0,
+                "episode_id": 0, "action_count": 0, "snapshot": None, "last_action": None}
 _CLEARED_ENV = {
     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND", "ASTERION_PRIME_P7_RUN_MODE",
     "ASTERION_PRIME_P7_ATTEMPT_UNIT", "ASTERION_PRIME_P7_ATTEMPT_SECONDS",
@@ -75,6 +81,7 @@ class ConsoleSession:
         process_stopper: Callable = _stop_process,
         guest_cleanup: Callable[[str], bool] | None = None,
         snapshot_reader: Callable = build_console_snapshot,
+        manual_controller: object | None = None,
         run_id_factory: Callable[[], str] = safe_run_id,
         environment: Mapping[str, str] | None = None, poll_interval: float = 1.0,
         clock: Callable[[], float] = time.monotonic,
@@ -93,6 +100,10 @@ class ConsoleSession:
         self._process_stopper = process_stopper
         self._guest_cleanup = guest_cleanup or self._cleanup_guest
         self._snapshot_reader = snapshot_reader
+        self._manual = manual_controller
+        self._manual_inflight = False
+        self._manual_done = threading.Event()
+        self._manual_done.set()
         self._run_id_factory = run_id_factory
         self._environment = dict(os.environ if environment is None else environment)
         self._poll_interval = poll_interval
@@ -112,7 +123,60 @@ class ConsoleSession:
 
     def view(self) -> dict[str, object]:
         with self._lock:
-            return deepcopy(self._view)
+            value = deepcopy(self._view)
+            manual = self._manual
+        value["manual"] = deepcopy(manual.view() if manual is not None else _MANUAL_IDLE)
+        return value
+
+    @staticmethod
+    def _manual_error(error: Exception) -> ConsoleSessionError:
+        code = str(error) if isinstance(error, ValueError) else "manual-unavailable"
+        return ConsoleSessionError(code if code in _MANUAL_ERRORS else "manual-unavailable")
+
+    def _ready(self) -> None:
+        if (self._closed or self._manual_inflight or self._view["state"] in _ACTIVE
+                or not self._view["cleanup_confirmed"]):
+            raise ConsoleSessionError("session-busy")
+
+    def _manual_call(self, method: str, args: tuple, *, game_id: str | None = None) -> dict:
+        with self._lock:
+            if method == "open" and (type(game_id) is not str or game_id not in self._games):
+                raise ConsoleSessionError("game-unavailable")
+            self._ready()
+            if self._manual is None and method != "open":
+                raise ConsoleSessionError("session-mismatch")
+            self._manual_inflight = True
+            self._manual_done.clear()
+        try:
+            if self._manual is None:
+                from .console_manual import ManualConsole
+                controller = ManualConsole(self._arc_root)
+                with self._lock:
+                    self._manual = controller
+            result = getattr(self._manual, method)(*args)
+            with self._lock:
+                if self._closed:
+                    raise ConsoleSessionError("session-busy")
+            return deepcopy(result)
+        except Exception as error:
+            raise self._manual_error(error) from None
+        finally:
+            with self._lock:
+                self._manual_inflight = False
+                self._manual_done.set()
+
+    def manual_open(self, game_id: str, command_id: str) -> dict:
+        if type(game_id) is not str or game_id not in self._games:
+            raise ConsoleSessionError("game-unavailable")
+        wins = next(entry["win_levels"] for entry in self._catalog if entry["game_id"] == game_id)
+        return self._manual_call("open", (game_id, wins, command_id), game_id=game_id)
+
+    def manual_action(self, session_id: str, command_id: str, observation_version: int,
+                      action: str, data: dict) -> dict:
+        return self._manual_call("act", (session_id, command_id, observation_version, action, data))
+
+    def manual_close(self, session_id: str, command_id: str) -> dict:
+        return self._manual_call("close", (session_id, command_id))
 
     def _change(self, **values) -> None:
         if any(self._view.get(key) != value for key, value in values.items()):
@@ -150,23 +214,42 @@ class ConsoleSession:
             prior = self._prior(command_id, signature)
             if prior is not None:
                 return prior
-            if self._closed or self._view["state"] in _ACTIVE or not self._view["cleanup_confirmed"]:
-                raise ConsoleSessionError("session-busy")
+            self._ready()
             if type(game_id) is not str or game_id not in self._games:
                 raise ConsoleSessionError("game-unavailable")
-            run_id = self._run_id_factory()
-            if self._run_path(run_id).exists():
-                raise ConsoleSessionError("run-unavailable")
-            unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
-            self._stop = threading.Event()
-            self._snapshot_key = None
-            self._change(session_id="p7-console-" + secrets.token_hex(16), state="starting",
-                         game_id=game_id, run_id=run_id, cleanup_confirmed=False, snapshot=None)
-            self._thread = threading.Thread(target=self._run, args=(game_id, run_id, unit),
-                                            name="p7-console-witness", daemon=True)
-            response = self._remember(command_id, signature)
-            self._thread.start()
-            return response
+            if self._manual is None:
+                return self._launch_locked(game_id, command_id, signature)
+            self._manual_inflight = True
+            self._manual_done.clear()
+        try:
+            self._manual.close()
+            with self._lock:
+                if self._closed:
+                    raise ConsoleSessionError("session-busy")
+                return self._launch_locked(game_id, command_id, signature)
+        except ConsoleSessionError:
+            raise
+        except Exception as error:
+            raise self._manual_error(error) from None
+        finally:
+            with self._lock:
+                self._manual_inflight = False
+                self._manual_done.set()
+
+    def _launch_locked(self, game_id: str, command_id: str, signature: tuple[str, ...]) -> dict:
+        run_id = self._run_id_factory()
+        if self._run_path(run_id).exists():
+            raise ConsoleSessionError("run-unavailable")
+        unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
+        self._stop = threading.Event()
+        self._snapshot_key = None
+        self._change(session_id="p7-console-" + secrets.token_hex(16), state="starting",
+                     game_id=game_id, run_id=run_id, cleanup_confirmed=False, snapshot=None)
+        self._thread = threading.Thread(target=self._run, args=(game_id, run_id, unit),
+                                        name="p7-console-witness", daemon=True)
+        response = self._remember(command_id, signature)
+        self._thread.start()
+        return response
 
     def stop(self, session_id: str, command_id: str) -> dict[str, object]:
         with self._lock:
@@ -298,11 +381,20 @@ class ConsoleSession:
             self._closed = True
             self._stop.set()
             thread = self._thread
+        manual_finished = self._manual_done.wait(timeout=30)
+        try:
+            if self._manual is not None:
+                self._manual.shutdown()
+        except Exception:
+            manual_finished = False
         if thread is not None and thread is not threading.current_thread():
             thread.join(timeout=60)
             if thread.is_alive():
                 with self._lock:
                     self._change(state="cleanup-unconfirmed", cleanup_confirmed=False)
+        if not manual_finished:
+            with self._lock:
+                self._change(state="cleanup-unconfirmed", cleanup_confirmed=False)
 
 
 __all__ = ("ConsoleSession", "ConsoleSessionError")

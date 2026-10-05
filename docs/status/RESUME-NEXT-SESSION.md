@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05. First realtime package delivered; no owned process remains.
+> Updated: 2026-10-05. Realtime P7 and independent playable selection delivered; no owned process remains.
 
 ## 已验证事实
 
@@ -10,12 +10,14 @@
 - Final installed-wheel run `p7-live-20261005063214-b9a30b6cbfd609490469887f` through the live service: 2 genuine P7 public decisions, 5 actual actions, 33 real frames, 5 cognition versions. Every action has a source sequence and decision link. Explicit HTTP stop returns stopping then cancelled, cleanup true. Exact unit not-found/inactive, cgroup and host parent absent. Service stopped. Zero completed levels.
 - Final real-run offline HTML `/tmp/p7-live-console-final-run.html`: 28 DOM tests PASS. Root guest/CLI/session suite: 29 OK, one existing opt-in Orb skip. Broader source suite: 297 OK, one skip; service/CLI suite: 21 OK. Lint, docs and diff checks PASS.
 - Final full promotion non-PASS: 3861 tests, 13 failures, 5 errors, 4 skips. Full log `/tmp/p7-live-console-promotion-full.log`. Same named failures remain in source-detachment literals, old preset/fixture/API, cognition ANSI logging, replay digests and sweep contracts. Full npm also non-PASS: 29 pass, 2 descriptor timeouts, 6 skips; focused actual tool/resource checks passed.
+- Independent manual play now opens on game selection. Installed-wheel SP80 HTTP open → ACTION4 → ACTION5 → RESET → close: 3 human actions, right shift by 4 cells, duplicate replay/stale rejection, temporary recordings and worker group removed. P7 stayed idle, no P7 run directory created. Root focused Python: 79 PASS; DOM: 39 PASS, including final installed-wheel HTML. Independent source review confirmed reload/close-poll race fixes.
+- New promotion attempt: 3879 tests, 13 failures, 5 errors, 4 skips; non-PASS. Log `/tmp/p7-manual-console-promotion.log`. No new P7 solving result.
 - Browser visual acceptance remains external-limited: cached browser runtime module missing; no new or isolated profile was created. DOM evidence does not prove visual acceptance.
 
 ## 当前判断
 
 - P7自主过关是核心。稳定认知是一份逐步完善的中文玩法介绍。假说针对认识缺口；常识与高置信推断可用于规划，再随正常动作检视。P7公开摘要不等于私有思维链。
-- 人工验证必须有独立游戏、记录和无学习路径，不进入P7内部工作流。首包不实现人工动作或可恢复暂停。取消不会保留可继续的模型会话。
+- 人工验证必须有独立游戏、记录和无学习路径，不进入P7内部工作流。独立人工试玩已实现；可恢复暂停尚未实现。人工局只保留当前画面，不持久化轨迹。取消不会保留可继续的模型会话。
 - The first live package is implemented and verified at the process/lifecycle boundary. It is not a new solving-proficiency result or a full release PASS.
 
 ## 历史归档
@@ -28,15 +30,15 @@
 
 ## 未完成边界
 
-- Resumable P7 pause and independent manual execution remain subsequent packages. Keep manual state out of P7 cognition/history/experience and do not rename cancellation as pause.
+- Resumable P7 pause and optional manual history/export remain subsequent packages. Keep manual state out of P7 cognition/history/experience and do not rename cancellation as pause.
 - Full repository promotion/extension checks still fail; exact recorded failures need separate scoped repairs. Do not silently label them PASS or expand this console task into a full framework audit.
 - Fresh SP80 completion, cold/warm proficiency comparison, cross-level learning and simulator benefit remain unproven. The final run deliberately stopped after live evidence, before any completed level.
 - Actual browser visual/mobile acceptance remains unverified due the external browser tool failure.
 
 ## 下一动作
 
-1. Use `make p7-console` for operator UAT of the delivered autonomous workspace. Its live endpoint is selected dynamically; prior `/tmp` URLs are stopped. Inspect actual public P7 decisions/actions and matching current cognition, keeping overlays off by default.
-2. Plan resumable pause or independent manual validation as separate packages under the approved three-mode design. Do not re-dispatch the completed Task1–3 or introduce human assistance into P7.
+1. Use `make p7-console` for operator UAT of the delivered autonomous workspace. Its live endpoint is selected dynamically; prior `/tmp` URLs are stopped. Select a game to play it directly in the independent manual view. Start P7 to close that game and begin fresh. Inspect actual public P7 decisions/actions and matching current cognition, keeping overlays off by default.
+2. Plan resumable pause or optional independent manual history/export as separate packages under the approved three-mode design. Do not re-dispatch the completed Task1–3 or introduce human assistance into P7.
 3. If investigating full-gate failures, use the named final log and narrow ownership. Preserve operator/backend configuration and compare against observed successful model/tool execution before declaring host wiring unavailable.
 
 ## Key references
@@ -45,4 +47,4 @@
 - Plan/evidence: `docs/superpowers/plans/2026-10-05-prime-p7-live-console.md`, `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`
 - Cognition contract: `docs/architecture/prime-p7-cognition-and-experience.md`
 - Operator guide: `docs/guides/prime-p7-games-and-official-results.md`
-- Runtime: `console_export.py`, `console_server.py`, `console_session.py`, `console_events.py`, `console_snapshot.py` under `src/asterion/applications/prime/p7/`; guest containment `tools/run_prime_p7_guest.py`.
+- Runtime: `console_export.py`, `console_server.py`, `console_session.py`, `console_manual.py`, `console_events.py`, `console_snapshot.py` under `src/asterion/applications/prime/p7/`; guest containment `tools/run_prime_p7_guest.py`.

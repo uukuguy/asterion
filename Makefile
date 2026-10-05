@@ -327,7 +327,7 @@ asterion-prime-p7-console: export ASTERION_CONSOLE_ARC_ROOT = $(ASTERION_PRIME_A
 asterion-prime-p7-console: export ASTERION_CONSOLE_GUEST = $(PRIME_ORB_MACHINE)
 asterion-prime-p7-console:
 	@if [ "$$ASTERION_CONSOLE_SERVE" = 1 ] && [ -z "$$ASTERION_CONSOLE_RUN" ] && [ -z "$$ASTERION_CONSOLE_OUTPUT" ]; then \
-		exec $(UV_BIN) run asterion arc-console serve --operator-root "$$ASTERION_CONSOLE_OPERATOR_ROOT" --arc-root "$$ASTERION_CONSOLE_ARC_ROOT" --guest-machine "$$ASTERION_CONSOLE_GUEST"; \
+		exec $(UV_BIN) run --with "$$ASTERION_CONSOLE_ARC_ROOT/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$ASTERION_CONSOLE_ARC_ROOT/wheels/arcengine-0.9.3-py3-none-any.whl" asterion arc-console serve --operator-root "$$ASTERION_CONSOLE_OPERATOR_ROOT" --arc-root "$$ASTERION_CONSOLE_ARC_ROOT" --guest-machine "$$ASTERION_CONSOLE_GUEST"; \
 	fi; \
 	set -- $(UV_BIN) run asterion arc-console --runs-root "$$ASTERION_CONSOLE_RUNS_ROOT"; \
 	if [ -n "$$ASTERION_CONSOLE_RUN" ]; then set -- "$$@" "$$ASTERION_CONSOLE_RUN"; fi; \

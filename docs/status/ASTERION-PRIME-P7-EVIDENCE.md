@@ -792,3 +792,17 @@ The first two attempts recorded initial frames/cognition but no actions. A priva
 | Not implemented | Resumable P7 pause and independent manual play | Subsequent packages; no human input enters P7 workflow |
 
 Private source evidence remains under the selected run directory. `/tmp/p7-live-console-final-run.html` is a self-contained safe replay export from the actual final run. Full promotion output: `/tmp/p7-live-console-promotion-full.log`.
+
+
+## Independent playable selection — 2026-10-05
+
+User selection now opens an independent real offline game, without a model call. A packaged HTTP test used SP80 `sp80-589a99af`, seed 0: initial blue bounds `[12,31,16,19]`; ACTION4 changed them to `[16,35,16,19]`. ACTION5 and RESET then completed normally. The manual action count was 3, observation version 3 and episode 2. Repeating the same ACTION4 request returned its original result; a different command with the old version was rejected. P7 state remained idle, its snapshot and run ID remained null, and its run directory inventory did not change.
+
+Closing the game removed the temporary SDK recordings and confirmed the owned process group absent. The installed HTTP server was then closed. This proves real independent human actions and cleanup, not P7 solving or new game completion. Manual data keeps only the latest actual frame and last action; human history/export is not implemented.
+
+- PASS: 79 focused Python tests; 39 actual-asset DOM tests, including the final installed-wheel HTML. Independent review reproduced and then verified fixes for reload resetting a manual game and a stale ready poll restoring closed controls.
+- PASS: wheel build/isolated install, actual SDK HTTP actions; lint, docs and diff checks.
+- Non-PASS: `make promotion-check`, 3879 tests, 13 failures, 5 errors, 4 skips. Tail still identifies the previously recorded source-detachment test literals. This result does not establish that every failure has the same cause as the prior run. Log: `/tmp/p7-manual-console-promotion.log`.
+- Boundary: no new P7 model run; no new visual browser acceptance; no persisted manual trajectory or resumable pause.
+
+Local evidence: `/tmp/p7-manual-http-evidence.json`; wheel `/tmp/p7-manual-console-wheel/asterion-0.1.0-py3-none-any.whl`; installed interpreter `/tmp/p7-manual-console-installed/bin/python`.

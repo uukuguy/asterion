@@ -959,3 +959,12 @@
 - Evidence contract: Initial and every settled public observation carry exact source sequence and canonical hash. Repeated pixels remain distinct observations. Missing source evidence cannot be inferred from SDK row positions. Capture is advisory and cannot change game execution authority.
 - Deployment: The Mac supervisor and exact guest unit retain a fixed 900-second limit and independent cleanup. Guest launch inherits only fixed Orb-resolved proxy names; values remain outside argv. This keeps Orb's address mapping intact and restores the observed model connection without changing provider, credentials or CA configuration.
 - Evidence: `ed6fa64b`, `004442f2`, `9e98b49e`; final packaged process verification in `ASTERION-PRIME-P7-EVIDENCE.md`. No fresh SP80 completion or full promotion PASS is implied.
+
+
+## D-2026-10-05-02 — Selection opens independent human play
+
+- Status: 🟢 active.
+- Decision: Selecting a game opens its real initial L1 frame in a separate offline SDK worker. The compact action panel operates that worker. P7 start closes the worker first and starts a fresh autonomous run. Human moves never enter P7 context, cognition, attempts or experience.
+- Lifecycle: Exact game/session/observation identity and idempotent commands; one operation at a time. Idle 300 seconds, total 1800 seconds and 1000 actions are finite limits. Temporary recordings are removed when the owned process group is confirmed absent. Cleanup uncertainty blocks replacement.
+- Interface: Reload restores the existing game; old polling responses cannot reopen controls after close. P7 and replay controls remain separate. Human history/export and resumable P7 pause are not implemented.
+- Evidence: Installed-wheel SP80 open, ACTION4 right shift, ACTION5, RESET, duplicate/stale requests and close verified; no new P7 run was created. Focused backend/DOM checks and independent code review cover lifecycle and request races. Full promotion remains non-PASS.

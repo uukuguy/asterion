@@ -23,12 +23,12 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `PRIME-TYPICAL-APPLICATIONS.md` | 🟡 decision-history | Historical Prime-backed P1-P7 behavior and traces; not native Asterion Prime closure. |
 | `FRAMEWORK-INTEGRATION-WORKLIST.md` | 🟡 decision-history | Completed framework integration worklist; superseded as active route by the 2026-09-12 native reset. |
 | `FRAMEWORK-PUBLIC-INVENTORY.md` | 🟢 active | Metadata-only inventory of application providers, capability refs, AgentRuntime IDs, separate control providers, and evidence boundaries. |
-| `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, level results, world-model diagnosis, breadth recovery and realtime console process evidence. |
+| `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, level results, world-model diagnosis, breadth recovery and realtime console process evidence and independent playable selection. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目、实时自主控制台、离线单 HTML 回放与官方结果操作指南。 |
-| `DECISIONS.md` | 🟢 active | Native decisions: partial-cognition solving and D-2026-10-05-01 autonomous console, source evidence and independent manual validation. |
+| `DECISIONS.md` | 🟢 active | Native decisions: partial-cognition solving and D-2026-10-05-01/02 autonomous console, exact source evidence and independent playable selection. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | P7 primary cognition contract, persistent hypotheses and solve/experiment feedback loop. |
-| `../superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` | 🟢 active | Approved P7-first design; packaged realtime decisions/actions/cognition and stop/cleanup verified; full gate non-PASS; pause/manual remain future work. |
+| `../superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` | 🟢 active | Approved P7-first design; packaged realtime decisions/actions/cognition and stop/cleanup verified; full gate non-PASS; independent manual play verified; pause remains future work. |
 | `PRIME-P1-P7-ACCEPTANCE.md` | 🟢 active | P1–P7 验收指南；记录 P7 组合失败与专用 provider 修复，区分无模型验证与真实求解。 |
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |

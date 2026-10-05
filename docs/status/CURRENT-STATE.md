@@ -7,7 +7,7 @@
 - Theme-level focus: native P7 builds persistent game knowledge and verifies whether it improves solving
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: realtime P7 console — finite autonomous start/stop, source decisions/actions/cognition, verified first realtime package; resumable pause and independent manual execution remain future work
+- Active work package: realtime P7 console — finite autonomous start/stop, source decisions/actions/cognition, verified first realtime package plus independent playable game selection; resumable pause remains future work
 
 ## Current Architecture
 
@@ -23,7 +23,7 @@
 - `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
 - Runtime cognition logs present the stable Chinese gameplay guide and post-action cognition changes; the persistent hypothesis ledger remains separate from bounded model projections.
 - `asterion arc-console` exports one P7 run as an offline HTML level console; final cognition and unaligned model signals remain explicitly scoped evidence.
-- `make p7-console` now serves the P7 autonomous workspace. A fixed finite L1 witness runs through the existing Make/wheel/Orb operator. Source events bind explicit public decisions and cognition revisions to observed actions; replay remains independent. Focused Python/DOM and final code reviews pass; packaged live decisions/actions/cognition and stop/cleanup are verified. Full promotion remains non-PASS; no fresh SP80 completion follows. Manual validation remains unimplemented and must not enter P7 history or learning.
+- `make p7-console` now serves the P7 autonomous workspace. A fixed finite L1 witness runs through the existing Make/wheel/Orb operator. Source events bind explicit public decisions and cognition revisions to observed actions; replay remains independent. Focused Python/DOM and final code reviews pass; packaged live decisions/actions/cognition and stop/cleanup are verified. Full promotion remains non-PASS; no fresh SP80 completion follows. Game selection opens an independent SDK-only manual game with real actions; P7 start closes it and starts fresh. Human actions never enter P7 history or learning. Manual recordings are temporary and removed at close.
 
 ## Open Problems
 
@@ -33,7 +33,7 @@
 - A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
 - Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
 - Sustained L1 feedback-driven solving and improved proficiency from reused cognition remain unverified; transport or unit-test success alone does not establish these capabilities.
-- The live operator still closes the game with the solve run; resumable P7 pause and independent manual mode remain unimplemented. Console cancellation verifies the Mac process group and owned guest unit before reopening. Guest units inherit Orb-resolved proxy variables by name; Mac loopback values stay out of the shared ORBENV contract.
+- The live operator still closes the game with the solve run; resumable P7 pause remains unimplemented. Independent manual play uses a separate finite offline subprocess, without broker or learning services. Console cancellation verifies the Mac process group and owned guest unit before reopening. Guest units inherit Orb-resolved proxy variables by name; Mac loopback values stay out of the shared ORBENV contract.
 
 ## Key Files
 
@@ -65,6 +65,7 @@
 - `src/asterion/applications/prime/p7/live.py` — live RPC and worker plumbing
 - `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
 - `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
+- `src/asterion/applications/prime/p7/console_manual.py` — isolated human game worker, versioned commands and finite cleanup
 - `src/asterion/applications/prime/p7/console_assets/` — packaged Tailwind CSS, canvas playback and Chinese process UI
 - `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — approved P7-first console with replay and independent manual validation; same-game takeover withdrawn
 

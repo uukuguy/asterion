@@ -127,7 +127,7 @@ class _Handler(BaseHTTPRequestHandler):
                 or not secrets.compare_digest(token, self.server.token)):
             self._error(403, "write-rejected")
             return
-        if self.path not in {"/api/start", "/api/stop"}:
+        if self.path not in {"/api/start", "/api/stop", "/api/manual/open", "/api/manual/action", "/api/manual/close"}:
             self._error(404, "not-found")
             return
         if (self.headers.get_all("Content-Type") != ["application/json"]
@@ -150,8 +150,16 @@ class _Handler(BaseHTTPRequestHandler):
                     raise ValueError
                 return value
             value = json.loads(raw, object_pairs_hook=pairs)
-            keys = {"game_id", "command_id"} if self.path == "/api/start" else {"session_id", "command_id"}
-            if type(value) is not dict or set(value) != keys or any(type(v) is not str for v in value.values()):
+            keys = ({"game_id", "command_id"} if self.path in {"/api/start", "/api/manual/open"}
+                    else {"session_id", "command_id", "observation_version", "action", "data"}
+                    if self.path == "/api/manual/action" else {"session_id", "command_id"})
+            if type(value) is not dict or set(value) != keys:
+                raise ValueError
+            if any(type(v) is not str for key, v in value.items() if key not in {"observation_version", "data"}):
+                raise ValueError
+            if self.path == "/api/manual/action" and (
+                    type(value["observation_version"]) is not int or value["observation_version"] < 0
+                    or type(value["data"]) is not dict):
                 raise ValueError
         except (ValueError, OSError, UnicodeError, RecursionError):
             self._error(400, "request-invalid")
@@ -159,9 +167,16 @@ class _Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/api/start":
                 result = self.server.session.start(value["game_id"], value["command_id"])
-            else:
+            elif self.path == "/api/stop":
                 result = self.server.session.stop(value["session_id"], value["command_id"])
-            self._send(202, result)
+            elif self.path == "/api/manual/open":
+                result = self.server.session.manual_open(value["game_id"], value["command_id"])
+            elif self.path == "/api/manual/action":
+                result = self.server.session.manual_action(value["session_id"], value["command_id"],
+                                                         value["observation_version"], value["action"], value["data"])
+            else:
+                result = self.server.session.manual_close(value["session_id"], value["command_id"])
+            self._send(200 if self.path.startswith("/api/manual/") else 202, result)
         except ConsoleSessionError as error:
             self._error(409, str(error))
         except Exception:

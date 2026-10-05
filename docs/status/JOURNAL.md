@@ -3678,3 +3678,6 @@
 - 14:23 Diagnostic witness reproduced fetch failure; no-auth probes isolate lost Orb proxy in systemd containment. Guest-only preservation fix authorized.
 - 14:26 Preserve Orb-resolved guest proxy in contained P7; avoid direct network timeout and argv credential exposure. `9e98b49e`
 - 14:38 Normal packaged console verified 2 P7 decisions, 5 actions, 33 frames, 5 cognition versions; explicit stop and cleanup passed.
+- 14:43 Record packaged console process verification, guest proxy repair and remaining release/visual/manual boundaries. `ac040db1`
+
+- 2026-10-05 — Verified independent playable selection: 79 Python, 39 DOM, installed SP80 actions/cleanup; promotion remains 13 failures/5 errors.

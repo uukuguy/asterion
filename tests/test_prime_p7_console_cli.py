@@ -59,12 +59,16 @@ class TestLiveConsoleCli(unittest.TestCase):
                                             capture_output=True, text=True, timeout=15)
                     self.assertEqual(result.returncode, 0, result.stderr)
                     args = json.loads(output.read_text())
-                    self.assertEqual(args[:3], ['run', 'asterion', 'arc-console'])
-                    self.assertEqual(args[3], expected)
                     if target == 'p7-console':
+                        arc_root = root.parent / 'external-prime' / 'arc-agi-3'
+                        self.assertEqual(args[:5], ['run', '--with', str(arc_root / 'wheels' / 'arc_agi-0.9.9-py3-none-any.whl'),
+                                                  '--with', str(arc_root / 'wheels' / 'arcengine-0.9.3-py3-none-any.whl')])
+                        self.assertEqual(args[5:8], ['asterion', 'arc-console', expected])
                         self.assertIn('/operator space', args)
                         self.assertIn('guest', args)
                     else:
+                        self.assertEqual(args[:4], ['run', 'asterion', 'arc-console', expected])
+                        self.assertNotIn('--with', args)
                         self.assertNotIn('serve', args)
 
 

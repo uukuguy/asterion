@@ -34,7 +34,7 @@
 - Judge learning by accumulated game understanding and how it informs play. Do not equate experience with an old solution route or require complete cognition before attempting a level.
 - Use the existing Pi Codex subscription with `gpt-6.1-sol`; do not switch to OpenRouter. Delegate ordinary programming to Sol high and repetitive checks to Luna; independently review changes.
 - The console centers P7 autonomous solving and a readable Chinese gameplay description. Hypotheses fill knowledge gaps; they do not replace the solving task. Show actual public decisions and action feedback.
-- Human play is independent manual validation. It must not enter P7 context, cognition, history, learning or control workflow. Replay remains separate. Approved design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`.
+- Selecting a game should show its real initial frame and permit human play directly. Human play is independent manual validation. It must not enter P7 context, cognition, history, learning or control workflow. Replay remains separate. Approved design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`.
 - Current contract: `docs/architecture/prime-p7-cognition-and-experience.md`; current evidence and immediate action: `docs/status/RESUME-NEXT-SESSION.md`.
 
 ### feedback — complete `handoff` contract
