@@ -494,6 +494,37 @@ class TestOfflineReplayCognition(unittest.TestCase):
         self.assertFalse((self.root / 'console-events.jsonl').exists())
         self.assertEqual(state['run']['primitive_action_count'], 3)
 
+    def test_resume_from_composed_source_keeps_matched_cognition_within_restore_boundary(self):
+        rows = [self.observation(), self.observation('ACTION1', 1, completed=1),
+                self.observation('ACTION1', 2, completed=1), self.observation('ACTION1', 3, completed=2)]
+        first = self._source('native-prefix', rows[:2], {0: '第一关规则'})
+        last = self._source('native-suffix', rows, {2: '第二关规则', 3: '第三关规则'})
+        composed, summary = self._source('composed-source', rows, {})
+        (composed / 'console-events.jsonl').unlink()
+        summary['diagnostics'] = {'recovery_kind': 'saved-route-composition'}
+        (composed / 'summary.json').write_text(json.dumps(summary))
+        segments = (({'source_start_sequence': 1, 'source_end_sequence': 1, 'destination_start_sequence': 1}, *first),
+                    ({'source_start_sequence': 2, 'source_end_sequence': 3, 'destination_start_sequence': 2}, *last))
+        for restored in (1, 3):
+            current, current_summary = self._source(f'resumed-{restored}', rows[:restored + 1], {})
+            current_summary['diagnostics'] = {'execution_mode': 'resumed', 'source_run_id': composed.name,
+                                              'restoration_actions': restored}
+            (current / 'summary.json').write_text(json.dumps(current_summary))
+            with self.subTest(restored=restored), patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=segments):
+                state = build_console_snapshot(current)
+            descriptions = [r['stable_description'] for level in state['levels'] for r in level['cognition_timeline']]
+            self.assertIn('第一关规则', descriptions)
+            if restored == 1:
+                self.assertNotIn('第二关规则', descriptions)
+                self.assertNotIn('第三关规则', descriptions)
+            else:
+                self.assertIn('第二关规则', descriptions)
+                self.assertIn('第三关规则', descriptions)
+            self.assertFalse((composed / 'console-events.jsonl').exists())
+            with patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=None):
+                rejected = build_console_snapshot(current)
+            self.assertFalse(any(level['cognition_timeline'] for level in rejected['levels']))
+
     def test_terminal_recovery_rejects_missing_lineage_and_recording_gap(self):
         rows = [self.observation(), self.observation('ACTION1', 1), self.observation('ACTION1', 2)]
         source = self._source('terminal-source', rows, {0: '初始规则', 2: '后续规则'})

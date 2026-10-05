@@ -579,6 +579,21 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
                 for action in actions[:restored]]
     if not sealed or prefix(trace) != prefix(prior_trace) or prefix(trace) != prefix(current_events, 'action'):
         raise ValueError('restored cognition unavailable')
+    prior_diagnostics = prior.get('diagnostics', {})
+    if (isinstance(prior_diagnostics, dict)
+            and prior_diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win'}):
+        # Offline replay sources have recordings and authenticated lineage, not
+        # actor console events. The current exact replay already proved these
+        # prefix actions; use its real observations to align the source beliefs.
+        observations, _ = _source_observations(current_events, warnings)
+        if warnings or len(observations) <= restored:
+            raise ValueError('restored cognition unavailable')
+        inherited = _restored_cognition_events(
+            source, prior, prior_trace, [], (*seen, root.name),
+            recorded_positions={index: observation for index, observation in enumerate(observations)
+                                if index <= restored},
+        )
+        return [event for event in inherited if event['payload']['source_action_sequence'] <= restored]
     events = read_console_events(source, source_id, game, warnings=warnings)
     observations, events = _source_observations(events, warnings)
     if warnings or len(observations) <= restored or prefix(events, 'action') != prefix(prior_trace):
