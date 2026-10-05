@@ -3703,3 +3703,6 @@
 - 20:18 固定Tycho/Retrodict源码，完成整体设计与独立复审；没有新模型运行或求解代码改动。
 - 20:18 make docs-check通过：272 Markdown/63本地链接；git diff --check通过，能力仍未新增验证。
 - 20:19 Redesigned P7 solver/console around IPython model work to restore the solving loop; proposal only [0ac742ac].
+
+- 20:35 用户确认继续：Prime 承载通用 IPython 工作区，P7 负责 WorldMap 与动作；已明确修订 DSL-only 设计，整体实施计划进行中。
+- 20:45 整体实施接口已冻结，Prime/P7/console 分工启动；模型轮次 admission 验证39 tests通过，尚未接入实际求解。

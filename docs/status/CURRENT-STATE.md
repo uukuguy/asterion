@@ -6,8 +6,8 @@
 - Current branch: `feat/p7-live-console`
 - Theme-level focus: native P7 WorldMap-driven solving through its existing persistent IPython
 - Project route: managed
-- Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: P7 WorldMap solver and console redesign — pinned reference-code review and whole-design proposal; implementation and new capability evidence remain open
+- Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` (native-detachment plan remains historical migration evidence)
+- Active work package: P7 WorldMap solver and console redesign — approved direction; Prime workspace, P7 solver and console implementation underway, capability evidence pending
 
 ## Current Architecture
 
@@ -48,7 +48,8 @@
 - `docs/status/JOURNAL.md` — append-only event log
 - `docs/status/INDEX.md` — status-file index
 - `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md` — current whole-design comparison and candidate solving loop
-- `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` — proposed solver/console redesign, unconstrained by current implementation shape
+- `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` — approved solver/console redesign
+- `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` — active implementation and shared acceptance
 
 ### P7 implementation entry points
 

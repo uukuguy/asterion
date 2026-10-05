@@ -32,11 +32,12 @@
 | D-2026-09-22-01 | 🟢 active | Fence each Pi prompt on exact request acknowledgment and its own settlement barrier |
 | D-2026-09-22-02 | 🟢 active | P6 failed work with admitted effects requires verified inverse or recovery-required state |
 | D-2026-09-29-01 | 🟢 active | The operator environment selects the native P7 provider and model |
-| D-2026-10-01-01 | 🟢 active | WorldMap may plan only through a current-history-certified declarative simulator |
+| D-2026-10-01-01 | 🟡 amended | Legacy DSL certification; D-2026-10-05-01 permits general Python research models |
+| D-2026-10-05-01 | 🟢 active | Prime owns computation; P7 owns WorldMap research and prediction-bound action submission |
 
 ## D-2026-10-01-01 — Certificate-gated same-game simulator
 
-- Status: 🟢 active
+- Status: 🟡 amended by D-2026-10-05-01; retained DSL implementation remains internally certificate-gated
 - Decision: Keep confirmed same-game mechanics and level memory in the
   Playbook, but expose them to a bounded BFS/A* planner only after a
   `MechanismSpec` has retrodicted every current-run transition and received a
@@ -53,7 +54,17 @@
 - Evidence: `docs/architecture/prime-p7-world-model-simulator.md`,
   `src/asterion/applications/prime/p7/model_search.py`, focused P7 model-search
   tests, and the Tycho/Retrodict references recorded in that design.
-- Review context (2026-10-05, not an adopted replacement): `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md` compares the actual reference code; `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` proposes a whole IPython-centered solver/console redesign without retaining current implementation shape. Ordinary checked exploration remains available; any change to this certified planner contract must be stated explicitly before implementation.
+- Initial review context (2026-10-05, before approval of D-2026-10-05-01): `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md` compares the actual reference code; `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` proposes a whole IPython-centered solver/console redesign without retaining current implementation shape. Ordinary checked exploration remains available; any change to this certified planner contract must be stated explicitly before implementation.
+
+## D-2026-10-05-01 — Prime research workspace and P7 WorldMap solver
+
+- Status: 🟢 active design, implementation and capability verification pending.
+- Authority: user requested a whole redesign, accepted the Prime/P7 ownership split and said “好的，继续”.
+- Decision: Prime owns persistent computation and explicit artifact recovery. P7 owns immutable environment evidence, game-specific research code, WorldMap, goals and plans. Research code reads evidence and produces candidates; actor submission through the existing operator/Broker is the only real action path.
+- Amendment: general Python partial models, competing hypotheses and searches need no legacy DSL certificate. The retained DSL still follows its certificate checks. Every submitted plan is bound to current evidence and model revision; checked execution stops at mismatch, level change or pause. A computation report cannot establish real success.
+- Console: project actual computation, model revision, plan and action events on one versioned timeline; pause waits for the current bounded operation, resume checks current state, hard stop records interruption.
+- Limits: no duplicate runner, domain-neutral framework, no same-UID OS-sandbox claim, no automatic replay of action cells; no full 25-game authorization.
+- Design: `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md`.
 
 ## D-2026-07-26-01 — Operator configuration root
 

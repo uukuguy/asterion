@@ -1,12 +1,12 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05 20:19 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-05 20:39 CST. **Session remains active — not a final handoff.**
 
 ## 已验证事实
 
-- 分支 `feat/p7-live-console`；路由 managed。原生迁移工作表仍是 `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`。本会话推进的是整体设计审查，尚未开始实现或新模型运行。
+- 分支 `feat/p7-live-console`；路由 managed。原生迁移工作表仍是 `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`。本会话已从整体设计审查进入实施；没有新模型运行。
 - 用户要求：核心是 WorldMap 驱动解题；参考榜首系统实际代码；整体设计而非碎片补丁；利用 Prime 的 IPython；网页控制台配合求解；允许大胆重设计，不迁就当前实现。
-- 本会话设计与状态提交 `0ac742ac`；候选设计已可审阅，未推送。代码能力未变，当前下一动作是整体设计审阅后制定实施计划。
+- 本会话设计与状态提交 `0ac742ac`；候选设计已可审阅，未推送。代码能力未变，用户随后确认继续，当前制定实施计划并实现通用 Prime 工作区。
 - 参考源码固定：Tycho `f68912a764372ead0a610db2e1c011d41ce5197e`；Retrodict `71672e8e5adb008360f52a61ef9e2adf91a62d89`。代码只读检查，未执行第三方程序、复现其评分或启动模型。
 - P7 当前 worker 可在同一 namespace 中执行自编 Python 并保留变量；Prime 摘要明确 kernel 跨 compaction 保留。默认策略将 IPython 降为分析/fallback。普通 checked 短列表不要求 DSL 证书；自动模型 context envelope 才有该检查。详见源码审查文件。
 - 本会话 `make docs-check` 通过（272 Markdown、63本地链接）；`git diff --check` 通过。没有重跑源码/模型/打包门禁。
@@ -30,16 +30,16 @@
 
 ## 未完成边界
 
-- 新研究工作区、默认建模/搜索策略、模型产物恢复、求解状态机和console计算/计划事件均未实现。
+- 新研究工作区、默认建模/搜索策略、模型产物恢复、求解状态机和console计算/计划事件正在实施，尚未完成验证。
 - 新设计的暂停不能用当前cancel冒充；kernel compaction可续用不等于worker重启后任意namespace可恢复。恢复不得重播含真实动作的cells。
-- `D-2026-10-01-01`与原认知合同仍是当前实现合同。设计落地前明确修订具体DSL-only选择，保留证据与唯一真实动作入口；不要私自让Python产物冒充旧ModelCertificate。
+- `D-2026-10-05-01`已明确修订DSL-only设计：Prime负责通用执行/工件恢复，P7负责游戏研究与唯一动作入口；保留的旧DSL仍遵循自身ModelCertificate，不将Python产物冒充证书。
 - 尚无本会话新的自主过关、跨关迁移或冷/热启动对比。不能把源码审查、文档检查或参考系统成绩升级为P7能力PASS。
 - MEMORY约24.7KB/16条active，JOURNAL超过两个月，历史climb指向旧Phase3.2；整理为后续维护，不扩张本设计审查范围。
 
 ## 下一动作
 
 1. 读取 `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md`（整体推荐），并用 `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md`核对源代码比较。
-2. 用户审阅或继续时，按managed路由形成一个共同验收的整体重构实施计划：求解循环、IPython成果、证据与模型检验、预测执行、控制台配套。不得改成无共同结果的碎片工具补丁；有限真实求解才验能力，全量25游戏需另有明确有限授权。
+2. 用户已确认继续，按managed路由实施一个共同验收的整体重构包：求解循环、IPython成果、证据与模型检验、预测执行、控制台配套。不得改成无共同结果的碎片工具补丁；有限真实求解才验能力，全量25游戏需另有明确有限授权。
 
 ## 关键路径
 
@@ -47,3 +47,10 @@
 - 已批准认知合同：`docs/architecture/prime-p7-cognition-and-experience.md`；旧DSL合同：`docs/architecture/prime-p7-world-model-simulator.md`。
 - 历史P7/控制台证据：`docs/status/ASTERION-PRIME-P7-EVIDENCE.md`；操作指南：`docs/guides/prime-p7-games-and-official-results.md`。
 - 源码：`src/asterion/applications/prime/p7/`、`src/asterion/agents/prime/summarization.py`、`packages/typescript/asterion-prime-extension/src/ipython-extension.ts`。
+
+## 当前并行实施
+
+- `/root/prime_workspace`：通用 Prime kernel/exports/recovery 与针对性测试。
+- `/root/worldmap_reasoning`：精确接口与整体实施计划。
+- `/root/p7_visual_memory`：console 事件、历史游标、页面、pause/resume 请求投影；不写 operator。
+- 根线程：状态、决策、集成、复审与验证。未开始真实模型运行；不要从进行中的文件推断能力通过。
