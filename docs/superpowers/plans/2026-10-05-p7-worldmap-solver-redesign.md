@@ -293,10 +293,10 @@ def test_pause_waits_for_dispatched_action(self):
 - [x] 在 root 拥有的 `p7/research_runtime.py` 写薄适配器 `P7ResearchRuntime`，组合 generic host、Solver、control 和 read server，提供 `execute/admit_round/continuation_prompt/close`；现有 runtime_binding 接受它并向 generic Prime 注入 `before_round` async hook。不要给 PrimeLaunch plain-data 附加 live callback。一次模型 round 内含 tool cells，不能把整个 round 记作控制活动计数，否则暂停等待 round 结束、tool 又等待暂停解除会死锁；`before_round` 只做 admission 等待，活动计数仅覆盖真正的有界计算/环境动作。
 - [x] 用一条实际 wiring 的 provider-free story 验证：cell 建模导出→publish→actor plan→Broker action→真实差异→workspace 修订→console 历史；checkpoint 重建 kernel 后强制校准；环境丢失不自动恢复游戏或重派未知动作。
 - [x] 实现复审重点：WorldMap 是否改变下一次计算/动作、程序是否实际执行、原始证据与派生报告是否分离、pause是否真正截断后缀、旧工具是否仍暴露行动捷径、公共投影是否越界。修复结论后再扩大检查。
-- [ ] 依次跑 `npm --prefix packages/typescript/asterion-prime-extension test`、本次相关 Python tests、`make promotion-check`；执行 `make lint`、`make docs-check` 并按仓库要求完成必要 `make check`，既有无关失败记录其边界。确认 wheel 内新 Prime worker、新 P7 modules、打包扩展与 allowlist 一致。
-- [ ] 用固定预设执行 `make asterion-prime-p7-level-witness GAME=<已选择的本地游戏> LEVEL=1`。只选一个有限新运行，隔离旧 knowledge stores，不能注入人工路线、成功 prefix 或真实 SDK 离线搜索答案。选择已有数据且允许本地运行的游戏，由集成方在执行记录中写清确切 GAME 与 preset；命令成功仅证明实际结果，不据synthetic story预先宣称过关。现有 witness action cap 基于 human baseline，不能为得到成功偷偷扩大。
-- [ ] 检查真实证据中至少有一次“程序模型/搜索结果→明确计划→真实反馈”的可追溯连接；若失败，记录第一个模型/控制/目标断点而不是盲目扩大预算。下一关迁移必须在全新 run 中自然连续过关，使用固定有限预设；旧 LEVEL=2 自动 replay prefix 的 witness 不能作跨关能力证据。再次求解只复用明确保存的规则/程序，不复用精确动作路线；无授权或外部阻塞则明确留作未完成边界，不标完整能力通过。
-- [ ] 记录实际命令、结果、动作数、RESET、停止原因、模型修订与控制台事件位置；修订 DSL-only 的旧设计决策。提交代码、生成资源、测试与状态文档，确保本次成果没有散落为未跟踪文件。
+- [x] 依次跑 `npm --prefix packages/typescript/asterion-prime-extension test`、本次相关 Python tests、`make promotion-check`；执行 `make lint`、`make docs-check` 并按仓库要求完成必要 `make check`，既有无关失败记录其边界。确认 wheel 内新 Prime worker、新 P7 modules、打包扩展与 allowlist 一致。
+- [x] 用固定预设执行 `make asterion-prime-p7-level-witness GAME=<已选择的本地游戏> LEVEL=1`。只选一个有限新运行，隔离旧 knowledge stores，不能注入人工路线、成功 prefix 或真实 SDK 离线搜索答案。选择已有数据且允许本地运行的游戏，由集成方在执行记录中写清确切 GAME 与 preset；命令成功仅证明实际结果，不据synthetic story预先宣称过关。现有 witness action cap 基于 human baseline，不能为得到成功偷偷扩大。
+- [x] 检查真实证据中至少有一次“实际计算→语义修订/明确计划→真实反馈”的可追溯连接（程序搜索为actor说明，精确算法需另有源码证据才能独立审计）；若失败，记录第一个模型/控制/目标断点而不是盲目扩大预算。下一关迁移必须在全新 run 中自然连续过关，使用固定有限预设；旧 LEVEL=2 自动 replay prefix 的 witness 不能作跨关能力证据。再次求解只复用明确保存的规则/程序，不复用精确动作路线；无授权或外部阻塞则明确留作未完成边界，不标完整能力通过。
+- [x] 记录实际命令、结果、动作数、RESET、停止原因、模型修订与控制台事件位置；修订 DSL-only 的旧设计决策。提交代码、生成资源、测试与状态文档，确保本次成果没有散落为未跟踪文件。
 
 ## 完成边界
 
@@ -320,3 +320,8 @@ Task 1–3 的单元验证仅证明各自接口，Task 4 的实际 wheel 运行�
 - 计划继续用现有 `workspace_revision`、`goal`、`assumptions` 连接公开推理依据与真实反馈。actor 对语言含义负责；非空校验不是模型正确性的认证。
 
 实施由 Task 2 扩展 research/solver/prompt/TypeScript schema 与针对测试，Task 4 更新打包资源并集成。针对检查限于：初始拒绝空版本但允许直接 revise 后 probe；matched 复用；失配/RESET/换关分别阻止未修订后缀并接受当前证据修订；stale revision/current evidence 拒绝；source/report 原语义保留；kernel lost/环境 unknown 不可被 revise 洗白；模型事件在同帧历史中保持准确。真实验证继续固定有限预设，记录语言/程序模型如何影响行动，不为满足验收强迫无用 IPython 工作。
+
+
+### Task 4 最终验收边界（2026-10-05）
+
+已执行规定检查并记录失败，checkbox不表示全仓PASS：最终promotion3965tests/13fail4error4skip；未重复make check。扩展34pass6external skip、实际installed tests、lint/docs通过。修复provider复合工具ID的提交`721c8ae5`真实新局SP80前两关16动作/0RESET/3成功cell/4修订，sealed/replayed/cleaned。实际事件22→23→40→42和49→50→51→77→79串联计算、模型、计划、反例修订与换关；详细命令/证据见implementation review。最终运行没有导出程序源码/检查点，不能据此宣称跨run程序复用、恢复或冷/热改进。25游戏全量评估未运行也未获授权。网页验收遵循用户要求的后台DOM/HTTP/导出方式。

@@ -58,7 +58,7 @@
 
 ## D-2026-10-05-01 — Prime research workspace and P7 WorldMap solver
 
-- Status: 🟢 active; research execution implemented, semantic main-path supplement undergoing deployment verification.
+- Status: 🟢 active; implemented and deployed; fresh two-level computation/semantic-revision/action witness verified, broader ability unproven.
 - Authority: user requested a whole redesign, accepted the Prime/P7 ownership split and said “好的，继续”.
 - Decision: Prime owns persistent computation and explicit artifact recovery. P7 owns immutable environment evidence, game-specific research code, WorldMap, goals and plans. Research code reads evidence and produces candidates; actor submission through the existing operator/Broker is the only real action path.
 - Amendment: general Python partial models, competing hypotheses and searches need no legacy DSL certificate. The retained DSL still follows its certificate checks. Every submitted plan is bound to current evidence and model revision; checked execution stops at mismatch, level change or pause. A computation report cannot establish real success.

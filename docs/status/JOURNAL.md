@@ -3729,3 +3729,9 @@
 - 22:01 Final promotion:3965 tests/13fail5error4skip,non-PASS. Started123249a1 fresh SP80 two-level semantic witness,900 seconds.
 - Semantic123249a1 fresh SP80 two-level witness PASS:16 actions/five revisions/zero cells,sealed/replayed/cleaned. Local real bridge reproduces Pi composite-ID rejection; narrow TS fix34pass6skip,resource synced,installed verification underway.
 - Composite-ID installed checks:19 PASS,one historical empty-profile fixture error; corrected fixture4 PASS. Independent narrow review/lint/docs PASS. Mandatory promotion running; no live model process.
+- Accepted composite Pi call IDs so real Responses IPython requests reach the worker; packaged resource synchronized [721c8ae5].
+- Background real-console acceptance passed41 research cursors and exact HTTP replay; history-listing5s timeout remains unverified,without Chrome.
+- 22:20 Composite-ID promotion3965tests/13fail4error4skip,non-PASS; started721c8ae5 freshSP80 Level2 fixed900s witness.
+- Fixed-ID live run emitted two real kernel started/completed pairs; computation dispatch now reaches the persistent workspace. Final outcome pending.
+- 22:25 Fixed-ID721c8ae5 freshSP80 Level2 PASS:16actions/0RESET/3successfulcells/4revisions; sealed/replayed/cleaned,guestinactive. Program exports/cross-run reuse unverified.
+- Final real-console45cursors/three calculation pairs/HTTP replay PASS; documented bounded solving evidence and unresolved reuse,listing latency,promotion.

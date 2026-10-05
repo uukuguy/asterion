@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 solver/console redesign; semantic revision/action execution is deployed; provider tool-ID compatibility is under final packaged verification.
+- Active work package: P7 solver/console redesign; implemented and deployed with bounded fresh two-level computation/revision/action evidence; broad evaluation remains open.
 
 ## Current Architecture
 
@@ -25,8 +25,8 @@
 
 ## Open Problems
 
-- Semantic revisions now bind the real action path. A discovered provider composite-ID rejection in IPython is being corrected; previous zero-cell live runs do not establish voluntary avoidance of computation.
-- Program-model-driven search, multi-level program reuse and cold/warm improvement remain unproven by the current live attempts.
+- Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.
+- The real witness links computation, candidate rules and natural two-level plans; exact program-source artifacts, cross-run program reuse and cold/warm improvement remain unproven.
 - Full promotion is non-PASS. Current and historical failures are classified in the implementation review; environment-specific differences must not be silently treated as old failures.
 - The read service is an application boundary under the operator UID, not a host filesystem/SDK sandbox. Enforcing a stronger sandbox is outside this research change.
 
