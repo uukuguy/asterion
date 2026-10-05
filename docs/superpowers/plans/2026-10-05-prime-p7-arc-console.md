@@ -70,5 +70,5 @@ Existing `run_story` remains unchanged. Its strict sealed-evidence contract must
 - `make lint`, `make docs-check`, `git diff --check` pass.
 - Built wheel exported real sample from `/tmp` through isolated `python -I`, with no source checkout dependency.
 - Final independent code review approved after fixing scope, action proof and absolute-path redaction.
-- Full promotion result is recorded in JOURNAL and the live checkpoint after completion.
+- `make promotion-check` FAIL: 3794 tests, 13 failures, 5 errors, 4 skips. The retained wrapper tail reports source-detachment failures in existing `context-witness.test.mjs`; other failures were not individually diagnosed. See JOURNAL and the live checkpoint.
 - No new paid/model witness was launched: this change exports already recorded evidence and does not modify solver/tool registration.
