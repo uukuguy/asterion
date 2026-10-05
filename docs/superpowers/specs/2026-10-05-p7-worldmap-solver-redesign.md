@@ -312,3 +312,12 @@ The callback path remains unresolved: event 271 `compaction_start` followed 270 
 ### 2026-10-06 live-console follow-up closure
 
 Local main now includes completed WorldMap/experience/console work, generic live/finalized per-level cognition provenance (`b074b5f4`/`ebc4542c`), and refresh-safe playback (`002f37a0`). Final full promotion PASS25 commands, related Python205 PASS, DOM86 PASS/one existing skip, actual served-HTML cognition21 checkpoints PASS. Chrome visual acceptance remains external-limited. DC22 is sealed/replayed4/6 (197 actual/191 completed-prefix actions); L5 attempt2 is active. Keep the two-unfinished-attempt rule and the one official25-task submission gate after finite DC22/VC33. The recovery checkpoint owns current processes, attempts and evidence limits; earlier pending-main/held-launch addenda are historical.
+
+
+## 2026-10-06 per-level attempts and efficiency retries
+
+Latest user authorization supersedes earlier single-guest and whole-game900-second presets for the background campaign: at most two independent games; each witness targets only the next unsolved level and receives900seconds. Exact saved actions restore the previous levels without model re-solving. A passed prefix is sealed/exported before the next level starts with a new timer. Two genuine unfinished attempts at the same blocked level switch games; infrastructure failures require repair.
+
+A saved level with actual actions >= its canonical baseline and per-level score <115 enters one persistent efficiency task. Equal baseline yields100 and therefore qualifies. Use the same verified source/experience; L1 starts fresh, later targets restore only through target-1. Preserve the original, admit only strictly improved target score, and validate existing later actions through the SDK. For this implementation, partial-game tasks remain pending until a native complete suffix anchor exists, then run in ascending level order. No paid re-solving of saved later levels and no repeated efficiency attempts after a genuine outcome.
+
+The live console derives provisional completed levels from validated current action records, refreshes the overview when progress increases, and labels pending sealing. Saved-route scores/actions continue to use independently verified prefixes. Current deployment/check commands and owned process identities belong in the live recovery checkpoint.
