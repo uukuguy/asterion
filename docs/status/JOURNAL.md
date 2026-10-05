@@ -3714,3 +3714,11 @@
 - 21:15 Committed console research timeline and pause handshake for solver supervision [63af3505].
 - 21:20 用户纠正UI验收沿用后台DOM/HTTP/导出方式；停止不必要Chrome操作，不将插件连接作为门禁。
 - 21:22 Related Python 365 tests passed; lint/docs passed; independent implementation review passed; promotion and bounded live evidence pending.
+- 21:23 Committed WorldMap research, actor plans and integrated Prime tools to enable the new solving loop [a1aef743].
+- 21:29 Promotion:3957 tests/15 failures/5 errors/4 skips; extra failures under triage. Fixed 900s SP80 L1 witness started.
+- 21:33 Fresh SP80 L1 PASS:9 actions,0 cells,no prior replay; sealed/replayed/cleaned. Program-model capability still unverified.
+- 21:34 Started fresh bounded SP80 L1→L2 witness,900 seconds,no saved route or prior knowledge injection.
+- 21:40 Fixed two new full-suite assertions: generic module inventory and P7 three-tool allowlist; three targeted checks passed.
+- 21:40 Committed test inventory/tool assertions matching the new runtime, preserving original boundary checks [b45977e6].
+- 21:40 Fresh SP80 L1→L2 PASS:20 actions,0 cells,0 WorldMap publications; no route reuse; replay/sealing/cleanup verified.
+- 21:41 Live evidence exposed WorldMap bypass; implementing direct semantic revisions and evidence-bound plan admission, without compulsory computation.

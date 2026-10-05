@@ -2,92 +2,58 @@
 
 ## Project Snapshot
 
-- Project: Asterion composable multi-runtime agent framework
-- Current branch: `feat/p7-live-console`
-- Theme-level focus: native P7 WorldMap-driven solving through its existing persistent IPython
-- Project route: managed
-- Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` (native-detachment plan remains historical migration evidence)
-- Active work package: P7 WorldMap solver and console redesign — Prime workspace, P7 solver and console implemented and reviewed; packaged live capability evidence pending
+- Project: Asterion composable multi-runtime agent framework; native Prime / P7 research application.
+- Current branch: `feat/p7-live-console`.
+- Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace.
+- Project route: managed.
+- Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
+- Active work package: P7 solver/console redesign; research execution is deployed, direct semantic revision admission is being completed from live evidence.
 
 ## Current Architecture
 
-- Python owns P7 orchestration, broker authority, persistence, and operator assembly.
-- `ArcBroker` validates identity, current history, action witnesses, and planner certificates before checked execution.
-- `WorldModelStore` holds per-run mechanics/entities/relations and level-local visual evidence.
-- `GameCognitionStore` remains an advisory progress cache; `SemanticCognitionStore` is the primary exact-game/L1 language cognition contract with atomic persistence and execution_authority=none.
-- `ObservationState` provides one immutable representation for frame, input surface, HUD, timers, resources, entities, relations, and events.
-- `GameMechanicsStore` persists game-wide mechanism candidates, conditions, effects, scope, evidence, and conflicts with `execution_authority=none`.
-- `CognitionSession` supports partial-cognition solve attempts and renewed hypothesis/experiment/analyze cycles during solving; `hypothesis_simulator.search_counterfactual` compares confirmed and hypothesis branches and never dispatches actions.
-- `MechanismSpec`/`ModelCertificate`/`model_search` remain the only path from retrodicted local evidence to a checked executable plan.
-- Prime application tools are registered in the packaged TypeScript Pi extension, routed through the Python operator/worker bridges; prompt text documents usage. Offline route injection is disabled for capability runs.
-- `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
-- Runtime cognition logs present the stable Chinese gameplay guide and post-action cognition changes; the persistent hypothesis ledger remains separate from bounded model projections.
-- `asterion arc-console` exports one P7 run as an offline HTML level console; final cognition and unaligned model signals remain explicitly scoped evidence.
-- `make p7-console` now serves the P7 autonomous workspace. A fixed finite L1 witness runs through the existing Make/wheel/Orb operator. Source events bind explicit public decisions and cognition revisions to observed actions; replay remains independent. Focused Python/DOM and final code reviews pass; packaged live decisions/actions/cognition and stop/cleanup are verified. Full promotion remains non-PASS; no fresh SP80 completion follows. Game selection opens an independent SDK-only manual game with real actions. Human play can directly select any catalog level; SDK current level and actual completed score remain separate. A private metadata preference restores the last game/level on service restart, at its saved human pose, or initial pose for an unplayed level. Stable action buttons retain focus across polls, with compact sending/acknowledged/uncertain feedback. Current actions use button highlights. Operator-private per-game/per-level HUMAN journals retain seed, origin, exact SDK/game identity and actual action/observation evidence. Real SDK replay restores checked pose and history across selection/reload/service restart, with one active worker and separate finite replay/live budgets. The manual settled-frame/action timeline supports slider/playback and a compact queue; past views disable execution until return to the current frame. Repeated/no-effect observations retain exact versions; gaps are not reconstructed. An explicit current-level HUMAN restart replaces only that save with a fresh SDK initial pose and clears its timeline/action queue; ordinary RESET preserves history. P7 start closes manual and starts fresh at L1. Human actions never enter P7 history or learning. Manual recordings are temporary and removed at close.
+- Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.
+- Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
+- P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.
+- Default verified runs register exactly `ipython`, `p7_workspace`, `p7_execute_plan` through the packaged TypeScript extension. The actor alone publishes research and submits short predictions through the existing Broker. Default runs do not load Playbook, shared cognition, exact prefixes or offline engine search.
+- Semantic `revise` is the low-cost WorldMap path being completed: current evidence and parent revision bind a language model of goals/rules/unknowns. Program `publish` and host-checked reports remain available when computation is useful. A checked report certifies comparison with its referenced observations, not model completeness or new prose.
+- Plans bind exact observation and workspace revision. Mismatch, RESET, level change, pause and unknown environment results stop the remaining steps. Matched plans can retain their model. Unknown actions are never automatically replayed.
+- Kernel recovery restores only explicit source and JSON, then requires current-observation calibration. It does not reconstruct arbitrary process objects or replay action cells.
+- `SolverControl` uses the existing shared run directory for bounded pause/resume acknowledgments. The current bounded cell/action settles before pause; its tool response is held so Pi cannot request another model turn. Resume retains the absolute deadline; stop uses actual process cleanup.
+- Console research events share the action/event timeline, including multiple revisions at one frame. Historical cursors select the matching model, prediction and feedback; the live stop control remains independent of history. Background DOM/HTTP/export validation is the established acceptance method; opening Chrome is not required.
+- Explicit legacy/cognition modes retain `WorldModelStore`, `SemanticCognitionStore`, `CognitionSession`, `GameMechanicsStore` and certificate-gated DSL search. These are not the new default solver or a prerequisite for general Python research.
+- HUMAN play is independent of P7, with one finite SDK worker and per-game/per-level persisted origin/action/observation journals. Selection/restart restores verified poses. Current-level clear/restart replaces only that save; ordinary RESET preserves history. Human actions never enter P7 history or learning.
 
 ## Open Problems
 
-- Native ARC history still records frame/state/level as the authoritative replay evidence; richer metadata needs an adapter that preserves protocol compatibility.
-- Game-wide mechanisms are persisted and advisory, but cross-level confirmation and current-context binding still require live evidence.
-- Counterfactual simulation is implemented and tested synthetically; its effect on real SP80 exploration and action efficiency is unverified.
-- A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
-- Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
-- Sustained L1 feedback-driven solving and improved proficiency from reused cognition remain unverified; transport or unit-test success alone does not establish these capabilities.
-- The live operator still closes the game with the solve run; resumable P7 pause remains unimplemented. Independent manual play uses a separate finite offline subprocess, without broker or learning services. Console cancellation verifies the Mac process group and owned guest unit before reopening. Guest units inherit Orb-resolved proxy variables by name; Mac loopback values stay out of the shared ORBENV contract.
+- Direct planning can solve simple levels without external WorldMap publication; the semantic main-path revision contract is being completed and requires new deployment evidence.
+- Program-model-driven search, multi-level program reuse and cold/warm improvement remain unproven by the current live attempts.
+- Full promotion is non-PASS. Current and historical failures are classified in the implementation review; environment-specific differences must not be silently treated as old failures.
+- The read service is an application boundary under the operator UID, not a host filesystem/SDK sandbox. Enforcing a stronger sandbox is outside this research change.
 
 ## Key Files
 
-### Loaded every session
+- `AGENTS.md`, `MEMORY.md` — repository and collaboration instructions.
+- `docs/status/INDEX.md`, `JOURNAL.md`, `RESUME-NEXT-SESSION.md`, `DECISIONS.md` — discovery, events, active recovery and decisions.
+- `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` — approved overall design and evidence-driven semantic supplement.
+- `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` — canonical implementation worklist.
+- `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md` — pinned reference-system comparison.
+- `docs/reviews/2026-10-05-p7-worldmap-implementation-review.md` — reviews, tests, deployment and actual ability boundaries.
+- `src/asterion/agents/prime/ipython.py`, `ipython_worker.py`, `execution.py`, `session.py` — generic computation/recovery/model admission.
+- `src/asterion/applications/prime/p7/research.py`, `solver.py`, `research_runtime.py`, `research_bridge.py` — WorldMap records, plans, Prime integration and read-only evidence access.
+- `src/asterion/applications/prime/p7/operator.py`, `runtime_binding.py`, `prompt.py`, `tool_registry.py` — selected default/legacy application wiring.
+- `packages/typescript/asterion-prime-extension/` and `src/asterion/applications/prime/resources/ipython-extension.mjs` — typed tool registration and packaged resource.
+- `src/asterion/applications/prime/p7/solver_control.py`, `console_events.py`, `console_snapshot.py`, `console_session.py`, `console_server.py`, `console_assets/` — control handshake, timeline and web console.
+- `src/asterion/applications/prime/p7/console_manual.py`, `console_manual_saves.py`, `console_preferences.py` — independent HUMAN lifecycle, journals and selection metadata.
 
-- `AGENTS.md`
-- `MEMORY.md`
+## Evidence Boundary
 
-### State / handoff
-
-- `docs/status/RESUME-NEXT-SESSION.md` — active-session recovery baton
-- `docs/status/JOURNAL.md` — append-only event log
-- `docs/status/INDEX.md` — status-file index
-- `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md` — current whole-design comparison and candidate solving loop
-- `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` — approved solver/console redesign
-- `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` — active implementation and shared acceptance
-
-### P7 implementation entry points
-
-- `docs/architecture/prime-p7-cognition-and-experience.md` — primary cognition and feedback-loop contract
-
-- `src/asterion/applications/prime/p7/broker.py` — identity, evidence, execution, and learning integration
-- `src/asterion/applications/prime/p7/observation_state.py` — immutable unified observations
-- `src/asterion/applications/prime/p7/world_model.py` — per-run WorldMap facts and conflicts
-- `src/asterion/applications/prime/p7/semantic_cognition.py` — persistent language-level cognition ledger
-- `src/asterion/applications/prime/p7/cognition_session.py` — experiment episode state machine and event audit
-- `src/asterion/applications/prime/p7/game_mechanics.py` — persistent game-wide mechanism memory
-- `src/asterion/applications/prime/p7/hypothesis_simulator.py` — bounded counterfactual branches and subgoals
-- `src/asterion/applications/prime/p7/mechanism_model.py` — declarative transitions and certificates
-- `src/asterion/applications/prime/p7/model_search.py` — certificate-gated bounded search
-- `src/asterion/applications/prime/p7/operator.py` — P7 tools and host wiring
-- `src/asterion/applications/prime/p7/live.py` — live RPC and worker plumbing
-- `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
-- `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
-- `src/asterion/applications/prime/p7/console_server.py` — protected local HTTP service and fixed route surface
-- `src/asterion/applications/prime/p7/console_session.py` — finite autonomous/manual lifecycle and selected-game restoration
-- `src/asterion/applications/prime/p7/console_manual.py` — isolated human game worker, pinned SDK level selection/reset, versioned commands and finite cleanup
-- `src/asterion/applications/prime/p7/console_manual_saves.py` — bounded private HUMAN journals, atomic saves and restore compatibility
-- `src/asterion/applications/prime/p7/console_preferences.py` — validated last game/level metadata only; no game history or P7 state
-- `src/asterion/applications/prime/p7/console_assets/` — packaged Tailwind CSS, canvas playback and Chinese process UI
-- `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — approved P7-first console with replay and independent manual validation; same-game takeover withdrawn
-
-## Execution and evidence boundary
-
-- Input-type priors and exact-game memory are advisory; persistence failures do not block ordinary exploration.
-- Checked actions require current identity, prefix, frame/state/level expectations, and certificate context.
-- Hypothesis simulation, offline optimization, and Playbook records never grant execution authority by themselves.
-- Cognition experiments now keep generic `frame_changed` observations undetermined; semantic claims require a concrete predicted frame, or a constrained level/state predicate. Checked-action experiment mismatches are recoverable in cognition mode.
-- A passing synthetic induction test does not establish real-game capability; live claims require sealed trace, replay verification, and explicit diagnostics.
+- Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
+- Old exact prefixes and human saves cannot be evidence of fresh solving. Read the current recovery baton for run IDs and counts.
+- Full 25-game evaluation needs separate finite authorization. Do not widen a bounded witness to improve the result.
 
 ## Resume Instructions
 
-1. Read this file and `docs/status/RESUME-NEXT-SESSION.md`.
-2. Read the latest `JOURNAL.md` entries and `AGENTS.md`.
-3. Run `git status --short` and `git log --oneline -5`.
-4. Run `make lint`, `make docs-check`, and the focused P7 regression suite before any live game attempt.
-5. If live work resumes, keep offline optimization disabled and report current-level steps separately from replay prefixes and total primitive actions.
+1. Read this snapshot, `RESUME-NEXT-SESSION.md`, recent JOURNAL entries and AGENTS.md.
+2. Check Git status/recent commits and any recorded process/unit before starting another run.
+3. Follow the canonical worklist, preserving active work and known non-PASS boundaries.
+4. After tool changes, synchronize packaged resources and perform extension/Python/promotion checks before the finite installed witness. Keep unrelated full-suite failures explicit.

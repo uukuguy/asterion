@@ -58,10 +58,11 @@
 
 ## D-2026-10-05-01 — Prime research workspace and P7 WorldMap solver
 
-- Status: 🟢 active design, implementation and capability verification pending.
+- Status: 🟢 active; research execution implemented, semantic main-path supplement undergoing deployment verification.
 - Authority: user requested a whole redesign, accepted the Prime/P7 ownership split and said “好的，继续”.
 - Decision: Prime owns persistent computation and explicit artifact recovery. P7 owns immutable environment evidence, game-specific research code, WorldMap, goals and plans. Research code reads evidence and produces candidates; actor submission through the existing operator/Broker is the only real action path.
 - Amendment: general Python partial models, competing hypotheses and searches need no legacy DSL certificate. The retained DSL still follows its certificate checks. Every submitted plan is bound to current evidence and model revision; checked execution stops at mismatch, level change or pause. A computation report cannot establish real success.
+- Semantic supplement from live evidence: direct `revise` updates language WorldMap without requiring a Python export. Plans require a meaningful current revision; mismatch, actual RESET and level change require one evidence-bound update before the next plan. Matched plans reuse their revision; no compulsory computation, full model or per-hypothesis experiment gate.
 - Console: project actual computation, model revision, plan and action events on one versioned timeline; pause waits for the current bounded operation, resume checks current state, hard stop records interruption.
 - Limits: no duplicate runner, domain-neutral framework, no same-UID OS-sandbox claim, no automatic replay of action cells; no full 25-game authorization.
 - Design: `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md`.

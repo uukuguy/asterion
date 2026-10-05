@@ -301,3 +301,22 @@ def test_pause_waits_for_dispatched_action(self):
 ## 完成边界
 
 Task 1–3 的单元验证仅证明各自接口，Task 4 的实际 wheel 运行才证明部署闭环。只有真实环境终局与可检索的模型→计划→反馈证据支持求解能力结论。没有下一关或恢复观察证据时，不把这些能力从代码存在推断为 Verified；最终状态分别记录已验证事实、当前判断、历史归档和未完成边界。
+
+## 实测后补充：直接语义修订与行动主路径
+
+本补充落实 spec 第 9 节，继续使用原三工具和唯一 Broker；不增加 runner、DSL 或强制计算次数。
+
+`p7_workspace` 新增闭合请求：
+
+```text
+{op:'revise', base_revision, worldmap, task, evidence_sequences, correction}
+```
+
+- `worldmap`、`task`、`correction` 复用现有 publish 同形字段与边界；`worldmap.description_zh.trim()` 和 `task.goal.trim()` 必须非空，其余列表可以为空，未知模型可以 probe。`base_revision` 精确匹配当前版本；`evidence_sequences` 升序唯一且包含当前真实 sequence。初始行动同样先 revise，没有单 probe 例外。
+- revise 创建不可变子 revision，只改语言 WorldMap、task、evidence 和 correction；继承 `model`、source/state refs 和 `reports`。继承报告的 checked 只表示原报告与原历史已比较，不认证新文字。revise 不接纳 model/reports/validation 字段，不制造计算事件；公共模型修订仍标 `origin=actor`，复用既有 `model_revision` 事件。
+- context 增加 `needs_revision: bool` 与 `revision_reason: initial|prediction-mismatch|reset-applied|level-advanced|null`。初始为 true/initial。真实 plan 除原身份、start、revision 校验外，需要非空语义版本且 needs_revision=false。matched 计划可复用版本，不要求逐步修订。
+- 实际预测失配、RESET 已执行、level-advanced 后置 needs_revision=true；下段计划前一次满足非空语义及当前证据的 revise 或 publish 可以清除。终局仍结束运行。失败或被拒的修订不清门槛；环境结果 unknown 的行动禁令独立存在，任何修订不能清除。
+- `requires_calibration` 与 needs_revision 分开。kernel 丢失/恢复继续设置校准门槛；只有当前 kernel 实际可用且本次 revise/publish 包含当前证据及非空语义，才能清除校准。同一提交可清两个标记，不新增 KernelExport generation/receipt 协议，不以修改字段冒充进程恢复。
+- 计划继续用现有 `workspace_revision`、`goal`、`assumptions` 连接公开推理依据与真实反馈。actor 对语言含义负责；非空校验不是模型正确性的认证。
+
+实施由 Task 2 扩展 research/solver/prompt/TypeScript schema 与针对测试，Task 4 更新打包资源并集成。针对检查限于：初始拒绝空版本但允许直接 revise 后 probe；matched 复用；失配/RESET/换关分别阻止未修订后缀并接受当前证据修订；stale revision/current evidence 拒绝；source/report 原语义保留；kernel lost/环境 unknown 不可被 revise 洗白；模型事件在同帧历史中保持准确。真实验证继续固定有限预设，记录语言/程序模型如何影响行动，不为满足验收强迫无用 IPython 工作。
