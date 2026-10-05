@@ -3784,3 +3784,9 @@
 - 2026-10-06 — Final002f37a0 full promotion PASS25 commands;21 actual cognition DOM checkpoints pass; DC22 saved4/6 and L5 attempt2 launched.
 - 2026-10-06 — Recorded user-correctedDC22 L5/L6 reference127/159; savedL4 route66 actions, with warm/all-attempt accounting kept separate.
 - 2026-10-06 — PackagedL5 witness emits exact startupcontext after191 restored actions, confirming generic live provenance deployment.
+- 2026-10-06 — 6d3bb27d: Recorded main integration, verified console repairs and liveL5 boundaries for reliable continuation.
+- 2026-10-06 03:01 CST — DC22 actualWIN6/6 at474 actions; post-win RPC overflow left trace unsealed; independent offline recovery underway.
+- 2026-10-06 03:25 CST — VC33 sealed/replayed WIN7/7 at201 actions; originalDC22 WIN6/6 independently replayed into separate sealed recovery; originalmodelFAIL preserved.
+- 2026-10-06 03:25 CST — User requests redoDC22L6/VC33L1 before one25-game official submit; VC33L1 baseline7/actual11 is40.50 per-level points, distinct from cappedgame100.
+- 2026-10-06 — b9b444cf: Sealed independent terminal game evidence while preserving model failure; added provenance checks and generic efficiency guidance.
+- 2026-10-06 03:18 CST — Timestamp correction: preceding03:25 checkpoint entries were recorded before03:18; their run facts remain unchanged.

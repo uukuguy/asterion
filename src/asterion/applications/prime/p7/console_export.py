@@ -53,28 +53,41 @@ def _hash(content: str) -> str:
 
 
 def render_console(snapshot: dict[str, object], *,
-                   live_config: dict[str, object] | None = None) -> str:
+                   live_config: dict[str, object] | None = None,
+                   replay_config: dict[str, object] | None = None) -> str:
     """Embed only the projected state, with hashes for the actual inline assets."""
     assets = files("asterion.applications.prime.p7").joinpath("console_assets")
     template = assets.joinpath("index.html").read_text(encoding="utf-8")
     css = assets.joinpath("tailwind.css").read_text(encoding="utf-8") + "\n" + assets.joinpath("styles.css").read_text(encoding="utf-8")
     js = assets.joinpath("app.js").read_text(encoding="utf-8")
+    if live_config is not None and replay_config is not None:
+        raise ValueError("console configuration ambiguous")
     if live_config is not None:
         if (not isinstance(live_config, dict) or set(live_config) - {"token", "games"}
             or not isinstance(live_config.get("token"), str)
             or not 1 <= len(live_config["token"]) <= 256):
             raise ValueError("console live configuration invalid")
-        games = live_config.get("games", [])
+    if replay_config is not None and (not isinstance(replay_config, dict)
+                                     or set(replay_config) != {"games"}):
+        raise ValueError("console replay configuration invalid")
+    console_config = live_config if live_config is not None else replay_config
+    if console_config is not None:
+        games = console_config.get("games", [])
         if not isinstance(games, list) or any(
-            not isinstance(game, dict) or set(game) != {"game_id", "alias", "win_levels"}
+            not isinstance(game, dict) or not {"game_id", "alias", "win_levels"} <= set(game)
+            or set(game) - {"game_id", "alias", "win_levels", "baseline_actions"}
             or not isinstance(game["game_id"], str) or not game["game_id"]
             or not isinstance(game["alias"], str)
             or type(game["win_levels"]) is not int or game["win_levels"] < 1
+            or ("baseline_actions" in game and (
+                type(game["baseline_actions"]) is not list
+                or len(game["baseline_actions"]) != game["win_levels"]
+                or any(type(count) is not int or count <= 0 for count in game["baseline_actions"])))
             for game in games
         ):
-            raise ValueError("console live catalog invalid")
+            raise ValueError("console catalog invalid")
     data = _inline_json(snapshot)
-    config = _inline_json(live_config)
+    config = _inline_json(console_config)
     connect = "'self'" if live_config is not None else "'none'"
     csp = (f"default-src 'none'; connect-src {connect}; img-src data:; "
            f"style-src '{_hash(css)}'; script-src '{_hash(js)}' '{_hash(data)}' '{_hash(config)}'; "
@@ -150,13 +163,14 @@ def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes) -> No
         write_atomic_file(latest_path, payload)
 
 
-def export_console(run_root: Path, output: Path | None = None) -> Path:
+def export_console(run_root: Path, output: Path | None = None, *,
+                   replay_config: dict[str, object] | None = None) -> Path:
     """Create the portable document; leave game evidence and solver state intact."""
     destination = Path(output) if output is not None else Path(run_root) / "p7-console.html"
     if destination.suffix.lower() != ".html" or destination.is_symlink():
         raise ValueError("console output must be a regular HTML file")
     snapshot = build_console_snapshot(Path(run_root))
-    payload = render_console(snapshot).encode("utf-8")
+    payload = render_console(snapshot, replay_config=replay_config).encode("utf-8")
     # Resolve operator-selected parents (macOS /tmp and /var are aliases),
     # while refusing to replace a symbolic-link output file above.
     write_atomic_file(destination.parent.resolve() / destination.name, payload)

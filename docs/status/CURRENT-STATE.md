@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Console integration and acceptance are complete at their stated boundaries (commit `2fec6fd3`). Failure-experience reuse (`12542476`) and complete-25 official preparation (`c261633c`) are integrated into local `main` through `b074b5f4`; root fast-forwarded and switched after full promotion PASS. Generic live-cognition `ebc4542c` and playback `002f37a0` are committed on `main`;205 related tests, DOM86/one existing skip,21 actual served-HTML checkpoints and final full promotion25 commands PASS. User explicitly authorized sequential local solving across all 25 catalog games under one finite guest at a time, switching after two failed attempts on one blocked level. One complete 25-task official submission is separately authorized after finite DC22/VC33 attempts; pause remaining local games during it. Do not expand this into repeated or open-ended livebench.
+- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under one finite guest at a time. Current requested route redos, named verification and the one complete25-game official submission gate belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
 ## Current Architecture
 
@@ -26,8 +26,10 @@
 ## Open Problems
 
 - Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.
-- Failure-experience reuse now delivers bounded prior evidence and has focused/joint tests plus an inert subprocess reproduction. DC22 sealed/replayed at4/6 with observed negative-hypothesis consumption and retained assumptions; no improvement guarantee or executable program restoration is established. The request-boundary compaction fix is committed; a user-released DC22 continuation is now active from the saved191-action/four-level prefix, pending real end-to-end outcome.
-- Full promotion at `b074b5f4` PASS:25 commands, provider_operations=0, full_dataset=no. The earlier three ANSI fixture failures are corrected. Follow-ups at `002f37a0` passed their final full promotion25 commands, plus205 related Python and DOM86/one existing skip checks. Actual served-HTML cognition acceptance passed21 checkpoints; no Chrome visual claim.
+- Failure-experience reuse delivers bounded historical evidence, inert source code and explicit provenance. Loading/reading historical research is observed; improved success probability is not established.
+- Model runtime settlement and game outcome are separate evidence boundaries. Post-WIN runtime failure keeps its original failure/empty model receipt; a separately audited full SDK replay may create a new sealed game record with immutable source lineage. This does not certify the original native execution.
+- Per-level action efficiency and game aggregate are distinct. Equal human baseline gives100 per-level points, capped at115; game aggregation can offset an inefficient early level. The console must label both scopes explicitly.
+- Current named checks and external browser limits are recorded in the live checkpoint; historical full promotion does not certify later edits.
 - The read service is an application boundary under the operator UID, not a host filesystem/SDK sandbox. Enforcing a stronger sandbox is outside this research change.
 
 ## Key Files
@@ -48,13 +50,13 @@
 ## Evidence Boundary
 
 - Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
-- Fresh HTTP overview at fixed port57515 confirms1/25 games,10/183 levels, local5.904762/100,737 actual actions (257 restored+480 new). SP80 contributes6/6;DC22 sealed4/6. Latest L5 attempt2 is in the recovery checkpoint.
-- Experience reuse can load bounded prior evidence, including negative hypotheses and cells, but does not carry old plans or execution authority. Current active DC22 run and source evidence are in the recovery checkpoint.
-- Local sequential solving is explicitly authorized as described in the live checkpoint. One official 25-task submission is authorized after DC22/VC33 finite attempts; its preflight is ready but no card was opened or submitted. Never infer official performance from local RHAE.
+- Local saved-route results, per-level counts, exact run IDs and currently owned processes are recorded in the live checkpoint, with restoration and new actions separated. Local warm replay is not a fresh full benchmark.
+- Experience reuse does not carry historical plans or execution authority. Original failed attempts and independent replay recoveries remain distinguishable.
+- One official25-game submission is authorized after the requested DC22/VC33 route redos. Never infer official performance from local RHAE; official receipt/result and any source selection limitation must be retained.
 
 ## Resume Instructions
 
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, recent JOURNAL entries and AGENTS.md.
 2. Check Git status/recent commits and any recorded process/unit before starting another run.
 3. Follow the canonical worklist, preserving active work and known non-PASS boundaries.
-4. Continue on `main`, preserve the active DC22 guest, and preserve exact source/campaign/official-submission boundaries. Latest named verification and official-submission gate are in `RESUME-NEXT-SESSION.md`.
+4. Continue on `main`, inspect actual active guest units, and preserve exact source/campaign/official-submission boundaries. Latest named verification and official-submission gate are in `RESUME-NEXT-SESSION.md`.

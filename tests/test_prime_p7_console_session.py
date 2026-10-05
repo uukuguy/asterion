@@ -76,6 +76,22 @@ class ConsoleSessionFixture(unittest.TestCase):
 
 
 class TestPrimeP7ConsoleSession(ConsoleSessionFixture):
+    def test_games_propagate_exact_arc_catalog_baselines_and_copy_results(self):
+        resource = self.root / 'environment_files' / 'vc33' / 'test'
+        resource.mkdir(parents=True)
+        (resource / 'metadata.json').write_text(json.dumps({
+            'game_id': 'vc33-test', 'win_levels': 2, 'baseline_actions': [7, 11]}))
+        (resource / 'vc33.py').write_text('raise AssertionError("must not import game source")')
+        session = self.session(catalog=None)
+        expected = [{'game_id': 'vc33-test', 'alias': 'vc33', 'win_levels': 2,
+                     'baseline_actions': [7, 11]}]
+        self.assertEqual(session.games(), expected)
+        session.games()[0]['baseline_actions'][0] = 99
+        self.assertEqual(session.games(), expected)
+        mismatch = self.session(catalog=({'game_id': 'vc33-test', 'alias': 'vc33', 'win_levels': 1},))
+        self.assertNotIn('baseline_actions', mismatch.games()[0])
+        self.assertNotIn('baseline_actions', self.session().games()[0])
+
     def test_real_process_group_cleans_term_ignoring_child_after_parent_exit(self):
         child_code = (
             "import os,signal,sys,time;from pathlib import Path;"
@@ -509,7 +525,8 @@ class TestConsoleOverviewStarts(ConsoleSessionFixture):
                 def cleanup(unit):
                     order.append('cleanup')
                     return True
-                def export(path):
+                def export(path, *, replay_config):
+                    self.assertEqual(replay_config, {"games": session.games()})
                     order.append('export')
                     if fail:
                         raise ValueError('sk-private-export-failure')

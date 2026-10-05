@@ -80,9 +80,9 @@
   let levels = Array.from({ length: levelCount }, (_, index) => recordedLevels.find((level) => level.level === index + 1) || {
     level: index + 1, status: 'not_run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null,
   });
-  let liveConfig = null;
-  try { liveConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
-  if (!isRecord(liveConfig) || typeof liveConfig.token !== 'string' || !liveConfig.token) liveConfig = null;
+  let consoleConfig = null;
+  try { consoleConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
+  const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.token === 'string' && consoleConfig.token ? consoleConfig : null;
   const state = { selectionReady: false, overview: null, overviewFresh: false, overviewBusy: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
@@ -258,6 +258,17 @@
     write('evidence-warning', warnings.length ? `证据提示 · ${warnings.join('；')}` : '');
   }
 
+  function levelEfficiency(level) {
+    const game = array(consoleConfig?.games).find((entry) => entry.game_id === run.game_id && entry.win_levels === run.win_levels);
+    const baseline = array(game?.baseline_actions)[level.level - 1];
+    const actual = array(level.actions).length;
+    const known = Number.isInteger(baseline) && baseline > 0;
+    const completed = level.status === 'successful';
+    const score = completed && known && actual > 0 ? Math.min(115, 100 * (baseline / actual) ** 2) : null;
+    return {text: `基准 ${known ? baseline : '未知'} / ${actual} 动作 / 关卡效率${completed ? score === null ? '未知' : ` ${score.toFixed(2)} 分` : '待完成'}`,
+      low: score !== null && score < 100};
+  }
+
   function renderRail() {
     const list = $('level-list');
     list.replaceChildren();
@@ -281,6 +292,10 @@
       if (saved) heading.append(node('span', '已保存', 'level-saved-badge'));
       content.append(heading, node('p', label, 'level-item-status'));
       content.append(node('p', `${array(level.actions).length} 动作 · ${array(level.frames).length ? `${array(level.frames).length} 帧` : '无画面'}${level.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
+      if (!manual) {
+        const efficiency = levelEfficiency(level);
+        content.append(node('p', efficiency.text, `level-item-detail${efficiency.low ? ' efficiency-low' : ''}`));
+      }
       button.append(content);
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') { selectLevel(index); seekFrame(0); return; }
@@ -302,6 +317,9 @@
     write('board-kicker', currentLevel().level === null ? 'LEVEL —' : `LEVEL ${String(currentLevel().level).padStart(2, '0')}`);
     write('board-title', run.status === 'manual' ? `关卡 ${currentLevel().level} · 人工试玩` : currentLevel().level === null ? '游戏画面 · 未记录关卡' : `关卡 ${currentLevel().level} · 游戏画面`);
     setStatus($('level-status'), currentLevel().status === 'successful' ? 'completed' : currentLevel().status);
+    const efficiency = levelEfficiency(currentLevel());
+    write('level-efficiency', state.mode === 'manual' ? '人工试玩不计 P7 分数' : efficiency.text);
+    $('level-efficiency').classList.toggle('efficiency-low', state.mode !== 'manual' && efficiency.low);
     renderWorld();
     renderProcess();
     renderReceipt();
@@ -332,16 +350,40 @@
         if (array(previous[y])[x] !== color) context.strokeRect(x * cell + 1, y * cell + 1, cell - 2, cell - 2);
       }));
     }
-    const point = object(action && action.data);
-    if ($('highlight-toggle').checked && Number.isFinite(point.x) && Number.isFinite(point.y) && point.x >= 0 && point.y >= 0 && point.x < columns && point.y < rows) {
-      const x = (point.x + 0.5) * cell;
-      const y = (point.y + 0.5) * cell;
-      context.strokeStyle = '#FFFFFF';
-      context.lineWidth = 3;
-      context.beginPath(); context.arc(x, y, Math.max(cell * 0.8, 5), 0, Math.PI * 2); context.stroke();
-      context.strokeStyle = '#3159A7'; context.lineWidth = 1.5; context.stroke();
-    }
     canvas.setAttribute('aria-label', `${columns} × ${rows} 网格，${frameLabel(frame)}${$('diff-toggle').checked && previous.length ? '，黄色方框为变化格回放标记，不属于游戏画面' : ''}`);
+  }
+
+  function renderClickMarker(canvas, frame, action, status = 'recorded') {
+    let marker = $(canvas.id + '-click-marker');
+    if (!marker) {
+      marker = node('span', undefined, 'click-marker');
+      marker.id = canvas.id + '-click-marker'; marker.setAttribute('aria-hidden', 'true');
+      marker.append(node('span', undefined, 'click-marker-label'));
+      canvas.parentElement.append(marker);
+    }
+    const grid = array(frame?.grid), point = object(action?.data);
+    const visible = action?.name === 'ACTION6' && (status !== 'recorded' || $('highlight-toggle').checked) &&
+      Number.isInteger(point.x) && Number.isInteger(point.y) && point.x >= 0 && point.y >= 0 &&
+      point.y < grid.length && point.x < array(grid[0]).length;
+    marker.hidden = !visible;
+    if (!visible) { marker.dataset.markerKey = ''; return ''; }
+    const bounds = canvas.getBoundingClientRect(), parent = canvas.parentElement.getBoundingClientRect();
+    marker.style.left = `${bounds.left - parent.left + (point.x + 0.5) * bounds.width / grid[0].length}px`;
+    marker.style.top = `${bounds.top - parent.top + (point.y + 0.5) * bounds.height / grid.length}px`;
+    marker.dataset.action = action.name; marker.dataset.status = status;
+    marker.classList.toggle('is-pending', status !== 'recorded');
+    marker.classList.toggle('is-right', point.x >= grid[0].length / 2);
+    marker.classList.toggle('is-bottom', point.y >= grid.length / 2);
+    const label = `${status === 'recorded' ? '已记录点击' : status === 'pending' ? '点击等待确认' : '点击结果未确认'} (${point.x}, ${point.y})`;
+    marker.firstElementChild.textContent = label;
+    const key = `${run.run_id}:${action.id}:${point.x}:${point.y}:${status}`;
+    if (marker.dataset.markerKey !== key) {
+      marker.dataset.markerKey = key;
+      marker.classList.remove('click-marker-pulse'); void marker.offsetWidth;
+      marker.classList.add('click-marker-pulse');
+    }
+    canvas.setAttribute('aria-label', `${canvas.getAttribute('aria-label')}，${label}，点击位置标记不属于游戏画面`);
+    return label;
   }
 
   function renderPalette(visibleFrames) {
@@ -495,14 +537,21 @@
     write('comparison-note', comparisonRequested ? (canCompare ? '对照显示所选动作的起始帧与结算帧' : action ? '前后帧缺链，无法对照' : '选择一个有前后帧的动作以对照') : '');
     const overlayNotes = [];
     if ($('diff-toggle').checked) overlayNotes.push('黄色方框为回放标记，不属于游戏画面');
-    if ($('highlight-toggle').checked) overlayNotes.push('圆圈为点击位置回放标记，不属于游戏画面');
-    write('overlay-note', overlayNotes.join('；'));
-    $('overlay-note').hidden = overlayNotes.length === 0;
     renderPalette(comparisonRequested && canCompare ? [before, after] : [frame]);
     if (frame) draw($('board-canvas'), frame, before, action);
+    const pending = state.mode === 'manual' && manualAtCurrent() &&
+      state.manualPending?.path === '/api/manual/action' && state.manualPending.body.session_id === state.manualView?.session_id
+      ? state.manualPending : null;
+    const markerAction = pending ? {id: pending.body.command_id, name: pending.body.action, data: pending.body.data} : action;
+    const clickLabel = renderClickMarker($('board-canvas'), frame, markerAction, pending ? state.manualBusy ? 'pending' : 'unconfirmed' : 'recorded');
+    if (clickLabel) overlayNotes.push(`${clickLabel} · 圆圈与十字为点击位置标记，不属于游戏画面`);
+    write('overlay-note', overlayNotes.join('；'));
+    $('overlay-note').hidden = overlayNotes.length === 0;
     if (comparisonRequested && canCompare) {
       draw($('before-canvas'), before, null, action);
       draw($('after-canvas'), after, before, action);
+      renderClickMarker($('before-canvas'), before, action);
+      renderClickMarker($('after-canvas'), after, action);
       write('before-label', `动作前 · ${string(before.id)}`);
       write('after-label', `动作后 · ${string(after.id)}`);
     }
@@ -875,7 +924,7 @@
     const target = $('receipt-content'); target.replaceChildren();
     const receipt = currentLevel().receipt;
     if (!receipt) { target.append(node('span', '未发现该关卡的完整权威回执。录制画面不替代最终成功证明。')); return; }
-    const labels = { completed_level_count: '已完成关卡', primitive_action_count: '原子动作', partial_game_score: '局部分数', scope: '回执范围', promotion: '证明边界' };
+    const labels = { completed_level_count: '已完成关卡', primitive_action_count: '原子动作', partial_game_score: '游戏综合分（局部）', scope: '回执范围', promotion: '证明边界' };
     Object.entries(labels).forEach(([key, label]) => {
       if (receipt[key] != null) target.append(node('span', `${label}：${scalarText(receipt[key])}`));
     });
@@ -946,6 +995,7 @@
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
   window.addEventListener('pagehide', pause);
+  window.addEventListener('resize', renderFrame);
   function replaceSnapshot(next, { follow = state.mode === 'live', manualPosition = null } = {}) {
     if (!validSnapshot(next)) throw new Error('invalid-response');
     follow = follow && state.eventSequence === null;

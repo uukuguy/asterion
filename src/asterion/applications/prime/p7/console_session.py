@@ -110,6 +110,19 @@ class ConsoleSession:
                                    if "baseline_actions" in entry}
         self._catalog = tuple({key: entry[key] for key in ("game_id", "alias", "win_levels")}
                               for entry in source_catalog)
+        try:
+            score_metadata = {entry["game_id"]: entry for entry in _read_catalog(self._arc_root)}
+        except (OSError, ValueError):
+            score_metadata = {}
+        score_metadata.update(self._supplied_metadata)
+        self._baseline_actions = {}
+        for game in self._catalog:
+            entry = score_metadata.get(game["game_id"], {})
+            baseline = entry.get("baseline_actions")
+            if (entry.get("win_levels") == game["win_levels"] and entry.get("alias") == game["alias"]
+                and isinstance(baseline, (list, tuple)) and len(baseline) == game["win_levels"]
+                and all(type(count) is int and count > 0 for count in baseline)):
+                self._baseline_actions[game["game_id"]] = list(baseline)
         self._games = {entry["game_id"] for entry in self._catalog}
         self._game_levels = {entry["game_id"]: entry["win_levels"] for entry in self._catalog}
         self._selection = read_selection(self._root, self._game_levels)
@@ -146,7 +159,11 @@ class ConsoleSession:
                       "revision": 0}
 
     def games(self) -> list[dict]:
-        return deepcopy(list(self._catalog))
+        games = deepcopy(list(self._catalog))
+        for game in games:
+            if game["game_id"] in self._baseline_actions:
+                game["baseline_actions"] = list(self._baseline_actions[game["game_id"]])
+        return games
 
     def overview(self) -> dict:
         with self._lock:
@@ -555,7 +572,7 @@ class ConsoleSession:
                     path = self._run_path(run_id)
                     summary = path / "summary.json"
                     if not summary.is_symlink() and summary.is_file():
-                        export_console(path)
+                        export_console(path, replay_config={"games": self.games()})
                         replay_saved = True
                 except Exception:
                     # Viewing output cannot change solver or cleanup outcomes.

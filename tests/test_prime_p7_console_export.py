@@ -16,6 +16,34 @@ from asterion.applications.prime.p7.console_export import export_console, main, 
 
 
 class TestConsoleExport(unittest.TestCase):
+    def test_replay_catalog_embeds_baselines_without_network_authority(self):
+        config = {"games": [{"game_id": "vc33-test", "alias": "vc33", "win_levels": 1,
+                              "baseline_actions": [7]}]}
+        html = render_console({}, replay_config=config)
+        embedded = re.search(r'<script id="console-config" type="application/json">(.*?)</script>', html, re.S)
+        self.assertEqual(json.loads(embedded[1]), config)
+        self.assertIn("connect-src 'none'", html)
+        with tempfile.TemporaryDirectory() as directory:
+            run = self.make_run(Path(directory), '20261006123456')
+            path = export_console(run, replay_config=config)
+            self.assertIn('"baseline_actions":[7]', path.read_text())
+
+    def test_console_catalog_rejects_invalid_baselines_and_replay_authority(self):
+        game = {"game_id": "vc33-test", "alias": "vc33", "win_levels": 1}
+        for baseline in ([True], [0], [-1], [7, 8], "7"):
+            with self.subTest(baseline=baseline):
+                for kind in ('live_config', 'replay_config'):
+                    config = {"games": [{**game, "baseline_actions": baseline}]}
+                    if kind == 'live_config':
+                        config['token'] = 'token'
+                    with self.assertRaises(ValueError):
+                        render_console({}, **{kind: config})
+        with self.assertRaises(ValueError):
+            render_console({}, replay_config={"token": "token", "games": [game]})
+        with self.assertRaises(ValueError):
+            render_console({}, live_config={"token": "token", "games": [game]},
+                           replay_config={"games": [game]})
+
     def test_worldmap_render_uses_cursor_belief_and_labels_saved_planning_fallback(self):
         node = shutil.which('node')
         if node is None:

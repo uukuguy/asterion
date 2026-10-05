@@ -34,12 +34,12 @@ function overviewFixture(config) {
       total_levels: games.reduce((sum, game) => sum + game.win_levels, 0), primitive_actions: 0, restoration_actions: 0, new_solver_actions: 0 }, games };
 }
 
-function launch(snapshot = fixture(), { liveConfig = null, fetch = null, overview = undefined } = {}) {
+function launch(snapshot = fixture(), { liveConfig = null, replayConfig = null, fetch = null, overview = undefined } = {}) {
   const errors = [], requests = [], paints = [], outlines = [], pointers = [], timers = new Map();
   const substitutions = {
     __CONSOLE_CSP__: '', __CONSOLE_CSS__: fs.readFileSync(path.join(assets, 'styles.css'), 'utf8'),
     __CONSOLE_DATA__: JSON.stringify(snapshot).replace(/</g, '\\u003c'),
-    __CONSOLE_CONFIG__: JSON.stringify(liveConfig).replace(/</g, '\\u003c'),
+    __CONSOLE_CONFIG__: JSON.stringify(liveConfig || replayConfig).replace(/</g, '\\u003c'),
     __CONSOLE_JS__: fs.readFileSync(path.join(assets, 'app.js'), 'utf8'),
   };
   const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8')
@@ -62,15 +62,43 @@ function launch(snapshot = fixture(), { liveConfig = null, fetch = null, overvie
   return { dom, $, errors, requests, paints, outlines, pointers, tick: () => [...timers.values()].forEach((fn) => fn()), timers };
 }
 
-test('replay markers are opt-in and the legend follows visible game colors', () => {
-  const snapshot = fixture(); snapshot.levels[0].actions[0].data = { x: 2, y: 3 };
+test('per-level efficiency uses exact baseline actions and remains separate from game aggregate', () => {
+  for (const [actual, baseline, status, expected] of [
+    [11, 7, 'successful', '关卡效率 40.50 分'],
+    [7, 7, 'successful', '关卡效率 100.00 分'],
+    [4, 7, 'successful', '关卡效率 115.00 分'],
+    [11, null, 'successful', '关卡效率未知'],
+    [11, 7, 'incomplete', '关卡效率待完成'],
+  ]) {
+    const snapshot = fixture(), level = snapshot.levels[0];
+    snapshot.run.game_id = 'vc33-test';
+    level.status = status;
+    level.actions = Array.from({length: actual}, (_, index) => ({...level.actions[0], id: `a${index + 1}`}));
+    level.receipt = {partial_game_score: '100.00'};
+    const game = {game_id: 'vc33-test', alias: 'vc33', win_levels: 3};
+    if (baseline !== null) game.baseline_actions = [baseline, 11, 12];
+    const app = launch(snapshot, {replayConfig: {games: [game]}});
+    assert.match(app.$('level-efficiency').textContent, new RegExp(expected));
+    assert.match(app.$('level-1').textContent, new RegExp(expected));
+    assert.match(app.$('level-efficiency').textContent, new RegExp(`基准 ${baseline ?? '未知'} / ${actual} 动作`));
+    assert.match(app.$('receipt-content').textContent, /游戏综合分（局部）：100.00/);
+    assert.equal(app.$('level-efficiency').classList.contains('efficiency-low'), status === 'successful' && baseline === 7 && actual === 11);
+    assert.deepEqual(app.requests, []);
+    assert.deepEqual(app.errors, []);
+    app.dom.window.close();
+  }
+});
+
+test('diff markers are opt-in, clicks default visible, and the legend follows visible game colors', () => {
+  const snapshot = fixture();
+  Object.assign(snapshot.levels[0].actions[0], {name: 'ACTION6', data: { x: 2, y: 3 }});
   const app = launch(snapshot); const { dom, $, outlines, pointers } = app;
   const change = (id, checked) => {
     $(id).checked = checked; $(id).dispatchEvent(new dom.window.Event('change'));
   };
   const legendIds = () => [...$('palette-colors').children].map((item) => item.dataset.color);
   assert.equal($('diff-toggle').checked, false);
-  assert.equal($('highlight-toggle').checked, false);
+  assert.equal($('highlight-toggle').checked, true);
   assert.equal($('overlay-note').hidden, true);
   assert.deepEqual(legendIds(), ['12']);
   assert.match($('palette-colors').textContent, /橙色（12）/);
@@ -78,6 +106,7 @@ test('replay markers are opt-in and the legend follows visible game colors', () 
   $('next-action').click();
   assert.deepEqual(outlines, []);
   assert.deepEqual(pointers, []);
+  assert.equal($('board-canvas-click-marker').hidden, false);
   assert.deepEqual(legendIds(), ['9']);
   assert.match($('palette-colors').textContent, /蓝色（9）/);
   change('diff-toggle', true);
@@ -88,8 +117,9 @@ test('replay markers are opt-in and the legend follows visible game colors', () 
   assert.match($('board-canvas').getAttribute('aria-label'), /不属于游戏画面/);
   change('diff-toggle', false);
   change('highlight-toggle', true);
-  assert.equal(pointers.length, 1);
-  assert.match($('overlay-note').textContent, /圆圈为点击位置回放标记/);
+  assert.deepEqual(pointers, []);
+  assert.equal($('board-canvas-click-marker').hidden, false);
+  assert.match($('overlay-note').textContent, /圆圈与十字为点击位置标记/);
   change('highlight-toggle', false);
   assert.equal($('overlay-note').hidden, true);
   change('compare-toggle', true);
@@ -99,6 +129,33 @@ test('replay markers are opt-in and the legend follows visible game colors', () 
   assert.deepEqual(legendIds(), []);
   assert.deepEqual(app.errors, []);
   dom.window.close();
+});
+
+test('recorded click marker defaults on, follows scaled edge coordinates, and leaves canvas pixels alone', () => {
+  for (const [name, x, y, visible] of [['ACTION6', 0, 63, true], ['ACTION6', 63, 0, true], ['ACTION4', 0, 63, false]]) {
+    const snapshot = fixture();
+    Object.assign(snapshot.levels[0].actions[0], {name, data: {x, y}});
+    const app = launch(snapshot), canvas = app.$('board-canvas');
+    const bounds = () => ({left: 10, top: 20, width: 320, height: 320});
+    canvas.getBoundingClientRect = bounds;
+    canvas.parentElement.getBoundingClientRect = bounds;
+    app.$('next-action').click();
+    const marker = app.$('board-canvas-click-marker');
+    assert.equal(marker.hidden, !visible);
+    assert.deepEqual(app.pointers, []);
+    if (visible) {
+      assert.equal(marker.style.left, `${(x + 0.5) * 5}px`);
+      assert.equal(marker.style.top, `${(y + 0.5) * 5}px`);
+      assert.equal(marker.dataset.action, 'ACTION6');
+      assert.equal(marker.dataset.status, 'recorded');
+      assert.match(app.$('overlay-note').textContent, /已记录点击/);
+      app.$('highlight-toggle').checked = false;
+      app.$('highlight-toggle').dispatchEvent(new app.dom.window.Event('change'));
+      assert.equal(marker.hidden, true);
+    }
+    assert.deepEqual(app.errors, []);
+    app.dom.window.close();
+  }
 });
 
 test('action frame measurements remain separate from unavailable P7 conclusions', () => {
@@ -1402,6 +1459,47 @@ test('manual ACTION6 waits for board click and sends exact grid coordinates; key
   } finally { app.dom.window.close(); }
 });
 
+test('manual click shows its real location immediately as pending and rejection never becomes executed', async () => {
+  for (const rejected of [false, true]) {
+    let release, requestBody;
+    const grid64 = (view) => {
+      view.snapshot.levels[0].frames[0].grid = Array.from({length: 64}, () => Array(64).fill(9));
+      return view;
+    };
+    const manual = grid64(manualView());
+    const app = launch(fixture(), {liveConfig, fetch: async (url, options) => {
+      if (url === '/api/manual/action') {
+        requestBody = JSON.parse(options.body);
+        return new Promise((resolve) => { release = resolve; });
+      }
+      return response(stateWithManual(manual));
+    }});
+    try {
+      await enterManual(app);
+      const canvas = app.$('board-canvas');
+      const bounds = () => ({left: 200, top: 100, width: 400, height: 400});
+      canvas.getBoundingClientRect = bounds; canvas.parentElement.getBoundingClientRect = bounds;
+      app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click();
+      assert.equal(app.$('board-canvas-click-marker').hidden, true);
+      canvas.dispatchEvent(new app.dom.window.MouseEvent('click', {clientX: 201, clientY: 499, bubbles: true}));
+      const marker = app.$('board-canvas-click-marker');
+      assert.deepEqual(requestBody.data, {x: 0, y: 63});
+      assert.equal(marker.hidden, false);
+      assert.equal(marker.dataset.status, 'pending');
+      assert.equal(marker.style.left, '3.125px'); assert.equal(marker.style.top, '396.875px');
+      assert.match(app.$('overlay-note').textContent, /等待确认/);
+      const accepted = grid64(manualView('sp80-test', 9, 1));
+      accepted.last_action = {action: 'ACTION6', data: requestBody.data, observation_version: 1};
+      release(rejected ? response({error: 'action-invalid'}, 409) : response(accepted));
+      await settle();
+      assert.equal(marker.hidden, rejected);
+      if (!rejected) assert.equal(marker.dataset.status, 'recorded');
+      assert.deepEqual(app.pointers, []);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
 test('arming manual ACTION6 exits comparison so the current clickable board is visible', async () => {
   let manual = manualView();
   const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
@@ -1811,6 +1909,27 @@ const catalog25 = { token: 'test-token', games: Array.from({length:25}, (_, i) =
 function replayOverview(ids) { const overview=overviewFixture(liveConfig); overview.games[0].runs=ids.map(run_id=>({run_id,status:'incomplete',completed_levels:0,primitive_actions:0,restoration_actions:0,new_solver_actions:0,verified:false}));return overview; }
 const catalogRun = (run_id, status='incomplete', verified=true) => ({run_id,status,completed_levels:1,primitive_actions:12,restoration_actions:4,new_solver_actions:8,verified});
 const overviewRow = (app, game=0) => app.$('overview-game-list').querySelector(`[data-game-id="game${game}-catalog"]`);
+
+test('live game aggregate 100 does not replace completed level efficiency 40.50', async () => {
+  const snapshot = fixture(), level = snapshot.levels[0];
+  level.status = 'successful';
+  level.actions = Array.from({length: 11}, (_, index) => ({...level.actions[0], id: `a${index + 1}`}));
+  const config = {token: 'test-token', games: [{game_id: 'sp80-test', alias: 'SP80', win_levels: 3,
+                                              baseline_actions: [7, 11, 12]}]};
+  const overview = overviewFixture(config);
+  overview.games[0].score = '100.000000';
+  const app = launch(snapshot, {liveConfig: config, overview, fetch: async () => response(view(snapshot))});
+  try {
+    await settle();
+    assert.equal(app.$('overview-game-list').firstElementChild.children[2].textContent, '100.000000');
+    assert.match(app.$('level-efficiency').textContent, /基准 7 \/ 11 动作 \/ 关卡效率 40.50 分/);
+    assert.match(app.$('level-1').textContent, /关卡效率 40.50 分/);
+    app.$('level-2').click();
+    assert.match(app.$('level-efficiency').textContent, /基准 11 \/ 0 动作 \/ 关卡效率待完成/);
+    assert.equal(app.$('level-efficiency').classList.contains('efficiency-low'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
 
 test('local overview renders each catalog game once and uses actual catalog totals and exact score strings', async () => {
   const overview = overviewFixture(catalog25);
