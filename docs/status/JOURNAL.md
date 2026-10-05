@@ -3741,3 +3741,10 @@
 - 23:08 Started fresh verified SP80 LEVEL6 witness59273dd7,900seconds/cap518,no replay; persistent launch log and metadata recorded.
 - User chose startLevel3; cancelled freshLEVEL6 after2actions,cleanuptrue/guestinactive. Persistent baseline DOM45cursors PASS; exact-run warm continuation under implementation.
 - Exact saved-run continuation implemented/reviewed:117testsPASS,actualsource16actions/2levels/prior/cap437 validated; packaged gate running before realLevel3 start.
+- Added explicit saved-pose continuation so solving starts at Level3 with the verified research tools [aa5b6c84].
+- 23:25 Resume promotion3971tests/13fail4error4skip,non-PASS; installed2PASS. Started aa5b6c84 exactsource Level3→6 warm witness,900s/cap437.
+- Actual saved-pose restoration16actions completed; first modelrevision referencesLevel3/sequence16. Persistent activeconsole exported; warm solving continues.
+- WarmLevel3 passed after14newactions/6successfulcells; actualsequence30 entersLevel4 and WorldMap revised. Final sealing/replay pending.
+- WarmLevel4 passed;sequence67 entersLevel5. Levels3–4 used51newactions/14successfulcells; finalseal/replay pending.
+- Warm L3→6 bounded run ended4/6:98actual actions/67completed-prefix/15cells;sealed/replayed/cleaned;164cursor DOM and selectedHTTP PASS.
+- User directs background solving:after two failed attempts at one level switch games;authorized25-game console/local RHAE integration.

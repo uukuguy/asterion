@@ -210,3 +210,18 @@ WorldMap 是当前可操作的游戏理解，包含以下相互关联的内容�
 接续保留verified研究三工具和新的Prime namespace；仅验证后读取来源WorldMap五个语义字段作为待复核先验，不复制报告认证、模型artifact或checkpoint。新的workspace仍需针对当前证据修订。source run当前为p7-live-20261005221958-e3d73e5ff66547bc9a6ff731，sp80-589a99af/seed0/gpt-6.1-sol/完成2关。任何来源身份、文件hash/symlink、封存/replay或实时恢复失配均拒绝接续，不回退fresh或legacy。
 
 来源16动作恢复与新求解动作分别记录，完整receipt/replay仍含全部真实动作。start_level=3,fresh=false；恢复失败按已实际执行数记录，禁止进入模型求解。目标L6总cap=16+sum(L3..L6人类baseline)=437，既有guest900s固定；这是真实warm接续，不能用作fresh/冷启动成绩。Console默认持久写该run/p7-console.html，控制台和状态记录保存已过关来源、恢复与后续求解的证据。
+
+
+## 11. 已授权的25游戏总览、本地评分和网页续关
+
+用户要求console覆盖25游戏过关与回放，并给出官网样式总统计与本地评分。主页顶部显示本地RHAE保存路线分数、已完成游戏/总游戏、已完成关卡/总关卡及实际动作；游戏目录逐项显示进度、分数、当前状态、已保存路线与各次回放。目录来自已验证metadata，不执行游戏源码；当前本地目录25游戏/183关，不硬编码数量。总览按固定model/seed/catalog划分，默认gpt-6.1-sol/seed0，避免把不同模型的成绩混在一起。
+
+计分复用现有`partial_game_score`，但分母始终是整场游戏全部关卡，不能按某次witness目标计出虚假100分。每关效率为人类baseline/模型动作的平方，上限115%，按关卡序号加权，再以已过关权重限制游戏上限；固定目录全部游戏平均，未尝试计零。官方依据：[ARC RHAE methodology](https://docs.arcprize.org/methodology)。标记为本地最佳保存路线成绩；warm恢复和多次研究择优不伪装官方冷启动成绩。
+
+只有身份/封存hashchain/summary/完成prefix一致且已记录replay确认的结果计入保存成绩。读取缓存只改善展示，不能授予执行权限；网页启动仍交给已有operator重新严格验证与真实恢复。游戏优先较高已过关数、同进度较少路线动作，再稳定run ID；当前失败关的动作不能混入成功prefix，但实际总开销必须保留。实际动作总数包括各次尝试与恢复，另列恢复/新增分账，不用成功路线长度替代整个attempt。
+
+提供轻量`/api/overview`而不在每次轮询构建全部回放或重新运行engine。每游戏可选择回放；活动外部CLI运行只读跟随更新，没有console拥有的pause/stop权限。切换run取消旧跟随；用户查看历史cursor不被轮询强制拉回未来。离线HTML仍自包含并零网络，不编造全目录实时数据。
+
+网页运行入口接受明确game/整场target/exact resume run。默认继续该游戏有用的保存进度；没有可恢复来源时显示从头开始，不悄悄使用旧路线或失败时回退。已全过的游戏不自动再跑。原manual与已拥有session暂停/继续/停止保持。ambient resume/history配置清除，只由本次明确选择设置verified路径；绝不新增runner或工具机制。单次继续沿用900秒有限预设。
+
+后台求解另按用户指令：同一阻塞关卡两次未通过，封存进度并换游戏。已通过关卡不计失败；新关重新计数。只维持一个有界guest，不启动25游戏同时执行或全量benchmark。页面展示25项和统计本身不授权全量复现。

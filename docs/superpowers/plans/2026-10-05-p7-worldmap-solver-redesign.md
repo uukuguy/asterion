@@ -335,3 +335,15 @@ Task 1–3 的单元验证仅证明各自接口，Task 4 的实际 wheel 运行�
 ### 用户纠正：从第三关显式接续
 
 取代前段freshLEVEL6尝试；该run已停止并如实记cancelled。实施限于application exact prefix loader、P7Invocation显式process resume selector、verified路线恢复/先验上下文及分账diagnostics、guest env传递和针对测试。Astra合同见spec§10。生产只由Sol resume_implementation实施，root集成状态与实际运行；测试优先exact source拒绝/restore失败/保持新版工具/预算分账，冻结后Astra复核和相关检查，再一次固定900s从L3继续到L6的实际wheel运行。旧fresh模型不重启，时间/动作上限不扩大。
+
+
+### 后续包：25游戏console总览与网页接续
+
+用户明确追加25游戏目录/过关回放、官网式总统计、本地评分；合同见spec§11。求解后台持续，阻塞关卡两次失败后换题，不另启全量sweep。
+
+- [ ] Python轻量overview：固定model/seed/catalog，封存完整/partial完成prefix核对、整场RHAE、本地固定目录平均、失败与恢复开销保留、显示缓存无执行权。
+- [ ] ConsoleSession/HTTP明确target与exact source，清除ambient resume/history，维持原单次有限preset和session控制。
+- [ ] 网页总统计/25游戏/按game回放，默认续关及明确fresh，外部run只读跟随，历史cursor保留。
+- [ ] 重点边界tests及独立变更review，实际目录/既存封存4关的后台HTTP/DOM验收；无需重复无关fullsuite。
+
+实施：Sol分别拥有后端与assets，root集成design/state；Luna仅后台真实求解与private证据。下一真实尝试由相同已部署solver启动；console代码完成后不改变正在运行的sealed-source和guest。
