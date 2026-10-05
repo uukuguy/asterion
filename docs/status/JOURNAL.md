@@ -3690,3 +3690,7 @@
 - 2026-10-05: 898f7536 稳定人工动作按钮并增加帧历史队列，明确操作确认，方便独立试玩回看。
 - 2026-10-05: 用户要求保存玩过的人工关卡；选择独立 JSON 动作存档与真实 SDK 重放恢复，替代页面内存边界。
 - 2026-10-05: 人工逐关存档验证通过：124 Python、63 DOM、十个 SDK 动作和两次重启；复审通过，promotion 仍未通过。
+- 2026-10-05: Saved independent human levels so switching and restarts resume actual SDK poses and history [a50044d1]
+- 2026-10-05: 用户要求当前人工关卡清空动作重新开始；新增独立 restart，普通 RESET 保留历史。
+- 2026-10-05: 当前关卡清空重开通过 132 Python、72 DOM、真实 SDK 双关清空及其他存档保留；复审通过，promotion 运行中。
+- 2026-10-05: 清空重开最终打包检查：3908 tests，13 failures / 5 errors / 4 skips；针对性验证通过，全仓仍未通过。

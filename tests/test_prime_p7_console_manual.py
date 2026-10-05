@@ -78,6 +78,29 @@ class TestPrimeP7ConsoleManual(unittest.TestCase):
         self.assertEqual(value['snapshot']['run']['completed_level_count'], 1)
         self.assertEqual(value['snapshot']['levels'][0]['level'], 2)
 
+    def test_restart_refuses_overlap_cleanup_failure_and_invalid_requests(self):
+        before = self.console.view()
+        for version in (True, -1, '0', None):
+            with self.subTest(version=version), self.assertRaisesRegex(ManualConsoleError, '^action-invalid$'):
+                self.console.restart(self.session, 'invalid', version)
+        with self.console._gate:
+            with self.assertRaisesRegex(ManualConsoleError, '^session-busy$'):
+                self.console.restart(self.session, 'busy', 0)
+        worker = self.workers[0]
+        with patch.object(worker, 'close', side_effect=RuntimeError('SENTINELSECRET')):
+            with self.assertRaisesRegex(ManualConsoleError, '^manual-cleanup-unconfirmed$'):
+                self.console.restart(self.session, 'restart', 0)
+        self.assertEqual(len(self.workers), 1)
+        self.assertEqual(self.console.view()['history'], before['history'])
+        original = self.console._factory
+        def factory(*args):
+            self.assertTrue(worker.closed, 'old worker must close before starting replacement')
+            return original(*args)
+        self.console._factory = factory
+        restarted = self.console.restart(self.session, 'restart', 0)
+        self.assertEqual(restarted['save_status'], 'disabled')
+        self.assertEqual(restarted['action_count'], 0)
+
     def test_direct_level_starts_with_zero_score_and_tracks_real_level(self):
         opened = self.console.open('test-1', 2, 'level-two', 2)
         self.session = opened['session_id']

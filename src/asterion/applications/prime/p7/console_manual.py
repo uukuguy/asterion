@@ -407,6 +407,72 @@ class ManualConsole:
         finally:
             self._gate.release()
 
+    def restart(self, session_id, command_id, observation_version) -> dict:
+        """Replace only the confirmed current HUMAN slot with a fresh SDK pose."""
+        if not self._gate.acquire(blocking=False):
+            raise ManualConsoleError('session-busy')
+        try:
+            if (type(session_id) is not str or type(observation_version) is not int
+                    or observation_version < 0):
+                raise ManualConsoleError('action-invalid')
+            signature = json.dumps(['restart', session_id, observation_version])
+            prior = self._prior(command_id, signature)
+            if prior is not None:
+                return prior
+            if session_id != self._view['session_id']:
+                raise ManualConsoleError('session-mismatch')
+            if self._closed or self._view['state'] not in {'ready', 'uncertain'}:
+                raise ManualConsoleError('session-busy')
+            if observation_version != self._view['observation_version']:
+                raise ManualConsoleError('observation-stale')
+            game_id, level = self._view['game_id'], self._view['level']
+            wins = self._observation['win_levels']
+            identity = None
+            if self._store is not None:
+                try:
+                    identity = game_identity(self._arc_root, game_id)
+                    if identity != self._record['game_identity']:
+                        raise ManualSaveError('manual-save-invalid')
+                    # Inspect storage boundaries before stopping the live game.
+                    saved_levels = self._store.levels(game_id)
+                except ManualSaveError as error:
+                    raise ManualConsoleError(str(error)) from None
+            else:
+                saved_levels = []
+            # Explicit restart may discard an unsaved pose. It must not retry
+            # the old journal or ever overlap the old and replacement workers.
+            self._close_worker()
+            self._change(state='uncertain')
+            try:
+                self._worker = self._factory(self._arc_root, game_id, level)
+                value = _observation(self._worker.observe(), game_id, wins)
+                if (value['current_level'] != level or value['levels_completed'] != 0
+                        or value['state'] != 'NOT_FINISHED'):
+                    raise ManualConsoleError('manual-unavailable')
+                activate = getattr(self._worker, 'activate', None)
+                if activate is not None and _observation(activate(), game_id, wins) != value:
+                    raise ManualConsoleError('manual-unavailable')
+                record = new_record(value, identity)
+                if self._store is not None:
+                    self._store.write(record, retain_previous=True)
+                    saved_levels = sorted(set(saved_levels) | {level})
+            except Exception as error:
+                self._close_worker()
+                code = str(error) if isinstance(error, ManualSaveError) else 'manual-unavailable'
+                raise ManualConsoleError(code) from None
+            self._observation, self._record = value, record
+            self._created = self._last_action = self._clock()
+            with self._lock:
+                self._change(session_id='manual-' + secrets.token_hex(16), state='ready', level=level,
+                             observation_version=0, action_count=0, episode_id=1, last_action=None,
+                             snapshot=_snapshot(value, 0, 0), restored=False, saved_levels=saved_levels,
+                             save_status='disabled' if self._store is None else 'saved')
+                self._history = [self._history_entry()]
+                self._live_start_count = 0
+            return self._remember(command_id, signature)
+        finally:
+            self._gate.release()
+
     def act(self, session_id, command_id, observation_version, action, data) -> dict:
         if not self._gate.acquire(blocking=False):
             raise ManualConsoleError('session-busy')

@@ -165,7 +165,7 @@ class ConsoleSession:
             with self._lock:
                 if self._closed:
                     raise ConsoleSessionError("session-busy")
-                if method in {"open", "act"}:
+                if method in {"open", "act", "restart"}:
                     # A retry can return an old acknowledgement. Remember the
                     # current controller position, never that cached response.
                     current = self._manual.view()
@@ -195,6 +195,9 @@ class ConsoleSession:
 
     def manual_close(self, session_id: str, command_id: str) -> dict:
         return self._manual_call("close", (session_id, command_id))
+
+    def manual_restart(self, session_id: str, command_id: str, observation_version: int) -> dict:
+        return self._manual_call("restart", (session_id, command_id, observation_version))
 
     def _change(self, **values) -> None:
         if any(self._view.get(key) != value for key, value in values.items()):

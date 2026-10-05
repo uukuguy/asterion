@@ -123,6 +123,26 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
         self.assertEqual(json.loads(body), {'error': 'manual-unavailable'})
         self.assertEqual(self.session_.view()['revision'], 0)
 
+    def test_manual_restart_requires_exact_current_identity_and_write_protections(self):
+        self.write('/api/manual/open', {'game_id': 'test-1', 'command_id': 'open', 'level': 2})
+        request = {'session_id': 'manual-1', 'command_id': 'restart', 'observation_version': 1}
+        self.assertEqual(self.write('/api/manual/restart', request, Origin='http://evil.test')[0], 403)
+        self.assertEqual(self.request('GET', '/api/manual/restart')[0], 404)
+        status, _, body = self.write('/api/manual/restart', request)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['session_id'], 'manual-2')
+        self.assertEqual(self.manual.calls[-1], ('restart', 'manual-1', 'restart', 1))
+        for changes in ({'observation_version': True}, {'observation_version': -1},
+                        {'observation_version': '1'}, {'game_id': 'test-1'}, {'level': 1},
+                        {'action': 'RESET'}, {'data': {}}):
+            with self.subTest(changes=changes):
+                self.assertEqual(self.write('/api/manual/restart', {**request, **changes})[0], 400)
+        state = self.session_.view()
+        self.assertEqual(state['selection'], {'game_id': 'test-1', 'level': 2})
+        self.assertEqual(state['state'], 'idle')
+        self.assertIsNone(state['run_id'])
+        self.assertFalse(self.calls)
+
     def test_manual_direct_level_uses_exact_shape_and_preserves_p7_state(self):
         request = {'game_id': 'test-1', 'command_id': 'level-two', 'level': 2}
         for level in (True, '2', None, 2.0):

@@ -19,7 +19,7 @@
   <main class="app-shell">
     <section id="session-controls" class="session-controls" aria-label="运行与回放">
       <label>工作模式<select id="console-mode"><option value="live">P7 实时运行</option><option value="manual">人工试玩</option><option value="replay">回放记录</option></select></label>
-      <div id="live-controls" class="session-actions" hidden><label>游戏<select id="game-select" aria-label="选择游戏"></select></label><button id="run-start" class="play-button" type="button">启动 P7</button><button id="run-stop" class="text-button stop-button" type="button" disabled>结束运行</button><button id="manual-close" class="text-button" type="button" hidden>结束试玩</button></div>
+      <div id="live-controls" class="session-actions" hidden><label>游戏<select id="game-select" aria-label="选择游戏"></select></label><button id="run-start" class="play-button" type="button">启动 P7</button><button id="run-stop" class="text-button stop-button" type="button" disabled>结束运行</button><button id="manual-close" class="text-button" type="button" hidden>结束试玩</button><button id="manual-restart" class="text-button manual-restart" type="button" title="清空当前关卡的试玩动作和记录，从初始画面重新开始；其他关卡存档保留" hidden disabled>清空并重新开始</button></div>
       <div id="replay-controls" class="session-actions" hidden><label>已录运行<select id="replay-run" aria-label="选择已录运行"></select></label><button id="replay-load" class="text-button" type="button">载入回放</button></div>
       <div class="session-status"><span id="service-status" role="status" aria-live="polite">离线回放 · 无网络请求</span><span id="session-id" class="muted"></span><button id="retry-command" class="event-link" type="button" hidden>重试请求</button></div>
       <span id="manual-save-status" class="manual-save-status muted" role="status" aria-live="polite" hidden></span>

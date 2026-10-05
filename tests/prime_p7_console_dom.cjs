@@ -713,6 +713,221 @@ function savedManualView(game = 'sp80-test', level = 1, session = 'restored-sess
       action_count: view.action_count, level, frame: view.snapshot.levels[0].frames[0], last_action: view.last_action })) };
 }
 
+function restartedManualView(previous, session = 'restarted-session', save_status = 'saved') {
+  const fresh = { ...manualView(previous.game_id, 12, 0, previous.level), session_id: session,
+    saved_levels: previous.saved_levels, save_status, restored: false };
+  fresh.history = [{ observation_version: 0, episode_id: 1, action_count: 0, level: fresh.level,
+    frame: fresh.snapshot.levels[0].frames[0], last_action: null }];
+  return fresh;
+}
+
+test('explicit HUMAN restart clears current history and counters, preserves actual level and other saved levels', async () => {
+  let manual = savedManualView('sp80-test', 2), stale = manual;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/restart') { manual = restartedManualView(manual); return response(manual); }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle();
+    const restart = app.$('manual-restart');
+    assert.ok(restart, 'HUMAN offers an explicit clear and restart button');
+    assert.equal(restart.textContent, '清空并重新开始'); assert.equal(restart.hidden, false); assert.equal(restart.disabled, false);
+    restart.click(); await settle();
+    const command = JSON.parse(app.requests.find((entry) => entry.url === '/api/manual/restart').options.body);
+    assert.deepEqual(Object.keys(command).sort(), ['command_id', 'observation_version', 'session_id']);
+    assert.equal(command.session_id, stale.session_id); assert.equal(command.observation_version, 2);
+    assert.equal(typeof command.command_id, 'string');
+    assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('action-total').textContent, '0');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 0);
+    assert.match(app.$('frame-caption').textContent, /观察 0 · 回合 1/);
+    assert.match(app.$('board-title').textContent, /关卡 2/); assert.match(app.$('level-1').textContent, /已保存/);
+    assert.match(app.$('session-id').textContent, /restarted-session/);
+    assert.doesNotMatch(app.$('manual-save-status').textContent, /已恢复/);
+    manual = stale; app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('action-total').textContent, '0');
+    assert.match(app.$('session-id').textContent, /restarted-session/);
+    assert.equal(app.requests.some((entry) => entry.url === '/api/start' || entry.url === '/api/manual/action'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('HUMAN restart disables historical and busy controls and stays hidden in P7', async () => {
+  let manual = savedManualView(), resolveRestart;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/restart') return new Promise((resolve) => { resolveRestart = resolve; });
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); assert.ok(app.$('manual-restart'));
+    app.$('manual-action-history').querySelector('button').click();
+    assert.equal(app.$('manual-restart').disabled, true); app.$('manual-restart').click();
+    assert.equal(app.requests.some((entry) => entry.url === '/api/manual/restart'), false);
+    app.$('manual-return-current').click(); app.$('manual-restart').click(); await settle();
+    assert.equal(app.$('manual-restart').disabled, true); assert.equal(app.$('console-mode').disabled, true);
+    app.$('manual-restart').click(); assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/restart').length, 1);
+    manual = restartedManualView(manual); resolveRestart(response(manual)); await settle();
+    app.$('console-mode').value = 'live'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+    assert.equal(app.$('manual-restart').hidden, true); app.$('manual-restart').click(); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/restart').length, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('restart transport and failed-save responses keep exact retry identity and clear history only when saved', async () => {
+  let manual = savedManualView(), calls = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/restart') {
+      calls += 1;
+      if (calls === 1) { manual = restartedManualView(manual, 'restarted-session', 'failed'); throw new Error('lost response'); }
+      manual = { ...manual, save_status: calls === 2 ? 'failed' : 'saved' }; return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); assert.ok(app.$('manual-restart')); app.$('manual-restart').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.equal(app.$('retry-command').textContent, '重试原请求');
+    app.tick(); await settle(); assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    app.$('retry-command').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.equal(app.$('retry-command').textContent, '重试原请求');
+    assert.equal(app.$('manual-restart').disabled, true); assert.equal(app.$('level-2').disabled, true);
+    app.$('retry-command').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('retry-command').hidden, true);
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 0);
+    const requests = app.requests.filter((entry) => entry.url === '/api/manual/restart');
+    assert.equal(requests.length, 3); assert.equal(requests[0].options.body, requests[1].options.body); assert.equal(requests[1].options.body, requests[2].options.body);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('uncertain last confirmed HUMAN frame permits restart and rejected startup remains exactly retryable', async () => {
+  let manual = { ...savedManualView(), state: 'uncertain' }, calls = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/restart') {
+      calls += 1;
+      if (calls === 1) return response({ error: 'manual-save-failed' }, 409);
+      manual = restartedManualView(manual); return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); assert.ok(app.$('manual-restart')); assert.equal(app.$('console-mode').value, 'manual');
+    assert.equal(app.$('manual-restart').disabled, false);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    app.$('manual-restart').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.equal(app.$('retry-command').hidden, false);
+    app.$('retry-command').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('manual-restart').disabled, false);
+    const requests = app.requests.filter((entry) => entry.url === '/api/manual/restart');
+    assert.equal(requests[0].options.body, requests[1].options.body);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('restart can replace an unsaved HUMAN pose and retires its earlier save retry', async () => {
+  let manual = savedManualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body);
+      manual = { ...manualView('sp80-test', 9, 3), session_id: manual.session_id, episode_id: 2,
+        saved_levels: [1, 2], save_status: 'failed', restored: true, last_action: { action: body.action, data: body.data, observation_version: 3 } };
+      return response(manual);
+    }
+    if (url === '/api/manual/restart') { manual = restartedManualView(manual); return response(manual); }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    assert.equal(app.$('retry-command').textContent, '重试保存');
+    assert.equal(app.$('manual-restart').disabled, false); app.$('manual-restart').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('retry-command').hidden, true);
+    app.$('retry-command').click(); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('restart recovers the last confirmed frame after an ordinary action rejection becomes uncertain', async () => {
+  let manual = savedManualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/action') { manual = { ...manual, state: 'uncertain' }; return response({ error: 'manual-uncertain' }, 409); }
+    if (url === '/api/manual/restart') { manual = restartedManualView(manual); return response(manual); }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.equal(app.$('manual-restart').disabled, false);
+    app.$('manual-restart').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 1');
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION4"]').disabled, false);
+    assert.equal(app.$('manual-action-status').hidden, true); assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('an old restart retry response cannot replace a later active P7 session', async () => {
+  let manual = savedManualView(), current = stateWithManual(manual), resolveRetry, calls = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/restart') {
+      calls += 1;
+      if (calls === 1) throw new Error('response lost');
+      return new Promise((resolve) => { resolveRetry = resolve; });
+    }
+    return response(url === '/api/runs' ? { runs: [] } : current);
+  } });
+  try {
+    await settle(); app.$('manual-restart').click(); await settle(); app.$('retry-command').click(); await settle();
+    current = view(); app.tick(); await settle();
+    assert.equal(app.$('console-mode').value, 'live'); assert.match(app.$('session-id').textContent, /session-1/);
+    resolveRetry(response(restartedManualView(manual))); await settle();
+    assert.equal(app.$('console-mode').value, 'live'); assert.match(app.$('session-id').textContent, /session-1/);
+    assert.equal(app.$('manual-restart').hidden, true); assert.equal(app.$('retry-command').hidden, true);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('permanent stale or expired restart rejections release controls and refresh the actual session', async () => {
+  for (const code of ['observation-stale', 'session-mismatch', 'session-busy', 'manual-expired']) {
+    let manual = savedManualView();
+    const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+      if (url === '/api/manual/restart') { manual = { ...manual, state: 'expired' }; return response({ error: code }, 409); }
+      return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+    } });
+    try {
+      await settle(); app.$('manual-restart').click(); await settle();
+      assert.equal(app.$('retry-command').hidden, true, code);
+      assert.equal(app.$('console-mode').disabled, false, code); assert.equal(app.$('game-select').disabled, false, code);
+      assert.equal(app.$('manual-close').disabled, false, code); assert.equal(app.$('manual-restart').disabled, true, code);
+      assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('restart rejects reused identity, wrong level and uncleared counters or history', async () => {
+  for (const mutate of [
+    (next, previous) => { next.session_id = previous.session_id; },
+    (next) => { next.level = 2; next.snapshot.levels[0].level = 2; next.history[0].level = 2; },
+    (next) => { next.observation_version = 1; next.action_count = 1; next.history[0].observation_version = 1; next.history[0].action_count = 1; },
+    (next) => { next.episode_id = 2; next.history[0].episode_id = 2; },
+    (next) => { next.restored = true; },
+    (next) => { delete next.history; },
+    (next) => { next.snapshot.run.completed_level_count = 1; },
+    (next) => { next.snapshot.levels[0].frames[0].state = 'WIN'; },
+    (next) => { next.snapshot.levels[0].frames[0].levels_completed = 1; },
+  ]) {
+    let manual = savedManualView();
+    const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+      if (url === '/api/manual/restart') { const next = restartedManualView(manual); mutate(next, manual); return response(next); }
+      return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+    } });
+    try {
+      await settle(); assert.ok(app.$('manual-restart')); app.$('manual-restart').click(); await settle();
+      assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.match(app.$('session-id').textContent, /restored-session/);
+      assert.equal(app.$('retry-command').hidden, false); assert.equal(app.$('manual-restart').disabled, true);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
 test('empty idle manual history permits saved selection to open and hydrate a resumed pose', async () => {
   const selection = { game_id: 'sp80-test', level: 1 };
   const empty = { session_id: null, game_id: null, level: null, state: 'idle', observation_version: 0,

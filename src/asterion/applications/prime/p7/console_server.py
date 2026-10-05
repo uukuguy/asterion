@@ -127,7 +127,8 @@ class _Handler(BaseHTTPRequestHandler):
                 or not secrets.compare_digest(token, self.server.token)):
             self._error(403, "write-rejected")
             return
-        if self.path not in {"/api/start", "/api/stop", "/api/manual/open", "/api/manual/action", "/api/manual/close"}:
+        if self.path not in {"/api/start", "/api/stop", "/api/manual/open", "/api/manual/action",
+                             "/api/manual/close", "/api/manual/restart"}:
             self._error(404, "not-found")
             return
         if (self.headers.get_all("Content-Type") != ["application/json"]
@@ -152,7 +153,9 @@ class _Handler(BaseHTTPRequestHandler):
             value = json.loads(raw, object_pairs_hook=pairs)
             keys = ({"game_id", "command_id"} if self.path in {"/api/start", "/api/manual/open"}
                     else {"session_id", "command_id", "observation_version", "action", "data"}
-                    if self.path == "/api/manual/action" else {"session_id", "command_id"})
+                    if self.path == "/api/manual/action"
+                    else {"session_id", "command_id", "observation_version"}
+                    if self.path == "/api/manual/restart" else {"session_id", "command_id"})
             if type(value) is not dict or (set(value) != keys
                     and not (self.path == "/api/manual/open" and set(value) == keys | {"level"})):
                 raise ValueError
@@ -160,9 +163,10 @@ class _Handler(BaseHTTPRequestHandler):
                 raise ValueError
             if "level" in value and type(value["level"]) is not int:
                 raise ValueError
-            if self.path == "/api/manual/action" and (
-                    type(value["observation_version"]) is not int or value["observation_version"] < 0
-                    or type(value["data"]) is not dict):
+            if "observation_version" in value and (
+                    type(value["observation_version"]) is not int or value["observation_version"] < 0):
+                raise ValueError
+            if self.path == "/api/manual/action" and type(value["data"]) is not dict:
                 raise ValueError
         except (ValueError, OSError, UnicodeError, RecursionError):
             self._error(400, "request-invalid")
@@ -177,6 +181,9 @@ class _Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/manual/action":
                 result = self.server.session.manual_action(value["session_id"], value["command_id"],
                                                          value["observation_version"], value["action"], value["data"])
+            elif self.path == "/api/manual/restart":
+                result = self.server.session.manual_restart(value["session_id"], value["command_id"],
+                                                          value["observation_version"])
             else:
                 result = self.server.session.manual_close(value["session_id"], value["command_id"])
             self._send(200 if self.path.startswith("/api/manual/") else 202, result)

@@ -79,6 +79,7 @@
   if (!isRecord(liveConfig) || typeof liveConfig.token !== 'string' || !liveConfig.token) liveConfig = null;
   const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
+  const retiredManualSessions = new Set();
   const currentLevel = () => levels[state.levelIndex] || emptyLevel;
   const frames = () => array(currentLevel().frames);
   const actions = () => array(currentLevel().actions);
@@ -88,6 +89,9 @@
   const manualPlayable = () => state.mode === 'manual' && run.status === 'manual' && state.manualView?.state === 'ready' &&
     state.manualView.game_id === run.game_id && manualLevel(state.manualView) === currentLevel().level && !state.manualBusy && !state.manualPending && !state.manualError &&
     !state.commandBusy && !state.pendingCommand && !activeSession() && !manualUnsaved() && Boolean(currentFrame()) && manualAtCurrent();
+  const manualRestartable = () => state.mode === 'manual' && run.status === 'manual' && ['ready', 'uncertain'].includes(state.manualView?.state) &&
+    state.manualView.game_id === run.game_id && manualLevel(state.manualView) === currentLevel().level && liveConfig && state.liveView &&
+    !activeSession() && !state.manualBusy && !state.manualPending && !state.commandBusy && !state.pendingCommand && Boolean(currentFrame()) && manualAtCurrent();
   const manualHistoryActive = () => state.mode === 'manual' && run.status === 'manual' && Boolean(state.manualHistory && state.manualView && state.manualHistory.session_id === state.manualView.session_id);
   const manualAtCurrent = () => !manualHistoryActive() || state.manualHistory.index === state.manualHistory.entries.length - 1;
   const timelineCount = () => manualHistoryActive() ? state.manualHistory.entries.length : frames().length;
@@ -899,7 +903,7 @@
   function renderSessionControls() {
     const live = state.mode === 'live', manual = state.mode === 'manual';
     $('console-mode').value = state.mode;
-    $('console-mode').disabled = !liveConfig || Boolean(state.manualPending && state.manualPending.path === '/api/manual/action');
+    $('console-mode').disabled = !liveConfig || Boolean(state.manualPending && ['/api/manual/action', '/api/manual/restart'].includes(state.manualPending.path));
     $('live-controls').hidden = !liveConfig || (!live && !manual);
     $('replay-controls').hidden = !liveConfig || state.mode !== 'replay';
     $('replay-transport').hidden = state.mode !== 'replay' && !manual;
@@ -926,6 +930,8 @@
     $('manual-close').hidden = !manual;
     $('manual-close').textContent = state.manualView?.state === 'ready' && !state.manualError ? '结束试玩' : '重新打开试玩';
     $('manual-close').disabled = !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
+    $('manual-restart').hidden = !manual;
+    $('manual-restart').disabled = !manualRestartable();
     $('retry-command').hidden = (!state.pendingCommand && !(manual && (state.manualPending || state.manualSaveRetry))) || state.commandBusy || state.manualBusy;
     $('retry-command').textContent = !state.pendingCommand && !state.manualPending && state.manualSaveRetry ? '重试保存' : '重试原请求';
     $('replay-load').disabled = !$('replay-run').value;
@@ -983,7 +989,18 @@
         ...(command ? { body: JSON.stringify(command) } : {}),
       });
     } catch (_) { throw new Error('disconnected'); }
-    if (!result.ok) throw new Error('request-rejected');
+    if (!result.ok) {
+      const error = new Error('request-rejected');
+      if (path === '/api/manual/restart') {
+        try {
+          const value = await result.json();
+          // Only public, permanent rejection codes release the exact retry request.
+          error.refreshManual = isRecord(value) && ['session-mismatch', 'observation-stale', 'session-busy', 'manual-expired',
+            'command-invalid', 'command-conflict', 'command-limit', 'game-unavailable', 'level-unavailable'].includes(value.error);
+        } catch (_) { /* An unknown rejection leaves the original request retryable. */ }
+      }
+      throw error;
+    }
     try { return await result.json(); } catch (_) { throw new Error('invalid-response'); }
   }
 
@@ -1080,12 +1097,25 @@
     panel.textContent = text;
   }
 
+  function validManualRestart(view, command) {
+    const record = array(view.snapshot?.levels).find((level) => level.level === command.choice.level);
+    const frame = array(record?.frames)[0];
+    return view.state === 'ready' && view.session_id !== command.body.session_id && !retiredManualSessions.has(view.session_id) &&
+      view.game_id === command.choice.game_id && manualLevel(view) === command.choice.level && view.observation_version === 0 &&
+      view.action_count === 0 && view.episode_id === 1 && view.last_action === null && view.restored === false &&
+      ['saved', 'disabled'].includes(view.save_status) && view.history?.length === 1 && view.history[0].observation_version === 0 &&
+      view.snapshot.run.primitive_action_count === 0 && view.snapshot.run.completed_level_count === 0 && array(record?.frames).length === 1 &&
+      frame.state === 'NOT_FINISHED' && frame.levels_completed === 0 &&
+      !array(view.snapshot.levels).some((level) => array(level.actions).length);
+  }
+
   function renderManualStatus() {
     write('service-status', state.manualBusy ? '正在处理人工试玩操作' : state.manualPending ? '试玩请求结果未确认 · 请重试原请求' : state.manualError ? '人工试玩操作未确认 · 请重新打开试玩' : `${manualLabels[state.manualView?.state] || '正在打开人工试玩'}${manualLevel(state.manualView) ? ` · 关卡 ${manualLevel(state.manualView)}` : ''}`);
   }
 
   function acceptManual(view) {
     if (!validManual(view)) throw new Error('invalid-response');
+    if (retiredManualSessions.has(view.session_id)) return;
     if (state.manualView?.session_id === view.session_id && state.manualView.observation_version > view.observation_version) return;
     const previous = state.manualView;
     const previousHistory = state.manualHistory;
@@ -1108,8 +1138,13 @@
   async function sendManualCommand(command) {
     if (!liveConfig || state.mode !== 'manual' || state.manualBusy || state.commandBusy || state.pendingCommand || activeSession()) return;
     const generation = state.manualGeneration;
+    const restart = command.path === '/api/manual/restart';
+    const originSession = state.manualView?.session_id;
+    let refreshManual = false;
+    if (restart && originSession !== command.body.session_id) return;
     state.manualPollGeneration += 1;
-    const isCurrent = () => generation === state.manualGeneration && state.mode === 'manual' && !activeSession();
+    const isCurrent = () => generation === state.manualGeneration && state.mode === 'manual' && !activeSession() &&
+      (!restart || state.manualView?.session_id === originSession);
     if (command.path === '/api/manual/action' && state.manualFeedback?.command_id !== command.body.command_id) {
       state.manualFeedback = { command_id: command.body.command_id, session_id: command.body.session_id,
         beforeGrid: currentFrame()?.grid, status: 'unconfirmed' };
@@ -1119,7 +1154,8 @@
     try {
       const view = await request(command.path, command.body);
       if (!isCurrent()) return;
-      if (!validManual(view) || (command.path === '/api/manual/open' ? view.game_id !== command.body.game_id || manualLevel(view) !== command.body.level : view.session_id !== command.body.session_id)) throw new Error('invalid-response');
+      if (!validManual(view) || (restart ? !validManualRestart(view, command) :
+        command.path === '/api/manual/open' ? view.game_id !== command.body.game_id || manualLevel(view) !== command.body.level : view.session_id !== command.body.session_id)) throw new Error('invalid-response');
       if (command.path === '/api/manual/action') {
         const acknowledged = view.observation_version === command.body.observation_version + 1 && view.last_action?.observation_version === view.observation_version &&
           view.last_action.action === command.body.action && Object.keys(view.last_action.data).length === Object.keys(command.body.data).length &&
@@ -1132,14 +1168,22 @@
         state.manualFeedback.changed = state.manualFeedback.beforeGrid && afterGrid ? JSON.stringify(state.manualFeedback.beforeGrid) !== JSON.stringify(afterGrid) : null;
       }
       acceptManual(view); state.manualPending = null; state.pointerAction = null;
+      if (restart) { retiredManualSessions.add(originSession); state.manualFeedback = null; }
       state.manualSaveRetry = view.state === 'ready' && view.save_status === 'failed' ? command : null;
       state.manualPollGeneration += 1;
     } catch (error) {
       if (!isCurrent()) return;
-      if (error.message === 'request-rejected') { state.manualPending = null; state.manualError = true; if (state.manualFeedback) state.manualFeedback.status = 'rejected'; }
+      if (error.message === 'request-rejected' && (!restart || error.refreshManual)) {
+        state.manualPending = null; state.manualError = true;
+        if (state.manualFeedback) state.manualFeedback.status = 'rejected';
+        refreshManual = restart;
+      }
       showRequestError(error);
     } finally {
-      if (isCurrent()) { state.manualBusy = false; renderFrame(); renderSessionControls(); renderManualStatus(); }
+      if (generation === state.manualGeneration && state.mode === 'manual' && !activeSession()) {
+        state.manualBusy = false; renderFrame(); renderSessionControls(); renderManualStatus();
+        if (refreshManual) await pollState();
+      }
     }
   }
 
@@ -1186,7 +1230,7 @@
     await pollState();
     if (!state.liveView || activeSession() || state.mode !== 'live' || generation !== state.manualGeneration) return;
     const manual = state.liveView.manual;
-    if (manual?.state === 'ready' && array(liveConfig.games).some((game) => game.game_id === manual.game_id)) {
+    if (['ready', 'uncertain'].includes(manual?.state) && manual.snapshot && array(liveConfig.games).some((game) => game.game_id === manual.game_id)) {
       $('game-select').value = manual.game_id;
       state.mode = 'manual'; acceptManual(manual);
     } else {
@@ -1202,11 +1246,11 @@
     $('console-mode').disabled = !liveConfig;
     renderRunHeader(); selectLevel(state.levelIndex); renderSessionControls();
     $('console-mode').addEventListener('change', () => {
-      if (state.manualPending?.path === '/api/manual/action') { renderSessionControls(); return; }
+      if (['/api/manual/action', '/api/manual/restart'].includes(state.manualPending?.path)) { renderSessionControls(); return; }
       pause(); invalidateManual(); state.manualPending = null; state.mode = $('console-mode').value; state.replayRun = null; state.replayGeneration += 1;
       if (state.mode === 'manual' && activeSession()) { state.mode = 'live'; write('service-status', 'P7 运行期间无法打开人工试玩'); }
       if (state.mode === 'live' && state.liveView) replaceSnapshot(snapshotForView(state.liveView), { follow: true });
-      else if (state.mode === 'manual' && state.manualView?.state === 'ready') { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
+      else if (state.mode === 'manual' && ['ready', 'uncertain'].includes(state.manualView?.state) && state.manualView.snapshot) { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
       else if (state.mode === 'manual') openManual(rememberedManualLevel());
       else renderFrame();
       renderSessionControls();
@@ -1223,6 +1267,12 @@
     });
     $('run-stop').addEventListener('click', () => sendCommand({ path: '/api/stop', body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } }));
     $('retry-command').addEventListener('click', () => { if (state.pendingCommand) sendCommand(state.pendingCommand); else if (state.mode === 'manual' && state.manualPending) sendManualCommand(state.manualPending); else if (state.mode === 'manual' && state.manualSaveRetry) sendManualCommand(state.manualSaveRetry); });
+    $('manual-restart').addEventListener('click', () => {
+      if (!manualRestartable()) return;
+      pause(); state.pointerAction = null;
+      sendManualCommand({ path: '/api/manual/restart', choice: { game_id: state.manualView.game_id, level: manualLevel(state.manualView) },
+        body: { session_id: state.manualView.session_id, command_id: window.crypto.randomUUID(), observation_version: state.manualView.observation_version } });
+    });
     $('manual-close').addEventListener('click', () => {
       if ($('manual-close').disabled) return;
       if (state.manualView?.state === 'ready' && !state.manualError) sendManualCommand({ path: '/api/manual/close', body: { session_id: state.manualView.session_id, command_id: window.crypto.randomUUID() } });

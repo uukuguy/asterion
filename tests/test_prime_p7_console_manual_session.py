@@ -30,6 +30,12 @@ class FakeManualController:
         self.current['action_count'] += 1
         return self.view()
 
+    def restart(self, session_id, command_id, observation_version):
+        self.calls.append(('restart', session_id, command_id, observation_version))
+        self.current.update(session_id='manual-2', observation_version=0, action_count=0,
+                            episode_id=1, last_action=None)
+        return self.view()
+
     def close(self, session_id=None, command_id=None):
         self.calls.append(('close', session_id, command_id))
         self.current['state'] = 'closed'
@@ -41,6 +47,20 @@ class FakeManualController:
 
 
 class TestPrimeP7ConsoleManualSession(ConsoleSessionFixture):
+    def test_manual_restart_uses_controller_and_preserves_p7_and_selected_level(self):
+        manual = FakeManualController()
+        session = self.session(manual_controller=manual)
+        session.manual_open('test-1', 'open', 2)
+        before = session.view()
+        self.assertTrue(callable(getattr(session, 'manual_restart', None)))
+        restarted = session.manual_restart('manual-1', 'restart', 1)
+        self.assertEqual(manual.calls[-1], ('restart', 'manual-1', 'restart', 1))
+        self.assertEqual(restarted['session_id'], 'manual-2')
+        after = session.view()
+        self.assertEqual({key: value for key, value in before.items() if key != 'manual'},
+                         {key: value for key, value in after.items() if key != 'manual'})
+        self.assertFalse(self.calls)
+
     def test_selected_game_and_level_survive_service_restart_without_launching(self):
         manual = FakeManualController()
         session = self.session(manual_controller=manual)

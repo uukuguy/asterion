@@ -156,8 +156,9 @@ class ManualSaveStore:
         except (OSError, ValueError, TypeError, KeyError, IndexError, RecursionError):
             raise ManualSaveError('manual-save-invalid') from None
 
-    def write(self, record: dict) -> None:
-        temporary = None
+    def write(self, record: dict, *, retain_previous: bool = False) -> None:
+        temporary = backup = None
+        replaced = committed = False
         try:
             self._directory(create=True)
             value = record['steps'][-1]['observation'] if record['steps'] else record['initial']
@@ -170,18 +171,41 @@ class ManualSaveStore:
                 output.write(raw)
                 output.flush()
                 os.fsync(output.fileno())
+            if retain_previous and path.exists():
+                backup_fd, backup = tempfile.mkstemp(prefix='.human-', dir=self.root)
+                os.close(backup_fd)
+                os.unlink(backup)
+                os.link(path, backup)
             os.replace(temporary, path)
+            replaced = True
             temporary = None
             directory_fd = os.open(self.root, os.O_RDONLY)
             try:
                 os.fsync(directory_fd)
             finally:
                 os.close(directory_fd)
+            committed = True
         except ManualSaveError:
             raise
         except (OSError, ValueError, TypeError, KeyError):
             raise ManualSaveError('manual-save-failed') from None
         finally:
+            if retain_previous and replaced and not committed:
+                # A restart does not publish a replacement until directory
+                # fsync succeeds. Restore the old inode on any earlier failure.
+                try:
+                    if backup is None:
+                        os.unlink(path)
+                    else:
+                        os.rename(backup, path)
+                        backup = None
+                except OSError:
+                    raise ManualSaveError('manual-save-failed') from None
+            if backup is not None:
+                try:
+                    os.unlink(backup)
+                except OSError:
+                    pass
             if temporary is not None:
                 try:
                     os.unlink(temporary)

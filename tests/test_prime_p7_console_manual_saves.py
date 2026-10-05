@@ -86,6 +86,118 @@ class TestPrimeP7ConsoleManualSaves(unittest.TestCase):
         self.assertEqual(restarted['history'], resumed['history'])
         self.assertEqual(self.workers[-1].calls, [('ACTION1', {})])
 
+    def restart(self, console, command='restart'):
+        self.assertTrue(callable(getattr(console, 'restart', None)), 'restart must be implemented')
+        view = console.view()
+        return console.restart(view['session_id'], command, view['observation_version'])
+
+    def test_restart_clears_only_actual_current_slot_and_preserves_origin_prefix(self):
+        console = self.console()
+        console.open('test-1', 3, 'third', 3)
+        self.action(console, 'third-move')
+        console.open('test-1', 3, 'one')
+        self.action(console, 'one-move')
+        prefix = (self.root / 'test-1--1.json').read_bytes()
+        third = (self.root / 'test-1--3.json').read_bytes()
+        self.action(console, 'advance', 'ACTION2')
+        self.action(console, 'two-move')
+        before = console.view()
+        restarted = self.restart(console)
+        self.assertNotEqual(restarted['session_id'], before['session_id'])
+        self.assertEqual((restarted['level'], restarted['action_count'], restarted['observation_version'],
+                          restarted['episode_id']), (2, 0, 0, 1))
+        self.assertEqual(restarted['snapshot']['run']['completed_level_count'], 0)
+        self.assertEqual(restarted['snapshot']['levels'][0]['frames'][0]['grid'], [[2, 0]])
+        self.assertEqual(len(restarted['history']), 1)
+        self.assertIsNone(restarted['last_action'])
+        self.assertFalse(restarted['restored'])
+        self.assertEqual(restarted['save_status'], 'saved')
+        self.assertEqual((self.root / 'test-1--1.json').read_bytes(), prefix)
+        self.assertEqual((self.root / 'test-1--3.json').read_bytes(), third)
+        record = json.loads((self.root / 'test-1--2.json').read_text())
+        self.assertEqual(record['origin_level'], 2)
+        self.assertEqual(record['steps'], [])
+        self.assertTrue(all(worker.closed for worker in self.workers[:-1]))
+        self.assertFalse(self.workers[-1].closed)
+        console.shutdown()
+        recovered = self.console().open('test-1', 3, 'recover', 2)
+        self.assertEqual(recovered['history'], restarted['history'])
+
+    def test_restart_duplicate_is_read_only_and_stale_requests_fail_before_cleanup(self):
+        console = self.console()
+        console.open('test-1', 3, 'one')
+        self.action(console, 'move')
+        before = console.view()
+        restarted = self.restart(console)
+        self.action(console, 'after')
+        current = console.view()
+        self.assertEqual(console.restart(before['session_id'], 'restart', before['observation_version']), restarted)
+        self.assertEqual(console.view(), current)
+        for session_id, version, code in ((before['session_id'], 1, 'session-mismatch'),
+                                          (current['session_id'], 0, 'observation-stale')):
+            with self.subTest(code=code), self.assertRaisesRegex(ManualConsoleError, '^' + code + '$'):
+                console.restart(session_id, 'stale-' + code, version)
+        self.assertEqual(len(self.workers), 2)
+        self.assertFalse(self.workers[-1].closed)
+
+    def test_restart_startup_failure_retains_durable_history_and_is_recoverable(self):
+        console = self.console()
+        console.open('test-1', 3, 'one')
+        self.action(console, 'move')
+        before = console.view()
+        durable = (self.root / 'test-1--1.json').read_bytes()
+        factory = console._factory
+        def wrong(*args):
+            worker = factory(*args)
+            worker.value['levels_completed'] = 1
+            return worker
+        console._factory = wrong
+        with self.assertRaisesRegex(ManualConsoleError, '^manual-unavailable$'):
+            self.restart(console)
+        self.assertEqual((self.root / 'test-1--1.json').read_bytes(), durable)
+        self.assertEqual(console.view()['session_id'], before['session_id'])
+        self.assertEqual(console.view()['history'], before['history'])
+        self.assertEqual(console.view()['state'], 'uncertain')
+        self.assertTrue(all(worker.closed for worker in self.workers))
+        console._factory = factory
+        self.assertEqual(self.restart(console)['action_count'], 0)
+
+    def test_restart_save_failure_retains_prior_slot_and_does_not_publish_new_session(self):
+        for failure in ('replace', 'directory-fsync'):
+            with self.subTest(failure=failure):
+                console = self.console()
+                console.open('test-1', 3, 'one')
+                self.action(console, 'move')
+                before = console.view()
+                durable = (self.root / 'test-1--1.json').read_bytes()
+                target = 'os.replace' if failure == 'replace' else 'os.fsync'
+                effect = OSError('/private/SENTINELSECRET') if failure == 'replace' else [None, OSError('secret')]
+                with patch(target, side_effect=effect):
+                    with self.assertRaisesRegex(ManualConsoleError, '^manual-save-failed$'):
+                        self.restart(console)
+                self.assertEqual((self.root / 'test-1--1.json').read_bytes(), durable)
+                self.assertEqual(console.view()['session_id'], before['session_id'])
+                self.assertEqual(console.view()['history'], before['history'])
+                self.assertEqual(console.view()['state'], 'uncertain')
+                self.assertIsNone(console._worker)
+                self.assertNotIn('SENTINELSECRET', str(console.view()))
+                self.assertEqual(self.restart(console)['save_status'], 'saved')
+                console.shutdown()
+
+    def test_restart_explicitly_discards_unsaved_pose_and_handles_win(self):
+        console = self.console()
+        console.open('test-1', 3, 'one')
+        with patch('os.replace', side_effect=OSError('secret')):
+            self.assertEqual(self.action(console, 'unsaved')['save_status'], 'failed')
+        self.assertEqual(self.restart(console)['action_count'], 0)
+        self.workers[-1].value.update(state='WIN', levels_completed=3)
+        self.action(console, 'win')
+        won = console.view()
+        self.assertEqual(won['snapshot']['levels'][0]['frames'][0]['available_actions'], [])
+        restarted = self.restart(console, 'restart-win')
+        self.assertEqual(restarted['snapshot']['run']['completed_level_count'], 0)
+        self.assertEqual(restarted['history'][0]['frame']['state'], 'NOT_FINISHED')
+
     def test_advance_keeps_origin_prefix_and_previous_playable_pose_and_reset_score(self):
         console = self.console()
         console.open('test-1', 3, 'open')

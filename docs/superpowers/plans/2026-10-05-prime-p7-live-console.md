@@ -158,3 +158,12 @@ Final follow-up: 112 Python, 54 installed-export DOM and installed real SDK/serv
 Backend ownership: `console_manual.py`, new `console_manual_saves.py`, `console_session.py` and related Python tests. UI ownership: `console_assets/app.js`, `index.html`, `styles.css`, `tests/prime_p7_console_dom.cjs`. Root owns docs and integration; existing HTTP execution routes suffice.
 
 Final evidence: 124 focused Python and 63 installed-export DOM tests PASS; final installed SDK/HTTP ten HUMAN actions, L1/L2/L6 switching and two restarts with RESET/origin/score preservation PASS; served-HTML history hydration PASS. Independent recovery-contract review PASS. Promotion attempt before final review fixes remains non-PASS (3896 tests, 13 failures, 5 errors, 4 skips). No P7 actions or new autonomous capability result.
+
+
+## Follow-up: clear the current HUMAN level and start fresh — 2026-10-05
+
+- [x] Backend owner: `console_manual.py`, `console_manual_saves.py` as needed, `console_session.py`, `console_server.py` and focused Python tests. Add the protected versioned restart command; validate fresh SDK state then replace only its slot, reset identity/history, preserve other saves and exact retry semantics. Test before implementation.
+- [x] UI owner: `console_assets/app.js`, `index.html`, `styles.css` as needed and `tests/prime_p7_console_dom.cjs`. Add compact clear/restart button, handle validated new identity, clear actual history, preserve modes and polling/retry safety. Test disabled and failure paths.
+- [x] Root: integrate, independently review changed behavior, run focused Python/DOM, lint/docs, packaged actual SDK/HTTP restart and final HTML proof. Attempt promotion for packaged assets; keep full-gate limitations honest. Update existing evidence/recovery files and commit.
+
+Final focused and packaged SDK/served-HTML evidence: 132 Python, 72 installed-export DOM PASS; ten actual HUMAN actions and two clear/restart commands preserve other slots, exact retry and new saved history. Independent review PASS. Final packaged promotion non-PASS: 3908 tests, 13 failures, 5 errors, 4 skips. No new P7 result.
