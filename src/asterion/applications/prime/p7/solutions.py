@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from collections.abc import Mapping
 import json
 from pathlib import Path
+import re
 import tempfile
 
 from .broker import ArcRunReceipt, ArcTransition
@@ -147,6 +148,76 @@ def load_best_prefix(
     return min(candidates, key=lambda value: (-value.levels_completed, len(value.transitions), value.source_run_id))
 
 
+def load_exact_prefix(
+    arc_root: Path,
+    runs_root: Path,
+    source_run_id: str,
+    game_id: str,
+    seed: int,
+    *,
+    expected_model_id: str | None = None,
+) -> VerifiedPrefix | None:
+    """Replay only the explicitly selected sealed run; never choose a fallback."""
+
+    try:
+        if (
+            type(source_run_id) is not str
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}", source_run_id) is None
+            or type(seed) is not int
+            or runs_root.is_symlink()
+            or not runs_root.is_dir()
+        ):
+            return None
+        run = runs_root / source_run_id
+        if run.is_symlink() or not run.is_dir():
+            return None
+        return _load_one(
+            arc_root, run, game_id, seed, None, expected_model_id,
+            strict_model=True,
+        )
+    except (OSError, ValueError):
+        return None
+
+
+def load_resume_worldmap(run: Path, prefix: VerifiedPrefix) -> dict | None:
+    """Read one exact revision as prose prior, without restoring its authority."""
+
+    from .research import worldmap
+    from .score import digest
+
+    try:
+        if type(prefix) is not VerifiedPrefix or run.name != prefix.source_run_id:
+            return None
+        scope = {
+            "game_id": prefix.game_id, "seed": prefix.seed,
+            "win_levels": prefix.win_levels, "run_id": prefix.source_run_id,
+            "attempt_id": prefix.source_run_id,
+        }
+        scope_id = digest(scope)[7:]
+        current_path = _private_path(run, "research", scope_id, "current.json")
+        if not current_path.is_file() or current_path.stat().st_size > 1024 * 1024:
+            return None
+        current = json.loads(current_path.read_text(encoding="utf-8"))
+        if type(current) is not dict or set(current) != {"scope", "revision"} or current["scope"] != scope:
+            return None
+        revision = current["revision"]
+        if type(revision) is not str or re.fullmatch(r"sha256:[0-9a-f]{64}", revision) is None:
+            return None
+        revision_path = _private_path(run, "research", scope_id, "revisions", revision[7:] + ".json")
+        if not revision_path.is_file() or revision_path.stat().st_size > 1024 * 1024:
+            return None
+        snapshot = json.loads(revision_path.read_text(encoding="utf-8"))
+        if type(snapshot) is not dict or snapshot.get("scope") != scope or digest(snapshot) != revision:
+            return None
+        return {
+            "source_run_id": prefix.source_run_id, "source_revision": revision,
+            "advisory_only": True, "requires_current_evidence": True,
+            "worldmap": worldmap(snapshot["worldmap"]),
+        }
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def list_verified_prefixes(
     arc_root: Path,
     runs_root: Path,
@@ -187,6 +258,8 @@ def _load_one(
     seed: int,
     max_level: int | None,
     expected_model_id: str | None = None,
+    *,
+    strict_model: bool = False,
 ) -> VerifiedPrefix | None:
     try:
         summary_path = _private_path(run, "summary.json")
@@ -211,6 +284,8 @@ def _load_one(
         if not entries or not _known_trace_identities(
             entries[0].identities, expected_model_id
         ):
+            return None
+        if strict_model and expected_model_id is not None and dict(entries[0].identities) != trace_identities_for(expected_model_id):
             return None
         if any(entry.identities != entries[0].identities for entry in entries):
             return None
@@ -571,5 +646,7 @@ __all__ = (
     "VerifiedPrefix",
     "list_verified_prefixes",
     "load_best_prefix",
+    "load_exact_prefix",
+    "load_resume_worldmap",
     "load_verified_attempt",
 )

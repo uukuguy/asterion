@@ -8,6 +8,7 @@ from dataclasses import dataclass, replace
 import json
 import os
 from pathlib import Path
+import re
 import signal as signal_module
 import socket
 import sys
@@ -120,6 +121,7 @@ UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
 P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
 P7_STRATEGY_ENV = "ASTERION_PRIME_P7_STRATEGY"
 P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
+P7_RESUME_RUN_ID_ENV = "ASTERION_PRIME_P7_RESUME_RUN_ID"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
@@ -3515,6 +3517,7 @@ def build_p7_operator_resources(
             if name not in {
                 "ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE",
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
+                P7_RESUME_RUN_ID_ENV,
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
@@ -3710,6 +3713,41 @@ class P7Invocation:
     extension_path: Path
     game: P7GameSelection
     sweep_mode: bool = False
+    resume_run_id: str | None = None
+
+
+def _resolve_resume_run_id(process_environment: Mapping[str, str]) -> str | None:
+    """Require an explicit run identity rather than ambient saved-state authority."""
+
+    if P7_RESUME_RUN_ID_ENV not in process_environment:
+        return None
+    value = process_environment[P7_RESUME_RUN_ID_ENV]
+    if type(value) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}", value) is None:
+        raise P7OperatorError("P7 resume source is unavailable")
+    return value
+
+
+def _resume_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
+    """Account separately for recovery and every level remaining to the target."""
+
+    from .solutions import VerifiedPrefix
+
+    if (
+        type(game) is not P7GameSelection
+        or type(prefix) is not VerifiedPrefix
+        or prefix.game_id != game.game_id
+        or prefix.seed != game.seed
+        or prefix.win_levels != game.win_levels
+        or not 0 < prefix.levels_completed < game.target_level
+        or not prefix.transitions
+    ):
+        raise P7OperatorError("P7 resume source is unavailable")
+    return replace(
+        game,
+        action_cap_override=len(prefix.transitions) + sum(
+            game.baseline_actions[prefix.levels_completed:game.target_level]
+        ),
+    )
 
 
 def _select_game_for_mode(
@@ -3876,6 +3914,10 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
+        resume_run_id = _resolve_resume_run_id(environment)
+        # An operator file describes configuration; it cannot select a saved
+        # run to execute. The explicit selector stays out of model processes.
+        resolved.pop(P7_RESUME_RUN_ID_ENV, None)
         if P7_STRATEGY_ENV in environment:
             resolved[P7_STRATEGY_ENV] = _resolve_strategy(environment)
         agent_dir = live.resolve_pi_agent_dir(resolved)
@@ -3903,6 +3945,7 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             extension_path=live.extension_path(),
             game=_select_game_for_mode(environment, resolved, arc_root),
             sweep_mode=environment.get("ASTERION_PRIME_P7_RUN_MODE") == "sweep",
+            resume_run_id=resume_run_id,
         )
     except (live.P7LiveSolveError, P7GameSelectionError, P7OperatorError) as error:
         raise P7OperatorError(str(error)) from None
@@ -4150,7 +4193,7 @@ async def run_live(
     :mod:`asterion.applications.prime.p7.live`.
     """
 
-    from .solutions import load_best_prefix, load_verified_attempt
+    from .solutions import load_best_prefix, load_exact_prefix, load_resume_worldmap, load_verified_attempt
 
     variant = _resolve_history_variant(invocation.environment, invocation.game)
     cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
@@ -4160,6 +4203,22 @@ async def run_live(
         raise P7OperatorError("P7 cancellation signal is unavailable")
 
     root = invocation.operator_root
+    resume_prior = None
+    resume_prefix = None
+    if invocation.resume_run_id is not None:
+        source_run_id = _resolve_resume_run_id({P7_RESUME_RUN_ID_ENV: invocation.resume_run_id})
+        if not research_mode or invocation.sweep_mode:
+            raise P7OperatorError("P7 resume source is unavailable")
+        runs_root = root / ".asterion-private" / "prime-p7-live"
+        resume_prefix = load_exact_prefix(
+            invocation.arc_root, runs_root, source_run_id,
+            invocation.game.game_id, invocation.game.seed,
+            expected_model_id=declared_model_selection(invocation.environment).model,
+        )
+        invocation = replace(invocation, game=_resume_game(invocation.game, resume_prefix))
+        resume_prior = load_resume_worldmap(runs_root / source_run_id, resume_prefix)
+        if resume_prior is None:
+            raise P7OperatorError("P7 resume source is unavailable")
     playbook_snapshot: PlaybookSnapshot | None = None
     playbook_loaded = False
     playbook_saved = False
@@ -4179,7 +4238,7 @@ async def run_live(
             prompt += P7_EXPLORE_APPENDIX
     else:
         prompt = _prompt_for_strategy(strategy, tool_registry)
-    prefix = None if research_mode or strategy == "cognition" else load_best_prefix(
+    prefix = resume_prefix if research_mode else None if strategy == "cognition" else load_best_prefix(
         invocation.arc_root,
         root / ".asterion-private" / "prime-p7-live",
         invocation.game.game_id,
@@ -4189,7 +4248,7 @@ async def run_live(
         else None,
         expected_model_id=declared_model_selection(invocation.environment).model,
     )
-    if prefix is not None and len(prefix.transitions) > 0:
+    if not research_mode and prefix is not None and len(prefix.transitions) > 0:
         summary = _summarize_prefix_mechanics(prefix)
         if summary:
             prompt = prompt + "\n\n" + summary
@@ -4337,6 +4396,13 @@ async def run_live(
     # A saved prefix may be loaded as prompt/playbook context for level 1;
     # those transitions were not applied to this broker/runtime.
     diagnostics.update(_prefix_action_diagnostics(prefix, applied=False))
+    if invocation.resume_run_id is not None:
+        diagnostics.update({
+            "execution_mode": "resumed", "fresh": False,
+            "source_run_id": prefix.source_run_id,
+            "start_level": prefix.levels_completed + 1,
+            "restoration_actions": 0, "new_solver_actions": 0,
+        })
     if invocation.sweep_mode:
         diagnostics["sweep"] = {
             "scope": "offline-research",
@@ -4402,6 +4468,15 @@ async def run_live(
                         expectations=parsed_expectations,
                     )
         if research_mode:
+            if resume_prior is not None:
+                prompt += (
+                    "\n\nHistorical WorldMap advisory from the ended source run. "
+                    "Its goal and budget statements describe that past run, including any target_level=2 completion. "
+                    "The authoritative current target_level and remaining budget are in the new research context below. "
+                    "This advisory restores no workspace revision, certification or kernel state. "
+                    "Revalidate it with current evidence and revise the new WorldMap before executing a plan:\n"
+                    + json.dumps(resume_prior, ensure_ascii=False, separators=(",", ":"))
+                )
             prompt += "\n\nInitial research context (authoritative observation):\n" + json.dumps(
                 resources_.host_services["prime.ipython"].current_context(),
                 ensure_ascii=False, separators=(",", ":"),
@@ -4528,6 +4603,10 @@ async def run_live(
                     diagnostics["replayed_prefix_actions"] = _prefix_replayed_count(
                         prefix, prefix_journal_start, len(broker_value.journal)
                     )
+                if invocation.resume_run_id is not None:
+                    restored = diagnostics["replayed_prefix_actions"]
+                    diagnostics["restoration_actions"] = restored
+                    diagnostics["new_solver_actions"] = len(broker_value.journal) - restored
                 try:
                     try:
                         status = broker_value.status()

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated 2026-10-05 after bounded redesign acceptance. This is a recovery checkpoint, not an explicit user-requested handoff.
+Updated 2026-10-05 23:08 CST during authorized SP80 continuation. This is a recovery checkpoint, not an explicit user-requested handoff.
 
 ## 已验证事实
 
@@ -34,6 +34,6 @@ The whole design now supports and demonstrates computation→WorldMap→predicti
 
 ## 下一动作
 
-1. Preserve committed two-level baseline and verify its regenerated persistent console; previous acceptance HTML/report must remain available outside /tmp.
-2. Launch one fresh verified SP80 LEVEL6 witness using the unchanged fixed900s guest preset and human baseline cap518. Model/kernel/WorldMap continue naturally across levels within this new run; no exact route replay. Record actual result even if bounded short of six.
-3. Export next console directly into its run directory, verify background event links, save outcome and commit safe status evidence. Do not expand to full25.
+1. Fresh LEVEL6 run stopped after user correction “可以从第三关开始呀”: `p7-live-20261005230820-7a8e491bcab640e8a11de01b`, guest unit `asterion-p7-b21d809326c04ae7b6da88865d053f87.service`, shell61890. Metadata/log under `.asterion-private/prime-p7-live/launches/<run_id>.json/.log`. Commit59273dd7,verified freshSP80 LEVEL6,900s,baselinecap518,no prefix. Guest inactive/dead/MainPID0; summary reports cancelled/cleanup true,unsealed/unreplayed. Do not restart this cancelled path.
+2. Agent next_levels verified persisted previous console45cursors/0JS/network; onlygenerated_at differs from accepted original. Accepted original HTML is preserved in previous run `console-acceptance/accepted-baseline.html` with original SHA817a7e7b..., regenerated `p7-console.html` SHA435a67f7...passed DOM; persistent reports/scripts in console-acceptance/.
+3. Application exact-run continuation implemented/frozen by Sol and Astra review passed;117 related tests PASS and actualsource loader/prior/budget437 PASS. Promotion session6381 and installed regression active; logs in prime-p7-live/launches/p7-resume-promotion.log and p7-resume-installed-tests.log. No warm model run active yet. Restore source two-level pose toLevel3, expose saved public rules as advisory, recordrestoration16 separately. TargetLevel6 remainingbaseline421 makes totalcap437; fixed900s. Export next console into run directory, verify outcome and cleanup,commit status. Do not expand to full25 or increase preset to rescue outcome.

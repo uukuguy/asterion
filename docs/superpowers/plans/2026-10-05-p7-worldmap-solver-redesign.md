@@ -325,3 +325,13 @@ Task 1–3 的单元验证仅证明各自接口，Task 4 的实际 wheel 运行�
 ### Task 4 最终验收边界（2026-10-05）
 
 已执行规定检查并记录失败，checkbox不表示全仓PASS：最终promotion3965tests/13fail4error4skip；未重复make check。扩展34pass6external skip、实际installed tests、lint/docs通过。修复provider复合工具ID的提交`721c8ae5`真实新局SP80前两关16动作/0RESET/3成功cell/4修订，sealed/replayed/cleaned。实际事件22→23→40→42和49→50→51→77→79串联计算、模型、计划、反例修订与换关；详细命令/证据见implementation review。最终运行没有导出程序源码/检查点，不能据此宣称跨run程序复用、恢复或冷/热改进。25游戏全量评估未运行也未获授权。网页验收遵循用户要求的后台DOM/HTTP/导出方式。
+
+
+### 已授权后续有限验证（2026-10-05）
+
+用户要求已过关保存提交后继续过关，并要求console网页存于持久目录。两关基线已提交保存。下一次只运行SP80 verified fresh LEVEL6，固定900秒/人类baseline动作cap518；同一运行内部自然跨关，保留其Prime namespace与WorldMap。已有封存进程无resume入口，不使用legacy prefix快捷接关。完成或有限预算结束后记录真实最高关、动作/RESET/cells/revisions及停止原因，默认导出到该run/p7-console.html。25游戏范围不扩张。无需改变生产代码或重复全仓门禁。
+
+
+### 用户纠正：从第三关显式接续
+
+取代前段freshLEVEL6尝试；该run已停止并如实记cancelled。实施限于application exact prefix loader、P7Invocation显式process resume selector、verified路线恢复/先验上下文及分账diagnostics、guest env传递和针对测试。Astra合同见spec§10。生产只由Sol resume_implementation实施，root集成状态与实际运行；测试优先exact source拒绝/restore失败/保持新版工具/预算分账，冻结后Astra复核和相关检查，再一次固定900s从L3继续到L6的实际wheel运行。旧fresh模型不重启，时间/动作上限不扩大。

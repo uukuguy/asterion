@@ -35,6 +35,67 @@ class _Engine:
 
 
 class TestP7SavedSolutions(unittest.TestCase):
+    def test_resume_worldmap_is_content_verified_advisory_only(self) -> None:
+        from asterion.applications.prime.p7 import solutions
+        from asterion.applications.prime.p7.score import digest
+
+        loader = getattr(solutions, "load_resume_worldmap", None)
+        self.assertTrue(callable(loader), "verified WorldMap advisory loader is required")
+        with tempfile.TemporaryDirectory() as directory:
+            run = Path(directory) / "p7-selected"
+            scope = {"game_id": "ls20-9607627b", "seed": 0, "win_levels": 7,
+                     "run_id": run.name, "attempt_id": run.name}
+            world = {"description_zh": "移动会改变位置", "state_summary": "完成第一关",
+                     "rules": ["需要重新核验"], "unknowns": [], "competing_hypotheses": []}
+            snapshot = {"scope": scope, "worldmap": world, "model": {"secret": "source-not-imported"},
+                        "reports": ["source-not-imported"], "checkpoint": "source-not-imported"}
+            revision = digest(snapshot)
+            workspace = run / "research" / digest(scope)[7:]
+            (workspace / "revisions").mkdir(parents=True)
+            current = workspace / "current.json"
+            current.write_text(json.dumps({"scope": scope, "revision": revision}))
+            record = workspace / "revisions" / (revision[7:] + ".json")
+            record.write_text(json.dumps(snapshot))
+            prefix = solutions.VerifiedPrefix(scope["game_id"], 0, 7, 1, (), run.name, "sha256:" + "a" * 64)
+            result = loader(run, prefix)
+            self.assertEqual(result, {"source_run_id": run.name, "source_revision": revision,
+                                     "advisory_only": True, "requires_current_evidence": True, "worldmap": world})
+            self.assertNotIn("source-not-imported", json.dumps(result))
+            record.write_text(json.dumps({**snapshot, "worldmap": {**world, "state_summary": "tampered"}}))
+            self.assertIsNone(loader(run, prefix))
+            record.write_text(json.dumps(snapshot))
+            current.write_text(json.dumps({"scope": {**scope, "seed": 1}, "revision": revision}))
+            self.assertIsNone(loader(run, prefix))
+            current.write_text(json.dumps({"scope": scope, "revision": revision}))
+            record.unlink()
+            external = Path(directory) / "external.json"
+            external.write_text(json.dumps(snapshot))
+            record.symlink_to(external)
+            self.assertIsNone(loader(run, prefix))
+
+    def test_exact_prefix_never_falls_back_to_another_run(self) -> None:
+        from asterion.applications.prime.p7 import solutions
+
+        loader = getattr(solutions, "load_exact_prefix", None)
+        self.assertTrue(callable(loader), "exact-run prefix loader is required")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc_root = self._arc_root(root)
+            runs = root / "runs"
+            self._write_run(runs / "p7-selected")
+            self._write_run(runs / "p7-other")
+            with patch("asterion.applications.prime.p7.solutions._fresh_engine", side_effect=lambda *_: _Engine()):
+                prefix = loader(arc_root, runs, "p7-selected", "ls20-9607627b", 0)
+                self.assertEqual(prefix.source_run_id, "p7-selected")
+                self.assertIsNone(loader(arc_root, runs, "p7-missing", "ls20-9607627b", 0))
+                for run_id in ("", "../p7-selected", "/p7-selected", "p7-selected/", ".", ".."):
+                    with self.subTest(run_id=run_id):
+                        self.assertIsNone(loader(arc_root, runs, run_id, "ls20-9607627b", 0))
+                (runs / "p7-link").symlink_to(runs / "p7-selected", target_is_directory=True)
+                self.assertIsNone(loader(arc_root, runs, "p7-link", "ls20-9607627b", 0))
+                self.assertIsNone(loader(arc_root, runs, "p7-selected", "tu93-0768757b", 0))
+                self.assertIsNone(loader(arc_root, runs, "p7-selected", "ls20-9607627b", 1))
+
     def test_rejects_run_without_completed_cleanup(self) -> None:
         from asterion.applications.prime.p7.solutions import load_best_prefix
 

@@ -3737,3 +3737,7 @@
 - Final real-console45cursors/three calculation pairs/HTTP replay PASS; documented bounded solving evidence and unresolved reuse,listing latency,promotion.
 - Recorded deployed computation/two-level evidence and remaining boundaries so future sessions resume accurately [fa564c92].
 - User authorized later SP80 levels; persisted two-level console/evidence in its run directory, regenerated projection verification pending.
+- Preserved solved SP80 baseline and durable console paths to support bounded later-level research [59273dd7].
+- 23:08 Started fresh verified SP80 LEVEL6 witness59273dd7,900seconds/cap518,no replay; persistent launch log and metadata recorded.
+- User chose startLevel3; cancelled freshLEVEL6 after2actions,cleanuptrue/guestinactive. Persistent baseline DOM45cursors PASS; exact-run warm continuation under implementation.
+- Exact saved-run continuation implemented/reviewed:117testsPASS,actualsource16actions/2levels/prior/cap437 validated; packaged gate running before realLevel3 start.

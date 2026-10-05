@@ -42,6 +42,35 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
 
 
 class TestPrimeP7LiveCommand(unittest.TestCase):
+    def test_explicit_resume_selector_is_separate_from_provider_environment(self) -> None:
+        from asterion.applications.prime.p7 import operator
+
+        resolver = getattr(operator, "_resolve_resume_run_id", None)
+        self.assertTrue(callable(resolver), "explicit resume selector is required")
+        key = "ASTERION_PRIME_P7_RESUME_RUN_ID"
+        self.assertIsNone(resolver({}))
+        self.assertEqual(resolver({key: "p7-live-selected"}), "p7-live-selected")
+        for value in ("", "../private", "/private", "p7/run", ".", "..", "secret\npath"):
+            with self.subTest(value=value), self.assertRaisesRegex(operator.P7OperatorError, "^P7 resume source is unavailable$"):
+                resolver({key: value})
+
+    def test_resume_budget_covers_each_remaining_level(self) -> None:
+        from asterion.applications.prime.p7 import operator
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+
+        binder = getattr(operator, "_resume_game", None)
+        self.assertTrue(callable(binder), "resume budget binding is required")
+        game = P7GameSelection("sp80-589a99af", 0, 6, (6, 10, 51, 73, 93, 204), 6)
+        prefix = VerifiedPrefix(game.game_id, 0, 6, 2, (object(),) * 16, "p7-live-selected", "sha256:" + "a" * 64)
+        resumed = binder(game, prefix)
+        self.assertEqual(resumed.action_cap, 437)
+        self.assertEqual(game.action_cap, 1000)
+        for invalid in (None, SimpleNamespace(**{**{name: getattr(prefix, name) for name in prefix.__slots__}, "seed": 1}),
+                        VerifiedPrefix(game.game_id, 0, 6, 6, (), prefix.source_run_id, prefix.replay_sha256)):
+            with self.subTest(prefix=invalid), self.assertRaisesRegex(operator.P7OperatorError, "^P7 resume source is unavailable$"):
+                binder(game, invalid)
+
     def test_console_logging_resets_terminal_column_on_newlines(self) -> None:
         from asterion.applications.prime.p7 import operator
 

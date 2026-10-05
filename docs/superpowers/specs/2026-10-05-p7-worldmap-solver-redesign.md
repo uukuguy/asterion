@@ -201,3 +201,12 @@ WorldMap 是当前可操作的游戏理解，包含以下相互关联的内容�
 语义修订门槛与 kernel 恢复校准分别记录。同一次有效修订可以满足两者，但必须是实际可用的 kernel，且修订不能使真实 `kernel.lost` 或环境结果 unknown 变为正常。环境结果 unknown 仍禁止再派行动；恢复计算工作区不能恢复未知的环境动作。
 
 因果关系沿用计划的 `workspace_revision`、`goal`、`assumptions` 和版本的证据、修正及真实反馈，不增加另一套 basis 标识或调度循环。验收观察认识怎样影响计划、遇到反例怎样修订及跨关怎样复用；修订次数和 IPython 调用次数均不是求解能力证明。
+
+
+## 10. 已授权的显式保存进度接续
+
+用户在已过两关后明确要求从第三关继续。默认fresh行为保持；接续仅接受本次进程显式声明的精确source run，不由历史配置自动启动或择优选择。应用调用exact prefix loader复用封存/summary/身份/trace及真实replay验证，再由既有Broker逐条恢复保存动作，完成后模型直接看到当前第三关。无新runner、工具、协议或SDK内部level跳转。
+
+接续保留verified研究三工具和新的Prime namespace；仅验证后读取来源WorldMap五个语义字段作为待复核先验，不复制报告认证、模型artifact或checkpoint。新的workspace仍需针对当前证据修订。source run当前为p7-live-20261005221958-e3d73e5ff66547bc9a6ff731，sp80-589a99af/seed0/gpt-6.1-sol/完成2关。任何来源身份、文件hash/symlink、封存/replay或实时恢复失配均拒绝接续，不回退fresh或legacy。
+
+来源16动作恢复与新求解动作分别记录，完整receipt/replay仍含全部真实动作。start_level=3,fresh=false；恢复失败按已实际执行数记录，禁止进入模型求解。目标L6总cap=16+sum(L3..L6人类baseline)=437，既有guest900s固定；这是真实warm接续，不能用作fresh/冷启动成绩。Console默认持久写该run/p7-console.html，控制台和状态记录保存已过关来源、恢复与后续求解的证据。

@@ -31,6 +31,7 @@
 ### feedback — P7 cognition and visible play
 
 - The user wants P7 itself to play, explain game hypotheses, and print every cognition change in runtime logs. Assistant summaries do not replace runtime output.
+- When asked to continue after verified levels, resume from the saved next-level pose rather than make the model solve earlier levels again. Record warm restoration separately from new solving; preserve solved evidence before continuing.
 - Judge learning by accumulated game understanding and how it informs play. Do not equate experience with an old solution route or require complete cognition before attempting a level.
 - Review P7 solving at the whole-design level against Tycho/Retrodict actual code. The user prioritizes WorldMap-driven reasoning and Prime's IPython, requires the web console to support the solving process, and authorizes a bold redesign without preserving current implementation shape. Do not assume PNG is necessary or respond with disconnected patches. Proposal: `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md`; source review: `docs/reviews/2026-10-05-p7-worldmap-solving-design-review.md`.
 - Use the existing Pi Codex subscription with `gpt-6.1-sol`; do not switch to OpenRouter. Delegate ordinary programming to Sol high and repetitive checks to Luna; independently review changes.
