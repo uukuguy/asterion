@@ -58,7 +58,7 @@
 - Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
 - Local saved-route results, per-level counts, exact run IDs and currently owned processes are recorded in the live checkpoint, with restoration and new actions separated. Local warm replay is not a fresh full benchmark.
 - Experience reuse does not carry historical plans or execution authority. Original failed attempts and independent replay recoveries remain distinguishable.
-- The first official25-game submission is complete. On2026-10-06 the user explicitly authorized one additional complete25-game saved-route submission; DC22 L6 already passed and must not be re-solved merely to refresh the console. Never infer official performance from local RHAE; official receipt/result and any source selection limitation must be retained.
+- The first official25-game submission is complete. On2026-10-06 the user explicitly authorized one additional complete25-game saved-route submission, now closed-confirmed29.834632 (7full/54levels/1883actions; card749fd876-37e4-42aa-9dc8-fdb9511b0f4a); no third card is authorized; DC22 L6 already passed and must not be re-solved merely to refresh the console. Never infer official performance from local RHAE; official receipt/result and any source selection limitation must be retained.
 
 ## Resume Instructions
 

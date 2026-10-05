@@ -3835,3 +3835,6 @@
 - 07:47 9afd2206: Authenticate animation replay and cognition lineage to retain verified wins without modifying original native evidence.
 - 07:49 7a2eb5cc: Compact overview actions and scores; default idle viewing to first catalog game while preserving explicit manual choices.
 - 07:50 Formal LF520-model recovery passed64 actions [8,56], cognition/provenance and immutable original hashes; authorized two-slot L3 resumption.
+- 07:52 8e7f0164: Record verified LF52 recovery, active two-game research and in-progress single official card for reliable continuation.
+- 07:53 Second authorized official25 card749fd876 closed-confirmed29.834632:25played/0skipped,7full,54levels,1883actions; exact submission-start local score matches.
+- 07:53 Packaged promotion fullPASS25commands/provider0; actual25row console/defaultAR25/compactscore and real portable AR25 export verified.
