@@ -2331,3 +2331,33 @@ test('game selection automatically loads the current source and unplayed games o
     assert.equal(app.requests.some(request=>request.url==='/api/start'),false);assert.deepEqual(app.errors,[]);
   }finally{app.dom.window.close();}
 });
+
+test('live level completion refreshes both games overview immediately without moving pinned playback', async () => {
+  let overview = overviewFixture(catalog25);
+  overview.guest_busy = true; overview.start_ready = false; overview.start_block_reason = 'session-busy';
+  overview.games[0] = {...overview.games[0], runs:[{...catalogRun('live-first','unverified',false),recording:true}]};
+  let replay = {...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'live-first',sealed_trace:false}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview:()=>overview,fetch:async url =>
+    url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
+  try {
+    await settle(); overviewRow(app).querySelector('[data-overview-watch]').click(); await settle();
+    app.$('frame-slider').value='0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    app.$('play-toggle').click();
+    const timer=[...app.timers.values()].find(fn=>fn.intervalMs<1000); timer();
+    const count=app.requests.filter(request=>request.url==='/api/overview').length;
+    overview={...overview,totals:{...overview.totals,display_completed_levels:2,display_completed_games:0},games:overview.games.map((game,index)=>
+      index<2?{...game,display_completed_levels:1,progress_pending:true,runs:index===0?[{...game.runs[0],observed_completed_levels:1}]:[{...catalogRun('live-second','unverified',false),recording:true,observed_completed_levels:1}]}:
+      {...game,display_completed_levels:0,progress_pending:false})};
+    replay={...replay,run:{...replay.run,completed_level_count:1},levels:replay.levels.map((level,index)=>index===0?{...level,status:'successful'}:level)};
+    [...app.timers.values()].find(fn=>fn.intervalMs===2000)(); await settle();
+    assert.equal(app.requests.filter(request=>request.url==='/api/overview').length,count+1);
+    assert.equal(app.$('overview-levels').textContent,'2 / 350');
+    assert.match(overviewRow(app).querySelector('.overview-progress').textContent,/1 \/ 2/);
+    assert.match(overviewRow(app,1).querySelector('.overview-progress').textContent,/1 \/ 3/);
+    assert.match(overviewRow(app).textContent,/待封存/);
+    assert.equal(app.$('frame-counter').textContent,'2 / 3');
+    assert.equal(app.$('play-toggle').textContent,'暂停');
+    assert.equal([...app.timers.values()].includes(timer),true);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});

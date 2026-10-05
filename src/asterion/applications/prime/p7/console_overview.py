@@ -70,16 +70,18 @@ def _fingerprint(run: Path) -> tuple:
     return tuple(values)
 
 
-def _recorded_actions(path: Path) -> int:
-    """Count only an intact unsealed trace prefix; never grant progress."""
+def _recorded_entries(path: Path, *, strict: bool = False) -> tuple:
+    """Read an intact journal prefix; strict mode rejects any corrupt complete row."""
     if not _safe(path) or path.stat().st_size > _MAX_FILE:
-        return 0
+        return ()
     entries = []
     previous = None
     with path.open(encoding='utf-8') as handle:
         for _ in range(16384):
             raw = handle.readline(65537)
-            if not raw or not raw.endswith('\n') or len(raw) > 65536:
+            if len(raw) > 65536:
+                return () if strict else tuple(entries)
+            if not raw or not raw.endswith('\n'):
                 break
             try:
                 row = json.loads(raw)
@@ -89,14 +91,65 @@ def _recorded_actions(path: Path) -> int:
                         or row['previous_sha256'] != previous
                         or _entry_digest(row['sequence'], row['kind'], row['identities'],
                                          row['payload'], previous) != row['sha256']):
-                    break
+                    return () if strict else tuple(entries)
                 entries.append(PrimeTraceEntry(**row))
                 previous = row['sha256']
             except (TypeError, ValueError, KeyError, PrimeTraceError):
-                break
+                return () if strict else tuple(entries)
+        else:
+            return () if strict else tuple(entries)
+    return tuple(entries)
+
+
+def _recorded_actions(path: Path) -> int:
     try:
-        return len(_transitions(tuple(entries)))
+        return len(_transitions(_recorded_entries(path)))
     except (TypeError, ValueError):
+        return 0
+
+
+def _observed_completed_levels(run: Path, game: dict) -> int:
+    """Provisional game progress, never a saved route, score or resume grant."""
+    try:
+        entries = _recorded_entries(run / 'trace' / 'prime-trace.jsonl', strict=True)
+        contexts = [entry for entry in entries if entry.kind == 'arc.run.context']
+        if len(contexts) != 1 or not entries or contexts[0] != entries[0]:
+            return 0
+        context = contexts[0].payload
+        if (set(context) != {'run_id', 'game_id', 'model_id', 'seed', 'win_levels',
+                             'target_level', 'restoration_actions', 'source_run_id'}
+                or context['run_id'] != run.name or context['game_id'] != game['game_id']
+                or context['model_id'] != MODEL_ID or type(context['seed']) is not int
+                or context['seed'] != SEED or context['win_levels'] != game['win_levels']
+                or type(context['win_levels']) is not int
+                or type(context['target_level']) is not int
+                or not 1 <= context['target_level'] <= game['win_levels']
+                or type(context['restoration_actions']) is not int or context['restoration_actions'] < 0
+                or not (context['source_run_id'] is None or
+                        type(context['source_run_id']) is str and _ID.fullmatch(context['source_run_id']))):
+            return 0
+        transitions = _transitions(entries)
+        previous_hash, previous_level, completed = None, 0, 0
+        for item in transitions:
+            if (type(item.sequence) is not int or type(item.levels_completed) is not int
+                    or not 0 <= item.levels_completed <= game['win_levels']
+                    or item.levels_completed > previous_level + 1
+                    or item.levels_completed < previous_level and item.action != 'RESET'
+                    or item.action not in {'RESET', *(f'ACTION{i}' for i in range(1, 8))}
+                    or any(type(value) is not str or not re.fullmatch(r'sha256:[0-9a-f]{64}', value)
+                           for value in (item.before_sha256, item.after_sha256))
+                    or previous_hash is not None and item.before_sha256 != previous_hash):
+                return 0
+            if item.action == 'ACTION6':
+                if (dict(item.data).keys() != {'x', 'y'} or
+                        any(type(value) is not int or not 0 <= value <= 63 for _, value in item.data)):
+                    return 0
+            elif item.data:
+                return 0
+            previous_hash, previous_level = item.after_sha256, item.levels_completed
+            completed = max(completed, item.levels_completed)
+        return completed
+    except (OSError, ValueError, TypeError, KeyError):
         return 0
 
 
@@ -136,7 +189,8 @@ class ConsoleOverview:
                       'completed_levels': 0, 'primitive_actions': actions,
                       'restoration_actions': restored, 'new_solver_actions': actions - restored,
                       'verified': False, 'sealed_trace': False, 'route_actions': 0,
-                      'score': '0.000000', 'resume_eligible': False}
+                      'score': '0.000000', 'resume_eligible': False,
+                      'observed_completed_levels': _observed_completed_levels(run, game)}
             if diagnostics.get('recovery_kind') == 'terminal-game-win':
                 result.update(recovery_kind='terminal-game-win',
                               recovered_from=diagnostics['recovered_from'],
@@ -203,7 +257,8 @@ class ConsoleOverview:
                     'primitive_actions': actions, 'restoration_actions': 0, 'new_solver_actions': 0,
                     'counts_pending': True,
                     'verified': False, 'sealed_trace': False, 'route_actions': 0,
-                    'score': '0.000000', 'resume_eligible': False}
+                    'score': '0.000000', 'resume_eligible': False,
+                    'observed_completed_levels': _observed_completed_levels(run, games[scopes[0]['game_id']])}
         except (OSError, ValueError, TypeError, KeyError):
             return None
 
@@ -310,8 +365,11 @@ class ConsoleOverview:
                     updated = 0
                 return updated, item['run_id']
             latest = max(attempts, key=display_recency)['run_id'] if attempts else None
+            saved_levels = best['completed_levels'] if best else 0
+            displayed_levels = max(saved_levels, *(item.get('observed_completed_levels', 0) for item in attempts), 0)
             output.append({'game_id': game['game_id'], 'alias': game['alias'], 'win_levels': game['win_levels'],
-                           'completed_levels': best['completed_levels'] if best else 0,
+                           'completed_levels': saved_levels, 'display_completed_levels': displayed_levels,
+                           'progress_pending': displayed_levels > saved_levels,
                            'score': best['score'] if best else '0.000000',
                            'status': 'running' if active else best['status'] if best else 'unverified' if attempts else 'unplayed',
                            'best_run_id': best['run_id'] if best else None,
@@ -325,6 +383,8 @@ class ConsoleOverview:
                   'completed_games': sum(game['completed_levels'] == game['win_levels'] for game in output),
                   'total_games': len(output), 'completed_levels': sum(game['completed_levels'] for game in output),
                   'total_levels': sum(game['win_levels'] for game in output),
+                  'display_completed_levels': sum(game['display_completed_levels'] for game in output),
+                  'display_completed_games': sum(game['display_completed_levels'] == game['win_levels'] for game in output),
                   'saved_route_actions': sum(game['route_actions'] for game in output)}
         for key in ('primitive_actions', 'restoration_actions', 'new_solver_actions'):
             totals[key] = sum(run[key] for game in output for run in game['runs'])

@@ -20,6 +20,7 @@ class TestConsoleOverview(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name).resolve()
         self.runs = self.root / 'runs'
+        self.recorders = {}
         self.catalog = ({'game_id': 'test-1', 'alias': 'test', 'win_levels': 6,
                          'baseline_actions': (20,) * 6},
                         {'game_id': 'other-1', 'alias': 'other', 'win_levels': 2,
@@ -65,6 +66,99 @@ class TestConsoleOverview(unittest.TestCase):
         (research / 'current.json').write_text(json.dumps({'scope': scope, 'revision': revision}))
         (research / 'revisions' / (revision[7:] + '.json')).write_text(json.dumps(snapshot))
         return run
+
+    def write_recording(self, name, game_id='test-1', levels=2, context_update=None, gap=False):
+        run = self.write_run(name)
+        (run / 'summary.json').unlink()
+        import shutil
+        shutil.rmtree(run / 'trace')
+        (run / 'trace').mkdir()
+        recorder = PrimeTraceRecorder(run / 'trace')
+        win = next(game['win_levels'] for game in self.catalog if game['game_id'] == game_id)
+        context = {'run_id': name, 'game_id': game_id, 'model_id': 'gpt-6.1-sol',
+                   'seed': 0, 'win_levels': win, 'target_level': win,
+                   'restoration_actions': 0, 'source_run_id': None}
+        context.update(context_update or {})
+        self.recorders[name] = recorder
+        self.addCleanup(recorder.close)
+        recorder.append('arc.run.context', trace_identities_for('gpt-6.1-sol'), context)
+        for index in range(1, levels + 2):
+            recorder.append('arc.action', trace_identities_for('gpt-6.1-sol'), {
+                'sequence': index + int(gap and index > 1), 'action': 'ACTION1',
+                'before_sha256': 'sha256:' + str(index - 1) * 64,
+                'after_sha256': 'sha256:' + str(index) * 64,
+                'levels_completed': min(index, levels)})
+        if game_id != 'test-1':
+            shutil.rmtree(run / 'research')
+            scope = {'game_id': game_id, 'seed': 0, 'win_levels': win, 'run_id': name, 'attempt_id': name}
+            snapshot = {'scope': scope, 'worldmap': {'description_zh': '移动', 'state_summary': '状态',
+                        'rules': [], 'unknowns': [], 'competing_hypotheses': []}}
+            revision = digest(snapshot)
+            research = run / 'research' / digest(scope)[7:]
+            (research / 'revisions').mkdir(parents=True)
+            (research / 'current.json').write_text(json.dumps({'scope': scope, 'revision': revision}))
+            (research / 'revisions' / (revision[7:] + '.json')).write_text(json.dumps(snapshot))
+        return run
+
+    def test_parallel_live_progress_is_display_only_and_does_not_duplicate_attempts(self):
+        self.write_recording('first', levels=2)
+        self.write_recording('repeated', levels=1)
+        self.write_recording('second', game_id='other-1', levels=1)
+        value = self.overview().build()
+        self.assertEqual([game['display_completed_levels'] for game in value['games']], [2, 1])
+        self.assertEqual(value['totals']['display_completed_levels'], 3)
+        self.assertEqual(value['totals']['completed_levels'], 0)
+        self.assertEqual(value['totals']['saved_route_actions'], 0)
+        self.assertEqual(value['totals']['score'], '0.000000')
+        self.assertTrue(value['games'][0]['progress_pending'])
+        self.assertIsNone(value['games'][0]['resume_run_id'])
+
+    def test_live_cache_advances_each_completed_level_and_sealed_progress_keeps_same_display(self):
+        run = self.write_recording('current', levels=1)
+        overview = self.overview()
+        self.assertEqual(overview.build()['games'][0]['display_completed_levels'], 1)
+        recorder = self.recorders['current']
+        recorder.append('arc.action', trace_identities_for('gpt-6.1-sol'), {
+            'sequence': 3, 'action': 'ACTION1', 'before_sha256': 'sha256:' + '2' * 64,
+            'after_sha256': 'sha256:' + '3' * 64, 'levels_completed': 2})
+        self.assertEqual(overview.build()['games'][0]['display_completed_levels'], 2)
+        transitions = tuple(ArcTransition(index, 'ACTION1', 'sha256:' + str(index - 1) * 64,
+                            'sha256:' + str(index) * 64, 1 if index < 3 else 2) for index in range(1, 4))
+        marker = {'game_id': 'test-1', 'seed': 0, 'win_levels': 6, 'levels_completed': 2,
+                  'primitive_actions': 3, 'terminal_reason': 'level-completed',
+                  'replay_sha256': replay_sha256(transitions, terminal_reason='level-completed')}
+        recorder.append('arc.run.partial', trace_identities_for('gpt-6.1-sol'), marker)
+        recorder.seal()
+        summary = {'schema': 'asterion.prime.p7-live-private-summary/v1', 'run_id': run.name,
+                   'experiment': {'model': 'gpt-6.1-sol', 'game_id': 'test-1', 'seed': 0,
+                                  'prediction_variant': 'verified'}, 'broker': None, 'completed_prefix': marker,
+                   'receipt': {}, 'failure': {'type': 'CancelledError'},
+                   'replay_verified': True, 'sealed_trace': True, 'cleanup_complete': True,
+                   'diagnostics': {'broker_status': {'primitive_actions': 3}}}
+        (run / 'summary.json').write_text(json.dumps(summary))
+        game = overview.build()['games'][0]
+        self.assertEqual(game['display_completed_levels'], 2)
+        self.assertEqual(game['completed_levels'], 2)
+        self.assertFalse(game['progress_pending'])
+        self.assertEqual(game['route_actions'], 3)
+
+    def test_live_progress_rejects_gaps_foreign_context_and_manual_context(self):
+        for mutation in ({'model_id': 'foreign'}, {'run_id': 'foreign'}, {'game_id': 'other-1'}, {'manual': True}):
+            with self.subTest(context=mutation):
+                run = self.write_recording('invalid', context_update=mutation)
+                self.assertEqual(self.overview().build()['games'][0]['display_completed_levels'], 0)
+                import shutil
+                shutil.rmtree(run)
+        self.write_recording('gap', gap=True)
+        self.assertEqual(self.overview().build()['games'][0]['display_completed_levels'], 0)
+
+    def test_saved_progress_never_regresses_to_lower_live_attempt(self):
+        self.write_run('saved', levels=4)
+        self.write_recording('redo', levels=1)
+        game = self.overview().build()['games'][0]
+        self.assertEqual(game['display_completed_levels'], 4)
+        self.assertFalse(game['progress_pending'])
+        self.assertEqual(game['completed_levels'], 4)
 
     def overview(self):
         from asterion.applications.prime.p7.console_overview import ConsoleOverview

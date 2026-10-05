@@ -83,7 +83,7 @@
   let consoleConfig = null;
   try { consoleConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.token === 'string' && consoleConfig.token ? consoleConfig : null;
-  const state = { selectionReady: false, overview: null, overviewFresh: false, overviewBusy: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
+  const state = { selectionReady: false, overview: null, overviewFresh: false, overviewBusy: false, overviewPending: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
   let attemptReplayRun = null;
@@ -1176,6 +1176,8 @@
         !preserveManual && (!previous || previous.revision !== view.revision || previous.run_id !== view.run_id || displayingManual)) replaceSnapshot(view.snapshot);
     // Publish the accepted session/revision only after snapshot replacement rendered successfully.
     state.liveView = view;
+    if (view.snapshot && (!previous || previous.run_id !== view.run_id ||
+        number(view.snapshot.run.completed_level_count) > number(previous.snapshot?.run.completed_level_count))) loadOverview();
     if (manualProjection && !active && view.manual && state.mode === 'manual' && !state.manualBusy && !state.manualPending && view.manual.game_id === $('game-select').value) acceptManual(view.manual);
     if (state.mode !== 'replay' || !state.replayRun) write('service-status', `${sessionLabels[view.state]}${view.cleanup_confirmed ? ' · 清理已确认' : ''}`);
     if (state.mode === 'manual') renderManualStatus();
@@ -1436,20 +1438,27 @@
     const totals = value.totals, seen = new Set();
     if ((totals.actions_pending !== undefined && !count(totals.actions_pending)) ||
       (totals.saved_route_actions !== undefined && !count(totals.saved_route_actions)) || !score(totals.score) || !['completed_games', 'total_games', 'completed_levels', 'total_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(totals[key]))) return false;
+    if ((totals.display_completed_levels !== undefined && (!count(totals.display_completed_levels) || totals.display_completed_levels < totals.completed_levels || totals.display_completed_levels > totals.total_levels)) ||
+      (totals.display_completed_games !== undefined && (!count(totals.display_completed_games) || totals.display_completed_games < totals.completed_games || totals.display_completed_games > totals.total_games))) return false;
     if (totals.total_games !== value.games.length || totals.completed_games > totals.total_games || totals.completed_levels > totals.total_levels) return false;
     if (!value.games.every((game) => {
       const catalog = array(liveConfig?.games).find((entry) => entry.game_id === game?.game_id);
       if (!isRecord(game) || !catalog || seen.has(game.game_id) || game.win_levels !== catalog.win_levels ||
         !count(game.win_levels) || !count(game.completed_levels) || game.completed_levels > game.win_levels || !score(game.score) ||
         !Object.hasOwn(overviewLabels, game.status) || !count(game.route_actions) || !id(game.best_run_id) || !id(game.resume_run_id) || !Array.isArray(game.runs)) return false;
+      if (game.display_completed_levels !== undefined && (!count(game.display_completed_levels) || game.display_completed_levels < game.completed_levels || game.display_completed_levels > game.win_levels ||
+          typeof game.progress_pending !== 'boolean' || game.progress_pending !== (game.display_completed_levels > game.completed_levels))) return false;
       seen.add(game.game_id);
       const runs = new Set();
       if (!game.runs.every((run) => isRecord(run) && id(run.run_id) && run.run_id !== null && !runs.has(run.run_id) && runs.add(run.run_id) &&
         typeof run.status === 'string' && typeof run.verified === 'boolean' &&
-        ['completed_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(run[key])))) return false;
+        ['completed_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(run[key])) &&
+        (run.observed_completed_levels === undefined || count(run.observed_completed_levels) && run.observed_completed_levels <= game.win_levels))) return false;
       return [game.best_run_id, game.resume_run_id, game.latest_run_id ?? null].every((runId) => runId === null || (id(runId) && runs.has(runId)));
     })) return false;
     return value.games.length === array(liveConfig?.games).length && totals.total_levels === value.games.reduce((sum, game) => sum + game.win_levels, 0) &&
+      (totals.display_completed_levels === undefined || totals.display_completed_levels === value.games.reduce((sum, game) => sum + (game.display_completed_levels ?? game.completed_levels), 0)) &&
+      (totals.display_completed_games === undefined || totals.display_completed_games === value.games.filter(game => (game.display_completed_levels ?? game.completed_levels) === game.win_levels).length) &&
       (totals.saved_route_actions === undefined || totals.saved_route_actions === value.games.reduce((sum, game) => sum + game.route_actions, 0));
   }
 
@@ -1488,8 +1497,10 @@
     const { scope, totals, games } = state.overview;
     write('overview-scope', `当前 WorldMap P7 · ${scope.model_id} · seed ${scope.seed} · 本地目录 ${totals.total_games} 个游戏`);
     write('overview-score', totals.score);
-    write('overview-games', `${totals.completed_games} / ${totals.total_games}`);
-    write('overview-levels', `${totals.completed_levels} / ${totals.total_levels}`);
+    write('overview-games', `${totals.display_completed_games ?? totals.completed_games} / ${totals.total_games}`);
+    write('overview-levels', `${totals.display_completed_levels ?? totals.completed_levels} / ${totals.total_levels}`);
+    const pendingLevels = (totals.display_completed_levels ?? totals.completed_levels) - totals.completed_levels;
+    write('overview-progress-breakdown', pendingLevels ? `实时已过（已保存 ${totals.completed_levels}，待封存 ${pendingLevels}）` : `已保存 ${totals.completed_levels} 关`);
     write('overview-actions', totals.saved_route_actions ?? games.reduce((sum, game) => sum + game.route_actions, 0));
     write('overview-action-breakdown', `全部尝试 ${totals.primitive_actions} · 恢复 ${totals.restoration_actions} · 新增求解 ${totals.new_solver_actions}${totals.actions_pending ? ' · 待封存分账 ' + totals.actions_pending : ''}`);
     const list = $('overview-game-list');
@@ -1515,9 +1526,10 @@
       const choice = row.querySelector('[data-overview-select]');
       choice.replaceChildren(node('span', string(game.alias, game.game_id)), node('span', game.game_id, 'game-code'));
       choice.setAttribute('aria-label', `选择游戏 ${string(game.alias, game.game_id)}`);
-      const progress = row.querySelector('progress'); progress.max = game.win_levels; progress.value = game.completed_levels;
-      progress.setAttribute('aria-label', `${game.completed_levels} / ${game.win_levels} 关卡`);
-      row.querySelector('.overview-progress span').textContent = `${game.completed_levels} / ${game.win_levels}`;
+      const displayed = game.display_completed_levels ?? game.completed_levels;
+      const progress = row.querySelector('progress'); progress.max = game.win_levels; progress.value = displayed;
+      progress.setAttribute('aria-label', `${displayed} / ${game.win_levels} 关卡`);
+      row.querySelector('.overview-progress span').textContent = `${displayed} / ${game.win_levels}${game.progress_pending ? ' · 待封存' : ''}`;
       row.children[2].textContent = game.score;
       const recording = game.runs.some((run) => run.recording === true);
       const external = (game.status === 'running' || recording) && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
@@ -1530,7 +1542,8 @@
   }
 
   async function loadOverview() {
-    if (!liveConfig || state.overviewBusy) return;
+    if (!liveConfig) return;
+    if (state.overviewBusy) { state.overviewPending = true; return; }
     state.overviewBusy = true;
     try {
       const overview = await request('/api/overview');
@@ -1543,7 +1556,10 @@
     } catch (_) {
       state.overviewFresh = false; renderRail(); renderProgressContext(); renderSessionControls();
       write('overview-refresh', '总览暂不可用 · 保留已显示记录');
-    } finally { state.overviewBusy = false; }
+    } finally {
+      state.overviewBusy = false;
+      if (state.overviewPending) { state.overviewPending = false; loadOverview(); }
+    }
   }
 
   function stopReplayPolling() {
@@ -1589,11 +1605,13 @@
       const replay = await request(`/api/replay/${encodeURIComponent(runId)}`);
       if (!isCurrent()) return;
       if (!validSnapshot(replay) || replay.run.run_id !== runId || replay.run.game_id !== $('game-select').value) throw new Error('invalid-response');
+      const completedBefore = run.run_id === replay.run.run_id ? number(run.completed_level_count) : 0;
       replaceSnapshot(replay, { follow: state.replayFollow }); state.replayRun = runId; state.replayFailures = 0; state.replayRetryAt = 0;
       write('service-status', replayUnsealed(replay) ? '只读观察 · 记录未封口 · 每 2 秒更新' : '回放记录 · 只读');
       if (replayUnsealed(replay) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(), 2000);
       else if (!replayUnsealed(replay) && state.replayPollTimer !== null) { window.clearInterval(state.replayPollTimer); state.replayPollTimer = null; }
       renderSessionControls();
+      if (number(replay.run.completed_level_count) > completedBefore) loadOverview();
     } catch (error) {
       if (isCurrent()) {
         state.replayFailures += 1; state.replayRetryAt = Date.now() + Math.min(30000, 2000 * (2 ** Math.min(state.replayFailures, 4)));
