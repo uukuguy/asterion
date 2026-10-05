@@ -113,6 +113,43 @@ class TestExperience(unittest.TestCase):
         with self.assertRaises(ValueError):
             bundle.read('failed-001', 'research')
 
+    def test_omitted_cells_remain_visible_without_summary_and_frozen(self):
+        from asterion.applications.prime.p7.experience import CellArchive
+        run, _ = self.source()
+        archive = CellArchive(run)
+        archive.started('too-large', 'generation-1', 'x' * (16 * 1024 + 1))
+        bundle = self.load()
+        prior = bundle.context()['latest']
+        self.assertEqual(prior['cell_source_count'], 0)
+        self.assertEqual(prior['missing_cell_source_count'], 1)
+        omitted = run / 'research' / 'cells' / 'omitted.json'
+        omitted.write_text(json.dumps({'run_id': run.name, 'omitted': 0}))
+        with self.assertRaises(ValueError):
+            bundle.read(run.name, 'cells')
+
+    def test_console_experience_messages_distinguish_access_and_program_match(self):
+        from asterion.applications.prime.p7.experience import CellArchive
+        run, _ = self.source()
+        source = "result = 'private-source-sentinel'"
+        archive = CellArchive(run)
+        archive.started('cell-1', 'generation-1', source)
+        bundle = self.load()
+        current = self.root / 'current'
+        current.mkdir()
+        messages = []
+        bundle.bind(current, messages.append)
+        bundle.mark_loaded()
+        revision = 'sha256:' + 'a' * 64
+        exported = {'kind': 'text', 'value': source, 'export_id': digest(source)}
+        bundle.record_revision(revision, {'changed': [], 'retained': []}, [exported])
+        self.assertIn('尚无', messages[-1])
+        bundle.read(run.name, 'cells')
+        bundle.record_revision(revision, {'changed': [], 'retained': []}, [exported])
+        self.assertIn('复用已核对', messages[-1])
+        self.assertIn('源码候选 1', messages[0])
+        self.assertNotIn('private-source-sentinel', ''.join(messages))
+        self.assertNotIn(str(self.root), ''.join(messages))
+
 
 if __name__ == '__main__':
     unittest.main()

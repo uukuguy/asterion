@@ -244,6 +244,7 @@ class _Source:
                     elif anchored and event['kind'] == 'feedback':
                         self.feedback.append(copy_json(payload))
         self.cells = []
+        self.omitted_cells = 0
         cell_root = run / 'research' / 'cells'
         if cell_root.exists():
             _safe(cell_root)
@@ -252,6 +253,12 @@ class _Source:
                 raise ValueError('experience cells exceed limit')
             for path in paths:
                 if path.name == 'omitted.json':
+                    omitted = _json(path)
+                    if (set(omitted) != {'run_id', 'omitted'} or omitted['run_id'] != run.name
+                            or type(omitted['omitted']) is not int or omitted['omitted'] < 0):
+                        raise ValueError('experience cell omission invalid')
+                    self.omitted_cells = omitted['omitted']
+                    self._pin(path)
                     continue
                 stored = _json(path, 128 * 1024)
                 record = stored.get('record', {})
@@ -318,7 +325,7 @@ class _Source:
         return {'source_run_id': self.run.name, 'source_revision': self.revision, 'trace_head_sha256': self.trace_head,
                 **self.trust, 'action_count': len(self.history), 'revision_count': len(self.research),
                 'export_count': len(self.artifacts), 'cell_source_count': len(self.cells),
-                'missing_cell_source_count': max(0, self.worker_cells - len(self.cells)),
+                'missing_cell_source_count': max(self.omitted_cells, self.worker_cells - len(self.cells)),
                 'unresolved_evidence_sequences': unresolved[:128]}
 
 
@@ -399,7 +406,13 @@ class ExperienceBundle:
             self._audit['loaded_source_ids'] = [context['latest']['source_run_id']] if context['latest'] else []
             self._save()
             if context['latest']:
-                self._event('历史经验已载入：' + context['latest']['source_run_id'] + '；仅作待复核先验。')
+                prior = context['latest']
+                self._event(f'历史经验已载入：{prior["source_run_id"]}；可用来源 {context["available_count"]}；'
+                            f'完整性 {prior["integrity"]}，轨迹 {prior["trace_status"]}，结果 {prior["outcome"]}；'
+                            f'源码候选 {prior["cell_source_count"]}，缺失 {prior["missing_cell_source_count"]}，'
+                            f'导出 {prior["export_count"]}；仅作待复核先验，尚未认定程序复用。')
+            else:
+                self._event('历史经验可用来源 0；本轮从当前观察建立研究。')
 
     def read(self, source_run_id: str, kind: str, *, start: int = 0, limit: int = 32, artifact_id: str | None = None) -> dict:
         with self._lock:
@@ -480,6 +493,9 @@ class ExperienceBundle:
             else:
                 self._audit['omitted_revisions'] += 1
             self._save()
+            self._event(f'历史经验已关联本轮修订：{revision}；参考来源 {len(consulted)}；'
+                        + ('已读历史程序与本轮发布源码一致，程序来源复用已核对。' if matches
+                           else '尚无已读历史程序与本轮发布源码匹配的证据。'))
 
 
 def load_experience(runs_root: Path, *, game_id: str, seed: int, win_levels: int,
