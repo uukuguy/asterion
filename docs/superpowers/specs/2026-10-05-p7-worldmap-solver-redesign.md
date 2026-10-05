@@ -238,3 +238,55 @@ The user has since explicitly authorized sequential local solving over the catal
 DC22 的当前 fresh run 因 `_CallbackRejected` / `prime-event-type` (`pi.prompt`) 中断，14 actions、0 completed levels、5 cells；cleanup true，但未封存/未 replay。分类为 runtime interruption，不计作求解失败，也不得在运行链路修复前重复启动。零关失败经验复用尚未接通，root 正在准备对应合同。
 
 用户另行明确授权一次完整 25-task 官方提交：先结束有限 DC22/VC33 尝试（不论是否全通），暂停其余本地题；由 root 执行并记录官方分数及提交通道后，再继续其余本地题。该授权只限这一轮完整提交，不延伸为重复或无限 livebench。
+
+## 12. 已授权的跨尝试经验复用：失败、程序与纠错
+
+用户要求失败经验也完整积累，使 P7 再次求解时实际使用之前的研究。本节将 §10 的“只读取接续成功路线来源的 WorldMap”扩展为独立的经验输入；成功路线恢复仍遵守原来的严格封存与 replay 合同。本节为已授权实施合同，能力结果仍须真实运行验证。
+
+### 12.1 两种来源分别选择
+
+`resume_run_id` 只选择真实环境恢复路线。经验按精确 `game_id/seed/win_levels/model_id` 与新版 WorldMap P7 身份选择；默认读取最新合格经验，同时保留其他尝试的索引。选择较旧成功 prefix 时也必须读取后续失败研究；从头开始、零关失败和同关重试均使用经验，不要求先取得 `VerifiedPrefix`。当前默认仍为 `gpt-6.1-sol`、seed 0，旧 dc22/vc33 求解栈、人工试玩、其他模型/seed、其他游戏不进入经验池。`fresh` 表示环境从头开始，不能表示无经验冷启动；诊断另记实际经验来源。
+
+方案选择：采用现有 run 目录上的应用级只读经验层。仅扩充成功 prefix 先验会继续丢掉失败与新尝试；新建通用知识库或 runner 会重复持久化与执行职责。因此复用 `ResearchWorkspace` 的不可变 revision、已接纳 exports、现有 trace 与 Prime kernel，把跨 run 选择、冻结和消费回执留在 P7。
+
+### 12.2 来源与信任合同
+
+每次启动在显式本地 runs root 下建立有限、确定的来源快照；只读取直接子 run、精确 scope 路径和已引用工件，不跟随 symlink，不允许模型提交任意路径。来源必须同时满足 trace 的精确 model/application/runtime 身份、research scope 的精确 game/seed/win_levels/run/attempt、revision 内容 hash 与父链、被引用 export 的 scope/kind/content hash。已有 summary 若存在须一致；缺 summary 本身不排除失败研究。禁止沿用 legacy model fallback。
+
+信任是独立字段：`integrity=checked` 表示本地文件身份及内容完整；`trace_status=sealed_replayed|sealed_unreplayed|unsealed_prefix` 表示实际证据边界；`outcome=completed|failed|interrupted|unknown` 由已有真实证据决定。未封存不伪装已 replay，hash 也不证明游戏规则成立。无法确认结束时标 unknown，不能从文件存在或进程缺席推断完成。
+
+无 finalizer 的运行可以读取 hash chain 中连续、完整的已记录前缀及已落盘研究版本。残缺最后一行只截断到前一完整记录，链中间非法即拒绝该来源；没有返回结果的动作标 unknown，不生成 action result。研究中的超界 evidence 引用必须显式记为 unresolved，不能冒充已经返回的环境证据；仍可保留其语言假说。revision/export hash 或身份冲突则拒绝对应来源/工件，记录安全原因码，不默默把旧版本称为最新版本。
+
+来源在消费时固定 `source_run_id/source_revision/trace_head_sha256` 与工件 ID；读取返回复制值。既有运行只读，当前 run 原子保存一份有限经验 manifest 和实际消费记录，使后续源文件增长不会改变当次已读内容。后续显式查询若源文件被替换或 hash 变化则拒绝，不能读取更新后内容并继续沿用旧引用。没有可用来源时正常从空经验开始；这与显式路线恢复失败的 fail-closed 行为分别处理。
+
+### 12.3 保存什么、如何读到
+
+经验是有来源的候选认识：WorldMap 的描述/规则/未知/竞争假说、原任务与未解决问题、`correction.changed/retained`、实际动作反馈与最小反例引用、已显式导出的模型源码及有限 JSON 状态，以及普通 IPython cells 的私有静态源码与执行元数据。原任务目标和预算只描述原运行，不能覆盖本次目标/预算。否定假说保留“在什么条件下被哪个反馈反驳”；中断只记录运行中断，不能据此把游戏假说判错。旧报告可供诊断，但其验证状态不传播到本次模型。
+
+不依赖退出时摘要：每次现有 `revise/publish/checkpoint` 和真实动作记录仍立即落盘，下一次直接从这些持久工件重建经验。零动作但有语义修订可贡献未验证假说；零 exports 明确显示无程序可恢复；两者都没有则只有运行结果元数据，不生成虚构经验。
+
+应用 IPython execute 入口在派发前原子存储有限 `call_id/generation/source/source_sha256`，返回后追加 execution status、有限结果元数据和显式 export IDs。进程未返回则保持 unknown/interrupted；失败、部分输出和 stdout 均不升级为环境事实。源码按既有每 cell 16 KiB 上限和明确每 run 总量保存，超限记录 omitted；失败 cell 同样保存。旧运行可从完整 hash trace 的精确 IPython tool call 提取源码为 candidate，并关联结果是否存在；trace 无原文就显示 unavailable，不推测恢复。如此不要求模型当时记得 export 才能留下程序研究；这些源码始终是 inert candidate，与可恢复的已接纳 export 分开。
+
+启动自动把最新合格经验的紧凑内容与来源索引加入实际 actor 初始上下文和 `p7_workspace.read` 返回值，并保存所注入内容的 digest；不止在 prompt 中要求“记得以前失败”。自动材料优先包含最新纠错/反例，再含稳定规则、未解决问题、程序清单和来源状态。初始经验预算最多 16 KiB；若需要缩减，明确 `truncated` 和省略计数，不能丢弃来源与信任标记。总 actor context 仍服从既有 56 KiB 上限。
+
+跨尝试细读扩展现有只读 `p7_research` bridge：按冻结的 source ID 分页读取研究版本、历史、帧与已接纳工件，禁止任意目录和写入/行动方法。每页历史最多 32 项，单响应服从既有 1 MiB 上限；来源发现、版本与字节扫描也须有显式有限上限和截断状态。所有合格尝试保留索引并可分页读取，不只记最佳或最近成功一次。当前运行的 `history/frame` 与 `evidence_sequences` 仍保持原语义；旧来源序号必须连同 source run 使用，不能转换为当前真实证据序号。
+
+### 12.4 程序和状态的实际复用
+
+自动接纳的源码与 JSON 默认是静态研究工件；可进入显式恢复集合的只包括原 `publish/checkpoint` 明确引用且 hash/scope/kind 一致的 exports。普通 cells 可作为 inert candidate 查询、审阅与改写，但不能进入自动恢复集合；stdout、聊天代码、pickle、namespace dump、旧计划与动作队列不参与恢复。Prime 继续唯一拥有 kernel、有限计算、取消及通用 source/JSON 恢复；P7 只持有证据读取、工件选择与当前游戏校准。
+
+当前 actor 可通过原 IPython 读取旧源码/JSON，选择复用模型定义或重新编写，再在当前 namespace 导出并 `publish`；必须记录被读工件和新的 source export 关联。历史状态只能作为 `prior_state` 待检查，不能覆盖当前真实观察；旧 frontier 和计划不自动续跑。读取源码不会自动执行。若接到既有 `Prime.restore`，必须由当前 actor 显式选择已接纳 exports，遵守 fresh kernel 与 source/JSON 限制；禁止启动时以“恢复经验”为由无条件执行旧文本。此路径不新增动作工具、通用 runner 或 P7 专用 kernel。
+
+经验输入不复制旧 workspace revision 作为本次 current revision，不带入证书、报告验证结论、计划 ID、kernel generation 或环境执行权。本次仍需用当前真实观察完成 `revise/publish`，失配、RESET、换关与 kernel lost 的既有门禁保持。从旧研究读出的反例可以帮助选探针，但不能满足当前证据校准，也不能洗白本次 unknown action result。
+
+### 12.5 实际消费与控制台
+
+区分 `available`（发现）、`loaded`（内容已送达 actor）、`read`（具体历史/工件查询成功）、`revised`（本次修订关联来源并保留/修正）四个事实。`loaded` 不等于模型采纳，`read` 不等于程序执行，导入数量不等于解题改进。保存当前 run、来源 IDs/hash、消费种类/有限计数、关联的新 revision 和纠错；程序只有实际重新导出并关联来源后才记 reused，不凭工具名称或自然语言声称判定。
+
+控制台默认展示当前/最新运行的真实经验来源、信任状态、已加载/已读取、程序复用与新纠错；历史 cursor 固定当时记录。安全投影仅包含 run/revision/工件 ID、计数、状态与已允许公开的研究摘要，不显示私有路径、完整源代码、原始 stdout 或 provider 内容。总览的最佳保存路线与最新经验来源分列，失败零关仍可显示“有研究经验”，不因此增加通关分数、resume eligibility 或恢复权限。离线回放使用同一投影。
+
+### 12.6 验收与当前未完成边界
+
+针对测试覆盖：零关未封存失败被实际加载；无 finalizer 与最后一行截断；零动作/零 exports；跨模型/seed/game/legacy 拒绝；hash/symlink/超限与 unresolved 证据；较旧 prefix 加最新失败经验；同关 fresh 重试；旧序号不冒充当前证据；旧计划/证书无权；源码仅静态加载、显式当前计算后再发布；来源和消费回执在 UI/离线中一致。研发重点是代码变更审查与这些边界，无需穷举每种损坏组合。
+
+真实有限尝试必须保存“来源 manifest → actor 实际收到的先验 digest → 指定历史/工件读取 → 本次 revision/纠错 → 新计划与实际反馈”的证据。没有 exports 时允许只证明语言/反例经验消费，明确程序复用未验证；不能为了完成指标伪造程序或强制无用计算。一次尝试只证明读入和使用，不足以证明动作效率提升；“越玩越熟练”需要后续同条件运行结果支持。当前 dc22 中断已有研究版本可供本合同恢复，但本节写入时尚无新的端到端消费证据。

@@ -17,6 +17,7 @@ from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
 from asterion.agents.prime.tools import PrimeToolResult
 
 from .broker import ArcBrokerError
+from .experience import CellArchive
 from .research_bridge import ResearchReadServer
 from .score import digest
 from .solver import Solver
@@ -97,7 +98,7 @@ class P7ResearchRuntime:
 
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
                  deadline_seconds: float, event_sink, worker=None,
-                 limits: KernelLimits | None = None):
+                 limits: KernelLimits | None = None, experience=None):
         self._closed = False
         self.cell_count = 0
         self._lost = False  # The application can rebuild a computation kernel.
@@ -105,12 +106,17 @@ class P7ResearchRuntime:
         self._broker = _EvidenceBroker(broker, trace_client)
         self._sink = event_sink
         self._last_control = None
+        self._experience = experience
+        self._cell_archive = CellArchive(run_root)
         self.control = SolverControl(run_root, run_id, time.monotonic() + deadline_seconds)
         self._read_server = ResearchReadServer(
             context=lambda: self.solver.current_context(),
             history=self._broker.history,
             frame=self._broker.frame_at,
             artifact=lambda export_id: self.solver.artifact(export_id),
+            experience=(lambda source, kind, start, limit, artifact_id:
+                        experience.read(source, kind, start=start, limit=limit, artifact_id=artifact_id))
+                       if experience is not None else None,
         )
         try:
             module_source = self._read_server.start()
@@ -123,8 +129,10 @@ class P7ResearchRuntime:
             self.solver = Solver(
                 broker=self._broker, kernel=_KernelHandle(self), control=self.control,
                 workspace_root=run_root / "research", run_id=run_id,
-                attempt_id=run_id, event_sink=event_sink,
+                attempt_id=run_id, event_sink=event_sink, experience=experience,
             )
+            if experience is not None:
+                experience.bind(run_root, self.solver.experience_event)
             self.poll()
         except BaseException:
             self._read_server.close()
@@ -203,7 +211,20 @@ class P7ResearchRuntime:
             return PrimeToolResult(call_id, "error", ({"type": "text", "text": "Research is paused."},))
         try:
             await self._recover_kernel(combined)
+            generation = self.kernel.generation
+            self._cell_archive.started(call_id, generation, code)
             result = await self.kernel.execute(call_id, code, combined)
+            export_ids = []
+            for content in result.content:
+                if content.get("type") == "text":
+                    try:
+                        metadata = json.loads(content["text"])
+                        if type(metadata) is dict:
+                            export_ids.extend(item["export_id"] for item in metadata.get("kernel_exports", [])
+                                              if type(item) is dict and type(item.get("export_id")) is str)
+                    except (ValueError, KeyError):
+                        pass
+            self._cell_archive.finished(call_id, generation, result.status, export_ids)
             # A lost read-only computation has no uncertain environment action.
             # Surface the loss as a recoverable tool error, with kernel metadata.
             if result.status == "uncertain":
@@ -241,6 +262,11 @@ class P7ResearchRuntime:
 
     def current_context(self):
         return self.solver.current_context()
+
+    def mark_experience_loaded(self):
+        """Called by the operator after adding the prior to the actor prompt."""
+        if self._experience is not None:
+            self._experience.mark_loaded()
 
     def continuation_prompt(self, round_index):
         return (

@@ -34,6 +34,7 @@
 | D-2026-09-29-01 | 🟢 active | The operator environment selects the native P7 provider and model |
 | D-2026-10-01-01 | 🟡 amended | Legacy DSL certification; D-2026-10-05-01 permits general Python research models |
 | D-2026-10-05-01 | 🟢 active | Prime owns computation; P7 owns WorldMap research and prediction-bound action submission |
+| D-2026-10-06-01 | 🟢 active | Failed research is reusable independently of success routes; official submission has an explicit campaign gate |
 
 ## D-2026-10-01-01 — Certificate-gated same-game simulator
 
@@ -64,8 +65,18 @@
 - Amendment: general Python partial models, competing hypotheses and searches need no legacy DSL certificate. The retained DSL still follows its certificate checks. Every submitted plan is bound to current evidence and model revision; checked execution stops at mismatch, level change or pause. A computation report cannot establish real success.
 - Semantic supplement from live evidence: direct `revise` updates language WorldMap without requiring a Python export. Plans require a meaningful current revision; mismatch, actual RESET and level change require one evidence-bound update before the next plan. Matched plans reuse their revision; no compulsory computation, full model or per-hypothesis experiment gate.
 - Console: project actual computation, model revision, plan and action events on one versioned timeline; pause waits for the current bounded operation, resume checks current state, hard stop records interruption.
-- Limits: no duplicate runner, domain-neutral framework, no same-UID OS-sandbox claim, no automatic replay of action cells; no full 25-game authorization.
+- Limits: no duplicate runner, domain-neutral framework, no same-UID OS-sandbox claim, no automatic replay of action cells. The later finite sequential campaign and one official submission are authorized in D-2026-10-06-01.
 - Design: `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md`.
+
+## D-2026-10-06-01 — Failed research persists independently of saved routes
+
+- Status: 🟢 active; approved for implementation; real retry evidence remains in the current checkpoint.
+- Authority: user requested complete failure-experience reuse so P7 becomes more practiced, including attempts that complete no levels.
+- Decision: Automatically load bounded exact-game/seed/model research from prior new-P7 attempts. Preserve failed hypotheses, corrections, unfinished questions, action feedback and explicit source/JSON exports. Archive ordinary computation source before execution; unknown completion remains unknown. Hash-valid unsealed prefixes are advisory research, never resume routes or official progress.
+- Reuse: The existing read-only research bridge exposes source-scoped records and inert code. The current actor selects and runs useful code through Prime, republishes current artifacts and revises against current observations. Do not replay all old cells, copy certification, or use historical sequence numbers as current evidence. Loaded, queried, revised and republished program provenance are recorded separately; repeated attempts do not establish a high success probability.
+- Console: Canonical port57515, latest selected-game replay, current WorldMap P7 statistics only. HUMAN opens after explicit mode selection; the former automatic-selection behavior is superseded. Existing bounded pause/resume/stop remains implemented.
+- Campaign: DC22 then VC33, at most two unsuccessful attempts per blocked level, one900-second guest at a time. After both finite tasks end, submit exactly one complete25-game official scorecard, record official score/channel, then continue the remaining local games. Runtime faults pause for repair and do not masquerade as reasoning failures.
+- Design and implementation worklist: existing WorldMap redesign spec§12 and Task6 in the matching plan. No new runner, tool registry or framework dependency direction.
 
 ## D-2026-07-26-01 — Operator configuration root
 

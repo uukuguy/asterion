@@ -237,7 +237,7 @@ def _serve_main(argv: list[str], *, stdout: TextIO, stderr: TextIO) -> int:
     parser.add_argument("--arc-root", type=Path, default=Path.cwd().parent / "external-prime" / "arc-agi-3")
     parser.add_argument("--guest-machine", default="ubuntu")
     parser.add_argument("--no-browser", action="store_true")
-    parser.add_argument("--port", type=int, default=0, help="本地监听端口；可用于保持原控制台地址")
+    parser.add_argument("--port", type=int, default=57515, help="本地监听端口（默认 57515）")
     args = parser.parse_args(argv)
 
     def ready(url: str) -> None:

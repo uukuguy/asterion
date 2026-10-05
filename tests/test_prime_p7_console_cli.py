@@ -3,6 +3,7 @@
 import io
 import json
 import os
+import socket
 from pathlib import Path
 import subprocess
 import sys
@@ -29,6 +30,7 @@ class TestLiveConsoleCli(unittest.TestCase):
         self.assertEqual(serve.call_args.kwargs['arc_root'], Path('/games'))
         self.assertEqual(serve.call_args.kwargs['guest_machine'], 'guest')
         self.assertFalse(serve.call_args.kwargs['open_browser'])
+        self.assertEqual(serve.call_args.kwargs['port'], 57515)
         self.assertIn('http://127.0.0.1:12345/', out.getvalue())
         self.assertEqual(err.getvalue(), '')
 
@@ -51,10 +53,14 @@ class TestLiveConsoleCli(unittest.TestCase):
             binary.chmod(0o700)
             env = {**os.environ, 'PATH': str(scratch) + os.pathsep + os.environ['PATH'],
                    'P7_TEST_ARGUMENTS': str(output)}
+            with socket.socket() as probe:
+                probe.bind(('127.0.0.1', 0))
+                port = probe.getsockname()[1]
             for target, expected in (('p7-console', 'serve'), ('asterion-prime-p7-console', '--runs-root')):
                 with self.subTest(target=target):
                     result = subprocess.run(['make', '-s', target, 'ASTERION_PRIME_NODE=',
                                              'ASTERION_PRIME_OPERATOR_ROOT=/operator space',
+                                             f'P7_CONSOLE_PORT={port}',
                                              'PRIME_ORB_MACHINE=guest'], cwd=root, env=env,
                                             capture_output=True, text=True, timeout=15)
                     self.assertEqual(result.returncode, 0, result.stderr)

@@ -46,6 +46,64 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.addAsyncCleanup(self.host.close)
 
+    async def test_failed_cell_research_is_inert_then_explicitly_reused_in_new_scope(self):
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.experience import load_experience
+        from asterion.applications.prime.p7.private_trace import trace_identities_for
+
+        source_code = 'def learned_move(value): return value + 2'
+        result = await self.host.execute('call_old|fc_123', source_code, _Signal())
+        self.assertEqual(result.status, 'ok')
+        value = draft()
+        value['correction']['changed'] = ['The earlier unit-step hypothesis failed.']
+        self.host.method_call('workspace', {'op': 'revise',
+            'base_revision': self.host.current_context()['workspace_revision'],
+            **{key: value[key] for key in ('worldmap', 'task', 'evidence_sequences', 'correction')}}, _Signal())
+        await self.host.close()
+        (self.root / 'trace').mkdir()
+        recorder = PrimeTraceRecorder(self.root / 'trace')
+        recorder.append('arc.usage.reported', trace_identities_for('gpt-6.1-sol'),
+                        {'input_tokens': 1, 'output_tokens': 1})
+        run_root = (self.root.parent / 'next-attempt').resolve()
+        run_root.mkdir()
+        bundle = load_experience(self.root.parent.resolve(), game_id=self.broker.game.game_id,
+            seed=self.broker.game.seed, win_levels=self.broker.game.win_levels,
+            model_id='gpt-6.1-sol', current_run_id=run_root.name)
+        engine = _Engine()
+        broker = ArcBroker(engine=engine)
+        broker.bind_history(run_root.name)
+        host = P7ResearchRuntime(broker=broker, trace_client=_TraceClient(), run_root=run_root,
+            run_id=run_root.name, deadline_seconds=30, event_sink=lambda *_: None, experience=bundle)
+        self.addAsyncCleanup(host.close)
+        self.assertTrue(host.current_context()['needs_revision'])
+        self.assertEqual(host.current_context()['experience']['latest']['source_run_id'], self.run_id)
+        audit_path = run_root / 'research' / 'experience-consumption.json'
+        self.assertFalse(json.loads(audit_path.read_text())['loaded'])
+        host.mark_experience_loaded()
+        result = await host.execute('call_new|fc_456',
+            "import p7_research\n"
+            "assert 'learned_move' not in globals()\n"
+            f"prior = p7_research.experience({self.run_id!r}, 'cells')['items'][0]\n"
+            "exec(prior['source'])\n"
+            "assert learned_move(40) == 42\n"
+            "prime_workspace.export('reused-source', prior['source'])", _Signal())
+        self.assertEqual(result.status, 'ok')
+        eid = json.loads(result.content[0]['text'])['kernel_exports'][0]['export_id']
+        value = draft([eid])
+        value['correction']['changed'] = ['Retained prior code after checking it against the current task.']
+        prepared = await host.execute('new-draft', f"prime_workspace.export('draft', {value!r})", _Signal())
+        draft_id = json.loads(prepared.content[0]['text'])['kernel_exports'][0]['export_id']
+        published = host.method_call('workspace', {'op': 'publish',
+            'base_revision': host.current_context()['workspace_revision'], 'draft_export_id': draft_id}, _Signal())
+        self.assertEqual(published['status'], 'published')
+        self.assertFalse(host.current_context()['needs_revision'])
+        audit = json.loads(audit_path.read_text())
+        self.assertTrue(audit['loaded'])
+        self.assertEqual(audit['reads'][0]['kind'], 'cells')
+        self.assertTrue(audit['revisions'][-1]['program_reused'])
+        self.assertEqual(audit['revisions'][-1]['workspace_revision'], published['workspace_revision'])
+        self.assertEqual(engine.calls, [])
+
     async def test_program_export_publish_plan_and_real_counterexample(self):
         value = draft()
         code = (

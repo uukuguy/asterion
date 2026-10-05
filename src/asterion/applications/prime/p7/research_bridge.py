@@ -11,7 +11,7 @@ from .research import copy_json
 
 
 class ResearchReadServer:
-    def __init__(self, *, context, history, frame, artifact):
+    def __init__(self, *, context, history, frame, artifact, experience=None):
         callbacks = {
             "context": context,
             "history": history,
@@ -20,6 +20,10 @@ class ResearchReadServer:
         }
         if any(not callable(callback) for callback in callbacks.values()):
             raise ValueError("research readers unavailable")
+        if experience is not None:
+            if not callable(experience):
+                raise ValueError("research readers unavailable")
+            callbacks["experience"] = experience
         self._readers = callbacks
         self._server = None
         self._thread = None
@@ -54,6 +58,13 @@ class ResearchReadServer:
                     raise ValueError
             elif method == "frame":
                 if len(args) != 1 or type(args[0]) is not int or args[0] < 0:
+                    raise ValueError
+            elif method == "experience":
+                if (len(args) != 5 or type(args[0]) is not str or len(args[0]) > 160
+                        or type(args[1]) is not str or args[1] not in {"index", "research", "history", "frame", "artifact", "cells"}
+                        or type(args[2]) is not int or args[2] < 0
+                        or type(args[3]) is not int or not 1 <= args[3] <= 32
+                        or (args[4] is not None and (type(args[4]) is not str or len(args[4]) != 71))):
                     raise ValueError
             elif len(args) != 1 or type(args[0]) is not str or len(args[0]) != 71:
                 raise ValueError
@@ -117,6 +128,8 @@ def context(): return _read("context", [])
 def history(start, limit): return _read("history", [start, limit])
 def frame(sequence): return _read("frame", [sequence])
 def artifact(export_id): return _read("artifact", [export_id])
+def experience(source_run_id, kind, start=0, limit=32, artifact_id=None):
+    return _read("experience", [source_run_id, kind, start, limit, artifact_id])
 '''
 
     def close(self) -> None:

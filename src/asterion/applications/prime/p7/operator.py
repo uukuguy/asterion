@@ -3495,6 +3495,7 @@ def build_p7_operator_resources(
     semantic_cognition_store: SemanticCognitionStore | None = None,
     semantic_cognition_read_only: bool = False,
     cognition_mode: bool = False,
+    experience: object | None = None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -3651,6 +3652,7 @@ def build_p7_operator_resources(
                 deadline_seconds=(selection.deadline_ms or 3_600_000) / 1000,
                 event_sink=prediction_client._emit_console,
                 worker=SubprocessPythonWorker() if isinstance(worker, live.SubprocessPythonWorker) else worker,
+                experience=experience,
             )
         else:
             prediction_client._capture_console_cognition()
@@ -4339,6 +4341,18 @@ async def run_live(
         file=sys.stderr,
         flush=True,
     )
+    experience = None
+    if research_mode:
+        from .experience import load_experience
+        experience = load_experience(
+            root / ".asterion-private" / "prime-p7-live",
+            game_id=invocation.game.game_id,
+            seed=invocation.game.seed,
+            win_levels=invocation.game.win_levels,
+            model_id=declared_model_selection(invocation.environment).model,
+            current_run_id=run_id,
+            pinned_source_run_id=invocation.resume_run_id,
+        )
     worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
         arc_root=invocation.arc_root,
@@ -4366,6 +4380,7 @@ async def run_live(
         # separately by ``cognition_mode``.
         semantic_cognition_read_only=False,
         cognition_mode=cognition_mode,
+        experience=experience,
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if not research_mode and isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
@@ -4468,19 +4483,11 @@ async def run_live(
                         expectations=parsed_expectations,
                     )
         if research_mode:
-            if resume_prior is not None:
-                prompt += (
-                    "\n\nHistorical WorldMap advisory from the ended source run. "
-                    "Its goal and budget statements describe that past run, including any target_level=2 completion. "
-                    "The authoritative current target_level and remaining budget are in the new research context below. "
-                    "This advisory restores no workspace revision, certification or kernel state. "
-                    "Revalidate it with current evidence and revise the new WorldMap before executing a plan:\n"
-                    + json.dumps(resume_prior, ensure_ascii=False, separators=(",", ":"))
-                )
             prompt += "\n\nInitial research context (authoritative observation):\n" + json.dumps(
                 resources_.host_services["prime.ipython"].current_context(),
                 ensure_ascii=False, separators=(",", ":"),
             )
+            resources_.host_services["prime.ipython"].mark_experience_loaded()
         elif prediction_client is not None:
             print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"initial-context\"}", "stage"), file=sys.stderr, flush=True)
             prompt = prompt + "\n\n" + _initial_game_context(

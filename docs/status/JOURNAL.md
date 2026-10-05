@@ -3756,3 +3756,5 @@
 - 2026-10-06 00:34 CST — Persistent console static/export DOM acceptance completed: 86/86 PASS, 0 skips; command and private log indexed in the live checkpoint.
 
 - 2026-10-06 — `2fec6fd3`: Added current-P7 overview, scoring, latest replay and fixed console address; excluded legacy results.
+
+- 2026-10-06 — `986ef65a`: Added Pi compaction handling and safe event diagnostics to recover interrupted research without hiding unknown events.

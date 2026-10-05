@@ -23,6 +23,7 @@ class Solver:
         run_id: str,
         attempt_id: str,
         event_sink,
+        experience=None,
     ):
         self.broker, self.kernel, self.control = broker, kernel, control
         self.run_id, self.attempt_id = identifier(run_id), identifier(attempt_id)
@@ -39,6 +40,7 @@ class Solver:
             },
         )
         self._sink = event_sink
+        self._experience = experience
         self._plans = {}
         self._lock = RLock()
         self._needs_calibration = self._workspace.loaded
@@ -102,6 +104,8 @@ class Solver:
                 "environment_result_unknown": self._environment_uncertain,
                 "checkpoint": self._workspace.checkpoint_manifest(),
             }
+            if self._experience is not None:
+                context["experience"] = self._experience.context()
             return self._bound_context(context)
 
     @staticmethod
@@ -237,6 +241,11 @@ class Solver:
     def kernel_recovered(self) -> None:
         with self._lock:
             self._needs_calibration = True
+
+    def experience_event(self, summary: str) -> None:
+        self._emit("compute_task", "operator", status="declared", operation="analyze",
+                   goal="复核历史研究", obstacles=[], question="历史规则与反例是否适用于当前观察？",
+                   summary=summary, elapsed_ms=None, completed_units=None)
 
     def _emit(self, kind: str, origin: str, **fields) -> None:
         observation, reference = self._observation()
@@ -425,6 +434,11 @@ class Solver:
             correction_summary="；".join(correction["changed"]),
             evidence_sequences=revised["evidence_sequences"],
         )
+        if self._experience is not None:
+            exports = []
+            for eid in revised["model"]["source_export_ids"]:
+                exports.append({"export_id": eid, "kind": "text", "value": self._workspace.artifact(eid)})
+            self._experience.record_revision(revised["workspace_revision"], correction, exports)
 
     @staticmethod
     def _validation_summary(reports):

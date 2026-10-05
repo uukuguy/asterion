@@ -13,6 +13,7 @@ from unittest import mock
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game import P7GameSelection
+from asterion.applications.prime.p7.model_selection import DEFAULT_MODEL
 from asterion.applications.prime.p7.operator import (
     P7Invocation, P7LiveAttemptFailure, _P7BrokerClient, run_live,
 )
@@ -31,14 +32,23 @@ class _LiveEngine(solutions_fixture._Engine):
 class TestP7ExplicitResume(unittest.TestCase):
     def _run_resume(self, *, divergent=False):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
+            root = Path(directory).resolve()
             arc_root = solutions_fixture.TestP7SavedSolutions._arc_root(root)
             runs = root / ".asterion-private" / "prime-p7-live"
             source = runs / "p7-selected"
             solutions_fixture.TestP7SavedSolutions._write_run(source, target_level=2)
+            summary_path = source / "summary.json"
+            summary = json.loads(summary_path.read_text())
+            summary["experiment"] = {
+                "game_id": "ls20-9607627b", "seed": 0,
+                "model": DEFAULT_MODEL, "prediction_variant": "verified",
+            }
+            summary_path.write_text(json.dumps(summary))
             scope = {"game_id": "ls20-9607627b", "seed": 0, "win_levels": 7,
                      "run_id": source.name, "attempt_id": source.name}
-            snapshot = {"scope": scope, "worldmap": draft()["worldmap"]}
+            snapshot = {"scope": scope, "parent_revision": None,
+                        **{key: draft()[key] for key in (
+                            "worldmap", "task", "model", "reports", "evidence_sequences", "correction")}}
             revision = digest(snapshot)
             workspace = source / "research" / digest(scope)[7:]
             (workspace / "revisions").mkdir(parents=True)
@@ -64,7 +74,8 @@ class TestP7ExplicitResume(unittest.TestCase):
                 self.assertIsNone(context["checkpoint"])
                 self.assertEqual(context["budget"]["target_level"], 6)
                 self.assertIn('"advisory_only":true', kwargs["input_text"])
-                self.assertIn("past run", kwargs["input_text"])
+                self.assertEqual(context["experience"]["latest"]["source_run_id"], source.name)
+                self.assertTrue(context["experience"]["requires_current_evidence"])
                 value = draft()
                 result = host.solver.workspace({
                     "op": "revise", "base_revision": context["workspace_revision"],
@@ -91,6 +102,7 @@ class TestP7ExplicitResume(unittest.TestCase):
                 host = P7ResearchRuntime(
                     broker=broker, trace_client=client, run_root=kwargs["private_trace_root"].parent,
                     run_id="p7-resumed", deadline_seconds=30, event_sink=lambda *_: None,
+                    experience=kwargs["experience"],
                 )
 
                 async def close():
