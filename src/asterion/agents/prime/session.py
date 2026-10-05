@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import weakref
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 
 from asterion.agents.prime.execution import (
     ASTERION_PRIME_CAPABILITIES,
@@ -24,10 +24,8 @@ _DEFAULT_TOOL_NAMES = ("ipython",)
 
 
 _CONTINUE_PROMPT = (
-    "Continue solving the same interactive puzzle from the current Python "
-    "state. Use only the ipython tool, check p7_client.status() and "
-    "p7_client.observe(), then take an available primitive action when the "
-    "level is not complete."
+    "Continue the current task from the retained workspace and latest "
+    "observations. Use the application's registered tools to make progress."
 )
 
 
@@ -61,6 +59,7 @@ class AsterionPrimeSession:
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        round_admission: Callable[[int, CancellationSignal], Awaitable[bool]] | None = None,
         round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
@@ -108,6 +107,7 @@ class AsterionPrimeSession:
             limits=limits,
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
+            round_admission=round_admission,
             round_diagnostic=round_diagnostic,
             failure_diagnostic=failure_diagnostic,
             allowed_tool_names=allowed_tool_names,

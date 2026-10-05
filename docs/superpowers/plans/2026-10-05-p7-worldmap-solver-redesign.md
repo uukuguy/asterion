@@ -182,7 +182,7 @@ def write_control_request(run_root: Path, *, run_id: str, command_id: str,
 def read_control_ack(run_root: Path, *, run_id: str) -> dict | None: ...
 ```
 
-Mac 单写者原子替换 `control-request.json`，guest/operator 单写者原子替换 `control-ack.json`。请求闭合字段为 `schema='asterion.prime.p7-run-control/v1',run_id,command_id,request_sequence>=1,operation`。ack 保留该请求所有字段，再加 `state= pause_requested|paused|running|rejected, reason, source_action_sequence, observation_sha256`。reason 为 `null|stale-request|invalid-state|deadline|stopping|identity-mismatch`。拒绝 symlink、超限文件、身份不符；request sequence 单调，每次仅一个在途 pause/resume；同 command ID 内容一致返回原状态，内容不同拒绝。浏览器等 ack 才确认暂停完成。
+Mac 单写者原子替换 `control-request.json`，guest/operator 单写者原子替换 `control-ack.json`。请求闭合字段为 `schema='asterion.prime.p7-run-control/v1',run_id,command_id,request_sequence>=1,operation`。ack 闭合字段为 `schema,run_id,command_id,request_sequence,state,reason,source_action_sequence,observation_sha256`，不重复 operation。state 为 `running|pause_requested|paused|stop_requested`；reason 为 `null|deadline_expired|request_invalid|control_stale|command_conflict|stop_requested`。拒绝 symlink、超限文件、身份不符；request sequence 单调，每次仅一个在途 pause/resume；同 command ID 内容一致返回原状态，内容不同拒绝。浏览器等 ack 才确认暂停完成。
 
 事件保留现有 console row：`schema,run_id,game_id,sequence,kind,payload`；host 分配连续 sequence，它就是 as-of 的 `event_sequence`。不要另建并行时间轴；同一 observation 上多次模型修订也由 sequence 精确区分。Task 2 `solver_events.py` 提供公共 payload 构造，Task 3 的 console_events 执行同一校验；现有 observation/action 历史可继续读取。
 
@@ -212,8 +212,8 @@ origin 由调用路径赋值，模型不可伪造 environment/operator 来源；
 
 **Interfaces:** 产出接口 A，消费既有 `PrimeToolResult`、`CancellationSignal`。不认识 ARC、WorldMap、模型证书或 console。
 
-- [ ] 添加最小真实 subprocess 测试：cell 1 定义函数与可变状态，cell 2 修改，cell 3 读取；一次 SyntaxError/ValueError 后仍可使用此前函数。
-- [ ] 添加候选导出与恢复断言：后续修改原字典不改变已导出 JSON；恢复仅运行显式 source，恢复 data 值正确，不读取/replay cell log。重复 call ID 不执行第二次。
+- [x] 添加最小真实 subprocess 测试：cell 1 定义函数与可变状态，cell 2 修改，cell 3 读取；一次 SyntaxError/ValueError 后仍可使用此前函数。
+- [x] 添加候选导出与恢复断言：后续修改原字典不改变已导出 JSON；恢复仅运行显式 source，恢复 data 值正确，不读取/replay cell log。重复 call ID 不执行第二次。
 
 ```python
 class TestPrimeIpython(unittest.IsolatedAsyncioTestCase):
@@ -226,9 +226,9 @@ class TestPrimeIpython(unittest.IsolatedAsyncioTestCase):
 
 测试 fixture 创建临时 workspace、真实 SubprocessPythonWorker、未取消 signal，退出时必关闭；`exports_from_last_result` 仅解析最后一次 execute 的结构化结果。
 
-- [ ] 实现源码中的 host/worker 解耦、JSON exports 通道与 observer；以正常 stdout 输出不能冒充 exports/host lifecycle 为断言。`restore` 校验 kind、hash、变量名和空 namespace 后执行，无 pickle。
-- [ ] 跑 `uv run python -m unittest -v tests.test_prime_ipython`；增加一个有限超时 cleanup case，确认 worker 被收回。确认 `rg 'applications|p7|arcengine' src/asterion/agents/prime/ipython*.py` 无产品依赖。
-- [ ] 提交本任务文件与测试，向 Task 2/4 报告精确导入路径、结果 JSON 和 observer 签名；未适配实际 P7 前只声明 kernel 边界通过。
+- [x] 实现源码中的 host/worker 解耦、JSON exports 通道与 observer；以正常 stdout 输出不能冒充 exports/host lifecycle 为断言。`restore` 校验 kind、hash、变量名和空 namespace 后执行，无 pickle。
+- [x] 跑 `uv run python -m unittest -v tests.test_prime_ipython`；增加一个有限超时 cleanup case，确认 worker 被收回。确认 `rg 'applications|p7|arcengine' src/asterion/agents/prime/ipython*.py` 无产品依赖。
+- [x] 提交本任务文件与测试，向 Task 2/4 报告精确导入路径、结果 JSON 和 observer 签名；未适配实际 P7 前只声明 kernel 边界通过。
 
 ## Task 2: P7 研究工作区、程序推演与行动计划
 

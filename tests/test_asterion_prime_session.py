@@ -204,6 +204,7 @@ class SessionFixture:
         release: asyncio.Event | None = None,
         release_after_events: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
+        round_admission=None,
         unbounded: bool = False,
         allowed_tool_names: tuple[str, ...] = ("ipython",),
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
@@ -236,6 +237,7 @@ class SessionFixture:
             approved_command=config.command,
             limits=limits,
             completion_predicate=completion_predicate,
+            round_admission=round_admission,
             allowed_tool_names=allowed_tool_names,
             failure_diagnostic=failure_diagnostic,
         )

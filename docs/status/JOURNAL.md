@@ -3706,3 +3706,6 @@
 
 - 20:35 用户确认继续：Prime 承载通用 IPython 工作区，P7 负责 WorldMap 与动作；已明确修订 DSL-only 设计，整体实施计划进行中。
 - 20:45 整体实施接口已冻结，Prime/P7/console 分工启动；模型轮次 admission 验证39 tests通过，尚未接入实际求解。
+- 20:45 Approved Prime/P7 ownership and implementation contracts to begin the whole redesign [447bb65a].
+- 20:55 Prime 工作区16项测试通过；模型轮次准入40项与跨组件研究/行动2项通过，均为无provider验证，未证明过关。
+- 21:04 Astra复核通用kernel/轮次准入修复及console通过；部署接线与真实求解仍待验收。

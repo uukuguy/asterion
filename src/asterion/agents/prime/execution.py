@@ -8,7 +8,7 @@ import math
 import json
 import os
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
 from types import MappingProxyType
@@ -266,6 +266,7 @@ class PrimeExecutionKernel:
         reusable: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
+        round_admission: Callable[[int, CancellationSignal], Awaitable[bool]] | None = None,
         round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
@@ -284,6 +285,9 @@ class PrimeExecutionKernel:
         self._reusable = reusable
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
+        if round_admission is not None and not callable(round_admission):
+            raise ProtocolError("Asterion-prime round admission is invalid")
+        self._round_admission = round_admission
         if round_diagnostic is not None and not callable(round_diagnostic):
             raise ProtocolError("Asterion-prime round diagnostic is invalid")
         if failure_diagnostic is not None and not callable(failure_diagnostic):
@@ -581,12 +585,31 @@ class PrimeExecutionKernel:
 
         prompt = request.input_text
         round_index = 0
+        admission_limits = [value for value in (request.deadline_ms, self._limits.deadline_ms) if value is not None]
+        admission_deadline = (
+            asyncio.get_running_loop().time() + min(admission_limits) / 1000
+            if admission_limits else None
+        )
         while True:
             protocol_failure: ProtocolError | None = None
             result: PiRpcResult | None = None
             round_start = len(native)
             round_terminal_seen = False
             try:
+                # Application admission waits within this invocation's fixed
+                # deadline and can be interrupted before transport starts.
+                if self._round_admission is not None:
+                    admitted = await self._await_round_admission(
+                        round_index, signal or _NeverCancelled(), admission_deadline
+                    )
+                    if type(admitted) is not bool:
+                        raise ProtocolError("Asterion-prime round admission is invalid")
+                    if not admitted:
+                        emit("run.completed", {"status": "cancelled"})
+                        return
+                if signal is not None and signal.cancelled:
+                    emit("run.completed", {"status": "cancelled"})
+                    return
                 self._extension_lease.validate_launch()
                 driver = (
                     self._rpc_session.prompt
@@ -684,6 +707,26 @@ class PrimeExecutionKernel:
             )
             if type(prompt) is not str or not prompt:
                 raise ProtocolError("Asterion-prime continuation is invalid")
+
+    async def _await_round_admission(self, round_index, signal, deadline):
+        task = asyncio.create_task(self._round_admission(round_index, signal))
+        try:
+            while True:
+                if signal.cancelled:
+                    return False
+                remaining = None if deadline is None else deadline - asyncio.get_running_loop().time()
+                if remaining is not None and remaining <= 0:
+                    raise TimeoutError("Prime admission deadline")
+                done, _ = await asyncio.wait((task,), timeout=min(0.05, remaining) if remaining is not None else 0.05)
+                if done:
+                    return task.result()
+        finally:
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
     @staticmethod
     def _validate_message_update(payload: Mapping[str, object]) -> None:
