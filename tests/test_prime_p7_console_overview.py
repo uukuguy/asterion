@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -97,6 +98,16 @@ class TestConsoleOverview(unittest.TestCase):
         self.assertEqual(game['status'], 'unverified')
         self.assertIsNone(game['resume_run_id'])
         self.assertEqual(overview.build()['totals']['primitive_actions'], 98)
+
+    def test_latest_attempt_is_separate_from_highest_saved_progress(self):
+        old = self.write_run('z-older-fuller', levels=4)
+        new = self.write_run('a-newer-redo', levels=1)
+        os.utime(old / 'summary.json', ns=(1_000_000_000, 1_000_000_000))
+        os.utime(new / 'summary.json', ns=(2_000_000_000, 2_000_000_000))
+        game = self.overview().build()['games'][0]
+        self.assertEqual(game['best_run_id'], old.name)
+        self.assertEqual(game['completed_levels'], 4)
+        self.assertEqual(game['latest_run_id'], new.name)
 
     def test_research_revision_changes_invalidate_resume_eligibility(self):
         run = self.write_run()

@@ -333,7 +333,7 @@ test('real assets: slider, animation/action link, tabs, compare, level switch, p
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, []);
   assert.equal(dom.window.document.querySelectorAll('.level-button').length, 3);
-  assert.match($('level-2').textContent, /未运行/);
+  assert.match($('level-2').textContent, /本轮未记录/);
   assert.match($('world-guide').textContent, /网格移动游戏/);
   assert.match($('cognition-scope').textContent, /最终/);
   assert.equal($('frame-counter').textContent, '1 / 3');
@@ -1910,6 +1910,85 @@ function replayOverview(ids) { const overview=overviewFixture(liveConfig); overv
 const catalogRun = (run_id, status='incomplete', verified=true) => ({run_id,status,completed_levels:1,primitive_actions:12,restoration_actions:4,new_solver_actions:8,verified});
 const overviewRow = (app, game=0) => app.$('overview-game-list').querySelector(`[data-game-id="game${game}-catalog"]`);
 
+test('finished latest attempt remains current and saved route is an explicit pinned replay', async () => {
+  const config = {token:'test-token',games:[{game_id:'sp80-test',alias:'SP80',win_levels:3}]};
+  const replay = (id, count) => {
+    const snapshot = fixture(); snapshot.run.run_id = id; snapshot.run.sealed_trace = true;
+    snapshot.levels[0].actions = Array.from({length:count}, (_,i)=>({...snapshot.levels[0].actions[0],id:`a${i}`}));
+    return snapshot;
+  };
+  let overview = overviewFixture(config);
+  overview.games[0] = {...overview.games[0],best_run_id:'a-old-full',completed_levels:3,
+    recording_run_id:'z-new-prefix',runs:[{...catalogRun('a-old-full'),completed_levels:3},
+    {...catalogRun('z-new-prefix','running',false),recording:true}]};
+  const app = launch(fixture(),{liveConfig:config,overview:()=>overview,fetch:async url=>response(
+    url==='/api/replay/a-old-full'?replay('a-old-full',11):url==='/api/replay/z-new-prefix'?replay('z-new-prefix',3):idleView())});
+  try {
+    await settle(); assert.equal(app.$('run-id').textContent,'z-new-prefix');
+    delete overview.games[0].recording_run_id; overview.games[0].runs[1].recording=false;
+    overview.games[0].runs[1].status='cancelled';
+    const refresh = [...app.timers.values()].find(fn=>fn.intervalMs===5000);
+    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'z-new-prefix');
+    assert.match(app.$('level-1').textContent,/3 动作/);
+    app.$('overview-game-list').querySelector('[data-overview-saved]').click(); await settle();
+    assert.equal(app.$('run-id').textContent,'a-old-full');
+    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-old-full');
+    app.$('overview-game-list').querySelector('[data-overview-watch]').click(); await settle();
+    assert.equal(app.$('run-id').textContent,'z-new-prefix');
+    overview.games[0].latest_run_id='a-old-full';
+    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-old-full');
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('verified saved completion stays separate from a fresh attempt and its current level observations', async () => {
+  for (const observedSecondLevel of [false, true]) {
+    const snapshot = fixture();
+    snapshot.run = {...snapshot.run, game_id: 'vc33-test', run_id: 'new-attempt', seed: 0,
+                    win_levels: 7, completed_level_count: 1};
+    snapshot.levels = Array.from({length: 7}, (_, index) => ({
+      ...fixture().levels[index ? 1 : 0], level: index + 1,
+      status: index === 0 ? 'successful' : 'not_run',
+    }));
+    if (observedSecondLevel) Object.assign(snapshot.levels[1], {
+      status: 'incomplete', frames: fixture().levels[0].frames, actions: fixture().levels[0].actions,
+    });
+    const original = JSON.stringify(snapshot);
+    const config = {token: 'test-token', games: [{game_id: 'vc33-test', alias: 'vc33', win_levels: 7}]};
+    let overview = overviewFixture(config);
+    overview.games[0] = {...overview.games[0], completed_levels: 7, status: 'running', score: '100.000000',
+      best_run_id: 'old-completed', recording_run_id: 'new-attempt',
+      runs: [{...catalogRun('old-completed', 'completed'), completed_levels: 7},
+             {...catalogRun('new-attempt', 'running', false), recording: true}]};
+    const app = launch(snapshot, {liveConfig: config, overview: () => overview, fetch: async () => response(view(snapshot))});
+    try {
+      await settle();
+      assert.match(app.$('run-progress-summary').textContent, /游戏已保存 7 \/ 7 · 本轮 1 \/ 7/);
+      for (let level = 2; level <= 7; level++) {
+        assert.match(app.$(`level-${level}`).textContent, /已有过关记录/);
+        if (level !== 2 || !observedSecondLevel) {
+          assert.match(app.$(`level-${level}`).textContent, /本轮未运行/);
+          assert.match(app.$(`level-${level}`).textContent, /0 动作/);
+        }
+      }
+      app.$('level-2').click();
+      assert.equal(app.$('level-status').textContent, observedSecondLevel ? '本轮进行中' : '本轮未运行');
+      assert.match(app.$('level-saved-status').textContent, /已有过关记录/);
+      assert.equal(app.$('board-empty').hidden, observedSecondLevel);
+      assert.equal(JSON.stringify(snapshot), original);
+      overview = {};
+      [...app.timers.values()].find((fn) => fn.intervalMs === 5000)(); await settle();
+      assert.equal(app.$('level-2').querySelector('.level-verified-badge'), null);
+      assert.equal(app.$('level-saved-status').hidden, true);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+  const staticApp = launch(fixture());
+  assert.match(staticApp.$('level-2').textContent, /本轮未记录/);
+  assert.equal(staticApp.$('level-2').querySelector('.level-verified-badge'), null);
+  staticApp.dom.window.close();
+});
+
 test('live game aggregate 100 does not replace completed level efficiency 40.50', async () => {
   const snapshot = fixture(), level = snapshot.levels[0];
   level.status = 'successful';
@@ -2077,6 +2156,12 @@ test('unsealed replay polling keeps active playback and its pinned frame cursor'
     playbackTimer[1]();
     assert.equal(app.$('frame-counter').textContent, '2 / 3');
 
+    [...app.timers.values()].find(fn => fn.intervalMs === 5000)();
+    await settle();
+    assert.equal(app.$('frame-counter').textContent, '2 / 3');
+    assert.equal(app.$('play-toggle').textContent, '暂停');
+    assert.equal([...app.timers.values()].includes(playbackTimer[1]), true);
+
     replay = { ...replay, levels: replay.levels.map((level, index) => index === 0 ? {
       ...level, frames: [...level.frames, { id: 'f4', grid: [[14]], state: 'NOT_FINISHED' }],
     } : level) };
@@ -2163,7 +2248,7 @@ test('default current game automatically mounts its latest WorldMap P7 recording
 
 test('game selection automatically loads the current source and unplayed games open HUMAN only after explicit mode selection',async()=>{
   const overview=overviewFixture(catalog25);
-  overview.games[0]={...overview.games[0],best_run_id:'highest-current',resume_run_id:'highest-current',completed_levels:1,status:'partial',runs:[catalogRun('older-current'),catalogRun('highest-current')]};
+  overview.games[0]={...overview.games[0],best_run_id:'highest-current',resume_run_id:'highest-current',latest_run_id:'highest-current',completed_levels:1,status:'partial',runs:[catalogRun('older-current'),catalogRun('highest-current')]};
   const replay={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'highest-current',sealed_trace:true}};
   const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async(url,options)=>{
     if(url==='/api/replay/highest-current')return response(replay);

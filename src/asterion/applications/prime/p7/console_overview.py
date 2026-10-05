@@ -290,6 +290,19 @@ class ConsoleOverview:
             eligible = next((item for item in verified if item['resume_eligible']), None)
             active = next((item['run_id'] for item in attempts if item['status'] == 'running'), None)
             recording = next((item['run_id'] for item in attempts if item.get('recording') is True), None)
+            def display_recency(item):
+                # Opaque run IDs can use different time zones. Exporting an
+                # old replay must not make it the latest attempt either.
+                root = self._runs / item['run_id']
+                path = root / 'summary.json'
+                if not path.is_file():
+                    path = root / 'trace' / 'prime-trace.jsonl'
+                try:
+                    updated = path.stat().st_mtime_ns if _safe(path) else 0
+                except OSError:
+                    updated = 0
+                return updated, item['run_id']
+            latest = max(attempts, key=display_recency)['run_id'] if attempts else None
             output.append({'game_id': game['game_id'], 'alias': game['alias'], 'win_levels': game['win_levels'],
                            'completed_levels': best['completed_levels'] if best else 0,
                            'score': best['score'] if best else '0.000000',
@@ -297,6 +310,7 @@ class ConsoleOverview:
                            'best_run_id': best['run_id'] if best else None,
                            'resume_run_id': eligible['run_id'] if eligible else None,
                            'active_run_id': active, 'recording_run_id': recording,
+                           'latest_run_id': latest,
                            'route_actions': best['route_actions'] if best else 0,
                            'runs': attempts})
         total_score = sum((Decimal(game['score']) for game in output), Decimal(0)) / max(1, len(output))
