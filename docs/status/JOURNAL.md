@@ -3796,3 +3796,9 @@
 - 2026-10-06 — f4a0431e: Kept latest attempts separate from saved progress to prevent replay regressions after redo.
 - 2026-10-06 — User clarifiedDC22 redo request preceded itsWIN; stopped redundant guest, preserved original159-stepL6 and newVC33L1=3.
 - 2026-10-06 03:48 CST — Exact SDK official selection verified SP80 143/DC22 474/VC33 composed176 (19/183 levels,793 saved-route actions); no scorecard opened. Preview SDK ls20 yields64×64 initial frame,0 actions and no run.
+- 2026-10-06 03:56 CST — af3c92bc: Unified saved-route evidence, cognition, action totals and initial previews to prevent console regressions.
+- 2026-10-06 03:56 CST — 040c16e5: Synchronize pause test with actual cell settlement instead of fixed delays.
+- 2026-10-06 03:58 CST — ONE25 saved official submit IN FLIGHT: p7-live-20261005195759-a3c256e549dbadb5019898cd; never open another card.
+- 2026-10-06 03:59 CST — 653a587f: Rank fixed replays by verified route quality and source modification time; refresh unchanged source exports.
+- 2026-10-06 04:01 CST — 4d7bc8d4: Preview every catalog level without model execution or solved-state promotion.
+- 2026-10-06 04:04 CST — ONE25 official receipt closed-confirmed, cardfb5ae449-b935-498f-a1e6-5b31c1633056:12.00,3games,19levels,793actions; channel verified.
