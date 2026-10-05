@@ -3817,3 +3817,4 @@
 - 04:31 ac79b260: Checkpoint verified per-level rollover and deployed console; background continues independently.
 - 04:32 a671ce40: Record BP35 L3 success and dynamic next-witness ownership for safe continuation.
 - 04:38 User requires BP35L2 redo before full-game completion; froze dispatcher only, preserving both finite guests.
+- 04:40 d7e9ef52: Admit partial saved-route suffixes so low-score levels retry before full completion while retaining later progress.

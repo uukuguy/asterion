@@ -15,7 +15,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | File | Status | Purpose |
 |---|---|---|
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Active checkpoint: official25 submission12.00 complete, preserved DC22 and optimized VC33, live progress and one efficiency retry implemented; background uses two games with per-level900-second attempts. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Active checkpoint: official25 submission12.00 complete, preserved DC22 and optimized VC33, live progress and immediate partial-route efficiency retry deployed; BP35L2/CD82L1 run concurrently with per-level900-second attempts. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
