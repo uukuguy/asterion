@@ -133,7 +133,7 @@ function runInheritedSequence(pair, payload) {
     };
     const code = payload.codeBytes === undefined ? payload.code : "x".repeat(payload.codeBytes);
     const first = await attempt(payload.requestId, code, controller.signal);
-    const second = await attempt("followup", "print(1)", undefined);
+    const second = await attempt(payload.followupRequestId ?? "followup", "print(1)", undefined);
     process.stdout.write(JSON.stringify({ first, second }));
   `;
   const child = spawn(process.execPath, ["--input-type=module", "-e", source, JSON.stringify(payload)], {
@@ -256,7 +256,9 @@ test("level queries and hypothesis registration expose the Python bridge contrac
 test("rejects malformed requests before writing", async () => {
   const pair = await socketPair();
   try {
-    const bridge = createIpythonBridge(pair.descriptor);
+    const writes = [];
+    pair.peer.on("data", (chunk) => writes.push(chunk));
+    const bridge = createIpythonBridge(pair.descriptor, { deadlineMs: 100 });
     await assert.rejects(
       bridge.handle({
         protocol: PROTOCOL,
@@ -266,8 +268,42 @@ test("rejects malformed requests before writing", async () => {
       }),
       { message: "Asterion ipython bridge is unavailable" },
     );
+    for (const requestId of ["call_1|fc_1\n", "call_1|fc_1\u0000", "call_1|fc_1 other", "a".repeat(257)]) {
+      await assert.rejects(bridge.execute(requestId, "print(1)"), {
+        message: "Asterion ipython bridge is unavailable",
+      });
+    }
+    assert.equal(writes.length, 0);
   } finally {
     pair.close();
+  }
+});
+
+test("OpenAI composite call IDs execute consecutive cells over the real bridge", async () => {
+  const pair = await socketPair();
+  const requestId = "call_8k7Qf1|fc_0123456789abcdef";
+  const followupRequestId = "call_B9mT2|fc_fedcba9876543210";
+  const running = runInheritedSequence(pair, {
+    requestId,
+    followupRequestId,
+    code: "print(42)",
+    options: { deadlineMs: 2000 },
+  });
+  try {
+    for (const id of [requestId, followupRequestId]) {
+      const request = await Promise.race([
+        readJsonLine(pair.peer),
+        running.then((result) => { throw new Error(`composite ID rejected before request: ${JSON.stringify(result)}`); }),
+      ]);
+      assert.equal(request.request_id, id);
+      pair.peer.write(JSON.stringify({protocol: PROTOCOL, request_id: id, type: "result", status: "ok", output: "42\n"}) + "\n");
+    }
+    const result = await running;
+    assert.equal(result.first.ok, true);
+    assert.equal(result.second.ok, true);
+  } finally {
+    pair.close();
+    await running;
   }
 });
 

@@ -23,7 +23,9 @@ const DEFAULT_OUTPUT_CAP = 64 * 1024;
 const DEFAULT_LINE_CAP = 256 * 1024;
 const DEFAULT_DEADLINE_MS = 60_000;
 const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
-const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
+// Pi passes OpenAI's call_id|item_id verbatim. Require the actual end of
+// input as JavaScript's bare $ also matches before a final newline.
+const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:|-]{0,255}$(?![\s\S])/;
 const RESULT_KEYS = ["output", "protocol", "request_id", "status", "type"];
 const REQUEST_KEYS = ["code", "protocol", "request_id", "type"];
 const METHOD_REQUEST_KEYS = ["method", "params", "protocol", "request_id", "type"];

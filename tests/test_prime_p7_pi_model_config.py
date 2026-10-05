@@ -32,12 +32,13 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             profile = Path(directory)
             (profile / "auth.json").write_text("{}")
-            (profile / "models-store.json").write_text("{}")
+            (profile / "models-store.json").write_text('{"deepseek": {"models": []}}')
             selection = resolve_p7_runtime(
                 {
                     "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
                     "ASTERION_PRIME_PROVIDER": "deepseek",
                     "ASTERION_PRIME_MODEL": "deepseek-v4-flash",
+                    "DEEPSEEK_API_KEY": "test-operator-credential",
                 },
                 P7GameSelection("ls20-9607627b", 0, 1),
             )

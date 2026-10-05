@@ -3724,3 +3724,8 @@
 - 21:41 Live evidence exposed WorldMap bypass; implementing direct semantic revisions and evidence-bound plan admission, without compulsory computation.
 - 21:46 Recorded fresh two-level success and semantic revision contract to close the observed WorldMap bypass [50e8bd2f].
 - 21:56 Semantic main-path implementation reviewed;317 related Python tests passed,resource synced; final task event tests passed,promotion running.
+- 21:56 Committed direct semantic revisions and plan admission so actual WorldMap state drives the action path [COMMIT_PENDING].
+- 21:56 Correction: preceding semantic revision implementation commit is 123249a1; placeholder resolved.
+- 22:01 Final promotion:3965 tests/13fail5error4skip,non-PASS. Started123249a1 fresh SP80 two-level semantic witness,900 seconds.
+- Semantic123249a1 fresh SP80 two-level witness PASS:16 actions/five revisions/zero cells,sealed/replayed/cleaned. Local real bridge reproduces Pi composite-ID rejection; narrow TS fix34pass6skip,resource synced,installed verification underway.
+- Composite-ID installed checks:19 PASS,one historical empty-profile fixture error; corrected fixture4 PASS. Independent narrow review/lint/docs PASS. Mandatory promotion running; no live model process.
