@@ -99,6 +99,46 @@ class TestPrimeP7Console(unittest.TestCase):
         self.assertEqual(state["run"]["completed_level_count"], 1)
         self.assertIsNone(first["receipt"])
 
+    def test_pixel_measurements_do_not_invent_model_conclusions(self):
+        initial = self.observation(color=12)
+        before = initial["data"]["frame"][0]
+        before[0] = [14] * 64
+        for y in range(16, 20):
+            before[y][12:32] = [9] * 20
+        moved = copy.deepcopy(initial)
+        moved["data"]["action_input"]["id"] = "ACTION4"
+        after = moved["data"]["frame"][0]
+        after[0][62:] = [0, 0]
+        for y in range(16, 20):
+            after[y][12:16] = [12] * 4
+            after[y][32:36] = [9] * 4
+        self.write_recording([initial, moved])
+        state = build_console_snapshot(self.root)
+        action = state["levels"][0]["actions"][0]
+        self.assertEqual(action["changed_cells"], 34)
+        measurements = action["visual_observations"]
+        self.assertIn("蓝色（9）像素整体向右4格；形状和数量不变。", measurements)
+        self.assertIn("绿色（14）像素数：64 → 62。", measurements)
+        self.assertNotIn("进度", "".join(measurements))
+        self.assertIsNone(action["decision_id"])
+        self.assertEqual(state["levels"][0]["cognition"]["scope"], "unavailable")
+
+    def test_full_frame_change_is_not_reported_as_no_change(self):
+        self.write_recording([self.observation(), self.observation("ACTION1", color=1)])
+        action = build_console_snapshot(self.root)["levels"][0]["actions"][0]
+        self.assertEqual(action["visual_observations"], ["画面发生变化。"])
+
+    def test_unknown_palette_entry_keeps_recording_readable(self):
+        initial = self.observation(color=12)
+        initial["data"]["frame"][0][1][1] = 16
+        moved = copy.deepcopy(initial)
+        moved["data"]["action_input"]["id"] = "ACTION4"
+        moved["data"]["frame"][0][1][1] = 12
+        moved["data"]["frame"][0][1][2] = 16
+        self.write_recording([initial, moved])
+        action = build_console_snapshot(self.root)["levels"][0]["actions"][0]
+        self.assertEqual(action["visual_observations"], ["颜色编号16像素整体向右1格；形状和数量不变。"])
+
     def test_truncated_recording_preserves_prefix_without_cross_gap_actions(self):
         self.write_recording([self.observation(), self.observation("ACTION1", 1)])
         with self.recording.open("a") as file:
@@ -283,6 +323,30 @@ class TestPrimeP7Console(unittest.TestCase):
         self.assertEqual(cognition["world_map_facts"]["confirmed"], {"entities": 2, "mechanics": 1, "relations": 0})
         self.assertEqual(cognition["updates"][0]["changes"][0]["claim"], "实测确认移动。")
         self.assertNotIn("SECRET", json.dumps(state))
+
+    def test_action_availability_tracks_frames_and_meanings_keep_evidence_status(self):
+        self.cognition()
+        semantic = self.summary["diagnostics"]["semantic_cognition"]["semantic"]
+        semantic["claims"] = {"control": [
+            {"id": "right", "kind": "control", "status": "certain", "claim": "当前位置ACTION4使颜色9横带右移四格。"},
+            {"id": "left", "kind": "control", "status": "undetermined", "claim": "ACTION3可能使横带左移。"},
+            {"id": "old-left", "kind": "control", "status": "falsified", "claim": "ACTION3使横带上移。"},
+            {"id": "pair", "kind": "control", "status": "certain", "claim": "ACTION1和ACTION2使横带移动。"},
+            {"id": "range", "kind": "control", "status": "certain", "claim": "ACTION1/2为上下移动。"},
+        ]}
+        self.write_summary()
+        initial = self.observation()
+        after = self.observation("ACTION4")
+        after["data"]["available_actions"] = [1, 2]
+        self.write_recording([initial, after])
+        level = build_console_snapshot(self.root)["levels"][0]
+        self.assertIn("ACTION4", level["frames"][0]["available_actions"])
+        self.assertEqual(level["frames"][1]["available_actions"], ["ACTION1", "ACTION2"])
+        meanings = level["cognition"]["action_meanings"]
+        self.assertEqual(set(meanings), {"ACTION3", "ACTION4"})
+        self.assertEqual(meanings["ACTION4"][0]["status"], "certain")
+        self.assertIn("蓝色（9）", meanings["ACTION4"][0]["claim"])
+        self.assertEqual([entry["status"] for entry in meanings["ACTION3"]], ["undetermined", "falsified"])
 
     def test_mismatched_sibling_cognition_events_are_never_used(self):
         sid = self.cognition()

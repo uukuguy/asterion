@@ -16,6 +16,11 @@
 - Chrome discovery and extension diagnostics passed, but extension transport repeatedly timed out. Actual browser visual/mobile acceptance is external-limited. No alternate browser profile was launched.
 - This export change did not alter solver behavior, tool registration or the Pi extension. No fresh live model witness was run.
 
+- 2026-10-05 console follow-up: replay overlays now default off; color prose and palette legend use names plus IDs. Literal pixel measurements remain separate from P7 analysis; absent action-linked cognition is explicitly missing. The action panel reads each frame's available actions, highlights the replayed action and preserves final-scope recognized/provisional/rejected meanings without supplying default direction semantics.
+- Solve and cognition prompts now remind P7 to notice important objects and potential score/progress/timer/resource/state displays, then use normal feedback to form and revise planning hypotheses. No SP80/green-bar meaning was added to prompts or cognition.
+- Inspected source run `p7-live-20261004140407-76efe9d22e179d6db7810496`: first ACTION4 moves blue pixels right four cells and green pixels decrease 64 to 62. No corresponding new action-specific cognition analysis was saved. These are retrospective pixel measurements, not P7 discoveries. No new live solve was launched for this change.
+- Follow-up focused suite: 78 Python tests PASS; 9 DOM checks and final isolated wheel export PASS. Promotion rerun (before the added action panel) remains FAIL: 3809 tests, 13 failures, 5 errors, 4 skips; `/tmp/p7-console-overlay-promotion.log` retains the source-detachment failure tail. No final full-gate PASS is claimed.
+
 ## 当前判断
 
 - P7 owns planning and game actions. Stable game description is the main WorldMap background. Hypotheses fill gaps and support reasoning; every hypothesis need not be individually proved before play. Normal gameplay can confirm or falsify useful inferences.

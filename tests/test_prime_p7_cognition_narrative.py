@@ -10,6 +10,41 @@ from asterion.applications.prime.p7.cognition_narrative import (
 
 
 class TestCognitionNarrative(unittest.TestCase):
+    def test_color_names_are_added_to_rendered_prose_without_changing_evidence(self):
+        claim = {
+            "id": "scene-colors", "kind": "game_type", "status": "certain",
+            "claim": "当前是64×64网格。颜色9的20×4横带位于12色区域，颜色4、6、11结构固定。",
+        }
+        pending = {
+            "id": "pending-colors", "kind": "object_role", "status": "undetermined",
+            "claim": "颜色14可能是目标。", "next_test": "用ACTION4检查color-9与4、6、11色结构。",
+        }
+        semantic = {"confirmed_knowledge": [claim], "claims": {"object_role": [pending]}}
+        session = {"events": [{"explanation": "坐标(12,16)处的颜色9横带发生变化。"}]}
+        before = copy.deepcopy((semantic, session))
+        for renderer in (
+            lambda: render_stable_game_description_zh(semantic),
+            lambda: render_cognition_narrative_zh(semantic, session),
+        ):
+            with self.subTest(renderer=renderer):
+                result = renderer()
+                self.assertIn("64×64网格。蓝色（9）的20×4横带位于橙色（12）区域", result)
+                self.assertIn("炭灰色（4）、品红色（6）、黄色（11）结构固定", result)
+        narrative = render_cognition_narrative_zh(semantic, session)
+        self.assertIn("用ACTION4检查蓝色（9）与炭灰色（4）、品红色（6）、黄色（11）结构", narrative)
+        self.assertIn("坐标(12,16)处的蓝色（9）横带发生变化", narrative)
+        self.assertEqual((semantic, session), before)
+
+    def test_color_expansion_respects_narrative_byte_budget(self):
+        semantic = {"claims": {"rule": [{
+            "id": "color-budget", "status": "undetermined",
+            "claim": "颜色9移动。", "next_test": "颜色4、6、11与9色比较。" * 8,
+        }]}}
+        for budget in (256, 512, 1024):
+            with self.subTest(budget=budget):
+                result = render_cognition_narrative_zh(semantic, None, max_bytes=budget)
+                self.assertLessEqual(len(result.encode()), budget)
+
     def test_renders_evidence_separately_from_hypotheses_and_recent_feedback(self):
         confirmed = {"id": "move", "kind": "control", "claim": "ACTION1 使横条向上移动。", "status": "certain", "next_test": "检验边界是否阻挡移动。"}
         pending = {"id": "goal", "kind": "success_condition", "claim": "接触色块可能过关。", "status": "undetermined", "next_test": "观察接触后关卡数是否增加。"}
@@ -88,7 +123,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertEqual(result.count("游戏规则："), 1)
         self.assertEqual(result.count("过关条件："), 1)
         self.assertEqual(result.count("当前玩法："), 1)
-        self.assertEqual(result.count("ACTION2使颜色9横带向下移动四格。"), 1)
+        self.assertEqual(result.count("ACTION2使蓝色（9）横带向下移动四格。"), 1)
         self.assertNotIn("已编入描述：", result)
         self.assertIn("过关条件：尚未完全确定", result)
         self.assertLessEqual(len(result.encode()), 4096)
@@ -168,7 +203,7 @@ class TestCognitionNarrative(unittest.TestCase):
         self.assertIn("画面物件：", description)
         self.assertIn("动作操作：", description)
         self.assertIn("过关条件：", description)
-        self.assertIn("ACTION2使颜色9横带向下移动四格", description)
+        self.assertIn("ACTION2使蓝色（9）横带向下移动四格", description)
         self.assertNotIn("可能", description)
         self.assertNotIn("历史原文", description)
         narrative = render_cognition_narrative_zh(semantic, {"session": {"state": "READY"}})

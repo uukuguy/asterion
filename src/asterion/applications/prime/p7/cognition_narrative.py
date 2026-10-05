@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import re
 import unicodedata
 
 from .semantic_cognition import _certainty_claim
@@ -133,6 +134,46 @@ _ACTION_PREFERRED_IDS = {
     "ACTION4": ("action4_right_test", "ap2026_right", "l0-action4-right", "level1-action4-horizontal", "l1_action4_right", "prime-right"),
 }
 _ACTION_WORDS = {"ACTION1": "向上", "ACTION2": "向下", "ACTION3": "向左", "ACTION4": "向右"}
+_COLOR_NAMES_ZH = (
+    "白色", "浅灰色", "灰色", "深灰色", "炭灰色", "黑色", "品红色", "粉色",
+    "红色", "蓝色", "浅蓝色", "黄色", "橙色", "暗红色", "绿色", "紫色",
+)
+_COLOR_IDS = r"[0-9]+(?:\s*、\s*[0-9]+)*"
+_COLOR_REFERENCE = re.compile(
+    r"(?:(?P<name>" + "|".join(sorted(_COLOR_NAMES_ZH, key=len, reverse=True)) + r")(?P<opening>[（(])?)?"
+    r"(?:(?:颜色\s*|(?<![A-Za-z0-9_])color[- ]?)(?P<prefix_ids>" + _COLOR_IDS + r")(?![0-9])"
+    r"|(?<![0-9A-Za-z_×])(?P<suffix_ids>" + _COLOR_IDS + r")色)(?(opening)[）)])",
+    re.IGNORECASE,
+)
+
+
+def color_label(index: int) -> str:
+    """Return the official P7 palette name and ID without assigning a role."""
+
+    if type(index) is not int or not 0 <= index < len(_COLOR_NAMES_ZH):
+        raise ValueError("color index must be an integer in the P7 palette")
+    return f"{_COLOR_NAMES_ZH[index]}（{index}）"
+
+
+def describe_color_names_zh(text: str) -> str:
+    """Name explicit P7 palette references on reading surfaces only.
+
+    Bare numbers, dimensions, coordinates and action IDs are not color refs.
+    Preserve unknown IDs and the surrounding prose, including English history.
+    The returned text may safely pass through this renderer again.
+    """
+
+    def replace(match: re.Match[str]) -> str:
+        ids = [int(value.strip()) for value in (match.group("prefix_ids") or match.group("suffix_ids")).split("、")]
+        if any(color_id >= len(_COLOR_NAMES_ZH) for color_id in ids):
+            return match.group(0)
+        names = "、".join(color_label(color_id) for color_id in ids)
+        existing = match.group("name") or ""
+        if existing and (len(ids) != 1 or existing != _COLOR_NAMES_ZH[ids[0]]):
+            return match.group(0)
+        return names
+
+    return _COLOR_REFERENCE.sub(replace, text)
 
 
 def _text(value: object, limit: int = 180) -> str:
@@ -311,6 +352,7 @@ def render_stable_game_description_zh(semantic: object, *, max_bytes: int = 4096
         lines.append("规划推断：" + inferred_control)
     if strategy:
         lines.append("当前玩法：" + strategy)
+    lines = [describe_color_names_zh(line) for line in lines]
     result = "\n".join(lines)
     while len(result.encode()) > max_bytes and len(lines) > 3:
         lines.pop(-2)
@@ -418,6 +460,7 @@ def render_cognition_narrative_zh(
         next_test = next((_claim_prose(c, "next_test") for c in claims if c.get("next_test")), "根据最新观察选择一个能区分假设的实验。")
     if action:
         next_test = f"已选 {action}；" + next_test
+    next_test = describe_color_names_zh(next_test)
     footer = "候选验证问题（供P7选择）：" + next_test + "\n以上为认知记录，不能授权动作；过关以关卡数增加或 WIN 为准。"
     # Reserve the next-test and authority boundary before adding claim prose.
     while len(("\n".join(lines) + "\n" + footer).encode()) > max_bytes:
@@ -426,6 +469,7 @@ def render_cognition_narrative_zh(
         if not next_test:
             lines = [title]
     def add(line: str) -> None:
+        line = describe_color_names_zh(line)
         if len(("\n".join([*lines, line, footer])).encode()) <= max_bytes:
             lines.append(line)
     stable_description = render_stable_game_description_zh(semantic)

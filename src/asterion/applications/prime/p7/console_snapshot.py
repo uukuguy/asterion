@@ -14,7 +14,9 @@ from hashlib import sha256
 from pathlib import Path
 
 from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
-from asterion.applications.prime.p7.cognition_narrative import render_stable_game_description_zh
+from asterion.applications.prime.p7.cognition_narrative import (
+    color_label, describe_color_names_zh, render_stable_game_description_zh,
+)
 from asterion.applications.prime.p7.observation_state import ObservationState
 from asterion.applications.prime.p7.score import digest
 from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
@@ -61,6 +63,41 @@ def _prose(value: object, limit: int = 600) -> str:
     if type(value) is not str or _PRIVATE_TEXT.search(value):
         return ""
     return " ".join("".join(c for c in value if c >= " " and c != "\x7f").split())[:limit]
+
+
+def _visual_observations(before: list[list[int]], after: list[list[int]]) -> list[str]:
+    """Describe measured pixels only; do not infer objects, rules or model beliefs."""
+    def positions(grid):
+        result = {}
+        for y, row in enumerate(grid):
+            for x, color in enumerate(row):
+                result.setdefault(color, set()).add((x, y))
+        return result
+
+    old, new = positions(before), positions(after)
+    area = sum(len(row) for row in before)
+    movements, counts = [], []
+    for color in sorted(old.keys() | new.keys()):
+        start, end = old.get(color, set()), new.get(color, set())
+        if start == end or max(len(start), len(end)) > area / 2:
+            continue
+        label = color_label(color) if 0 <= color < 16 else f"颜色编号{color}"
+        if start and end and len(start) == len(end):
+            dx = min(x for x, _ in end) - min(x for x, _ in start)
+            dy = min(y for _, y in end) - min(y for _, y in start)
+            if (dx or dy) and {(x + dx, y + dy) for x, y in start} == end:
+                displacement = []
+                if dx:
+                    displacement.append(f"向{'右' if dx > 0 else '左'}{abs(dx)}格")
+                if dy:
+                    displacement.append(f"向{'下' if dy > 0 else '上'}{abs(dy)}格")
+                movements.append(f"{label}像素整体{'、'.join(displacement)}；形状和数量不变。")
+                continue
+        if len(start) != len(end):
+            counts.append(f"{label}像素数：{len(start)} → {len(end)}。")
+        else:
+            counts.append(f"{label}像素位置发生变化；数量仍为{len(end)}格。")
+    return movements + counts or ["画面发生变化。" if before != after else "结算画面没有像素变化。"]
 
 
 def _regular(path: Path) -> bool:
@@ -164,6 +201,7 @@ def _observation(row: dict | None) -> dict | None:
     return {
         "game_id": game_id, "guid": guid, "wins": wins, "levels": levels,
         "state": state, "timestamp": timestamp, "layers": layers,
+        "available_actions": [f"ACTION{i}" for i in available],
         "action": action["id"], "data": coordinates,
         "hash": digest(legacy), "hashes": hashes,
     }
@@ -271,6 +309,19 @@ def _cognition(root: Path, diagnostics: dict, experiment: dict, game: str | None
         if safe:
             claims[(safe["id"], safe["status"])] = safe
     description = render_stable_game_description_zh({"claims": {"certain": [c for c in claims.values() if c["status"] == "certain"]}})
+    action_meanings: dict[str, list[dict]] = {}
+    for claim in claims.values():
+        if claim["kind"] != "control" or not claim["claim"]:
+            continue
+        # Only attach unambiguous per-action claims; group/range statements do
+        # not identify each member's operation. Keep competing claims visible.
+        names = set(re.findall(r"(?<![A-Za-z0-9_])ACTION[1-7](?![0-9])", claim["claim"]))
+        if len(names) != 1 or re.search(r"ACTION[1-7]\s*[-/、到至]\s*[1-7]", claim["claim"]):
+            continue
+        name = next(iter(names))
+        entry = {"status": claim["status"], "claim": describe_color_names_zh(claim["claim"])}
+        if entry not in action_meanings.setdefault(name, []):
+            action_meanings[name].append(entry)
     events = session.get("events", [])
     live_sibling = root.parent / f"cognition-live-{expected_session}.jsonl"
     sibling = root.parent / f"semantic-events-{expected_session}.json"
@@ -307,14 +358,15 @@ def _cognition(root: Path, diagnostics: dict, experiment: dict, game: str | None
             for raw_claim in changed_claims[:256]:
                 safe = _claim(raw_claim)
                 if safe:
-                    changes.append({key: safe[key] for key in ("id", "kind", "status", "claim")})
+                    changes.append({**{key: safe[key] for key in ("id", "kind", "status")},
+                                    "claim": describe_color_names_zh(safe["claim"])})
         ids = event.get("claim_ids", [])
         if status and isinstance(ids, list):
             for claim_id in ids[:256]:
                 if not _identifier(claim_id) or any(c["id"] == claim_id and c["status"] == status for c in changes):
                     continue
                 changes.append({"id": claim_id, "kind": "unknown", "status": status,
-                                "claim": _prose(event.get("explanation"))})
+                                "claim": describe_color_names_zh(_prose(event.get("explanation")))})
         if changes:
             updates.append({"type": kind, "sequence": sequence, "changes": changes})
     raw_facts = diagnostics.get("world_model_facts", {})
@@ -327,7 +379,8 @@ def _cognition(root: Path, diagnostics: dict, experiment: dict, game: str | None
         if isinstance(confirmed, dict):
             facts["confirmed"] = {k: confirmed[k] for k in ("entities", "mechanics", "relations") if _integer(confirmed.get(k)) is not None}
     warn.append("cognition-final")
-    return {"stable_description": description, "scope": "final", "updates": updates, "world_map_facts": facts}
+    return {"stable_description": description, "scope": "final", "updates": updates,
+            "world_map_facts": facts, "action_meanings": action_meanings}
 
 
 def _receipt(summary: dict, run_id: str, completed: int, actions: int, warn: list[str]) -> dict | None:
@@ -443,6 +496,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         for grid in observation["layers"]:
             frame_count += 1
             new_frames.append({"id": f"f{frame_count:06d}", "grid": grid, "timestamp": observation["timestamp"],
+                               "available_actions": observation["available_actions"],
                                "state": observation["state"], "levels_completed": observation["levels"]})
         bucket["frames"].extend(new_frames)
         if previous:
@@ -462,6 +516,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                                       "before_frame": previous["frame_id"], "after_frame": new_frames[-1]["id"],
                                       "data": observation["data"], "levels_completed": observation["levels"],
                                       "changed_cells": changed, "trace_sequence": matched["sequence"] if matched else None,
+                                      "visual_observations": _visual_observations(previous["layers"][-1], observation["layers"][-1]),
                                       "decision_id": None})
         elif observation["action"] != "RESET":
             warn.append("recording-invalid")

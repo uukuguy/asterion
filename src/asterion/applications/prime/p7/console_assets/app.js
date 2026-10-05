@@ -3,6 +3,7 @@
 
   // Official ARC-AGI-3 colors, verified against arc_agi/rendering.py.
   const PALETTE = ['#FFFFFF', '#CCCCCC', '#999999', '#666666', '#333333', '#000000', '#E53AA3', '#FF7BCC', '#F93C31', '#1E93FF', '#88D8F1', '#FFDC00', '#FF851B', '#921231', '#4FCC30', '#A356D6'];
+  const COLOR_NAMES = ['白色', '浅灰色', '灰色', '深灰色', '炭灰色', '黑色', '品红色', '粉色', '红色', '蓝色', '浅蓝色', '黄色', '橙色', '暗红色', '绿色', '紫色'];
   const $ = (id) => document.getElementById(id);
   const array = (value) => Array.isArray(value) ? value : [];
   const object = (value) => value && typeof value === 'object' && !Array.isArray(value) ? value : {};
@@ -153,13 +154,86 @@
       context.beginPath(); context.arc(x, y, Math.max(cell * 0.8, 5), 0, Math.PI * 2); context.stroke();
       context.strokeStyle = '#3159A7'; context.lineWidth = 1.5; context.stroke();
     }
-    canvas.setAttribute('aria-label', `${columns} × ${rows} 网格，${frameLabel(frame)}${$('diff-toggle').checked && previous.length ? '，黄色边框标记变化格' : ''}`);
+    canvas.setAttribute('aria-label', `${columns} × ${rows} 网格，${frameLabel(frame)}${$('diff-toggle').checked && previous.length ? '，黄色方框为变化格回放标记，不属于游戏画面' : ''}`);
+  }
+
+  function renderPalette(visibleFrames) {
+    const used = new Set();
+    visibleFrames.forEach((frame) => array(frame && frame.grid).forEach((row) => array(row).forEach((color) => {
+      if (Number.isInteger(color) && color >= 0 && color < PALETTE.length) used.add(color);
+    })));
+    const colors = $('palette-colors');
+    colors.replaceChildren();
+    [...used].sort((a, b) => a - b).forEach((color) => {
+      const item = node('span', undefined, 'palette-color');
+      item.setAttribute('role', 'listitem');
+      item.dataset.color = String(color);
+      const swatch = node('span', undefined, 'palette-swatch');
+      swatch.style.backgroundColor = PALETTE[color];
+      swatch.setAttribute('aria-hidden', 'true');
+      item.append(swatch, node('span', `${COLOR_NAMES[color]}（${color}）`));
+      colors.append(item);
+    });
+    $('palette-legend').hidden = used.size === 0;
+  }
+
+  function renderAvailableActions(frame, action) {
+    const hasAvailability = Boolean(frame && Array.isArray(frame.available_actions));
+    const available = [...new Set(array(frame && frame.available_actions).filter((name) => typeof name === 'string' && name))];
+    const beforeIndex = action ? frames().findIndex((item) => item.id === action.before_frame) : -1;
+    const afterIndex = action ? frames().findIndex((item) => item.id === action.after_frame) : -1;
+    const linked = action && frame && (frame.id === action.after_frame || (beforeIndex >= 0 && afterIndex >= beforeIndex && state.frameIndex > beforeIndex && state.frameIndex <= afterIndex));
+    const activeName = linked ? action.name : null;
+    const cognition = object(currentLevel().cognition);
+    const meanings = cognition.scope === 'final' ? object(cognition.action_meanings) : {};
+    const labels = { certain: '已识别', undetermined: '推测', falsified: '已否定' };
+    const card = (name, availability) => {
+      const active = name === activeName;
+      const item = node('article', undefined, `available-action${active ? ' is-current' : ''}`);
+      item.dataset.availableAction = name;
+      item.setAttribute('role', 'listitem');
+      if (active) item.setAttribute('aria-current', 'true');
+      const heading = node('div', undefined, 'available-action-heading');
+      heading.append(node('strong', name));
+      if (active) heading.append(node('span', availability || '当前动作', 'current-action-label'));
+      item.append(heading);
+      const entries = array(meanings[name]).filter((entry) => entry && labels[entry.status] && typeof entry.claim === 'string' && entry.claim);
+      if (!entries.length) item.append(node('p', '含义未知', 'action-meaning-unknown'));
+      else {
+        const statuses = ['certain', 'undetermined', 'falsified'].filter((status) => entries.some((entry) => entry.status === status));
+        const representative = entries.find((entry) => entry.status === statuses[0]);
+        const summary = node('p', undefined, 'action-meaning action-meaning-summary');
+        statuses.forEach((status) => summary.append(node('span', labels[status], 'action-meaning-status')));
+        summary.append(node('span', representative.claim));
+        item.append(summary);
+        if (entries.length > 1) {
+          const details = node('details', undefined, 'action-meaning-details');
+          details.append(node('summary', `认知依据（${entries.length}）`));
+          entries.forEach((entry) => {
+            const meaning = node('p', undefined, 'action-meaning');
+            meaning.append(node('span', labels[entry.status], 'action-meaning-status'), node('span', entry.claim));
+            details.append(meaning);
+          });
+          item.append(details);
+        }
+      }
+      return item;
+    };
+    const list = $('available-actions');
+    list.replaceChildren();
+    if (!available.length) list.append(node('p', hasAvailability ? '当前帧没有可用动作。' : '未记录可用动作。', 'available-actions-empty'));
+    available.forEach((name) => list.append(card(name)));
+    const unavailable = $('unavailable-current-action');
+    unavailable.replaceChildren();
+    unavailable.hidden = !activeName || available.includes(activeName);
+    if (!unavailable.hidden) unavailable.append(card(activeName, hasAvailability ? '已执行／当前不可用' : '已执行／可用性未记录'));
   }
 
   function renderFrame() {
     const count = frames().length;
     const frame = currentFrame();
     const action = selectedAction();
+    renderAvailableActions(frame, action);
     const before = action && frameById(action.before_frame);
     const after = action && frameById(action.after_frame);
     const comparisonRequested = $('compare-toggle').checked;
@@ -176,9 +250,19 @@
     write('current-action', action ? actionLabel(action) : count ? '初始观察 / 未关联动作' : '没有记录动作');
     const decision = action && action.decision_id;
     write('current-action-link', action ? (decision ? `决策关联 ${decision}` : '未建立可靠的 P7 轮次关联') : '');
+    const evidence = $('current-action-evidence');
+    evidence.replaceChildren();
+    evidence.hidden = !action;
+    if (action) renderActionEvidence(evidence, action);
     const changed = action && action.changed_cells;
-    write('change-caption', action ? `结算变化 ${Number.isFinite(changed) ? changed : array(changed).length} 格${changed === 0 ? ' · 画面未变化' : ''}` : '黄色边框：变化格');
+    write('change-caption', action ? `结算变化 ${Number.isFinite(changed) ? changed : array(changed).length} 格${changed === 0 ? ' · 画面未变化' : ''}` : '游戏原始画面');
     write('comparison-note', comparisonRequested ? (canCompare ? '对照显示所选动作的起始帧与结算帧' : action ? '前后帧缺链，无法对照' : '选择一个有前后帧的动作以对照') : '');
+    const overlayNotes = [];
+    if ($('diff-toggle').checked) overlayNotes.push('黄色方框为回放标记，不属于游戏画面');
+    if ($('highlight-toggle').checked) overlayNotes.push('圆圈为点击位置回放标记，不属于游戏画面');
+    write('overlay-note', overlayNotes.join('；'));
+    $('overlay-note').hidden = overlayNotes.length === 0;
+    renderPalette(comparisonRequested && canCompare ? [before, after] : [frame]);
     if (frame) draw($('board-canvas'), frame, before, action);
     if (comparisonRequested && canCompare) {
       draw($('before-canvas'), before, null, action);
@@ -301,6 +385,17 @@
     card.append(meta);
   }
 
+  function renderActionEvidence(target, action) {
+    const before = frameById(action.before_frame), after = frameById(action.after_frame);
+    const observations = array(action.visual_observations).filter((entry) => typeof entry === 'string' && entry);
+    if (before && after && observations.length) {
+      target.append(node('p', '画面对比（自动测量）', 'signal-heading'));
+      target.append(node('p', `${before.id} → ${after.id} · 起始帧到结算帧`, 'measurement-source'));
+      observations.forEach((observation) => target.append(node('p', observation, 'signal-line')));
+    }
+    target.append(node('p', 'P7 认知结论：该动作未保存可关联的分析记录。', 'cognition-missing'));
+  }
+
   function signalLines(signals, target) {
     if (Array.isArray(signals)) {
       signals.forEach((signal) => { if (typeof signal === 'string') target.append(node('p', signalNames[signal] || signal, 'signal-line')); });
@@ -365,6 +460,8 @@
       addMetadata(card, [`动作前 ${before ? before.id : '记录缺失'}`, `动作后 ${after ? after.id : '记录缺失'}`, `变化 ${changed} 格${changed === 0 ? ' · 画面未变化' : ''}`, before && after ? `已完成关卡 ${number(before.levels_completed)} → ${number(after.levels_completed)}` : '关卡变化无法核对', after && after.state === 'WIN' ? '结算状态 WIN' : null]);
       addMetadata(card, [action.trace_sequence != null ? `轨迹序号 ${action.trace_sequence}` : '轨迹关联缺失', action.decision_id ? `P7 关联 ${action.decision_id}` : 'P7 轮次关联缺失']);
       if (!before || !after) card.append(node('p', '动作前后帧不完整，无法建立完整的结果对照。', 'event-note'));
+      const evidence = node('div', undefined, 'action-evidence');
+      renderActionEvidence(evidence, action); card.append(evidence);
       actionsPanel.append(card);
     });
     cognitionPanel.append(node('p', '认知事件是最终会话的记录，未与回放帧、动作或模型轮次建立时间关联。展开后可查看保留的认知条目。', 'process-note'));

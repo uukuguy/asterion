@@ -27,7 +27,7 @@ function fixture() {
 }
 
 function launch(snapshot = fixture()) {
-  const errors = [], requests = [], paints = [], timers = new Map();
+  const errors = [], requests = [], paints = [], outlines = [], pointers = [], timers = new Map();
   const substitutions = {
     __CONSOLE_CSP__: '', __CONSOLE_CSS__: fs.readFileSync(path.join(assets, 'styles.css'), 'utf8'),
     __CONSOLE_DATA__: JSON.stringify(snapshot).replace(/</g, '\\u003c'),
@@ -41,7 +41,7 @@ function launch(snapshot = fixture()) {
   const dom = new JSDOM(html, { runScripts: 'dangerously', resources: new NoNetwork(), virtualConsole: vc,
     beforeParse(window) {
       window.HTMLCanvasElement.prototype.getContext = function () {
-        return { fillRect() { paints.push(this.fillStyle); }, strokeRect() {}, beginPath() {}, arc() {}, stroke() {} };
+        return { fillRect() { paints.push(this.fillStyle); }, strokeRect() { outlines.push(this.strokeStyle); }, beginPath() {}, arc() { pointers.push(this.strokeStyle); }, stroke() {} };
       };
       window.matchMedia = () => ({ matches: true, addEventListener() {} });
       let next = 0;
@@ -49,8 +49,146 @@ function launch(snapshot = fixture()) {
       window.clearInterval = (id) => timers.delete(id);
     } });
   const $ = (id) => dom.window.document.getElementById(id);
-  return { dom, $, errors, requests, paints, tick: () => [...timers.values()].forEach((fn) => fn()), timers };
+  return { dom, $, errors, requests, paints, outlines, pointers, tick: () => [...timers.values()].forEach((fn) => fn()), timers };
 }
+
+test('replay markers are opt-in and the legend follows visible game colors', () => {
+  const snapshot = fixture(); snapshot.levels[0].actions[0].data = { x: 2, y: 3 };
+  const app = launch(snapshot); const { dom, $, outlines, pointers } = app;
+  const change = (id, checked) => {
+    $(id).checked = checked; $(id).dispatchEvent(new dom.window.Event('change'));
+  };
+  const legendIds = () => [...$('palette-colors').children].map((item) => item.dataset.color);
+  assert.equal($('diff-toggle').checked, false);
+  assert.equal($('highlight-toggle').checked, false);
+  assert.equal($('overlay-note').hidden, true);
+  assert.deepEqual(legendIds(), ['12']);
+  assert.match($('palette-colors').textContent, /橙色（12）/);
+  assert.equal($('palette-colors').querySelector('.palette-swatch').style.backgroundColor, 'rgb(255, 133, 27)');
+  $('next-action').click();
+  assert.deepEqual(outlines, []);
+  assert.deepEqual(pointers, []);
+  assert.deepEqual(legendIds(), ['9']);
+  assert.match($('palette-colors').textContent, /蓝色（9）/);
+  change('diff-toggle', true);
+  assert.equal(outlines.length, 4096);
+  assert.equal(outlines[0], '#FFD84D');
+  assert.match($('overlay-note').textContent, /黄色方框为回放标记，不属于游戏画面/);
+  assert.equal($('overlay-note').hidden, false);
+  assert.match($('board-canvas').getAttribute('aria-label'), /不属于游戏画面/);
+  change('diff-toggle', false);
+  change('highlight-toggle', true);
+  assert.equal(pointers.length, 1);
+  assert.match($('overlay-note').textContent, /圆圈为点击位置回放标记/);
+  change('highlight-toggle', false);
+  assert.equal($('overlay-note').hidden, true);
+  change('compare-toggle', true);
+  assert.deepEqual(legendIds(), ['9', '12']);
+  $('level-2').click();
+  assert.equal($('palette-legend').hidden, true);
+  assert.deepEqual(legendIds(), []);
+  assert.deepEqual(app.errors, []);
+  dom.window.close();
+});
+
+test('action frame measurements remain separate from unavailable P7 conclusions', () => {
+  const snapshot = fixture();
+  snapshot.levels[0].actions[0].visual_observations = ['蓝色（9）连通块向右移动 4 格。', '<b>原样测量文本</b>'];
+  const app = launch(snapshot); const { dom, $ } = app;
+  assert.match($('panel-actions').textContent, /画面对比（自动测量）/);
+  assert.match($('panel-actions').textContent, /f0 → f2 · 起始帧到结算帧/);
+  assert.match($('panel-actions').textContent, /蓝色（9）连通块向右移动 4 格。/);
+  assert.match($('panel-actions').textContent, /P7 认知结论：该动作未保存可关联的分析记录。/);
+  assert.equal($('current-action-evidence').hidden, true);
+  $('next-action').click();
+  assert.equal($('current-action-evidence').hidden, false);
+  assert.match($('current-action-evidence').textContent, /蓝色（9）连通块向右移动 4 格。/);
+  assert.match($('current-action-evidence').textContent, /f0 → f2/);
+  assert.match($('current-action-evidence').textContent, /<b>原样测量文本<\/b>/);
+  assert.equal($('current-action-evidence').querySelector('b'), null);
+  assert.deepEqual(app.errors, []);
+  dom.window.close();
+});
+
+test('read-only action panel follows frame availability and preserves final meaning statuses', () => {
+  const snapshot = fixture();
+  const level = snapshot.levels[0];
+  level.frames[0].available_actions = ['ACTION1', 'ACTION4', 'ACTION5'];
+  level.frames[1].available_actions = ['ACTION1', 'ACTION4'];
+  level.frames[2].available_actions = ['ACTION1', 'ACTION5'];
+  level.cognition.action_meanings = {
+    ACTION1: [{ status: 'certain', claim: '记录中的向上动作。' }],
+    ACTION4: [{ status: 'undetermined', claim: '可能向右移动。' }, { status: 'falsified', claim: '不会直接完成关卡。' }],
+  };
+  const app = launch(snapshot); const { dom, $ } = app;
+  const availableNames = () => [...$('available-actions').querySelectorAll('[data-available-action]')].map((card) => card.dataset.availableAction);
+  const highlighted = () => dom.window.document.querySelectorAll('.available-action[aria-current="true"]');
+  assert.deepEqual(availableNames(), ['ACTION1', 'ACTION4', 'ACTION5']);
+  assert.equal(highlighted().length, 0);
+  assert.match($('available-actions').textContent, /ACTION1已识别记录中的向上动作/);
+  assert.match($('available-actions').textContent, /ACTION4推测已否定可能向右移动/);
+  assert.match($('available-actions').textContent, /已否定不会直接完成关卡/);
+  assert.match($('available-actions').textContent, /ACTION5含义未知/);
+  assert.equal($('available-actions').querySelector('button'), null);
+  assert.match(dom.window.document.querySelector('.available-actions-note').textContent, /含义来自最终认知，未与历史帧对齐/);
+  $('next-frame').click();
+  assert.deepEqual(availableNames(), ['ACTION1', 'ACTION4']);
+  assert.equal(highlighted().length, 1);
+  assert.equal(highlighted()[0].dataset.availableAction, 'ACTION4');
+  assert.match(highlighted()[0].textContent, /当前动作/);
+  assert.equal($('unavailable-current-action').hidden, true);
+  $('next-frame').click();
+  assert.deepEqual(availableNames(), ['ACTION1', 'ACTION5']);
+  assert.equal(highlighted().length, 1);
+  assert.equal($('unavailable-current-action').hidden, false);
+  assert.match($('unavailable-current-action').textContent, /ACTION4已执行／当前不可用/);
+  $('level-2').click();
+  assert.deepEqual(availableNames(), []);
+  assert.match($('available-actions').textContent, /未记录可用动作/);
+  assert.equal(highlighted().length, 0);
+  assert.equal($('unavailable-current-action').hidden, true);
+  assert.deepEqual(app.errors, []);
+  dom.window.close();
+});
+
+test('action panel does not invent availability or use cognition without final scope', () => {
+  const snapshot = fixture();
+  snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
+  snapshot.levels[0].cognition = { scope: 'unavailable', action_meanings: { ACTION4: [{ status: 'certain', claim: '不得展示的记录。' }] } };
+  const app = launch(snapshot);
+  assert.match(app.$('available-actions').textContent, /ACTION4含义未知/);
+  assert.doesNotMatch(app.$('available-actions').textContent, /不得展示/);
+  app.$('next-frame').click();
+  assert.match(app.$('available-actions').textContent, /未记录可用动作/);
+  assert.match(app.$('unavailable-current-action').textContent, /已执行／可用性未记录/);
+  assert.deepEqual(app.errors, []);
+  app.dom.window.close();
+});
+
+test('action cards summarize one original claim while exposing all conflicting statuses', () => {
+  const snapshot = fixture();
+  snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
+  const entries = [
+    { status: 'undetermined', claim: '第一条推测。' },
+    { status: 'falsified', claim: '已否定的说明。' },
+    { status: 'certain', claim: '第一条已识别的原始说明。' },
+    { status: 'certain', claim: '相近的另一条原始说明。' },
+  ];
+  snapshot.levels[0].cognition.action_meanings = { ACTION4: entries };
+  const app = launch(snapshot);
+  const card = app.$('available-actions').querySelector('[data-available-action="ACTION4"]');
+  const summary = card.querySelector('.action-meaning-summary');
+  assert.equal(summary.textContent, '已识别推测已否定第一条已识别的原始说明。');
+  assert.doesNotMatch(summary.textContent, /相近|第一条推测/);
+  const details = card.querySelector('details');
+  assert.equal(details.open, false);
+  assert.equal(details.querySelector('summary').textContent, '认知依据（4）');
+  assert.equal(details.querySelectorAll('.action-meaning').length, entries.length);
+  entries.forEach((entry) => assert.ok(details.textContent.includes(entry.claim)));
+  assert.equal(app.$('available-actions').querySelector('.is-current'), null);
+  assert.deepEqual(app.errors, []);
+  app.dom.window.close();
+});
 
 test('real assets: slider, animation/action link, tabs, compare, level switch, playback', () => {
   const app = launch(); const { dom, $, errors, requests, paints } = app;
