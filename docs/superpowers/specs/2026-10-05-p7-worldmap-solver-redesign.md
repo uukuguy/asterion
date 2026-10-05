@@ -290,3 +290,20 @@ DC22 的当前 fresh run 因 `_CallbackRejected` / `prime-event-type` (`pi.promp
 针对测试覆盖：零关未封存失败被实际加载；无 finalizer 与最后一行截断；零动作/零 exports；跨模型/seed/game/legacy 拒绝；hash/symlink/超限与 unresolved 证据；较旧 prefix 加最新失败经验；同关 fresh 重试；旧序号不冒充当前证据；旧计划/证书无权；源码仅静态加载、显式当前计算后再发布；来源和消费回执在 UI/离线中一致。研发重点是代码变更审查与这些边界，无需穷举每种损坏组合。
 
 真实有限尝试必须保存“来源 manifest → actor 实际收到的先验 digest → 指定历史/工件读取 → 本次 revision/纠错 → 新计划与实际反馈”的证据。没有 exports 时允许只证明语言/反例经验消费，明确程序复用未验证；不能为了完成指标伪造程序或强制无用计算。一次尝试只证明读入和使用，不足以证明动作效率提升；“越玩越熟练”需要后续同条件运行结果支持。当前 dc22 中断已有研究版本可供本合同恢复，但本节写入时尚无新的端到端消费证据。
+
+
+### 12.7 当前实现与证据状态（2026-10-06）
+
+Failure-experience implementation is committed as `12542476`: focused tests 37 PASS, joint checks 43 PASS, and an inert subprocess regression PASS (computed result 42). This verifies bounded loading and source boundaries, not guaranteed solving or automatic program execution. Complete-25 official preparation is committed as `c261633c`; preflight has 25 exact task IDs, but no card was opened and no submission occurred.
+
+At the earlier 37-action checkpoint, DC22 run was `p7-live-20261006005914-31079cf165a443c496c180a1`, active at 37 actions after entering Level 2. Its revisions consumed negative hypotheses and retained evidence-backed movement/discard-click assumptions. The old prior source has five cells and is correctly excluded; the new run archive contains six cells and four exports. That checkpoint preceded the sealed 79-action / two-level outcome in the current session checkpoint. Console acceptance is complete; commits remain on `feat/p7-live-console` pending root integration to `main`, which the user prefers to happen promptly after closure.
+
+
+### 12.8 DC22 sealed attempt and remaining runtime boundary (2026-10-06)
+
+DC22 run `p7-live-20261006005914-31079cf165a443c496c180a1` ended at 79 actions, 2/6 levels, with trace seal, replay verification and cleanup true; guest inactive/MainPID 0. Action 79 completed L2. Although feedback labels the transition L3, the actor did not attempt L3; do not count an L3 reasoning failure. Observed experience included consumed negative hypotheses and retained movement/discard-click assumptions. This demonstrates consumption in that run, not guaranteed improvement or executable program restoration.
+
+The callback path remains unresolved: event 271 `compaction_start` followed 270 `turn_end` and preceded `agent_end`, but the prior handler at 986 requires `agent_end`; `prime-native-callback` at `pi.prompt` still rejects this in-turn compaction sequence. Sol owns the fix/tests. Do not launch the next witness until root validates a new wheel. Root polish has 32 tests PASS; the omitted-counter/no-finalizer behavior is covered, but this does not mean all lifecycle/corruption cases passed.
+
+
+`ca471c31` implements the observed in-turn/pre-prompt compaction fix (82 native checks PASS); `3c1869ea` completes source-omission visibility and public experience timeline facts; `670ff905` preserves partial replay seed identity. Related ordered checks: 256 PASS. Final promotion, main integration and real continuation are tracked in `RESUME-NEXT-SESSION.md`.

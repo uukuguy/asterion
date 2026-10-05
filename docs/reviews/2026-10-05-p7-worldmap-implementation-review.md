@@ -119,3 +119,29 @@ DC22 run `p7-live-20261006002338-7fc5ecf2b7ca4c5e8a827607` stopped on `_Callback
 The user authorized one complete 25-task official submission after finite DC22/VC33 attempts, regardless of whether they fully solve. Pause remaining local games during submission; root records official score and channel, then resumes the rest. No repeated or open-ended livebench is authorized.
 
 Prime now accepts the installed Pi1.0.0 documented compaction lifecycle with settlement, ordering and tool-ledger checks. Session retains up to128 immutable safe native sequence/type diagnostics on rejection. Four related Python suites pass80 checks. The original DC22 rejected type was not recorded; this is verified compatibility and observability, not a proven diagnosis or actual recovered DC22 run.
+
+
+## Latest branch checkpoint (2026-10-06)
+
+`12542476` implements bounded cross-attempt failure-experience reuse (37 focused PASS, 43 joint PASS, inert subprocess regression PASS (computed result 42)). `c261633c` implements complete-25 official preparation (29 PASS); preflight is ready for 25 exact task IDs, with no task card opened and no submission made. These are implementation/preflight facts, not official score evidence.
+
+At the earlier checkpoint, DC22 run `p7-live-20261006005914-31079cf165a443c496c180a1` was at 37 actions after entering Level 2. Its eventual sealed outcome and bounded experience-consumption evidence are recorded below.
+
+Full promotion: 4010 test cases, 13 failures / 4 errors / 4 skips, NON-PASS; Sol is investigating. Feature commits are pending timely integration into `main` after root closure.
+
+
+### DC22 final trace and callback incompatibility (2026-10-06)
+
+DC22 run `p7-live-20261006005914-31079cf165a443c496c180a1` ended at 79 actions and 2/6 levels; trace sealed, replay verified, cleanup complete, guest inactive/MainPID 0. The last action completed L2. A feedback label marks the L3 transition, but no L3 reasoning attempt occurred. The run consumed negative hypotheses and retained historical movement/discard-click assumptions. Five-cell old source was correctly unavailable; new run has ten archived cells and four exports. This supports observed experience consumption only, not guaranteed improvement or executable program restoration.
+
+The next run is held: diagnostic tail shows event 271 `compaction_start` after event 270 `turn_end` but before `agent_end`; existing handler at 986 requires `agent_end`, so the `prime-native-callback` at `pi.prompt` path remains incompatible with in-turn compaction. Sol owns its fix/tests; root must validate the rebuilt wheel before another launch. Task 6.4 is implemented through existing compute-task/revision timeline messages only; no dedicated panel, schema or tool. Latest polish: 32 tests PASS, bounded to asserted cases. Task 6.6 remains open.
+
+
+Root’s fresh fixed-port HTTP overview after DC22 sealing reports 1/25 games, 8/183 levels, local average 4.571429/100 and 540 actual actions (178 restoration + 362 new). This supersedes the earlier SP80-only 4/100 overview checkpoint, while leaving the sealed SP80 result unchanged.
+
+
+### Integration repairs (2026-10-06)
+
+`ca471c31` corrects the observed Pi request-boundary compaction ordering, including retained pre-prompt context and documented summarization retry events. Native/session diagnostics checks: 82 PASS on Python 3.14.3. `3c1869ea` pins source-omission metadata even without a finalizer, and projects available/loaded/read/revised/program-source matching through existing closed timeline fields. Independent narrow review found no material blocker; it does not establish psychological adoption or automatic source execution. `670ff905` keeps the exact replay seed: normal export now publishes fixed DC22 and latest HTML while retaining overall incomplete status. Per-game SP80 replay remains complete.
+
+`ee9833e4` updates portable Make/model/timeout fixtures and pins current unified-observation replay digests without changing runtime hashing. It removes obsolete checkout probing from an already unavailable external compaction harness; extension remains 34 PASS / six existing external skips. Ordered related Python verification is 256 PASS; lint/docs PASS. The final promotion is running in `launches/p7-main-integration-promotion.log`; main integration and a real recovered compaction witness are pending.

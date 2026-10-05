@@ -4,17 +4,17 @@
 
 - Project: Asterion composable multi-runtime agent framework; native Prime / P7 research application.
 - Current branch: `feat/p7-live-console`.
-- Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace.
+- Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Console integration is implemented with focused boundary verification; final root HTTP/DOM/export check and commit are pending. User explicitly authorized sequential local solving across all 25 catalog games under one finite guest at a time, switching after two failed attempts on one blocked level. One complete 25-task official submission is separately authorized after finite DC22/VC33 attempts; pause remaining local games during it. Do not expand this into repeated or open-ended livebench.
+- Active work package: P7 WorldMap solver and local 25-game console. Console integration and acceptance are complete at their stated boundaries (commit `2fec6fd3`). Failure-experience reuse (`12542476`) and complete-25 official preparation (`c261633c`) are committed on `feat/p7-live-console`; timely integration to `main` is pending root closure. User explicitly authorized sequential local solving across all 25 catalog games under one finite guest at a time, switching after two failed attempts on one blocked level. One complete 25-task official submission is separately authorized after finite DC22/VC33 attempts; pause remaining local games during it. Do not expand this into repeated or open-ended livebench.
 
 ## Current Architecture
 
 - Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.
 - Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
 - P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.
-- Default verified runs register exactly `ipython`, `p7_workspace`, `p7_execute_plan` through the packaged TypeScript extension. The actor alone publishes research and submits short predictions through the existing Broker. Default runs do not load Playbook, shared cognition, exact prefixes or offline engine search. An operator-explicit saved-run continuation is deployed and verified in bounded warm continuation: verified pose restoration and advisory prior rules, with restoration/new actions counted separately.
+- Default verified runs register exactly `ipython`, `p7_workspace`, `p7_execute_plan` through the packaged TypeScript extension. The actor alone publishes research and submits short predictions through the existing Broker. Cross-attempt experience loader is committed and exposes bounded prior evidence without carrying old execution authority. Default runs do not load Playbook, shared cognition, exact prefixes or offline engine search. An operator-explicit saved-run continuation is deployed and verified in bounded warm continuation: verified pose restoration and advisory prior rules, with restoration/new actions counted separately.
 - Semantic `revise` is the low-cost WorldMap path: current evidence and parent revision bind a language model of goals/rules/unknowns. Program `publish` and host-checked reports remain available when computation is useful. A checked report certifies comparison with its referenced observations, not model completeness or new prose.
 - Plans bind exact observation and workspace revision. Mismatch, RESET, level change, pause and unknown environment results stop the remaining steps. Matched plans can retain their model. Unknown actions are never automatically replayed.
 - Kernel recovery restores only explicit source and JSON, then requires current-observation calibration. It does not reconstruct arbitrary process objects or replay action cells.
@@ -26,8 +26,8 @@
 ## Open Problems
 
 - Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.
-- The real witness links computation, candidate rules and natural two-level plans; exact program-source artifacts, cross-run program reuse and cold/warm improvement remain unproven.
-- Full promotion is non-PASS. Current and historical failures are classified in the implementation review; environment-specific differences must not be silently treated as old failures.
+- Failure-experience reuse now delivers bounded prior evidence and has focused/joint tests plus an inert subprocess reproduction. DC22 sealed/replayed at 2/6 with observed negative-hypothesis consumption and retained assumptions; no improvement guarantee or executable program restoration is established. The callback compaction failure still blocks the next launch pending a validated wheel.
+- Latest full promotion is 4010 tests, 13 failures / 4 errors / 4 skips, NON-PASS; Sol is investigating. Do not call the failures historical without evidence.
 - The read service is an application boundary under the operator UID, not a host filesystem/SDK sandbox. Enforcing a stronger sandbox is outside this research change.
 
 ## Key Files
@@ -48,12 +48,13 @@
 ## Evidence Boundary
 
 - Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
-- Exact resume restores only a verified successful action prefix and advisory WorldMap text; failed actions/cells/kernel are not imported. Read the current recovery baton for active run IDs and counts.
-- Local sequential solving is explicitly authorized as described in the live checkpoint. This is not official submission or a formal benchmark; never infer the latter from local RHAE.
+- Fresh HTTP overview at fixed port 57515 confirms catalog progress 1/25 games, 8/183 levels, score 4.571429/100, and 540 actual actions (178 restored + 362 new). SP80 contributes 6/6; DC22 contributes sealed 2/6.
+- Experience reuse can load bounded prior evidence, including negative hypotheses and cells, but does not carry old plans or execution authority. Current active DC22 run and source evidence are in the recovery checkpoint.
+- Local sequential solving is explicitly authorized as described in the live checkpoint. One official 25-task submission is authorized after DC22/VC33 finite attempts; its preflight is ready but no card was opened or submitted. Never infer official performance from local RHAE.
 
 ## Resume Instructions
 
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, recent JOURNAL entries and AGENTS.md.
 2. Check Git status/recent commits and any recorded process/unit before starting another run.
 3. Follow the canonical worklist, preserving active work and known non-PASS boundaries.
-4. After tool changes, synchronize packaged resources and perform extension/Python/promotion checks before the finite installed witness. Keep unrelated full-suite failures explicit.
+4. Integrate completed branch commits to `main` promptly after root closure. Keep full-promotion NON-PASS explicit; latest result and active live run are in `RESUME-NEXT-SESSION.md`.

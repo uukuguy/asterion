@@ -3758,3 +3758,17 @@
 - 2026-10-06 — `2fec6fd3`: Added current-P7 overview, scoring, latest replay and fixed console address; excluded legacy results.
 
 - 2026-10-06 — `986ef65a`: Added Pi compaction handling and safe event diagnostics to recover interrupted research without hiding unknown events.
+
+- 2026-10-06 — `12542476`: Added failed-attempt research, inert code archive and consumption audit so retries retain learning.
+- 2026-10-06 — `c261633c`: Prepared one full-roster current-P7 official scorecard to validate the authorized submission channel.
+
+- 2026-10-06 — Failure-experience deployment check completed: 4010 test cases, 13 failures / 4 errors / 4 skips; full promotion remains non-PASS. Captured tail shows unchanged TS context-witness source-locator fixtures; exact remaining failures are under investigation before main integration.
+- 2026-10-06 — Active DC22 research entered Level2 after 37 actions. Current revisions use prior failed semantic/history evidence; six new IPython cell sources and four exports are now archived. This is active progress, not yet a sealed score or full-game WIN.
+- 2026-10-06 — User requests timely branch integration to main independently of continued background solving; local main is an ancestor of the feature branch, with no remote-main divergence.
+- 2026-10-06 — 3c1869ea: fix(p7): expose verified experience consumption and omitted sources; topic change passed its related checks before main integration.
+- 2026-10-06 — 670ff905: fix(p7): retain seed identity when exporting saved partial replays; topic change passed its related checks before main integration.
+- 2026-10-06 — ca471c31: fix(prime): accept Pi compaction at model request boundaries; topic change passed its related checks before main integration.
+- 2026-10-06 — ee9833e4: test(prime): refresh portable fixtures for current P7 contracts; topic change passed its related checks before main integration.
+- 2026-10-06 — Verified ordered extension 34 PASS/six existing skips, related Python 256 PASS, lint/docs PASS before final promotion.
+- 2026-10-06 — Saved DC22 79-action/two-level prefix; diagnosed in-turn Pi compaction interruption, preserving zero L3 reasoning failures.
+- 2026-10-06 — Corrected replay seed and exported fixed DC22/latest HTML through normal validation; preserved separate SP80 full replay.
