@@ -1,36 +1,37 @@
 # Live Session Checkpoint
 
-Updated 2026-10-06 00:05 CST. Active work; not a final handoff.
+Updated 2026-10-06 00:34 CST. Active work; not a handoff.
 
 ## 已验证事实
 
-- Branch feat/p7-live-console; canonical worklist docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md; approved spec§10 exact resume, §11 new25-game console/local scoring.
-- Deployed solver aa5b6c84: verified ipython/p7_workspace/p7_execute_plan, semantic revisions and prediction-bound Actor→Broker plans. GenericPrime owns model/kernel; no secondrunner.
-- Source p7-live-20261005221958-e3d73e5ff66547bc9a6ff731: fresh2/6,16actions,3successfulcells,4revisions,sealed/replayed/cleaned. Persistent p7-console.html SHA435a67f7...,45cursorDOMPASS.
-- Completed warm source p7-live-20261005232533-2e9f20d6a7294d23bddf876a: start3,target6,fixed900s,highest4/6;98actual actions=16restored+82new. Completedprefix67=16restored+51new(14L3+37L4);31laterfailedL5 actions preserved.15successfulcells/9revisions/11plans,0RESET. Partialsealed/replayed/cleaned;guestinactive/dead/MainPID0. Fulltarget unsuccessful,notWIN.
-- Four-level persistent HTML .asterion-private/prime-p7-live/<source>/p7-console.html SHA f1192d471d3590a67e91270728b7812125275657fc89e930e37b6513429f0b18;164cursor DOM/all15cells/selectedreplay+page+stateHTTP PASS,0provider/action callbacks/JS/network. Allscripts/results in source/console-acceptance/. Export fullcompletionflagfalse distinctfromsummary completedprefixverifiedtrue.
-- Relatedresume117PythonPASS;installed2PASS;old2levelsourceloader/prior/budget437PASS;Astrareview/lint/docsPASS. Mandatorypromotion3971tests/13fail4error4skip non-PASS; no redundantfullsuite.
-- Fresh target6 p7-live-20261005230820-7a8e491bcab640e8a11de01b cancelled on user choice start3 after2actions;cleaned/unsealed/unreplayed,not abilityevidence.
-- Local metadata-only catalog25games/183levels verified. OfficialRHAE formula existing score.py matches per-levelsquared efficiency/cap115/levelweight/fullgamecompletioncap/fixedrosteraverage.
+- Branch `feat/p7-live-console`. Current console worklist is `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`; the broader design contract is in the matching spec.
+- New overview covers the fixed local catalog of 25 games / 183 levels. Only exact WorldMap P7 records with model `gpt-6.1-sol` and seed 0 count. Old `dc22`/`vc33` progress and actions are excluded. A game selects its run by most completed progress, then highest RHAE, then fewer actions. Per-game score uses the full-game denominator; unplayed games score 0 in the local 25-game average.
+- Console exposes public `/api/start` with an explicit target and exact resume source. The UI automatically opens the latest replay for the selected game; there is no multi-run chooser. History cursor is pinned; externally launched runs are read-only. Fixed aliases are `replays/sp80.html` and `p7-console.html`; `make p7-replay GAME=sp80` and `make p7-controller` are entry points.
+- User’s canonical controller URL is `http://127.0.0.1:57515/` and remains fixed across restart. Legacy port 56659 is idle and within task scope; do not recommend it as the main URL. Metadata files `launches/p7-controller-server.json` and `launches/p7-controller-server-56659.json` and their processes remain active. Do not stop them during this active session.
+- SP80 full WIN run `p7-live-20261006001222-3a7662493aa44f01b109e5f9`, guest unit `asterion-p7-132187b58696406ba1864d7a3d8d2804.service` now inactive. Result 6/6, 143 actions = 95 restored + 48 new, RESET=2 (an older summary incorrectly said 0; earlier runs had 0). Seal/replay/cleanup true; receipt 100. Local standing is 1/25 games, 6/183 levels, 4%. Eight cells; actual DOM 92 research cursors PASS, no JS errors or network requests. Private acceptance file: `launches/p7-live-20261006001222-3a7662493aa44f01b109e5f9/console-acceptance/final-summary.json`.
+- Earlier warm-five source `p7-live-20261005235518-0401f6db49354f27bca12e60`: 143 actions = 67 restored + 76 new, successful prefix 95, failed tail 48, 900 seconds. It is historical evidence, not an active process.
+- DC22 fresh run `p7-live-20261006002338-7fc5ecf2b7ca4c5e8a827607`, guest unit `asterion-p7-43e92fd0c88642658a4f73a00494c584.service`, stopped on `_CallbackRejected` / `prime-event-type` in `pi.prompt`: 14 actions, 0 completed levels, 5 cells; cleanup true, unsealed/unreplayed. This is a runtime interruption, not a solving failure. Root is fixing the run path; do not relaunch/duplicate DC22 until that fix is ready. Private `launches/attempt-progress.json` tracks roster and attempts.
+- User explicitly authorized all 25 games sequentially: DC22 → VC33 → remaining catalog, skipping completed SP80; one finite guest at a time. After two failed attempts on the same blocked level, switch games; a success resets that level’s failure counter. This supersedes older “25 unauthorized” wording. The user additionally authorized exactly one complete 25-task official submission, only after finite DC22 and VC33 attempts finish (regardless of completion): pause remaining local games, let root perform the official submission and record official score/channel, then resume remaining local games. This does not authorize repeated or open-ended livebench runs.
+- Exact resume currently restores the successful action prefix only. Latest WorldMap may include failed semantic knowledge as advisory; failed action tail, cells, kernel state, zero-level failure experience, and program/source state are not restored. Root is to design and implement the full failure-experience reuse contract next. Do not claim a retry has high success probability.
+- Related checks: overview Python 59, export 14, CLI 3 PASS; final actual static/export DOM is 86/86 PASS, 0 skips. Command: `NODE_PATH=/tmp/asterion-console-tailwind/node_modules P7_CONSOLE_HTML=<persistent replays/sp80.html> node --test tests/prime_p7_console_dom.cjs`; log `launches/console-overview-acceptance/final-dom.txt`. Lint/docs passed earlier. Mandatory promotion latest: 3990 tests, 14 failures / 4 errors / 4 skips, non-PASS; one additional failure remains unclassified. Log is private `launches/p7-overview-promotion.log`. Do not call all failures historical or repeat full suite.
+- Four console worklist items are implemented and targeted-verified; final actual static/export DOM passed 86/86 with 0 skips. Root HTTP/DOM review and commit coordination remain pending.
 
 ## 当前判断 / 下一动作
 
-1. User: continue background;aftertwo failed attempts at same blockedlevel switchgame. L5 hasonefailedWorldMap attempt. Next exact4levelsource intendedstart5,target6,900s,cap67+96+152=315. However load_exact_prefix currentlyreturnsNone for thissource;root/Luna locating deepestcaughtreplayerror before launching. No bypass, no activeguest. Do not change sourceevidence or assume terminalwhitelist in _load_attempt_one explains _load_one.
-2. Sol console_overview_backend owns Python overview/session/server/tests. Sol console_overview_ui owns assets/DOMtests. Both running,noLLM. Backendcontract GET /api/overview fixedmodelgpt-6.1-sol/seed0/catalog;totals score/progress/fullactualactions/restored/new;pergamebestsealedprefix/localRHAE/allruns/resumesource. Whole-game scoringdenominator evenpartialwitness. Displaycache notexecutionauthority,strictactualrestore remainsoperator.
-3. Web POST /api/start optionaltarget_level/exactresume_run_id;targetfullgame,verifiedenvcleared,900s. Existing ownedpause/resume/stop retained. ExternalCLIrun read-only livefollow,not sessionownership. Top officialstyle score/levels/games/actions,all25games/filteredreplays/historycursorpreserved. BackgroundDOM/HTTP only,noChrome.
-4. Collect workerchanges,focusedchecks/independentreview,realexisting4leveloverview HTTP/DOM. Commit code/docs promptly. Preservefullpromotionnon-PASS;not expandtests pastchangedboundary.
+1. Root next owns the full failure-experience reuse contract and implementation. Zero-level failed attempts, failed action tails, and program/source restoration are not implemented; do not infer them from advisory WorldMap text or successful-prefix restore.
+2. Console static/export DOM is complete at 86/86 PASS. Root should finish HTTP/commit integration without losing those verified facts.
+3. Repair the DC22 runtime callback path before any retry. Then finish finite DC22 and VC33 attempts; preserve the two-failure switching rule and skip SP80 as completed.
+4. After those attempts, pause remaining games for the single authorized official 25-task submission; record score/channel, then continue the local sequence.
 
 ## 历史归档
 
-- OldDSL/cognition/Playbook explicitlegacy,notdefault. Do not use legacy nextlevel auto-bestprefix/30min.
-- Pi call_id|item_id prewire rejection fixed721c8ae5;oldzero-cell runs notvoluntaryavoidance evidence.
-- Exactresume startsnewkernel+advisory languageprior,newcurrentrevisionrequired;no oldreports/program/checkpoint authoritycopied.
-- Source restore logs oldp7_cognition unavailable renderer only:storesNone/writerNone,no actuallegacycontext/tool/eventpollution. Cosmeticfix unnecessary.
+- Previous SP80 two-level and warm four-level runs remain bounded historical witnesses, superseded as current progress by the sealed 6/6 WIN above.
+- The earlier statement that 25-game work was unauthorized is superseded by the current explicit local-sweep authorization. Formal benchmark/submission remains outside it.
 
 ## 未完成边界
 
-- SP80remainingL5–6 unresolved. Sourcepartial replay confirmedatseal but loaderreusability currentlypending diagnosis. No freshgeneralization/full25 benchmarkclaim.
-- Crossrunprogram/checkpointreuse/livekernelrecovery notactualverified.
-- Fullpromotionnon-PASS and knownenvironmentfailures notallautomaticallyhistorical.
-- Old /api/runs fullsnapshotlisting5stimeout;new lightweightoverview replacing highfrequencyusage.25metadata/statdisplaydoesnotauthorize25sweep.
-- Publicsurfaces mustremainprovider/prompt/credential/privatepathfree. Rawrun/providerartifacts ignored in persistentprivate directory,neverGit.
+- Local standing 1/25 is not the authorized sweep’s completion. The one explicitly authorized official 25-task submission is pending finite DC22/VC33 attempts and root’s fix for the DC22 runtime callback interruption.
+- Console final root acceptance/commit remain pending.
+- Exact resume does not recover failed-tail actions, computation cells or live kernel. A separate failure-experience reuse contract is being prepared; zero-level failed-run reuse is not yet connected.
+- Full promotion is non-PASS; its one additional failure has not been classified.
+- Public endpoints must remain free of prompt, answer, credential, provider payload, corpus text, raw output and private paths.

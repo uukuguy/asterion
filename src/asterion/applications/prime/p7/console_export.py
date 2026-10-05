@@ -18,6 +18,7 @@ from .run_story.storage import write_atomic_file
 
 
 _RUN_NAME = re.compile(r"p7-live-[0-9]{14}-[0-9a-f]{24}\Z")
+_GAME_NAME = re.compile(r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)?\Z")
 
 
 def _latest_run_root(runs_root: Path) -> Path | None:
@@ -87,6 +88,68 @@ def render_console(snapshot: dict[str, object], *,
     return re.sub("|".join(replacements), lambda match: replacements[match[0]], template)
 
 
+def _fixed_projection(path: Path) -> dict:
+    if path.is_symlink():
+        raise ValueError("console output must be a regular HTML file")
+    if not path.is_file():
+        return {}
+    match = re.search(r'<script id="console-data" type="application/json">(.*?)</script>',
+                      path.read_text(encoding="utf-8"), re.S)
+    try:
+        return json.loads(match[1]).get("run", {}) if match else {}
+    except (ValueError, AttributeError):
+        return {}
+
+
+def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes) -> None:
+    """Keep stable viewing files, without replacing a better saved progression."""
+    run = snapshot.get("run", {})
+    game_id = run.get("game_id")
+    if (not _RUN_NAME.fullmatch(run_root.name) or run.get("run_id") != run_root.name
+            or type(game_id) is not str or not _GAME_NAME.fullmatch(game_id)
+            or run.get("sealed_trace") is not True
+            or type(run.get("completed_level_count")) is not int
+            or run["completed_level_count"] < 1):
+        return
+    summary_path = run_root / "summary.json"
+    if summary_path.is_symlink():
+        raise ValueError("console evidence unavailable")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if (summary.get("run_id") != run_root.name or any(summary.get(key) is not True
+            for key in ("sealed_trace", "replay_verified", "cleanup_complete"))):
+        return
+    prefix = summary.get("completed_prefix")
+    if prefix is not None:
+        from .live import read_trace_entries
+        from .score import replay_sha256
+        from .solutions import _prefix_values, _transitions, _truncate
+
+        if (type(prefix) is not dict or prefix.get("levels_completed") != run["completed_level_count"]
+                or _prefix_values(prefix, game_id, run.get("seed"), run.get("win_levels"),
+                                  is_partial=True) is None):
+            return
+        entries = read_trace_entries(run_root / "trace")
+        markers = [entry.payload for entry in entries if entry.kind == "arc.run.partial"]
+        transitions = _truncate(_transitions(entries), prefix["levels_completed"])
+        if (markers != [prefix] or len(transitions) != prefix["primitive_actions"]
+                or replay_sha256(transitions, terminal_reason="level-completed") != prefix["replay_sha256"]):
+            return
+    elif run.get("replay_verified") is not True:
+        return
+    root = run_root.parent.resolve()
+    game_path = root / "replays" / (game_id.split("-")[0] + ".html")
+    latest_path = root / "p7-console.html"
+    # Validate both outputs before publication, including an existing linked file.
+    previous_game = _fixed_projection(game_path)
+    previous_latest = _fixed_projection(latest_path)
+    rank = (run["completed_level_count"], run["run_id"])
+    old_rank = (previous_game.get("completed_level_count", 0), previous_game.get("run_id", ""))
+    if rank >= old_rank:
+        write_atomic_file(game_path, payload)
+    if run["run_id"] >= previous_latest.get("run_id", ""):
+        write_atomic_file(latest_path, payload)
+
+
 def export_console(run_root: Path, output: Path | None = None) -> Path:
     """Create the portable document; leave game evidence and solver state intact."""
     destination = Path(output) if output is not None else Path(run_root) / "p7-console.html"
@@ -97,6 +160,8 @@ def export_console(run_root: Path, output: Path | None = None) -> Path:
     # Resolve operator-selected parents (macOS /tmp and /var are aliases),
     # while refusing to replace a symbolic-link output file above.
     write_atomic_file(destination.parent.resolve() / destination.name, payload)
+    if output is None:
+        _publish_fixed_replays(Path(run_root), snapshot, payload)
     return destination
 
 
@@ -108,6 +173,8 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None,
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments[:1] == ["serve"]:
         return _serve_main(arguments[1:], stdout=stdout, stderr=stderr)
+    if arguments[:1] == ["replay"]:
+        return _replay_main(arguments[1:], stdout=stdout, stderr=stderr)
     parser = argparse.ArgumentParser(prog="asterion arc-console", description="导出单文件 ARC-AGI-3 关卡回放")
     parser.add_argument("run_root", type=Path, nargs="?", help="P7 运行目录；默认选择最近一份带录制的运行")
     parser.add_argument("--runs-root", type=Path, default=Path(".asterion-private/prime-p7-live"),
@@ -137,12 +204,40 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None,
     return 0
 
 
+def _replay_main(argv: list[str], *, stdout: TextIO, stderr: TextIO) -> int:
+    parser = argparse.ArgumentParser(prog="asterion arc-console replay", description="打开固定文件名的已保存回放")
+    parser.add_argument("--runs-root", type=Path, default=Path(".asterion-private/prime-p7-live"))
+    parser.add_argument("--game", help="游戏别名，例如 sp80；省略时打开最近已验证回放")
+    args = parser.parse_args(argv)
+    if args.game is not None and not _GAME_NAME.fullmatch(args.game):
+        stderr.write("游戏名称无效。\n")
+        return 2
+    path = (args.runs_root / "replays" / (args.game.split("-")[0] + ".html")
+            if args.game else args.runs_root / "p7-console.html")
+    if path.is_symlink() or not path.is_file():
+        stderr.write("尚无已保存回放；请先完成并导出一次运行。\n")
+        return 2
+    if args.game and "-" in args.game and _fixed_projection(path).get("game_id") != args.game:
+        stderr.write("固定回放与指定游戏版本不匹配。\n")
+        return 2
+    try:
+        opened = webbrowser.open(path.resolve().as_uri())
+    except Exception:
+        opened = False
+    if not opened:
+        stderr.write("浏览器未能打开；固定回放文件仍可直接打开。\n")
+        return 2
+    stdout.write("已打开保存回放。\n")
+    return 0
+
+
 def _serve_main(argv: list[str], *, stdout: TextIO, stderr: TextIO) -> int:
     parser = argparse.ArgumentParser(prog="asterion arc-console serve", description="打开 P7 自主求解控制台")
     parser.add_argument("--operator-root", type=Path, default=Path.cwd())
     parser.add_argument("--arc-root", type=Path, default=Path.cwd().parent / "external-prime" / "arc-agi-3")
     parser.add_argument("--guest-machine", default="ubuntu")
     parser.add_argument("--no-browser", action="store_true")
+    parser.add_argument("--port", type=int, default=0, help="本地监听端口；可用于保持原控制台地址")
     args = parser.parse_args(argv)
 
     def ready(url: str) -> None:
@@ -154,7 +249,7 @@ def _serve_main(argv: list[str], *, stdout: TextIO, stderr: TextIO) -> int:
 
         serve_console(operator_root=args.operator_root, arc_root=args.arc_root,
                       guest_machine=args.guest_machine, open_browser=not args.no_browser,
-                      on_ready=ready)
+                      on_ready=ready, port=args.port)
     except KeyboardInterrupt:
         return 0
     except Exception:

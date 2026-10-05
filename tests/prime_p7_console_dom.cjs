@@ -26,7 +26,15 @@ function fixture() {
   };
 }
 
-function launch(snapshot = fixture(), { liveConfig = null, fetch = null } = {}) {
+function overviewFixture(config) {
+  const games = config.games.map((game) => ({ ...game, completed_levels: 0, score: '0.000000', status: 'unplayed',
+    best_run_id: null, resume_run_id: null, route_actions: 0, runs: [] }));
+  return { guest_busy: false, start_ready: true, start_block_reason: null, scope: { model_id: 'gpt-6.1-sol', seed: 0, score_kind: 'saved-route-rhae', catalog_id: 'test-catalog' },
+    totals: { score: '0.000000', completed_games: 0, total_games: games.length, completed_levels: 0,
+      total_levels: games.reduce((sum, game) => sum + game.win_levels, 0), primitive_actions: 0, restoration_actions: 0, new_solver_actions: 0 }, games };
+}
+
+function launch(snapshot = fixture(), { liveConfig = null, fetch = null, overview = undefined } = {}) {
   const errors = [], requests = [], paints = [], outlines = [], pointers = [], timers = new Map();
   const substitutions = {
     __CONSOLE_CSP__: '', __CONSOLE_CSS__: fs.readFileSync(path.join(assets, 'styles.css'), 'utf8'),
@@ -44,10 +52,10 @@ function launch(snapshot = fixture(), { liveConfig = null, fetch = null } = {}) 
       window.HTMLCanvasElement.prototype.getContext = function () {
         return { fillRect() { paints.push(this.fillStyle); }, strokeRect() { outlines.push(this.strokeStyle); }, beginPath() {}, arc() { pointers.push(this.strokeStyle); }, stroke() {} };
       };
-      window.fetch = async (url, options = {}) => { requests.push({ url, options }); if (!fetch) throw new Error('unexpected network'); return fetch(url, options); };
+      window.fetch = async (url, options = {}) => { requests.push({ url, options }); if (!fetch) throw new Error('unexpected network'); if (url === '/api/overview' && overview === undefined) return response(overviewFixture(liveConfig)); if (url === '/api/overview' && overview !== null) return response(typeof overview === 'function' ? overview() : overview); return fetch(url, options); };
       window.matchMedia = () => ({ matches: true, addEventListener() {} });
       let next = 0;
-      window.setInterval = (fn) => { timers.set(++next, fn); return next; };
+      window.setInterval = (fn, ms) => { fn.intervalMs = ms; timers.set(++next, fn); return next; };
       window.clearInterval = (id) => timers.delete(id);
     } });
   const $ = (id) => dom.window.document.getElementById(id);
@@ -334,6 +342,9 @@ test('exported real HTML loads with zero external resource requests', { skip: !p
 });
 
 const settle = async () => { for (let i = 0; i < 24; i++) await Promise.resolve(); };
+const enterManual = async (app) => {
+  await settle(); app.$('console-mode').value='manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+};
 const liveConfig = { token: 'test-token', games: [{ game_id: 'sp80-test', alias: 'SP80', win_levels: 3 }, { game_id: 'ls20-test', alias: 'LS20', win_levels: 7 }] };
 const view = (snapshot = fixture(), state = 'running') => ({ session_id: 'session-1', state, game_id: snapshot.run.game_id, run_id: snapshot.run.run_id, cleanup_confirmed: false, snapshot, revision: 1 });
 const response = (value, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => value });
@@ -356,7 +367,7 @@ test('selected game opens real playable manual session without P7 and idle polls
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     assert.equal(app.$('console-mode').value, 'manual');
     assert.match(app.$('board-title').textContent, /人工试玩/);
     assert.match(app.$('world-guide').textContent, /人工试玩不生成 P7 认知/);
@@ -390,7 +401,7 @@ test('startup resumes existing manual game, actual level and observation without
   const manual = manualView('ls20-test', 9, 4, 3);
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
-    await settle();
+    await enterManual(app);
     assert.equal(app.$('console-mode').value, 'manual');
     assert.equal(app.$('game-select').value, 'ls20-test');
     assert.equal(app.$('action-total').textContent, '4');
@@ -413,7 +424,7 @@ test('fresh server selection restores the saved game and direct level without im
     return response(url === '/api/runs' ? { runs: [] } : { ...stateWithManual(manual), selection });
   } });
   try {
-    await settle();
+    await enterManual(app);
     const opens = app.requests.filter((entry) => entry.url === '/api/manual/open');
     assert.equal(opens.length, 1);
     const body = JSON.parse(opens[0].options.body);
@@ -440,14 +451,14 @@ test('legacy manual view infers the actual frame level and invalid saved selecti
   const legacy = manualView('ls20-test', 9, 2, 3); delete legacy.level;
   const resumed = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(legacy)) });
   try {
-    await settle(); assert.equal(resumed.$('board-kicker').textContent, 'LEVEL 03');
+    await enterManual(resumed); assert.equal(resumed.$('board-kicker').textContent, 'LEVEL 03');
     assert.equal(resumed.requests.some((entry) => entry.url === '/api/manual/open'), false);
     assert.deepEqual(resumed.errors, []);
   } finally { resumed.dom.window.close(); }
   for (const selection of [{ game_id: 'unknown', level: 3 }, { game_id: 'ls20-test', level: 8 }, { game_id: 'ls20-test', level: '3' }, null]) {
     const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url === '/api/manual/open' ? manualView() : { ...idleView(), selection }) });
     try {
-      await settle(); const body = JSON.parse(app.requests.find((entry) => entry.url === '/api/manual/open').options.body);
+      await enterManual(app); const body = JSON.parse(app.requests.find((entry) => entry.url === '/api/manual/open').options.body);
       assert.equal(body.game_id, 'sp80-test'); assert.equal(body.level, 1);
       assert.equal(app.$('board-kicker').textContent, 'LEVEL 01');
       assert.deepEqual(app.errors, []);
@@ -466,7 +477,7 @@ test('direct level opening locks the rail until its exact response and changing 
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('level-3').click(); await settle();
+    await enterManual(app); app.$('level-3').click(); await settle();
     const request = app.requests.find((entry) => entry.url === '/api/manual/open');
     assert.equal(JSON.parse(request.options.body).level, 3);
     assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
@@ -496,7 +507,7 @@ test('direct level open rejects a different actual level and retry keeps the ori
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('level-3').click(); await settle();
+    await enterManual(app); app.$('level-3').click(); await settle();
     assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
     assert.equal(app.$('board-empty').hidden, false);
     assert.equal(app.$('retry-command').hidden, false);
@@ -531,7 +542,7 @@ test('poll captured before successful manual close cannot reopen the closed obse
     return response(stateWithManual(manual));
   } });
   try {
-    await settle(); hold = true; app.tick(); await settle();
+    await enterManual(app); hold = true; app.tick(); await settle();
     app.$('manual-close').click(); await settle(); releasePoll(); await settle();
     assert.match(app.$('service-status').textContent, /试玩已结束/);
     assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
@@ -546,7 +557,7 @@ test('manual opening disables selection and active session poll rejects its dela
     return response(url === '/api/runs' ? { runs: [] } : current);
   } });
   try {
-    await settle(); assert.equal(app.$('run-start').disabled, true);
+    await enterManual(app); assert.equal(app.$('run-start').disabled, true);
     assert.equal(app.$('game-select').disabled, true);
     assert.ok([...app.dom.window.document.querySelectorAll('.level-button')].every((button) => button.disabled));
     app.$('level-2').dispatchEvent(new app.dom.window.MouseEvent('click', { bubbles: true }));
@@ -567,7 +578,7 @@ test('manual open failure does not prevent independent fresh P7 start', async ()
     return response(url === '/api/runs' ? { runs: [] } : current);
   } });
   try {
-    await settle(); assert.equal(app.$('run-start').disabled, false);
+    await enterManual(app); assert.equal(app.$('run-start').disabled, false);
     assert.equal(app.$('frame-counter').textContent, '0 / 0');
     assert.doesNotMatch(app.$('board-empty').textContent, /private|sentinel/);
     app.$('run-start').click(); await settle();
@@ -580,14 +591,14 @@ test('manual open failure does not prevent independent fresh P7 start', async ()
 
 test('replay rejects pending manual open and returning to manual reopens playable session', async () => {
   const releases = [];
-  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+  const app = launch(fixture(), { liveConfig, overview:replayOverview(['old-run']), fetch: async (url) => {
     if (url === '/api/manual/open') return new Promise((resolve) => { releases.push(resolve); });
     if (url === '/api/runs') return response({ runs: [{ run_id: 'old-run', game_id: 'sp80-test' }] });
     if (url === '/api/replay/old-run') return response({ ...fixture(), run: { ...fixture().run, run_id: 'old-run' } });
     return response(idleView());
   } });
   try {
-    await settle(); app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    await enterManual(app); app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
     app.$('replay-load').click(); await settle(); releases[0](response(manualView())); await settle();
     assert.equal(app.$('run-id').textContent, 'old-run');
     app.$('console-mode').value = 'manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
@@ -602,7 +613,7 @@ test('unchanged manual polls preserve pressed button identity and keyboard focus
   const manual = manualView();
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
-    await settle();
+    await enterManual(app);
     const button = app.$('available-actions').querySelector('[data-available-action="ACTION4"]');
     button.focus(); button.dispatchEvent(new app.dom.window.MouseEvent('mousedown', { bubbles: true }));
     app.tick(); await settle();
@@ -623,7 +634,7 @@ test('manual feedback distinguishes pending from acknowledged action and reports
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     const button = app.$('available-actions').querySelector('[data-available-action="ACTION1"]');
     button.click(); button.click(); await settle();
     assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
@@ -667,7 +678,7 @@ test('manual feedback never reports execution for rejected or unconfirmed respon
       return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
     } });
     try {
-      await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION1"]').click(); await settle();
+      await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION1"]').click(); await settle();
       const feedback = app.$('manual-action-status').textContent;
       assert.doesNotMatch(feedback, /已执行|private|sentinel/, outcome);
       assert.match(feedback, outcome === 'rejected' ? /拒绝/ : outcome === 'closed' ? /结束/ : /未确认/, outcome);
@@ -693,7 +704,7 @@ test('manual coordinate acknowledgement checks exact coordinates independently o
       return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
     } });
     try {
-      await settle(); const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 });
+      await enterManual(app); const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 });
       app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click();
       canvas.dispatchEvent(new app.dom.window.MouseEvent('click', { clientX: 75, clientY: 25, bubbles: true })); await settle();
       assert.match(app.$('manual-action-status').textContent, wrongCoordinate ? /未确认/ : /已执行/);
@@ -728,7 +739,7 @@ test('explicit HUMAN restart clears current history and counters, preserves actu
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     const restart = app.$('manual-restart');
     assert.ok(restart, 'HUMAN offers an explicit clear and restart button');
     assert.equal(restart.textContent, '清空并重新开始'); assert.equal(restart.hidden, false); assert.equal(restart.disabled, false);
@@ -758,7 +769,7 @@ test('HUMAN restart disables historical and busy controls and stays hidden in P7
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); assert.ok(app.$('manual-restart'));
+    await enterManual(app); assert.ok(app.$('manual-restart'));
     app.$('manual-action-history').querySelector('button').click();
     assert.equal(app.$('manual-restart').disabled, true); app.$('manual-restart').click();
     assert.equal(app.requests.some((entry) => entry.url === '/api/manual/restart'), false);
@@ -784,7 +795,7 @@ test('restart transport and failed-save responses keep exact retry identity and 
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); assert.ok(app.$('manual-restart')); app.$('manual-restart').click(); await settle();
+    await enterManual(app); assert.ok(app.$('manual-restart')); app.$('manual-restart').click(); await settle();
     assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.equal(app.$('retry-command').textContent, '重试原请求');
     app.tick(); await settle(); assert.equal(app.$('frame-counter').textContent, '3 / 3');
     app.$('retry-command').click(); await settle();
@@ -810,7 +821,7 @@ test('uncertain last confirmed HUMAN frame permits restart and rejected startup 
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); assert.ok(app.$('manual-restart')); assert.equal(app.$('console-mode').value, 'manual');
+    await enterManual(app); assert.ok(app.$('manual-restart')); assert.equal(app.$('console-mode').value, 'manual');
     assert.equal(app.$('manual-restart').disabled, false);
     assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
     app.$('manual-restart').click(); await settle();
@@ -836,7 +847,7 @@ test('restart can replace an unsaved HUMAN pose and retires its earlier save ret
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     assert.equal(app.$('retry-command').textContent, '重试保存');
     assert.equal(app.$('manual-restart').disabled, false); app.$('manual-restart').click(); await settle();
     assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('retry-command').hidden, true);
@@ -854,7 +865,7 @@ test('restart recovers the last confirmed frame after an ordinary action rejecti
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     app.tick(); await settle();
     assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.equal(app.$('manual-restart').disabled, false);
     app.$('manual-restart').click(); await settle();
@@ -875,7 +886,7 @@ test('an old restart retry response cannot replace a later active P7 session', a
     return response(url === '/api/runs' ? { runs: [] } : current);
   } });
   try {
-    await settle(); app.$('manual-restart').click(); await settle(); app.$('retry-command').click(); await settle();
+    await enterManual(app); app.$('manual-restart').click(); await settle(); app.$('retry-command').click(); await settle();
     current = view(); app.tick(); await settle();
     assert.equal(app.$('console-mode').value, 'live'); assert.match(app.$('session-id').textContent, /session-1/);
     resolveRetry(response(restartedManualView(manual))); await settle();
@@ -893,7 +904,7 @@ test('permanent stale or expired restart rejections release controls and refresh
       return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
     } });
     try {
-      await settle(); app.$('manual-restart').click(); await settle();
+      await enterManual(app); app.$('manual-restart').click(); await settle();
       assert.equal(app.$('retry-command').hidden, true, code);
       assert.equal(app.$('console-mode').disabled, false, code); assert.equal(app.$('game-select').disabled, false, code);
       assert.equal(app.$('manual-close').disabled, false, code); assert.equal(app.$('manual-restart').disabled, true, code);
@@ -920,7 +931,7 @@ test('restart rejects reused identity, wrong level and uncleared counters or his
       return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
     } });
     try {
-      await settle(); assert.ok(app.$('manual-restart')); app.$('manual-restart').click(); await settle();
+      await enterManual(app); assert.ok(app.$('manual-restart')); app.$('manual-restart').click(); await settle();
       assert.equal(app.$('frame-counter').textContent, '3 / 3'); assert.match(app.$('session-id').textContent, /restored-session/);
       assert.equal(app.$('retry-command').hidden, false); assert.equal(app.$('manual-restart').disabled, true);
       assert.deepEqual(app.errors, []);
@@ -934,7 +945,7 @@ test('empty idle manual history permits saved selection to open and hydrate a re
     episode_id: 0, action_count: 0, snapshot: null, last_action: null, history: [], saved_levels: [], save_status: 'saved', restored: false };
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url === '/api/manual/open' ? savedManualView() : { ...stateWithManual(empty), selection }) });
   try {
-    await settle();
+    await enterManual(app);
     assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/open').length, 1);
     assert.equal(app.$('frame-counter').textContent, '3 / 3');
     assert.match(app.$('manual-save-status').textContent, /已恢复/);
@@ -946,7 +957,7 @@ test('saved manual history hydrates reload with exact edges and stable read-only
   let manual = savedManualView();
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
-    await settle();
+    await enterManual(app);
     assert.equal(app.$('frame-counter').textContent, '3 / 3');
     assert.match(app.$('manual-action-history').textContent, /#1 ACTION4.*#2 RESET/);
     assert.match(app.$('manual-save-status').textContent, /自动保存.*已恢复/);
@@ -987,7 +998,7 @@ test('switching back to a saved manual level resumes history in the new session 
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('level-2').click(); await settle(); app.$('level-1').click(); await settle();
+    await enterManual(app); app.$('level-2').click(); await settle(); app.$('level-1').click(); await settle();
     assert.equal(opens, 2); assert.equal(app.$('frame-counter').textContent, '3 / 3');
     assert.match(app.$('manual-action-history').textContent, /#2 RESET/);
     app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
@@ -1005,7 +1016,7 @@ test('manual save status changes preserve the live buttons and explain preserved
   let manual = { ...savedManualView(), save_status: 'pending' };
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
-    await settle();
+    await enterManual(app);
     assert.match(app.$('manual-save-status').textContent, /已保留该关原存档；继续操作后更新/);
     assert.doesNotMatch(app.$('manual-save-status').textContent, /自动保存/);
     const button = app.$('available-actions').querySelector('[data-available-action="ACTION4"]'); button.focus();
@@ -1034,7 +1045,7 @@ test('failed automatic save retains the pose and exposes exact save retry before
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     assert.equal(app.$('frame-counter').textContent, '4 / 4');
     assert.match(app.$('manual-action-status').textContent, /已执行 3 次/);
     assert.equal(app.$('level-2').disabled, true); assert.equal(app.$('game-select').disabled, true);
@@ -1064,7 +1075,7 @@ test('failed-save retry waits for HUMAN mode and cannot strand controls in P7 mo
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     app.$('console-mode').value = 'live'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
     assert.equal(app.$('retry-command').hidden, true);
     app.$('retry-command').click(); await settle(); assert.equal(calls, 1);
@@ -1089,7 +1100,7 @@ test('initial save failure retries the exact open without replacing its confirme
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); assert.equal(app.$('frame-counter').textContent, '1 / 1');
+    await enterManual(app); assert.equal(app.$('frame-counter').textContent, '1 / 1');
     assert.equal(app.$('retry-command').textContent, '重试保存'); assert.equal(app.$('level-2').disabled, true);
     app.$('retry-command').click(); await settle();
     const requests = app.requests.filter((entry) => entry.url === '/api/manual/open');
@@ -1106,7 +1117,7 @@ test('same-version full history fills actual gaps without moving historical seek
   let manual = { ...full, history: [full.history[0], full.history[2]] };
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
-    await settle(); assert.equal(app.$('frame-counter').textContent, '2 / 2');
+    await enterManual(app); assert.equal(app.$('frame-counter').textContent, '2 / 2');
     assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 0);
     assert.match(app.$('manual-history-note').textContent, /缺失/);
     app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
@@ -1124,7 +1135,7 @@ test('invalid saved history cannot partially replace the accepted pose or histor
   let manual = savedManualView();
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
-    await settle(); const accepted = app.dom.window.__ASTERION_STATE__;
+    await enterManual(app); const accepted = app.dom.window.__ASTERION_STATE__;
     for (const mutate of [
       (view) => { view.history[1].frame.grid = [[99]]; },
       (view) => { view.history[1].observation_version = 0; },
@@ -1160,7 +1171,7 @@ test('manual history retains actual no-change and RESET observations; seeking an
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     for (const name of ['ACTION4', 'RESET']) { app.$('available-actions').querySelector(`[data-available-action="${name}"]`).click(); await settle(); }
     assert.equal(app.$('frame-slider').max, '2');
     assert.equal(app.$('frame-counter').textContent, '3 / 3');
@@ -1205,7 +1216,7 @@ test('manual history crosses actual levels and retains historical selection acro
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     assert.match(app.$('board-title').textContent, /关卡 2/);
     assert.equal(app.$('frame-counter').textContent, '2 / 2');
     const edge = app.dom.window.__ASTERION_STATE__.levels.find((level) => level.level === 2).actions[0];
@@ -1241,7 +1252,7 @@ test('manual history autoplay continues across actual level transitions', async 
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     for (let i = 0; i < 2; i += 1) { app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle(); }
     app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
     app.$('play-toggle').click(); app.tick(); await settle();
@@ -1266,7 +1277,7 @@ test('manual feedback cannot survive a different same-game session identity', as
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     assert.match(app.$('manual-action-status').textContent, /已执行 1 次/);
     manual = { ...manualView(), session_id: 'different-session' }; app.tick(); await settle();
     assert.equal(app.$('action-total').textContent, '0');
@@ -1289,7 +1300,7 @@ test('manual history survives same-session mode changes and resets for a newly o
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
     app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
     app.$('console-mode').value = 'manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
@@ -1311,7 +1322,7 @@ test('manual buttons send versioned actions once and transport retry retains exa
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     assert.equal(app.$('retry-command').hidden, false);
     assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
     app.$('retry-command').click(); await settle();
@@ -1346,7 +1357,7 @@ test('manual action strip only shows real measurements and never suggests a miss
     level.actions = [{ id: 'manual-action', name: 'ACTION4', before_frame: 'manual-before', after_frame: 'manual-1', data: {}, visual_observations: observations }];
     const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
     try {
-      await settle();
+      await enterManual(app);
       assert.equal(app.$('available-actions').querySelector('.is-current').dataset.availableAction, 'ACTION4');
       assert.equal(app.$('current-action-link').hidden, true);
       assert.equal(app.$('current-action-link').textContent, '');
@@ -1370,7 +1381,7 @@ test('manual ACTION6 waits for board click and sends exact grid coordinates; key
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 100, height: 100 });
     app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click(); await settle();
     assert.equal(app.requests.some((entry) => entry.url === '/api/manual/action'), false);
@@ -1403,7 +1414,7 @@ test('arming manual ACTION6 exits comparison so the current clickable board is v
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
-    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    await enterManual(app); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
     app.$('compare-toggle').checked = true; app.$('compare-toggle').dispatchEvent(new app.dom.window.Event('change'));
     assert.equal(app.$('comparison-board').hidden, false);
     assert.equal(app.$('single-board').hidden, true);
@@ -1439,7 +1450,7 @@ test('manual busy operation rejects extra clicks and closed or uncertain session
       return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
     } });
     try {
-      await settle(); const button = app.$('available-actions').querySelector('[data-available-action="ACTION1"]');
+      await enterManual(app); const button = app.$('available-actions').querySelector('[data-available-action="ACTION1"]');
       button.click(); button.click(); await settle();
       assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
       manual = { ...manual, state: terminal }; releaseAction(response(manual)); await settle(); app.tick(); await settle();
@@ -1461,7 +1472,7 @@ test('closed manual session reopens the selected game and actual level with a fr
     return response(stateWithManual(manual));
   } });
   try {
-    await settle();
+    await enterManual(app);
     app.$('manual-close').click(); await settle();
     const close = app.requests.find((entry) => entry.url === '/api/manual/close');
     assert.equal(app.$('manual-close').textContent, '重新打开试玩');
@@ -1489,7 +1500,7 @@ test('live initialization polls without starting, start uses exact game, retry p
     if (url === '/api/stop') { current = view(fixture(), 'stopping'); return response(current, 202); }
     throw new Error('unexpected route');
   } });
-  await settle();
+  await enterManual(app);
   assert.equal(app.$('console-mode').value, 'manual');
   assert.equal(app.requests.filter((request) => request.url === '/api/start').length, 0);
   app.$('game-select').value = 'ls20-test'; app.$('run-start').click(); await settle();
@@ -1512,7 +1523,7 @@ test('live initialization polls without starting, start uses exact game, retry p
 
 test('live replacement follows newest frame; replay preserves historical selection and animation never stops solver', async () => {
   let current = view(), revision = 1;
-  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [{run_id:'old-run',game_id:'sp80-test'}] } : url === '/api/replay/old-run' ? {...fixture(), run: {...fixture().run, run_id:'old-run'}} : current) });
+  const app = launch(fixture(), { liveConfig, overview: replayOverview(['old-run']), fetch: async (url) => response(url === '/api/runs' ? { runs: [{run_id:'old-run',game_id:'sp80-test'}] } : url === '/api/replay/old-run' ? {...fixture(), run: {...fixture().run, run_id:'old-run'}} : current) });
   await settle(); assert.equal(app.$('frame-counter').textContent, '3 / 3');
   assert.equal(app.$('unavailable-current-action').querySelector('.is-current').dataset.availableAction, 'ACTION4');
   assert.equal(app.$('unavailable-current-action').querySelector('button').disabled, true);
@@ -1523,15 +1534,15 @@ test('live replacement follows newest frame; replay preserves historical selecti
   assert.equal(app.paints.at(-1), '#4FCC30');
   assert.equal(app.$('available-actions').querySelector('button').disabled, true);
   assert.equal(app.$('available-actions').querySelector('.is-current'), null); // no action links to the new observation
-  app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+  app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
   app.$('frame-slider').value = '1'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
   current = {...view(next), revision: ++revision}; app.tick(); await settle();
-  assert.equal(app.$('frame-counter').textContent, '2 / 4');
+  assert.equal(app.$('frame-counter').textContent, '2 / 3');
   assert.equal(app.$('unavailable-current-action').querySelector('[aria-current="true"]').dataset.availableAction, 'ACTION4');
   app.$('play-toggle').click(); app.$('play-toggle').click();
   assert.equal(app.requests.some((request) => request.url === '/api/stop'), false);
-  assert.equal(app.$('replay-run').options.length, 1);
-  app.$('replay-load').click(); await settle();
+  assert.equal(app.$('replay-run').hidden, true);
+  assert.equal(app.$('replay-load').hidden, true);
   assert.ok(app.requests.some((request) => request.url === '/api/replay/old-run'));
   assert.equal(app.$('run-id').textContent, 'old-run');
   current = {...view(next), revision: ++revision}; app.tick(); await settle();
@@ -1622,7 +1633,7 @@ test('new live session with no observation clears previous session frame and cog
 test('late replay response after mode switch cannot replace live frame at an unchanged revision', async () => {
   let releaseReplay;
   const current = view(), replay = {...fixture(), run:{...fixture().run,run_id:'old-run'}};
-  const app = launch(fixture(),{liveConfig,fetch:async(url)=>{
+  const app = launch(fixture(),{liveConfig,overview:replayOverview(['old-run']),fetch:async(url)=>{
     if(url==='/api/runs') return response({runs:[{run_id:'old-run',game_id:'sp80-test'}]});
     if(url==='/api/replay/old-run') return new Promise(resolve=>{releaseReplay=()=>resolve(response(replay));});
     return response(current);
@@ -1643,20 +1654,20 @@ test('late replay response after mode switch cannot replace live frame at an unc
 
 test('superseded replay response cannot replace a newer selected run', async () => {
   const releases = {};
-  const app = launch(fixture(),{liveConfig,fetch:async(url)=>{
+  const overview=replayOverview(['old-run']);overview.games[1].runs=replayOverview(['new-run']).games[0].runs;
+  const app = launch(fixture(),{liveConfig,overview,fetch:async(url)=>{
     if(url==='/api/runs') return response({runs:['old-run','new-run'].map(run_id=>({run_id,game_id:'sp80-test'}))});
     if(url.startsWith('/api/replay/')) {
       const run_id=url.split('/').at(-1);
-      return new Promise(resolve=>{releases[run_id]=()=>resolve(response({...fixture(),run:{...fixture().run,run_id}}));});
+      return new Promise(resolve=>{releases[run_id]=()=>resolve(response({...fixture(),run:{...fixture().run,run_id,game_id:run_id==='new-run'?'ls20-test':'sp80-test'}}));});
     }
     return response(view());
   }});
   try {
     await settle();
     app.$('console-mode').value='replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
-    app.$('replay-load').click(); await settle();
-    app.$('replay-run').value='new-run'; app.$('replay-run').dispatchEvent(new app.dom.window.Event('change'));
-    app.$('replay-load').click(); await settle();
+    await settle();
+    app.$('overview-game-list').querySelector('[data-game-id="ls20-test"] [data-overview-select]').click();await settle();
     releases['new-run'](); await settle(); releases['old-run'](); await settle();
     assert.equal(app.$('run-id').textContent,'new-run');
     app.tick(); await settle(); assert.equal(app.$('run-id').textContent,'new-run');
@@ -1793,4 +1804,212 @@ test('live historical event cursor stays read-only across polls and pause/resume
   app.$('run-stop').click(); await settle();
   assert.equal(app.requests.filter((request)=>request.url==='/api/stop').length,1);
   assert.deepEqual(app.errors,[]);app.dom.window.close();
+});
+
+
+const catalog25 = { token: 'test-token', games: Array.from({length:25}, (_, i) => ({game_id:`game${i}-catalog`,alias:`G${i}`,win_levels:i+2})) };
+function replayOverview(ids) { const overview=overviewFixture(liveConfig); overview.games[0].runs=ids.map(run_id=>({run_id,status:'incomplete',completed_levels:0,primitive_actions:0,restoration_actions:0,new_solver_actions:0,verified:false}));return overview; }
+const catalogRun = (run_id, status='incomplete', verified=true) => ({run_id,status,completed_levels:1,primitive_actions:12,restoration_actions:4,new_solver_actions:8,verified});
+const overviewRow = (app, game=0) => app.$('overview-game-list').querySelector(`[data-game-id="game${game}-catalog"]`);
+
+test('local overview renders each catalog game once and uses actual catalog totals and exact score strings', async () => {
+  const overview = overviewFixture(catalog25);
+  overview.totals = {...overview.totals,score:'1.234567',completed_levels:1,primitive_actions:15,restoration_actions:4,new_solver_actions:8,actions_pending:3};
+  overview.games[0] = {...overview.games[0],completed_levels:1,status:'partial',score:'2.500000',route_actions:8,runs:[catalogRun('best-one')],best_run_id:'best-one',resume_run_id:'best-one'};
+  const app = launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url==='/api/runs'?{runs:[]}:idleView())});
+  try {
+    await settle(); app.tick(); await settle();
+    const rows=[...app.$('overview-game-list').children];
+    assert.equal(rows.length,25); assert.equal(new Set(rows.map(row=>row.dataset.gameId)).size,25);
+    assert.equal(app.$('overview-score').textContent,'1.234567');
+    assert.equal(app.$('overview-games').textContent,'0 / 25');
+    assert.equal(app.$('overview-levels').textContent,'1 / 350');
+    assert.match(app.$('overview').textContent,/本地总分|保存路线|热启动|官网冷启动/);
+    assert.match(app.$('overview-action-breakdown').textContent,/恢复 4 · 新增求解 8 · 待封存分账 3/);
+    assert.equal(overviewRow(app).children[2].textContent,'2.500000');
+    assert.equal([...app.timers.values()].some(fn=>fn.intervalMs===5000),true);
+    assert.equal(app.requests.filter(r=>r.url==='/api/runs').length,0);
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
+});
+
+test('game selection exposes partial failure runs and continue sends the exact saved route and complete game target', async () => {
+  const overview=overviewFixture(catalog25);
+  overview.games[1]={...overview.games[1],status:'partial',completed_levels:1,best_run_id:'best-two',resume_run_id:'best-two',runs:[catalogRun('failed-two','failed',false),catalogRun('best-two')]};
+  overview.games[0]={...overview.games[0],runs:[catalogRun('other-game')]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async(url)=>url==='/api/manual/open'?response({},503):response(url==='/api/runs'?{runs:[]}:idleView())});
+  try {
+    await settle(); overviewRow(app,1).querySelector('[data-overview-select]').click(); await settle();
+    assert.equal(app.$('game-select').value,'game1-catalog');
+    assert.deepEqual([...app.$('replay-run').options].map(option=>option.value),['failed-two','best-two']);
+    assert.equal(app.$('run-start').textContent,'继续 P7');
+    overviewRow(app,1).querySelector('[data-overview-start]').click(); await settle();
+    const body=JSON.parse(app.requests.find(request=>request.url==='/api/start').options.body);
+    assert.equal(body.game_id,'game1-catalog');assert.equal(body.target_level,3);assert.equal(body.resume_run_id,'best-two');
+    assert.equal(typeof body.command_id,'string');
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
+});
+
+test('unplayed games start fresh, completed games require explicit restart, and missing overview never falls back fresh', async () => {
+  for (const kind of ['unplayed','completed','missing']) {
+    const overview=overviewFixture(catalog25); overview.games[0].status=kind==='completed'?'completed':'unplayed';
+    const app=launch(fixture(),{liveConfig:catalog25,overview:kind==='missing'?null:overview,fetch:async(url)=>url==='/api/manual/open'?response({},503):response(url==='/api/runs'?{runs:[]}:url==='/api/overview'?{}:idleView())});
+    try {
+      await settle(); app.$('run-start').click(); await settle();
+      if (kind==='completed') { assert.equal(app.$('run-start').disabled,true); assert.equal(app.requests.some(r=>r.url==='/api/start'),false); app.$('run-fresh').click(); await settle(); }
+      const starts=app.requests.filter(r=>r.url==='/api/start');
+      assert.equal(starts.length,kind==='missing'?0:1);
+      if (starts.length) { const body=JSON.parse(starts[0].options.body); assert.equal(body.target_level,2);assert.equal(Object.hasOwn(body,'resume_run_id'),false); }
+      assert.deepEqual(app.errors,[]);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('external unsealed replay polling preserves chosen history, switches runs without stale updates, and stops after sealing', async () => {
+  const overview=overviewFixture(catalog25);
+  overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
+  overview.games[0]={...overview.games[0],status:'running',runs:[catalogRun('external-one','running',false)]};
+  overview.games[1]={...overview.games[1],runs:[catalogRun('external-two')]};
+  let replay={...researchStory(),run:{...fixture().run,run_id:'external-one',game_id:'game0-catalog',win_levels:2,sealed_trace:false,status:'incomplete'}};
+  let delayed=null,hold=false;
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async(url)=>{
+    if(url==='/api/runs')return response({runs:[]});
+    if(url==='/api/manual/open')return response({},503);
+    if(url==='/api/replay/external-one'){if(hold)return new Promise(resolve=>{delayed=resolve;});return response(replay);}
+    if(url==='/api/replay/external-two')return response({...replay,run:{...replay.run,run_id:'external-two',game_id:'game1-catalog',sealed_trace:true}});
+    return response(idleView());
+  }});
+  try {
+    await settle(); const row=overviewRow(app); assert.match(row.textContent,/外部只读/);
+    assert.equal(row.querySelector('[data-overview-start]').disabled,true);
+    row.querySelector('[data-overview-watch]').click();await settle();
+    assert.equal(app.$('run-pause').disabled,true);assert.equal(app.$('run-stop').disabled,true);
+    assert.equal([...app.timers.values()].some(fn=>fn.intervalMs===2000),true);
+    app.$('event-slider').value='1';app.$('event-slider').dispatchEvent(new app.dom.window.Event('input'));
+    assert.match(app.$('world-guide').textContent,/门保持开放/);
+    replay={...replay,process_events:[...replay.process_events,{...replay.process_events.at(-1),event_sequence:7}]};
+    app.tick();await settle();assert.equal(app.$('event-counter').textContent,'事件 2');assert.match(app.$('world-guide').textContent,/门保持开放/);
+    app.$('replay-follow').click();assert.equal(app.$('event-counter').textContent,'事件 7');
+    hold=true;app.tick();await settle();
+    overviewRow(app,1).querySelector('[data-overview-select]').click();await settle();
+    assert.equal(app.$('run-id').textContent,'external-two');
+    delayed(response(replay));await settle();assert.equal(app.$('run-id').textContent,'external-two');
+    assert.equal([...app.timers.values()].some(fn=>fn.intervalMs===2000),false);
+    assert.equal(app.requests.some(r=>['/api/start','/api/pause','/api/stop'].includes(r.url)),false);
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
+});
+
+test('static exports keep the local overview hidden and never fetch',()=>{
+  const app=launch(fixture());try{assert.equal(app.$('overview').hidden,true);assert.equal(app.requests.length,0);assert.deepEqual(app.errors,[]);}finally{app.dom.window.close();}
+});
+
+
+test('unresumable saved progress and stale overview disable default start without discarding displayed records', async()=>{
+  let overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,best_run_id:'no-world-model',runs:[catalogRun('no-world-model')]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview:()=>overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(idleView())});
+  try {
+    await settle();assert.equal(app.$('run-start').disabled,true);assert.equal(app.$('run-start').textContent,'存档不可接续');assert.equal(app.$('run-fresh').disabled,false);
+    app.$('run-start').click();assert.equal(app.requests.some(r=>r.url==='/api/start'),false);
+    overview={};app.tick();await settle();assert.equal(app.$('overview-game-list').children.length,25);assert.equal(app.$('run-fresh').disabled,true);
+    overviewRow(app,1).querySelector('[data-overview-start]').click();assert.equal(app.requests.some(r=>r.url==='/api/start'),false);
+    assert.match(app.$('overview-refresh').textContent,/暂不可用/);assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+test('recording overview watches the unsealed external attempt before best saved route and preserves frame history',async()=>{
+  const overview=overviewFixture(catalog25);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
+  overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,best_run_id:'old-best',resume_run_id:'old-best',runs:[catalogRun('old-best'),{...catalogRun('new-recording','unverified',false),recording:true,sealed_trace:false}]};
+  let replay={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'new-recording',win_levels:2,sealed_trace:false}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
+  try {
+    await settle();const row=overviewRow(app);assert.match(row.textContent,/记录中 · 外部只读/);assert.match(row.querySelector('.overview-progress').textContent,/1 \/ 2/);
+    row.querySelector('[data-overview-watch]').click();await settle();assert.equal(app.$('replay-run').value,'new-recording');assert.equal(app.$('run-id').textContent,'new-recording');
+    app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    replay={...replay,levels:replay.levels.map((level,i)=>i?level:{...level,frames:[...level.frames,{id:'f3',grid:[[14]],state:'NOT_FINISHED'}]})};
+    app.tick();await settle();assert.equal(app.$('frame-counter').textContent,'2 / 4');assert.equal(app.$('replay-follow').hidden,false);
+    app.$('replay-follow').click();assert.equal(app.$('frame-counter').textContent,'4 / 4');
+    overviewRow(app,1).querySelector('[data-overview-select]').click();await settle();
+    const before=app.requests.filter(r=>r.url==='/api/replay/new-recording').length;app.tick();await settle();assert.equal(app.requests.filter(r=>r.url==='/api/replay/new-recording').length,before);
+    assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+
+test('replay frame and user level cursors pin the existing event when new revisions arrive at the same frame',async()=>{
+  const overview=overviewFixture(catalog25);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
+  overview.games[0]={...overview.games[0],runs:[{...catalogRun('cursor-recording','unverified',false),recording:true}]};
+  let replay={...researchStory(),run:{...fixture().run,game_id:'game0-catalog',run_id:'cursor-recording',sealed_trace:false}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
+  try{
+    await settle();overviewRow(app).querySelector('[data-overview-watch]').click();await settle();
+    app.$('frame-slider').value='0';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    const revision={...replay.process_events[4],event_sequence:7,payload:{...replay.process_events[4].payload,revision:'model-3',description_zh:'新规则：门永久关闭。'}};
+    replay={...replay,process_events:[...replay.process_events,revision]};app.tick();await settle();
+    assert.equal(app.$('event-counter').textContent,'事件 6');assert.match(app.$('world-guide').textContent,/门仅开放一步/);assert.doesNotMatch(app.$('world-guide').textContent,/永久关闭/);
+    app.$('replay-follow').click();assert.equal(app.$('event-counter').textContent,'事件 7');
+    app.$('level-1').click();replay={...replay,process_events:[...replay.process_events,{...revision,event_sequence:8}]};app.tick();await settle();
+    assert.equal(app.$('event-counter').textContent,'事件 7');assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+test('loading another replay clears a previous event cursor and follows its latest frame',async()=>{
+  const overview=overviewFixture(catalog25);overview.games[0]={...overview.games[0],runs:[catalogRun('first-replay')]};overview.games[1]={...overview.games[1],runs:[catalogRun('second-replay')]};
+  const first={...researchStory(),run:{...fixture().run,game_id:'game0-catalog',run_id:'first-replay',sealed_trace:true}};
+  const second={...fixture(),run:{...fixture().run,game_id:'game1-catalog',run_id:'second-replay',sealed_trace:true},process_events:[{...first.process_events[4],event_sequence:99,frame_id:'f2'}]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url==='/api/replay/first-replay'?first:url==='/api/replay/second-replay'?second:idleView())});
+  try{
+    await settle();overviewRow(app).querySelector('[data-overview-watch]').click();await settle();
+    app.$('event-slider').value='1';app.$('event-slider').dispatchEvent(new app.dom.window.Event('input'));
+    overviewRow(app,1).querySelector('[data-overview-select]').click();await settle();
+    assert.equal(app.$('run-id').textContent,'second-replay');assert.equal(app.$('frame-counter').textContent,'3 / 3');assert.equal(app.$('event-counter').textContent,'事件 99');assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+test('stale unsealed recording does not veto a ready guest and backend readiness blocks new starts',async()=>{
+  let overview=overviewFixture(catalog25);overview.games[0]={...overview.games[0],runs:[{...catalogRun('stale-recording','unverified',false),recording:true}]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview:()=>overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(idleView())});
+  try{
+    await settle();assert.equal(app.$('run-start').disabled,false);assert.match(overviewRow(app).textContent,/记录中 · 外部只读/);
+    overview={...overview,guest_busy:true,start_ready:false,start_block_reason:'session-busy'};app.tick();await settle();assert.equal(app.$('run-start').disabled,true);assert.equal(app.$('run-fresh').disabled,true);
+    app.$('run-start').click();assert.equal(app.requests.some(request=>request.url==='/api/start'),false);assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+
+test('default current game automatically mounts its latest WorldMap P7 recording at level 6 without manual state overwrites',async()=>{
+  const config={...catalog25,games:catalog25.games.map((game,i)=>i===5?{...game,game_id:'sp80-test',alias:'SP80',win_levels:7}:game)};
+  const overview=overviewFixture(config);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
+  overview.games[5]={...overview.games[5],completed_levels:5,status:'partial',score:'59.523810',best_run_id:'saved-five',resume_run_id:'saved-five',recording_run_id:'current-six',runs:[{...catalogRun('saved-five'),completed_levels:5},{...catalogRun('current-six','unverified',false),recording:true}]};
+  const replay={...fixture(),run:{...fixture().run,game_id:'sp80-test',run_id:'current-six',win_levels:7,completed_level_count:5,sealed_trace:false},levels:Array.from({length:6},(_,i)=>({level:i+1,status:i<5?'successful':'incomplete',frames:[{id:`l${i+1}`,grid:[[i]],state:'NOT_FINISHED'}],actions:[],decisions:[],cognition:{scope:'unavailable'}}))};
+  const savedManual=manualView('sp80-test',9,0,2);
+  const session={...stateWithManual(savedManual),selection:{game_id:'sp80-test',level:2}};
+  const app=launch(fixture(),{liveConfig:config,overview,fetch:async url=>response(url==='/api/replay/current-six'?replay:session)});
+  try{
+    await settle();assert.equal(app.$('game-select').value,'sp80-test');assert.equal(app.$('run-id').textContent,'current-six');assert.equal(app.$('board-kicker').textContent,'LEVEL 06');assert.equal(app.$('level-progress').textContent,'5 / 7');
+    assert.equal(app.$('board-empty').hidden,true);assert.equal(app.$('console-mode').value,'replay');assert.equal(app.$('manual-history').hidden,true);
+    assert.equal(app.$('replay-run').hidden,true);assert.equal(app.$('replay-load').hidden,true);assert.equal(app.$('replay-run').getAttribute('aria-hidden'),'true');
+    assert.match(app.$('overview').textContent,/当前 WorldMap P7/);assert.doesNotMatch(app.$('overview').textContent,/历史存档|不同代码版本/);
+    app.tick();await settle();assert.equal(app.$('board-kicker').textContent,'LEVEL 06');assert.equal(app.$('run-id').textContent,'current-six');
+    assert.equal(app.requests.some(request=>['/api/manual/open','/api/manual/action','/api/start'].includes(request.url)),false);assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+test('game selection automatically loads the current source and unplayed games open HUMAN only after explicit mode selection',async()=>{
+  const overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],best_run_id:'highest-current',resume_run_id:'highest-current',completed_levels:1,status:'partial',runs:[catalogRun('older-current'),catalogRun('highest-current')]};
+  const replay={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'highest-current',sealed_trace:true}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async(url,options)=>{
+    if(url==='/api/replay/highest-current')return response(replay);
+    if(url==='/api/manual/open'){const body=JSON.parse(options.body);return response(manualView(body.game_id,9,0,body.level));}
+    return response(idleView());
+  }});
+  try{
+    await settle();assert.equal(app.$('run-id').textContent,'highest-current');assert.equal(app.requests.filter(request=>request.url==='/api/replay/highest-current').length,1);
+    overviewRow(app,1).querySelector('[data-overview-select]').click();await settle();assert.equal(app.$('game-title').textContent,'game1-catalog');assert.equal(app.$('board-empty').hidden,false);assert.equal(app.requests.some(request=>request.url==='/api/manual/open'),false);
+    await enterManual(app);assert.equal(app.$('console-mode').value,'manual');assert.equal(app.$('board-empty').hidden,true);assert.equal(app.requests.filter(request=>request.url==='/api/manual/open').length,1);
+    assert.equal(app.requests.some(request=>request.url==='/api/start'),false);assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
 });

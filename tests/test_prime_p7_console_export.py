@@ -15,6 +15,54 @@ from asterion.applications.prime.p7.console_export import export_console, main, 
 
 
 class TestConsoleExport(unittest.TestCase):
+    def test_fixed_replays_keep_verified_progress_and_latest_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            def publish(timestamp, game, levels, verified=True, trace_verified=True):
+                run = self.make_run(root, timestamp)
+                (run / 'summary.json').write_text(json.dumps({
+                    'run_id': run.name, 'sealed_trace': verified,
+                    'replay_verified': verified, 'cleanup_complete': verified}))
+                snapshot = {'schema': 'asterion.arc-agi3-p7-console/v1', 'levels': [],
+                            'run': {'run_id': run.name, 'game_id': game,
+                                    'completed_level_count': levels, 'sealed_trace': trace_verified,
+                                    'replay_verified': True}, 'warnings': []}
+                with patch('asterion.applications.prime.p7.console_export.build_console_snapshot', return_value=snapshot):
+                    output = export_console(run)
+                self.assertTrue(output.is_file())
+                return snapshot
+            four = publish('20261005010000', 'sp80-test', 4)
+            publish('20261005020000', 'sp80-test', 5, verified=False)
+            fixed = root / 'replays' / 'sp80.html'
+            def embedded(path):
+                return json.loads(re.search(
+                    r'<script id="console-data" type="application/json">(.*?)</script>', path.read_text(), re.S)[1])
+            self.assertEqual(embedded(fixed), four)
+            publish('20261005025000', 'sp80-test', 5, trace_verified=False)
+            self.assertEqual(embedded(fixed), four)
+            other = publish('20261005030000', 'as66-test', 1)
+            self.assertEqual(embedded(root / 'p7-console.html'), other)
+            publish('20261005000000', 'sp80-test', 2)
+            self.assertEqual(embedded(fixed), four)
+            self.assertEqual(embedded(root / 'p7-console.html'), other)
+            five = publish('20261005040000', 'sp80-test', 5)
+            self.assertEqual(embedded(fixed), five)
+
+    def test_replay_command_opens_fixed_file_without_game_or_model_work(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            (root / 'replays').mkdir()
+            fixed = root / 'replays' / 'sp80.html'
+            fixed.write_text('saved')
+            with patch('asterion.applications.prime.p7.console_export.webbrowser.open', return_value=True) as browser:
+                self.assertEqual(main(['replay', '--runs-root', str(root), '--game', 'sp80'],
+                                      stdout=io.StringIO(), stderr=io.StringIO()), 0)
+                browser.assert_called_once_with(fixed.as_uri())
+                browser.reset_mock()
+                self.assertEqual(main(['replay', '--runs-root', str(root), '--game', '../sp80'],
+                                      stdout=io.StringIO(), stderr=io.StringIO()), 2)
+                browser.assert_not_called()
+
     def make_run(self, root, timestamp, suffix='a'):
         run = root / f'p7-live-{timestamp}-{suffix * 24}'
         run.mkdir()

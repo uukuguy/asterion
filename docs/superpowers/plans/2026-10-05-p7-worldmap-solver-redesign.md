@@ -347,3 +347,18 @@ Task 1–3 的单元验证仅证明各自接口，Task 4 的实际 wheel 运行�
 - [ ] 重点边界tests及独立变更review，实际目录/既存封存4关的后台HTTP/DOM验收；无需重复无关fullsuite。
 
 实施：Sol分别拥有后端与assets，root集成design/state；Luna仅后台真实求解与private证据。下一真实尝试由相同已部署solver启动；console代码完成后不改变正在运行的sealed-source和guest。
+
+### Task 5 closure and current boundary (2026-10-06)
+
+The four console worklist items above are implemented and targeted-verified. Evidence recorded at checkpoint: Python overview 59 PASS, export 14 PASS, CLI 3 PASS, UI 85 PASS / 1 skip. Final actual static/export DOM acceptance passed 86/86 with 0 skips using the persistent `replays/sp80.html`; command and log are recorded in the live checkpoint. Root HTTP review and commit coordination remain pending. Latest mandatory promotion is non-PASS: 3990 tests, 14 failures, 4 errors, 4 skips; one additional failure is unclassified. Do not describe all failures as historical or repeat the full suite.
+
+Current UI contract details: overview is fixed to 25 games / 183 levels, exact `gpt-6.1-sol`/seed 0 WorldMap P7 records, and excludes legacy dc22/vc33 history/actions. Pick per game by progress, then RHAE, then fewer actions; whole-game denominator, unplayed=0. `/api/start` takes explicit target and exact resume source. UI opens latest selected-game replay, pins history cursor, and follows external runs read-only. Aliases: `replays/sp80.html`, `p7-console.html`; Make entries `p7-replay GAME=sp80`, `p7-controller`. Canonical fixed URL is `http://127.0.0.1:57515/`; legacy 56659 remains idle and is not the primary URL.
+
+The SP80 6/6 witness is complete: run `p7-live-20261006001222-3a7662493aa44f01b109e5f9`, 143 actions (95 restored + 48 new), RESET=2, seal/replay/cleanup true, receipt 100. Earlier text claiming RESET=0 for this run is corrected; earlier runs had 0. Local standing is 1/25 games, 6/183 levels, 4%, not a formal benchmark. The current authorized local sequence is DC22 → VC33 → remaining catalog, one finite guest at a time; skip SP80. Two failures at a blocked level switch games and a success resets that counter. Active DC22 run identity and caps are in `docs/status/RESUME-NEXT-SESSION.md`; do not duplicate it.
+
+
+### 2026-10-06 运行与官方提交授权更新
+
+DC22 run `p7-live-20261006002338-7fc5ecf2b7ca4c5e8a827607` was interrupted by `_CallbackRejected` at `prime-event-type` / `pi.prompt`: 14 actions, 0 levels, 5 cells, cleanup true, unsealed/unreplayed. Treat as runtime interruption rather than solving failure; do not relaunch until root fixes the run path. Zero-level failure-experience reuse remains unconnected; root is preparing its contract.
+
+After finite DC22 and VC33 attempts, the user authorized exactly one complete 25-task official submission. Pause all remaining local games, have root perform that submission and record official score/channel, then resume the local sequence. This does not authorize repeated/open-ended livebench.

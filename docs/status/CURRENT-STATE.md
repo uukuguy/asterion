@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 solver/console redesign; implemented and deployed with fresh two-level and warm four-level computation/revision/action evidence; multi-game console integration and broad evaluation remain open.
+- Active work package: P7 WorldMap solver and local 25-game console. Console integration is implemented with focused boundary verification; final root HTTP/DOM/export check and commit are pending. User explicitly authorized sequential local solving across all 25 catalog games under one finite guest at a time, switching after two failed attempts on one blocked level. One complete 25-task official submission is separately authorized after finite DC22/VC33 attempts; pause remaining local games during it. Do not expand this into repeated or open-ended livebench.
 
 ## Current Architecture
 
@@ -48,8 +48,8 @@
 ## Evidence Boundary
 
 - Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
-- Old exact prefixes and human saves cannot be evidence of fresh solving. Read the current recovery baton for run IDs and counts.
-- Full 25-game evaluation needs separate finite authorization. Do not widen a bounded witness to improve the result.
+- Exact resume restores only a verified successful action prefix and advisory WorldMap text; failed actions/cells/kernel are not imported. Read the current recovery baton for active run IDs and counts.
+- Local sequential solving is explicitly authorized as described in the live checkpoint. This is not official submission or a formal benchmark; never infer the latter from local RHAE.
 
 ## Resume Instructions
 

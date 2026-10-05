@@ -104,6 +104,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, page, html=True)
             elif self.path == "/api/state":
                 self._send(200, session.view())
+            elif self.path == "/api/overview":
+                self._send(200, session.overview())
             elif self.path == "/api/games":
                 self._send(200, {"games": session.games()})
             elif self.path == "/api/runs":
@@ -113,7 +115,10 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._error(404, "not-found")
         except ConsoleSessionError:
-            self._error(404, "run-unavailable")
+            if self.path == "/api/overview":
+                self._error(503, "overview-unavailable")
+            else:
+                self._error(404, "run-unavailable")
         except Exception:
             self._error(503, "console-unavailable")
 
@@ -157,9 +162,13 @@ class _Handler(BaseHTTPRequestHandler):
                     else {"session_id", "command_id", "observation_version"}
                     if self.path == "/api/manual/restart" else {"session_id", "command_id"})
             if type(value) is not dict or (set(value) != keys
-                    and not (self.path == "/api/manual/open" and set(value) == keys | {"level"})):
+                    and not (self.path == "/api/manual/open" and set(value) == keys | {"level"})
+                    and not (self.path == "/api/start" and keys <= set(value)
+                             and set(value) <= keys | {"target_level", "resume_run_id"})):
                 raise ValueError
-            if any(type(v) is not str for key, v in value.items() if key not in {"observation_version", "data", "level"}):
+            if any(type(v) is not str for key, v in value.items() if key not in {"observation_version", "data", "level", "target_level"}):
+                raise ValueError
+            if "target_level" in value and type(value["target_level"]) is not int:
                 raise ValueError
             if "level" in value and type(value["level"]) is not int:
                 raise ValueError
@@ -173,7 +182,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
         try:
             if self.path == "/api/start":
-                result = self.server.session.start(value["game_id"], value["command_id"])
+                result = self.server.session.start(value["game_id"], value["command_id"],
+                    **{key: value[key] for key in ("target_level", "resume_run_id") if key in value})
             elif self.path == "/api/stop":
                 result = self.server.session.stop(value["session_id"], value["command_id"])
             elif self.path in {"/api/pause", "/api/resume"}:
@@ -204,9 +214,10 @@ def create_console_server(session: ConsoleSession, *, renderer: Callable = rende
 
 
 def serve_console(operator_root: Path, arc_root: Path, *, guest_machine: str = "ubuntu",
-                  open_browser: bool = False, on_ready: Callable[[str], None] | None = None) -> None:
+                  open_browser: bool = False, on_ready: Callable[[str], None] | None = None,
+                  port: int = 0) -> None:
     session = ConsoleSession(operator_root, arc_root, guest_machine=guest_machine)
-    server = create_console_server(session)
+    server = create_console_server(session, port=port)
     previous = {}
 
     def interrupt(_signum, _frame):

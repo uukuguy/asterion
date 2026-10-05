@@ -118,20 +118,28 @@ uv run asterion arc-story serve
 
 `analyze` is the model-backed stage; compile, render, export, and serving operate on retained evidence. Local research artifacts use the stable `artifacts/arc-agi-3/` hierarchy and remain outside the package distribution.
 
-### P7 离线关卡控制台
+### P7 控制台与回放
 
-也可直接把一次 P7 运行导出为单个自包含 HTML。未过关和中断的运行同样可看。
+实时控制台汇总本地游戏；单次运行也可导出为自包含 HTML。未过关和中断的运行同样可看。
 
 ```bash
-make p7-console
-# 默认选择最近一次有记录的运行，生成 HTML 并打开浏览器。
-# 可指定历史运行和输出文件（仅导出）：
-make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id> OUTPUT=/tmp/p7-console.html
+# 打开实时控制台：http://127.0.0.1:57515/
+make p7-controller
+# make p7-console 是同一入口；再次调用会复用已有控制台
+
+# 打开 SP80 固定回放；省略 GAME 则看最近已验证回放
+make p7-replay GAME=sp80
+# 导出指定历史运行：
+make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id>
 ```
 
-默认输出为运行目录内的 `p7-console.html`。双击即可打开，无需网络、npm 构建或本地服务。
+控制台显示全部本地游戏、保存进度、RHAE 本地分数和各次回放。网页“继续”使用明确的已验证存档；“从头开始”单独选择。外部后台运行可只读观察，网页自身启动的运行可暂停、继续和停止。
+
+控制台默认固定使用 `http://127.0.0.1:57515/`，重复调用会打开该地址并复用已运行的服务。需要另选固定端口时使用 `make p7-controller P7_CONSOLE_PORT=57516`；如果端口被其他服务占用，命令会报错，不会自动换端口。显式 `RUN` 或 `OUTPUT` 仍走历史 HTML 导出流程。
+
+默认导出保留运行目录内的 `p7-console.html`，并将已封存、回放验证且清理完成的结果更新到固定入口 `.asterion-private/prime-p7-live/replays/sp80.html`（其他游戏同名规则）和 `.asterion-private/prime-p7-live/p7-console.html`。旧运行导出不会覆盖更高的同游戏进度。单文件回放无需网络、npm 构建或本地服务。
 中央显示关卡画面，滑块和播放按钮回放动作，侧栏显示游戏认知，过程区展示 P7 回合信号、动作结果和认知记录。
-控制台是导出时的快照；新动作发生后须重新导出。首版每份文件对应一次运行、一个游戏的多个关卡。
+离线文件保存导出时的快照，每份文件对应一次运行、一个游戏的多个关卡。在线控制台按游戏选择回放，并可持续观察未结束的后台运行。
 
 旧记录未保存的规划文字显示“未记录”。无法精确关联动作的模型回合单独展示。
 只保存最终认知时，页面明确标为最终快照，不把结束时知识当作早期决策依据。

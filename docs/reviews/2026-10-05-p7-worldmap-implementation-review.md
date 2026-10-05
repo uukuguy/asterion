@@ -100,3 +100,20 @@ Commit `aa5b6c84`, run `p7-live-20261005232533-2e9f20d6a7294d23bddf876a`: the fi
 Persistent export is `.asterion-private/prime-p7-live/<run>/p7-console.html`, SHA256 `f1192d471d3590a67e91270728b7812125275657fc89e930e37b6513429f0b18`. Background DOM acceptance passes164 exact cursors, all15 actual calculation pairs, zero JS/network errors; selected replay/page/state HTTP200 matches the persistent projection with zero provider/action callbacks. Reports and scripts are in `<run>/console-acceptance/`. Summary partial replay verification is distinct from the export's full-target completion flag (false); neither the UI nor this review promotes the latter.
 
 User requests background continuation with a two-unsuccessful-attempt limit per blocked level, then switching games. Level5 currently has one unsuccessful new-WorldMap attempt. The next finite attempt explicitly restores this four-level source and starts Level5; same900-second preset, cap67+96+152=315. No simultaneous guests or all25 sweep.
+
+## 2026-10-06 console and local-solving update
+
+Console implementation is recorded as targeted verified: fixed 25-game/183-level overview, exact WorldMap P7 filter for `gpt-6.1-sol`/seed 0, legacy dc22/vc33 history exclusion, per-game selection by progress/RHAE/fewer actions, whole-game denominator and unplayed zero. Explicit target/exact-source start, latest selected-game replay, pinned history cursor and read-only external-run following are implemented. Focused checks: Python overview 59 PASS, export 14 PASS, CLI 3 PASS, UI 85 PASS / 1 skip. The final actual static/export DOM acceptance passed 86/86 with 0 skips on persistent `replays/sp80.html`; command and log path are recorded in `docs/status/RESUME-NEXT-SESSION.md`. Root HTTP review and commit coordination remain pending.
+
+The persistent controller’s canonical URL is `http://127.0.0.1:57515/`; do not promote idle legacy port 56659. The active process metadata is under `launches/`. SP80 run `p7-live-20261006001222-3a7662493aa44f01b109e5f9` completed 6/6 with 143 actions (95 restored + 48 new), RESET=2, receipt 100, seal/replay/cleanup true. Correct the earlier stale claim of RESET=0. Its local standing is 1/25 games, 6/183 levels, 4%.
+
+User explicitly authorized sequential local solving over all 25 games: DC22 → VC33 → remaining catalog, skipping SP80, with one finite guest at a time. Switch after two failures on one blocked level; success resets the counter. This supersedes older statements that the 25-game work was unauthorized. Official submission and formal benchmark remain unauthorized. Exact-resume limitations remain: successful action prefix and advisory WorldMap text only, without failed-tail action/cell/kernel recovery; no high-probability claim for a retry.
+
+Latest promotion is 3990 tests, 14 failures / 4 errors / 4 skips, non-PASS; one additional failure remains unclassified. See private `launches/p7-overview-promotion.log`. Do not characterize all failures as historical or repeat the full suite.
+
+
+### DC22 interruption and one-time official submission authorization
+
+DC22 run `p7-live-20261006002338-7fc5ecf2b7ca4c5e8a827607` stopped on `_CallbackRejected` (`prime-event-type`, `pi.prompt`): 14 actions, 0 levels, 5 cells; cleanup true, unsealed/unreplayed. This is a runtime interruption, not a solving failure. Do not relaunch before root repairs the run path. A zero-level failed-run experience reuse contract is not yet connected.
+
+The user authorized one complete 25-task official submission after finite DC22/VC33 attempts, regardless of whether they fully solve. Pause remaining local games during submission; root records official score and channel, then resumes the rest. No repeated or open-ended livebench is authorized.

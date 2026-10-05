@@ -225,3 +225,16 @@ WorldMap 是当前可操作的游戏理解，包含以下相互关联的内容�
 网页运行入口接受明确game/整场target/exact resume run。默认继续该游戏有用的保存进度；没有可恢复来源时显示从头开始，不悄悄使用旧路线或失败时回退。已全过的游戏不自动再跑。原manual与已拥有session暂停/继续/停止保持。ambient resume/history配置清除，只由本次明确选择设置verified路径；绝不新增runner或工具机制。单次继续沿用900秒有限预设。
 
 后台求解另按用户指令：同一阻塞关卡两次未通过，封存进度并换游戏。已通过关卡不计失败；新关重新计数。只维持一个有界guest，不启动25游戏同时执行或全量benchmark。页面展示25项和统计本身不授权全量复现。
+
+### 11.1 实施状态与当前运行约束（2026-10-06）
+
+Console roster/filter and local selection follow the contract above: only exact WorldMap P7 runs with `gpt-6.1-sol`/seed 0 are eligible; legacy `dc22`/`vc33` history and actions are excluded. Tie-break is completed progress, RHAE, then fewer actions. Display denominator is the whole game; unplayed games contribute zero to the local 25-game average. Exact current implementation evidence and launch metadata are in `docs/status/RESUME-NEXT-SESSION.md`.
+
+The user has since explicitly authorized sequential local solving over the catalog, DC22 then VC33 then remaining games, skipping completed SP80. Run one finite guest at a time. Two failed attempts at one blocked level trigger a game switch; success resets that level's failure count. Separately, exactly one complete 25-task official submission is authorized after finite DC22/VC33 attempts: pause remaining local games, record official score/channel, then resume. This is not authorization for repeated or open-ended livebench. Earlier wording that the 25-game sweep was unauthorized is superseded.
+
+
+### 11.2 后续官方提交的明确边界（2026-10-06）
+
+DC22 的当前 fresh run 因 `_CallbackRejected` / `prime-event-type` (`pi.prompt`) 中断，14 actions、0 completed levels、5 cells；cleanup true，但未封存/未 replay。分类为 runtime interruption，不计作求解失败，也不得在运行链路修复前重复启动。零关失败经验复用尚未接通，root 正在准备对应合同。
+
+用户另行明确授权一次完整 25-task 官方提交：先结束有限 DC22/VC33 尝试（不论是否全通），暂停其余本地题；由 root 执行并记录官方分数及提交通道后，再继续其余本地题。该授权只限这一轮完整提交，不延伸为重复或无限 livebench。

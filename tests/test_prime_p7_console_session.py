@@ -56,7 +56,9 @@ class ConsoleSessionFixture(unittest.TestCase):
             return True
 
         options = dict(catalog=CATALOG, process_factory=launch, process_stopper=stop,
-                       guest_cleanup=cleanup, run_id_factory=lambda: RUN_ID,
+                       guest_cleanup=cleanup, guest_activity_reader=lambda: False,
+                       operator_environment_reader=lambda _: {'ASTERION_PRIME_MODEL': 'gpt-6.1-sol'},
+                       run_id_factory=lambda: RUN_ID,
                        environment={}, poll_interval=0.01)
         options.update(changes)
         session = ConsoleSession(self.root, self.root, **options)
@@ -377,3 +379,148 @@ class TestP7ConsoleControlHandshake(ConsoleSessionFixture):
         self.wait_state(session, 'cancelled')
         self.assertEqual(len(self.calls), 1)
         self.assertTrue(session.view()['cleanup_confirmed'])
+
+
+class TestConsoleOverviewStarts(ConsoleSessionFixture):
+    def test_target_and_resume_source_are_explicit_and_idempotent(self):
+        session = self.session(environment={
+            'ASTERION_PRIME_P7_HISTORY_VARIANT': 'legacy',
+            'ASTERION_PRIME_P7_RESUME_RUN_ID': 'ambient-source',
+            'ASTERION_PRIME_P7_TARGET_LEVEL': '99',
+            'ASTERION_PRIME_P7_SEED': '9', 'LEVEL': '99'})
+        overview = {'games': [{'game_id': 'test-1', 'runs': [
+            {'run_id': 'chosen-source', 'verified': True, 'resume_eligible': True,
+             'completed_levels': 1}]}]}
+        with patch.object(session, 'overview', return_value=overview):
+            started = session.start('test-1', 'start-selected', target_level=2,
+                                    resume_run_id='chosen-source')
+            self.assertEqual(started['start_level'], 2)
+            self.assertEqual(started['source_run_id'], 'chosen-source')
+            self.assertEqual(session.start('test-1', 'start-selected', target_level=2,
+                                           resume_run_id='chosen-source'), started)
+            with self.assertRaisesRegex(ConsoleSessionError, 'command-conflict'):
+                session.start('test-1', 'start-selected', target_level=1)
+        self.assertTrue(self.launched.wait(1))
+        argv, kwargs = self.calls[0]
+        self.assertIn('LEVEL=2', argv)
+        self.assertIn('ASTERION_PRIME_P7_ATTEMPT_SECONDS=900', argv)
+        self.assertEqual(kwargs['env']['ASTERION_PRIME_P7_HISTORY_VARIANT'], 'verified')
+        self.assertEqual(kwargs['env']['ASTERION_PRIME_P7_RESUME_RUN_ID'], 'chosen-source')
+        self.assertEqual(kwargs['env']['ASTERION_PRIME_P7_SEED'], '0')
+        self.assertNotIn('ASTERION_PRIME_P7_TARGET_LEVEL', kwargs['env'])
+        self.assertNotIn('LEVEL', kwargs['env'])
+
+    def test_bad_target_or_resume_never_launches(self):
+        session = self.session()
+        with patch.object(session, 'overview', return_value={'games': []}):
+            for target, source in ((True, None), (0, None), (3, None), (2, '../source'),
+                                   (2, 'missing-source'), (1, 'chosen-source')):
+                with self.subTest(target=target, source=source):
+                    with self.assertRaises(ConsoleSessionError):
+                        session.start('test-1', 'bad', target_level=target, resume_run_id=source)
+        self.assertFalse(self.calls)
+
+    def test_fresh_start_clears_ambient_source(self):
+        session = self.session(environment={'ASTERION_PRIME_P7_RESUME_RUN_ID': 'ambient',
+                                           'ASTERION_PRIME_P7_HISTORY_VARIANT': 'legacy'})
+        session.start('test-1', 'fresh')
+        self.assertTrue(self.launched.wait(1))
+        argv, kwargs = self.calls[0]
+        self.assertIn('LEVEL=1', argv)
+        self.assertNotIn('ASTERION_PRIME_P7_RESUME_RUN_ID', kwargs['env'])
+        self.assertEqual(kwargs['env']['ASTERION_PRIME_P7_HISTORY_VARIANT'], 'verified')
+
+    def test_stale_external_recording_does_not_block_idle_guest(self):
+        session = self.session()
+        overview = {'games': [{'game_id': 'test-1', 'runs': [
+            {'run_id': 'external-run', 'recording': True}]}]}
+        with patch.object(session, 'overview', return_value=overview):
+            session.start('test-1', 'new-start', target_level=2)
+        self.assertTrue(self.launched.wait(1))
+
+    def test_busy_or_unavailable_guest_rejects_before_launch(self):
+        for reader, error in ((lambda: True, 'session-busy'), (lambda: None, 'guest-unavailable')):
+            with self.subTest(error=error):
+                session = self.session(guest_activity_reader=reader)
+                with self.assertRaisesRegex(ConsoleSessionError, error):
+                    session.start('test-1', 'busy')
+        self.assertFalse(self.calls)
+
+    def test_actual_model_selection_rejects_fresh_and_resume_before_launch(self):
+        session = self.session(operator_environment_reader=lambda _: {
+            'ASTERION_PRIME_MODEL': 'wrong-model', 'PRIVATE': 'sk-sentinel-secret'})
+        for source in (None, 'chosen-source'):
+            with self.subTest(source=source):
+                with patch.object(session, 'overview', return_value={'games': []}):
+                    with self.assertRaisesRegex(ConsoleSessionError, '^model-mismatch$'):
+                        session.start('test-1', 'mismatch', target_level=2, resume_run_id=source)
+        self.assertFalse(self.calls)
+
+    def test_guest_activity_overview_cache_does_not_authorize_launch(self):
+        states = iter((False, True))
+        session = self.session(catalog=({'game_id': 'test-1', 'alias': 'test', 'win_levels': 2,
+                                         'baseline_actions': (20, 20)},),
+                               guest_activity_reader=lambda: next(states))
+        value = session.overview()
+        self.assertIs(value['guest_busy'], False)
+        self.assertIs(value['start_ready'], True)
+        self.assertIs(session.overview()['guest_busy'], False)
+        with self.assertRaisesRegex(ConsoleSessionError, 'session-busy'):
+            session.start('test-1', 'fresh-after-cache')
+        self.assertFalse(self.calls)
+
+    def test_guest_query_is_fixed_read_only_and_rejects_ambiguous_output(self):
+        session = self.session()
+        unit = 'asterion-p7-' + 'a' * 32 + '.service'
+        for output, expected in (('', False), (unit + ' loaded active running witness\n', True)):
+            with self.subTest(output=output):
+                with patch('asterion.applications.prime.p7.console_session.subprocess.run',
+                           return_value=SimpleNamespace(returncode=0, stdout=output)) as run:
+                    self.assertIs(session._query_guest_activity(), expected)
+                    argv = run.call_args.args[0]
+                    self.assertEqual(argv[-7:], ['systemctl', 'list-units', '--all', '--no-legend',
+                                                 '--plain', '--state=active,activating,deactivating',
+                                                 'asterion-p7-*.service'])
+                    self.assertEqual(run.call_args.kwargs['timeout'], 8)
+                    self.assertNotIn('shell', run.call_args.kwargs)
+        for code, output in ((1, ''), (0, 'foreign.service loaded active running sk-secret'),
+                             (0, unit + ' loaded inactive dead witness')):
+            with self.subTest(code=code, output=output):
+                with patch('asterion.applications.prime.p7.console_session.subprocess.run',
+                           return_value=SimpleNamespace(returncode=code, stdout=output)):
+                    with self.assertRaisesRegex(ConsoleSessionError, '^guest-unavailable$'):
+                        session._query_guest_activity()
+
+    def test_final_replay_exports_once_after_cleanup_and_failure_does_not_change_outcome(self):
+        for fail in (False, True):
+            with self.subTest(export_fails=fail):
+                run_id = 'p7-live-20261005123456-' + ('b' if fail else 'c') * 24
+                order = []
+                def launch(*args, **kwargs):
+                    path = self.root / '.asterion-private' / 'prime-p7-live' / run_id
+                    path.mkdir(parents=True)
+                    (path / 'summary.json').write_text('{}')
+                    self.process.returncode = 0
+                    return self.process
+                def snapshot(path):
+                    order.append('refresh')
+                    return {'run': {'run_id': run_id, 'game_id': 'test-1', 'status': 'successful',
+                                    'replay_verified': True, 'sealed_trace': True}}
+                def cleanup(unit):
+                    order.append('cleanup')
+                    return True
+                def export(path):
+                    order.append('export')
+                    if fail:
+                        raise ValueError('sk-private-export-failure')
+                    return path / 'p7-console.html'
+                session = self.session(process_factory=launch, snapshot_reader=snapshot,
+                                       guest_cleanup=cleanup, run_id_factory=lambda: run_id)
+                with patch('asterion.applications.prime.p7.console_session.export_console', side_effect=export) as exporter:
+                    session.start('test-1', 'export')
+                    view = self.wait_state(session, 'completed')
+                    self.assertEqual(exporter.call_count, 1)
+                self.assertEqual(view['replay_saved'], not fail)
+                self.assertIs(view['cleanup_confirmed'], True)
+                self.assertLess(order.index('cleanup'), len(order) - 2)
+                self.assertEqual(order[-2:], ['refresh', 'export'])

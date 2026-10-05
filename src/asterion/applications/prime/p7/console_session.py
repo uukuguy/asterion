@@ -15,10 +15,13 @@ import threading
 import time
 
 from .console_snapshot import build_console_snapshot
+from .console_export import export_console
 from .solver_control import read_control_ack, write_control_request
 from .console_preferences import read_selection, valid_selection, write_selection
-from .game import public_game_catalog
-from .live import safe_run_id
+from .game import _read_catalog, public_game_catalog
+from .console_overview import ConsoleOverview, MODEL_ID
+from .live import load_operator_environment, safe_run_id
+from .model_selection import declared_model_selection
 
 
 _RUN_ID = re.compile(r"p7-live-[0-9]{14}-[0-9a-f]{24}\Z")
@@ -37,6 +40,9 @@ _CLEARED_ENV = {
     "ASTERION_PRIME_P7_ATTEMPT_UNIT", "ASTERION_PRIME_P7_ATTEMPT_SECONDS",
     "ASTERION_PRIME_P7_CONSOLE_RUN_ID", "OPERATION_MODE", "MAKEFLAGS", "MFLAGS",
     "MAKEOVERRIDES", "GNUMAKEFLAGS", "MAKEFILES",
+    "ASTERION_PRIME_P7_HISTORY_VARIANT", "ASTERION_PRIME_P7_RESUME_RUN_ID",
+    "ASTERION_PRIME_P7_TARGET_LEVEL", "ASTERION_PRIME_P7_SEED",
+    "ASTERION_PRIME_P7_GAME_ID", "LEVEL", "GAME", "ASTERION_PRIME_MODEL",
 }
 
 
@@ -83,6 +89,8 @@ class ConsoleSession:
         process_factory: Callable = subprocess.Popen,
         process_stopper: Callable = _stop_process,
         guest_cleanup: Callable[[str], bool] | None = None,
+        guest_activity_reader: Callable[[], bool] | None = None,
+        operator_environment_reader: Callable[[Path], Mapping[str, str]] = load_operator_environment,
         snapshot_reader: Callable = build_console_snapshot,
         manual_controller: object | None = None,
         manual_save_root: Path | None = None,
@@ -97,14 +105,23 @@ class ConsoleSession:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", guest_machine):
             raise ConsoleSessionError("console-unavailable")
         self._guest = guest_machine
-        self._catalog = tuple(deepcopy(catalog if catalog is not None else public_game_catalog(self._arc_root)))
+        source_catalog = tuple(deepcopy(catalog if catalog is not None else public_game_catalog(self._arc_root)))
+        self._supplied_metadata = {entry["game_id"]: entry for entry in source_catalog
+                                   if "baseline_actions" in entry}
+        self._catalog = tuple({key: entry[key] for key in ("game_id", "alias", "win_levels")}
+                              for entry in source_catalog)
         self._games = {entry["game_id"] for entry in self._catalog}
         self._game_levels = {entry["game_id"]: entry["win_levels"] for entry in self._catalog}
         self._selection = read_selection(self._root, self._game_levels)
         self._runs = self._root / ".asterion-private" / "prime-p7-live"
+        self._overview_reader = None
         self._process_factory = process_factory
         self._process_stopper = process_stopper
         self._guest_cleanup = guest_cleanup or self._cleanup_guest
+        self._guest_activity_reader = guest_activity_reader or self._query_guest_activity
+        self._operator_environment_reader = operator_environment_reader
+        self._activity_cache: tuple[float, bool | None] | None = None
+        self._activity_lock = threading.Lock()
         self._snapshot_reader = snapshot_reader
         self._manual = manual_controller
         self._manual_save_root = (Path(manual_save_root) if manual_save_root is not None
@@ -130,6 +147,79 @@ class ConsoleSession:
 
     def games(self) -> list[dict]:
         return deepcopy(list(self._catalog))
+
+    def overview(self) -> dict:
+        with self._lock:
+            if self._overview_reader is None:
+                try:
+                    catalog = _read_catalog(self._arc_root)
+                except (OSError, ValueError):
+                    catalog = ()
+                metadata = {entry["game_id"]: entry for entry in catalog}
+                metadata.update(self._supplied_metadata)
+                selected = []
+                for game in self._catalog:
+                    entry = metadata.get(game["game_id"])
+                    if (entry is None or entry.get("alias") != game["alias"]
+                            or entry.get("win_levels") != game["win_levels"]):
+                        raise ConsoleSessionError("overview-unavailable")
+                    selected.append(entry)
+                self._overview_reader = ConsoleOverview(self._runs, tuple(selected))
+            reader = self._overview_reader
+            active = self._view["run_id"] if self._view["state"] in _ACTIVE else None
+        value = reader.build(active_run_id=active)
+        busy = self._read_guest_activity()
+        block = "guest-unavailable" if busy is None else "session-busy" if busy else None
+        try:
+            self._validate_model()
+        except ConsoleSessionError as error:
+            block = str(error)
+        with self._lock:
+            if self._closed or self._manual_inflight or self._view["state"] in _ACTIVE or not self._view["cleanup_confirmed"]:
+                block = "session-busy"
+        value.update(guest_busy=busy, start_ready=block is None, start_block_reason=block)
+        return value
+
+    def _query_guest_activity(self) -> bool:
+        result = subprocess.run(
+            ["orb", "-m", self._guest, "-u", "root", "-w", "/tmp", "systemctl", "list-units",
+             "--all", "--no-legend", "--plain", "--state=active,activating,deactivating",
+             "asterion-p7-*.service"], capture_output=True, text=True, timeout=8, check=False,
+        )
+        if result.returncode != 0 or len(result.stdout) > 4096:
+            raise ConsoleSessionError("guest-unavailable")
+        units = []
+        for line in result.stdout.splitlines():
+            fields = line.split()
+            if not fields:
+                continue
+            if (len(fields) < 4 or re.fullmatch(r"asterion-p7-[0-9a-f]{32}\.service", fields[0]) is None
+                    or fields[2] not in {"active", "activating", "deactivating"}):
+                raise ConsoleSessionError("guest-unavailable")
+            units.append(fields[0])
+        return bool(units)
+
+    def _read_guest_activity(self, *, force: bool = False) -> bool | None:
+        with self._activity_lock:
+            now = self._clock()
+            if not force and self._activity_cache is not None and now - self._activity_cache[0] < 5:
+                return self._activity_cache[1]
+            try:
+                busy = self._guest_activity_reader()
+                if type(busy) is not bool:
+                    busy = None
+            except Exception:
+                busy = None
+            self._activity_cache = (now, busy)
+            return busy
+
+    def _validate_model(self) -> None:
+        try:
+            selected = declared_model_selection(self._operator_environment_reader(self._root))
+        except Exception:
+            raise ConsoleSessionError("model-unavailable") from None
+        if selected.model != MODEL_ID:
+            raise ConsoleSessionError("model-mismatch")
 
     def view(self) -> dict[str, object]:
         with self._lock:
@@ -232,17 +322,42 @@ class ConsoleSession:
             raise ConsoleSessionError("run-unavailable")
         return path
 
-    def start(self, game_id: str, command_id: str) -> dict[str, object]:
+    def start(self, game_id: str, command_id: str, *, target_level: int | None = None,
+              resume_run_id: str | None = None) -> dict[str, object]:
         with self._lock:
-            signature = ("start", game_id)
+            signature = ("start", game_id, str(target_level), str(resume_run_id))
             prior = self._prior(command_id, signature)
             if prior is not None:
                 return prior
             self._ready()
             if type(game_id) is not str or game_id not in self._games:
                 raise ConsoleSessionError("game-unavailable")
+            target = 1 if target_level is None else target_level
+            if type(target) is not int or not 1 <= target <= self._game_levels[game_id]:
+                raise ConsoleSessionError("level-unavailable")
+            try:
+                overview = self.overview()
+            except ConsoleSessionError as error:
+                if str(error) != "overview-unavailable":
+                    raise
+                # Legacy injected catalogs have no score metadata. The actual
+                # operator still validates resources before any execution.
+                overview = {"games": []}
+            self._validate_model()
+            start_level = 1
+            if resume_run_id is not None:
+                if type(resume_run_id) is not str or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}", resume_run_id) is None:
+                    raise ConsoleSessionError("resume-unavailable")
+                source = next((run for game in overview["games"]
+                               if game["game_id"] == game_id for run in game["runs"]
+                               if run["run_id"] == resume_run_id), None)
+                if (source is None or source.get("verified") is not True
+                        or source.get("resume_eligible") is not True
+                        or not 0 < source["completed_levels"] < target):
+                    raise ConsoleSessionError("resume-unavailable")
+                start_level = source["completed_levels"] + 1
             if self._manual is None:
-                return self._launch_locked(game_id, command_id, signature)
+                return self._launch_locked(game_id, command_id, signature, target, resume_run_id, start_level)
             self._manual_inflight = True
             self._manual_done.clear()
         try:
@@ -250,7 +365,7 @@ class ConsoleSession:
             with self._lock:
                 if self._closed:
                     raise ConsoleSessionError("session-busy")
-                return self._launch_locked(game_id, command_id, signature)
+                return self._launch_locked(game_id, command_id, signature, target, resume_run_id, start_level)
         except ConsoleSessionError:
             raise
         except Exception as error:
@@ -260,18 +375,27 @@ class ConsoleSession:
                 self._manual_inflight = False
                 self._manual_done.set()
 
-    def _launch_locked(self, game_id: str, command_id: str, signature: tuple[str, ...]) -> dict:
+    def _launch_locked(self, game_id: str, command_id: str, signature: tuple[str, ...],
+                       target_level: int, resume_run_id: str | None, start_level: int) -> dict:
         run_id = self._run_id_factory()
         if self._run_path(run_id).exists():
             raise ConsoleSessionError("run-unavailable")
+        busy = self._read_guest_activity(force=True)
+        if busy is None:
+            raise ConsoleSessionError("guest-unavailable")
+        if busy:
+            raise ConsoleSessionError("session-busy")
+        self._validate_model()
         unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
         self._stop = threading.Event()
         self._snapshot_key = None
         self._control_sequence = 0
         self._control_pending = None
         self._change(session_id="p7-console-" + secrets.token_hex(16), state="starting",
-                     game_id=game_id, run_id=run_id, cleanup_confirmed=False, snapshot=None)
-        self._thread = threading.Thread(target=self._run, args=(game_id, run_id, unit),
+                     game_id=game_id, run_id=run_id, cleanup_confirmed=False, snapshot=None,
+                     target_level=target_level, start_level=start_level, source_run_id=resume_run_id,
+                     replay_saved=False)
+        self._thread = threading.Thread(target=self._run, args=(game_id, run_id, unit, target_level, resume_run_id),
                                         name="p7-console-witness", daemon=True)
         response = self._remember(command_id, signature)
         self._thread.start()
@@ -369,13 +493,19 @@ class ConsoleSession:
             # new observation. Keep the previous confirmed projection.
             return
 
-    def _run(self, game_id: str, run_id: str, unit: str) -> None:
+    def _run(self, game_id: str, run_id: str, unit: str, target_level: int = 1,
+             resume_run_id: str | None = None) -> None:
         process = None
         outcome = "failed"
         reaped = True
         environment = {key: value for key, value in self._environment.items() if key not in _CLEARED_ENV}
         environment["ASTERION_PRIME_P7_CONSOLE_RUN_ID"] = run_id
-        argv = ["make", "asterion-prime-p7-level-witness", f"GAME={game_id}", "LEVEL=1",
+        environment["ASTERION_PRIME_P7_HISTORY_VARIANT"] = "verified"
+        environment["ASTERION_PRIME_P7_SEED"] = "0"
+        environment["ASTERION_PRIME_MODEL"] = MODEL_ID
+        if resume_run_id is not None:
+            environment["ASTERION_PRIME_P7_RESUME_RUN_ID"] = resume_run_id
+        argv = ["make", "asterion-prime-p7-level-witness", f"GAME={game_id}", f"LEVEL={target_level}",
                 f"ASTERION_PRIME_P7_ATTEMPT_UNIT={unit}", f"ASTERION_PRIME_P7_ATTEMPT_SECONDS={_SECONDS}",
                 f"PRIME_ORB_MACHINE={self._guest}", f"ASTERION_PRIME_OPERATOR_ROOT={self._root}",
                 f"ASTERION_PRIME_ARC_ROOT={self._arc_root}"]
@@ -419,12 +549,24 @@ class ConsoleSession:
             except Exception:
                 cleaned = False
             self._refresh(run_id, game_id)
+            replay_saved = False
+            if cleaned:
+                try:
+                    path = self._run_path(run_id)
+                    summary = path / "summary.json"
+                    if not summary.is_symlink() and summary.is_file():
+                        export_console(path)
+                        replay_saved = True
+                except Exception:
+                    # Viewing output cannot change solver or cleanup outcomes.
+                    pass
             with self._lock:
                 run = (self._view["snapshot"] or {}).get("run", {})
                 if (outcome == "incomplete" and run.get("status") == "successful"
                         and run.get("replay_verified") is True and run.get("sealed_trace") is True):
                     outcome = "completed"
-                self._change(state=outcome if cleaned else "cleanup-unconfirmed", cleanup_confirmed=cleaned)
+                self._change(state=outcome if cleaned else "cleanup-unconfirmed", cleanup_confirmed=cleaned,
+                             replay_saved=replay_saved)
 
     def recorded_runs(self) -> list[dict]:
         if self._runs.is_symlink() or self._runs.parent.is_symlink() or not self._runs.is_dir():

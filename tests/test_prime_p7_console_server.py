@@ -200,5 +200,43 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
         self.assertFalse(self.calls)
 
 
+    def test_overview_is_read_only_fixed_scope_and_redacted(self):
+        from unittest.mock import patch
+        metadata = ({'game_id': 'test-1', 'alias': 'test', 'win_levels': 2,
+                     'baseline_actions': (20, 20)},)
+        with patch('asterion.applications.prime.p7.console_session._read_catalog', return_value=metadata):
+            status, _, raw = self.request('GET', '/api/overview')
+        self.assertEqual(status, 200)
+        value = json.loads(raw)
+        self.assertEqual(value['scope']['model_id'], 'gpt-6.1-sol')
+        self.assertEqual(value['scope']['seed'], 0)
+        self.assertEqual(value['totals']['total_games'], 1)
+        self.assertEqual(value['totals']['score'], '0.000000')
+        self.assertNotIn(self.server.token.encode(), raw)
+        self.assertNotIn(str(self.root).encode(), raw)
+        self.assertFalse(self.calls)
+
+    def test_overview_missing_metadata_is_unavailable_without_changing_other_api(self):
+        status, _, raw = self.request('GET', '/api/overview')
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(raw), {'error': 'overview-unavailable'})
+        self.assertEqual(self.request('GET', '/api/games')[0], 200)
+        self.assertEqual(self.request('GET', '/api/state')[0], 200)
+        self.assertFalse(self.calls)
+
+    def test_start_accepts_exact_optional_target_but_rejects_bad_types(self):
+        valid = {'game_id': 'test-1', 'command_id': 'full-game', 'target_level': 2}
+        for target in (True, '2', None, 2.0):
+            with self.subTest(target=target):
+                self.assertEqual(self.write('/api/start', {**valid, 'target_level': target})[0], 400)
+        self.assertEqual(self.write('/api/start', {**valid, 'resume_run_id': '../bad'})[0], 409)
+        self.assertFalse(self.calls)
+        status, _, raw = self.write('/api/start', valid)
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(raw)['target_level'], 2)
+        self.assertTrue(self.launched.wait(1))
+        self.assertIn('LEVEL=2', self.calls[0][0])
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -5,6 +5,7 @@ DCI_ARGS ?=
 ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- node -p 'process.execPath' 2>/dev/null)
 ASTERION_PROMOTION_NPM_CACHE ?=
 PRIME_ORB_MACHINE ?= ubuntu
+P7_CONSOLE_PORT ?= 57515
 
 .DEFAULT_GOAL := help
 
@@ -141,7 +142,7 @@ help:
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime local ARC-AGI-3 solved-game story pages: asterion-prime-p7-stories"
-	@echo "P7 控制台: p7-console（打开自主求解工作区，点击启动后运行）"
+	@echo "P7 控制台: p7-controller / p7-console（http://127.0.0.1:$(P7_CONSOLE_PORT)/，重复调用复用服务）"
 	@echo "  可选 RUN=<历史运行目录> OUTPUT=<输出.html>；仅导出用 asterion-prime-p7-console"
 	@echo "Asterion Prime sync official public games without a scorecard: asterion-prime-p7-sync-games"
 	@echo "Asterion Prime official ARC-AGI-3 catalog readiness: asterion-prime-p7-official-preflight"
@@ -315,9 +316,50 @@ asterion-prime-p7-stories:
 	@$(UV_BIN) run asterion arc-story serve --open-browser
 
 # Local live console, with an optional historical export override.
+define ASTERION_CONSOLE_REUSE_SCRIPT
+import http.client, json, os, re, socket, sys, webbrowser
+try:
+    port = int(os.environ["ASTERION_CONSOLE_PORT"])
+    if not 1 <= port <= 65535:
+        raise ValueError("invalid-port")
+except ValueError:
+    sys.exit("P7_CONSOLE_PORT must be an integer from 1 to 65535.")
+with socket.socket() as probe:
+    probe.settimeout(1)
+    occupied = probe.connect_ex(("127.0.0.1", port)) == 0
+if not occupied:
+    sys.exit(10)
+url = f"http://127.0.0.1:{port}/"
+try:
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=3)
+    connection.request("GET", "/")
+    response = connection.getresponse()
+    page = response.read(2000000).decode("utf-8")
+    connection.close()
+    match = re.search(r'<script id="console-config" type="application/json">(.*?)</script>', page)
+    config = json.loads(match.group(1)) if match else None
+    if (response.status != 200 or "Prime P7" not in page or not isinstance(config, dict)
+            or not isinstance(config.get("token"), str) or not config["token"]):
+        raise ValueError("unrelated-service")
+except Exception:
+    sys.exit(f"P7 console port {port} is occupied by an unavailable or unrelated service; refusing to change ports.")
+print(f"P7 自主求解控制台（复用）：{url}")
+if os.environ.get("ASTERION_CONSOLE_OPEN") == "1":
+    webbrowser.open(url, new=2)
+endef
+
 p7-console: export ASTERION_CONSOLE_SERVE = 1
 p7-console: export ASTERION_CONSOLE_OPEN = 1
 p7-console: asterion-prime-p7-console
+
+.PHONY: p7-controller p7-replay
+p7-controller: p7-console
+
+p7-replay: export ASTERION_CONSOLE_GAME = $(GAME)
+p7-replay:
+	@set -- $(UV_BIN) run asterion arc-console replay --runs-root "$(ASTERION_PRIME_OPERATOR_ROOT)/.asterion-private/prime-p7-live"; \
+	if [ -n "$$ASTERION_CONSOLE_GAME" ]; then set -- "$$@" --game "$$ASTERION_CONSOLE_GAME"; fi; \
+	exec "$$@"
 
 asterion-prime-p7-console: export ASTERION_CONSOLE_RUN = $(RUN)
 asterion-prime-p7-console: export ASTERION_CONSOLE_OUTPUT = $(OUTPUT)
@@ -325,9 +367,12 @@ asterion-prime-p7-console: export ASTERION_CONSOLE_RUNS_ROOT = $(ASTERION_PRIME_
 asterion-prime-p7-console: export ASTERION_CONSOLE_OPERATOR_ROOT = $(ASTERION_PRIME_OPERATOR_ROOT)
 asterion-prime-p7-console: export ASTERION_CONSOLE_ARC_ROOT = $(ASTERION_PRIME_ARC_ROOT)
 asterion-prime-p7-console: export ASTERION_CONSOLE_GUEST = $(PRIME_ORB_MACHINE)
+asterion-prime-p7-console: export ASTERION_CONSOLE_PORT = $(P7_CONSOLE_PORT)
+asterion-prime-p7-console: export ASTERION_CONSOLE_REUSE_SCRIPT := $(ASTERION_CONSOLE_REUSE_SCRIPT)
 asterion-prime-p7-console:
 	@if [ "$$ASTERION_CONSOLE_SERVE" = 1 ] && [ -z "$$ASTERION_CONSOLE_RUN" ] && [ -z "$$ASTERION_CONSOLE_OUTPUT" ]; then \
-		exec $(UV_BIN) run --with "$$ASTERION_CONSOLE_ARC_ROOT/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$ASTERION_CONSOLE_ARC_ROOT/wheels/arcengine-0.9.3-py3-none-any.whl" asterion arc-console serve --operator-root "$$ASTERION_CONSOLE_OPERATOR_ROOT" --arc-root "$$ASTERION_CONSOLE_ARC_ROOT" --guest-machine "$$ASTERION_CONSOLE_GUEST"; \
+		if python3 -c "$$ASTERION_CONSOLE_REUSE_SCRIPT"; then exit 0; else probe_status=$$?; [ "$$probe_status" -eq 10 ] || exit "$$probe_status"; fi; \
+		exec $(UV_BIN) run --with "$$ASTERION_CONSOLE_ARC_ROOT/wheels/arc_agi-0.9.9-py3-none-any.whl" --with "$$ASTERION_CONSOLE_ARC_ROOT/wheels/arcengine-0.9.3-py3-none-any.whl" asterion arc-console serve --operator-root "$$ASTERION_CONSOLE_OPERATOR_ROOT" --arc-root "$$ASTERION_CONSOLE_ARC_ROOT" --guest-machine "$$ASTERION_CONSOLE_GUEST" --port "$$ASTERION_CONSOLE_PORT"; \
 	fi; \
 	set -- $(UV_BIN) run asterion arc-console --runs-root "$$ASTERION_CONSOLE_RUNS_ROOT"; \
 	if [ -n "$$ASTERION_CONSOLE_RUN" ]; then set -- "$$@" "$$ASTERION_CONSOLE_RUN"; fi; \
