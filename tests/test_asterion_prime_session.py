@@ -527,6 +527,61 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(public[-1].payload, {"status": "completed"})
         self.assertNotIn("PRIVATE-RECOVERY-ERROR", repr(public))
 
+    def test_compaction_before_agent_end_preserves_active_turn_and_terminal(self) -> None:
+        for boundary in ("before assistant response", "after turn end"):
+            with self.subTest(boundary=boundary):
+                values = [("agent_start", {}), ("turn_start", {})]
+                if boundary == "after turn end":
+                    values.extend((("message_start", {"message": {"role": "assistant"}}), ("turn_end", {})))
+                values.extend((
+                    ("compaction_start", {"reason": "threshold"}),
+                    ("summarization_retry_scheduled", {"attempt": 1, "maxAttempts": 3, "delayMs": 1000, "errorMessage": "PRIVATE-RETRY"}),
+                    ("summarization_retry_attempt_start", {"source": "compaction", "reason": "threshold"}),
+                    ("summarization_retry_finished", {}),
+                    ("compaction_end", {"reason": "threshold", "aborted": False, "willRetry": False, "result": {"summary": "PRIVATE-SUMMARY"}}),
+                ))
+                if boundary == "after turn end":
+                    values.append(("turn_start", {}))
+                values.extend((("message_start", {"message": {"role": "assistant"}}), ("turn_end", {}),
+                               ("agent_end", {}), ("agent_settled", {})))
+                session, _rpc, _lease = self.fixture.make(native_events(*values))
+                public = asyncio.run(collect(session))
+                self.assertEqual(public[-1].payload, {"status": "completed"})
+                self.assertNotIn("PRIVATE", repr(public))
+
+    def test_compaction_before_reusable_prompt_keeps_native_cursor(self) -> None:
+        values = native_events(
+            ("compaction_start", {"reason": "threshold"}),
+            ("compaction_end", {"reason": "threshold", "aborted": False, "willRetry": False, "result": {}}),
+            ("agent_start", {}), ("turn_start", {}), ("agent_end", {}), ("agent_settled", {}),
+        )
+        events = tuple(PiRpcEvent(sequence=event.sequence + 10, type=event.type, payload=event.payload) for event in values)
+        session, rpc, _lease = self.fixture.make(events)
+        rpc.prompt = rpc.run
+        session._kernel._reusable = True
+        session._kernel._sequence = 10
+        public = asyncio.run(collect(session))
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+        self.assertEqual(session._kernel._sequence, 16)
+
+    def test_compaction_rejects_mid_response_and_invalid_summary_retry(self) -> None:
+        start = ("compaction_start", {"reason": "threshold"})
+        scheduled = ("summarization_retry_scheduled", {"attempt": 1, "maxAttempts": 3, "delayMs": 1000, "errorMessage": "PRIVATE-RETRY"})
+        cases = (
+            (("agent_start", {}), ("turn_start", {}), ("message_start", {"message": {"role": "assistant"}}), start),
+            (("agent_start", {}), ("turn_start", {}), ("tool_execution_start", {"toolName": "ipython", "toolCallId": "pending", "args": {"code": "PRIVATE-CODE"}}), ("turn_end", {}), start),
+            (("agent_end", {}), start, ("summarization_retry_attempt_start", {"source": "compaction", "reason": "threshold"})),
+            (("agent_end", {}), start, scheduled, ("summarization_retry_attempt_start", {"source": "compaction", "reason": "overflow"})),
+            (("agent_end", {}), start, ("summarization_retry_scheduled", {"attempt": True, "maxAttempts": 3, "delayMs": 1000, "errorMessage": "PRIVATE-RETRY"})),
+            (("agent_end", {}), scheduled),
+        )
+        for values in cases:
+            with self.subTest(types=tuple(item[0] for item in values)):
+                session, _rpc, _lease = self.fixture.make(native_events(*values))
+                with self.assertRaises(ProtocolError) as caught:
+                    asyncio.run(collect(session))
+                self.assertNotIn("PRIVATE", str(caught.exception))
+
     def test_compaction_rejects_invalid_order_and_control_fields(self) -> None:
         start = ("compaction_start", {"reason": "threshold"})
         end = ("compaction_end", {"reason": "threshold", "aborted": False, "willRetry": False})

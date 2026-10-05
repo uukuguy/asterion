@@ -453,6 +453,9 @@ class PrimeExecutionKernel:
         round_terminal_seen = False
         compaction_reason: str | None = None
         compaction_retry_pending = False
+        model_request_boundary = False
+        round_can_precompact = False
+        summarization_retry_state: str | None = None
         callback_failure: ProtocolError | None = None
 
         def report_failure() -> None:
@@ -468,6 +471,7 @@ class PrimeExecutionKernel:
 
         def consume_checked(event: PiRpcEvent) -> None:
             nonlocal model_callbacks, round_terminal_seen, compaction_reason, compaction_retry_pending
+            nonlocal model_request_boundary, round_can_precompact, summarization_retry_state
             expected_sequence = (
                 self._sequence + 1 if self._reusable else len(native) - round_start + 1
             )
@@ -480,6 +484,7 @@ class PrimeExecutionKernel:
             payload = event.payload
             if compaction_reason is not None and event_type not in {
                 "compaction_end", "entry_appended", "response",
+                "summarization_retry_scheduled", "summarization_retry_attempt_start", "summarization_retry_finished",
             }:
                 raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
             if os.environ.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition":
@@ -498,13 +503,40 @@ class PrimeExecutionKernel:
                 # prompt's settlement barrier. Its terminal is still required.
                 round_terminal_seen = False
                 compaction_retry_pending = False
+                model_request_boundary = False
+                round_can_precompact = False
+                return
+            if event_type.startswith("summarization_retry_"):
+                if compaction_reason is None:
+                    raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                if event_type == "summarization_retry_scheduled":
+                    attempt, maximum, delay = payload.get("attempt"), payload.get("maxAttempts"), payload.get("delayMs")
+                    if (summarization_retry_state == "scheduled" or type(attempt) is not int
+                            or type(maximum) is not int or not 1 <= attempt <= maximum
+                            or type(delay) not in {int, float} or delay < 0
+                            or type(payload.get("errorMessage")) is not str):
+                        raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                    summarization_retry_state = "scheduled"
+                elif event_type == "summarization_retry_attempt_start":
+                    if (summarization_retry_state != "scheduled" or payload.get("source") != "compaction"
+                            or payload.get("reason") != compaction_reason):
+                        raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                    summarization_retry_state = "running"
+                elif event_type == "summarization_retry_finished":
+                    if summarization_retry_state is None:
+                        raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                    summarization_retry_state = None
+                else:
+                    raise _NativeEventRejected(_NativeDiagnostic.EVENT_TYPE_INVALID)
                 return
             if event_type in {"compaction_start", "compaction_end"}:
-                # Pi 1.0.0 AgentSessionEvent: post-agent compaction is private
-                # bookkeeping, followed by agent_settled or a new agent cycle.
+                # Pi 1.0.0 prepares the next request after turn_end and after
+                # turn_start before assistant streaming; it also compacts a
+                # retained session before prompting and after agent_end.
                 reason = payload.get("reason")
                 if (type(reason) is not str or reason not in {"manual", "threshold", "overflow"}
-                        or not round_terminal_seen or pending_calls or compaction_retry_pending):
+                        or not (round_terminal_seen or model_request_boundary or round_can_precompact)
+                        or pending_calls or compaction_retry_pending):
                     raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
                 if event_type == "compaction_start":
                     if compaction_reason is not None:
@@ -514,6 +546,7 @@ class PrimeExecutionKernel:
                 aborted, retry = payload.get("aborted"), payload.get("willRetry")
                 result, error = payload.get("result"), payload.get("errorMessage")
                 if (type(aborted) is not bool or type(retry) is not bool
+                        or summarization_retry_state is not None
                         or (result is not None and not isinstance(result, Mapping))
                         or (error is not None and type(error) is not str)
                         or (aborted and result is not None)
@@ -528,10 +561,16 @@ class PrimeExecutionKernel:
                 compaction_reason = None
                 compaction_retry_pending = retry
                 return
+            if event_type == "turn_end":
+                model_request_boundary = True
+                return
+            if event_type == "message_start":
+                message = payload.get("message")
+                if isinstance(message, Mapping) and message.get("role") == "assistant":
+                    model_request_boundary = False
+                return
             if event_type in {
                 "response",
-                "message_start",
-                "turn_end",
                 "tool_execution_update",
                 # Pi emits this marker after an agent_end with willRetry=true
                 # and before the retry's next agent_start. It carries no
@@ -548,6 +587,9 @@ class PrimeExecutionKernel:
                 # Streaming tool updates contain private partial output.
                 return
             if event_type == "turn_start":
+                if compaction_retry_pending:
+                    raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                model_request_boundary = True
                 model_callbacks += 1
                 self.model_callbacks = model_callbacks
                 if (
@@ -557,6 +599,7 @@ class PrimeExecutionKernel:
                     raise _NativeEventRejected(_NativeDiagnostic.MODEL_CALLBACK_LIMIT)
                 return
             if event_type == "message_update":
+                model_request_boundary = False
                 self._validate_message_update(payload)
                 return
             if event_type == "message_end":
@@ -570,6 +613,7 @@ class PrimeExecutionKernel:
                     emit("usage.reported", usage)
                 return
             if event_type == "tool_execution_start":
+                model_request_boundary = False
                 call = self._tool_call(payload)
                 if (
                     self._limits.tool_callbacks is not None
@@ -655,6 +699,8 @@ class PrimeExecutionKernel:
             result: PiRpcResult | None = None
             round_start = len(native)
             round_terminal_seen = False
+            model_request_boundary = False
+            round_can_precompact = self._reusable and self._sequence > 0
             try:
                 # Application admission waits within this invocation's fixed
                 # deadline and can be interrupted before transport starts.
