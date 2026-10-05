@@ -45,7 +45,7 @@ def refresh_tasks(game: dict, row: dict, prefix: VerifiedPrefix | None) -> None:
 
 
 def _native_anchor(runs_root: Path, prefix: VerifiedPrefix) -> str | None:
-    """Only a verified native full route can supply the fixed later-level tail."""
+    """Resolve a native saved tail at the current verified progress boundary."""
     import json
     from asterion.applications.prime.p7.route_composition import _source, composition_sources
     run = runs_root / prefix.source_run_id
@@ -57,7 +57,7 @@ def _native_anchor(runs_root: Path, prefix: VerifiedPrefix) -> str | None:
                 return None
             run = sources[-1][1]
         _, native, _, _ = _source(run)
-        if native.levels_completed != native.win_levels:
+        if native.levels_completed != prefix.levels_completed:
             return None
         return run.name
     except (OSError, ValueError, KeyError, TypeError):
@@ -66,9 +66,9 @@ def _native_anchor(runs_root: Path, prefix: VerifiedPrefix) -> str | None:
 
 def next_task(game: dict, row: dict, prefix: VerifiedPrefix | None, *, runs_root: Path) -> dict | None:
     refresh_tasks(game, row, prefix)
-    if prefix is None or prefix.levels_completed != prefix.win_levels:
+    if prefix is None:
         return None
-    anchor = row.get('efficiency_anchor_run_id') or _native_anchor(runs_root, prefix)
+    anchor = _native_anchor(runs_root, prefix)
     if anchor is None:
         return None
     row['efficiency_anchor_run_id'] = anchor
@@ -92,7 +92,7 @@ def prepare_task(game: dict, task: dict, prefix: VerifiedPrefix) -> dict:
     baseline = game['baseline_actions'][level - 1]
     if (task.get('genuine_attempts', 0) != 0 or task['status'] != 'pending'
             or prefix.game_id != game['game_id'] or prefix.seed != task['seed']
-            or prefix.levels_completed != game['win_levels'] or not 1 <= level <= game['win_levels']
+            or not 1 <= level <= prefix.levels_completed <= game['win_levels']
             or task['baseline'] != baseline):
         raise ValueError('Efficiency task is unavailable')
     restored = len(_truncate(prefix.transitions, level - 1)) if level > 1 else 0
@@ -133,13 +133,13 @@ def finish_task(*, operator_root: Path, arc_root: Path, game: dict, task: dict,
     if level_score(new_counts[-1], baseline) <= level_score(old_counts[level - 1], baseline):
         result['status'] = 'no-improvement'
         return result
-    admitted = runs / new_run_id if level == game['win_levels'] else compose_saved_route(
+    admitted = runs / new_run_id if level == previous_prefix.levels_completed else compose_saved_route(
         operator_root=operator_root, arc_root=arc_root, source_run_id=new_run_id,
         suffix_run_id=task['anchor_run_id'], through_level=level)
     complete = load_exact_prefix(arc_root, runs, admitted.name, game['game_id'], task['seed'],
                                  expected_model_id=expected_model_id)
-    if complete is None or complete.levels_completed != game['win_levels']:
-        raise ValueError('Improved full route failed independent replay')
+    if complete is None or complete.levels_completed != previous_prefix.levels_completed:
+        raise ValueError('Improved saved route failed independent replay')
     expected = (*new_counts, *old_counts[level:])
     if level_counts(complete) != expected:
         raise ValueError('Improved route changed saved later levels')

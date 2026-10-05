@@ -467,12 +467,13 @@ def compose_saved_route(*, operator_root: Path, arc_root: Path, source_run_id: s
             raise ValueError
         game = resolve_game_selection({GAME_ID_ENV: experiment["game_id"], SEED_ENV: str(experiment["seed"]),
                                        TARGET_LEVEL_ENV: str(transitions[-1].levels_completed)}, arc_root)
-        receipt = ArcRunReceipt(game.game_id, game.seed, len(transitions), game.win_levels,
-                                "game-won", replay_sha256(transitions, terminal_reason="game-won"))
+        terminal = "game-won" if game.target_level == game.win_levels else "level-completed"
+        receipt = ArcRunReceipt(game.game_id, game.seed, len(transitions), game.target_level,
+                                terminal, replay_sha256(transitions, terminal_reason=terminal))
         candidate = _Candidate(source, game, transitions, receipt, {}, 0, 0,
                                trace_identities_for(experiment["model"]),
                                {"game_id": game.game_id, "seed": game.seed, "model": experiment["model"],
-                                "target_level": game.win_levels, "prediction_variant": "offline-replay"},
+                                "target_level": game.target_level, "prediction_variant": "offline-replay"},
                                {"route_sources": segments, "composition_seam": seam})
     except Exception:
         raise RecoveryError("composition source is unavailable") from None

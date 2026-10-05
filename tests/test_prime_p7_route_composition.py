@@ -125,6 +125,38 @@ class TestRouteComposition(unittest.TestCase):
                         if mutation == "source":
                             (first / "summary.json").write_bytes(before[first / "summary.json"])
 
+    def test_partial_suffix_preserves_current_progress_without_a_false_win(self):
+        from tools.recover_prime_p7_trace_race import compose_saved_route
+        from asterion.applications.prime.p7.route_composition import composition_sources
+        from asterion.applications.prime.p7.solutions import load_exact_prefix, source_experiment, load_resume_worldmap
+        from asterion.applications.prime.p7.console_overview import ConsoleOverview
+        from tests.test_recover_prime_p7_trace_race import TestRecoverPrimeP7TraceRace
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            arc = TestRecoverPrimeP7TraceRace._arc_root(root)
+            first = self._source(root, "p7-live-20261006120000-000000000000000000000001", 2)
+            last = self._source(root, "p7-live-20261006110000-000000000000000000000002", 4)
+            with (mock.patch("tools.recover_prime_p7_trace_race.live.ArcadeEngine", side_effect=lambda recordings_dir, game, **_: _CompositionEngine(recordings_dir=recordings_dir, game=game)),
+                  mock.patch("asterion.applications.prime.p7.solutions._fresh_engine", side_effect=lambda _arc, game, recordings: _CompositionEngine(recordings_dir=recordings, game=game))):
+                run = compose_saved_route(operator_root=root, arc_root=arc, source_run_id=first.name,
+                                          suffix_run_id=last.name, through_level=2)
+                summary = json.loads((run / "summary.json").read_text())
+                self.assertEqual(len(composition_sources(run, summary)), 2)
+                self.assertEqual(summary["broker"]["terminal_reason"], "level-completed")
+                self.assertEqual(summary["broker"]["levels_completed"], 4)
+                self.assertEqual(summary["broker"]["win_levels"], 7)
+                self.assertEqual(summary["experiment"]["target_level"], 4)
+                prefix = load_exact_prefix(arc, run.parent, run.name, "ls20-9607627b", 0, expected_model_id="gpt-6.1-sol")
+                self.assertEqual(prefix.levels_completed, 4)
+                self.assertIsNotNone(source_experiment(run, summary))
+                self.assertEqual(load_resume_worldmap(run, prefix)["source_run_id"], last.name)
+                catalog = ({"game_id": "ls20-9607627b", "win_levels": 7, "baseline_actions": [22, 123, 73, 84, 96, 192, 186]},)
+                row = ConsoleOverview(run.parent, catalog)._read_run(run, {catalog[0]["game_id"]: catalog[0]})
+                self.assertNotEqual(row["status"], "completed")
+                altered = json.loads(json.dumps(summary))
+                altered["broker"]["terminal_reason"] = "game-won"
+                self.assertIsNone(composition_sources(run, altered))
+
     def test_reindexes_only_sequences_and_first_suffix_before(self):
         from asterion.applications.prime.p7.route_composition import compose_transitions
         prefix = (ArcTransition(1, "ACTION1", "initial", "new-boundary", 1),)

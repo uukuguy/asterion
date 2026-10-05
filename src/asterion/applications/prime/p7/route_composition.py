@@ -140,7 +140,7 @@ def plan_composition(prefix_run: Path, suffix_run: Path, through_level: int):
     a, b = first[1], last[1]
     if (prefix_run == suffix_run or type(through_level) is not int
             or not 1 <= through_level < a.win_levels or through_level > a.levels_completed
-            or b.levels_completed != b.win_levels
+            or not through_level < b.levels_completed <= b.win_levels
             or any(getattr(a, key) != getattr(b, key) for key in ("game_id", "seed", "win_levels"))
             or first[0]["experiment"]["model"] != last[0]["experiment"]["model"]):
         raise ValueError
@@ -186,16 +186,23 @@ def composition_sources(run: Path, summary: Mapping[str, object]) -> tuple[tuple
         expected, expected_seam, transitions, experiment = plan_composition(*sources, seam["through_level"])
         if segments != expected or seam != expected_seam:
             return None
+        source_summaries = [json.loads((source / "summary.json").read_text()) for source in sources]
+        suffix_summary = source_summaries[-1]
+        source_scope = suffix_summary.get("completed_prefix") or suffix_summary["broker"]
+        win_levels = source_scope["win_levels"]
+        highest = transitions[-1].levels_completed
         own_experiment = summary.get("experiment")
         broker = summary.get("broker")
+        terminal = "game-won" if highest == win_levels else "level-completed"
         if (type(own_experiment) is not dict or own_experiment.get("prediction_variant") != "offline-replay"
                 or type(own_experiment.get("seed")) is not int or type(broker) is not dict
                 or any(own_experiment.get(key) != experiment.get(key) for key in ("game_id", "seed", "model"))
                 or summary.get("run_id") != run.name
                 or any(summary.get(key) is not True for key in ("sealed_trace", "replay_verified", "cleanup_complete"))
-                or broker.get("terminal_reason") != "game-won"
-                or broker.get("levels_completed") != broker.get("win_levels")
-                or own_experiment.get("target_level") != broker["win_levels"]
+                or broker.get("win_levels") != win_levels
+                or broker.get("terminal_reason") != terminal
+                or broker.get("levels_completed") != highest
+                or own_experiment.get("target_level") != highest
                 or diagnostics.get("restoration_actions") != len(transitions)):
             return None
         entries = _entries(run)
@@ -203,9 +210,10 @@ def composition_sources(run: Path, summary: Mapping[str, object]) -> tuple[tuple
         if ([ _plain(entry.payload) for entry in entries if entry.kind == "arc.recovery.source"] != [marker]
                 or any(dict(entry.identities) != trace_identities_for(experiment["model"]) for entry in entries)
                 or _transitions(entries) != transitions
-                or not _summary_matches(summary, experiment["game_id"], experiment["seed"], broker["win_levels"],
-                                        broker["win_levels"], len(transitions), "game-won", replay_sha256(transitions, terminal_reason="game-won"))):
+                or not _summary_matches(summary, experiment["game_id"], experiment["seed"], win_levels,
+                                        highest, len(transitions), terminal, replay_sha256(transitions, terminal_reason=terminal))):
             return None
-        return tuple((segment, source, json.loads((source / "summary.json").read_text())) for segment, source in zip(segments, sources))
+        return tuple((segment, source, source_summary)
+                     for segment, source, source_summary in zip(segments, sources, source_summaries))
     except (OSError, ValueError, TypeError, KeyError, IndexError):
         return None

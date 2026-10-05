@@ -3815,3 +3815,5 @@
 - 04:31 Efficiency/operator promotion fullPASS25 provider-free commands; later resumed-progress parser27 focused testsPASS, exact real records accepted.
 - 04:31 2d9a5651: Validate resumed action prefixes so live progress survives exact restoration; reloaded57515 without stopping guests.
 - 04:31 ac79b260: Checkpoint verified per-level rollover and deployed console; background continues independently.
+- 04:32 a671ce40: Record BP35 L3 success and dynamic next-witness ownership for safe continuation.
+- 04:38 User requires BP35L2 redo before full-game completion; froze dispatcher only, preserving both finite guests.

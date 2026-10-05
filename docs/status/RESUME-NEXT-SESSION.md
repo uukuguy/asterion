@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated 2026-10-06 04:31 CST. Active work, not a handoff. Branch `main`; implementation committed through `2d9a5651`. Console57515 shows live level progress; one efficiency retry queue deployed; background has two games with EACH LEVEL ATTEMPT bounded900seconds. Efficiency/operator full promotion passed25 provider-free commands; the later resumed-progress parser fix passed27 focused Python checks.
+Updated 2026-10-06 04:38 CST. Active work, not a handoff. Branch main; committed code2d9a5651 and statea671ce40. Latest user correction requires BP35 L2 efficiency redo before full-game completion. Two existing guests run naturally; coordinator8248 is SIGSTOP-frozen for safe partial-route deployment. Astra owns partial composition/helper, separate Astra owns pool adoption; root owns integration/state. Do not launch from uncommitted code or resume old coordinator.
 
 ## 已验证事实
 
@@ -19,6 +19,9 @@ Updated 2026-10-06 04:31 CST. Active work, not a handoff. Branch `main`; impleme
 - Last known server metadata PID16646 on57515; controller/manual idle during reload; solver guests are independent. Verify actual metadata/process ownership before reload. Chrome existing-session connector times out on tab access; HTTP/served-DOM evidence does not establish Chrome visual acceptance.
 
 ## 当前判断 / 下一动作
+
+0. **Latest active package:** remove full-game waiting for efficiency tasks. Preserve saved highest level with native partial suffix and exact SDK composition; frontier retry admits native candidate directly. BP35 L2=49/baseline48 qualifies; after existingBP35L4 settles, prioritize one900-second L2 witness. Old poolUV8246/Python8248 is SIGSTOP-frozen since04:36:33 without guest signals. Existing BP35L4 and AR25L8 keep original deadlines. Commit reviewed helper/partial admission first, then only kill exact old coordinator parent(s), adopt state with one new writer; inspect finished summaries so each guest is finalized once. Earlier full-anchor-only policy below is superseded by this request; implementation is still pending.
+
 
 1. Console implementation is integrated onmain: saved-route default/793 statistics, generic cognition, each-level initial previews and fixed publication ordering. Saved route drives idle default; explicit latest attempt remains diagnostic; active run remains live. No outstanding frontend fix is known from the named checks.
 2. Focused checks and final `make promotion-check` passed; code is onmain and exact idle controller was reloaded on57515 (PID81296). Export SP80/DC22/composedVC33 with explicit25-game baseline metadata. Confirm fixed VC33 contains3-stepL1 and both full games retain all cognition. Never order opaque run IDs as timestamps.

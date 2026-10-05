@@ -42,9 +42,12 @@ class TestEfficiencyQueue(unittest.TestCase):
         queue.refresh_tasks(other, row2, prefix((19,)))
         self.assertEqual(row2['efficiency_redos'], {})
 
-    def test_partial_progress_waits_for_full_anchor_and_prepares_exact_boundary(self):
+    def test_partial_progress_is_ready_and_prepares_exact_boundary(self):
         row = {}
-        self.assertIsNone(queue.next_task(self.game, row, prefix((10,)), runs_root=Path('/unused')))
+        with patch.object(queue, '_native_anchor', return_value='native-partial'):
+            task = queue.next_task(self.game, row, prefix((10,)), runs_root=Path('/unused'))
+        self.assertEqual(task['level'], 1)
+        self.assertEqual(task['anchor_run_id'], 'native-partial')
         self.assertIn('1', row['efficiency_redos'])
         source = prefix((10, 10, 11), 'composed')
         task = {'level': 2, 'seed': 0, 'baseline': 10, 'previous_actions': 10,
@@ -76,3 +79,23 @@ class TestEfficiencyQueue(unittest.TestCase):
         with patch(loader, return_value=prefix((10,), 'new')), patch(compose) as materialize:
             self.assertEqual(queue.finish_task(**kwargs)['status'], 'unfinished')
         materialize.assert_not_called()
+
+    def test_partial_frontier_admits_directly_and_earlier_level_keeps_saved_tail(self):
+        source = prefix((10, 10))
+        loader = 'asterion.applications.prime.p7.solutions.load_exact_prefix'
+        prior = 'asterion.applications.prime.p7.solutions.load_resume_worldmap'
+        compose = 'tools.recover_prime_p7_trace_race.compose_saved_route'
+        for level, candidate_counts in ((1, (8,)), (2, (10, 8))):
+            task = {'level': level, 'seed': 0, 'baseline': 10, 'anchor_run_id': 'native-partial'}
+            kwargs = dict(operator_root=Path('/operator'), arc_root=Path('/arc'), game=self.game,
+                          task=task, new_run_id='new', previous_prefix=source, expected_model_id='model')
+            result_counts = (*candidate_counts, *queue.level_counts(source)[level:])
+            with self.subTest(level=level), patch(loader, side_effect=[prefix(candidate_counts, 'new'), prefix(result_counts, 'admitted')]), patch(prior, return_value={}), patch(compose, return_value=Path('/operator/admitted')) as materialize:
+                result = queue.finish_task(**kwargs)
+            self.assertEqual(result['status'], 'improved')
+            self.assertEqual(result['admitted_levels'], 2)
+            self.assertEqual(result['admitted_actions'], 18)
+            if level == 2:
+                materialize.assert_not_called()
+            else:
+                self.assertEqual(materialize.call_args.kwargs['suffix_run_id'], 'native-partial')
