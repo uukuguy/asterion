@@ -3735,3 +3735,4 @@
 - Fixed-ID live run emitted two real kernel started/completed pairs; computation dispatch now reaches the persistent workspace. Final outcome pending.
 - 22:25 Fixed-ID721c8ae5 freshSP80 Level2 PASS:16actions/0RESET/3successfulcells/4revisions; sealed/replayed/cleaned,guestinactive. Program exports/cross-run reuse unverified.
 - Final real-console45cursors/three calculation pairs/HTTP replay PASS; documented bounded solving evidence and unresolved reuse,listing latency,promotion.
+- Recorded deployed computation/two-level evidence and remaining boundaries so future sessions resume accurately [fa564c92].

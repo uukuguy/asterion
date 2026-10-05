@@ -4,7 +4,7 @@ Updated 2026-10-05 after bounded redesign acceptance. This is a recovery checkpo
 
 ## 已验证事实
 
-- User approved whole WorldMap-driven P7 redesign, generic Prime IPython ownership and cooperating web console. Implemented on `feat/p7-live-console`; canonical worklist `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`. No push.
+- User approved whole WorldMap-driven P7 redesign, generic Prime IPython ownership and cooperating web console. Implemented on `feat/p7-live-console`; canonical worklist `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`. Evidence/state commit `fa564c92`; no push.
 - Implementation commits: generic kernel209baf19, console63af3505, integrationa1aef743, assertionsb45977e6, semantic revision123249a1, provider composite-ID fix721c8ae5. Exact design, tests and limits: `docs/reviews/2026-10-05-p7-worldmap-implementation-review.md`.
 - Default tools: `ipython`, `p7_workspace`, `p7_execute_plan`. Prime owns persistent computation and existing model loop; P7 owns immutable evidence, semantic/program WorldMap and the only real Broker action path. No legacy knowledge/prefix/HUMAN injection by default.
 - Final actual installed witness: run `p7-live-20261005221958-e3d73e5ff66547bc9a6ff731`, commit721c8ae5, SP80 seed0/gpt-6.1-sol/openai-codex, fresh natural Levels1→2, fixed900s/actioncap97. **PASS:16actions/0RESET/3successfulIPythoncells/4WorldMaprevisions/5plans**. No prior/replayed prefix, Playbook or offline optimization. Stops at `level-completed`, two of six levels, not whole-game WIN.
