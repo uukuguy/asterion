@@ -200,10 +200,11 @@ class ConsoleOverview:
                       'verified': False, 'sealed_trace': False, 'route_actions': 0,
                       'score': '0.000000', 'resume_eligible': False,
                       'observed_completed_levels': _observed_completed_levels(run, game)}
-            if diagnostics.get('recovery_kind') == 'terminal-game-win':
-                result.update(recovery_kind='terminal-game-win',
+            if diagnostics.get('recovery_kind') in {'terminal-game-win', 'animation-replay'}:
+                result.update(recovery_kind=diagnostics['recovery_kind'],
                               recovered_from=diagnostics['recovered_from'],
-                              execution_mode='offline-replay', source_runtime_status='failed')
+                              execution_mode='offline-replay',
+                              source_runtime_status='completed' if diagnostics['recovery_kind'] == 'animation-replay' else 'failed')
             elif diagnostics.get('recovery_kind') == 'saved-route-composition':
                 result.update(recovery_kind='saved-route-composition', execution_mode='offline-replay',
                               source_runtime_status='mixed',

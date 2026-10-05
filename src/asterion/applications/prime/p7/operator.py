@@ -30,7 +30,6 @@ from asterion.applications.prime.p7.broker import (
     P7ToolRegistry,
     Tool,
     _canonical_action,
-    _observation_digest,
 )
 from asterion.applications.prime.p7.cognition import GameCognitionStore
 from asterion.applications.prime.p7.cognition_narrative import (
@@ -2486,32 +2485,42 @@ def _apply_saved_prefix(
     transitions: tuple[ArcTransition, ...],
     *,
     identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
+    observations: tuple[ArcObservation, ...] | None = None,
 ) -> None:
     """Re-execute a verified prefix into this run's broker and private trace."""
+
+    from .replay import authenticate_observations, observation_matches_digest
 
     if not transitions or any(type(item) is not ArcTransition for item in transitions):
         raise P7OperatorError("P7 saved prefix is unavailable")
     try:
+        if observations is not None:
+            authenticate_observations(transitions, observations)
         if len(broker.history(0, 1)) != 1 or broker.history(0, 1)[0]["sequence"] != 0:
             raise ValueError
         client = _P7BrokerClient(broker, recorder, identities, variant="verified")
         for expected in transitions:
             if (
                 expected.sequence != len(broker.journal) + 1
-                or _observation_digest(broker.observe()) != expected.before_sha256
+                or not observation_matches_digest(broker.observe(), expected.before_sha256,
+                    None if observations is None else observations[expected.sequence - 1])
             ):
                 raise ValueError
             client.act(
                 [{"name": expected.action, "data": dict(expected.data)}],
                 _trusted_prefix_replay=True,
             )
-            if broker.journal[-1] != expected:
+            actual = broker.journal[-1]
+            if (actual.sequence != expected.sequence or actual.action != expected.action
+                    or actual.data != expected.data or actual.levels_completed != expected.levels_completed
+                    or not observation_matches_digest(broker.observe(), expected.after_sha256,
+                        None if observations is None else observations[expected.sequence])):
                 raise ValueError
             record = broker.history(expected.sequence, 1)[0]
             if (
                 record["sequence"] != expected.sequence
-                or record["before_state_sha256"] != expected.before_sha256
-                or record["after_state_sha256"] != expected.after_sha256
+                or record["before_state_sha256"] != actual.before_sha256
+                or record["after_state_sha256"] != actual.after_sha256
                 or record["levels_completed"] != expected.levels_completed
                 or broker.frame_at(expected.sequence)
                 != [list(row) for row in broker.observe().frame[-1]]
@@ -3226,6 +3235,7 @@ def _seal_verified_partial_run(
                 game=game,
             ),
             game=game,
+            observations=broker.replay_observations[:stop + 1],
         )
         payload = {
             "game_id": receipt.game_id,
@@ -3824,6 +3834,7 @@ def _resume_prefix_for_target(
         prefix = replace(
             prefix, levels_completed=game.target_level - 1, transitions=transitions,
             replay_sha256=replay_sha256(transitions, terminal_reason="level-completed"),
+            observations=None if prefix.observations is None else prefix.observations[:len(transitions) + 1],
         )
     _resume_game(game, prefix)
     return prefix
@@ -4530,6 +4541,7 @@ async def run_live(
                 _apply_saved_prefix(
                     broker, evidence.runtime_recorder, prefix.transitions,
                     identities=evidence.identities,
+                    observations=prefix.observations,
                 )
                 diagnostics.update(_prefix_action_diagnostics(prefix, applied=True))
                 if broker.status().levels_completed != prefix.levels_completed:

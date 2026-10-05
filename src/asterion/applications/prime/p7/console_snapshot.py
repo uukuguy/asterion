@@ -483,13 +483,49 @@ def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict
     return observations, retained
 
 
+def _recorded_animation_witnesses(root: Path, trace: list[dict], game: str, wins: int,
+                                  count: int | None = None) -> tuple | None:
+    """Read full observations authenticated by this trace's unchanged hashes."""
+    from .solutions import _transitions, recorded_observations
+    try:
+        transitions = _transitions(tuple(PrimeTraceEntry(**entry) for entry in trace))
+        if count is not None:
+            transitions = transitions[:count]
+        return recorded_observations(root, transitions, game, wins)
+    except (ValueError, OSError, KeyError, TypeError):
+        return None
+
+
+def _alias_restored_observations(events: list[dict], positions: dict[int, dict]) -> None:
+    """Keep source hashes intact; aliases require a previously checked lineage."""
+    for event in events:
+        payload = event['payload']
+        observation = positions.get(payload.get('source_action_sequence'))
+        matched = event.get('_matched_observation_sha256')
+        if observation and matched in observation['hashes']:
+            observation['hashes'].add(payload['observation_sha256'])
+
+
+def _aligned_restored_observation(source: dict, current: dict, position: int, destination: int,
+                                  expected: tuple | None, actual: tuple | None) -> bool:
+    if source['hash'] in current['hashes']:
+        return True
+    from .broker import _observation_digest
+    from .replay import observations_match
+    return (expected is not None and actual is not None and position < len(expected) and destination < len(actual)
+            and _observation_digest(expected[position]) in source['hashes']
+            and _observation_digest(actual[destination]) in current['hashes']
+            and observations_match(actual[destination], expected[position]))
+
+
 def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], current_events: list[dict],
                                seen: tuple[str, ...] = (), *,
-                               recorded_positions: dict[int, dict] | None = None) -> list[dict]:
-    """Read only explicitly linked, replay-identical historical actor beliefs."""
+                               recorded_positions: dict[int, dict] | None = None,
+                               recorded_witnesses: tuple | None = None) -> list[dict]:
+    """Read only explicitly linked, authenticated historical actor beliefs."""
     diagnostics = summary.get('diagnostics', {})
     recovery_kind = diagnostics.get('recovery_kind') if isinstance(diagnostics, dict) else None
-    if recovery_kind in {'saved-route-composition', 'terminal-game-win'}:
+    if recovery_kind in {'saved-route-composition', 'terminal-game-win', 'animation-replay'}:
         if root.name in seen or len(seen) >= 8:
             raise ValueError('replayed cognition unavailable')
         if recovery_kind == 'saved-route-composition':
@@ -507,6 +543,9 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         if recorded_positions is None:
             observations, _ = _source_observations(current_events, warnings)
             recorded_positions = dict(enumerate(observations))
+        if recorded_witnesses is None and recorded_positions:
+            first = next(iter(recorded_positions.values()))
+            recorded_witnesses = _recorded_animation_witnesses(root, trace, first['game_id'], first['wins'])
         retained = []
         for segment, source, prior in sources:
             source_trace, sealed = _trace(source, prior, prior['experiment']['game_id'], warnings)
@@ -524,6 +563,9 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
                     or actions(events, 'action') != actions(source_trace, 'arc.action')):
                 raise ValueError('replayed cognition unavailable')
             inherited = _restored_cognition_events(source, prior, source_trace, events, (*seen, root.name))
+            _alias_restored_observations(inherited, dict(enumerate(observations)))
+            expected_witnesses = _recorded_animation_witnesses(
+                source, source_trace, prior['experiment']['game_id'], observations[0]['wins']) if observations else None
             start, end = segment['source_start_sequence'] - 1, segment['source_end_sequence']
             offset = segment['destination_start_sequence'] - segment['source_start_sequence']
             for event in (*inherited, *events):
@@ -535,14 +577,16 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
                 if not start <= position <= end or not 0 <= position < len(observations):
                     continue
                 current = recorded_positions.get(destination)
-                # Animation history can differ at the join. Keep source hashes
-                # unchanged and omit beliefs not aligned with an actual frame.
-                if (current is None or payload['observation_sha256'] != observations[position]['hash']
-                        or payload['observation_sha256'] not in current['hashes']):
+                # Animation equivalence requires both original full-hash
+                # witnesses. A missing witness retains the strict hash path.
+                if (current is None or payload['observation_sha256'] not in observations[position]['hashes']
+                        or not _aligned_restored_observation(observations[position], current, position, destination,
+                                                             expected_witnesses, recorded_witnesses)):
                     continue
                 if event['kind'] == 'model_revision' and payload['level'] != min(observations[position]['levels'] + 1, observations[position]['wins']):
                     continue
                 retained.append({**event, 'payload': {**payload, 'source_action_sequence': destination},
+                                 '_matched_observation_sha256': current['hash'],
                                  'provenance': event.get('provenance', {'run_id': source.name, 'event_sequence': event['sequence']})})
         if len(retained) > _MAX_ROWS:
             raise ValueError('replayed cognition unavailable')
@@ -577,11 +621,22 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         return [{key: action.get(key, {} if key == 'data' else None) for key in
                  ('sequence', 'action', 'data', 'before_sha256', 'after_sha256', 'levels_completed')}
                 for action in actions[:restored]]
-    if not sealed or prefix(trace) != prefix(prior_trace) or prefix(trace) != prefix(current_events, 'action'):
+    actual_prefix, expected_prefix = prefix(trace), prefix(prior_trace)
+    if not sealed or actual_prefix != prefix(current_events, 'action'):
         raise ValueError('restored cognition unavailable')
+    current_observations, _ = _source_observations(current_events, warnings)
+    actual_witnesses = _recorded_animation_witnesses(root, trace, game, current_observations[0]['wins'], restored) if current_observations else None
+    expected_witnesses = _recorded_animation_witnesses(source, prior_trace, game, current_observations[0]['wins'], restored) if current_observations else None
+    if actual_prefix != expected_prefix:
+        from .replay import observations_match
+        keys = ('sequence', 'action', 'data', 'levels_completed')
+        if (any(any(left[key] != right[key] for key in keys) for left, right in zip(actual_prefix, expected_prefix))
+                or actual_witnesses is None or expected_witnesses is None
+                or not all(observations_match(left, right) for left, right in zip(actual_witnesses, expected_witnesses))):
+            raise ValueError('restored cognition unavailable')
     prior_diagnostics = prior.get('diagnostics', {})
     if (isinstance(prior_diagnostics, dict)
-            and prior_diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win'}):
+            and prior_diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win', 'animation-replay'}):
         # Offline replay sources have recordings and authenticated lineage, not
         # actor console events. The current exact replay already proved these
         # prefix actions; use its real observations to align the source beliefs.
@@ -592,6 +647,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
             source, prior, prior_trace, [], (*seen, root.name),
             recorded_positions={index: observation for index, observation in enumerate(observations)
                                 if index <= restored},
+            recorded_witnesses=actual_witnesses,
         )
         return [event for event in inherited if event['payload']['source_action_sequence'] <= restored]
     events = read_console_events(source, source_id, game, warnings=warnings)
@@ -599,8 +655,9 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
     if warnings or len(observations) <= restored or prefix(events, 'action') != prefix(prior_trace):
         raise ValueError('restored cognition unavailable')
     inherited = _restored_cognition_events(source, prior, prior_trace, events, (*seen, root.name))
-    retained = [event for event in inherited if event['payload']['source_action_sequence'] <= restored]
-    for event in events:
+    _alias_restored_observations(inherited, dict(enumerate(observations)))
+    retained = []
+    for event in (*inherited, *events):
         if event['kind'] not in {'model_revision', 'cognition'}:
             continue
         payload = event['payload']
@@ -608,10 +665,13 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         if position > restored or position >= len(observations):
             continue
         observation = observations[position]
-        if (payload['observation_sha256'] != observation['hash']
+        current = current_observations[position] if position < len(current_observations) else None
+        if (payload['observation_sha256'] not in observation['hashes'] or current is None
+            or not _aligned_restored_observation(observation, current, position, position, expected_witnesses, actual_witnesses)
             or (event['kind'] == 'model_revision' and payload['level'] != min(observation['levels'] + 1, observation['wins']))):
             continue
-        retained.append({**event, 'provenance': {'run_id': source_id, 'event_sequence': event['sequence']}})
+        retained.append({**event, '_matched_observation_sha256': current['hash'],
+                         'provenance': event.get('provenance', {'run_id': source_id, 'event_sequence': event['sequence']})})
     if len(retained) > _MAX_ROWS:
         raise ValueError('restored cognition unavailable')
     return retained
@@ -730,7 +790,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             game = experiment['game_id']
     diagnostics = summary.get('diagnostics', {})
     recorded_lineage = (not source_mode and isinstance(diagnostics, dict)
-                        and diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win'})
+                        and diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win', 'animation-replay'})
     try:
         restored_events = [] if recorded_lineage else _restored_cognition_events(root, summary, trace, source_events)
     except (ValueError, OSError):
@@ -878,6 +938,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         except (ValueError, OSError):
             warn.append('restored-cognition-invalid')
     source_decisions = []
+    _alias_restored_observations(source_events, observation_positions)
     process_events = []
     decisions_by_id = {}
     for event in source_events:

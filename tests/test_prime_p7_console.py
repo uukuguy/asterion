@@ -456,9 +456,67 @@ class TestOfflineReplayCognition(unittest.TestCase):
                               'description_zh': revisions[position]})
             previous = hashed
         recorder.seal()
+        recording = root / 'recordings' / 'record-session' / 'game-record.jsonl'
+        recording.parent.mkdir(parents=True)
+        recording.write_text(''.join(json.dumps(row) + '\n' for row in rows))
         summary = {**self.summary, 'run_id': name, 'sealed_trace': True, 'replay_verified': True}
         (root / 'summary.json').write_text(json.dumps(summary))
         return root, summary
+
+    def test_animation_recovery_and_resume_preserve_authenticated_source_cognition(self):
+        rows = [self.observation(layers=2), self.observation('ACTION1', 1, layers=2),
+                self.observation('ACTION1', 2, completed=1, layers=2)]
+        source, prior = self._source('animation-source', rows, {0: '初始规则', 1: '动作后规则'})
+        changed = copy.deepcopy(rows)
+        for row in changed:
+            row['data']['frame'][0][0][0] = 9
+        before = (source / 'recordings' / 'record-session' / 'game-record.jsonl').read_bytes()
+        recovered, summary = self._source('animation-recovered', changed, {})
+        (recovered / 'console-events.jsonl').unlink()
+        summary['diagnostics'] = {'recovery_kind': 'animation-replay'}
+        (recovered / 'summary.json').write_text(json.dumps(summary))
+        original_failed = {**prior, 'sealed_trace': False, 'replay_verified': False}
+        with patch('asterion.applications.prime.p7.solutions.recovery_source', return_value=(source, original_failed)):
+            state = build_console_snapshot(recovered)
+        revisions = state['levels'][0]['cognition_timeline']
+        self.assertEqual([r['stable_description'] for r in revisions], ['初始规则', '动作后规则'])
+        self.assertTrue(all(r['provenance']['run_id'] == source.name for r in revisions))
+        self.assertEqual(state['levels'][0]['frames'][0]['grid'][0][0], 9)
+        self.assertEqual((source / 'recordings' / 'record-session' / 'game-record.jsonl').read_bytes(), before)
+        for failure in (None, 'final', 'count', 'no-witness', 'tampered-witness'):
+            actual = copy.deepcopy(changed[:2])
+            if failure == 'final':
+                actual[1]['data']['frame'][-1][0][0] = 7
+            if failure == 'count':
+                actual[1]['data']['frame'].append(copy.deepcopy(actual[1]['data']['frame'][-1]))
+            current, current_summary = self._source(f'animation-resumed-{failure}', actual, {})
+            current_summary['diagnostics'] = {'execution_mode': 'resumed', 'source_run_id': source.name,
+                                              'restoration_actions': 1}
+            (current / 'summary.json').write_text(json.dumps(current_summary))
+            recording = current / 'recordings' / 'record-session' / 'game-record.jsonl'
+            if failure == 'no-witness':
+                recording.unlink()
+            if failure == 'tampered-witness':
+                tampered = copy.deepcopy(actual)
+                tampered[1]['data']['frame'][0][0][0] = 8
+                recording.write_text(''.join(json.dumps(row) + '\n' for row in tampered))
+            with self.subTest(failure=failure):
+                state = build_console_snapshot(current)
+                revisions = state['levels'][0]['cognition_timeline']
+                self.assertEqual([r['stable_description'] for r in revisions],
+                                 ['初始规则', '动作后规则'] if failure is None else [])
+                if revisions:
+                    self.assertTrue(all(r['provenance']['run_id'] == source.name for r in revisions))
+                    self.assertEqual(revisions[-1]['source_action_sequence'], 1)
+        restored, restored_summary = self._source('animation-lineage-resumed', changed[:2], {})
+        restored_summary['diagnostics'] = {'execution_mode': 'resumed', 'source_run_id': recovered.name,
+                                           'restoration_actions': 1}
+        (restored / 'summary.json').write_text(json.dumps(restored_summary))
+        with patch('asterion.applications.prime.p7.solutions.recovery_source', return_value=(source, original_failed)):
+            state = build_console_snapshot(restored)
+        self.assertEqual([r['stable_description'] for r in state['levels'][0]['cognition_timeline']],
+                         ['初始规则', '动作后规则'])
+        self.assertTrue(all(r['provenance']['run_id'] == source.name for r in state['levels'][0]['cognition_timeline']))
 
     def test_composition_aligns_recordings_and_preserves_source_provenance(self):
         initial = self.observation()

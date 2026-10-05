@@ -3830,3 +3830,5 @@
 - 07:26 Verified54levels/seven games; background exited06:57 HOLD after LF52L2 replay failed despite observed pass; investigate before release.
 - 07:29 User authorized green passed progress, one additional official25 saved-route card and continued two-game background solving.
 - 07:30 35f5f8c9: Use green passed progress and retain the new finite official-card authorization while preserving two-game research.
+- 07:37 e07cfc7f: Expand all25 game rows and compact spacing so the complete catalog is visible.
+- 07:46 Root integration70 PASS and console DOM99 PASS/one environment skip; authenticated animation replay and compact two-decimal/first-game UI reviewed on main, formal LF52 recovery pending.

@@ -10,14 +10,14 @@ from pathlib import Path
 import re
 import tempfile
 
-from .broker import ArcRunReceipt, ArcTransition
+from .broker import ArcObservation, ArcRunReceipt, ArcTransition, _snapshot_observation
 from .game import GAME_ID_ENV, SEED_ENV, TARGET_LEVEL_ENV, P7GameSelection, resolve_game_selection
 from .live import ArcadeEngine, read_trace_entries
 from .private_trace import (
     are_p7_trace_identities,
     trace_identities_for,
 )
-from .replay import replay_arc_run
+from .replay import authenticate_observations, replay_arc_run
 from .score import replay_sha256
 
 
@@ -58,6 +58,7 @@ class VerifiedPrefix:
     transitions: tuple[ArcTransition, ...]
     source_run_id: str
     replay_sha256: str
+    observations: tuple[ArcObservation, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,6 +189,9 @@ def recovery_source(run: Path, summary: Mapping[str, object]) -> tuple[Path, dic
     """
     from asterion.agents.prime.trace import _entry_digest, _plain
 
+    if isinstance(summary.get("diagnostics"), Mapping) and summary["diagnostics"].get("recovery_kind") == "animation-replay":
+        from .animation_replay import recovery_source as animation_source
+        return animation_source(run, summary)
     try:
         diagnostics = summary.get("diagnostics")
         if not isinstance(diagnostics, Mapping) or diagnostics.get("recovery_kind") != "terminal-game-win":
@@ -289,7 +293,7 @@ def source_experiment(run: Path, summary: Mapping[str, object]) -> dict | None:
         from .route_composition import composition_sources
         sources = composition_sources(run, summary)
         return None if sources is None else sources[0][2]["experiment"]
-    is_recovery = isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "terminal-game-win"
+    is_recovery = isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") in {"terminal-game-win", "animation-replay"}
     if experiment.get("prediction_variant") != "offline-replay" and not is_recovery:
         return experiment
     recovered = recovery_source(run, summary)
@@ -314,7 +318,7 @@ def load_resume_worldmap(run: Path, prefix: VerifiedPrefix) -> dict | None:
                 if prior is not None:
                     prior.update(recovered_run_id=run.name, route_sources=diagnostics["route_sources"])
                 return prior
-            if isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "terminal-game-win":
+            if isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") in {"terminal-game-win", "animation-replay"}:
                 recovered = recovery_source(run, summary)
                 if recovered is None or type(prefix) is not VerifiedPrefix or run.name != prefix.source_run_id:
                     return None
@@ -490,9 +494,10 @@ def _load_one(
         if game.win_levels != win_levels:
             return None
         receipt = ArcRunReceipt(recorded_game_id, seed, len(transitions), levels, terminal, recorded_digest)
+        observations = recorded_observations(run, transitions, recorded_game_id, win_levels)
         with tempfile.TemporaryDirectory(prefix="asterion-p7-prefix-") as directory:
-            replay_arc_run(transitions, receipt, lambda: _fresh_engine(arc_root, game, Path(directory)), game=game)
-        return VerifiedPrefix(recorded_game_id, seed, win_levels, levels, transitions, run_id, recorded_digest)
+            replay_arc_run(transitions, receipt, lambda: _fresh_engine(arc_root, game, Path(directory)), game=game, observations=observations)
+        return VerifiedPrefix(recorded_game_id, seed, win_levels, levels, transitions, run_id, recorded_digest, observations)
     except Exception:
         return None
 
@@ -632,6 +637,7 @@ def _load_attempt_one(
                 receipt,
                 lambda: _fresh_engine(arc_root, game, Path(directory)),
                 game=game,
+                observations=recorded_observations(run, transitions, expected_game_id, win_levels),
             )
         return VerifiedAttempt(
             expected_game_id,
@@ -665,6 +671,43 @@ def _transitions(entries: tuple[object, ...]) -> tuple[ArcTransition, ...]:
     if not values:
         raise ValueError
     return tuple(values)
+
+
+def recorded_observations(
+    run: Path, transitions: tuple[ArcTransition, ...], game_id: str, win_levels: int,
+) -> tuple[ArcObservation, ...] | None:
+    """Authenticate SDK animation witnesses; absent legacy frames stay strict."""
+    root = _private_path(run, "recordings")
+    sessions = tuple(root.iterdir())
+    if len(sessions) != 1:
+        raise ValueError
+    session = _private_path(run, "recordings", sessions[0].name)
+    paths = tuple(session.glob("*.jsonl"))
+    if len(paths) != 1:
+        raise ValueError
+    path = _private_path(run, "recordings", session.name, paths[0].name)
+    rows = [json.loads(line)["data"] for line in path.read_text(encoding="utf-8").splitlines()]
+    # Some historical fixtures/recordings retained action identities only.
+    # They cannot authorize animation equivalence and use strict replay.
+    if not any("frame" in row for row in rows):
+        return None
+    start = 0
+    while start < len(rows) and rows[start]["action_input"]["id"] == "RESET":
+        start += 1
+    if start == 0 or len(rows) - start < len(transitions):
+        raise ValueError
+    selected = rows[start - 1:start + len(transitions)]
+    values = []
+    for index, row in enumerate(selected):
+        if row.get("game_id") != game_id or row.get("win_levels") != win_levels:
+            raise ValueError
+        if index:
+            action = row["action_input"]
+            expected = transitions[index - 1]
+            if action["id"] != expected.action or action["data"] != dict(expected.data):
+                raise ValueError
+        values.append(_snapshot_observation(row, win_levels=win_levels))
+    return authenticate_observations(transitions, tuple(values))
 
 
 def _recording_identity(run: Path, transitions: tuple[ArcTransition, ...]) -> tuple[str, int] | None:

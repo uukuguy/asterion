@@ -16,7 +16,7 @@ import tempfile
 
 from asterion.agents.prime.trace import PrimeTraceRecorder, _entry_digest
 from asterion.applications.prime.p7 import live
-from asterion.applications.prime.p7.broker import ArcBroker, ArcRunReceipt, ArcTransition
+from asterion.applications.prime.p7.broker import ArcBroker, ArcObservation, ArcRunReceipt, ArcTransition
 from asterion.applications.prime.p7.diagnostics import analyze_trace
 from asterion.applications.prime.p7.game import (
     GAME_ID_ENV,
@@ -64,6 +64,8 @@ class _Candidate:
     identities: Mapping[str, str] | None = None
     experiment: Mapping[str, object] | None = None
     composition: Mapping[str, object] | None = None
+    observations: tuple[ArcObservation, ...] | None = None
+    source_receipt: Mapping[str, object] | None = None
 
 
 def _digest_file(path: Path) -> str:
@@ -481,6 +483,35 @@ def compose_saved_route(*, operator_root: Path, arc_root: Path, source_run_id: s
                         kind=KIND, candidate=candidate)
 
 
+def recover_animation_replay(*, operator_root: Path, arc_root: Path, source_run_id: str) -> Path:
+    """Verify every settled observation, then write distinct offline evidence."""
+    from asterion.applications.prime.p7.animation_replay import KIND, native_evidence
+    try:
+        source = _source_directory(operator_root, source_run_id)
+        summary, transitions, observations, receipt, hashes = native_evidence(source)
+        game = resolve_game_selection({GAME_ID_ENV: receipt.game_id, SEED_ENV: str(receipt.seed),
+            TARGET_LEVEL_ENV: str(receipt.levels_completed)}, arc_root)
+        with tempfile.TemporaryDirectory(prefix="asterion-p7-animation-audit-") as directory:
+            replay_arc_run(transitions, receipt, lambda: live.ArcadeEngine(
+                arc_root=arc_root, recordings_dir=Path(directory), game=game),
+                game=game, observations=observations)
+        experiment = {key: summary["experiment"][key] for key in ("game_id", "seed", "model", "target_level")}
+        experiment["prediction_variant"] = "offline-replay"
+        usage = [entry.payload for entry in live.read_trace_entries(source / "trace")
+                 if entry.kind == "arc.usage.reported"]
+        if any(set(item) != {"input_tokens", "output_tokens"}
+               or any(type(value) is not int or value < 0 for value in item.values()) for item in usage):
+            raise ValueError
+        candidate = _Candidate(source, game, transitions, receipt, hashes,
+            sum(item["input_tokens"] for item in usage), sum(item["output_tokens"] for item in usage),
+            trace_identities_for(experiment["model"]), experiment,
+            observations=observations, source_receipt=summary["receipt"])
+    except Exception:
+        raise RecoveryError("animation recovery source is unavailable") from None
+    return _materialize(operator_root=operator_root, arc_root=arc_root, source_run_id=source_run_id,
+        kind=KIND, candidate=candidate)
+
+
 def _receipt_mapping(value: object) -> dict[str, object]:
     names = (
         "completed_level_count",
@@ -504,11 +535,22 @@ def _replay_into(
     recorder: PrimeTraceRecorder,
     transitions: tuple[ArcTransition, ...],
     identities: Mapping[str, str],
+    observations: tuple[ArcObservation, ...] | None = None,
 ) -> None:
+    from asterion.applications.prime.p7.replay import authenticate_observations, observation_matches_digest
+    if observations is not None:
+        authenticate_observations(transitions, observations)
     client = _P7BrokerClient(broker, recorder, identities, variant="legacy")
     for expected in transitions:
+        if not observation_matches_digest(broker.observe(), expected.before_sha256,
+                None if observations is None else observations[expected.sequence - 1]):
+            raise ValueError
         client.act([{"name": expected.action, "data": dict(expected.data)}], _trusted_prefix_replay=True)
-        if broker.journal[-1] != expected:
+        actual = broker.journal[-1]
+        if (actual.action != expected.action or actual.data != expected.data
+                or actual.sequence != expected.sequence or actual.levels_completed != expected.levels_completed
+                or not observation_matches_digest(broker.replay_observations[-1], expected.after_sha256,
+                    None if observations is None else observations[expected.sequence])):
             raise ValueError
     snapshot = broker.terminal_snapshot()
     if snapshot.status.levels_completed != transitions[-1].levels_completed:
@@ -567,9 +609,12 @@ def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
                 **dict(candidate.source_hashes),
             }),
         )
-        _replay_into(broker, recorder, candidate.transitions, identities)
+        _replay_into(broker, recorder, candidate.transitions, identities, candidate.observations)
         broker_receipt = broker.seal()
-        if broker_receipt != candidate.receipt:
+        if candidate.observations is None and broker_receipt != candidate.receipt:
+            raise ValueError
+        if candidate.observations is not None and any(getattr(broker_receipt, key) != getattr(candidate.receipt, key)
+                for key in ("game_id", "seed", "primitive_actions", "levels_completed", "terminal_reason")):
             raise ValueError
         broker.replay(
             lambda: live.ArcadeEngine(
@@ -602,7 +647,8 @@ def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
                 "recovered_from": source_run_id,
                 "recovery_kind": kind,
                 "execution_mode": "offline-replay",
-                "source_runtime_status": "mixed" if candidate.composition else "failed",
+                "source_runtime_status": "completed" if kind == "animation-replay" else "mixed" if candidate.composition else "failed",
+                **({"source_receipt": dict(candidate.source_receipt)} if candidate.source_receipt is not None else {}),
                 "restoration_actions": len(candidate.transitions),
                 "new_solver_actions": 0,
                 **({} if candidate.composition else {
@@ -636,7 +682,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--operator-root", required=True, type=Path)
     parser.add_argument("--arc-root", required=True, type=Path)
     parser.add_argument("--source-run", required=True)
-    parser.add_argument("--kind", choices=("concurrent-trace-append", "terminal-game-win", "saved-route-composition"), default="concurrent-trace-append")
+    parser.add_argument("--kind", choices=("concurrent-trace-append", "terminal-game-win", "saved-route-composition", "animation-replay"), default="concurrent-trace-append")
     parser.add_argument("--suffix-run")
     parser.add_argument("--through-level", type=int)
     return parser
@@ -650,7 +696,7 @@ def main(arguments: list[str] | None = None) -> int:
                                       source_run_id=values.source_run, suffix_run_id=values.suffix_run,
                                       through_level=values.through_level)
         else:
-            recover = recover_terminal_win if values.kind == "terminal-game-win" else recover_trace_race
+            recover = recover_animation_replay if values.kind == "animation-replay" else recover_terminal_win if values.kind == "terminal-game-win" else recover_trace_race
             run = recover(operator_root=values.operator_root, arc_root=values.arc_root,
                           source_run_id=values.source_run)
         summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))

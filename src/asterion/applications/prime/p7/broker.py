@@ -358,6 +358,7 @@ class ArcBroker:
         self._current = initial
         self._observation_listener: Callable[[int, str, ArcObservation], None] | None = None
         self._journal: list[ArcTransition] = []
+        self._replay_observations: list[ArcObservation] = [initial]
         self._terminal_reason = "active"
         self._actions_dispatched = 0
         self._failed_action: str | None = None
@@ -2941,6 +2942,7 @@ class ArcBroker:
                 self._history.append(record)
                 self._record_world_evidence(record)
             self._journal.append(transition)
+            self._replay_observations.append(after)
             transitions.append(transition)
             self._current = after
             self._notify_observation(transition.sequence, transition.after_sha256, after)
@@ -3151,12 +3153,17 @@ class ArcBroker:
             replay_sha256(self._journal, terminal_reason=reason, uncertain_action=self._failed_action),
         )
 
+    @property
+    def replay_observations(self) -> tuple[ArcObservation, ...]:
+        return tuple(self._replay_observations)
+
     def replay(self, engine_factory: Callable[[], object]) -> ArcRunReceipt:
         from .replay import replay_arc_run
 
         if type(self._game) is not P7GameSelection:
             raise ArcBrokerError("unavailable")
-        return replay_arc_run(self.journal, self.seal(), engine_factory, game=self._game)
+        return replay_arc_run(self.journal, self.seal(), engine_factory, game=self._game,
+                              observations=self.replay_observations)
 
 
 __all__ = (

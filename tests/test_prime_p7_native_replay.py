@@ -10,6 +10,45 @@ from tests.test_prime_p7_native_broker import _Engine, _ResetEngine
 
 
 class TestNativeP7Replay(unittest.TestCase):
+    def test_animation_witness_requires_authenticated_full_source_and_settled_state(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+        from asterion.applications.prime.p7.replay import replay_arc_run
+
+        class Animated(_Engine):
+            def __init__(self, noise=2, change=None):
+                super().__init__(level_after=2)
+                self.noise, self.change = noise, change
+
+            def observe(self):
+                value = super().observe()
+                value['frame'] = [[[self.noise, 1]], *value['frame']]
+                if self.calls and self.change:
+                    if self.change == 'final':
+                        value['frame'][-1][0][0] = 9
+                    elif self.change == 'count':
+                        value['frame'].insert(0, [[self.noise, 1]])
+                    elif self.change == 'shape':
+                        value['frame'][0][0].append(1)
+                    else:
+                        value[self.change] = {'state': 'GAME_OVER', 'levels_completed': 0,
+                            'win_levels': 8, 'available_actions': ['ACTION1'], 'timers': {'clock': 1}}[self.change]
+                return value
+
+        broker = ArcBroker(engine=Animated())
+        broker.act(('ACTION1', 'ACTION1'))
+        original = broker.journal, broker.seal(), broker.replay_observations
+        with self.assertRaises(ArcBrokerError):
+            replay_arc_run(broker.journal, broker.seal(), lambda: Animated(3))
+        self.assertEqual(broker.replay(lambda: Animated(3)), broker.seal())
+        tampered = list(broker.replay_observations)
+        tampered[1] = replace(tampered[1], frame=(((7, 1),), tampered[1].frame[-1]))
+        with self.assertRaises(ArcBrokerError):
+            replay_arc_run(broker.journal, broker.seal(), lambda: Animated(3), observations=tuple(tampered))
+        for change in ('final', 'count', 'shape', 'state', 'levels_completed', 'win_levels', 'available_actions', 'timers'):
+            with self.subTest(change=change), self.assertRaises(ArcBrokerError):
+                broker.replay(lambda: Animated(3, change))
+        self.assertEqual(original, (broker.journal, broker.seal(), broker.replay_observations))
+
     def test_operator_interruption_replays_acknowledged_actions_without_progress(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 

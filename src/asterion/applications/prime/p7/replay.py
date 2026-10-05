@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import replace
 from typing import Protocol, cast
 
 from .broker import (
     ArcAction,
+    ArcObservation,
     ArcBrokerError,
     ArcRunReceipt,
     ArcTransition,
@@ -35,12 +37,55 @@ def _step(engine: object, action: ArcAction) -> object:
     return act({"name": action.name, "data": dict(action.data)})
 
 
+def authenticate_observations(
+    journal: tuple[ArcTransition, ...], observations: tuple[ArcObservation, ...],
+) -> tuple[ArcObservation, ...]:
+    """Bind complete recorded observations to every immutable transition digest."""
+    if type(observations) is not tuple or len(observations) != len(journal) + 1:
+        raise ValueError
+    if any(type(value) is not ArcObservation for value in observations):
+        raise ValueError
+    hashes = tuple(_observation_digest(value) for value in observations)
+    for index, transition in enumerate(journal):
+        if (transition.sequence != index + 1
+                or hashes[index] != transition.before_sha256
+                or hashes[index + 1] != transition.after_sha256
+                or observations[index + 1].levels_completed != transition.levels_completed):
+            raise ValueError
+    return observations
+
+
+def observations_match(actual: ArcObservation, expected: ArcObservation) -> bool:
+    """Compare settled state and all metadata, retaining animation dimensions.
+
+    Callers must authenticate expected observations against their original full
+    transition hashes first. Only intermediate pixel values may vary.
+    """
+    return (
+        len(actual.frame) == len(expected.frame)
+        and all(tuple(map(len, left)) == tuple(map(len, right))
+                for left, right in zip(actual.frame, expected.frame))
+        and replace(actual, frame=(actual.frame[-1],))
+        == replace(expected, frame=(expected.frame[-1],))
+    )
+
+
+def observation_matches_digest(
+    actual: ArcObservation, digest: str, expected: ArcObservation | None = None,
+) -> bool:
+    if expected is not None and _observation_digest(expected) != digest:
+        return False
+    return (_observation_digest(actual) == digest
+            or (expected is not None and observations_match(actual, expected)))
+
+
 def replay_arc_run(
     journal: object,
     receipt: object,
     engine_factory: Callable[[], object],
     *,
     game: P7GameSelection = DEFAULT_GAME,
+    observations: tuple[ArcObservation, ...] | None = None,
 ) -> ArcRunReceipt:
     """Require a fresh adapter to reproduce every state digest and terminal count."""
 
@@ -85,6 +130,8 @@ def replay_arc_run(
         raise ArcBrokerError("unavailable")
     engine = None
     try:
+        if observations is not None:
+            authenticate_observations(journal, observations)
         engine = cast(_ArcEngine, engine_factory())
         _engine_identity(engine, game)
         current = _snapshot_observation(engine.observe(), win_levels=game.win_levels)
@@ -100,13 +147,15 @@ def replay_arc_run(
                     raise ValueError
             elif current.state == "GAME_OVER" or action.name not in current.available_actions:
                 raise ValueError
-            if _observation_digest(current) != transition.before_sha256:
+            if not observation_matches_digest(current, transition.before_sha256,
+                    None if observations is None else observations[sequence - 1]):
                 raise ValueError
             after = _snapshot_observation(
                 _step(engine, action), win_levels=game.win_levels
             )
             if (
-                _observation_digest(after) != transition.after_sha256
+                not observation_matches_digest(after, transition.after_sha256,
+                    None if observations is None else observations[sequence])
                 or after.levels_completed != transition.levels_completed
                 or (action.name == "RESET" and (after.levels_completed != current.levels_completed or after.state != "NOT_FINISHED"))
                 or (action.name != "RESET" and (after.levels_completed < current.levels_completed or after.levels_completed > current.levels_completed + 1))
