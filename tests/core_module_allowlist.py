@@ -15,6 +15,8 @@ CORE_MODULES = (
     "asterion.agents.prime.context",
     "asterion.agents.prime.detachment",
     "asterion.agents.prime.execution",
+    "asterion.agents.prime.ipython",
+    "asterion.agents.prime.ipython_worker",
     "asterion.agents.prime.session",
     "asterion.agents.prime.state",
     "asterion.agents.prime.store",
