@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -22,7 +23,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 
-from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, _read_catalog, resolve_game_selection
+from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, P7GameSelection, _read_catalog, resolve_game_selection
 from . import live
 from .model_selection import declared_model_selection
 from .official import CompetitionEngine, CompetitionSession, OfficialError, prepare_session
@@ -34,6 +35,9 @@ from .official_result import (
 from .operator import build_p7_operator_resources
 from .official_replay import execute_saved_prefix
 from .prompt import P7_SOLVE_PROMPT
+
+
+_FULL_ROSTER_MODEL_ID = "gpt-6.1-sol"
 
 
 @dataclass(frozen=True, slots=True)
@@ -97,6 +101,7 @@ class SavedInvocation:
     arc_root: Path
     api_key: str
     prefixes: tuple[object, ...]
+    catalog_ids: tuple[str, ...] = ()
 
     def __repr__(self) -> str:
         return "<SavedInvocation redacted>"
@@ -156,10 +161,63 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
         raise OfficialError("official preflight unavailable") from None
 
 
+def _load_current_roster_prefixes(
+    arc_root: Path, runs_root: Path, catalog: tuple[dict[str, object], ...],
+) -> tuple[object, ...]:
+    """Verify current WorldMap sources directly; display caches grant no authority."""
+    from .score import partial_game_score
+    from .solutions import VerifiedPrefix, load_exact_prefix, load_resume_worldmap
+
+    if runs_root.is_symlink() or not runs_root.is_dir():
+        return ()
+    games = {row["game_id"]: row for row in catalog}
+    best: dict[str, tuple[tuple[object, ...], VerifiedPrefix]] = {}
+    for run in sorted(runs_root.iterdir(), key=lambda path: path.name):
+        try:
+            summary_path = run / "summary.json"
+            if (run.is_symlink() or not run.is_dir() or summary_path.is_symlink()
+                    or not summary_path.is_file() or summary_path.stat().st_size > 1024 * 1024):
+                continue
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            experiment = summary.get("experiment") if type(summary) is dict else None
+            if (type(experiment) is not dict
+                    or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                    or summary.get("run_id") != run.name
+                    or experiment.get("model") != _FULL_ROSTER_MODEL_ID
+                    or type(experiment.get("seed")) is not int or experiment["seed"] != 0
+                    or experiment.get("prediction_variant") != "verified"):
+                continue
+            game_id = experiment.get("game_id")
+            if type(game_id) is not str or game_id not in games:
+                continue
+            game = games[game_id]
+            scope = VerifiedPrefix(game_id, 0, game["win_levels"], 0, (), run.name, "")
+            if load_resume_worldmap(run, scope) is None:
+                continue
+            prefix = load_exact_prefix(arc_root, runs_root, run.name, game_id, 0,
+                                       expected_model_id=_FULL_ROSTER_MODEL_ID)
+            if prefix is None:
+                continue
+            counts, previous = [], 0
+            for level in range(1, prefix.levels_completed + 1):
+                end = next(item.sequence for item in prefix.transitions if item.levels_completed == level)
+                counts.append(end - previous)
+                previous = end
+            selection = P7GameSelection(game_id, 0, prefix.levels_completed,
+                                        tuple(game["baseline_actions"]), game["win_levels"])
+            key = (-prefix.levels_completed, -Decimal(partial_game_score(tuple(counts), selection)),
+                   len(prefix.transitions), prefix.source_run_id)
+            if game_id not in best or key < best[game_id][0]:
+                best[game_id] = (key, prefix)
+        except (OSError, UnicodeError, ValueError, TypeError, KeyError, StopIteration):
+            continue
+    return tuple(best[game_id][1] for game_id in sorted(best))
+
+
 def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
     """Verify local actions and ARC credentials before any scorecard operation."""
     import asterion
-    from .solutions import load_best_prefix, list_verified_prefixes
+    from .solutions import load_best_prefix
 
     try:
         root = Path(process_environment[live.OPERATOR_ROOT_ENV]).resolve(strict=True)
@@ -177,14 +235,14 @@ def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
         if type(requested) is not str or not requested:
             raise ValueError
         if requested == "all":
-            catalog_ids = tuple(str(row["game_id"]) for row in _read_catalog(arc_root))
-            prefixes = list_verified_prefixes(
-                arc_root,
-                runs_root,
-                catalog_ids,
-                0,
-                expected_model_id=expected_model_id,
-            )
+            if expected_model_id != _FULL_ROSTER_MODEL_ID:
+                raise ValueError
+            catalog = _read_catalog(arc_root)
+            catalog_ids = tuple(sorted(row["game_id"] for row in catalog))
+            if not catalog_ids or len(set(catalog_ids)) != len(catalog_ids):
+                raise ValueError
+            prefixes = _load_current_roster_prefixes(arc_root, runs_root, catalog)
+            return SavedInvocation(root, arc_root, api_key, prefixes, catalog_ids)
         else:
             game = resolve_game_selection(
                 {GAME_ID_ENV: requested, SEED_ENV: "0"}, arc_root
@@ -312,19 +370,36 @@ def _submit_saved(
     session: CompetitionSession,
     evidence_root: Path,
     prefixes: tuple[object, ...],
+    *,
+    catalog_ids: tuple[str, ...] = (),
 ) -> dict[str, object]:
-    """Play selected, locally verified actions once under one official card."""
-    if (
-        not prefixes
-        or tuple(getattr(prefix, "game_id", None) for prefix in prefixes)
-        != session.selected_game_ids
-    ):
+    """Replay each saved route once; a full roster also makes every zero row."""
+    prefix_ids = tuple(getattr(prefix, "game_id", None) for prefix in prefixes)
+    if (any(type(game_id) is not str for game_id in prefix_ids)
+            or len(set(prefix_ids)) != len(prefix_ids)):
         raise OfficialError("official saved selection unavailable")
+    if catalog_ids:
+        if (type(catalog_ids) is not tuple or catalog_ids != tuple(sorted(set(catalog_ids)))
+                or catalog_ids != session.preflight.game_ids or catalog_ids != session.selected_game_ids
+                or not set(prefix_ids).issubset(catalog_ids)):
+            raise OfficialError("official saved catalog unavailable")
+        selected = catalog_ids
+    elif not prefixes or prefix_ids != session.selected_game_ids:
+        raise OfficialError("official saved selection unavailable")
+    else:
+        selected = prefix_ids
+    by_game = dict(zip(prefix_ids, prefixes))
     session.open()
-    for prefix in prefixes:
-        engine = session.make(prefix.game_id)
+    for game_id in selected:
+        engine = session.make(game_id)
         try:
-            execute_saved_prefix(engine, prefix)
+            prefix = by_game.get(game_id)
+            if prefix is not None:
+                execute_saved_prefix(engine, prefix)
+            else:
+                initial = engine.observe()
+                if initial.get("levels_completed") != 0 or initial.get("state") != "NOT_FINISHED":
+                    raise OfficialError("official initial observation unavailable")
         finally:
             engine.close()
     session.close()
@@ -357,7 +432,7 @@ def main(argv: list[str] | None = None) -> int:
             evidence_root=evidence_root,
             model_host_ready=True,
             **(
-                {"selected_game_ids": tuple(prefix.game_id for prefix in invocation.prefixes)}
+                {"selected_game_ids": invocation.catalog_ids or tuple(prefix.game_id for prefix in invocation.prefixes)}
                 if isinstance(invocation, SavedInvocation) else {}
             ),
         ) as session:
@@ -382,7 +457,8 @@ def main(argv: list[str] | None = None) -> int:
             elif mode == "saved-submit":
                 if not isinstance(invocation, SavedInvocation):
                     raise OfficialError("official saved selection unavailable")
-                value = _submit_saved(session, evidence_root, invocation.prefixes)
+                value = _submit_saved(session, evidence_root, invocation.prefixes,
+                                      catalog_ids=invocation.catalog_ids)
             else:
                 value = asyncio.run(_submit(invocation, session, evidence_root))
         print(json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True))
