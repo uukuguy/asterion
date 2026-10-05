@@ -417,6 +417,26 @@ const manualView = (game_id = 'sp80-test', color = 12, version = 0, level = 1) =
 const changeGame = (app, game) => { app.$('game-select').value = game; app.$('game-select').dispatchEvent(new app.dom.window.Event('change')); };
 const stateWithManual = (manual) => ({ ...idleView(), manual });
 
+test('idle startup selects the first catalog game instead of the embedded replay or remembered manual choice', async () => {
+  const config = {token:'test-token', games:[{game_id:'ar25-test',alias:'AR25',win_levels:3}, liveConfig.games[0]]};
+  const preview = {schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+    run:{game_id:'ar25-test',run_id:null,status:'preview',seed:0,win_levels:3,completed_level_count:0,
+      primitive_action_count:0,target_level:1,replay_verified:false,sealed_trace:false},
+    levels:[{level:1,status:'preview',frames:[{id:'initial-ar25',grid:[[12]],state:'NOT_FINISHED',levels_completed:0}],
+      actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]};
+  const app = launch(fixture(), {liveConfig:config, fetch:async url => response(url==='/api/preview/ar25-test' ? preview :
+    {...idleView(),selection:{game_id:'sp80-test',level:2}})});
+  try {
+    await settle();
+    assert.equal(app.$('game-select').value,'ar25-test');
+    assert.equal(app.$('game-title').textContent,'ar25-test');
+    app.tick(); await settle();
+    assert.equal(app.$('game-select').value,'ar25-test');
+    assert.equal(app.requests.some(entry=>entry.url==='/api/manual/open'),false);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('selected game opens real playable manual session without P7 and idle polls retain it', async () => {
   let manual = null;
   const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
@@ -2209,7 +2229,7 @@ test('live game aggregate 100 does not replace completed level efficiency 40.50'
   const app = launch(snapshot, {liveConfig: config, overview, fetch: async () => response(view(snapshot))});
   try {
     await settle();
-    assert.equal(app.$('overview-game-list').firstElementChild.children[2].textContent, '100.000000');
+    assert.equal(app.$('overview-game-list').firstElementChild.children[2].textContent, '100.00');
     assert.match(app.$('level-efficiency').textContent, /基准 7 \/ 11 动作 \/ 关卡效率 40.50 分/);
     assert.match(app.$('level-1').textContent, /关卡效率 40.50 分/);
     app.$('level-2').click();
@@ -2220,7 +2240,7 @@ test('live game aggregate 100 does not replace completed level efficiency 40.50'
   } finally { app.dom.window.close(); }
 });
 
-test('local overview renders each catalog game once and uses actual catalog totals and exact score strings', async () => {
+test('local overview renders each catalog game once and uses actual catalog totals and two-decimal score displays', async () => {
   const overview = overviewFixture(catalog25);
   overview.totals = {...overview.totals,score:'1.234567',completed_levels:1,saved_route_actions:8,primitive_actions:15,restoration_actions:4,new_solver_actions:8,actions_pending:3};
   overview.games[0] = {...overview.games[0],completed_levels:1,status:'partial',score:'2.500000',route_actions:8,runs:[catalogRun('best-one')],best_run_id:'best-one',resume_run_id:'best-one'};
@@ -2229,14 +2249,20 @@ test('local overview renders each catalog game once and uses actual catalog tota
     await settle(); app.tick(); await settle();
     const rows=[...app.$('overview-game-list').children];
     assert.equal(rows.length,25); assert.equal(new Set(rows.map(row=>row.dataset.gameId)).size,25);
-    assert.equal(app.$('overview-score').textContent,'1.234567');
+    assert.equal(app.$('overview-score').textContent,'1.23');
     assert.equal(app.$('overview-games').textContent,'0 / 25');
     assert.equal(app.$('overview-levels').textContent,'1 / 350');
     assert.match(app.$('overview').textContent,/本地总分|保存路线|热启动|官网冷启动/);
     assert.equal(app.$('overview-actions').textContent,'8');
     assert.match(app.$('overview').textContent,/游戏动作总计/);
     assert.match(app.$('overview-action-breakdown').textContent,/全部尝试 15 · 恢复 4 · 新增求解 8 · 待封存分账 3/);
-    assert.equal(overviewRow(app).children[2].textContent,'2.500000');
+    assert.equal(overviewRow(app).children[2].textContent,'2.50');
+    assert.equal(overviewRow(app).querySelector('[data-overview-watch]').textContent,'回放');
+    assert.equal(overviewRow(app).querySelector('[data-overview-attempt]').textContent,'尝试');
+    assert.equal(overviewRow(app).querySelector('[data-overview-start]').textContent,'继续');
+    assert.equal(overviewRow(app).querySelector('[data-overview-fresh]').textContent,'重玩');
+    overview.games[0].status='completed'; app.tick(); await settle();
+    assert.equal(overviewRow(app).querySelector('[data-overview-start]').hidden,true);
     assert.equal([...app.timers.values()].some(fn=>fn.intervalMs===5000),true);
     assert.equal(app.requests.filter(r=>r.url==='/api/runs').length,0);
     assert.deepEqual(app.errors,[]);
@@ -2455,7 +2481,7 @@ test('stale unsealed recording does not veto a ready guest and backend readiness
 });
 
 
-test('default current game automatically mounts its latest WorldMap P7 recording at level 6 without manual state overwrites',async()=>{
+test('explicit game selection mounts its latest WorldMap P7 recording at level 6 without manual state overwrites',async()=>{
   const config={...catalog25,games:catalog25.games.map((game,i)=>i===5?{...game,game_id:'sp80-test',alias:'SP80',win_levels:7}:game)};
   const overview=overviewFixture(config);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
   overview.games[5]={...overview.games[5],completed_levels:5,status:'partial',score:'59.523810',best_run_id:'saved-five',resume_run_id:'saved-five',recording_run_id:'current-six',runs:[{...catalogRun('saved-five'),completed_levels:5},{...catalogRun('current-six','unverified',false),recording:true}]};
@@ -2464,7 +2490,7 @@ test('default current game automatically mounts its latest WorldMap P7 recording
   const session={...stateWithManual(savedManual),selection:{game_id:'sp80-test',level:2}};
   const app=launch(fixture(),{liveConfig:config,overview,fetch:async url=>response(url==='/api/replay/current-six'?replay:session)});
   try{
-    await settle();assert.equal(app.$('game-select').value,'sp80-test');assert.equal(app.$('run-id').textContent,'current-six');assert.equal(app.$('board-kicker').textContent,'LEVEL 06');assert.equal(app.$('level-progress').textContent,'5 / 7');
+    await settle(); changeGame(app, 'sp80-test'); await settle();assert.equal(app.$('game-select').value,'sp80-test');assert.equal(app.$('run-id').textContent,'current-six');assert.equal(app.$('board-kicker').textContent,'LEVEL 06');assert.equal(app.$('level-progress').textContent,'5 / 7');
     assert.equal(app.$('board-empty').hidden,true);assert.equal(app.$('console-mode').value,'replay');assert.equal(app.$('manual-history').hidden,true);
     assert.equal(app.$('replay-run').hidden,true);assert.equal(app.$('replay-load').hidden,true);assert.equal(app.$('replay-run').getAttribute('aria-hidden'),'true');
     assert.match(app.$('overview').textContent,/当前 WorldMap P7/);assert.doesNotMatch(app.$('overview').textContent,/历史存档|不同代码版本/);

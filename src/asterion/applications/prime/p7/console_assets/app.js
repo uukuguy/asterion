@@ -83,7 +83,7 @@
   let consoleConfig = null;
   try { consoleConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.token === 'string' && consoleConfig.token ? consoleConfig : null;
-  const state = { selectionReady: false, overview: null, overviewFresh: false, overviewBusy: false, overviewPending: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
+  const state = { selectionReady: false, gameSelectionTouched: false, overview: null, overviewFresh: false, overviewBusy: false, overviewPending: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
   let attemptReplayRun = null;
@@ -1529,6 +1529,7 @@
       const game = overviewGame(row.dataset.gameId);
       row.classList.toggle('is-selected', row.dataset.gameId === $('game-select').value);
       row.querySelector('[data-overview-start]').disabled = locked || game.status === 'completed' || game.status === 'running' || (game.completed_levels > 0 && !game.resume_run_id);
+      row.querySelector('[data-overview-start]').hidden = game.status === 'completed';
       row.querySelector('[data-overview-fresh]').disabled = locked || game.status === 'running';
       row.querySelector('[data-overview-watch]').disabled = !game.runs.length;
       const attempt = row.querySelector('[data-overview-attempt]');
@@ -1541,7 +1542,7 @@
   function renderOverview() {
     const { scope, totals, games } = state.overview;
     write('overview-scope', `当前 WorldMap P7 · ${scope.model_id} · seed ${scope.seed} · 本地目录 ${totals.total_games} 个游戏`);
-    write('overview-score', totals.score);
+    write('overview-score', Number(totals.score).toFixed(2));
     write('overview-games', `${totals.display_completed_games ?? totals.completed_games} / ${totals.total_games}`);
     write('overview-levels', `${totals.display_completed_levels ?? totals.completed_levels} / ${totals.total_levels}`);
     const pendingLevels = (totals.display_completed_levels ?? totals.completed_levels) - totals.completed_levels;
@@ -1561,8 +1562,9 @@
         const progressCell = node('td'), progress = node('div', undefined, 'overview-progress');
         progress.append(node('progress'), node('span')); progressCell.append(progress);
         const operations = node('td'), buttons = node('div', undefined, 'overview-game-actions');
-        [['watch', '回放 / 观察', () => watchGame(game.game_id)], ['attempt', '查看最新尝试', () => chooseOverviewGame(game.game_id, {replay:true,attempt:true})], ['start', '启动', () => startGame(game.game_id)], ['fresh', '从头开始', () => startGame(game.game_id, true)]].forEach(([kind, label, action]) => {
+        [['watch', '回放', '回放或观察游戏', () => watchGame(game.game_id)], ['attempt', '尝试', '查看最新尝试', () => chooseOverviewGame(game.game_id, {replay:true,attempt:true})], ['start', '启动', '启动或继续求解', () => startGame(game.game_id)], ['fresh', '重玩', '从头开始游戏', () => startGame(game.game_id, true)]].forEach(([kind, label, description, action]) => {
           const button = node('button', label, 'text-button' + (kind === 'start' ? ' overview-primary' : ''));
+          button.title = description; button.setAttribute('aria-label', description);
           button.type = 'button'; button.dataset['overview' + kind[0].toUpperCase() + kind.slice(1)] = game.game_id;
           button.addEventListener('click', action); buttons.append(button);
         });
@@ -1575,12 +1577,15 @@
       const progress = row.querySelector('progress'); progress.max = game.win_levels; progress.value = displayed;
       progress.setAttribute('aria-label', `${displayed} / ${game.win_levels} 关卡`);
       row.querySelector('.overview-progress span').textContent = `${displayed} / ${game.win_levels}${game.progress_pending ? ' · 待封存' : ''}`;
-      row.children[2].textContent = game.score;
+      row.children[2].textContent = Number(game.score).toFixed(2);
       const recording = game.runs.some((run) => run.recording === true);
       const external = (game.status === 'running' || recording) && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
       row.children[3].textContent = (recording ? '记录中' : overviewLabels[game.status]) + (external ? ' · 外部只读' : ''); row.children[3].className = 'overview-state ' + game.status;
       row.children[4].textContent = String(game.route_actions);
-      row.querySelector('[data-overview-start]').textContent = game.status === 'completed' ? '已通关' : game.resume_run_id ? '继续' : game.completed_levels > 0 ? '存档不可接续' : '启动';
+      const start = row.querySelector('[data-overview-start]');
+      start.textContent = game.resume_run_id ? '继续' : game.completed_levels > 0 ? '待恢复' : '启动';
+      start.title = game.resume_run_id ? '继续求解下一关' : game.completed_levels > 0 ? '存档不可接续' : '启动游戏求解';
+      start.setAttribute('aria-label', start.title);
       if (list.children[index] !== row) list.insertBefore(row, list.children[index] || null);
     });
     renderOverviewControls(); renderRunChoices();
@@ -1617,6 +1622,7 @@
 
   function chooseOverviewGame(gameId, { replay = false, attempt = false } = {}) {
     if (manualUnsaved() || state.manualPending || state.commandBusy || !overviewGame(gameId)) return false;
+    state.gameSelectionTouched = true;
     pause(); stopReplayPolling(); $('game-select').value = gameId; renderRunChoices();
     attemptReplayRun = attempt ? latestReplayId(overviewGame(gameId)) : null;
     if (!replay && state.mode === 'manual' && !activeSession()) openManual(1);
@@ -1627,6 +1633,7 @@
   function startGame(gameId, fresh = false) {
     const game = overviewGame(gameId);
     if (!game || startLocked() || game.status === 'running' || (!fresh && (game.status === 'completed' || (game.completed_levels > 0 && !game.resume_run_id)))) return;
+    state.gameSelectionTouched = true;
     pause(); stopReplayPolling(); $('game-select').value = gameId; renderRunChoices();
     attemptReplayRun = null;
     state.mode = 'live'; state.replayFollow = true; state.manualView = null; state.eventSequence = null;
@@ -1826,6 +1833,7 @@
       const choice = {game_id:manual?.game_id,level:manualLevel(manual)};
       if (validChoice(choice)) { state.manualChoice = choice; $('game-select').value = choice.game_id; }
     }
+    if (!state.gameSelectionTouched) $('game-select').value = array(liveConfig.games)[0]?.game_id || '';
     state.selectionReady = true;
     observeSelectedGame();
   }
@@ -1842,8 +1850,12 @@
       else if (state.mode === 'manual' && ['ready', 'uncertain'].includes(state.manualView?.state) && state.manualView.snapshot) { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
       else if (state.mode === 'manual') {
         const saved = state.liveView?.manual;
-        if (['ready', 'uncertain'].includes(saved?.state) && saved.snapshot && saved.game_id === $('game-select').value) acceptManual(saved);
-        else openManual(rememberedManualLevel());
+        if (['ready', 'uncertain'].includes(saved?.state) && saved.snapshot &&
+            (!state.gameSelectionTouched || saved.game_id === $('game-select').value)) {
+          $('game-select').value = saved.game_id; acceptManual(saved);
+        } else if (!state.gameSelectionTouched && validChoice(state.manualChoice)) {
+          $('game-select').value = state.manualChoice.game_id; openManual(state.manualChoice.level);
+        } else openManual(rememberedManualLevel());
       } else observeSelectedGame();
       renderSessionControls();
     });
@@ -1852,7 +1864,7 @@
     games.filter((game) => isRecord(game) && typeof game.game_id === 'string').forEach((game) => {
       const option = node('option', `${string(game.alias, game.game_id)} · ${game.game_id}`); option.value = game.game_id; $('game-select').append(option);
     });
-    $('game-select').addEventListener('change', () => { attemptReplayRun = null; stopReplayPolling(); renderRunChoices(); if (state.mode === 'manual') openManual(1); else observeSelectedGame(); renderSessionControls(); });
+    $('game-select').addEventListener('change', () => { state.gameSelectionTouched = true; attemptReplayRun = null; stopReplayPolling(); renderRunChoices(); if (state.mode === 'manual') openManual(1); else observeSelectedGame(); renderSessionControls(); });
     $('run-start').addEventListener('click', () => startGame($('game-select').value));
     $('run-fresh').addEventListener('click', () => startGame($('game-select').value, true));
     ['pause', 'resume'].forEach((operation) => $('run-' + operation).addEventListener('click', () => sendCommand({ path: '/api/' + operation, body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } })));
