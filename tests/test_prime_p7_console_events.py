@@ -643,14 +643,14 @@ class TestRestoredResearchProjection(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.runs = Path(self.tmp.name).resolve()
 
-    def publish(self, name, count, revisions, source=None, restored=0):
+    def publish(self, name, count, revisions, source=None, restored=0, game='sp80-test', startup=False):
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.observation_state import ObservationState
         from asterion.applications.prime.p7.score import digest
         root = self.runs / name
         root.mkdir()
         (root / 'trace').mkdir()
-        writer = ConsoleEventWriter(root, name, 'sp80-test')
+        writer = ConsoleEventWriter(root, name, game)
         trace = PrimeTraceRecorder(root / 'trace')
         previous = None
         for position in range(count + 1):
@@ -664,6 +664,16 @@ class TestRestoredResearchProjection(unittest.TestCase):
                 trace.append('arc.action', {'application_id': 'prime.arc-agi-3-solving', 'model_id': 'test-model'}, action)
             writer.append('observation', {'source_action_sequence': position,
                           'observation_sha256': hashed, 'observation': raw})
+            if startup and position == (0 if startup == 'early' else restored):
+                context = {'run_id': name, 'game_id': game, 'seed': 0, 'win_levels': 3,
+                           'model_id': 'test-model', 'target_level': 3,
+                           'source_run_id': source, 'restoration_actions': restored}
+                if startup == 'model':
+                    context['model_id'] = 'other-model'
+                elif startup == 'extra':
+                    context['prompt'] = 'PRIVATE-CONTEXT-SENTINEL'
+                for _ in range(2 if startup == 'duplicate' else 1):
+                    trace.append('arc.run.context', {'application_id': 'prime.arc-agi-3-solving', 'model_id': 'test-model'}, context)
             if position in revisions:
                 revision = research_payloads(hashed)['model_revision']
                 writer.append('model_revision', {**revision, 'source_action_sequence': position,
@@ -672,11 +682,77 @@ class TestRestoredResearchProjection(unittest.TestCase):
         trace.seal()
         (root / 'summary.json').write_text(json.dumps({
             'schema': 'asterion.prime.p7-live-private-summary/v1', 'run_id': name,
-            'experiment': {'game_id': 'sp80-test', 'seed': 0, 'model': 'test-model'},
+            'experiment': {'game_id': game, 'seed': 0, 'model': 'test-model'},
             'sealed_trace': True, 'replay_verified': True,
             'diagnostics': {'execution_mode': 'resumed', 'source_run_id': source,
                             'restoration_actions': restored} if source else {}}))
         return root
+
+    def launch(self, current, source, game):
+        launches = self.runs / 'launches'
+        launches.mkdir(exist_ok=True)
+        value = {'run_id': current.name, 'game': game, 'seed': 0,
+                 'expected_model_id': 'test-model', 'target_level': 3,
+                 'source_run_id': source.name, 'restoration_actions': 1,
+                 'source_validation': {'game_id': game, 'seed': 0, 'win_levels': 3,
+                     'source_run_id': source.name, 'restoration_actions': 1,
+                     'levels_completed': 1, 'replay_sha256': 'sha256:' + 'a' * 64}}
+        path = launches / (current.name + '.json')
+        path.write_text(json.dumps(value))
+        return path, value
+
+    def test_active_without_summary_has_same_source_beliefs_for_any_game(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        for game in ('sp80-test', 'dc22-test'):
+            for provenance in ('startup', 'launch'):
+                with self.subTest(game=game, provenance=provenance):
+                    tag = game + '-' + provenance
+                    source = self.publish('source-' + tag, 1, {0: '本关历史规划'}, game=game)
+                    current = self.publish('current-' + tag, 1, {1: '当前新关规划'}, source.name, 1,
+                                           game=game, startup=provenance == 'startup')
+                    finalized = build_console_snapshot(current)
+                    (current / 'summary.json').unlink()
+                    if provenance == 'launch':
+                        self.launch(current, source, game)
+                    live = build_console_snapshot(current)
+                    self.assertEqual(live['levels'][0]['cognition'], finalized['levels'][0]['cognition'])
+                    self.assertEqual(live['run']['model'], 'test-model')
+                    self.assertEqual(live['run']['seed'], 0)
+                    self.assertEqual(live['levels'][1]['cognition']['stable_description'], '当前新关规划')
+
+    def test_bad_present_summary_or_live_provenance_does_not_fall_back(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        for failure in ('summary', 'launch-model', 'launch-seed', 'validation-source', 'validation-count'):
+            with self.subTest(failure=failure):
+                source = self.publish('source-' + failure, 1, {0: '不应导入'})
+                current = self.publish('current-' + failure, 1, {}, source.name, 1)
+                path, value = self.launch(current, source, 'sp80-test')
+                if failure == 'summary':
+                    (current / 'summary.json').write_text('{}')
+                else:
+                    (current / 'summary.json').unlink()
+                    if failure == 'launch-model':
+                        value['expected_model_id'] = 'other-model'
+                    elif failure == 'launch-seed':
+                        value['seed'] = True
+                    elif failure == 'validation-source':
+                        value['source_validation']['source_run_id'] = 'another-source'
+                    else:
+                        value['source_validation']['restoration_actions'] = 2
+                    path.write_text(json.dumps(value))
+                self.assertEqual(build_console_snapshot(current)['levels'][0]['cognition']['scope'], 'unavailable')
+
+    def test_invalid_startup_context_never_uses_valid_launcher_fallback(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        for invalid in ('early', 'duplicate', 'model', 'extra'):
+            with self.subTest(invalid=invalid):
+                source = self.publish('source-context-' + invalid, 1, {0: '不应导入'})
+                current = self.publish('current-context-' + invalid, 1, {}, source.name, 1, startup=invalid)
+                (current / 'summary.json').unlink()
+                self.launch(current, source, 'sp80-test')
+                snapshot = build_console_snapshot(current)
+                self.assertEqual(snapshot['levels'][0]['cognition']['scope'], 'unavailable')
+                self.assertNotIn('PRIVATE-CONTEXT-SENTINEL', json.dumps(snapshot))
 
     def test_recursive_exact_prefix_keeps_original_level_beliefs_and_provenance(self):
         from asterion.applications.prime.p7.console_snapshot import build_console_snapshot

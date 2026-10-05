@@ -542,6 +542,59 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
     return retained
 
 
+def _live_run_summary(root: Path, trace: list[dict], game: str | None, wins: int | None) -> dict:
+    """Use a recorded exact link, never a candidate search, before finalization."""
+    contexts = [entry for entry in trace if entry['kind'] == 'arc.run.context']
+    if contexts:
+        if len(contexts) != 1:
+            raise ValueError('live context unavailable')
+        entry = contexts[0]
+        context = entry['payload']
+        if (set(context) != {'run_id', 'game_id', 'seed', 'win_levels', 'model_id', 'target_level',
+                             'source_run_id', 'restoration_actions'}
+            or entry['identities'].get('model_id') != context.get('model_id')
+            or sum(row['kind'] == 'arc.action' for row in trace if row['sequence'] < entry['sequence'])
+                != context.get('restoration_actions')):
+            raise ValueError('live context unavailable')
+    else:
+        path = root.parent / 'launches' / (root.name + '.json')
+        if not path.exists() and not path.is_symlink():
+            return {}
+        launch = _object(path, [], 'summary-missing')
+        validation = launch.get('source_validation')
+        if not isinstance(validation, dict):
+            raise ValueError('live context unavailable')
+        context = {key: launch.get(key) for key in ('run_id', 'seed', 'target_level', 'source_run_id', 'restoration_actions')}
+        context.update(game_id=launch.get('game'), model_id=launch.get('expected_model_id'),
+                       win_levels=validation.get('win_levels'))
+        if (any(validation.get(key) != context.get(key) for key in
+                ('game_id', 'seed', 'source_run_id', 'restoration_actions'))
+            or type(validation.get('seed')) is not int or type(validation.get('restoration_actions')) is not int
+            or not _integer(validation.get('levels_completed'), 100)
+            or not _integer(validation.get('win_levels'), 100)
+            or validation['levels_completed'] >= validation['win_levels']
+            or type(validation.get('replay_sha256')) is not str
+            or re.fullmatch(r'sha256:[0-9a-f]{64}', validation['replay_sha256']) is None):
+            raise ValueError('live context unavailable')
+    if (context.get('run_id') != root.name or not _identifier(context.get('game_id'))
+        or (game is not None and context['game_id'] != game)
+        or not _identifier(context.get('model_id')) or _integer(context.get('seed')) is None
+        or not _integer(context.get('win_levels'), 100) or not _integer(context.get('target_level'), 100)
+        or (wins is not None and context['win_levels'] != wins)
+        or context['target_level'] > context['win_levels']
+        or _integer(context.get('restoration_actions'), _MAX_ROWS) is None
+        or (context.get('source_run_id') is None) != (context['restoration_actions'] == 0)
+        or (context.get('source_run_id') is not None and
+            (not _identifier(context['source_run_id']) or context['source_run_id'] == root.name))
+        or not trace or any(entry['identities'].get('model_id') != context['model_id'] for entry in trace)):
+        raise ValueError('live context unavailable')
+    return {'run_id': root.name,
+            'experiment': {'game_id': context['game_id'], 'model': context['model_id'], 'seed': context['seed'],
+                           'target_level': context['target_level']},
+            'diagnostics': {'execution_mode': 'resumed', 'source_run_id': context['source_run_id'],
+                            'restoration_actions': context['restoration_actions']} if context['source_run_id'] else {}}
+
+
 def build_console_snapshot(run_root: Path) -> dict[str, object]:
     """Project explicitly selected evidence without modifying it or running P7."""
     if not isinstance(run_root, Path) or run_root.is_symlink() or not run_root.is_dir():
@@ -552,7 +605,9 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     if not _identifier(root.name):
         raise ValueError("console evidence unavailable")
     warn: list[str] = []
-    summary = _object(root / "summary.json", warn, "summary-missing")
+    summary_path = root / 'summary.json'
+    summary_present = summary_path.exists() or summary_path.is_symlink()
+    summary = _object(summary_path, warn, "summary-missing")
     if summary and (summary.get("schema") != "asterion.prime.p7-live-private-summary/v1" or summary.get("run_id") != root.name):
         raise ValueError("console evidence unavailable")
     experiment = summary.get("experiment", {})
@@ -590,6 +645,14 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             if "recording-missing" in warn:
                 warn.remove("recording-missing")
     trace, sealed = _trace(root, summary, game, warn)
+    if not summary_present:
+        try:
+            summary = _live_run_summary(root, trace, game, wins)
+        except (ValueError, OSError):
+            warn.append('restored-cognition-invalid')
+        experiment = summary.get('experiment', {})
+        if experiment:
+            game = experiment['game_id']
     try:
         restored_events = _restored_cognition_events(root, summary, trace, source_events)
     except (ValueError, OSError):

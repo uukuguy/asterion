@@ -64,6 +64,16 @@ class TestP7ExplicitResume(unittest.TestCase):
 
             async def composed(*args, **kwargs):
                 host = kwargs["host_services"]["prime.ipython"]
+                trace_rows = [json.loads(line) for line in
+                              (runs / "p7-resumed" / "trace" / "prime-trace.jsonl").read_text().splitlines()]
+                startup = [row for row in trace_rows if row['kind'] == 'arc.run.context']
+                self.assertEqual(len(startup), 1)
+                self.assertEqual(startup[0]['payload'], {
+                    'run_id': 'p7-resumed', 'game_id': 'ls20-9607627b', 'seed': 0,
+                    'win_levels': 7, 'model_id': DEFAULT_MODEL, 'target_level': 6,
+                    'source_run_id': source.name, 'restoration_actions': 5})
+                self.assertEqual(sum(row['kind'] == 'arc.action' for row in trace_rows
+                                     if row['sequence'] < startup[0]['sequence']), 5)
                 context = host.current_context()
                 self.assertEqual(context["observation_ref"]["level"], 3)
                 self.assertEqual(context["observation_ref"]["sequence"], 5)
@@ -131,6 +141,10 @@ class TestP7ExplicitResume(unittest.TestCase):
                 with self.assertRaises(P7LiveAttemptFailure):
                     asyncio.run(run_live(invocation, "p7-resumed"))
                 self.assertEqual(model.await_count, 0 if divergent else 1)
+            if divergent:
+                trace_rows = [json.loads(line) for line in
+                              (runs / "p7-resumed" / "trace" / "prime-trace.jsonl").read_text().splitlines()]
+                self.assertFalse(any(row['kind'] == 'arc.run.context' for row in trace_rows))
             return json.loads((runs / "p7-resumed" / "summary.json").read_text())
 
     def test_recovery_precedes_model_and_keeps_new_worldmap_admission(self):

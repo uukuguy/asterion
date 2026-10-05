@@ -4453,6 +4453,17 @@ async def run_live(
                 diagnostics.update(_prefix_action_diagnostics(prefix, applied=True))
                 if broker.status().levels_completed != prefix.levels_completed:
                     raise P7OperatorError("P7 saved prefix is unavailable")
+        broker = resources_.host_services["prime.arc-broker"]
+        evidence = resources_.host_services["prime.private-trace"]
+        evidence.runtime_recorder.append(
+            "arc.run.context", evidence.identities,
+            {"run_id": run_id, "game_id": invocation.game.game_id,
+             "seed": invocation.game.seed, "win_levels": invocation.game.win_levels,
+             "model_id": declared_model_selection(invocation.environment).model,
+             "target_level": invocation.game.target_level,
+             "source_run_id": prefix.source_run_id if prefix_journal_start is not None else None,
+             "restoration_actions": len(broker.journal) - prefix_journal_start if prefix_journal_start is not None else 0},
+        )
         prediction_client = getattr(resources_, "_prediction_client", None)
         if (
             isinstance(prediction_client, _P7BrokerClient)
