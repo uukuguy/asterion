@@ -63,6 +63,7 @@ class _Candidate:
     usage_output_tokens: int
     identities: Mapping[str, str] | None = None
     experiment: Mapping[str, object] | None = None
+    composition: Mapping[str, object] | None = None
 
 
 def _digest_file(path: Path) -> str:
@@ -449,6 +450,36 @@ def recover_terminal_win(*, operator_root: Path, arc_root: Path, source_run_id: 
                     source_run_id=source_run_id, kind="terminal-game-win")
 
 
+def compose_saved_route(*, operator_root: Path, arc_root: Path, source_run_id: str,
+                       suffix_run_id: str, through_level: int) -> Path:
+    """Replay a new sealed prefix followed only by an old saved suffix."""
+    from asterion.applications.prime.p7.route_composition import KIND, plan_composition
+    from asterion.applications.prime.p7.solutions import load_exact_prefix
+    try:
+        source = _source_directory(operator_root, source_run_id)
+        suffix = _source_directory(operator_root, suffix_run_id)
+        segments, seam, transitions, experiment = plan_composition(source, suffix, through_level)
+        for run in (source, suffix):
+            if load_exact_prefix(arc_root, run.parent, run.name, experiment["game_id"], experiment["seed"],
+                                 expected_model_id=experiment["model"]) is None:
+                raise ValueError
+        if plan_composition(source, suffix, through_level)[:3] != (segments, seam, transitions):
+            raise ValueError
+        game = resolve_game_selection({GAME_ID_ENV: experiment["game_id"], SEED_ENV: str(experiment["seed"]),
+                                       TARGET_LEVEL_ENV: str(transitions[-1].levels_completed)}, arc_root)
+        receipt = ArcRunReceipt(game.game_id, game.seed, len(transitions), game.win_levels,
+                                "game-won", replay_sha256(transitions, terminal_reason="game-won"))
+        candidate = _Candidate(source, game, transitions, receipt, {}, 0, 0,
+                               trace_identities_for(experiment["model"]),
+                               {"game_id": game.game_id, "seed": game.seed, "model": experiment["model"],
+                                "target_level": game.win_levels, "prediction_variant": "offline-replay"},
+                               {"route_sources": segments, "composition_seam": seam})
+    except Exception:
+        raise RecoveryError("composition source is unavailable") from None
+    return _materialize(operator_root=operator_root, arc_root=arc_root, source_run_id=source_run_id,
+                        kind=KIND, candidate=candidate)
+
+
 def _receipt_mapping(value: object) -> dict[str, object]:
     names = (
         "completed_level_count",
@@ -497,6 +528,12 @@ def _recover(*, operator_root: Path, arc_root: Path, source_run_id: str, kind: s
         candidate = (_terminal_candidate if kind == "terminal-game-win" else _candidate)(operator_root, arc_root, source_run_id)
     except Exception:
         raise RecoveryError("recovery source is unavailable") from None
+    return _materialize(operator_root=operator_root, arc_root=arc_root, source_run_id=source_run_id,
+                        kind=kind, candidate=candidate)
+
+
+def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
+                 kind: str, candidate: _Candidate) -> Path:
     run_id = live.safe_run_id()
     private = live.private_root(operator_root, run_id)
     trace_root = private / "trace"
@@ -523,11 +560,11 @@ def _recover(*, operator_root: Path, arc_root: Path, source_run_id: str, kind: s
         recorder.append(
             "arc.recovery.source",
             identities,
-            {
+            ({"recovery_kind": kind, **dict(candidate.composition)} if candidate.composition else {
                 "source_run_id": source_run_id,
                 "recovery_kind": kind,
                 **dict(candidate.source_hashes),
-            },
+            }),
         )
         _replay_into(broker, recorder, candidate.transitions, identities)
         broker_receipt = broker.seal()
@@ -560,16 +597,19 @@ def _recover(*, operator_root: Path, arc_root: Path, source_run_id: str, kind: s
             failure=None,
             experiment=candidate.experiment,
             diagnostics={
+                **dict(candidate.composition or {}),
                 "recovered_from": source_run_id,
                 "recovery_kind": kind,
                 "execution_mode": "offline-replay",
-                "source_runtime_status": "failed",
+                "source_runtime_status": "mixed" if candidate.composition else "failed",
                 "restoration_actions": len(candidate.transitions),
                 "new_solver_actions": 0,
-                "source_hashes": dict(candidate.source_hashes),
-                "source_usage_input_tokens": candidate.usage_input_tokens,
-                "source_usage_output_tokens": candidate.usage_output_tokens,
-                "usage_attributed_to_source": True,
+                **({} if candidate.composition else {
+                    "source_hashes": dict(candidate.source_hashes),
+                    "source_usage_input_tokens": candidate.usage_input_tokens,
+                    "source_usage_output_tokens": candidate.usage_output_tokens,
+                    "usage_attributed_to_source": True,
+                }),
                 "worker_cell_count": 0,
                 "model_call_count": 0,
             },
@@ -595,19 +635,23 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--operator-root", required=True, type=Path)
     parser.add_argument("--arc-root", required=True, type=Path)
     parser.add_argument("--source-run", required=True)
-    parser.add_argument("--kind", choices=("concurrent-trace-append", "terminal-game-win"), default="concurrent-trace-append")
+    parser.add_argument("--kind", choices=("concurrent-trace-append", "terminal-game-win", "saved-route-composition"), default="concurrent-trace-append")
+    parser.add_argument("--suffix-run")
+    parser.add_argument("--through-level", type=int)
     return parser
 
 
 def main(arguments: list[str] | None = None) -> int:
     try:
         values = _parser().parse_args(arguments)
-        recover = recover_terminal_win if values.kind == "terminal-game-win" else recover_trace_race
-        run = recover(
-            operator_root=values.operator_root,
-            arc_root=values.arc_root,
-            source_run_id=values.source_run,
-        )
+        if values.kind == "saved-route-composition":
+            run = compose_saved_route(operator_root=values.operator_root, arc_root=values.arc_root,
+                                      source_run_id=values.source_run, suffix_run_id=values.suffix_run,
+                                      through_level=values.through_level)
+        else:
+            recover = recover_terminal_win if values.kind == "terminal-game-win" else recover_trace_race
+            run = recover(operator_root=values.operator_root, arc_root=values.arc_root,
+                          source_run_id=values.source_run)
         summary = json.loads((run / "summary.json").read_text(encoding="utf-8"))
         print(
             json.dumps(

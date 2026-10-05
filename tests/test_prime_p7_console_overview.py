@@ -87,6 +87,21 @@ class TestConsoleOverview(unittest.TestCase):
         self.assertEqual(len(game['runs']), 1)
         self.assertNotIn('sk-sentinel-secret', json.dumps(value))
 
+    def test_saved_route_actions_count_selected_route_once_across_failed_partial_and_repeated_attempts(self):
+        self.write_run('a-best', level_counts=(15, 15, 15, 15))
+        self.write_run('z-repeated-restoration', level_counts=(15, 15, 15, 15))
+        self.write_run('earlier-partial', levels=2)
+        failed = self.write_run('failed-attempt')
+        trace = failed / 'trace' / 'prime-trace.jsonl'
+        trace.write_text(trace.read_text().replace('ACTION1', 'ACTION2', 1))
+        value = self.overview().build()
+        self.assertEqual(value['games'][0]['best_run_id'], 'a-best')
+        self.assertEqual(value['games'][0]['route_actions'], 60)
+        self.assertEqual(value['totals']['saved_route_actions'], 60)
+        self.assertEqual(value['totals']['primitive_actions'], 4 * 98)
+        self.assertEqual(value['totals']['restoration_actions'], 4 * 12)
+        self.assertEqual(len(value['games'][0]['runs']), 4)
+
     def test_tamper_invalidates_display_cache_and_resume(self):
         run = self.write_run()
         overview = self.overview()
@@ -130,6 +145,7 @@ class TestConsoleOverview(unittest.TestCase):
         self.assertIsNone(game['resume_run_id'])
         self.assertEqual(value['totals']['primitive_actions'], 98)
         self.assertEqual(value['totals']['actions_pending'], 98)
+        self.assertEqual(value['totals']['saved_route_actions'], 0)
         self.assertEqual(value['totals']['new_solver_actions'], 0)
         self.assertIs(game['runs'][0]['counts_pending'], True)
 
@@ -150,7 +166,7 @@ class TestConsoleOverview(unittest.TestCase):
         self.assertEqual(value['scope']['history_scope'], 'worldmap-p7')
         self.assertEqual(value['games'][0]['runs'], [])
         self.assertEqual(value['games'][0]['status'], 'unplayed')
-        for key in ('completed_levels', 'completed_games', 'primitive_actions',
+        for key in ('completed_levels', 'completed_games', 'saved_route_actions', 'primitive_actions',
                     'restoration_actions', 'new_solver_actions', 'actions_pending'):
             with self.subTest(counter=key):
                 self.assertEqual(value['totals'][key], 0)

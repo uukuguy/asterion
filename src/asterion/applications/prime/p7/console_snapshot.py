@@ -484,9 +484,69 @@ def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict
 
 
 def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], current_events: list[dict],
-                               seen: tuple[str, ...] = ()) -> list[dict]:
+                               seen: tuple[str, ...] = (), *,
+                               recorded_positions: dict[int, dict] | None = None) -> list[dict]:
     """Read only explicitly linked, replay-identical historical actor beliefs."""
     diagnostics = summary.get('diagnostics', {})
+    recovery_kind = diagnostics.get('recovery_kind') if isinstance(diagnostics, dict) else None
+    if recovery_kind in {'saved-route-composition', 'terminal-game-win'}:
+        if root.name in seen or len(seen) >= 8:
+            raise ValueError('replayed cognition unavailable')
+        if recovery_kind == 'saved-route-composition':
+            from .route_composition import composition_sources
+            sources = composition_sources(root, summary)
+        else:
+            from .solutions import recovery_source
+            recovered = recovery_source(root, summary)
+            count = sum(entry['kind'] == 'arc.action' for entry in trace)
+            sources = (({'source_start_sequence': 1, 'source_end_sequence': count,
+                         'destination_start_sequence': 1}, *recovered),) if recovered else None
+        if sources is None:
+            raise ValueError('replayed cognition unavailable')
+        warnings: list[str] = []
+        if recorded_positions is None:
+            observations, _ = _source_observations(current_events, warnings)
+            recorded_positions = dict(enumerate(observations))
+        retained = []
+        for segment, source, prior in sources:
+            source_trace, sealed = _trace(source, prior, prior['experiment']['game_id'], warnings)
+            # The terminal recovery contract explicitly authenticates the
+            # original unsealed trace; its failure remains an original failure.
+            if recovery_kind == 'terminal-game-win' and not sealed:
+                warnings = [warning for warning in warnings if warning != 'trace-unsealed']
+            events = read_console_events(source, source.name, prior['experiment']['game_id'], warnings=warnings)
+            observations, events = _source_observations(events, warnings)
+            keys = ('sequence', 'action', 'data', 'before_sha256', 'after_sha256', 'levels_completed')
+            def actions(rows, kind):
+                return [{key: row['payload'].get(key, {} if key == 'data' else None) for key in keys}
+                        for row in rows if row['kind'] == kind]
+            if (warnings or (not sealed and recovery_kind != 'terminal-game-win')
+                    or actions(events, 'action') != actions(source_trace, 'arc.action')):
+                raise ValueError('replayed cognition unavailable')
+            inherited = _restored_cognition_events(source, prior, source_trace, events, (*seen, root.name))
+            start, end = segment['source_start_sequence'] - 1, segment['source_end_sequence']
+            offset = segment['destination_start_sequence'] - segment['source_start_sequence']
+            for event in (*inherited, *events):
+                if event['kind'] not in {'model_revision', 'cognition'}:
+                    continue
+                payload = event['payload']
+                position = payload['source_action_sequence']
+                destination = position + offset
+                if not start <= position <= end or not 0 <= position < len(observations):
+                    continue
+                current = recorded_positions.get(destination)
+                # Animation history can differ at the join. Keep source hashes
+                # unchanged and omit beliefs not aligned with an actual frame.
+                if (current is None or payload['observation_sha256'] != observations[position]['hash']
+                        or payload['observation_sha256'] not in current['hashes']):
+                    continue
+                if event['kind'] == 'model_revision' and payload['level'] != min(observations[position]['levels'] + 1, observations[position]['wins']):
+                    continue
+                retained.append({**event, 'payload': {**payload, 'source_action_sequence': destination},
+                                 'provenance': event.get('provenance', {'run_id': source.name, 'event_sequence': event['sequence']})})
+        if len(retained) > _MAX_ROWS:
+            raise ValueError('replayed cognition unavailable')
+        return retained
     if not isinstance(diagnostics, dict) or diagnostics.get('execution_mode') != 'resumed':
         return []
     source_id = _identifier(diagnostics.get('source_run_id'))
@@ -653,8 +713,11 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         experiment = summary.get('experiment', {})
         if experiment:
             game = experiment['game_id']
+    diagnostics = summary.get('diagnostics', {})
+    recorded_lineage = (not source_mode and isinstance(diagnostics, dict)
+                        and diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win'})
     try:
-        restored_events = _restored_cognition_events(root, summary, trace, source_events)
+        restored_events = [] if recorded_lineage else _restored_cognition_events(root, summary, trace, source_events)
     except (ValueError, OSError):
         restored_events = []
         warn.append('restored-cognition-invalid')
@@ -718,6 +781,14 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             action_count += 1
             if source_mode:
                 source_match = observation["source_action"]
+            elif recorded_lineage:
+                source_matches = [entry['payload'] for entry in trace_actions
+                                  if entry['payload'].get('sequence') == action_count
+                                  and entry['payload'].get('action') == observation['action']
+                                  and entry['payload'].get('data', {}) == observation['data']
+                                  and entry['payload'].get('levels_completed') == observation['levels']
+                                  and entry['payload'].get('after_sha256') in observation['hashes']]
+                source_match = source_matches[0] if len(source_matches) == 1 else None
             else:
                 # Legacy SDK rows lack source identity. Only a unique matching
                 # transition can establish position; omitted rows stay ambiguous.
@@ -780,6 +851,17 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             level(last_level)["status"] = "unsuccessful" if previous and previous["state"] == "GAME_OVER" else "incomplete"
         if receipt and completed >= 1:
             level(min(completed, wins or 100))["receipt"] = receipt
+    if recorded_lineage:
+        try:
+            restored_events = _restored_cognition_events(
+                root, summary, trace, source_events, recorded_positions=observation_positions)
+            # These are projections of authenticated source events, not new
+            # runtime events. Preserve provenance while giving the view its own
+            # unique display cursor.
+            source_events = [{**event, 'sequence': index}
+                             for index, event in enumerate(restored_events, 1)]
+        except (ValueError, OSError):
+            warn.append('restored-cognition-invalid')
     source_decisions = []
     process_events = []
     decisions_by_id = {}

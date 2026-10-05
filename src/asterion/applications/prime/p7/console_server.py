@@ -112,11 +112,15 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, {"runs": session.recorded_runs()})
             elif self.path.startswith("/api/replay/"):
                 self._send(200, session.replay(self.path.removeprefix("/api/replay/")))
+            elif self.path.startswith("/api/preview/"):
+                self._send(200, session.preview(self.path.removeprefix("/api/preview/")))
             else:
                 self._error(404, "not-found")
         except ConsoleSessionError:
             if self.path == "/api/overview":
                 self._error(503, "overview-unavailable")
+            elif self.path.startswith('/api/preview/'):
+                self._error(503, 'preview-unavailable')
             else:
                 self._error(404, "run-unavailable")
         except Exception:

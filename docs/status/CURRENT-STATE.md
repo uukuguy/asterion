@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under one finite guest at a time. Current requested route redos, named verification and the one complete25-game official submission gate belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
+- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under one finite guest at a time. Current saved-route integration, named verification and the one complete25-game official submission gate belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
 ## Current Architecture
 
@@ -21,6 +21,7 @@
 - `SolverControl` uses the existing shared run directory for bounded pause/resume acknowledgments. The current bounded cell/action settles before pause; its tool response is held so Pi cannot request another model turn. Resume retains the absolute deadline; stop uses actual process cleanup.
 - Console research events share the action/event timeline, including multiple revisions at one frame. Historical cursors select the matching model, prediction and feedback; the live stop control remains independent of history. HTTP/DOM/export checks validate the projection; the user also requests verification in existing Chrome. Browser transport currently times out, so actual Chrome acceptance is not claimed.
 - Explicit legacy/cognition modes retain `WorldModelStore`, `SemanticCognitionStore`, `CognitionSession`, `GameMechanicsStore` and certificate-gated DSL search. These are not the new default solver or a prerequisite for general Python research.
+- Saved routes, current attempts and offline previews are separate console scopes. Saved-route progress/actions use one selected verified route per game; attempt diagnostics retain failed/repeated execution. Offline route composition replays existing actions with pinned source evidence and a checked settled seam, without launching the model.
 - HUMAN play is independent of P7, with one finite SDK worker and per-game/per-level persisted origin/action/observation journals. Selection/restart restores verified poses. Current-level clear/restart replaces only that save; ordinary RESET preserves history. Human actions never enter P7 history or learning.
 
 ## Open Problems
@@ -52,7 +53,7 @@
 - Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
 - Local saved-route results, per-level counts, exact run IDs and currently owned processes are recorded in the live checkpoint, with restoration and new actions separated. Local warm replay is not a fresh full benchmark.
 - Experience reuse does not carry historical plans or execution authority. Original failed attempts and independent replay recoveries remain distinguishable.
-- One official25-game submission is authorized after the requested DC22/VC33 route redos. Never infer official performance from local RHAE; official receipt/result and any source selection limitation must be retained.
+- Exactly one official25-game submission is authorized using saved SP80/DC22 and the new VC33 L1 route; DC22 L6 already passed and must not be re-solved merely to refresh the console. Never infer official performance from local RHAE; official receipt/result and any source selection limitation must be retained.
 
 ## Resume Instructions
 

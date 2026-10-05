@@ -285,6 +285,10 @@ def source_experiment(run: Path, summary: Mapping[str, object]) -> dict | None:
     if type(experiment) is not dict:
         return None
     diagnostics = summary.get("diagnostics")
+    if isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "saved-route-composition":
+        from .route_composition import composition_sources
+        sources = composition_sources(run, summary)
+        return None if sources is None else sources[0][2]["experiment"]
     is_recovery = isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "terminal-game-win"
     if experiment.get("prediction_variant") != "offline-replay" and not is_recovery:
         return experiment
@@ -300,6 +304,16 @@ def load_resume_worldmap(run: Path, prefix: VerifiedPrefix) -> dict | None:
             summary_path = _private_path(run, "summary.json")
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             diagnostics = summary.get("diagnostics", {})
+            if isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "saved-route-composition":
+                from .route_composition import composition_sources
+                sources = composition_sources(run, summary)
+                if sources is None or type(prefix) is not VerifiedPrefix or run.name != prefix.source_run_id:
+                    return None
+                _, source, _ = sources[-1]
+                prior = _load_direct_resume_worldmap(source, replace(prefix, source_run_id=source.name))
+                if prior is not None:
+                    prior.update(recovered_run_id=run.name, route_sources=diagnostics["route_sources"])
+                return prior
             if isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "terminal-game-win":
                 recovered = recovery_source(run, summary)
                 if recovered is None or type(prefix) is not VerifiedPrefix or run.name != prefix.source_run_id:

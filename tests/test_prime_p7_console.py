@@ -418,5 +418,103 @@ class TestPrimeP7Console(unittest.TestCase):
         self.assertNotIn("SECRET", json.dumps(state))
 
 
+class TestOfflineReplayCognition(unittest.TestCase):
+    setUp = TestPrimeP7Console.setUp
+    write_summary = TestPrimeP7Console.write_summary
+    observation = TestPrimeP7Console.observation
+    write_recording = TestPrimeP7Console.write_recording
+    observation_hash = TestPrimeP7Console.observation_hash
+    write_trace = TestPrimeP7Console.write_trace
+    action_payload = TestPrimeP7Console.action_payload
+    def _source(self, name, rows, revisions):
+        from asterion.applications.prime.p7.console_events import ConsoleEventWriter
+        from tests.test_prime_p7_console_events import research_payloads
+        root = self.root.parent.resolve() / name
+        root.mkdir()
+        (root / 'trace').mkdir()
+        recorder = PrimeTraceRecorder(root / 'trace')
+        writer = ConsoleEventWriter(root, name, 'sp80-test')
+        previous = None
+        for position, row in enumerate(rows):
+            data = row['data']
+            raw = {key: data[key] for key in ('frame', 'state', 'levels_completed', 'win_levels')}
+            raw['available_actions'] = [f'ACTION{i}' for i in data['available_actions']]
+            hashed = digest(ObservationState.from_observation(raw).to_projection())
+            if previous is not None:
+                action = {'sequence': position, 'action': data['action_input']['id'], 'data': {},
+                          'before_sha256': previous, 'after_sha256': hashed,
+                          'levels_completed': data['levels_completed']}
+                recorder.append('arc.action', {'application_id': 'prime.arc-agi-3-solving',
+                                               'model_id': 'test-model'}, action)
+                writer.append('action', {**action, 'decision_id': None})
+            writer.append('observation', {'source_action_sequence': position,
+                          'observation_sha256': hashed, 'observation': raw})
+            if position in revisions:
+                writer.append('model_revision', {**research_payloads(hashed)['model_revision'],
+                              'source_action_sequence': position,
+                              'level': min(data['levels_completed'] + 1, data['win_levels']),
+                              'description_zh': revisions[position]})
+            previous = hashed
+        recorder.seal()
+        summary = {**self.summary, 'run_id': name, 'sealed_trace': True, 'replay_verified': True}
+        (root / 'summary.json').write_text(json.dumps(summary))
+        return root, summary
+
+    def test_composition_aligns_recordings_and_preserves_source_provenance(self):
+        initial = self.observation()
+        joined = self.observation('ACTION1', 1, completed=1)
+        next_row = self.observation('ACTION1', 2, completed=1)
+        last = self.observation('ACTION1', 3, completed=1)
+        prefix, prefix_summary = self._source('prefix', [initial, joined], {0: '第一关规则', 1: '前缀第二关规则'})
+        animated_join = copy.deepcopy(joined)
+        animated_join['data']['frame'].insert(0, [[9] * 64 for _ in range(64)])
+        suffix, suffix_summary = self._source('suffix', [initial, self.observation('ACTION1', 9),
+                                                       animated_join, next_row, last],
+                                              {2: '连接处动画规则', 3: '后缀第二关规则'})
+        segments = (({'source_start_sequence': 1, 'source_end_sequence': 1, 'destination_start_sequence': 1},
+                     prefix, prefix_summary),
+                    ({'source_start_sequence': 3, 'source_end_sequence': 4, 'destination_start_sequence': 2},
+                     suffix, suffix_summary))
+        self.summary['diagnostics'] = {'recovery_kind': 'saved-route-composition'}
+        self.write_summary()
+        rows = [initial, joined, next_row, last]
+        # SDK duplicate initial RESET is not an extra source action.
+        self.write_recording([initial, copy.deepcopy(initial), *rows[1:]])
+        self.write_trace([('arc.action', self.action_payload(before, after, index))
+                          for index, (before, after) in enumerate(zip(rows, rows[1:]), 1)], sealed=True)
+        with patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=segments):
+            state = build_console_snapshot(self.root)
+        first, second, _ = state['levels']
+        self.assertEqual([r['stable_description'] for r in first['cognition_timeline']], ['第一关规则'])
+        self.assertEqual([r['stable_description'] for r in second['cognition_timeline']], ['前缀第二关规则', '后缀第二关规则'])
+        revision = second['cognition_timeline'][-1]
+        self.assertEqual(revision['source_action_sequence'], 2)
+        self.assertEqual(revision['provenance']['run_id'], 'suffix')
+        self.assertNotIn('连接处动画规则', json.dumps(state, ensure_ascii=False))
+        self.assertFalse((self.root / 'console-events.jsonl').exists())
+        self.assertEqual(state['run']['primitive_action_count'], 3)
+
+    def test_terminal_recovery_rejects_missing_lineage_and_recording_gap(self):
+        rows = [self.observation(), self.observation('ACTION1', 1), self.observation('ACTION1', 2)]
+        source = self._source('terminal-source', rows, {0: '初始规则', 2: '后续规则'})
+        self.summary['diagnostics'] = {'recovery_kind': 'terminal-game-win'}
+        self.write_summary()
+        self.write_trace([('arc.action', self.action_payload(before, after, index))
+                          for index, (before, after) in enumerate(zip(rows, rows[1:]), 1)], sealed=True)
+        for linked, gap in ((True, False), (False, False), (True, True)):
+            with self.subTest(linked=linked, gap=gap):
+                self.write_recording([rows[0], rows[-1]] if gap else rows)
+                with patch('asterion.applications.prime.p7.solutions.recovery_source',
+                           return_value=source if linked else None):
+                    state = build_console_snapshot(self.root)
+                revisions = state['levels'][0]['cognition_timeline']
+                self.assertEqual([r['stable_description'] for r in revisions],
+                                 ['初始规则', '后续规则'] if linked and not gap else ['初始规则'] if linked else [])
+                if not linked:
+                    self.assertIn('恢复来源的认知证据不匹配或超过边界；未用于历史认知。', state['warnings'])
+                if revisions:
+                    self.assertEqual(revisions[0]['provenance']['run_id'], 'terminal-source')
+
+
 if __name__ == "__main__":
     unittest.main()

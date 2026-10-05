@@ -57,6 +57,33 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
             self.assertNotIn(self.server.token.encode(), body)
         self.assertFalse(self.calls)
 
+    def test_initial_preview_get_uses_catalog_members_and_redacts_failure_without_starting(self):
+        calls = []
+        def preview(root, game):
+            calls.append(game['game_id'])
+            return {'run': {'game_id': game['game_id'], 'status': 'preview', 'run_id': None},
+                    'levels': [{'frames': [{'grid': [[9]]}], 'actions': []}]}
+        self.session_._preview_reader = preview
+        before = self.session_.view()
+        status, _, raw = self.request('GET', '/api/preview/test-1')
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(raw)['run']['status'], 'preview')
+        self.assertEqual(self.request('GET', '/api/preview/test-1')[0], 200)
+        self.assertEqual(calls, ['test-1'])
+        self.assertEqual(self.session_.view(), before)
+        self.assertFalse(self.calls)
+        for path in ('/api/preview/unknown-test', '/api/preview/../test-1'):
+            self.assertGreaterEqual(self.request('GET', path)[0], 400)
+        self.assertEqual(calls, ['test-1'])
+        self.session_._previews.clear()
+        def fail(*_):
+            raise ValueError('/private/sk-preview-secret')
+        self.session_._preview_reader = fail
+        status, _, raw = self.request('GET', '/api/preview/test-1')
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(raw), {'error': 'preview-unavailable'})
+        self.assertNotIn(b'sk-preview-secret', raw)
+
     def test_write_requires_exact_host_origin_token_and_keys(self):
         valid = {'game_id': 'test-1', 'command_id': 'start'}
         for changes in ({'Origin': 'http://evil.test'}, {'Origin': ''},

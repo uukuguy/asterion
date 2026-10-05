@@ -1910,7 +1910,41 @@ function replayOverview(ids) { const overview=overviewFixture(liveConfig); overv
 const catalogRun = (run_id, status='incomplete', verified=true) => ({run_id,status,completed_levels:1,primitive_actions:12,restoration_actions:4,new_solver_actions:8,verified});
 const overviewRow = (app, game=0) => app.$('overview-game-list').querySelector(`[data-game-id="game${game}-catalog"]`);
 
-test('finished latest attempt remains current and saved route is an explicit pinned replay', async () => {
+test('unplayed game shows a readonly initial preview and a late preview cannot replace another selection', async () => {
+  const config = {token:'test-token',games:[{game_id:'first-test',alias:'first',win_levels:2},
+                                         {game_id:'second-test',alias:'second',win_levels:2}]};
+  const preview = (game_id, color) => ({schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+    run:{game_id,run_id:null,status:'preview',seed:0,win_levels:2,completed_level_count:0,
+         primitive_action_count:0,replay_verified:false,sealed_trace:false},
+    levels:[{level:1,status:'preview',frames:[{id:'preview-initial',grid:Array.from({length:64},()=>Array(64).fill(color)),
+      available_actions:['ACTION1','ACTION6','RESET'],state:'NOT_FINISHED',levels_completed:0}],
+      actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]});
+  let release;
+  const app = launch(fixture(), {liveConfig:config,fetch:async url=>{
+    if(url==='/api/preview/first-test')return new Promise(resolve=>{release=resolve;});
+    if(url==='/api/preview/second-test')return response(preview('second-test',9));
+    return response(idleView());
+  }});
+  try {
+    await settle(); assert.ok(release);
+    changeGame(app,'second-test'); await settle();
+    assert.equal(app.$('game-title').textContent,'second-test');
+    assert.equal(app.$('board-empty').hidden,true);
+    assert.match(app.$('frame-caption').textContent,/尚未开始 · 初始画面/);
+    assert.match(app.$('run-id').textContent,/尚未启动 P7/);
+    assert.equal(app.$('board-canvas').width,512);
+    assert.equal(app.$('action-total').textContent,'0');
+    assert.equal(app.$('console-mode').value,'replay');
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every(button=>button.disabled));
+    release(response(preview('first-test',12))); await settle();
+    assert.equal(app.$('game-title').textContent,'second-test');
+    assert.equal(app.paints.at(-1),'#1E93FF');
+    assert.equal(app.requests.some(entry=>['/api/manual/open','/api/manual/action','/api/start'].includes(entry.url)),false);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('saved route is the default after an attempt ends and latest attempt is an explicit pinned view', async () => {
   const config = {token:'test-token',games:[{game_id:'sp80-test',alias:'SP80',win_levels:3}]};
   const replay = (id, count) => {
     const snapshot = fixture(); snapshot.run.run_id = id; snapshot.run.sealed_trace = true;
@@ -1918,25 +1952,25 @@ test('finished latest attempt remains current and saved route is an explicit pin
     return snapshot;
   };
   let overview = overviewFixture(config);
-  overview.games[0] = {...overview.games[0],best_run_id:'a-old-full',completed_levels:3,
-    recording_run_id:'z-new-prefix',runs:[{...catalogRun('a-old-full'),completed_levels:3},
-    {...catalogRun('z-new-prefix','running',false),recording:true}]};
+  overview.games[0] = {...overview.games[0],best_run_id:'a-saved-full',completed_levels:3,
+    recording_run_id:'z-new-attempt',runs:[{...catalogRun('a-saved-full'),completed_levels:3},
+    {...catalogRun('z-new-attempt','running',false),recording:true}]};
   const app = launch(fixture(),{liveConfig:config,overview:()=>overview,fetch:async url=>response(
-    url==='/api/replay/a-old-full'?replay('a-old-full',11):url==='/api/replay/z-new-prefix'?replay('z-new-prefix',3):idleView())});
+    url==='/api/replay/a-saved-full'?replay('a-saved-full',3):url==='/api/replay/z-new-attempt'?replay('z-new-attempt',11):idleView())});
   try {
-    await settle(); assert.equal(app.$('run-id').textContent,'z-new-prefix');
+    await settle(); assert.equal(app.$('run-id').textContent,'z-new-attempt');
     delete overview.games[0].recording_run_id; overview.games[0].runs[1].recording=false;
     overview.games[0].runs[1].status='cancelled';
     const refresh = [...app.timers.values()].find(fn=>fn.intervalMs===5000);
-    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'z-new-prefix');
+    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-saved-full');
     assert.match(app.$('level-1').textContent,/3 动作/);
-    app.$('overview-game-list').querySelector('[data-overview-saved]').click(); await settle();
-    assert.equal(app.$('run-id').textContent,'a-old-full');
-    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-old-full');
+    app.$('overview-game-list').querySelector('[data-overview-attempt]').click(); await settle();
+    assert.equal(app.$('run-id').textContent,'z-new-attempt');
+    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'z-new-attempt');
     app.$('overview-game-list').querySelector('[data-overview-watch]').click(); await settle();
-    assert.equal(app.$('run-id').textContent,'z-new-prefix');
-    overview.games[0].latest_run_id='a-old-full';
-    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-old-full');
+    assert.equal(app.$('run-id').textContent,'a-saved-full');
+    overview.games[0].latest_run_id='a-saved-full';
+    refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-saved-full');
     assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
 });
@@ -2012,7 +2046,7 @@ test('live game aggregate 100 does not replace completed level efficiency 40.50'
 
 test('local overview renders each catalog game once and uses actual catalog totals and exact score strings', async () => {
   const overview = overviewFixture(catalog25);
-  overview.totals = {...overview.totals,score:'1.234567',completed_levels:1,primitive_actions:15,restoration_actions:4,new_solver_actions:8,actions_pending:3};
+  overview.totals = {...overview.totals,score:'1.234567',completed_levels:1,saved_route_actions:8,primitive_actions:15,restoration_actions:4,new_solver_actions:8,actions_pending:3};
   overview.games[0] = {...overview.games[0],completed_levels:1,status:'partial',score:'2.500000',route_actions:8,runs:[catalogRun('best-one')],best_run_id:'best-one',resume_run_id:'best-one'};
   const app = launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url==='/api/runs'?{runs:[]}:idleView())});
   try {
@@ -2023,12 +2057,29 @@ test('local overview renders each catalog game once and uses actual catalog tota
     assert.equal(app.$('overview-games').textContent,'0 / 25');
     assert.equal(app.$('overview-levels').textContent,'1 / 350');
     assert.match(app.$('overview').textContent,/本地总分|保存路线|热启动|官网冷启动/);
-    assert.match(app.$('overview-action-breakdown').textContent,/恢复 4 · 新增求解 8 · 待封存分账 3/);
+    assert.equal(app.$('overview-actions').textContent,'8');
+    assert.match(app.$('overview').textContent,/游戏动作总计/);
+    assert.match(app.$('overview-action-breakdown').textContent,/全部尝试 15 · 恢复 4 · 新增求解 8 · 待封存分账 3/);
     assert.equal(overviewRow(app).children[2].textContent,'2.500000');
     assert.equal([...app.timers.values()].some(fn=>fn.intervalMs===5000),true);
     assert.equal(app.requests.filter(r=>r.url==='/api/runs').length,0);
     assert.deepEqual(app.errors,[]);
   } finally { app.dom.window.close(); }
+});
+
+test('game action total shows 793 saved-route actions while 2994 all-attempt actions stay secondary', async () => {
+  const config = {token:'test-token',games:Array.from({length:3},(_,i)=>({game_id:`count${i}-test`,alias:`C${i}`,win_levels:7}))};
+  const overview = overviewFixture(config);
+  overview.games.forEach((game,i)=>{game.route_actions=[474,143,176][i];});
+  overview.totals = {...overview.totals,saved_route_actions:793,primitive_actions:2994,
+                     restoration_actions:1811,new_solver_actions:1183};
+  const app = launch(fixture(),{liveConfig:config,overview,fetch:async()=>response(idleView())});
+  try {
+    await settle();
+    assert.equal(app.$('overview-actions').textContent,'793');
+    assert.match(app.$('overview-action-breakdown').textContent,/全部尝试 2994 · 恢复 1811 · 新增求解 1183/);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
 });
 
 test('game selection exposes partial failure runs and continue sends the exact saved route and complete game target', async () => {

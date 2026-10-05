@@ -141,6 +141,13 @@ class ConsoleOverview:
                 result.update(recovery_kind='terminal-game-win',
                               recovered_from=diagnostics['recovered_from'],
                               execution_mode='offline-replay', source_runtime_status='failed')
+            elif diagnostics.get('recovery_kind') == 'saved-route-composition':
+                result.update(recovery_kind='saved-route-composition', execution_mode='offline-replay',
+                              source_runtime_status='mixed',
+                              route_sources=[{key: segment[key] for key in
+                                              ('source_run_id', 'source_start_sequence', 'source_end_sequence',
+                                               'destination_start_sequence', 'destination_end_sequence')}
+                                             for segment in diagnostics['route_sources']])
             try:
                 prefix = self._display_prefix(run, summary, game)
                 if prefix is None:
@@ -317,7 +324,8 @@ class ConsoleOverview:
         totals = {'score': format(total_score.quantize(Decimal('0.000001'), rounding=ROUND_HALF_UP), '.6f'),
                   'completed_games': sum(game['completed_levels'] == game['win_levels'] for game in output),
                   'total_games': len(output), 'completed_levels': sum(game['completed_levels'] for game in output),
-                  'total_levels': sum(game['win_levels'] for game in output)}
+                  'total_levels': sum(game['win_levels'] for game in output),
+                  'saved_route_actions': sum(game['route_actions'] for game in output)}
         for key in ('primitive_actions', 'restoration_actions', 'new_solver_actions'):
             totals[key] = sum(run[key] for game in output for run in game['runs'])
         totals['actions_pending'] = sum(run['primitive_actions'] for game in output

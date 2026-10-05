@@ -3790,3 +3790,9 @@
 - 2026-10-06 03:25 CST — User requests redoDC22L6/VC33L1 before one25-game official submit; VC33L1 baseline7/actual11 is40.50 per-level points, distinct from cappedgame100.
 - 2026-10-06 — b9b444cf: Sealed independent terminal game evidence while preserving model failure; added provenance checks and generic efficiency guidance.
 - 2026-10-06 03:18 CST — Timestamp correction: preceding03:25 checkpoint entries were recorded before03:18; their run facts remain unchanged.
+- 2026-10-06 — 065PLACEHOLDER: Displayed per-level efficiency and visible clicks; kept aggregate scores and pending actions distinct.
+- 2026-10-06 — Correction: preceding065PLACEHOLDER denotes467597d8; per-level score and confirmed/pending click display integrated onmain.
+- 2026-10-06 — Joint196Python tests PASS on rerun after one isolated process-group cleanup assertion; DOM90PASS/oneexisting skip; final promotion started.
+- 2026-10-06 — f4a0431e: Kept latest attempts separate from saved progress to prevent replay regressions after redo.
+- 2026-10-06 — User clarifiedDC22 redo request preceded itsWIN; stopped redundant guest, preserved original159-stepL6 and newVC33L1=3.
+- 2026-10-06 03:48 CST — Exact SDK official selection verified SP80 143/DC22 474/VC33 composed176 (19/183 levels,793 saved-route actions); no scorecard opened. Preview SDK ls20 yields64×64 initial frame,0 actions and no run.

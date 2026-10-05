@@ -86,7 +86,8 @@
   const state = { selectionReady: false, overview: null, overviewFresh: false, overviewBusy: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
-  let savedReplayRun = null;
+  let attemptReplayRun = null;
+  const gamePreviews = new Map();
   const currentLevel = () => levels[state.levelIndex] || emptyLevel;
   const frames = () => array(currentLevel().frames);
   const actions = () => array(currentLevel().actions);
@@ -224,6 +225,7 @@
     incomplete: ['未完成', 'warning'], interrupted: ['已中断', 'warning'], waiting: ['等待', 'warning'], unknown: ['信息不足', 'warning'],
     unsuccessful: ['未成功', 'failed'], failed: ['失败', 'failed'], game_over: ['游戏结束', 'failed'],
     manual: ['人工试玩', 'neutral'], 'not-run': ['未运行', 'neutral'], not_run: ['未运行', 'neutral'], unobserved: ['未运行', 'neutral'], unavailable: ['无证据', 'neutral'],
+    preview: ['尚未开始', 'neutral'], 'preview-unavailable': ['初始画面不可用', 'warning'],
   };
   const statusInfo = (value) => Object.hasOwn(statuses, value) ? statuses[value] : ['信息不足', 'warning'];
   const setStatus = (element, value) => {
@@ -247,14 +249,14 @@
 
   function renderRunHeader() {
     write('game-title', string(run.game_id, '未识别游戏'));
-    write('run-id', run.status === 'manual' ? '尚未启动 P7' : string(run.run_id));
+    write('run-id', ['manual', 'preview', 'preview-unavailable'].includes(run.status) ? '尚未启动 P7' : string(run.run_id));
     write('level-progress', `${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`);
     write('action-total', number(run.primitive_action_count));
     write('level-total', levelCount ? `${levelCount} 个关卡` : '总数未知');
     renderProgressContext();
     setStatus($('run-status'), run.status);
     write('snapshot-date', `快照时间 ${string(snapshot.generated_at)}`);
-    write('verification-note', run.status === 'manual' ? '独立人工试玩；启动 P7 会重置游戏并开始新的运行。' : `${run.replay_verified === true ? '回放已验证。' : '回放验证未确认。'}${run.sealed_trace === true ? '具有封存轨迹。' : '无封存成功证明。'}`);
+    write('verification-note', run.status === 'manual' ? '独立人工试玩；启动 P7 会重置游戏并开始新的运行。' : string(run.status, '').startsWith('preview') ? '只读初始画面；尚未启动 P7，没有求解或试玩动作记录。' : `${run.replay_verified === true ? '回放已验证。' : '回放验证未确认。'}${run.sealed_trace === true ? '具有封存轨迹。' : '无封存成功证明。'}`);
     const warnings = array(snapshot.warnings).filter((warning) => typeof warning === 'string');
     $('evidence-warning').hidden = !warnings.length;
     write('evidence-warning', warnings.length ? `证据提示 · ${warnings.join('；')}` : '');
@@ -280,6 +282,7 @@
 
   function currentRunLevelLabel(level) {
     if (state.mode === 'manual') return statusInfo(level.status)[0];
+    if (level.status === 'preview') return '尚未开始 · 初始画面';
     if (level.status === 'successful') return '本轮已过关';
     if (['not_run', 'not-run', 'unobserved'].includes(level.status)) return liveConfig ? '本轮未运行' : '本轮未记录';
     if (level.status === 'incomplete' && activeSession() && state.liveView?.run_id === run.run_id) return '本轮进行中';
@@ -290,7 +293,7 @@
     const manual = state.mode === 'manual', game = verifiedSavedGame();
     const current = `本轮 ${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`;
     $('run-progress-summary').hidden = manual;
-    write('run-progress-summary', game ? `游戏已保存 ${game.completed_levels} / ${game.win_levels} · ${current}` : current);
+    write('run-progress-summary', string(run.status, '').startsWith('preview') ? '尚未开始 · 初始画面预览' : game ? `游戏已保存 ${game.completed_levels} / ${game.win_levels} · ${current}` : current);
     setStatus($('level-status'), currentLevel().status === 'successful' ? 'completed' : currentLevel().status);
     if (!manual) write('level-status', currentRunLevelLabel(currentLevel()));
     const saved = game && currentLevel().status !== 'successful' && currentLevel().level <= game.completed_levels;
@@ -543,8 +546,8 @@
     const comparisonRequested = $('compare-toggle').checked;
     const canCompare = Boolean(before && after);
     $('board-empty').hidden = count > 0;
-    $('board-empty').querySelector('h3').textContent = run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
-    $('board-empty').querySelector('p').textContent = run.status === 'manual' ? (state.manualBusy ? '正在读取所选游戏的初始观察，尚未启动 P7。' : state.manualError ? '试玩操作未确认；可重新选择游戏开启新的试玩。' : '该关卡尚无真实观察记录；人工试玩仅展示当前关卡的真实画面。') : '没有记录帧，无法恢复该关卡的画面。';
+    $('board-empty').querySelector('h3').textContent = run.status === 'preview-unavailable' ? '初始画面暂不可用' : run.status === 'preview' && currentLevel().level === 1 ? '正在读取初始画面' : run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
+    $('board-empty').querySelector('p').textContent = string(run.status, '').startsWith('preview') ? '尚未启动 P7；可启动求解，或明确切换人工试玩。' : run.status === 'manual' ? (state.manualBusy ? '正在读取所选游戏的初始观察，尚未启动 P7。' : state.manualError ? '试玩操作未确认；可重新选择游戏开启新的试玩。' : '该关卡尚无真实观察记录；人工试玩仅展示当前关卡的真实画面。') : '没有记录帧，无法恢复该关卡的画面。';
     $('single-board').hidden = count === 0 || (comparisonRequested && canCompare);
     $('comparison-board').hidden = count === 0 || !comparisonRequested || !canCompare;
     $('frame-slider').max = String(Math.max(0, count - 1));
@@ -554,7 +557,7 @@
     write('frame-counter', `${count ? position + 1 : 0} / ${count}`);
     write('frame-state', frame ? frameState(frame.state) : '无帧记录');
     const manualEntry = manualHistoryActive() ? state.manualHistory.entries[position] : null;
-    write('frame-caption', run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
+    write('frame-caption', run.status === 'preview' && frame ? '尚未开始 · 初始画面 · 只读预览' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
     $('board-canvas').style.cursor = state.mode === 'manual' && state.pointerAction === 'ACTION6' ? 'crosshair' : '';
     const decision = action && action.decision_id;
     const showDecisionLink = Boolean(action && run.status !== 'manual');
@@ -1425,7 +1428,8 @@
       ![null, 'guest-unavailable', 'session-busy', 'model-unavailable', 'model-mismatch'].includes(value.start_block_reason) ||
       !stringFields(value.scope, ['model_id', 'score_kind', 'catalog_id']) || value.scope.score_kind !== 'saved-route-rhae' || !count(value.scope.seed)) return false;
     const totals = value.totals, seen = new Set();
-    if ((totals.actions_pending !== undefined && !count(totals.actions_pending)) || !score(totals.score) || !['completed_games', 'total_games', 'completed_levels', 'total_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(totals[key]))) return false;
+    if ((totals.actions_pending !== undefined && !count(totals.actions_pending)) ||
+      (totals.saved_route_actions !== undefined && !count(totals.saved_route_actions)) || !score(totals.score) || !['completed_games', 'total_games', 'completed_levels', 'total_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(totals[key]))) return false;
     if (totals.total_games !== value.games.length || totals.completed_games > totals.total_games || totals.completed_levels > totals.total_levels) return false;
     if (!value.games.every((game) => {
       const catalog = array(liveConfig?.games).find((entry) => entry.game_id === game?.game_id);
@@ -1439,7 +1443,8 @@
         ['completed_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(run[key])))) return false;
       return [game.best_run_id, game.resume_run_id, game.latest_run_id ?? null].every((runId) => runId === null || (id(runId) && runs.has(runId)));
     })) return false;
-    return value.games.length === array(liveConfig?.games).length && totals.total_levels === value.games.reduce((sum, game) => sum + game.win_levels, 0);
+    return value.games.length === array(liveConfig?.games).length && totals.total_levels === value.games.reduce((sum, game) => sum + game.win_levels, 0) &&
+      (totals.saved_route_actions === undefined || totals.saved_route_actions === value.games.reduce((sum, game) => sum + game.route_actions, 0));
   }
 
   function renderRunChoices() {
@@ -1466,9 +1471,9 @@
       row.querySelector('[data-overview-start]').disabled = locked || game.status === 'completed' || game.status === 'running' || (game.completed_levels > 0 && !game.resume_run_id);
       row.querySelector('[data-overview-fresh]').disabled = locked || game.status === 'running';
       row.querySelector('[data-overview-watch]').disabled = !game.runs.length;
-      const saved = row.querySelector('[data-overview-saved]');
-      saved.hidden = !game.best_run_id || game.best_run_id === latestReplayId(game);
-      saved.disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;
+      const attempt = row.querySelector('[data-overview-attempt]');
+      attempt.hidden = !latestReplayId(game) || preferredReplayId(game) === latestReplayId(game);
+      attempt.disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;
       row.querySelector('[data-overview-select]').disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;
     });
   }
@@ -1479,8 +1484,8 @@
     write('overview-score', totals.score);
     write('overview-games', `${totals.completed_games} / ${totals.total_games}`);
     write('overview-levels', `${totals.completed_levels} / ${totals.total_levels}`);
-    write('overview-actions', totals.primitive_actions);
-    write('overview-action-breakdown', `恢复 ${totals.restoration_actions} · 新增求解 ${totals.new_solver_actions}${totals.actions_pending ? ' · 待封存分账 ' + totals.actions_pending : ''}`);
+    write('overview-actions', totals.saved_route_actions ?? games.reduce((sum, game) => sum + game.route_actions, 0));
+    write('overview-action-breakdown', `全部尝试 ${totals.primitive_actions} · 恢复 ${totals.restoration_actions} · 新增求解 ${totals.new_solver_actions}${totals.actions_pending ? ' · 待封存分账 ' + totals.actions_pending : ''}`);
     const list = $('overview-game-list');
     const existing = new Map([...list.children].map((row) => [row.dataset.gameId, row]));
     [...list.children].forEach((row) => { if (!games.some((game) => game.game_id === row.dataset.gameId)) row.remove(); });
@@ -1494,7 +1499,7 @@
         const progressCell = node('td'), progress = node('div', undefined, 'overview-progress');
         progress.append(node('progress'), node('span')); progressCell.append(progress);
         const operations = node('td'), buttons = node('div', undefined, 'overview-game-actions');
-        [['watch', '回放 / 观察', () => watchGame(game.game_id)], ['saved', '回放已保存路线', () => chooseOverviewGame(game.game_id, {replay:true,saved:true})], ['start', '启动', () => startGame(game.game_id)], ['fresh', '从头开始', () => startGame(game.game_id, true)]].forEach(([kind, label, action]) => {
+        [['watch', '回放 / 观察', () => watchGame(game.game_id)], ['attempt', '查看最新尝试', () => chooseOverviewGame(game.game_id, {replay:true,attempt:true})], ['start', '启动', () => startGame(game.game_id)], ['fresh', '从头开始', () => startGame(game.game_id, true)]].forEach(([kind, label, action]) => {
           const button = node('button', label, 'text-button' + (kind === 'start' ? ' overview-primary' : ''));
           button.type = 'button'; button.dataset['overview' + kind[0].toUpperCase() + kind.slice(1)] = game.game_id;
           button.addEventListener('click', action); buttons.append(button);
@@ -1541,10 +1546,10 @@
     state.replayPollTimer = null;
   }
 
-  function chooseOverviewGame(gameId, { replay = false, saved = false } = {}) {
+  function chooseOverviewGame(gameId, { replay = false, attempt = false } = {}) {
     if (manualUnsaved() || state.manualPending || state.commandBusy || !overviewGame(gameId)) return false;
     pause(); stopReplayPolling(); $('game-select').value = gameId; renderRunChoices();
-    savedReplayRun = saved ? overviewGame(gameId).best_run_id : null;
+    attemptReplayRun = attempt ? latestReplayId(overviewGame(gameId)) : null;
     if (!replay && state.mode === 'manual' && !activeSession()) openManual(1);
     else { invalidateManual(); state.manualPending = null; state.mode = 'replay'; observeSelectedGame(); }
     renderSessionControls(); return true;
@@ -1554,7 +1559,7 @@
     const game = overviewGame(gameId);
     if (!game || startLocked() || game.status === 'running' || (!fresh && (game.status === 'completed' || (game.completed_levels > 0 && !game.resume_run_id)))) return;
     pause(); stopReplayPolling(); $('game-select').value = gameId; renderRunChoices();
-    savedReplayRun = null;
+    attemptReplayRun = null;
     state.mode = 'live'; state.manualView = null; state.eventSequence = null;
     const body = { game_id: gameId, command_id: window.crypto.randomUUID(), target_level: game.win_levels };
     if (!fresh && game.resume_run_id) body.resume_run_id = game.resume_run_id;
@@ -1591,12 +1596,65 @@
     } finally { if (isCurrent()) state.replayPollBusy = false; }
   }
 
-  function latestReplayId(game) {
+  function activeReplayId(game) {
     if (!game?.runs.length) return null;
     const ids = new Set(game.runs.map((entry) => entry.run_id));
     for (const id of [game.recording_run_id, game.active_run_id]) { if (ids.has(id)) return id; }
     const active = game.runs.find((run) => run.recording === true || ['starting', 'running', 'pause_requested', 'paused', 'resume_requested', 'stopping'].includes(run.status));
-    return active?.run_id || (ids.has(game.latest_run_id) ? game.latest_run_id : null) || [...game.runs].sort((a, b) => b.run_id.localeCompare(a.run_id))[0].run_id;
+    return active?.run_id || null;
+  }
+
+  function latestReplayId(game) {
+    if (!game?.runs.length) return null;
+    const explicit = game.runs.some(entry => entry.run_id === game.latest_run_id) ? game.latest_run_id : null;
+    return activeReplayId(game) || explicit || [...game.runs].sort((a, b) => b.run_id.localeCompare(a.run_id))[0].run_id;
+  }
+
+  function preferredReplayId(game) {
+    return activeReplayId(game) || game?.best_run_id || latestReplayId(game);
+  }
+
+  function emptyGamePreview(game, status = 'preview') {
+    return {schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+      run:{run_id:null,game_id:game.game_id,status,seed:0,win_levels:game.win_levels,
+           completed_level_count:0,primitive_action_count:0,replay_verified:false,sealed_trace:false},
+      levels:[],decisions:[],warnings:[]};
+  }
+
+  function validGamePreview(value, game) {
+    if (!validSnapshot(value)) return false;
+    const record = value.run, level = value.levels[0];
+    return record.game_id === game.game_id && record.win_levels === game.win_levels && record.run_id === null &&
+      record.status === 'preview' && record.seed === 0 && record.completed_level_count === 0 && record.primitive_action_count === 0 &&
+      record.replay_verified === false && record.sealed_trace === false && value.levels.length === 1 &&
+      level.level === 1 && level.status === 'preview' && level.frames.length === 1 && level.frames[0].grid.length > 0 &&
+      level.frames[0].state === 'NOT_FINISHED' && level.frames[0].levels_completed === 0 &&
+      level.actions.length === 0 && level.decisions.length === 0 && array(value.decisions).length === 0 &&
+      level.cognition?.scope === 'unavailable' && level.receipt == null;
+  }
+
+  async function loadGamePreview(game) {
+    if (!game || (run.game_id === game.game_id &&
+        (run.status === 'preview-unavailable' || (run.status === 'preview' && recordedLevels.some(level => level.frames.length))))) return;
+    const generation = state.replayGeneration;
+    const isCurrent = () => state.mode === 'replay' && state.replayGeneration === generation &&
+      $('game-select').value === game.game_id && run.run_id === null && !latestReplayId(overviewGame(game.game_id));
+    if (!gamePreviews.has(game.game_id)) {
+      gamePreviews.set(game.game_id, request('/api/preview/' + game.game_id).then(value => {
+        if (!validGamePreview(value, game)) throw new Error('invalid-response');
+        return value;
+      }));
+    }
+    try {
+      const preview = await gamePreviews.get(game.game_id);
+      if (!isCurrent()) return;
+      replaceSnapshot(preview, {follow:false});
+      write('service-status','尚未开始 · 初始画面预览 · 可启动 P7 或选择人工试玩');
+    } catch (_) {
+      if (!isCurrent()) return;
+      replaceSnapshot(emptyGamePreview(game, 'preview-unavailable'), {follow:false});
+      write('service-status','初始画面暂不可用 · 尚未启动 P7');
+    }
   }
 
   function observeSelectedGame() {
@@ -1605,16 +1663,18 @@
     if (state.mode === 'live' && activeSession()) return;
     state.mode = 'replay';
     const game = overviewGame($('game-select').value);
-    const runId = array(game?.runs).some(entry => entry.run_id === savedReplayRun) ? savedReplayRun : latestReplayId(game);
+    const runId = array(game?.runs).some(entry => entry.run_id === attemptReplayRun) ? attemptReplayRun : preferredReplayId(game);
     renderRunChoices();
     if (runId) {
       $('replay-run').value = runId;
       if (state.replayRun !== runId || (run.run_id !== runId && !state.replayPollBusy && Date.now() >= state.replayRetryAt)) loadReplay({ initial: true });
-    } else if (run.game_id !== game?.game_id || run.run_id !== null) {
-      stopReplayPolling(); state.eventSequence = null;
-      replaceSnapshot({schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
-        run:{run_id:null,game_id:game?.game_id,status:'not_run',win_levels:game?.win_levels ?? 0,completed_level_count:0,primitive_action_count:0},levels:[],decisions:[],warnings:[]}, {follow:false});
-      write('service-status','当前游戏尚无 WorldMap P7 记录 · 可启动 P7 或选择人工试玩');
+    } else if (game) {
+      if (run.game_id !== game.game_id || run.run_id !== null) {
+        stopReplayPolling(); state.eventSequence = null;
+        replaceSnapshot(emptyGamePreview(game), {follow:false});
+        write('service-status','尚未开始 · 正在读取初始画面');
+      }
+      loadGamePreview(game);
     }
     renderSessionControls();
   }
@@ -1644,7 +1704,7 @@
     $('console-mode').addEventListener('change', () => {
       if (['/api/manual/action', '/api/manual/restart'].includes(state.manualPending?.path)) { renderSessionControls(); return; }
       pause(); stopReplayPolling(); invalidateManual(); state.manualPending = null; state.mode = $('console-mode').value;
-      savedReplayRun = null;
+      attemptReplayRun = null;
       if (state.mode === 'manual' && activeSession()) { state.mode = 'live'; write('service-status', 'P7 运行期间无法打开人工试玩'); }
       if (state.mode === 'live' && state.liveView) { state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); }
       else if (state.mode === 'manual' && ['ready', 'uncertain'].includes(state.manualView?.state) && state.manualView.snapshot) { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
@@ -1660,7 +1720,7 @@
     games.filter((game) => isRecord(game) && typeof game.game_id === 'string').forEach((game) => {
       const option = node('option', `${string(game.alias, game.game_id)} · ${game.game_id}`); option.value = game.game_id; $('game-select').append(option);
     });
-    $('game-select').addEventListener('change', () => { savedReplayRun = null; stopReplayPolling(); renderRunChoices(); if (state.mode === 'manual') openManual(1); else observeSelectedGame(); renderSessionControls(); });
+    $('game-select').addEventListener('change', () => { attemptReplayRun = null; stopReplayPolling(); renderRunChoices(); if (state.mode === 'manual') openManual(1); else observeSelectedGame(); renderSessionControls(); });
     $('run-start').addEventListener('click', () => startGame($('game-select').value));
     $('run-fresh').addEventListener('click', () => startGame($('game-select').value, true));
     ['pause', 'resume'].forEach((operation) => $('run-' + operation).addEventListener('click', () => sendCommand({ path: '/api/' + operation, body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } })));
