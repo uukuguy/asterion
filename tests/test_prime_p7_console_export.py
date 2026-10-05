@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 import re
 import shutil
+import subprocess
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -15,6 +16,54 @@ from asterion.applications.prime.p7.console_export import export_console, main, 
 
 
 class TestConsoleExport(unittest.TestCase):
+    def test_worldmap_render_uses_cursor_belief_and_labels_saved_planning_fallback(self):
+        node = shutil.which('node')
+        if node is None:
+            self.skipTest('Node is unavailable')
+        from asterion.applications.prime.p7 import console_export
+        app = Path(console_export.__file__).parent / 'console_assets' / 'app.js'
+        script = r'''
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const app = fs.readFileSync(process.argv[1], 'utf8');
+const revision = (id, sequence, description) => ({scope:'observation', frame_id:id,
+  source_action_sequence:sequence, cognition_revision:sequence, event_sequence:sequence,
+  stable_description:description, cognition_narrative_zh:'模型修订', origin:'actor',
+  provenance:{run_id:'source-run',event_sequence:sequence+10}});
+const earlier = revision('f2', 2, '早期规划'), later = revision('f3', 3, '后期规划');
+const level = {cognition_timeline:[earlier,later],cognition:later};
+const state = {frameIndex:0,eventSequence:null};
+const elements = new Map();
+const element = () => ({children:[],append(...values){this.children.push(...values)},replaceChildren(){this.children=[]}});
+const scopes = {};
+const context = {state,run:{},currentLevel:()=>level,frames:()=>[{id:'f0'},{id:'f2'},{id:'f3'}],
+  researchEvents:()=>[],array:x=>Array.isArray(x)?x:[],object:x=>x||{},
+  number:x=>Number.isFinite(x)?x:0,string:(x,fallback='')=>typeof x==='string'?x:fallback,
+  $:id=>{if(!elements.has(id))elements.set(id,element());return elements.get(id)},
+  write:(id,value)=>{scopes[id]=value},node:(tag,text)=>({tag,text}),};
+context.node=(tag,text)=>({...element(),tag,text});
+vm.createContext(context);
+vm.runInContext(app.slice(app.indexOf('  function observationCognition()'),app.indexOf('  function setEvent(')),context);
+const text = entry => [entry.text||'',...(entry.children||[]).map(text)].join(' ');
+context.renderWorld();
+assert.match(scopes['cognition-scope'],/形成于第 3 步/);
+assert.match(scopes['cognition-scope'],/仅作规划背景，不表示此帧当时已知/);
+assert.match(scopes['cognition-scope'],/来源运行 source-run · 原事件 13/);
+assert.match(text(elements.get('world-guide')),/后期规划/);
+state.frameIndex=1;
+context.renderWorld();
+assert.match(scopes['cognition-scope'],/动作序号 2/);
+assert.match(text(elements.get('world-guide')),/早期规划/);
+assert.doesNotMatch(text(elements.get('world-guide')),/后期规划/);
+assert.match(scopes['cognition-scope'],/不认证规则或授权动作/);
+state.eventSequence=1;
+context.renderWorld();
+assert.match(scopes['cognition-scope'],/仅作规划背景，不表示此帧当时已知/);
+'''
+        completed = subprocess.run([node, '-e', script, str(app)], capture_output=True, text=True, check=False)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
     def test_export_retains_exact_seed_for_saved_partial_identity(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()

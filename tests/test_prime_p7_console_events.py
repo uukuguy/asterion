@@ -635,3 +635,100 @@ class TestConsoleResearchProjection(unittest.TestCase):
         writer.append('model_revision', {**payloads['model_revision'], 'revision': 'unlinked',
                       'observation_sha256': 'sha256:' + '0' * 64})
         self.assertEqual(len(build_console_snapshot(self.root)['process_events']), 5)
+
+
+class TestRestoredResearchProjection(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.runs = Path(self.tmp.name).resolve()
+
+    def publish(self, name, count, revisions, source=None, restored=0):
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.observation_state import ObservationState
+        from asterion.applications.prime.p7.score import digest
+        root = self.runs / name
+        root.mkdir()
+        (root / 'trace').mkdir()
+        writer = ConsoleEventWriter(root, name, 'sp80-test')
+        trace = PrimeTraceRecorder(root / 'trace')
+        previous = None
+        for position in range(count + 1):
+            raw = {'frame': [[[position]]], 'available_actions': ['ACTION1'],
+                   'levels_completed': position, 'win_levels': 3, 'state': 'NOT_FINISHED'}
+            hashed = digest(ObservationState.from_observation(raw).to_projection())
+            if previous is not None:
+                action = {'sequence': position, 'action': 'ACTION1', 'data': {},
+                          'before_sha256': previous, 'after_sha256': hashed, 'levels_completed': position}
+                writer.append('action', {**action, 'decision_id': None})
+                trace.append('arc.action', {'application_id': 'prime.arc-agi-3-solving', 'model_id': 'test-model'}, action)
+            writer.append('observation', {'source_action_sequence': position,
+                          'observation_sha256': hashed, 'observation': raw})
+            if position in revisions:
+                revision = research_payloads(hashed)['model_revision']
+                writer.append('model_revision', {**revision, 'source_action_sequence': position,
+                              'level': position + 1, 'description_zh': revisions[position]})
+            previous = hashed
+        trace.seal()
+        (root / 'summary.json').write_text(json.dumps({
+            'schema': 'asterion.prime.p7-live-private-summary/v1', 'run_id': name,
+            'experiment': {'game_id': 'sp80-test', 'seed': 0, 'model': 'test-model'},
+            'sealed_trace': True, 'replay_verified': True,
+            'diagnostics': {'execution_mode': 'resumed', 'source_run_id': source,
+                            'restoration_actions': restored} if source else {}}))
+        return root
+
+    def test_recursive_exact_prefix_keeps_original_level_beliefs_and_provenance(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        self.publish('run-first', 2, {0: '第一关规划', 1: '第二关旧规划', 2: '第三关旧规划'})
+        self.publish('run-second', 2, {1: '第二关修订规划'}, 'run-first', 1)
+        current = self.publish('run-current', 2, {2: '第三关当前规划'}, 'run-second', 2)
+        snapshot = build_console_snapshot(current)
+        first, second, third = snapshot['levels']
+        self.assertEqual(first['cognition']['stable_description'], '第一关规划')
+        self.assertEqual(second['cognition']['stable_description'], '第二关修订规划')
+        self.assertEqual(third['cognition']['stable_description'], '第三关当前规划')
+        self.assertEqual(first['cognition']['provenance']['run_id'], 'run-first')
+        self.assertEqual(second['cognition']['provenance']['run_id'], 'run-second')
+        self.assertEqual(third['cognition']['provenance'], {'run_id': 'run-current', 'event_sequence': 6})
+        self.assertNotIn('第三关旧规划', json.dumps(snapshot, ensure_ascii=False))
+        events = snapshot['process_events']
+        self.assertEqual([e['event_sequence'] for e in events], sorted({e['event_sequence'] for e in events}))
+        self.assertLess(first['cognition']['event_sequence'], second['cognition']['event_sequence'])
+        self.assertLess(second['cognition']['event_sequence'], third['cognition']['event_sequence'])
+        self.assertNotIn(str(self.runs), json.dumps(snapshot))
+
+    def test_ineligible_scope_trace_prefix_and_cycle_never_supply_cognition(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        for reason in ('model', 'seed', 'unsealed', 'prefix', 'source-journal', 'current-journal', 'cycle', 'symlink'):
+            with self.subTest(reason=reason):
+                name = 'source-' + reason
+                source = self.publish(name, 1, {0: '不能导入的规划'})
+                current = self.publish('current-' + reason, 1, {}, name, 1)
+                summary = json.loads((source / 'summary.json').read_text())
+                if reason in ('model', 'seed'):
+                    summary['experiment'][reason] = 'other-model' if reason == 'model' else 1
+                elif reason == 'unsealed':
+                    summary['sealed_trace'] = False
+                elif reason == 'cycle':
+                    summary['diagnostics'] = {'execution_mode': 'resumed', 'source_run_id': current.name, 'restoration_actions': 1}
+                elif reason == 'prefix':
+                    path = current / 'trace' / 'prime-trace.jsonl'
+                    path.write_text(path.read_text().replace('ACTION1', 'ACTION2'))
+                elif reason in ('source-journal', 'current-journal'):
+                    path = (source if reason == 'source-journal' else current) / 'console-events.jsonl'
+                    rows = [json.loads(line) for line in path.read_text().splitlines()]
+                    for row in rows:
+                        if row['kind'] == 'action':
+                            row['payload']['action'] = 'ACTION2'
+                    path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+                elif reason == 'symlink':
+                    alias = self.runs / 'alias-source'
+                    alias.symlink_to(source, target_is_directory=True)
+                    own = json.loads((current / 'summary.json').read_text())
+                    own['diagnostics']['source_run_id'] = alias.name
+                    (current / 'summary.json').write_text(json.dumps(own))
+                (source / 'summary.json').write_text(json.dumps(summary))
+                snapshot = build_console_snapshot(current)
+                self.assertEqual(snapshot['levels'][0]['cognition']['scope'], 'unavailable')
+                self.assertNotIn('不能导入的规划', json.dumps(snapshot, ensure_ascii=False))

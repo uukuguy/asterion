@@ -26,20 +26,22 @@
     (decision.action_ids === undefined || (Array.isArray(decision.action_ids) && decision.action_ids.every((id) => typeof id === 'string'))) &&
     stringFields(decision, ['source', 'goal', 'basis', 'expected']) && numberFields(decision, ['trace_sequence', 'round_index']);
   const validClaim = (claim) => isRecord(claim) && stringFields(claim, ['id', 'kind', 'status', 'claim']);
+  const validProvenance = (value) => value === undefined || (isRecord(value) && Object.keys(value).sort().join(',') === 'event_sequence,run_id' &&
+    typeof value.run_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}$/.test(value.run_id) && Number.isInteger(value.event_sequence) && value.event_sequence > 0);
   const validCognition = (cognition) => cognition === undefined || (isRecord(cognition) &&
-    stringFields(cognition, ['scope', 'stable_description']) &&
+    stringFields(cognition, ['scope', 'stable_description']) && validProvenance(cognition.provenance) &&
     optionalRecords(cognition.updates, (update) => isRecord(update) && optionalString(update.type) && optionalNumber(update.sequence) && optionalRecords(update.changes, validClaim)) &&
     (cognition.action_meanings === undefined || (isRecord(cognition.action_meanings) && Object.values(cognition.action_meanings).every((entries) => optionalRecords(entries, validClaim)))));
   const validTimelineEntry = (entry) => isRecord(entry) &&
     stringFields(entry, ['scope', 'frame_id', 'action_id', 'stable_description', 'cognition_narrative_zh']) &&
-    numberFields(entry, ['cognition_revision', 'source_action_sequence', 'event_sequence']);
+    numberFields(entry, ['cognition_revision', 'source_action_sequence', 'event_sequence']) && validProvenance(entry.provenance);
   function validSnapshot(value) {
     if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-console/v1' || !isRecord(value.run) || !Array.isArray(value.levels)) return false;
     if (!optionalRecords(value.decisions, validDecision) || !stringFields(value.run, ['status', 'game_id', 'run_id']) || !optionalString(value.generated_at)) return false;
     if (value.process_events !== undefined && (!Array.isArray(value.process_events) || value.process_events.length > 16384 ||
       value.process_events.some((event, index, events) => !isRecord(event) || !Number.isInteger(event.event_sequence) || event.event_sequence < 1 ||
         (index > 0 && event.event_sequence <= events[index - 1].event_sequence) || !['observation', 'action', 'decision', 'cognition', 'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind) ||
-        typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload)))) return false;
+        typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload) || !validProvenance(event.provenance)))) return false;
     const run = value.run;
     if (run.win_levels != null && (!Number.isInteger(run.win_levels) || run.win_levels < 0 || run.win_levels > 1000)) return false;
     const ids = new Set();
@@ -593,19 +595,26 @@
   function renderWorld() {
     const timeline = array(currentLevel().cognition_timeline);
     const revision = researchEvents().filter((event) => event.kind === 'model_revision').at(-1);
-    const cognition = revision ? { scope: 'observation', frame_id: revision.frame_id,
+    const aligned = timeline.length ? observationCognition() : revision ? { scope: 'observation', frame_id: revision.frame_id,
       source_action_sequence: revision.source_action_sequence, cognition_revision: revision.event_sequence,
-      stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary }
-      : timeline.length ? observationCognition() || {} : state.eventSequence !== null ? {} : object(currentLevel().cognition);
+      stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary, origin: 'actor', provenance: revision.provenance } : null;
+    const saved = object(currentLevel().cognition);
+    const cognition = aligned || (timeline.length && saved.scope === 'observation' ? { ...saved, scope: 'planning' }
+      : state.eventSequence !== null ? {} : saved);
     const guide = $('world-guide');
     const facts = $('world-facts');
     guide.replaceChildren(); facts.replaceChildren();
-    if (!['final', 'observation'].includes(cognition.scope)) {
+    if (!['final', 'observation', 'planning'].includes(cognition.scope)) {
       write('cognition-scope', run.status === 'manual' ? '人工试玩不生成 P7 认知。' : '当前关卡没有身份匹配的稳定认知。');
       guide.append(node('p', run.status === 'manual' ? '人工试玩不生成 P7 认知与决策。启动 P7 后会开始新的观察与探索。' : '尚未确定。没有认知记录可供展示。', 'guide-empty'));
       return;
     }
-    write('cognition-scope', cognition.scope === 'observation' ? `观察来源 ${string(cognition.frame_id)} · 动作序号 ${number(cognition.source_action_sequence)} · 认知版本 ${number(cognition.cognition_revision)}。当前帧仅使用已关联观察的认知。` : '运行结束时的最终认知快照。未与历史帧或动作建立时间对齐，不能视为该帧当时已有的知识。');
+    const provenance = cognition.provenance ? ` · 来源运行 ${cognition.provenance.run_id} · 原事件 ${cognition.provenance.event_sequence}` : '';
+    const scopeText = cognition.scope === 'observation'
+      ? `观察来源 ${string(cognition.frame_id)} · 动作序号 ${number(cognition.source_action_sequence)} · 认知版本 ${number(cognition.cognition_revision)}${provenance}。当前帧仅使用已关联观察的认知。`
+      : cognition.scope === 'planning' ? `本关保存的认知，形成于第 ${number(cognition.source_action_sequence)} 步${provenance}。仅作规划背景，不表示此帧当时已知。`
+        : '运行结束时的最终认知快照。未与历史帧或动作建立时间对齐，不能视为该帧当时已有的知识。';
+    write('cognition-scope', scopeText + (cognition.origin === 'actor' ? ' 这是模型记录的玩法理解与假说，不认证规则或授权动作。' : ''));
     const world = object(cognition.world_map_facts);
     const confirmed = object(world.confirmed);
     const factLabels = { entities: '对象', mechanics: '机制', relations: '关系' };
@@ -633,7 +642,7 @@
       });
     } else guide.append(node('p', description || '没有可用的稳定游戏认知。', 'guide-empty'));
     const update = node('section', undefined, 'guide-section');
-    update.append(node('h3', '最近一次稳定更新'), node('p', cognition.scope === 'observation' ? string(cognition.cognition_narrative_zh, '该观察未记录更新说明。') : '最终快照；具体更新时间未与回放帧对齐。'));
+    update.append(node('h3', '最近一次稳定更新'), node('p', ['observation', 'planning'].includes(cognition.scope) ? string(cognition.cognition_narrative_zh, '该观察未记录更新说明。') : '最终快照；具体更新时间未与回放帧对齐。'));
     guide.append(update);
   }
 
@@ -809,8 +818,10 @@
     });
     timeline.forEach((entry) => {
       const card = node('article', undefined, 'event-card timeline-cognition');
-      card.append(node('h3', `观察认知 · 版本 ${number(entry.cognition_revision)}`));
-      addMetadata(card, [`来源帧 ${string(entry.frame_id)}`, `动作序号 ${number(entry.source_action_sequence)}`, entry.action_id ? `关联动作 ${entry.action_id}` : '初始观察']);
+      card.append(node('h3', `${entry.origin === 'actor' ? '模型认知' : '观察认知'} · 版本 ${number(entry.cognition_revision)}`));
+      addMetadata(card, [`来源帧 ${string(entry.frame_id)}`, `动作序号 ${number(entry.source_action_sequence)}`, entry.action_id ? `关联动作 ${entry.action_id}` : '初始观察',
+        entry.provenance ? `来源运行 ${entry.provenance.run_id} · 原事件 ${entry.provenance.event_sequence}` : null]);
+      if (entry.origin === 'actor') card.append(node('p', '模型记录的玩法理解与假说，仅作规划背景，不认证规则或授权动作。', 'process-note'));
       const button = node('button', '定位观察', 'event-link'); button.type = 'button';
       const index = frames().findIndex((frame) => frame.id === entry.frame_id); button.disabled = index < 0;
       button.addEventListener('click', () => { pause(); setFrame(index, entry.action_id); });

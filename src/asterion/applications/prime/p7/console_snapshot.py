@@ -49,6 +49,7 @@ _WARNINGS = {
     "cognition-final": "稳定认知是运行结束时的规划背景快照，未与历史画面对齐。",
     "cognition-missing": "没有身份匹配的稳定认知。",
     "cognition-events-invalid": "部分认知事件格式或会话身份不匹配；未使用这些事件。",
+    "restored-cognition-invalid": "恢复来源的认知证据不匹配或超过边界；未用于历史认知。",
     "receipt-missing": "没有经过核对的最终回执；录制进度不等于完整运行成功。",
 }
 
@@ -482,6 +483,65 @@ def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict
     return observations, retained
 
 
+def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], current_events: list[dict],
+                               seen: tuple[str, ...] = ()) -> list[dict]:
+    """Read only explicitly linked, replay-identical historical actor beliefs."""
+    diagnostics = summary.get('diagnostics', {})
+    if not isinstance(diagnostics, dict) or diagnostics.get('execution_mode') != 'resumed':
+        return []
+    source_id = _identifier(diagnostics.get('source_run_id'))
+    restored = _integer(diagnostics.get('restoration_actions'), _MAX_ROWS)
+    if not source_id or not restored or source_id in (*seen, root.name) or len(seen) >= 8:
+        raise ValueError('restored cognition unavailable')
+    source = root.parent / source_id
+    if source.is_symlink() or not source.is_dir():
+        raise ValueError('restored cognition unavailable')
+    warnings: list[str] = []
+    prior = _object(source / 'summary.json', warnings, 'summary-missing')
+    experiment = summary.get('experiment', {})
+    prior_experiment = prior.get('experiment', {})
+    if (prior.get('schema') != 'asterion.prime.p7-live-private-summary/v1'
+        or prior.get('run_id') != source_id or prior.get('sealed_trace') is not True
+        or prior.get('replay_verified') is not True
+        or not isinstance(experiment, dict) or not isinstance(prior_experiment, dict)
+        or not _identifier(experiment.get('model')) or _integer(experiment.get('seed')) is None
+        or _integer(prior_experiment.get('seed')) is None
+        or any(prior_experiment.get(key) != experiment.get(key) for key in ('game_id', 'model', 'seed'))):
+        raise ValueError('restored cognition unavailable')
+    game = experiment.get('game_id')
+    prior_trace, sealed = _trace(source, prior, game, warnings)
+    def prefix(entries, kind='arc.action'):
+        actions = [entry['payload'] for entry in entries if entry['kind'] == kind]
+        if len(actions) < restored or any(action.get('sequence') != index + 1 for index, action in enumerate(actions[:restored])):
+            raise ValueError('restored cognition unavailable')
+        return [{key: action.get(key, {} if key == 'data' else None) for key in
+                 ('sequence', 'action', 'data', 'before_sha256', 'after_sha256', 'levels_completed')}
+                for action in actions[:restored]]
+    if not sealed or prefix(trace) != prefix(prior_trace) or prefix(trace) != prefix(current_events, 'action'):
+        raise ValueError('restored cognition unavailable')
+    events = read_console_events(source, source_id, game, warnings=warnings)
+    observations, events = _source_observations(events, warnings)
+    if warnings or len(observations) <= restored or prefix(events, 'action') != prefix(prior_trace):
+        raise ValueError('restored cognition unavailable')
+    inherited = _restored_cognition_events(source, prior, prior_trace, events, (*seen, root.name))
+    retained = [event for event in inherited if event['payload']['source_action_sequence'] <= restored]
+    for event in events:
+        if event['kind'] not in {'model_revision', 'cognition'}:
+            continue
+        payload = event['payload']
+        position = payload['source_action_sequence']
+        if position > restored or position >= len(observations):
+            continue
+        observation = observations[position]
+        if (payload['observation_sha256'] != observation['hash']
+            or (event['kind'] == 'model_revision' and payload['level'] != min(observation['levels'] + 1, observation['wins']))):
+            continue
+        retained.append({**event, 'provenance': {'run_id': source_id, 'event_sequence': event['sequence']}})
+    if len(retained) > _MAX_ROWS:
+        raise ValueError('restored cognition unavailable')
+    return retained
+
+
 def build_console_snapshot(run_root: Path) -> dict[str, object]:
     """Project explicitly selected evidence without modifying it or running P7."""
     if not isinstance(run_root, Path) or run_root.is_symlink() or not run_root.is_dir():
@@ -530,6 +590,24 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             if "recording-missing" in warn:
                 warn.remove("recording-missing")
     trace, sealed = _trace(root, summary, game, warn)
+    try:
+        restored_events = _restored_cognition_events(root, summary, trace, source_events)
+    except (ValueError, OSError):
+        restored_events = []
+        warn.append('restored-cognition-invalid')
+    if restored_events and source_mode:
+        # Restored beliefs follow their settled observation and precede current
+        # actor work at the restoration boundary. Keep original source IDs apart
+        # from the merged display cursor; no runtime event is rewritten.
+        def event_order(event):
+            position = event['payload'].get('source_action_sequence', event['payload'].get('sequence', 0))
+            rank = 1 if 'provenance' in event else 0 if event['kind'] in {'action', 'observation'} else 2
+            return position, rank
+        source_events = sorted([*restored_events, *source_events], key=event_order)
+        source_events = [{**event, 'sequence': index,
+                          'provenance': event.get('provenance', {'run_id': root.name, 'event_sequence': event['sequence']})}
+                         for index, event in enumerate(source_events, 1)]
+        observations, source_events = _source_observations(source_events, warn)
     trace_actions = [e for e in trace if e["kind"] == "arc.action"]
     levels: dict[int, dict] = {}
 
@@ -662,9 +740,22 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                                    'source_action_sequence': position if position is not None else payload.get('sequence'),
                                    'frame_id': event_observation['frame_id'], 'level': number,
                                    'payload': public_payload}
+                if 'provenance' in event:
+                    projected_event['provenance'] = event['provenance']
                 process_events.append(projected_event)
                 if event['kind'] in {'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'}:
                     level(number)['research_timeline'].append(projected_event)
+                if event['kind'] == 'model_revision':
+                    action = action_positions.get(position)
+                    revision = {'scope': 'observation', 'frame_id': event_observation['frame_id'],
+                                'action_id': action['id'] if action else None,
+                                'source_action_sequence': position, 'cognition_revision': event['sequence'],
+                                'event_sequence': event['sequence'], 'stable_description': payload['description_zh'],
+                                'cognition_narrative_zh': payload['correction_summary'], 'origin': 'actor'}
+                    if 'provenance' in event:
+                        revision['provenance'] = event['provenance']
+                    level(number)['cognition_timeline'].append(revision)
+                    level(number)['cognition'] = {**revision, 'updates': [], 'world_map_facts': {}}
         if event["kind"] == "decision":
             # A summary is public model output at one exact observed position.
             if not observation or payload["observation_sha256"] not in observation["hashes"] or payload["decision_id"] in decisions_by_id:
@@ -699,6 +790,8 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             action = action_positions.get(position)
             revision = {**payload, "frame_id": observation["frame_id"], "action_id": action["id"] if action else None,
                         "scope": "observation", "event_sequence": event["sequence"]}
+            if 'provenance' in event:
+                revision['provenance'] = event['provenance']
             bucket = level(min(observation["levels"] + 1, wins or 100))
             bucket["cognition_timeline"].append(revision)
             bucket["cognition"] = {**revision, "updates": [], "world_map_facts": {}}
