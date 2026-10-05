@@ -28,6 +28,14 @@ class _TraceClient:
         pass
 
 
+async def _wait_until(predicate, message):
+    deadline = asyncio.get_running_loop().time() + 5
+    while not predicate():
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(message)
+        await asyncio.sleep(0.01)
+
+
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -173,13 +181,16 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         pending = asyncio.create_task(self.host.execute(
             "pause-cell", "import time; time.sleep(0.15); retained = 7", _Signal()
         ))
-        await asyncio.sleep(0.08)
+        await _wait_until(lambda: self.host.cell_count == 1,
+                          "kernel did not report cell_started within five seconds")
         write_control_request(self.root, run_id=self.run_id, command_id="pause-cell-1",
                               request_sequence=1, operation="pause")
-        await asyncio.sleep(0.25)
+        await _wait_until(
+            lambda: self.host.control.snapshot()["state"] == "paused"
+            and self.host.kernel.status()["execution_status"] == "ok",
+            "running cell did not finish and settle the pause within five seconds",
+        )
         self.assertFalse(pending.done())
-        self.assertEqual(self.host.control.snapshot()["state"], "paused")
-        self.assertEqual(self.host.kernel.status()["execution_status"], "ok")
         write_control_request(self.root, run_id=self.run_id, command_id="resume-cell-1",
                               request_sequence=2, operation="resume")
         self.assertEqual((await asyncio.wait_for(pending, 1)).status, "ok")
