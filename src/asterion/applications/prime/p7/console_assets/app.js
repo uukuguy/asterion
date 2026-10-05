@@ -88,12 +88,37 @@
   const retiredManualSessions = new Set();
   let attemptReplayRun = null;
   const gamePreviews = new Map();
-  const currentLevel = () => levels[state.levelIndex] || emptyLevel;
+  // Auxiliary views retain their own run authority. Never merge them into the
+  // currently observed attempt or attach its events to another run's frames.
+  const savedViews = new Map(), savedRequests = new Map(), previewViews = new Map(), boardSavedViews = new Map();
+  const primaryLevel = () => levels[state.levelIndex] || emptyLevel;
+  function cachedSavedView() {
+    if (state.mode === 'manual') return null;
+    const view = savedViews.get(run.game_id), game = verifiedSavedGame();
+    return view && view.run.seed === run.seed && view.run.win_levels === run.win_levels &&
+      (!state.overviewFresh || Boolean(game)) ? view : null;
+  }
+  function savedView() {
+    const view = cachedSavedView();
+    return view && (!state.overviewFresh || verifiedSavedGame()?.best_run_id === view.run.run_id) ? view : null;
+  }
+  const savedLevel = (level) => array(savedView()?.levels).find(entry => entry.level === level && entry.status === 'successful') || null;
+  const retainedSavedLevel = (level) => savedView() ? null : array(cachedSavedView()?.levels).find(entry => entry.level === level && entry.status === 'successful') || null;
+  function levelSource(level = primaryLevel()) {
+    if (state.mode === 'manual' || array(level.frames).length) return {scope: string(run.status, '').startsWith('preview') ? 'preview' : 'current', snapshot, level, key:`${run.game_id}/${run.run_id || 'preview'}/${level.level}`};
+    const view = boardSavedViews.get(`${run.game_id}/${level.level}`);
+    const saved = state.mode !== 'manual' && view && view.run.seed === run.seed && view.run.win_levels === run.win_levels ?
+      array(view.levels).find(entry => entry.level === level.level && entry.status === 'successful') : null;
+    if (saved && array(saved.frames).length) return {scope:'saved',snapshot:view,level:saved,key:`${run.game_id}/${view.run.run_id}/${level.level}`};
+    const preview = previewViews.get(`${run.game_id}/${level.level}`);
+    return preview ? {scope:'preview',snapshot:preview,level:preview.levels[0],key:`${run.game_id}/preview/${level.level}`} : {scope:'current',snapshot,level,key:`${run.game_id}/${run.run_id}/${level.level}`};
+  }
+  const currentLevel = () => levelSource().level;
   const frames = () => array(currentLevel().frames);
   const actions = () => array(currentLevel().actions);
   const currentFrame = () => frames()[state.frameIndex];
   const frameById = (id) => (state.mode === 'manual' && run.status === 'manual' ? levels.flatMap((level) => array(level.frames)) : frames()).find((frame) => frame.id === id);
-  const processEvents = () => state.mode === 'manual' ? [] : array(snapshot.process_events).filter((event) => event.level === currentLevel().level && frames().some((frame) => frame.id === event.frame_id));
+  const processEvents = () => state.mode === 'manual' ? [] : array(levelSource().snapshot.process_events).filter((event) => event.level === currentLevel().level && frames().some((frame) => frame.id === event.frame_id));
   const cursorSequence = () => state.eventSequence ?? processEvents().filter((event) => frames().findIndex((frame) => frame.id === event.frame_id) <= state.frameIndex).at(-1)?.event_sequence ?? null;
   const researchEvents = () => processEvents().filter((event) => event.event_sequence <= cursorSequence() && ['compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind));
   const selectedAction = () => actions().find((action) => action.id === state.actionId) || null;
@@ -296,7 +321,7 @@
     $('run-progress-summary').hidden = manual;
     write('run-progress-summary', string(run.status, '').startsWith('preview') ? '关卡初始预览 · 尚未开始' : game ? `游戏已保存 ${game.completed_levels} / ${game.win_levels} · ${current}` : current);
     setStatus($('level-status'), currentLevel().status === 'successful' ? 'completed' : currentLevel().status);
-    if (!manual) write('level-status', currentRunLevelLabel(currentLevel()));
+    if (!manual) write('level-status', levelSource().scope === 'saved' ? '已保存 · 已过关' : currentRunLevelLabel(currentLevel()));
     const saved = game && currentLevel().status !== 'successful' && currentLevel().level <= game.completed_levels;
     $('level-saved-status').hidden = !saved;
     write('level-saved-status', saved ? '已有过关记录' : '');
@@ -308,17 +333,22 @@
     list.replaceChildren();
     if (!levels.length) list.append(node('p', '没有可验证的关卡记录。', 'guide-empty'));
     levels.forEach((level, index) => {
+      const authority = savedLevel(level.level), retained = retainedSavedLevel(level.level), displayed = authority || retained || levelSource(level).level;
       const button = node('button', undefined, 'level-button');
       button.id = `level-${level.level}`;
       button.type = 'button';
       button.setAttribute('aria-current', String(index === state.levelIndex));
       const manual = state.mode === 'manual';
-      const [statusLabel, tone] = manual && !array(level.frames).length ? ['可直接试玩', 'neutral'] : statusInfo(level.status === 'successful' ? 'completed' : level.status);
-      const label = manual ? statusLabel : currentRunLevelLabel(level);
+      const [statusLabel, tone] = manual && !array(level.frames).length ? ['可直接试玩', 'neutral'] : statusInfo(displayed.status === 'successful' ? 'completed' : displayed.status);
+      const label = manual ? statusLabel : authority ? '已保存 · 已过关' : retained ? '历史已保存 · 最佳路线刷新中' : currentRunLevelLabel(displayed);
+      if (authority || retained) {
+        button.dataset.savedSourceRunId = (authority ? savedView() : cachedSavedView()).run.run_id;
+        button.dataset.savedCurrentBest = String(Boolean(authority));
+      }
       button.disabled = manual && manualSelectionLocked();
       const saved = manual && state.manualView?.game_id === run.game_id && array(state.manualView.saved_levels).includes(level.level);
       const verified = savedGame && level.status !== 'successful' && level.level <= savedGame.completed_levels;
-      button.setAttribute('aria-label', `关卡 ${level.level}，${label}${saved ? '，已保存，可继续' : ''}${verified ? '，已有过关记录' : ''}，${array(level.actions).length} 个动作`);
+      button.setAttribute('aria-label', `关卡 ${level.level}，${label}${saved ? '，已保存，可继续' : ''}${verified ? '，已有过关记录' : ''}，${array(displayed.actions).length} 个动作`);
       button.append(node('span', String(level.level).padStart(2, '0'), 'level-number'));
       const content = node('div', undefined, 'level-item-content');
       const heading = node('div', undefined, 'level-item-heading');
@@ -328,16 +358,16 @@
       if (saved) heading.append(node('span', '已保存', 'level-saved-badge'));
       if (verified) heading.append(node('span', '已有过关记录', 'level-verified-badge'));
       content.append(heading, node('p', label, 'level-item-status'));
-      content.append(node('p', `${array(level.actions).length} 动作 · ${array(level.frames).length ? `${array(level.frames).length} 帧` : '无画面'}${level.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
+      content.append(node('p', `${authority ? '已保存 · ' : retained ? '历史已保存 · ' : ''}${array(displayed.actions).length} 动作 · ${array(displayed.frames).length ? `${array(displayed.frames).length} 帧` : '无画面'}${displayed.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
       if (!manual) {
-        const efficiency = levelEfficiency(level);
+        const efficiency = levelEfficiency(displayed);
         content.append(node('p', efficiency.text, `level-item-detail${efficiency.low ? ' efficiency-low' : ''}`));
       }
       button.append(content);
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') {
           selectLevel(index); seekFrame(0);
-          if (string(run.status, '').startsWith('preview')) loadGamePreview(overviewGame(run.game_id), level.level);
+          ensureSelectedSource();
           return;
         }
         if (manualSelectionLocked()) return;
@@ -348,26 +378,34 @@
     });
   }
 
-  function selectLevel(index, { pausePlayback = true } = {}) {
+  function selectLevel(index, { pausePlayback = true, bindSavedSource = true } = {}) {
     if (pausePlayback) pause();
     state.levelIndex = index;
     state.eventSequence = null;
     state.frameIndex = 0;
     state.actionId = null;
+    const saved = savedView() || cachedSavedView();
+    if (saved && bindSavedSource) boardSavedViews.set(`${run.game_id}/${primaryLevel().level}`, saved);
     if (run.status === 'preview') run.target_level = currentLevel().level;
     renderRail();
     write('board-kicker', currentLevel().level === null ? 'LEVEL —' : `LEVEL ${String(currentLevel().level).padStart(2, '0')}`);
     write('board-title', run.status === 'manual' ? `关卡 ${currentLevel().level} · 人工试玩` : currentLevel().level === null ? '游戏画面 · 未记录关卡' : `关卡 ${currentLevel().level} · 游戏画面`);
     renderProgressContext();
-    const efficiency = levelEfficiency(currentLevel());
-    write('level-efficiency', state.mode === 'manual' ? '人工试玩不计 P7 分数' : efficiency.text);
-    $('level-efficiency').classList.toggle('efficiency-low', state.mode !== 'manual' && efficiency.low);
+    renderLevelEfficiency();
     renderWorld();
     renderProcess();
     renderReceipt();
     renderFrame();
     write('playback-announcement', currentLevel().level === null ? '没有可验证的关卡记录。' : `已选择关卡 ${currentLevel().level}，${frames().length} 帧。`);
     renderSessionControls();
+  }
+
+  function renderLevelEfficiency() {
+    const authority = savedLevel(primaryLevel().level), retained = retainedSavedLevel(primaryLevel().level), saved = authority || retained;
+    const efficiency = levelEfficiency(saved || currentLevel());
+    const current = saved && levelSource().scope === 'current' && run.run_id !== (savedView() || cachedSavedView()).run.run_id;
+    write('level-efficiency', state.mode === 'manual' ? '人工试玩不计 P7 分数' : `${authority ? '已保存 · ' : retained ? '历史已保存 · 最佳路线刷新中 · ' : ''}${efficiency.text}${current ? ` · 本次 ${array(primaryLevel().actions).length} 动作 · ${currentRunLevelLabel(primaryLevel())}` : ''}`);
+    $('level-efficiency').classList.toggle('efficiency-low', state.mode !== 'manual' && efficiency.low);
   }
 
   function draw(canvas, frame, before, action) {
@@ -563,7 +601,12 @@
     write('frame-counter', `${count ? position + 1 : 0} / ${count}`);
     write('frame-state', frame ? frameState(frame.state) : '无帧记录');
     const manualEntry = manualHistoryActive() ? state.manualHistory.entries[position] : null;
-    write('frame-caption', run.status === 'preview' && frame ? '关卡初始预览 · 尚未开始 · 只读' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
+    const source = levelSource();
+    const sourceRun = array(overviewGame(run.game_id)?.runs).find(entry => entry.run_id === source.snapshot.run.run_id);
+    const offline = ['offline', 'offline-replay'].includes(source.snapshot.run.execution_mode || sourceRun?.execution_mode);
+    $('single-board').dataset.sourceScope = source.scope;
+    $('single-board').dataset.sourceRunId = source.snapshot.run.run_id || '';
+    write('frame-caption', source.scope === 'preview' && frame ? '关卡初始预览 · 尚未开始 · 只读' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${source.scope === 'saved' ? `已保存 · ${source.snapshot.run.run_id} · ` : offline ? '' : replayUnsealed(source.snapshot) ? '本次记录 · LIVE · ' : '本次记录 · '}${offline ? '离线 SDK 路线验证 · ' : ''}${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
     $('board-canvas').style.cursor = state.mode === 'manual' && state.pointerAction === 'ACTION6' ? 'crosshair' : '';
     const decision = action && action.decision_id;
     const showDecisionLink = Boolean(action && run.status !== 'manual');
@@ -627,7 +670,7 @@
   }
 
   function seekFrame(index, actionId) {
-    if (state.mode === 'replay') state.replayFollow = false;
+    if (['live', 'replay'].includes(state.mode)) state.replayFollow = false;
     setFrame(index, actionId);
     if (['live', 'replay'].includes(state.mode) && processEvents().length) { state.eventSequence = cursorSequence() ?? 0; renderFrame(); renderSessionControls(); }
   }
@@ -843,7 +886,7 @@
     [decisionsPanel, actionsPanel, cognitionPanel].forEach((panel) => panel.replaceChildren());
     const ownDecisions = array(level.decisions);
     const decisionMap = new Map(ownDecisions.map((decision) => [decision.id, decision]));
-    array(snapshot.decisions).forEach((decision) => { if (!decisionMap.has(decision.id)) decisionMap.set(decision.id, decision); });
+    array(levelSource().snapshot.decisions).forEach((decision) => { if (!decisionMap.has(decision.id)) decisionMap.set(decision.id, decision); });
     const decisions = [...decisionMap.values()];
     const updates = array(object(level.cognition).updates);
     const timeline = array(level.cognition_timeline).filter((entry) => entry.scope === 'observation');
@@ -1038,13 +1081,14 @@
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
   window.addEventListener('pagehide', pause);
   window.addEventListener('resize', renderFrame);
-  function replaceSnapshot(next, { follow = state.mode === 'live', manualPosition = null } = {}) {
+  function replaceSnapshot(next, { follow = state.mode === 'live' && state.replayFollow, manualPosition = null } = {}) {
     if (!validSnapshot(next)) throw new Error('invalid-response');
     follow = follow && state.eventSequence === null;
     const previousEvent = state.eventSequence;
     const previous = { snapshot, run, recordedLevels, levelCount, levels,
       levelIndex: state.levelIndex, frameIndex: state.frameIndex, actionId: state.actionId };
-    const previousRun = run.run_id, previousLevel = currentLevel().level, previousFrame = currentFrame()?.id, previousAction = state.actionId;
+    const previousSource = levelSource().key;
+    const previousGame = run.game_id, previousLevel = currentLevel().level, previousFrame = currentFrame()?.id, previousAction = state.actionId;
     // Derive the complete next view before changing the currently accepted state.
     const nextRun = object(next.run), nextRecordedLevels = array(next.levels);
     const nextCount = Math.max(0, number(nextRun.win_levels), ...nextRecordedLevels.map((level) => number(level.level)));
@@ -1053,12 +1097,13 @@
     });
     let index = nextLevels.findIndex((level) => level.level === previousLevel);
     if (follow) index = nextLevels.map((level, i) => array(level.frames).length ? i : -1).filter((i) => i >= 0).pop() ?? 0;
-    else if (previousRun !== nextRun.run_id || index < 0) index = Math.max(0, nextLevels.findIndex((level) => array(level.frames).length));
-    const preserve = !follow && previousRun === nextRun.run_id;
-    const preservePlayback = state.timer !== null && state.mode === 'replay' && previousRun === nextRun.run_id && index === state.levelIndex;
+    else if (previousGame !== nextRun.game_id || index < 0) index = Math.max(0, nextLevels.findIndex((level) => array(level.frames).length));
     try {
       snapshot = next; run = nextRun; recordedLevels = nextRecordedLevels; levelCount = nextCount; levels = nextLevels;
-      renderRunHeader(); selectLevel(index, { pausePlayback: !preservePlayback });
+      const sameSource = levelSource(nextLevels[index] || emptyLevel).key === previousSource;
+      const preserve = !follow && sameSource;
+      const preservePlayback = state.timer !== null && state.mode === 'replay' && sameSource && index === state.levelIndex;
+      renderRunHeader(); selectLevel(index, { pausePlayback: !preservePlayback, bindSavedSource:false });
       const historical = preserve ? frames().findIndex((frame) => frame.id === previousFrame) : -1;
       if (manualPosition !== null) setManualFrame(manualPosition);
       else setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
@@ -1549,7 +1594,9 @@
       const overview = await request('/api/overview');
       if (!validOverview(overview)) throw new Error('invalid-response');
       state.overview = overview; state.overviewFresh = true; renderOverview(); renderRail(); renderProgressContext(); renderSessionControls();
+      renderLevelEfficiency();
       observeSelectedGame();
+      ensureSelectedSource();
       if (state.replayPollTimer !== null && !replayUnsealed(snapshot)) loadReplay();
       const blocked = { 'guest-unavailable': '执行器暂不可用', 'session-busy': '执行器正在使用', 'model-unavailable': '求解模型尚未就绪', 'model-mismatch': '求解模型配置不匹配' };
       write('overview-refresh', `本地记录 · 每 5 秒更新${overview.start_ready ? '' : ' · ' + (blocked[overview.start_block_reason] || '启动尚未就绪')}`);
@@ -1582,7 +1629,7 @@
     if (!game || startLocked() || game.status === 'running' || (!fresh && (game.status === 'completed' || (game.completed_levels > 0 && !game.resume_run_id)))) return;
     pause(); stopReplayPolling(); $('game-select').value = gameId; renderRunChoices();
     attemptReplayRun = null;
-    state.mode = 'live'; state.manualView = null; state.eventSequence = null;
+    state.mode = 'live'; state.replayFollow = true; state.manualView = null; state.eventSequence = null;
     const body = { game_id: gameId, command_id: window.crypto.randomUUID(), target_level: game.win_levels };
     if (!fresh && game.resume_run_id) body.resume_run_id = game.resume_run_id;
     sendCommand({ path: '/api/start', body });
@@ -1593,10 +1640,10 @@
     array(overviewGame(replay.run.game_id)?.runs).some((run) => run.run_id === replay.run.run_id &&
       (run.recording === true || ['starting', 'running', 'pause_requested', 'paused', 'resume_requested', 'stopping'].includes(run.status)));
 
-  async function loadReplay({ initial = false } = {}) {
+  async function loadReplay({ initial = false, preserveSelection = false } = {}) {
     const runId = $('replay-run').value;
     if (!runId || state.mode !== 'replay' || (state.replayPollBusy && !initial)) return;
-    if (initial) { stopReplayPolling(); state.replayRun = runId; state.replayFollow = true; state.eventSequence = null; }
+    if (initial) { stopReplayPolling(); state.replayRun = runId; if (!preserveSelection) { state.replayFollow = true; state.eventSequence = null; } }
     if (!initial && Date.now() < state.replayRetryAt) return;
     const generation = state.replayGeneration;
     const isCurrent = () => state.mode === 'replay' && state.replayGeneration === generation && $('replay-run').value === runId;
@@ -1607,6 +1654,7 @@
       if (!validSnapshot(replay) || replay.run.run_id !== runId || replay.run.game_id !== $('game-select').value) throw new Error('invalid-response');
       const completedBefore = run.run_id === replay.run.run_id ? number(run.completed_level_count) : 0;
       replaceSnapshot(replay, { follow: state.replayFollow }); state.replayRun = runId; state.replayFailures = 0; state.replayRetryAt = 0;
+      ensureSelectedSource();
       write('service-status', replayUnsealed(replay) ? '只读观察 · 记录未封口 · 每 2 秒更新' : '回放记录 · 只读');
       if (replayUnsealed(replay) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(), 2000);
       else if (!replayUnsealed(replay) && state.replayPollTimer !== null) { window.clearInterval(state.replayPollTimer); state.replayPollTimer = null; }
@@ -1658,12 +1706,62 @@
       level.cognition?.scope === 'unavailable' && level.receipt == null;
   }
 
+  function refreshLevelSource(previousSource) {
+    renderRail(); renderProgressContext(); renderLevelEfficiency();
+    if (levelSource().key !== previousSource) selectLevel(state.levelIndex);
+  }
+
+  async function loadSavedView(game) {
+    if (!game || !verifiedSavedGame() || game.game_id !== run.game_id) return;
+    const bestId = game.best_run_id;
+    if (savedViews.get(game.game_id)?.run.run_id === bestId) {
+      const previousSource = levelSource().key;
+      const key = `${run.game_id}/${primaryLevel().level}`;
+      if (!boardSavedViews.has(key)) boardSavedViews.set(key, savedViews.get(game.game_id));
+      refreshLevelSource(previousSource);
+      return;
+    }
+    const generation = state.replayGeneration, currentRun = run.run_id, selectedLevel = primaryLevel().level, seed = run.seed;
+    const isCurrent = () => state.mode !== 'manual' && state.replayGeneration === generation &&
+      run.game_id === game.game_id && run.run_id === currentRun && $('game-select').value === game.game_id &&
+      verifiedSavedGame()?.best_run_id === bestId;
+    if (!savedRequests.has(bestId)) savedRequests.set(bestId, request(`/api/replay/${encodeURIComponent(bestId)}`).then(value => {
+      if (!validSnapshot(value) || value.run.run_id !== bestId || value.run.game_id !== game.game_id ||
+        value.run.seed !== seed || value.run.win_levels !== game.win_levels || value.run.completed_level_count !== game.completed_levels ||
+        value.run.replay_verified !== true || value.run.sealed_trace !== true) throw new Error('invalid-response');
+      return value;
+    }).catch(error => { savedRequests.delete(bestId); throw error; }));
+    try {
+      const saved = await savedRequests.get(bestId);
+      if (!isCurrent()) return;
+      const previousSource = levelSource().key;
+      savedViews.set(game.game_id, saved);
+      // Authority can update the rail. Only the still-selected level accepts
+      // a new board source; late replies cannot reset another level's cursor.
+      if (primaryLevel().level === selectedLevel) {
+        boardSavedViews.set(`${run.game_id}/${selectedLevel}`, saved);
+        refreshLevelSource(previousSource);
+      } else { renderRail(); renderProgressContext(); renderLevelEfficiency(); }
+    } catch (_) { /* The current observation remains usable if saved evidence is unavailable. */ }
+  }
+
+  async function ensureSelectedSource() {
+    if (state.mode === 'manual') return;
+    const game = overviewGame(run.game_id), generation = state.replayGeneration, currentRun = run.run_id, selectedLevel = primaryLevel().level;
+    if (!game || $('game-select').value !== game.game_id) return;
+    await loadSavedView(game);
+    if (state.mode === 'manual' || state.replayGeneration !== generation || run.run_id !== currentRun ||
+      run.game_id !== game.game_id || primaryLevel().level !== selectedLevel) return;
+    if (!array(levelSource().level.frames).length) loadGamePreview(game, selectedLevel);
+  }
+
   async function loadGamePreview(game, selectedLevel = currentLevel().level || 1) {
     if (!game || (run.game_id === game.game_id &&
         (currentLevel().status === 'preview-unavailable' || (run.status === 'preview' && currentLevel().frames.length)))) return;
-    const generation = state.replayGeneration;
-    const isCurrent = () => state.mode === 'replay' && state.replayGeneration === generation &&
-      $('game-select').value === game.game_id && currentLevel().level === selectedLevel && run.run_id === null && !latestReplayId(overviewGame(game.game_id));
+    const generation = state.replayGeneration, mode = state.mode;
+    const isCurrent = () => state.mode === mode && mode !== 'manual' && state.replayGeneration === generation &&
+      $('game-select').value === game.game_id && primaryLevel().level === selectedLevel && run.run_id === currentRun;
+    const currentRun = run.run_id;
     const key = `${game.game_id}/${selectedLevel}`;
     if (!gamePreviews.has(key)) {
       gamePreviews.set(key, request('/api/preview/' + game.game_id + (selectedLevel === 1 ? '' : '/' + selectedLevel)).then(value => {
@@ -1674,12 +1772,20 @@
     try {
       const preview = await gamePreviews.get(key);
       if (!isCurrent()) return;
-      replaceSnapshot({...preview, levels:levels.map(level => level.level === selectedLevel ? preview.levels[0] : level)}, {follow:false});
-      write('service-status','关卡初始预览 · 尚未开始 · 可启动 P7 或选择人工试玩');
+      if (currentRun === null && !latestReplayId(overviewGame(game.game_id))) {
+        replaceSnapshot({...preview, levels:levels.map(level => level.level === selectedLevel ? preview.levels[0] : level)}, {follow:false});
+        write('service-status','关卡初始预览 · 尚未开始 · 可启动 P7 或选择人工试玩');
+      } else {
+        const previousSource = levelSource().key;
+        previewViews.set(key, preview);
+        refreshLevelSource(previousSource);
+      }
     } catch (_) {
       if (!isCurrent()) return;
-      replaceSnapshot({...snapshot,levels:levels.map(level => level.level === selectedLevel ? {...level,status:'preview-unavailable'} : level)}, {follow:false});
-      write('service-status','初始画面暂不可用 · 尚未启动 P7');
+      if (currentRun === null) {
+        replaceSnapshot({...snapshot,levels:levels.map(level => level.level === selectedLevel ? {...level,status:'preview-unavailable'} : level)}, {follow:false});
+        write('service-status','初始画面暂不可用 · 尚未启动 P7');
+      }
     }
   }
 
@@ -1693,7 +1799,7 @@
     renderRunChoices();
     if (runId) {
       $('replay-run').value = runId;
-      if (state.replayRun !== runId || (run.run_id !== runId && !state.replayPollBusy && Date.now() >= state.replayRetryAt)) loadReplay({ initial: true });
+      if (state.replayRun !== runId || (run.run_id !== runId && !state.replayPollBusy && Date.now() >= state.replayRetryAt)) loadReplay({ initial: true, preserveSelection:run.game_id === game.game_id && !state.replayFollow });
     } else if (game) {
       if (run.game_id !== game.game_id || run.run_id !== null) {
         stopReplayPolling(); state.eventSequence = null;
@@ -1732,7 +1838,7 @@
       pause(); stopReplayPolling(); invalidateManual(); state.manualPending = null; state.mode = $('console-mode').value;
       attemptReplayRun = null;
       if (state.mode === 'manual' && activeSession()) { state.mode = 'live'; write('service-status', 'P7 运行期间无法打开人工试玩'); }
-      if (state.mode === 'live' && state.liveView) { state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); }
+      if (state.mode === 'live' && state.liveView) { state.replayFollow = true; state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); }
       else if (state.mode === 'manual' && ['ready', 'uncertain'].includes(state.manualView?.state) && state.manualView.snapshot) { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
       else if (state.mode === 'manual') {
         const saved = state.liveView?.manual;
@@ -1773,7 +1879,7 @@
     window.addEventListener('pagehide', () => { stopReplayPolling(); if (state.pollTimer !== null) window.clearInterval(state.pollTimer); if (state.overviewTimer !== null) window.clearInterval(state.overviewTimer); });
   }
 
-  $('event-return-current').addEventListener('click', () => { if (state.liveView) { state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); renderSessionControls(); } });
+  $('event-return-current').addEventListener('click', () => { if (state.liveView) { state.replayFollow = true; state.eventSequence = null; replaceSnapshot(snapshotForView(state.liveView), { follow: true }); renderSessionControls(); } });
   $('event-slider').addEventListener('input', () => setEvent(Number($('event-slider').value)));
   initializeLive();
 })();

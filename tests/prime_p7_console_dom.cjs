@@ -1962,6 +1962,163 @@ test('unplayed game shows a readonly initial preview and a late preview cannot r
   } finally {app.dom.window.close();}
 });
 
+test('recorded games load readonly previews for missing levels without replacing their attempt', async () => {
+  for (const [gameId, winLevels, selectedLevel, controller] of [['three-test', 3, 3], ['six-test', 6, 6], ['nine-test', 9, 5], ['live-controller-test', 4, 4, true]]) {
+    const snapshot = fixture();
+    snapshot.run = {...snapshot.run, game_id:gameId, run_id:'active-attempt', seed:0, win_levels:winLevels, sealed_trace:false};
+    snapshot.levels = [snapshot.levels[0]];
+    const config = {token:'test-token', games:[{game_id:gameId, alias:gameId, win_levels:winLevels}]};
+    const overview = overviewFixture(config);
+    overview.games[0] = {...overview.games[0], status:'running', recording_run_id:'active-attempt',
+      runs:[{...catalogRun('active-attempt','running',false), completed_levels:0, recording:true}]};
+    let releasePreview;
+    const preview = {schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+      run:{game_id:gameId,run_id:null,status:'preview',seed:0,win_levels:winLevels,completed_level_count:0,
+        target_level:selectedLevel,primitive_action_count:0,replay_verified:false,sealed_trace:false},
+      levels:[{level:selectedLevel,status:'preview',frames:[{id:'initial-selected',grid:[[12,12],[12,12]],
+        state:'NOT_FINISHED',levels_completed:selectedLevel-1,available_actions:['ACTION1','RESET']}],
+        actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]};
+    let revision=1;
+    const app = launch(snapshot,{liveConfig:config,overview,fetch:async url=>{
+      if(controller && url==='/api/state')return response({...view(snapshot),revision:revision++});
+      if(url==='/api/replay/active-attempt')return response(snapshot);
+      if(url===`/api/preview/${gameId}/${selectedLevel}`)return new Promise(resolve=>{releasePreview=resolve;});
+      return response(idleView());
+    }});
+    try {
+      await settle(); app.$(`level-${selectedLevel}`).click(); await settle();
+      assert.ok(releasePreview, 'missing recorded level requests its actual initial frame');
+      app.tick();await settle();
+      assert.equal(app.$(`level-${selectedLevel}`).getAttribute('aria-current'),'true','same-run polls must not starve a pending preview');
+      releasePreview(response(preview)); await settle();
+      assert.equal(app.$('board-empty').hidden,true);
+      assert.match(app.$('frame-caption').textContent,/关卡初始预览/);
+      assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'active-attempt');
+      assert.equal(app.dom.window.__ASTERION_STATE__.levels.length,1);
+      app.tick(); await settle();
+      assert.equal(app.$(`level-${selectedLevel}`).getAttribute('aria-current'),'true');
+      assert.equal(app.$('board-empty').hidden,true);
+      assert.ok([...app.$('available-actions').querySelectorAll('button')].every(button=>button.disabled));
+      assert.equal(app.requests.some(entry=>['/api/start','/api/manual/open','/api/manual/action'].includes(entry.url)),false);
+      assert.deepEqual(app.errors,[]);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('a redo preserves saved level counts and uses saved frames only where its own observations are absent', async () => {
+  const gameId='saved-levels-test', config={token:'test-token',games:[{game_id:gameId,alias:'saved',win_levels:6,baseline_actions:[10,15,20,25,30,35]}]};
+  const active=fixture(); active.run={...active.run,game_id:gameId,run_id:'redo-attempt',seed:0,win_levels:6,completed_level_count:1,sealed_trace:false};
+  active.levels=[{...active.levels[0],status:'successful'}, {...active.levels[0],level:2,status:'incomplete',
+    frames:[{id:'redo-level2',grid:[[9,9],[9,9]],state:'NOT_FINISHED',levels_completed:1}],actions:active.levels[0].actions}];
+  const saved=fixture(); saved.run={...saved.run,game_id:gameId,run_id:'saved-four',seed:0,win_levels:6,completed_level_count:4,replay_verified:true,sealed_trace:true};
+  saved.levels=[9,12,7,5].map((count,index)=>({...fixture().levels[0],level:index+1,status:'successful',
+    frames:[{id:`saved-f${index}`,grid:[[12,12],[12,12]],state:'NOT_FINISHED',levels_completed:index}],
+    actions:Array.from({length:count},(_,i)=>({id:`saved-a${index}-${i}`,name:'ACTION1',before_frame:`saved-f${index}`,after_frame:`saved-f${index}`,data:{}})),
+    decisions:[],cognition:{scope:'final',stable_description:`游戏规则：保存关卡 ${index+1} 的认知。`,updates:[]}}));
+  const overview=overviewFixture(config);
+  overview.games[0]={...overview.games[0],status:'running',completed_levels:4,best_run_id:'saved-four',recording_run_id:'redo-attempt',
+    runs:[{...catalogRun('saved-four'),completed_levels:4},{...catalogRun('redo-attempt','running',false),recording:true}]};
+  const app=launch(active,{liveConfig:config,overview,fetch:async url=>{
+    if(url==='/api/replay/redo-attempt')return response(active);
+    if(url==='/api/replay/saved-four')return response(saved);
+    return response(idleView());
+  }});
+  try {
+    await settle();
+    assert.match(app.$('level-2').textContent,/已保存.*12 动作/, JSON.stringify(app.requests.map(entry=>entry.url)) + String(app.errors));
+    assert.match(app.$('level-3').textContent,/已保存.*7 动作/);
+    app.$('level-2').click(); await settle();
+    assert.equal(app.paints.at(-1),'#1E93FF');
+    assert.match(app.$('level-efficiency').textContent,/已保存.*12 动作/);
+    assert.match(app.$('level-efficiency').textContent,/本次.*1 动作/);
+    app.$('level-3').click(); await settle();
+    assert.equal(app.$('board-empty').hidden,true);
+    assert.match(app.$('frame-caption').textContent,/已保存.*saved-four/);
+    assert.match(app.$('world-guide').textContent,/保存关卡 3 的认知/);
+    app.tick(); await settle();
+    assert.equal(app.$('level-3').getAttribute('aria-current'),'true');
+    assert.match(app.$('level-3').textContent,/已保存.*7 动作/);
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'redo-attempt');
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.completed_level_count,1);
+    assert.equal(app.dom.window.__ASTERION_STATE__.levels.length,2);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('saved level sources survive improved routes, continuation, game changes and stale polls', async () => {
+  const gameId='route-transition-test', otherId='preview-transition-test';
+  const config={token:'test-token',games:[{game_id:gameId,alias:'route',win_levels:9,baseline_actions:[20,50,35,26,40,40,40,40,40]},
+    {game_id:otherId,alias:'preview',win_levels:6}]};
+  const record=(id,counts,{saved=false,firstLevel=1,color=12}={})=>({schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+    run:{game_id:gameId,run_id:id,seed:0,win_levels:9,status:saved?'incomplete':'running',completed_level_count:saved?counts.length:1,
+      primitive_action_count:counts.reduce((a,b)=>a+b,0),replay_verified:saved,sealed_trace:saved},
+    levels:counts.map((count,index)=>({level:index+firstLevel,status:saved?'successful':'incomplete',
+      frames:[0,1,2].map(frame=>({id:`${id}-l${index+firstLevel}-f${frame}`,grid:[[color,color],[color,color]],state:'NOT_FINISHED',levels_completed:index})),
+      actions:Array.from({length:count},(_,i)=>({id:`${id}-l${index+firstLevel}-a${i}`,name:'ACTION1',data:{}})),decisions:[],
+      cognition:{scope:'final',stable_description:`游戏规则：${id} 第 ${index+firstLevel} 关认知。`,updates:[]}})),decisions:[],warnings:[]});
+  const original=record('original-four',[19,49,34,25],{saved:true});
+  const improved=record('improved-four',[19,40,34,25],{saved:true,color:14});
+  const redo=record('retry-level2',[18],{firstLevel:2,color:9});
+  const next=record('next-level5',[2],{firstLevel:5,color:10});
+  let overview=overviewFixture(config), best=original, active=redo, holdPoll=false, releasePoll, releaseImproved;
+  const updateOverview=()=>{
+    overview.games[0]={...overview.games[0],status:'running',completed_levels:4,best_run_id:best.run.run_id,recording_run_id:active.run.run_id,
+      runs:[{...catalogRun(best.run.run_id),completed_levels:4,execution_mode:best===improved?'offline-replay':null},
+        {...catalogRun(active.run.run_id,'running',false),recording:true}]};
+  };
+  updateOverview();
+  const preview={schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+    run:{game_id:otherId,run_id:null,status:'preview',seed:0,win_levels:6,completed_level_count:0,primitive_action_count:0,target_level:1,replay_verified:false,sealed_trace:false},
+    levels:[{level:1,status:'preview',frames:[{id:'real-initial',grid:[[15]],state:'NOT_FINISHED',levels_completed:0}],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]};
+  const app=launch(redo,{liveConfig:config,overview:()=>overview,fetch:async url=>{
+    if(url==='/api/replay/original-four')return response(original);
+    if(url==='/api/replay/improved-four')return new Promise(resolve=>{releaseImproved=resolve;});
+    if(url==='/api/replay/retry-level2')return holdPoll?new Promise(resolve=>{releasePoll=resolve;}):response(redo);
+    if(url==='/api/replay/next-level5')return response(next);
+    if(url===`/api/preview/${otherId}`)return response(preview);
+    return response(idleView());
+  }});
+  const refresh=()=>[...app.timers.values()].find(fn=>fn.intervalMs===5000)();
+  const assertSaved=counts=>counts.forEach((count,index)=>assert.match(app.$(`level-${index+1}`).textContent,new RegExp(`已保存.*${count} 动作`)));
+  try {
+    await settle(); assertSaved([19,49,34,25]);
+    app.$('level-2').click();await settle();
+    assert.match(app.$('level-efficiency').textContent,/已保存.*49 动作.*本次 18 动作/);
+    best=improved;updateOverview();refresh();await settle();assert.ok(releaseImproved);
+    assert.match(app.$('level-2').textContent,/历史已保存.*最佳路线刷新中.*49 动作/);
+    assert.equal(app.$('level-2').dataset.savedSourceRunId,'original-four');
+    assert.equal(app.$('level-2').dataset.savedCurrentBest,'false');
+    assert.match(app.$('level-efficiency').textContent,/历史已保存.*最佳路线刷新中.*49 动作.*本次 18 动作/);
+    app.$('level-4').click();await settle();releaseImproved(response(improved));await settle();
+    // A late saved response updates authority, but cannot select the level that requested it.
+    assert.equal(app.$('level-4').getAttribute('aria-current'),'true');
+    app.$('level-3').click();await settle();assertSaved([19,40,34,25]);
+    assert.equal(app.$('level-2').dataset.savedSourceRunId,'improved-four');
+    assert.equal(app.$('level-2').dataset.savedCurrentBest,'true');
+    assert.doesNotMatch(app.$('level-2').textContent,/49 动作|刷新中/);
+    assert.match(app.$('world-guide').textContent,/improved-four 第 3 关认知/);
+    assert.match(app.$('frame-caption').textContent,/已保存.*improved-four.*离线 SDK 路线验证/);
+    app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    app.$('play-toggle').click();const playback=[...app.timers.values()].find(fn=>fn.intervalMs!==1000&&fn.intervalMs!==2000&&fn.intervalMs!==5000);
+    assert.ok(playback);refresh();await settle();
+    assert.equal(app.$('frame-slider').value,'1');assert.ok([...app.timers.values()].includes(playback));
+    active=next;updateOverview();refresh();await settle();assertSaved([19,40,34,25]);
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'next-level5');
+    assert.equal(app.$('level-3').getAttribute('aria-current'),'true');assert.equal(app.$('frame-slider').value,'1');
+    assert.match(app.$('world-guide').textContent,/improved-four 第 3 关认知/);
+    // An obsolete poll cannot put the prior attempt back after game selection.
+    active=redo;updateOverview();refresh();await settle();holdPoll=true;
+    const poll=[...app.timers.values()].find(fn=>fn.intervalMs===2000);poll();await settle();assert.ok(releasePoll);
+    changeGame(app,otherId);await settle();assert.match(app.$('frame-caption').textContent,/关卡初始预览/);
+    releasePoll(response(redo));await settle();assert.equal(app.dom.window.__ASTERION_STATE__.run.game_id,otherId);
+    holdPoll=false;active=next;updateOverview();changeGame(app,gameId);await settle();assertSaved([19,40,34,25]);
+    app.$('level-4').click();await settle();assert.match(app.$('world-guide').textContent,/improved-four 第 4 关认知/);
+    assert.equal(app.$('single-board').dataset.sourceRunId,'improved-four');
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.completed_level_count,1);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('saved route is the default after an attempt ends and latest attempt is an explicit pinned view', async () => {
   const config = {token:'test-token',games:[{game_id:'sp80-test',alias:'SP80',win_levels:3}]};
   const replay = (id, count) => {
@@ -2056,6 +2213,7 @@ test('live game aggregate 100 does not replace completed level efficiency 40.50'
     assert.match(app.$('level-efficiency').textContent, /基准 7 \/ 11 动作 \/ 关卡效率 40.50 分/);
     assert.match(app.$('level-1').textContent, /关卡效率 40.50 分/);
     app.$('level-2').click();
+    await settle();
     assert.match(app.$('level-efficiency').textContent, /基准 11 \/ 0 动作 \/ 关卡效率待完成/);
     assert.equal(app.$('level-efficiency').classList.contains('efficiency-low'), false);
     assert.deepEqual(app.errors, []);
