@@ -134,11 +134,12 @@ assert.match(scopes['cognition-scope'],/仅作规划背景，不表示此帧当�
             self.assertEqual(embedded(fixed), four)
             other = publish('20261005030000', 'as66-test', 1)
             self.assertEqual(embedded(root / 'p7-console.html'), other)
-            publish('20261005000000', 'sp80-test', 2)
+            latest_by_summary_mtime = publish('20261005000000', 'sp80-test', 2)
             self.assertEqual(embedded(fixed), four)
-            self.assertEqual(embedded(root / 'p7-console.html'), other)
+            self.assertEqual(embedded(root / 'p7-console.html'), latest_by_summary_mtime)
             five = publish('20261005040000', 'sp80-test', 5)
             self.assertEqual(embedded(fixed), five)
+            self.assertEqual(embedded(root / 'p7-console.html'), five)
 
     def test_replay_command_opens_fixed_file_without_game_or_model_work(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from importlib.resources import files
 import json
@@ -106,15 +107,120 @@ def _fixed_projection(path: Path) -> dict:
         raise ValueError("console output must be a regular HTML file")
     if not path.is_file():
         return {}
-    match = re.search(r'<script id="console-data" type="application/json">(.*?)</script>',
-                      path.read_text(encoding="utf-8"), re.S)
+    html = path.read_text(encoding="utf-8")
+    data = re.search(r'<script id="console-data" type="application/json">(.*?)</script>',
+                     html, re.S)
+    config = re.search(r'<script id="console-config" type="application/json">(.*?)</script>',
+                       html, re.S)
     try:
-        return json.loads(match[1]).get("run", {}) if match else {}
+        return {"snapshot": json.loads(data[1]) if data else {},
+                "config": json.loads(config[1]) if config else None}
     except (ValueError, AttributeError):
         return {}
 
 
-def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes) -> None:
+def _source_summary(runs_root: Path, run_id: object) -> tuple[dict, int]:
+    if (type(run_id) is not str or not _RUN_NAME.fullmatch(run_id)
+            or runs_root.is_symlink() or not runs_root.is_dir()):
+        return {}, 0
+    source = runs_root / run_id
+    summary_path = source / "summary.json"
+    if (source.is_symlink() or not source.is_dir() or summary_path.is_symlink()
+            or not summary_path.is_file()):
+        return {}, 0
+    try:
+        stat = summary_path.stat()
+        if stat.st_size > 32 * 1024 * 1024:
+            return {}, 0
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        return (summary if isinstance(summary, dict) else {}), stat.st_mtime_ns
+    except (OSError, UnicodeError, ValueError):
+        return {}, 0
+
+
+def _verified_partial(run_root: Path, summary: dict, run: dict):
+    prefix = summary.get("completed_prefix")
+    if prefix is None:
+        return None
+    from .live import read_trace_entries
+    from .score import replay_sha256
+    from .solutions import _prefix_values, _transitions, _truncate
+
+    if (type(prefix) is not dict or prefix.get("levels_completed") != run.get("completed_level_count")
+            or _prefix_values(prefix, run.get("game_id"), run.get("seed"), run.get("win_levels"),
+                              is_partial=True) is None):
+        return False
+    entries = read_trace_entries(run_root / "trace")
+    markers = [entry.payload for entry in entries if entry.kind == "arc.run.partial"]
+    transitions = _truncate(_transitions(entries), prefix["levels_completed"])
+    if (markers != [prefix] or len(transitions) != prefix["primitive_actions"]
+            or replay_sha256(transitions, terminal_reason="level-completed") != prefix["replay_sha256"]):
+        return False
+    return prefix, transitions
+
+
+def _route_score(snapshot: dict, summary: dict, run: dict, config: object, partial) -> Decimal | None:
+    levels = snapshot.get("levels", [])
+    if isinstance(levels, list):
+        for level in levels:
+            receipt = level.get("receipt") if isinstance(level, dict) else None
+            if isinstance(receipt, dict) and level.get("level") == run.get("completed_level_count"):
+                score = receipt.get("partial_game_score")
+                try:
+                    value = Decimal(score)
+                    if value.is_finite() and value >= 0:
+                        return value
+                except (InvalidOperation, TypeError):
+                    pass
+    receipt = summary.get("receipt")
+    if isinstance(receipt, dict):
+        score = receipt.get("partial_game_score")
+        try:
+            value = Decimal(score)
+            if value.is_finite() and value >= 0:
+                return value
+        except (InvalidOperation, TypeError):
+            pass
+    if partial is None or not isinstance(config, dict):
+        return None
+    games = config.get("games")
+    game = next((item for item in games if isinstance(item, dict)
+                 and item.get("game_id") == run.get("game_id")), None) if isinstance(games, list) else None
+    baseline = game.get("baseline_actions") if game else None
+    if (not isinstance(baseline, list) or game.get("win_levels") != run.get("win_levels")
+            or len(baseline) != run.get("win_levels")):
+        return None
+    try:
+        from .game import P7GameSelection
+        from .score import partial_game_score
+        prefix, transitions = partial
+        action_counts, previous = [], 0
+        for level_number in range(1, prefix["levels_completed"] + 1):
+            end = next(item.sequence for item in transitions if item.levels_completed == level_number)
+            action_counts.append(end - previous)
+            previous = end
+        selection = P7GameSelection(run["game_id"], run["seed"], len(action_counts),
+                                    tuple(baseline), game["win_levels"])
+        return Decimal(partial_game_score(tuple(action_counts), selection))
+    except (KeyError, StopIteration, TypeError, ValueError, InvalidOperation):
+        return None
+
+
+def _fixed_rank(snapshot: dict, summary: dict, config: object, mtime: int, partial=None):
+    run = snapshot.get("run", {})
+    if not isinstance(run, dict):
+        return (0, False, Decimal(-1), 0, mtime)
+    completed = run.get("completed_level_count")
+    completed = completed if type(completed) is int and completed > 0 else 0
+    route_actions = partial[0].get("primitive_actions") if partial else run.get("primitive_action_count")
+    route_actions = route_actions if type(route_actions) is int and route_actions > 0 else 10**9
+    score = _route_score(snapshot, summary, run, config, partial)
+    return (completed, score is not None, score if score is not None else Decimal(-1),
+            -route_actions, mtime)
+
+
+def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes,
+                           replay_config: dict[str, object] | None = None) -> None:
     """Keep stable viewing files, without replacing a better saved progression."""
     run = snapshot.get("run", {})
     game_id = run.get("game_id")
@@ -131,23 +237,10 @@ def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes) -> No
     if (summary.get("run_id") != run_root.name or any(summary.get(key) is not True
             for key in ("sealed_trace", "replay_verified", "cleanup_complete"))):
         return
-    prefix = summary.get("completed_prefix")
-    if prefix is not None:
-        from .live import read_trace_entries
-        from .score import replay_sha256
-        from .solutions import _prefix_values, _transitions, _truncate
-
-        if (type(prefix) is not dict or prefix.get("levels_completed") != run["completed_level_count"]
-                or _prefix_values(prefix, game_id, run.get("seed"), run.get("win_levels"),
-                                  is_partial=True) is None):
-            return
-        entries = read_trace_entries(run_root / "trace")
-        markers = [entry.payload for entry in entries if entry.kind == "arc.run.partial"]
-        transitions = _truncate(_transitions(entries), prefix["levels_completed"])
-        if (markers != [prefix] or len(transitions) != prefix["primitive_actions"]
-                or replay_sha256(transitions, terminal_reason="level-completed") != prefix["replay_sha256"]):
-            return
-    elif run.get("replay_verified") is not True:
+    partial = _verified_partial(run_root, summary, run)
+    if partial is False:
+        return
+    if partial is None and run.get("replay_verified") is not True:
         return
     root = run_root.parent.resolve()
     game_path = root / "replays" / (game_id.split("-")[0] + ".html")
@@ -155,11 +248,30 @@ def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes) -> No
     # Validate both outputs before publication, including an existing linked file.
     previous_game = _fixed_projection(game_path)
     previous_latest = _fixed_projection(latest_path)
-    rank = (run["completed_level_count"], run["run_id"])
-    old_rank = (previous_game.get("completed_level_count", 0), previous_game.get("run_id", ""))
-    if rank >= old_rank:
+    current_config = replay_config if replay_config is not None else previous_game.get("config")
+    candidate_rank = _fixed_rank(snapshot, summary, current_config,
+                                 summary_path.stat().st_mtime_ns, partial)
+    previous_snapshot = previous_game.get("snapshot", {})
+    previous_run = previous_snapshot.get("run", {}) if isinstance(previous_snapshot, dict) else {}
+    previous_summary, previous_mtime = _source_summary(root, previous_run.get("run_id"))
+    previous_partial = None
+    previous_run_root = root / previous_run.get("run_id", "") if previous_run else root
+    if previous_summary.get("completed_prefix") is not None and previous_run_root.is_dir():
+        try:
+            previous_partial = _verified_partial(previous_run_root, previous_summary, previous_run)
+            if previous_partial is False:
+                previous_partial = None
+        except (OSError, ValueError, TypeError, KeyError):
+            previous_partial = None
+    old_rank = _fixed_rank(previous_snapshot if isinstance(previous_snapshot, dict) else {},
+                           previous_summary, previous_game.get("config"), previous_mtime, previous_partial)
+    same_game_source = run["run_id"] == previous_run.get("run_id")
+    if candidate_rank > old_rank or same_game_source:
         write_atomic_file(game_path, payload)
-    if run["run_id"] >= previous_latest.get("run_id", ""):
+    latest_run = previous_latest.get("snapshot", {}).get("run", {})
+    latest_run_id = latest_run.get("run_id") if isinstance(latest_run, dict) else None
+    _, latest_mtime = _source_summary(root, latest_run_id)
+    if summary_path.stat().st_mtime_ns > latest_mtime or run["run_id"] == latest_run_id:
         write_atomic_file(latest_path, payload)
 
 
@@ -175,7 +287,7 @@ def export_console(run_root: Path, output: Path | None = None, *,
     # while refusing to replace a symbolic-link output file above.
     write_atomic_file(destination.parent.resolve() / destination.name, payload)
     if output is None:
-        _publish_fixed_replays(Path(run_root), snapshot, payload)
+        _publish_fixed_replays(Path(run_root), snapshot, payload, replay_config)
     return destination
 
 
