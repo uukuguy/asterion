@@ -3651,3 +3651,4 @@
 - 09:36 新增离线单 HTML 关卡控制台，以画面回放、稳定认知和 P7 过程替代日志阅读。[60c67ba2]
 - 09:36 控制台 29 项 Python、4 项 DOM、lint、docs、隔离 wheel 导出通过；Chrome 视觉验收因扩展超时受限。
 - 单 HTML 控制台完整 promotion 检查未通过：3794 项测试，13 failures / 5 errors / 4 skipped；保留日志尾部指出 context-witness.test.mjs 的 source-detachment 失败，其余失败未逐项归因。更新活动 checkpoint，保留无新过关证据和浏览器视觉验收受限边界。
+- 09:39 更新控制台恢复记录，明确验证结果和未完成边界。[8738a59c]
