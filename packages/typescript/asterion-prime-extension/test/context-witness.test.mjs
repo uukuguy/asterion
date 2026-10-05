@@ -14,24 +14,15 @@ const command = "b".repeat(64);
 const authority = "c".repeat(64);
 const base = { protocol: "asterion.prime-context-witness/v1", launch_nonce: launch, command_nonce: command, authority_sha256: authority };
 const artifact = pathToFileURL(resolve("dist/ipython-extension.mjs")).href;
-// These tests exercise Pi's private compaction driver through the historical
-// Prime Agent checkout. That checkout was removed with the Prime Gateway
-// surface, and the installed Pi 0.99.x line no longer exposes the
+// These tests require a historical private compaction harness. That harness
+// was removed with the legacy gateway surface, and installed Pi no longer exposes the
 // `_performCompaction` seam used by the witness harness. Keep the protocol and
 // registration tests below active, but do not replace the missing mechanics
 // with a local fake.
-const historicalPiRoot = resolve("../../../../3th-party/prime-agent");
 const harnessPath = resolve("test/context-witness-harness.mjs");
-const historicalAgentSession = join(historicalPiRoot, "packages/coding-agent/dist/core/agent-session.js");
-const externalMechanicsSkip = !existsSync(historicalPiRoot)
-  ? "external Pi mechanics unavailable: the pinned 3th-party/prime-agent checkout is absent"
-  : !existsSync(harnessPath)
-    ? "external Pi mechanics unavailable: the compatibility harness is absent"
-    : !existsSync(historicalAgentSession)
-      ? "external Pi mechanics unavailable: the pinned AgentSession build is absent"
-    : !readFileSync(historicalAgentSession, "utf8").includes("_performCompaction")
-      ? "external Pi mechanics unavailable: the available AgentSession has no historical _performCompaction seam"
-      : false;
+const externalMechanicsSkip = !existsSync(harnessPath)
+  ? "external Pi mechanics unavailable: the compatibility harness is absent"
+  : false;
 // The native side is authoritative for the prompt material and delivers it on
 // the arm frame, so the shared fixture supplies it here too.
 const material = JSON.parse(readFileSync(

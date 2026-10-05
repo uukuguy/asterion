@@ -194,9 +194,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
                 receipt_path.symlink_to(moved.name)
                 self.assertFalse(scheduler._campaign_entry_is_valid(entry))
 
-    def test_execution_stall_accepts_sealed_replay_verified_partial(self) -> None:
-        from types import SimpleNamespace
-
+    def test_execution_stall_rejects_sealed_replay_verified_partial(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             scheduler, run, summary, entry = self._execution_failure_fixture(Path(directory))
             summary = {
@@ -220,28 +218,22 @@ class TestPrimeP7Sweep(unittest.TestCase):
                     (run / "trace" / "prime-trace.jsonl").read_text().splitlines()[-1]
                 )["sha256"],
             }), encoding="utf-8")
-            from asterion.applications.prime.p7.broker import ArcTransition
-            with patch("tools.run_prime_p7_sweep.load_best_prefix", return_value=SimpleNamespace(
-                levels_completed=1, primitive_actions=1,
-                transitions=(ArcTransition(1, "ACTION1", "sha256:" + "0" * 64, "sha256:" + "1" * 64, 1),),
-            )):
-                entry["outcome"] = "execution-stalled"
-                self.assertTrue(scheduler._campaign_entry_is_valid(entry))
+            entry["outcome"] = "execution-stalled"
+            # A stall receipt is supervisor evidence for an unsealed trace.
+            # Sealed partial outcomes have their own replay/summary contract.
+            self.assertFalse(scheduler._campaign_entry_is_valid(entry))
 
-    def test_write_stall_receipt_allows_sealed_trace(self) -> None:
+    def test_write_stall_receipt_rejects_sealed_trace(self) -> None:
         from tools.run_prime_p7_sweep import _write_stall_receipt
 
         with tempfile.TemporaryDirectory() as directory:
-            scheduler, run, _summary, _entry = self._execution_failure_fixture(Path(directory))
-            trace = run / "trace" / "prime-trace.jsonl"
-            final = json.loads(trace.read_text(encoding="utf-8").splitlines()[-1])
-            self.assertTrue(_write_stall_receipt(
+            _scheduler, run, _summary, _entry = self._execution_failure_fixture(Path(directory))
+            self.assertFalse(_write_stall_receipt(
                 run, game_id="lp85-305b61c3", run_id="fixture-failed",
                 action_count=2, expected_action_count=2, stall_seconds=300,
                 cleanup_complete=True,
             ))
-            receipt = json.loads((run / "stall-receipt.json").read_text(encoding="utf-8"))
-            self.assertEqual(receipt["trace_final_sha256"], final["sha256"])
+            self.assertFalse((run / "stall-receipt.json").exists())
 
     def test_next_level_stall_requires_exact_verified_multi_level_prefix(self) -> None:
         from types import SimpleNamespace
@@ -674,7 +666,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
         self.assertEqual(bounded_environment["ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"], "")
         self.assertEqual(bounded_environment["OPERATION_MODE"], "")
 
-    def test_attempt_forwards_dotenv_model_selection_over_stale_terminal_values(self) -> None:
+    def test_attempt_preserves_inherited_provider_model_values(self) -> None:
         from types import SimpleNamespace
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
@@ -687,11 +679,6 @@ class TestPrimeP7Sweep(unittest.TestCase):
             clear=False,
         ):
             root = Path(directory)
-            (root / ".env").write_text(
-                "ASTERION_PRIME_PROVIDER=openai-codex\n"
-                "ASTERION_PRIME_MODEL=gpt-6.1-sol\n",
-                encoding="utf-8",
-            )
             process = SimpleNamespace(returncode=1, communicate=lambda **_kwargs: ("", ""))
             scheduler = SweepScheduler(SweepConfig(
                 root / "arc", root / "runs", command=("attempt",), guest_machine=None,
@@ -702,11 +689,14 @@ class TestPrimeP7Sweep(unittest.TestCase):
             environment = popen.call_args.kwargs["env"]
 
         self.assertEqual(environment["ASTERION_PRIME_PROVIDER"], "openai-codex")
-        self.assertEqual(environment["ASTERION_PRIME_MODEL"], "gpt-6.1-sol")
+        self.assertEqual(environment["ASTERION_PRIME_MODEL"], "gpt-6-sol")
 
     def test_make_forwards_first_round_runtime_marker_and_offline_mode(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
-        recipe = makefile.split("asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:\n", 1)[1]
+        recipe = makefile.split(
+            "asterion-prime-p7-solve asterion-prime-p7-cognition "
+            "asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt:\n", 1
+        )[1]
         contract = (Path(__file__).resolve().parents[1] / "tools" / "p7_guest_environment.txt").read_text(encoding="utf-8")
         self.assertIn("tools/p7_guest_environment.txt", recipe)
         self.assertIn("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND\n", contract)
@@ -959,7 +949,7 @@ time.sleep(10)
         self.assertEqual(result.attempted, 1)
         self.assertEqual(result.stopped_reason, "child-evidence-missing")
 
-    def test_guest_launch_without_trace_hits_startup_timeout(self) -> None:
+    def test_guest_launch_without_trace_hits_attempt_timeout(self) -> None:
         from tools.run_prime_p7_sweep import SweepConfig, SweepScheduler
 
         with tempfile.TemporaryDirectory() as directory:
@@ -967,10 +957,9 @@ time.sleep(10)
             scheduler = SweepScheduler(SweepConfig(
                 arc_root=root / "arc", runs_root=root / "runs", repo_root=root,
                 command=("/bin/sh", "-c", "sleep 10"), guest_machine=None,
-                startup_timeout_seconds=0.05,
             ))
-            scheduler._attempt("a-1", 1, 1)
-        self.assertEqual(scheduler._stop_reason, "child-launch-timeout")
+            scheduler._attempt("a-1", 1, 0.05)
+        self.assertEqual(scheduler._stop_reason, "run-timeout")
 
     def test_unconfirmed_guest_cleanup_halts_sweep(self) -> None:
         import subprocess

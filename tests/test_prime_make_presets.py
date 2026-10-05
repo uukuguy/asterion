@@ -6,6 +6,13 @@ import unittest
 from pathlib import Path
 import os
 import subprocess
+import tempfile
+
+
+_P7_PRESET_TARGETS = (
+    "asterion-prime-p7-solve asterion-prime-p7-cognition "
+    "asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt"
+)
 
 
 def _recipe(makefile: str, target: str) -> str:
@@ -156,7 +163,7 @@ class TestPrimeMakePresets(unittest.TestCase):
     def test_p7_guest_receives_configuration_selected_model_and_provider(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text()
-        recipe = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
+        recipe = _recipe(makefile, _P7_PRESET_TARGETS)
         contract = (root / "tools" / "p7_guest_environment.txt").read_text()
         self.assertIn("tools/p7_guest_environment.txt", recipe)
         self.assertIn('tr "\\\\n" ":"', recipe)
@@ -166,19 +173,23 @@ class TestPrimeMakePresets(unittest.TestCase):
 
     def test_make_model_selection_overrides_stale_terminal_export(self) -> None:
         root = Path(__file__).resolve().parents[1]
-        dotenv = {}
-        for line in (root / ".env").read_text().splitlines():
-            if "=" in line and not line.lstrip().startswith("#"):
-                key, value = line.split("=", 1)
-                if key in {"ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL"}:
-                    dotenv[key] = value.strip().strip("'\"")
-        self.assertIn("ASTERION_PRIME_MODEL", dotenv)
+        dotenv = {
+            "ASTERION_PRIME_PROVIDER": "fixture-provider",
+            "ASTERION_PRIME_MODEL": "fixture-model",
+        }
         probe = "p7-model-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_PROVIDER):$(ASTERION_PRIME_MODEL)'\n"
-        completed = subprocess.run(
-            ["make", "--no-print-directory", "-s", "-f", "Makefile", "-f", "-",
-             "p7-model-probe", "ASTERION_PRIME_PROVIDER=stale", "ASTERION_PRIME_MODEL=gpt-6-sol"],
-            cwd=root, text=True, input=probe, capture_output=True, check=True,
-        )
+        with tempfile.TemporaryDirectory() as temporary:
+            operator_root = Path(temporary)
+            (operator_root / ".env").write_text(
+                "\n".join(f"{key}={value}" for key, value in dotenv.items()) + "\n",
+                encoding="utf-8",
+            )
+            completed = subprocess.run(
+                ["make", "--no-print-directory", "-s", "-f", str(root / "Makefile"),
+                 "-f", "-", "p7-model-probe", "ASTERION_PRIME_PROVIDER=stale",
+                 "ASTERION_PRIME_MODEL=gpt-6-sol"],
+                cwd=operator_root, text=True, input=probe, capture_output=True, check=True,
+            )
         self.assertEqual(
             completed.stdout.strip(),
             f"{dotenv['ASTERION_PRIME_PROVIDER']}:{dotenv['ASTERION_PRIME_MODEL']}",
@@ -187,7 +198,7 @@ class TestPrimeMakePresets(unittest.TestCase):
     def test_p7_history_variant_reaches_only_local_witness_and_sweep_guest(self) -> None:
         root = Path(__file__).resolve().parents[1]
         makefile = (root / "Makefile").read_text()
-        local = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
+        local = _recipe(makefile, _P7_PRESET_TARGETS)
         official = _recipe(makefile, "asterion-prime-p7-official-preflight asterion-prime-p7-official-submit asterion-prime-p7-official-live-eval")
         self.assertIn("tools/p7_guest_environment.txt", local)
         self.assertIn("ASTERION_PRIME_P7_HISTORY_VARIANT\n", (root / "tools" / "p7_guest_environment.txt").read_text())
@@ -337,7 +348,7 @@ class TestPrimeMakePresets(unittest.TestCase):
 
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text()
         self.assertNotIn("/Users/", makefile)
-        recipe = _recipe(makefile, "asterion-prime-p7-solve asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt")
+        recipe = _recipe(makefile, _P7_PRESET_TARGETS)
         for literal in (
             '$(CURDIR)/.asterion-prime-p7-wheel.XXXXXX',
             "trap",

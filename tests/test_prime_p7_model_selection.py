@@ -211,7 +211,7 @@ class TestP7ModelSelection(unittest.TestCase):
         self.assertFalse(_known_trace_identities("identities", None))
 
     def test_launch_command_must_declare_exactly_one_selection(self) -> None:
-        from asterion.applications.prime.runtime_binding import _launch_selection
+        from asterion.applications.prime.p7.runtime_binding import _launch_selection
 
         self.assertEqual(
             _launch_selection(

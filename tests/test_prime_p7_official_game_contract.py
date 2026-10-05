@@ -119,8 +119,8 @@ class TestOfficialGameContract(unittest.TestCase):
             finally:
                 recorder.close()
 
-    def test_local_replay_digest_is_unchanged(self):
+    def test_local_unified_observation_replay_digest_is_pinned(self):
         broker = ArcBroker(engine=_Engine(level_after=2))
         broker.act(("ACTION1", "ACTION1"))
-        self.assertEqual(broker.seal().replay_sha256, "sha256:299c813a28a944d87571e156c8d5d1f0e14444dec3dbef2b7e14baed3a7774f7")
+        self.assertEqual(broker.seal().replay_sha256, "sha256:97c8997fd8e82cbbf256e86307cf30bcc32b341c9c0fbd83b20ae09e7fdb38ac")
         self.assertEqual(broker.replay(lambda: _Engine(level_after=2)), broker.seal())

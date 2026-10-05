@@ -55,12 +55,12 @@ class TestNativeP7Replay(unittest.TestCase):
         self.assertEqual(broker.seal().terminal_reason, "action-cap")
         self.assertEqual(broker.replay(_Engine), broker.seal())
 
-    def test_historical_partial_journal_digest_is_unchanged(self) -> None:
+    def test_unified_observation_partial_journal_digest_is_pinned(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
 
         broker = ArcBroker(engine=_Engine(level_after=2))
         broker.act(("ACTION1", "ACTION2"))
-        self.assertEqual(broker.seal().replay_sha256, "sha256:6ec90e9f7e39977912320516ef2ebda7f3d08f7facace7911d90281530775350")
+        self.assertEqual(broker.seal().replay_sha256, "sha256:003ab3856f737693c177e2ce2db25fd601c0c9ed07b724b28f55502df381b440")
         self.assertEqual(broker.replay(lambda: _Engine(level_after=2)), broker.seal())
 
     def test_second_level_replays_full_cross_level_journal(self) -> None:
