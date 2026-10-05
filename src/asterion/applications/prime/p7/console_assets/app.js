@@ -77,7 +77,7 @@
   let liveConfig = null;
   try { liveConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   if (!isRecord(liveConfig) || typeof liveConfig.token !== 'string' || !liveConfig.token) liveConfig = null;
-  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
+  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const currentLevel = () => levels[state.levelIndex] || emptyLevel;
   const frames = () => array(currentLevel().frames);
@@ -87,7 +87,7 @@
   const selectedAction = () => actions().find((action) => action.id === state.actionId) || null;
   const manualPlayable = () => state.mode === 'manual' && run.status === 'manual' && state.manualView?.state === 'ready' &&
     state.manualView.game_id === run.game_id && manualLevel(state.manualView) === currentLevel().level && !state.manualBusy && !state.manualPending && !state.manualError &&
-    !state.commandBusy && !state.pendingCommand && !activeSession() && Boolean(currentFrame()) && manualAtCurrent();
+    !state.commandBusy && !state.pendingCommand && !activeSession() && !manualUnsaved() && Boolean(currentFrame()) && manualAtCurrent();
   const manualHistoryActive = () => state.mode === 'manual' && run.status === 'manual' && Boolean(state.manualHistory && state.manualView && state.manualHistory.session_id === state.manualView.session_id);
   const manualAtCurrent = () => !manualHistoryActive() || state.manualHistory.index === state.manualHistory.entries.length - 1;
   const timelineCount = () => manualHistoryActive() ? state.manualHistory.entries.length : frames().length;
@@ -106,40 +106,62 @@
     renderFrame(); renderSessionControls();
   }
 
+  function sameManualFrame(left, right) {
+    return ['id', 'state', 'levels_completed', 'timestamp'].every((key) => left[key] === right[key]) &&
+      JSON.stringify(left.grid) === JSON.stringify(right.grid) && JSON.stringify(left.available_actions) === JSON.stringify(right.available_actions);
+  }
+
+  function sameManualAction(left, right) {
+    return left == null || right == null ? left == null && right == null : left.action === right.action &&
+      left.observation_version === right.observation_version && Object.keys(left.data).length === Object.keys(right.data).length &&
+      Object.keys(left.data).every((key) => left.data[key] === right.data[key]);
+  }
+
   function appendManualObservation(view) {
     const record = array(view.snapshot?.levels).find((level) => level.level === manualLevel(view));
     const frame = array(record?.frames).at(-1);
     if (!frame) return false;
     const existing = state.manualHistory;
     const same = existing?.session_id === view.session_id && existing.game_id === view.game_id;
-    const history = same ? { ...existing, entries: [...existing.entries] } : { session_id: view.session_id, game_id: view.game_id, entries: [], index: 0 };
-    const previous = history.entries.at(-1);
-    if (previous?.version >= view.observation_version) return false;
-    const follow = !same || history.index === history.entries.length - 1;
-    const entry = { version: view.observation_version, episode_id: view.episode_id, level: record.level, record, frame,
-      count: view.action_count, gap: previous ? view.observation_version - previous.version - 1 : view.observation_version, action: null };
-    const last = view.last_action;
-    if (previous && entry.version === previous.version + 1 && last?.observation_version === entry.version &&
-        view.action_count === previous.count + 1 && array(previous.frame.available_actions).includes(last.action)) {
-      const before = previous.frame.grid, after = frame.grid;
-      let changed = 0;
-      for (let y = 0; y < Math.max(before.length, after.length); y += 1) {
-        for (let x = 0; x < Math.max(array(before[y]).length, array(after[y]).length); x += 1) {
-          if (before[y]?.[x] !== after[y]?.[x]) changed += 1;
-        }
+    const source = view.history?.length ? view.history : [{ observation_version: view.observation_version,
+      episode_id: view.episode_id, action_count: view.action_count, level: record.level, frame, last_action: view.last_action }];
+    const observations = new Map(same ? existing.entries.map((entry) => [entry.version, entry]) : []);
+    source.forEach((item) => {
+      const previous = observations.get(item.observation_version);
+      if (previous) {
+        if (previous.level !== item.level || previous.count !== item.action_count || previous.episode_id !== item.episode_id ||
+            !sameManualFrame(previous.frame, item.frame) || !sameManualAction(previous.last_action, item.last_action)) throw new Error('invalid-response');
+        return;
       }
-      entry.action = { id: `manual-action-${entry.version}`, name: last.action, data: last.data,
-        before_frame: previous.frame.id, after_frame: frame.id, changed_cells: changed };
-    }
-    history.entries.push(entry);
-    // Match the controller's finite 1000-action session boundary; no persisted history.
-    const removed = Math.max(0, history.entries.length - 1001);
-    if (removed) {
-      history.entries = history.entries.slice(removed);
-      history.entries[0] = { ...history.entries[0], action: null };
-    }
-    history.index = follow ? history.entries.length - 1 : Math.max(0, history.index - removed);
-    state.manualHistory = history;
+      const historical = item.observation_version !== view.observation_version;
+      const itemRecord = historical ? { level: item.level, status: 'manual', frames: [item.frame], actions: [], decisions: [], cognition: { scope: 'unavailable' } } : record;
+      observations.set(item.observation_version, { version: item.observation_version, episode_id: item.episode_id,
+        count: item.action_count, level: item.level, record: itemRecord, frame: item.frame, last_action: item.last_action, action: null });
+    });
+    const entries = [...observations.values()].sort((a, b) => a.version - b.version).slice(-1001);
+    if (same && entries.length === existing.entries.length && entries.every((entry, index) => entry === existing.entries[index])) return false;
+    const derived = entries.map((item, index) => {
+      const previous = entries[index - 1], last = item.last_action;
+      const entry = { ...item, gap: previous ? item.version - previous.version - 1 : item.version, action: null };
+      if (previous && entry.version === previous.version + 1 && last?.observation_version === entry.version &&
+          entry.count === previous.count + 1 && array(previous.frame.available_actions).includes(last.action)) {
+        const before = previous.frame.grid, after = entry.frame.grid;
+        let changed = 0;
+        for (let y = 0; y < Math.max(before.length, after.length); y += 1) {
+          for (let x = 0; x < Math.max(array(before[y]).length, array(after[y]).length); x += 1) {
+            if (before[y]?.[x] !== after[y]?.[x]) changed += 1;
+          }
+        }
+        entry.action = { id: `manual-action-${entry.version}`, name: last.action, data: last.data,
+          before_frame: previous.frame.id, after_frame: entry.frame.id, changed_cells: changed };
+      }
+      return entry;
+    });
+    const selectedVersion = same ? existing.entries[existing.index]?.version : null;
+    const follow = !same || existing.index === existing.entries.length - 1;
+    const selectedIndex = derived.findIndex((entry) => entry.version === selectedVersion);
+    state.manualHistory = { session_id: view.session_id, game_id: view.game_id, entries: derived,
+      index: follow ? derived.length - 1 : Math.max(0, selectedIndex) };
     return true;
   }
 
@@ -179,7 +201,7 @@
       if (list.children[index] !== button) list.insertBefore(button, list.children[index] || null);
     });
     const missing = history.entries.some((entry) => entry.gap > 0);
-    write('manual-history-note', missing ? '本页试玩记录 · 中间或更早的观察记录缺失，不补写动作' : '本页试玩记录 · 播放与定位只查看画面');
+    write('manual-history-note', missing ? '试玩记录 · 中间或更早的观察记录缺失，不补写动作' : '试玩记录 · 播放与定位只查看画面');
   }
 
   const statuses = {
@@ -235,13 +257,15 @@
       const manual = state.mode === 'manual';
       const [label, tone] = manual && !array(level.frames).length ? ['可直接试玩', 'neutral'] : statusInfo(level.status === 'successful' ? 'completed' : level.status);
       button.disabled = manual && manualSelectionLocked();
-      button.setAttribute('aria-label', `关卡 ${level.level}，${label}，${array(level.actions).length} 个动作`);
+      const saved = manual && state.manualView?.game_id === run.game_id && array(state.manualView.saved_levels).includes(level.level);
+      button.setAttribute('aria-label', `关卡 ${level.level}，${label}${saved ? '，已保存，可继续' : ''}，${array(level.actions).length} 个动作`);
       button.append(node('span', String(level.level).padStart(2, '0'), 'level-number'));
       const content = node('div', undefined, 'level-item-content');
       const heading = node('div', undefined, 'level-item-heading');
       const dot = node('span', undefined, `level-status-dot status-${tone}`);
       dot.setAttribute('aria-hidden', 'true');
       heading.append(node('strong', `关卡 ${level.level}`), dot);
+      if (saved) heading.append(node('span', '已保存', 'level-saved-badge'));
       content.append(heading, node('p', label, 'level-item-status'));
       content.append(node('p', `${array(level.actions).length} 动作 · ${array(level.frames).length ? `${array(level.frames).length} 帧` : '无画面'}${level.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
       button.append(content);
@@ -859,7 +883,8 @@
 
   const sessionLabels = { idle: '就绪 · 尚未启动', starting: '启动中', running: 'P7 运行中', stopping: '结束中 · 等待清理确认', completed: '运行完成 · 有完成证据', incomplete: '运行未完成', cancelled: '运行已结束', 'timed-out': '运行超时', failed: '运行失败', 'cleanup-unconfirmed': '清理未确认 · 无法启动新运行' };
   const activeSession = () => ['starting', 'running', 'stopping', 'cleanup-unconfirmed'].includes(state.liveView?.state);
-  const manualSelectionLocked = () => !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
+  const manualUnsaved = () => state.manualView?.state === 'ready' && state.manualView.save_status === 'failed';
+  const manualSelectionLocked = () => manualUnsaved() || !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
   function validChoice(choice) {
     if (!isRecord(choice) || typeof choice.game_id !== 'string' || !Number.isInteger(choice.level)) return false;
     const game = array(liveConfig?.games).find((entry) => entry.game_id === choice.game_id);
@@ -882,15 +907,27 @@
     write('actions-mode', manual ? '人工试玩动作' : live ? '运行观察' : '只读回放');
     write('actions-note', manual ? !manualAtCurrent() ? '历史画面只读；返回当前画面后可操作' : state.pointerAction === 'ACTION6' ? '点击画面目标格执行 ACTION6' : '执行可用动作；按键含义尚未识别' : live ? '动作由 P7 执行，此处只观察' : '点击定位已录动作');
     renderManualFeedback();
+    const saveStatus = state.manualView?.save_status;
+    $('manual-save-status').hidden = !manual || !saveStatus || saveStatus === 'disabled';
+    write('manual-save-status', saveStatus === 'failed' ? '保存失败 · 当前进度尚未保存' : saveStatus === 'saved' ? `自动保存${state.manualView.restored ? ' · 已恢复' : ''}` : saveStatus === 'pending' ? '已保留该关原存档；继续操作后更新' : '');
     write('manual-note', liveConfig ? manual ? '点击左侧关卡可直接试玩任意关卡；直接选择不代表已过关。启动 P7 会从第 1 关开始全新运行。画面获得焦点时可按 1–7 选择 ACTION 按键。' : '人工试玩独立于 P7；P7 运行时动作面板仅展示观察。' : '离线回放不执行游戏动作。');
-    document.querySelectorAll('.level-button').forEach((button) => { button.disabled = manual && manualSelectionLocked(); });
-    $('run-start').disabled = !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
-    $('game-select').disabled = !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
+    document.querySelectorAll('.level-button').forEach((button) => {
+      button.disabled = manual && manualSelectionLocked();
+      const saved = manual && state.manualView?.game_id === run.game_id && array(state.manualView.saved_levels).includes(Number(button.id.slice(6)));
+      const badge = button.querySelector('.level-saved-badge');
+      if (saved && !badge) button.querySelector('.level-item-heading').append(node('span', '已保存', 'level-saved-badge'));
+      else if (!saved && badge) badge.remove();
+      const label = button.getAttribute('aria-label').replace('，已保存，可继续', '');
+      button.setAttribute('aria-label', saved ? `${label}，已保存，可继续` : label);
+    });
+    $('run-start').disabled = manualUnsaved() || !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
+    $('game-select').disabled = manualUnsaved() || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
     $('run-stop').disabled = !state.liveView?.session_id || !['starting', 'running'].includes(state.liveView?.state) || state.commandBusy || Boolean(state.pendingCommand);
     $('manual-close').hidden = !manual;
     $('manual-close').textContent = state.manualView?.state === 'ready' && !state.manualError ? '结束试玩' : '重新打开试玩';
     $('manual-close').disabled = !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
-    $('retry-command').hidden = (!state.pendingCommand && !state.manualPending) || state.commandBusy || state.manualBusy;
+    $('retry-command').hidden = (!state.pendingCommand && !(manual && (state.manualPending || state.manualSaveRetry))) || state.commandBusy || state.manualBusy;
+    $('retry-command').textContent = !state.pendingCommand && !state.manualPending && state.manualSaveRetry ? '重试保存' : '重试原请求';
     $('replay-load').disabled = !$('replay-run').value;
     write('session-id', manual && state.manualView?.session_id ? `试玩 ${state.manualView.session_id}` : state.liveView?.session_id ? `会话 ${state.liveView.session_id}` : '');
   }
@@ -971,7 +1008,7 @@
     const game = array(liveConfig.games).find((entry) => entry.game_id === gameId);
     if (!game || !validChoice({ game_id: gameId, level })) return;
     state.manualChoice = { game_id: gameId, level };
-    invalidateManual(); state.manualView = null; state.manualHistory = null; state.mode = 'manual';
+    invalidateManual(); state.manualView = null; state.manualHistory = null; state.manualSaveRetry = null; state.mode = 'manual';
     replaceSnapshot({ schema: 'asterion.arc-agi3-p7-console/v1', generated_at: null,
       run: { run_id: null, game_id: gameId, status: 'manual', win_levels: game.win_levels ?? null, completed_level_count: 0, primitive_action_count: 0 },
       levels: [], decisions: [], warnings: [] });
@@ -980,6 +1017,41 @@
   }
 
   const manualLabels = { idle: '尚未打开人工试玩', ready: '人工试玩 · 可操作', closed: '人工试玩已结束', expired: '人工试玩已过期', uncertain: '人工试玩结果未确认 · 已停止操作' };
+  function validManualHistory(view) {
+    if (view.history === undefined) return true;
+    if (!Array.isArray(view.history) || view.history.length > 1001) return false;
+    if (!view.history.length) return view.snapshot === null && view.state !== 'ready';
+    if (!view.snapshot) return false;
+    const ids = new Set();
+    let previous = null;
+    for (const entry of view.history) {
+      if (!isRecord(entry) || !['observation_version', 'episode_id', 'action_count'].every((key) => Number.isInteger(entry[key]) && entry[key] >= 0) ||
+          !validChoice({ game_id: view.game_id, level: entry.level }) || entry.observation_version !== entry.action_count || entry.episode_id < 1) return false;
+      if (previous && (entry.observation_version <= previous.observation_version || entry.episode_id < previous.episode_id)) return false;
+      const record = { level: entry.level, frames: [entry.frame], actions: [], decisions: [] };
+      if (!validSnapshot({ ...view.snapshot, levels: [record] }) || ids.has(entry.frame.id) ||
+          !Array.isArray(entry.frame.available_actions) || !entry.frame.available_actions.every((action) => ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7', 'RESET'].includes(action)) ||
+          !Number.isInteger(entry.frame.levels_completed) || entry.frame.levels_completed < 0) return false;
+      ids.add(entry.frame.id);
+      const last = entry.last_action;
+      if (last == null) { if (entry.observation_version !== 0) return false; }
+      else {
+        if (!isRecord(last) || !['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7', 'RESET'].includes(last.action) ||
+            !isRecord(last.data) || last.observation_version !== entry.observation_version) return false;
+        const keys = Object.keys(last.data);
+        if (last.action === 'ACTION6' ? keys.length !== 2 || !keys.includes('x') || !keys.includes('y') ||
+            !['x', 'y'].every((key) => Number.isInteger(last.data[key]) && last.data[key] >= 0 && last.data[key] < 64) : keys.length !== 0) return false;
+        if (previous && entry.observation_version === previous.observation_version + 1 &&
+            (entry.episode_id !== previous.episode_id + Number(last.action === 'RESET') || !previous.frame.available_actions.includes(last.action))) return false;
+      }
+      previous = entry;
+    }
+    const record = view.snapshot.levels.find((level) => level.level === manualLevel(view));
+    const frame = array(record?.frames).at(-1);
+    return Boolean(frame && previous.observation_version === view.observation_version && previous.action_count === view.action_count &&
+      previous.episode_id === view.episode_id && previous.level === manualLevel(view) && sameManualFrame(previous.frame, frame) && sameManualAction(previous.last_action, view.last_action));
+  }
+
   function validManual(view) {
     if (!isRecord(view) || !Object.hasOwn(manualLabels, view.state) || !['session_id', 'game_id'].every((key) => view[key] === null || typeof view[key] === 'string')) return false;
     if (!['observation_version', 'episode_id', 'action_count'].every((key) => Number.isInteger(view[key]) && view[key] >= 0)) return false;
@@ -988,7 +1060,10 @@
     if (view.level != null && !validChoice({ game_id: view.game_id, level: view.level })) return false;
     if (view.state === 'ready' && (!validChoice({ game_id: view.game_id, level: manualLevel(view) }) || !array(view.snapshot.levels).some((level) => level.level === manualLevel(view) && array(level.frames).length))) return false;
     if (view.last_action != null && (!isRecord(view.last_action) || typeof view.last_action.action !== 'string' || !isRecord(view.last_action.data))) return false;
-    return true;
+    if (view.saved_levels !== undefined && (!Array.isArray(view.saved_levels) || !view.saved_levels.every((level, index) => validChoice({ game_id: view.game_id, level }) && (index === 0 || level > view.saved_levels[index - 1])))) return false;
+    if (view.save_status !== undefined && !['disabled', 'saved', 'failed', 'pending'].includes(view.save_status)) return false;
+    if (view.restored !== undefined && typeof view.restored !== 'boolean') return false;
+    return validManualHistory(view);
   }
 
   function renderManualFeedback() {
@@ -1024,13 +1099,14 @@
       try { if (manualHistoryActive()) setManualFrame(previousHistory.index); } catch (_) { /* Keep the accepted data on persistent rendering failure. */ }
       throw error;
     }
+    if (view.save_status !== 'failed' || previous?.session_id !== view.session_id) state.manualSaveRetry = null;
     const choice = { game_id: view.game_id, level: manualLevel(view) };
     if (validChoice(choice)) state.manualChoice = choice;
     renderManualStatus(); renderSessionControls();
   }
 
   async function sendManualCommand(command) {
-    if (!liveConfig || state.manualBusy || state.commandBusy || state.pendingCommand || activeSession()) return;
+    if (!liveConfig || state.mode !== 'manual' || state.manualBusy || state.commandBusy || state.pendingCommand || activeSession()) return;
     const generation = state.manualGeneration;
     state.manualPollGeneration += 1;
     const isCurrent = () => generation === state.manualGeneration && state.mode === 'manual' && !activeSession();
@@ -1056,6 +1132,7 @@
         state.manualFeedback.changed = state.manualFeedback.beforeGrid && afterGrid ? JSON.stringify(state.manualFeedback.beforeGrid) !== JSON.stringify(afterGrid) : null;
       }
       acceptManual(view); state.manualPending = null; state.pointerAction = null;
+      state.manualSaveRetry = view.state === 'ready' && view.save_status === 'failed' ? command : null;
       state.manualPollGeneration += 1;
     } catch (error) {
       if (!isCurrent()) return;
@@ -1145,7 +1222,7 @@
       sendCommand({ path: '/api/start', body: { game_id: $('game-select').value, command_id: window.crypto.randomUUID() } });
     });
     $('run-stop').addEventListener('click', () => sendCommand({ path: '/api/stop', body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } }));
-    $('retry-command').addEventListener('click', () => { if (state.pendingCommand) sendCommand(state.pendingCommand); else if (state.manualPending) sendManualCommand(state.manualPending); });
+    $('retry-command').addEventListener('click', () => { if (state.pendingCommand) sendCommand(state.pendingCommand); else if (state.mode === 'manual' && state.manualPending) sendManualCommand(state.manualPending); else if (state.mode === 'manual' && state.manualSaveRetry) sendManualCommand(state.manualSaveRetry); });
     $('manual-close').addEventListener('click', () => {
       if ($('manual-close').disabled) return;
       if (state.manualView?.state === 'ready' && !state.manualError) sendManualCommand({ path: '/api/manual/close', body: { session_id: state.manualView.session_id, command_id: window.crypto.randomUUID() } });

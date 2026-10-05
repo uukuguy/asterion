@@ -17,12 +17,15 @@ import tempfile
 import threading
 import time
 
+from .console_manual_saves import (MAX_STEPS, ManualSaveError, ManualSaveStore,
+                                  append_step, digest, game_identity, new_record)
 
 _OUTPUT_CAP = 1100 * 1024
 _COMMAND_SECONDS = 20
 _IDLE_SECONDS = 300
 _TOTAL_SECONDS = 1800
 _ACTION_CAP = 1000
+_RESTORE_SECONDS = 60
 _COMMAND_ID = re.compile(r'[A-Za-z0-9_-]{1,80}\Z')
 _GAME_ID = re.compile(r'[A-Za-z0-9]+-[A-Za-z0-9]+\Z')
 
@@ -150,8 +153,8 @@ class _Worker:
             self.close()
             raise ManualConsoleError('manual-unavailable') from None
 
-    def _read(self) -> dict:
-        deadline, buffer = time.monotonic() + _COMMAND_SECONDS, bytearray()
+    def _read(self, seconds=_COMMAND_SECONDS) -> dict:
+        deadline, buffer = time.monotonic() + seconds, bytearray()
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0 or not select.select([self._process.stdout], [], [], remaining)[0]:
@@ -178,6 +181,17 @@ class _Worker:
     def step(self, action: str, data: dict) -> dict:
         raw = json.dumps({'action': action, 'data': data}, separators=(',', ':')).encode() + b'\n'
         self._process.stdin.write(raw)
+        self._process.stdin.flush()
+        return self._read()
+
+    def replay_step(self, action: str, data: dict, seconds: float) -> dict:
+        raw = json.dumps({'action': action, 'data': data, 'replay': True}, separators=(',', ':')).encode() + b'\n'
+        self._process.stdin.write(raw)
+        self._process.stdin.flush()
+        return self._read(min(_COMMAND_SECONDS, seconds))
+
+    def activate(self) -> dict:
+        self._process.stdin.write(b'{"activate":true}\n')
         self._process.stdin.flush()
         return self._read()
 
@@ -218,21 +232,63 @@ class _Worker:
 class ManualConsole:
     """One independent session. Commands never queue behind another action."""
 
-    def __init__(self, arc_root: Path, *, worker_factory=None, clock=time.monotonic):
+    def __init__(self, arc_root: Path, *, worker_factory=None, clock=time.monotonic, save_root: Path | None = None):
         self._arc_root, self._factory, self._clock = Path(arc_root), worker_factory or _Worker, clock
-        self._gate, self._lock = threading.Lock(), threading.Lock()
+        self._gate, self._lock = threading.Lock(), threading.RLock()
         self._worker, self._observation, self._closed = None, None, False
         self._commands: dict[str, tuple[str, dict]] = {}
         self._created = self._last_action = 0.0
+        self._store = ManualSaveStore(save_root) if save_root is not None else None
+        self._record = None
+        self._history = []
+        self._live_start_count = 0
         self._view = {'session_id': None, 'game_id': None, 'level': None, 'state': 'idle', 'observation_version': 0,
-                      'episode_id': 0, 'action_count': 0, 'snapshot': None, 'last_action': None}
+                      'episode_id': 0, 'action_count': 0, 'snapshot': None, 'last_action': None,
+                      'saved_levels': [], 'save_status': 'disabled' if self._store is None else 'saved',
+                      'restored': False}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._monitor, daemon=True, name='manual-console-expiry')
         self._thread.start()
 
-    def view(self) -> dict:
+    def view(self, *, history=True) -> dict:
         with self._lock:
-            return deepcopy(self._view)
+            value = deepcopy(self._view)
+            if history:
+                value['history'] = deepcopy(self._history)
+            return value
+
+    def _history_entry(self):
+        value = self._view
+        return {key: deepcopy(value[key]) for key in
+                ('observation_version', 'episode_id', 'action_count', 'level', 'last_action')} | {
+                    'frame': deepcopy(value['snapshot']['levels'][0]['frames'][0])}
+
+    def _save(self):
+        if self._store is None or self._record is None:
+            return
+        try:
+            self._store.write(self._record)
+            self._change(save_status='saved', saved_levels=self._store.levels(self._record['game_id']))
+        except ManualSaveError as error:
+            self._change(save_status='failed')
+            raise ManualConsoleError(str(error)) from None
+
+    def _flush_unsaved(self):
+        if self._view['save_status'] == 'failed':
+            self._save()
+
+    def _retry_save(self, command_id, signature, prior):
+        if (self._view['save_status'] == 'failed'
+                and prior['session_id'] == self._view['session_id']
+                and prior['observation_version'] == self._view['observation_version']):
+            try:
+                self._save()
+            except ManualConsoleError:
+                pass
+            prior['save_status'] = self._view['save_status']
+            prior['saved_levels'] = deepcopy(self._view['saved_levels'])
+            self._commands[command_id] = (signature, deepcopy(prior))
+        return prior
 
     def _change(self, **values):
         with self._lock:
@@ -250,8 +306,8 @@ class ManualConsole:
             raise ManualConsoleError('command-limit')
         return None
 
-    def _remember(self, command_id, signature):
-        value = self.view()
+    def _remember(self, command_id, signature, *, history=True):
+        value = self.view(history=history)
         self._commands[command_id] = (signature, value)
         return deepcopy(value)
 
@@ -276,25 +332,77 @@ class ManualConsole:
             signature = json.dumps(['open', game_id, win_levels, level])
             prior = self._prior(command_id, signature)
             if prior is not None:
-                return prior
+                return self._retry_save(command_id, signature, prior)
             if self._closed:
                 raise ManualConsoleError('session-busy')
+            self._flush_unsaved()
+            record = None
+            identity = None
+            if self._store is not None:
+                try:
+                    identity = game_identity(self._arc_root, game_id)
+                    record = self._store.load(game_id, win_levels, level, _observation, identity)
+                except ManualSaveError as error:
+                    raise ManualConsoleError(str(error)) from None
             self._close_worker()
             self._change(state='closed')
+            replay_deadline = time.monotonic() + _RESTORE_SECONDS
             try:
-                self._worker = self._factory(self._arc_root, game_id, level)
+                self._worker = self._factory(self._arc_root, game_id, record['origin_level'] if record else level)
                 value = _observation(self._worker.observe(), game_id, win_levels)
                 if (value['levels_completed'] != 0 or value['state'] != 'NOT_FINISHED'
-                        or value['current_level'] != level):
+                        or value['current_level'] != (record['origin_level'] if record else level)):
                     raise ManualConsoleError('manual-unavailable')
+                history_values = [(value, None)]
+                if record is not None:
+                    if digest(value) != record['initial_digest']:
+                        raise ManualConsoleError('manual-restore-failed')
+                    for step in record['steps']:
+                        remaining = replay_deadline - time.monotonic()
+                        if remaining <= 0:
+                            raise ManualConsoleError('manual-restore-failed')
+                        replay = getattr(self._worker, 'replay_step', None)
+                        raw = (replay(step['action'], step['data'], remaining) if replay is not None
+                               else self._worker.step(step['action'], step['data']))
+                        value = _observation(raw, game_id, win_levels)
+                        if digest(value) != step['digest']:
+                            raise ManualConsoleError('manual-restore-failed')
+                        history_values.append((value, step))
+                    if time.monotonic() >= replay_deadline:
+                        raise ManualConsoleError('manual-restore-failed')
+                activate = getattr(self._worker, 'activate', None)
+                if activate is not None and _observation(activate(), game_id, win_levels) != value:
+                    raise ManualConsoleError('manual-restore-failed')
             except Exception:
                 self._close_worker()
-                raise ManualConsoleError('manual-unavailable') from None
+                raise ManualConsoleError('manual-restore-failed' if record else 'manual-unavailable') from None
             self._observation = value
+            self._record = record if record is not None else new_record(value, identity)
             self._created = self._last_action = self._clock()
-            self._change(session_id='manual-' + secrets.token_hex(16), game_id=game_id, level=level, state='ready',
-                         observation_version=0, episode_id=1, action_count=0,
-                         snapshot=_snapshot(value, 0, 0), last_action=None)
+            episode = 1
+            history = []
+            for version, (observed, step) in enumerate(history_values):
+                episode += int(step is not None and step['action'] == 'RESET')
+                last_action = None if step is None else {'action': step['action'],
+                              'data': deepcopy(step['data']), 'observation_version': version}
+                if version >= len(history_values) - 1001:
+                    snapshot = _snapshot(observed, version, version)
+                    history.append({'level': observed['current_level'], 'observation_version': version,
+                                    'episode_id': episode, 'action_count': version, 'last_action': last_action,
+                                    'frame': snapshot['levels'][0]['frames'][0]})
+            with self._lock:
+                self._change(session_id='manual-' + secrets.token_hex(16), game_id=game_id, state='ready',
+                             restored=record is not None, save_status='disabled' if self._store is None else 'saved',
+                             level=value['current_level'], observation_version=version, episode_id=episode,
+                             action_count=version, snapshot=snapshot, last_action=last_action)
+                self._history = history
+                self._live_start_count = self._view['action_count']
+                try:
+                    self._save()
+                except ManualConsoleError:
+                    # The actual initial/restored pose remains usable and visible.
+                    # A subsequent switch must first retry this save successfully.
+                    pass
             return self._remember(command_id, signature)
         finally:
             self._gate.release()
@@ -312,11 +420,12 @@ class ManualConsole:
             signature = json.dumps(['act', session_id, observation_version, action, data], sort_keys=True)
             prior = self._prior(command_id, signature)
             if prior is not None:
-                return prior
+                return self._retry_save(command_id, signature, prior)
             if session_id != self._view['session_id']:
                 raise ManualConsoleError('session-mismatch')
             if self._closed or self._view['state'] != 'ready':
                 raise ManualConsoleError('session-busy')
+            self._flush_unsaved()
             if self._expired():
                 self._close_worker()
                 self._change(state='expired')
@@ -328,6 +437,13 @@ class ManualConsole:
                 raise ManualConsoleError('action-unavailable')
             if action == 'ACTION6' and (data['y'] >= len(frame['grid']) or data['x'] >= len(frame['grid'][0])):
                 raise ManualConsoleError('action-invalid')
+            if len(self._record['steps']) >= MAX_STEPS:
+                raise ManualConsoleError('manual-save-limit')
+            if self._store is not None:
+                try:
+                    self._store.ensure_room(self._record)
+                except ManualSaveError as error:
+                    raise ManualConsoleError(str(error)) from None
             try:
                 value = _observation(self._worker.step(action, data), self._view['game_id'], self._observation['win_levels'])
             except Exception:
@@ -337,11 +453,25 @@ class ManualConsole:
             self._observation = value
             version, count = observation_version + 1, self._view['action_count'] + 1
             self._last_action = self._clock()
-            self._change(observation_version=version, action_count=count, level=value['current_level'],
-                         episode_id=self._view['episode_id'] + int(action == 'RESET'),
-                         snapshot=_snapshot(value, version, count),
-                         last_action={'action': action, 'data': deepcopy(data), 'observation_version': version})
-            return self._remember(command_id, signature)
+            previous_level = self._view['level']
+            append_step(self._record, action, data, value)
+            with self._lock:
+                self._change(observation_version=version, action_count=count, level=value['current_level'],
+                             episode_id=self._view['episode_id'] + int(action == 'RESET'),
+                             snapshot=_snapshot(value, version, count),
+                             last_action={'action': action, 'data': deepcopy(data), 'observation_version': version})
+                self._history.append(self._history_entry())
+                self._history = self._history[-1001:]
+                try:
+                    collision = (self._store is not None and previous_level != value['current_level']
+                                 and value['current_level'] in self._store.levels(value['game_id']))
+                    if collision:
+                        self._change(save_status='pending', saved_levels=self._store.levels(value['game_id']))
+                    else:
+                        self._save()
+                except (ManualConsoleError, ManualSaveError):
+                    self._change(save_status='failed')
+            return self._remember(command_id, signature, history=False)
         finally:
             self._gate.release()
 
@@ -356,6 +486,7 @@ class ManualConsole:
                     return prior
                 if type(session_id) is not str or session_id != self._view['session_id']:
                     raise ManualConsoleError('session-mismatch')
+            self._flush_unsaved()
             self._close_worker()
             if self._view['state'] != 'idle':
                 self._change(state='closed')
@@ -366,7 +497,7 @@ class ManualConsole:
     def _expired(self):
         now = self._clock()
         return (now - self._created >= _TOTAL_SECONDS or now - self._last_action >= _IDLE_SECONDS
-                or self._view['action_count'] >= _ACTION_CAP)
+                or self._view['action_count'] - self._live_start_count >= _ACTION_CAP)
 
     def reap_idle(self):
         if self._gate.acquire(blocking=False):
@@ -404,7 +535,7 @@ def main() -> int:
     engine = None
     try:
         # Remain finite even if the host disappears during a blocked SDK call.
-        signal.setitimer(signal.ITIMER_REAL, _TOTAL_SECONDS)
+        signal.setitimer(signal.ITIMER_REAL, _RESTORE_SECONDS)
         with open(os.devnull, 'w') as silent:
             os.dup2(silent.fileno(), sys.stdout.fileno())
             os.dup2(silent.fileno(), sys.stderr.fileno())
@@ -415,7 +546,7 @@ def main() -> int:
             raise ValueError
         engine = ArcadeEngine(arc_root=args.arc_root, recordings_dir=args.recordings, game=game)
         manual = _ManualEngine(engine, args.level)
-        deadline, count = time.monotonic() + _TOTAL_SECONDS, 0
+        deadline, count, replay_count, active = time.monotonic() + _RESTORE_SECONDS, 0, 0, False
         value = manual.observe()
         while True:
             _observation(value, game.game_id, game.win_levels)
@@ -433,10 +564,21 @@ def main() -> int:
             if len(raw) > 4096 or not raw.endswith(b'\n'):
                 raise ValueError
             command = json.loads(raw)
-            if type(command) is not dict or set(command) != {'action', 'data'}:
+            if type(command) is not dict:
                 raise ValueError
-            value = manual.step(command['action'], command['data'])
-            count += 1
+            if command == {'activate': True} and not active:
+                active = True
+                deadline = time.monotonic() + _TOTAL_SECONDS
+                signal.setitimer(signal.ITIMER_REAL, _TOTAL_SECONDS)
+            elif (not active and set(command) == {'action', 'data', 'replay'}
+                  and command['replay'] is True and replay_count < MAX_STEPS):
+                value = manual.step(command['action'], command['data'])
+                replay_count += 1
+            elif active and set(command) == {'action', 'data'}:
+                value = manual.step(command['action'], command['data'])
+                count += 1
+            else:
+                raise ValueError
         return 0
     except Exception:
         return 1

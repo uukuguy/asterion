@@ -704,6 +704,234 @@ test('manual coordinate acknowledgement checks exact coordinates independently o
   }
 });
 
+function savedManualView(game = 'sp80-test', level = 1, session = 'restored-session') {
+  const observations = [manualView(game, 12, 0, level), manualView(game, 12, 1, level), manualView(game, 9, 2, level)];
+  observations[2].episode_id = 2;
+  observations[2].last_action = { action: 'RESET', data: {}, observation_version: 2 };
+  return { ...observations[2], session_id: session, saved_levels: [1, 2], save_status: 'saved', restored: true,
+    history: observations.map((view) => ({ observation_version: view.observation_version, episode_id: view.episode_id,
+      action_count: view.action_count, level, frame: view.snapshot.levels[0].frames[0], last_action: view.last_action })) };
+}
+
+test('empty idle manual history permits saved selection to open and hydrate a resumed pose', async () => {
+  const selection = { game_id: 'sp80-test', level: 1 };
+  const empty = { session_id: null, game_id: null, level: null, state: 'idle', observation_version: 0,
+    episode_id: 0, action_count: 0, snapshot: null, last_action: null, history: [], saved_levels: [], save_status: 'saved', restored: false };
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url === '/api/manual/open' ? savedManualView() : { ...stateWithManual(empty), selection }) });
+  try {
+    await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/open').length, 1);
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.match(app.$('manual-save-status').textContent, /已恢复/);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('saved manual history hydrates reload with exact edges and stable read-only historical selection', async () => {
+  let manual = savedManualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+  try {
+    await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.match(app.$('manual-action-history').textContent, /#1 ACTION4.*#2 RESET/);
+    assert.match(app.$('manual-save-status').textContent, /自动保存.*已恢复/);
+    assert.match(app.$('level-2').textContent, /已保存/);
+    const edges = app.dom.window.__ASTERION_STATE__.levels[0].actions;
+    assert.equal(edges[0].before_frame, 'manual-0'); assert.equal(edges[0].after_frame, 'manual-1');
+    assert.equal(edges[0].changed_cells, 0); assert.equal(edges[1].name, 'RESET');
+    const historyButton = app.$('manual-action-history').querySelector('button'); historyButton.click(); historyButton.focus();
+    assert.equal(app.$('frame-counter').textContent, '2 / 3');
+    app.tick(); await settle();
+    assert.equal(app.$('manual-action-history').querySelector('button'), historyButton);
+    assert.equal(app.dom.window.document.activeElement, historyButton);
+    assert.equal(app.$('frame-counter').textContent, '2 / 3');
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    manual = { ...manualView('sp80-test', 10, 3), session_id: manual.session_id, episode_id: 2, saved_levels: [1, 2], save_status: 'saved', restored: true };
+    app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '2 / 4');
+    assert.equal(app.$('manual-action-history').querySelector('button'), historyButton);
+    app.$('manual-return-current').click(); assert.equal(app.$('frame-counter').textContent, '4 / 4');
+    assert.equal(app.requests.some((entry) => entry.url === '/api/manual/open' || entry.url === '/api/manual/action' || entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('switching back to a saved manual level resumes history in the new session and continues its count', async () => {
+  let manual = savedManualView(), opens = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/open') {
+      const body = JSON.parse(options.body); opens += 1;
+      manual = body.level === 1 ? savedManualView(body.game_id, 1, `restored-${opens}`) : { ...manualView(body.game_id, 10, 0, 2), session_id: `fresh-${opens}`, saved_levels: [1, 2], save_status: 'saved', restored: false };
+      return response(manual);
+    }
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); manual = { ...manualView('sp80-test', 10, 3), session_id: body.session_id, episode_id: 2,
+        last_action: { action: body.action, data: body.data, observation_version: 3 }, saved_levels: [1, 2], save_status: 'failed', restored: true };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('level-2').click(); await settle(); app.$('level-1').click(); await settle();
+    assert.equal(opens, 2); assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.match(app.$('manual-action-history').textContent, /#2 RESET/);
+    app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    const action = JSON.parse(app.requests.find((entry) => entry.url === '/api/manual/action').options.body);
+    assert.equal(action.session_id, 'restored-2'); assert.equal(action.observation_version, 2);
+    assert.equal(app.$('frame-counter').textContent, '4 / 4');
+    assert.match(app.$('manual-save-status').textContent, /保存失败/);
+    assert.doesNotMatch(app.$('manual-save-status').textContent, /自动保存/);
+    assert.equal(app.requests.some((entry) => entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual save status changes preserve the live buttons and explain preserved advance saves', async () => {
+  let manual = { ...savedManualView(), save_status: 'pending' };
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+  try {
+    await settle();
+    assert.match(app.$('manual-save-status').textContent, /已保留该关原存档；继续操作后更新/);
+    assert.doesNotMatch(app.$('manual-save-status').textContent, /自动保存/);
+    const button = app.$('available-actions').querySelector('[data-available-action="ACTION4"]'); button.focus();
+    manual = { ...manual, save_status: 'failed', saved_levels: [] }; app.tick(); await settle();
+    assert.match(app.$('manual-save-status').textContent, /保存失败/);
+    assert.doesNotMatch(app.$('level-1').textContent, /已保存/);
+    manual = { ...manual, save_status: 'saved', saved_levels: [1, 2] }; app.tick(); await settle();
+    assert.match(app.$('manual-save-status').textContent, /自动保存/);
+    assert.match(app.$('level-1').textContent, /已保存/);
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION4"]'), button);
+    assert.equal(app.dom.window.document.activeElement, button);
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('failed automatic save retains the pose and exposes exact save retry before level or game switching', async () => {
+  let manual = { ...savedManualView(), save_status: 'saved' }, calls = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); calls += 1;
+      manual = { ...manualView('sp80-test', 10, 3), session_id: 'restored-session', episode_id: 2, saved_levels: [1, 2], restored: true,
+        save_status: calls === 1 ? 'failed' : 'saved', last_action: { action: body.action, data: body.data, observation_version: 3 } };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '4 / 4');
+    assert.match(app.$('manual-action-status').textContent, /已执行 3 次/);
+    assert.equal(app.$('level-2').disabled, true); assert.equal(app.$('game-select').disabled, true);
+    assert.equal(app.$('retry-command').hidden, false); assert.equal(app.$('retry-command').textContent, '重试保存');
+    app.$('level-2').click(); assert.equal(app.requests.some((entry) => entry.url === '/api/manual/open'), false);
+    app.$('retry-command').click(); await settle();
+    const actions = app.requests.filter((entry) => entry.url === '/api/manual/action');
+    assert.equal(actions.length, 2); assert.equal(actions[0].options.body, actions[1].options.body);
+    assert.equal(app.$('frame-counter').textContent, '4 / 4');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 3);
+    assert.equal(app.$('retry-command').hidden, true);
+    assert.equal(app.$('level-2').disabled, false); assert.equal(app.$('game-select').disabled, false);
+    assert.match(app.$('manual-save-status').textContent, /自动保存/);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('failed-save retry waits for HUMAN mode and cannot strand controls in P7 mode', async () => {
+  let manual = { ...manualView(), save_status: 'saved', saved_levels: [1], restored: false }, calls = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); calls += 1;
+      manual = { ...manualView('sp80-test', 10, 1), save_status: calls === 1 ? 'failed' : 'saved', saved_levels: [1], restored: false,
+        last_action: { action: body.action, data: body.data, observation_version: 1 } };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    app.$('console-mode').value = 'live'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+    assert.equal(app.$('retry-command').hidden, true);
+    app.$('retry-command').click(); await settle(); assert.equal(calls, 1);
+    app.$('console-mode').value = 'manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+    assert.equal(app.$('retry-command').hidden, false); app.$('retry-command').click(); await settle();
+    assert.equal(calls, 2); assert.equal(app.$('retry-command').hidden, true);
+    assert.equal(app.$('game-select').disabled, false);
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION4"]').disabled, false);
+    const actions = app.requests.filter((entry) => entry.url === '/api/manual/action');
+    assert.equal(actions[0].options.body, actions[1].options.body);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('initial save failure retries the exact open without replacing its confirmed frame or session', async () => {
+  let manual = null, opens = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/open') {
+      opens += 1; manual = { ...manualView(), saved_levels: opens > 1 ? [1] : [], save_status: opens > 1 ? 'saved' : 'failed', restored: false };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); assert.equal(app.$('frame-counter').textContent, '1 / 1');
+    assert.equal(app.$('retry-command').textContent, '重试保存'); assert.equal(app.$('level-2').disabled, true);
+    app.$('retry-command').click(); await settle();
+    const requests = app.requests.filter((entry) => entry.url === '/api/manual/open');
+    assert.equal(requests.length, 2); assert.equal(requests[0].options.body, requests[1].options.body);
+    assert.equal(app.$('frame-counter').textContent, '1 / 1'); assert.equal(app.$('session-id').textContent, '试玩 manual-sp80-test');
+    assert.equal(app.$('retry-command').hidden, true); assert.equal(app.$('level-2').disabled, false);
+    assert.equal(app.requests.some((entry) => entry.url === '/api/manual/action' || entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('same-version full history fills actual gaps without moving historical seek or fabricating missing edges', async () => {
+  const full = savedManualView();
+  let manual = { ...full, history: [full.history[0], full.history[2]] };
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+  try {
+    await settle(); assert.equal(app.$('frame-counter').textContent, '2 / 2');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 0);
+    assert.match(app.$('manual-history-note').textContent, /缺失/);
+    app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    manual = full; app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 3');
+    assert.match(app.$('manual-action-history').textContent, /#1 ACTION4.*#2 RESET/);
+    assert.doesNotMatch(app.$('manual-history-note').textContent, /缺失/);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    app.$('manual-return-current').click(); assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('invalid saved history cannot partially replace the accepted pose or history and old replies cannot erase it', async () => {
+  let manual = savedManualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+  try {
+    await settle(); const accepted = app.dom.window.__ASTERION_STATE__;
+    for (const mutate of [
+      (view) => { view.history[1].frame.grid = [[99]]; },
+      (view) => { view.history[1].observation_version = 0; },
+      (view) => { view.history[2].frame.grid = [[1]]; },
+      (view) => { view.history[2].level = 2; },
+      (view) => { view.history[2].action_count = 3; },
+      (view) => { view.saved_levels = [2, 1]; },
+    ]) {
+      manual = savedManualView(); mutate(manual); app.tick(); await settle();
+      assert.equal(app.dom.window.__ASTERION_STATE__, accepted);
+      assert.equal(app.$('frame-counter').textContent, '3 / 3');
+      assert.match(app.$('service-status').textContent, /响应无效/);
+    }
+    manual = { ...manualView('sp80-test', 12, 1), session_id: 'restored-session', history: [], saved_levels: [], save_status: 'saved', restored: true };
+    app.tick(); await settle();
+    assert.equal(app.dom.window.__ASTERION_STATE__, accepted);
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.match(app.$('level-2').textContent, /已保存/);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
 test('manual history retains actual no-change and RESET observations; seeking and animation send no actions', async () => {
   let manual = manualView(), version = 0;
   const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {

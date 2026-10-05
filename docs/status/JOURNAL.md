@@ -3687,3 +3687,6 @@
 - 2026-10-05: `8974457b` restores game/level and enables direct human selection; compact button highlights keep manual validation clear.
 - 2026-10-05: 人工历史初验通过：112 Python、51 DOM、打包 SP80 七动作进入 L2；独立复审发现三个界面边界，修正中。
 - 2026-10-05: 最终人工历史验证通过：112 Python、54 DOM、八个 SDK 动作及跨关卡播放；独立复审通过，promotion 仍未通过。
+- 2026-10-05: 898f7536 稳定人工动作按钮并增加帧历史队列，明确操作确认，方便独立试玩回看。
+- 2026-10-05: 用户要求保存玩过的人工关卡；选择独立 JSON 动作存档与真实 SDK 重放恢复，替代页面内存边界。
+- 2026-10-05: 人工逐关存档验证通过：124 Python、63 DOM、十个 SDK 动作和两次重启；复审通过，promotion 仍未通过。

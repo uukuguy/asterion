@@ -146,3 +146,15 @@ Files: `console_assets/app.js`, `index.html`, `styles.css`; DOM regressions in `
 Verification command: `NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs`; then the named installed-wheel/manual HTTP smoke and related Python console suite. Actual manual route tests establish interface behavior only, not P7 proficiency.
 
 Final follow-up: 112 Python, 54 installed-export DOM and installed real SDK/served-HTML integration pass. Eight human actions, nine actual frames; cross-level playback and cleanup verified, zero P7 requests. Independent final review passes. Full promotion remains non-PASS; browser visual acceptance remains external-limited. See the existing evidence file.
+
+
+## Follow-up: saved human levels — 2026-10-05
+
+- [x] Backend: add a narrow manual JSON save store and integrate `ManualConsole` open/act/close; inject operator root in `ConsoleSession`. Prove switch/back and restart restoration, exact state hashes, RESET, automatic advance/origin prefix, new session identity, idempotent acknowledgements and disk failure behavior. Keep one active worker and independent finite restoration/live budgets.
+- [x] UI: consume optional actual `history`, `saved_levels`, `save_status`, `restored`; restore timeline/queue on open and reload, preserve unchanged-poll focus/seek, mark saved levels compactly. Reject invalid history before state commit. Do not change P7/replay mode semantics.
+- [x] Integration: focused console Python/DOM, lint/docs, final wheel isolated install, real SDK HTTP switch/back/restart/reset/advance and served-HTML history hydration. Independent recovery-contract review; promotion attempt with exact remaining boundary.
+- [x] Record actual results in existing evidence/recovery files, update the user guide and commit all owned changes.
+
+Backend ownership: `console_manual.py`, new `console_manual_saves.py`, `console_session.py` and related Python tests. UI ownership: `console_assets/app.js`, `index.html`, `styles.css`, `tests/prime_p7_console_dom.cjs`. Root owns docs and integration; existing HTTP execution routes suffice.
+
+Final evidence: 124 focused Python and 63 installed-export DOM tests PASS; final installed SDK/HTTP ten HUMAN actions, L1/L2/L6 switching and two restarts with RESET/origin/score preservation PASS; served-HTML history hydration PASS. Independent recovery-contract review PASS. Promotion attempt before final review fixes remains non-PASS (3896 tests, 13 failures, 5 errors, 4 skips). No P7 actions or new autonomous capability result.

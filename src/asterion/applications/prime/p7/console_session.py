@@ -27,7 +27,8 @@ _ACTIVE = {"starting", "running", "stopping"}
 _MANUAL_ERRORS = {"session-busy", "command-invalid", "command-conflict", "command-limit",
                   "game-unavailable", "level-unavailable", "session-mismatch", "observation-stale", "action-invalid",
                   "action-unavailable", "manual-unavailable", "manual-uncertain",
-                  "manual-cleanup-unconfirmed", "manual-expired"}
+                  "manual-cleanup-unconfirmed", "manual-expired", "manual-save-failed",
+                  "manual-save-invalid", "manual-restore-failed", "manual-save-limit"}
 _MANUAL_IDLE = {"session_id": None, "game_id": None, "state": "idle", "observation_version": 0,
                 "episode_id": 0, "action_count": 0, "snapshot": None, "last_action": None}
 _CLEARED_ENV = {
@@ -83,6 +84,7 @@ class ConsoleSession:
         guest_cleanup: Callable[[str], bool] | None = None,
         snapshot_reader: Callable = build_console_snapshot,
         manual_controller: object | None = None,
+        manual_save_root: Path | None = None,
         run_id_factory: Callable[[], str] = safe_run_id,
         environment: Mapping[str, str] | None = None, poll_interval: float = 1.0,
         clock: Callable[[], float] = time.monotonic,
@@ -104,6 +106,8 @@ class ConsoleSession:
         self._guest_cleanup = guest_cleanup or self._cleanup_guest
         self._snapshot_reader = snapshot_reader
         self._manual = manual_controller
+        self._manual_save_root = (Path(manual_save_root) if manual_save_root is not None
+                                  else self._root / '.asterion-private' / 'p7-console-manual')
         self._manual_inflight = False
         self._manual_done = threading.Event()
         self._manual_done.set()
@@ -154,7 +158,7 @@ class ConsoleSession:
         try:
             if self._manual is None:
                 from .console_manual import ManualConsole
-                controller = ManualConsole(self._arc_root)
+                controller = ManualConsole(self._arc_root, save_root=self._manual_save_root)
                 with self._lock:
                     self._manual = controller
             result = getattr(self._manual, method)(*args)
