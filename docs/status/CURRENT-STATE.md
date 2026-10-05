@@ -3,7 +3,7 @@
 ## Project Snapshot
 
 - Project: Asterion composable multi-runtime agent framework
-- Current branch: `main`
+- Current branch: `feat/p7-live-console`
 - Theme-level focus: native P7 builds persistent game knowledge and verifies whether it improves solving
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
@@ -66,7 +66,7 @@
 - `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
 - `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
 - `src/asterion/applications/prime/p7/console_assets/` — packaged Tailwind CSS, canvas playback and Chinese process UI
-- `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — proposed P7-first console with replay and independent manual validation; same-game takeover withdrawn
+- `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — approved P7-first console with replay and independent manual validation; same-game takeover withdrawn
 
 ## Execution and evidence boundary
 

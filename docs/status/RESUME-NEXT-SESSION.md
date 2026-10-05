@@ -47,7 +47,7 @@
 
 ## 下一动作
 
-1. Use the revised P7-first design as the review basis. Next implementation package is the real-time autonomous P7 main flow: connect existing run lifecycle, actual frames, decision summaries and cognition revisions. Do not build manual-first or same-game takeover. Current offline HTML does not provide live control.
+1. User approved the P7-first design. Implement the first package using `docs/superpowers/plans/2026-10-05-prime-p7-live-console.md` on `feat/p7-live-console`: fixed bounded P7 start/stop, actual frames, source decision summaries and cognition revisions. No manual mode or resumable pause in this first package. Source events are the first task; do not repeat completed offline UI tasks.
 2. Follow with genuine P7 pause/resume and then independent manual validation. Keep manual persistence, history, model calls and game results isolated from P7; verify isolation rather than handoff.
 3. Open the delivered replay with `make p7-console`. Actual visual/mobile checks still require a functioning existing Chrome transport.
 4. For subsequent real solving, use configured Pi Codex `gpt-6.1-sol`, keep exact-route injection disabled, and report current actions, replay prefixes, level progress and stop cause separately.
