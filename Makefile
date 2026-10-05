@@ -55,6 +55,7 @@ PRIME_ORB_MACHINE ?= ubuntu
 .PHONY: asterion-prime-p7-sweep-attempt
 .PHONY: asterion-prime-p7-games
 .PHONY: asterion-prime-p7-stories
+.PHONY: asterion-prime-p7-console p7-console
 .PHONY: asterion-prime-p7-sync-games
 .PHONY: asterion-prime-p7-official-preflight
 .PHONY: asterion-prime-p7-official-submit
@@ -92,6 +93,7 @@ ASTERION_PRIME_P6_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p6-live
 GAME ?= tu93
 ASTERION_PRIME_P7_GAME_ID := $(GAME)
 RUN ?=
+OUTPUT ?=
 export ASTERION_PRIME_P7_RECOVERY_RUN := $(RUN)
 ifneq ($(filter asterion-prime-p7-official-submit,$(MAKECMDGOALS)),)
 ifneq ($(origin GAME),command line)
@@ -139,6 +141,8 @@ help:
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime local ARC-AGI-3 solved-game story pages: asterion-prime-p7-stories"
+	@echo "P7 离线单 HTML 控制台: p7-console RUN=<运行目录> [OUTPUT=<输出.html>]"
+	@echo "  完整入口: asterion-prime-p7-console；默认输出 <运行目录>/p7-console.html；不启动游戏或调用模型"
 	@echo "Asterion Prime sync official public games without a scorecard: asterion-prime-p7-sync-games"
 	@echo "Asterion Prime official ARC-AGI-3 catalog readiness: asterion-prime-p7-official-preflight"
 	@echo "Asterion Prime submit saved verified actions: asterion-prime-p7-official-submit GAME=<alias-or-all>"
@@ -310,7 +314,9 @@ asterion-prime-p7-games:
 asterion-prime-p7-stories:
 	@$(UV_BIN) run asterion arc-story serve --open-browser
 
-.PHONY: asterion-prime-p7-console
+# Read-only single-file export. Keep operator paths in quoted environment values.
+p7-console: asterion-prime-p7-console
+
 asterion-prime-p7-console: export ASTERION_CONSOLE_RUN = $(RUN)
 asterion-prime-p7-console: export ASTERION_CONSOLE_OUTPUT = $(OUTPUT)
 asterion-prime-p7-console:
