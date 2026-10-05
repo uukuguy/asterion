@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from collections.abc import Mapping
 import json
+from hashlib import sha256
 from pathlib import Path
 import re
 import tempfile
@@ -179,9 +180,141 @@ def load_exact_prefix(
         return None
 
 
+def recovery_source(run: Path, summary: Mapping[str, object]) -> tuple[Path, dict] | None:
+    """Resolve one immutable original run behind an offline WIN replay.
+
+    This grants only source attribution. Actual saved-solution authorization
+    still requires the ordinary sealed-trace and SDK replay checks.
+    """
+    from asterion.agents.prime.trace import _entry_digest, _plain
+
+    try:
+        diagnostics = summary.get("diagnostics")
+        if not isinstance(diagnostics, Mapping) or diagnostics.get("recovery_kind") != "terminal-game-win":
+            return None
+        source_id = diagnostics.get("recovered_from")
+        if (type(source_id) is not str or re.fullmatch(r"p7-live-[0-9]{14}-[0-9a-f]{24}", source_id) is None
+                or source_id == run.name or diagnostics.get("execution_mode") != "offline-replay"):
+            return None
+        source = _private_path(run.parent, source_id)
+        summary_path = _private_path(source, "summary.json")
+        trace_path = _private_path(source, "trace", "prime-trace.jsonl")
+        hashes = diagnostics.get("source_hashes")
+        if (type(hashes) is not dict or summary_path.stat().st_size > 1024 * 1024
+                or trace_path.stat().st_size > 16 * 1024 * 1024
+                or sha256(summary_path.read_bytes()).hexdigest() != hashes.get("summary_sha256")
+                or sha256(trace_path.read_bytes()).hexdigest() != hashes.get("trace_sha256")):
+            return None
+        original = json.loads(summary_path.read_text(encoding="utf-8"))
+        if type(original) is not dict:
+            return None
+        experiment = original.get("experiment")
+        broker = original.get("broker")
+        if (original.get("schema") != "asterion.prime.p7-live-private-summary/v1"
+                or original.get("run_id") != source_id or original.get("cleanup_complete") is not True
+                or original.get("replay_verified") is not True or type(original.get("failure")) is not dict
+                or original.get("receipt") != {} or type(experiment) is not dict
+                or type(broker) is not dict or broker != summary.get("broker")
+                or broker.get("terminal_reason") != "game-won"
+                or broker.get("levels_completed") != broker.get("win_levels")
+                or experiment.get("game_id") != broker.get("game_id")
+                or type(experiment.get("seed")) is not int or experiment["seed"] != broker.get("seed")):
+            return None
+        replay_experiment = summary.get("experiment")
+        if (type(replay_experiment) is not dict
+                or replay_experiment.get("prediction_variant") != "offline-replay"
+                or type(replay_experiment.get("seed")) is not int
+                or any(replay_experiment.get(key) != experiment.get(key) for key in ("game_id", "seed", "model"))
+                or type(replay_experiment.get("target_level")) is not int
+                or replay_experiment["target_level"] != broker.get("win_levels")):
+            return None
+        expected_hashes = {"summary_sha256", "trace_sha256", "recording_sha256s"}
+        seal_path = source / "trace" / "prime-trace.seal.json"
+        if original.get("sealed_trace") is True:
+            expected_hashes.add("trace_seal_sha256")
+            seal_path = _private_path(source, "trace", "prime-trace.seal.json")
+            if sha256(seal_path.read_bytes()).hexdigest() != hashes.get("trace_seal_sha256"):
+                return None
+        elif original.get("sealed_trace") is not False or seal_path.exists() or seal_path.is_symlink():
+            return None
+        if set(hashes) != expected_hashes:
+            return None
+        recording_hashes = []
+        for group in ("recordings", "replay-recordings"):
+            recordings = _private_path(source, group)
+            sessions = tuple(recordings.iterdir())
+            if len(sessions) != 1:
+                return None
+            session = _private_path(source, group, sessions[0].name)
+            files = tuple(session.glob("*.jsonl"))
+            if len(files) != 1:
+                return None
+            recording = _private_path(source, group, session.name, files[0].name)
+            recording_hashes.append(sha256(recording.read_bytes()).hexdigest())
+        if sorted(recording_hashes) != hashes.get("recording_sha256s"):
+            return None
+        entries = read_trace_entries(_private_path(run, "trace"))
+        identities = trace_identities_for(experiment["model"])
+        if any(dict(entry.identities) != identities for entry in entries):
+            return None
+        markers = [entry.payload for entry in entries if entry.kind == "arc.recovery.source"]
+        if len(markers) != 1 or _plain(markers[0]) != {"source_run_id": source_id, "recovery_kind": "terminal-game-win", **hashes}:
+            return None
+        previous = None
+        original_actions = []
+        for sequence, line in enumerate(trace_path.read_text(encoding="utf-8").splitlines(), 1):
+            row = json.loads(line)
+            if (set(row) != {"sequence", "kind", "identities", "payload", "previous_sha256", "sha256"}
+                    or type(row["sequence"]) is not int or row["sequence"] != sequence
+                    or row["identities"] != identities or row["previous_sha256"] != previous
+                    or row["sha256"] != _entry_digest(sequence, row["kind"], identities, row["payload"], previous)):
+                return None
+            previous = row["sha256"]
+            if row["kind"] == "arc.action":
+                original_actions.append(row["payload"])
+        if not original_actions or original_actions != [dict(entry.payload) for entry in entries if entry.kind == "arc.action"]:
+            return None
+        return source, original
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def source_experiment(run: Path, summary: Mapping[str, object]) -> dict | None:
+    """Return the checked solver experiment, including explicit replay lineage."""
+    experiment = summary.get("experiment")
+    if type(experiment) is not dict:
+        return None
+    diagnostics = summary.get("diagnostics")
+    is_recovery = isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "terminal-game-win"
+    if experiment.get("prediction_variant") != "offline-replay" and not is_recovery:
+        return experiment
+    recovered = recovery_source(run, summary)
+    return None if recovered is None else recovered[1]["experiment"]
+
+
 def load_resume_worldmap(run: Path, prefix: VerifiedPrefix) -> dict | None:
     """Read one exact revision as prose prior, without restoring its authority."""
 
+    try:
+        if (run / "summary.json").exists() or (run / "summary.json").is_symlink():
+            summary_path = _private_path(run, "summary.json")
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            diagnostics = summary.get("diagnostics", {})
+            if isinstance(diagnostics, Mapping) and diagnostics.get("recovery_kind") == "terminal-game-win":
+                recovered = recovery_source(run, summary)
+                if recovered is None or type(prefix) is not VerifiedPrefix or run.name != prefix.source_run_id:
+                    return None
+                source, _ = recovered
+                prior = _load_direct_resume_worldmap(source, replace(prefix, source_run_id=source.name))
+                if prior is not None:
+                    prior["recovered_run_id"] = run.name
+                return prior
+        return _load_direct_resume_worldmap(run, prefix)
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
+def _load_direct_resume_worldmap(run: Path, prefix: VerifiedPrefix) -> dict | None:
     from .research import worldmap
     from .score import digest
 

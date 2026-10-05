@@ -3247,6 +3247,54 @@ def _seal_verified_partial_run(
         return None
 
 
+def _seal_verified_game_win(
+    broker: ArcBroker,
+    evidence: P7PrivateTraceReceipt,
+    receipt: ArcRunReceipt,
+) -> bool:
+    """Preserve replay-verified game evidence without settling the native run.
+
+    Called only after broker replay succeeded. The distinct marker deliberately
+    cannot publish a native solve receipt or satisfy the saved-solution loader.
+    An explicit offline recovery must replay it into a separate run.
+    """
+    if not evidence.matches_runtime_broker(broker):
+        return False
+    try:
+        snapshot = broker.terminal_snapshot()
+        journal = broker.journal
+        entries = evidence.runtime_recorder.snapshot()
+        recorded = tuple(entry.payload for entry in entries if entry.kind == "arc.action")
+        if (
+            not broker.game.is_full_game
+            or receipt != broker.seal()
+            or receipt.terminal_reason != "game-won"
+            or receipt.levels_completed != broker.game.win_levels
+            or snapshot.observation.state != "WIN"
+            or len(recorded) != len(journal)
+            or any(entry.identities != evidence.identities for entry in entries)
+            or any(row != {
+                "sequence": item.sequence, "action": item.action,
+                "before_sha256": item.before_sha256, "after_sha256": item.after_sha256,
+                "levels_completed": item.levels_completed,
+                **({"data": dict(item.data)} if item.data else {}),
+            } for row, item in zip(recorded, journal))
+        ):
+            return False
+        evidence.runtime_recorder.append("arc.run.game-won", evidence.identities, {
+            "game_id": receipt.game_id, "seed": receipt.seed,
+            "win_levels": broker.game.win_levels,
+            "levels_completed": receipt.levels_completed,
+            "primitive_actions": receipt.primitive_actions,
+            "replay_sha256": receipt.replay_sha256,
+            "terminal_reason": receipt.terminal_reason,
+        })
+        evidence.runtime_recorder.seal()
+        return True
+    except Exception:
+        return False
+
+
 def _seal_replay_verified_first_level_failure(
     broker: ArcBroker,
     evidence: P7PrivateTraceReceipt,
@@ -4704,8 +4752,11 @@ async def run_live(
                     elif (
                         replay_verified
                         and broker_receipt is not None
-                        and _seal_replay_verified_first_level_failure(
-                            broker_value, evidence_value, broker_receipt
+                        and (
+                            _seal_verified_game_win(broker_value, evidence_value, broker_receipt)
+                            or _seal_replay_verified_first_level_failure(
+                                broker_value, evidence_value, broker_receipt
+                            )
                         )
                     ):
                         sealed_trace = True

@@ -19,7 +19,7 @@ from .live import read_trace_entries
 from .private_trace import trace_identities_for
 from .score import digest, partial_game_score, replay_sha256
 from .solutions import (VerifiedPrefix, _partial_summary_matches, _prefix_values,
-                        _summary_matches, _transitions, _truncate, load_resume_worldmap)
+                        _summary_matches, _transitions, _truncate, load_resume_worldmap, source_experiment)
 
 MODEL_ID = 'gpt-6.1-sol'
 SEED = 0
@@ -111,7 +111,7 @@ class ConsoleOverview:
     def _read_run(self, run: Path, games: dict[str, dict]) -> dict | None:
         try:
             summary = _json(run / 'summary.json')
-            experiment = summary.get('experiment')
+            experiment = source_experiment(run, summary)
             if (summary.get('schema') != 'asterion.prime.p7-live-private-summary/v1'
                     or summary.get('run_id') != run.name or type(experiment) is not dict
                     or experiment.get('model') != MODEL_ID or type(experiment.get('seed')) is not int
@@ -137,6 +137,10 @@ class ConsoleOverview:
                       'restoration_actions': restored, 'new_solver_actions': actions - restored,
                       'verified': False, 'sealed_trace': False, 'route_actions': 0,
                       'score': '0.000000', 'resume_eligible': False}
+            if diagnostics.get('recovery_kind') == 'terminal-game-win':
+                result.update(recovery_kind='terminal-game-win',
+                              recovered_from=diagnostics['recovered_from'],
+                              execution_mode='offline-replay', source_runtime_status='failed')
             try:
                 prefix = self._display_prefix(run, summary, game)
                 if prefix is None:

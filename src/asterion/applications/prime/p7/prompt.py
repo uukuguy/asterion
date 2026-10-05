@@ -37,12 +37,13 @@ source_export_ids 必须是显式导出的纯源码，state/report 必须是 JSO
 RESET 也只通过 step {action:{name:'RESET',data:{}},expect:明确预期} 提交。真实 RESET 返回后结束该 plan，重建当前尝试状态并保留有用机制假说。帧采用 frame[layer][y][x]；核对和研究使用 settled last frame，cells 中 x 是列、y 是行。p7_research.history(0,32) 读有限分页，后续从最后返回序号加一继续。
 
 计划先整体校验，再顺序执行；失配、过关、暂停或终局立即停止后缀。返回 applied_count、stop_reason、feedback、unexecuted_steps、最新 observation 与 observation_ref。分析 expected/actual、differences 和 counterexample_sequence，分辨状态估计、动力学、目标解释或实现错误，再修订并重算剩余计划。不要无反馈重试同一动作。plan_id 精确标识一次提交；相同内容重复仅返回已记录结果，不重派；内容不同拒绝。环境结果 unknown 时不得重派。新观察或新版本后旧起点不能继续使用。
-应用 budget 给出 target_level、action_cap、actions_remaining、primitive_actions 和 terminal_reason。正常完整求解 target_level 等于 win_levels；有限 level-witness 可在更小 target_level 截止，这仅是局部验证，不能称为完整 WIN。遵守固定预算，available_actions 是当前行动可用性依据。
+应用 budget 给出 target_level、action_cap、actions_remaining、primitive_actions、level_baseline 和 terminal_reason。正常完整求解 target_level 等于 win_levels；有限 level-witness 可在更小 target_level 截止，这仅是局部验证，不能称为完整 WIN。遵守固定预算，available_actions 是当前行动可用性依据。
+求解目标同时包括通关和动作效率。单关得分为 min(115,100*(level_baseline/该关实际动作数)^2)，与 baseline 相同步数得 100 分；游戏汇总分不能代表每关都得 100 分。真实探针、无效动作和 RESET 都计入该关代价，前面已过关的恢复动作也必须如实保留。复用已有证据与历史反例，在自己的程序模型中比较候选路线，尽量消除绕路、重复试探和可以预先避免的 RESET；历史路线只能作为待复核的上界，不要为了省步伪造终局或未经当前观察校准就照搬行动。
 
 p7_workspace({op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}) 只保存已显式接纳的源码和 JSON，不保存任意进程对象或重播真实动作 cells。kernel 丢失时未保存的 frontier 丢失；恢复后重新读取当前真实观察、校准 state 并发布包含当前 evidence_sequence 的新 revision 后再行动。新关卡也应重新估计布局/资源/局部状态，复用规则与程序，不复用精确动作路线。绝对运行期限与动作上限由应用固定预设控制，暂停不延长期限。
 """
 
-P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。needs_revision=true 时先用 p7_workspace op revise 直接更新语义 WorldMap/task，并引用当前 base_revision 和证据序号；无需先写程序。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。正确匹配的计划可复用原修订。"""
+P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。以通关和减少真实动作共同为目标，参考当前 level_baseline；先用已有证据和自己的程序比较路线，避免重复探针与不必要的 RESET。needs_revision=true 时先用 p7_workspace op revise 直接更新语义 WorldMap/task，并引用当前 base_revision 和证据序号；无需先写程序。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。正确匹配的计划可复用原修订。"""
 
 
 P7_EXPLORE_APPENDIX = """\n\nExploration strategy is explicitly enabled for this run. A replay-verified

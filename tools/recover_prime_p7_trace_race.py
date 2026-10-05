@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Materialize one verified P7 prefix from the known concurrent trace race."""
+"""Replay an audited P7 trace race or terminal WIN into separate evidence."""
 
 from __future__ import annotations
 
@@ -61,6 +61,8 @@ class _Candidate:
     source_hashes: Mapping[str, object]
     usage_input_tokens: int
     usage_output_tokens: int
+    identities: Mapping[str, str] | None = None
+    experiment: Mapping[str, object] | None = None
 
 
 def _digest_file(path: Path) -> str:
@@ -343,6 +345,110 @@ def _candidate(operator_root: Path, arc_root: Path, source_run_id: str) -> _Cand
     )
 
 
+def _terminal_candidate(operator_root: Path, arc_root: Path, source_run_id: str) -> _Candidate:
+    source = _source_directory(operator_root, source_run_id)
+    summary_path = _inside_file(source, source / "summary.json")
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if (
+        type(summary) is not dict or summary.get("schema") != _SUMMARY_SCHEMA
+        or summary.get("run_id") != source_run_id
+        or summary.get("cleanup_complete") is not True
+        or summary.get("replay_verified") is not True
+        or type(summary.get("sealed_trace")) is not bool
+        or type(summary.get("failure")) is not dict
+        or summary.get("receipt") != {} or summary.get("completed_prefix") is not None
+    ):
+        raise ValueError
+    broker = summary.get("broker")
+    if (
+        type(broker) is not dict
+        or set(broker) != {"game_id", "seed", "win_levels", "levels_completed",
+                           "primitive_actions", "terminal_reason", "replay_sha256"}
+        or broker["terminal_reason"] != "game-won"
+        or type(broker["win_levels"]) is not int or broker["win_levels"] < 1
+        or type(broker["levels_completed"]) is not int
+        or broker["levels_completed"] != broker["win_levels"]
+        or type(broker["seed"]) is not int
+        or type(broker["primitive_actions"]) is not int
+    ):
+        raise ValueError
+    trace = _inside_file(source, source / "trace" / "prime-trace.jsonl")
+    rows = [json.loads(line) for line in trace.read_text(encoding="utf-8").splitlines()]
+    previous = None
+    identities = None
+    for sequence, row in enumerate(rows, 1):
+        if (type(row) is not dict or set(row) != _ENTRY_FIELDS
+                or type(row["sequence"]) is not int or row["sequence"] != sequence
+                or not are_p7_trace_identities(row["identities"])
+                or row["previous_sha256"] != previous
+                or row["sha256"] != _entry_digest(sequence, row["kind"], row["identities"], row["payload"], previous)):
+            raise ValueError
+        if identities is None:
+            identities = row["identities"]
+        if row["identities"] != identities:
+            raise ValueError
+        previous = row["sha256"]
+    if identities is None or any(row["kind"] in {"arc.run.completed", "arc.run.partial", "arc.run.failed"} for row in rows):
+        raise ValueError
+    source_experiment = summary.get("experiment")
+    if (type(source_experiment) is not dict
+            or source_experiment.get("game_id") != broker["game_id"]
+            or type(source_experiment.get("seed")) is not int
+            or source_experiment["seed"] != broker["seed"]
+            or source_experiment.get("model") != identities["model_id"]):
+        raise ValueError
+    seal_path = source / "trace" / "prime-trace.seal.json"
+    hashes = {"summary_sha256": _digest_file(summary_path), "trace_sha256": _digest_file(trace)}
+    if summary["sealed_trace"]:
+        seal = json.loads(_inside_file(source, seal_path).read_text())
+        entries = live.read_trace_entries(source / "trace")
+        if (set(seal) != {"entry_count", "final_sha256", "sealed_at"}
+                or seal["entry_count"] != len(entries) or seal["final_sha256"] != entries[-1].sha256
+                or type(seal["sealed_at"]) is not str
+                or [row["payload"] for row in rows if row["kind"] == "arc.run.game-won"] != [broker]):
+            raise ValueError
+        hashes["trace_seal_sha256"] = _digest_file(seal_path)
+    elif seal_path.exists() or seal_path.is_symlink() or any(row["kind"] in {"trace.sealed", "arc.run.game-won"} for row in rows):
+        raise ValueError
+    from asterion.agents.prime.trace import PrimeTraceEntry
+    from asterion.applications.prime.p7.solutions import _transitions
+    transitions = _transitions(tuple(PrimeTraceEntry(**row) for row in rows))
+    receipt = ArcRunReceipt(*(broker[key] for key in (
+        "game_id", "seed", "primitive_actions", "levels_completed", "terminal_reason", "replay_sha256")))
+    if len(transitions) != receipt.primitive_actions or replay_sha256(transitions, terminal_reason="game-won") != receipt.replay_sha256:
+        raise ValueError
+    game = resolve_game_selection({GAME_ID_ENV: receipt.game_id, SEED_ENV: str(receipt.seed), TARGET_LEVEL_ENV: str(receipt.levels_completed)}, arc_root)
+    if game.win_levels != broker["win_levels"]:
+        raise ValueError
+    recordings = [_recording(source, group) for group in ("recordings", "replay-recordings")]
+    if recordings[0][0] != recordings[1][0]:
+        raise ValueError
+    if recordings[0][0][-1].get("state") != "WIN" or recordings[0][0][-1].get("levels_completed") != game.win_levels:
+        raise ValueError
+    if _recorded_actions(recordings[0][0], game.game_id, game.win_levels) != tuple((t.action, t.data) for t in transitions):
+        raise ValueError
+    hashes["recording_sha256s"] = sorted(item[1] for item in recordings)
+    with tempfile.TemporaryDirectory(prefix="asterion-p7-win-audit-") as directory:
+        replay_arc_run(transitions, receipt, lambda: live.ArcadeEngine(arc_root=arc_root, recordings_dir=Path(directory), game=game), game=game)
+    usage = [row["payload"] for row in rows if row["kind"] == "arc.usage.reported"]
+    if any(type(item) is not dict or set(item) != {"input_tokens", "output_tokens"}
+           or any(type(value) is not int or value < 0 for value in item.values()) for item in usage):
+        raise ValueError
+    # The replay itself performs no model execution. Source identity is preserved
+    # explicitly, while its original experiment remains attributable to source.
+    experiment = {"game_id": game.game_id, "seed": game.seed, "model": identities["model_id"],
+                  "target_level": game.win_levels, "prediction_variant": "offline-replay"}
+    return _Candidate(source, game, transitions, receipt, hashes,
+                      sum(item["input_tokens"] for item in usage), sum(item["output_tokens"] for item in usage),
+                      identities, experiment)
+
+
+def recover_terminal_win(*, operator_root: Path, arc_root: Path, source_run_id: str) -> Path:
+    """Independently replay a game WIN; the source model failure stays unchanged."""
+    return _recover(operator_root=operator_root, arc_root=arc_root,
+                    source_run_id=source_run_id, kind="terminal-game-win")
+
+
 def _receipt_mapping(value: object) -> dict[str, object]:
     names = (
         "completed_level_count",
@@ -367,9 +473,9 @@ def _replay_into(
     transitions: tuple[ArcTransition, ...],
     identities: Mapping[str, str],
 ) -> None:
-    client = _P7BrokerClient(broker, recorder, identities)
+    client = _P7BrokerClient(broker, recorder, identities, variant="legacy")
     for expected in transitions:
-        client.act([{"name": expected.action, "data": dict(expected.data)}])
+        client.act([{"name": expected.action, "data": dict(expected.data)}], _trusted_prefix_replay=True)
         if broker.journal[-1] != expected:
             raise ValueError
     snapshot = broker.terminal_snapshot()
@@ -382,8 +488,13 @@ def recover_trace_race(
 ) -> Path:
     """Create a new sealed run after proving the one known append race."""
 
+    return _recover(operator_root=operator_root, arc_root=arc_root,
+                    source_run_id=source_run_id, kind="concurrent-trace-append")
+
+
+def _recover(*, operator_root: Path, arc_root: Path, source_run_id: str, kind: str) -> Path:
     try:
-        candidate = _candidate(operator_root, arc_root, source_run_id)
+        candidate = (_terminal_candidate if kind == "terminal-game-win" else _candidate)(operator_root, arc_root, source_run_id)
     except Exception:
         raise RecoveryError("recovery source is unavailable") from None
     run_id = live.safe_run_id()
@@ -400,7 +511,7 @@ def recover_trace_race(
         )
         broker = ArcBroker(engine=engine, game=candidate.game)
         recorder = PrimeTraceRecorder(trace_root)
-        identities = trace_identities_for(
+        identities = candidate.identities or trace_identities_for(
             declared_model_selection(
                 {
                     **live._dotenv_values(operator_root / ".env"),
@@ -414,6 +525,7 @@ def recover_trace_race(
             identities,
             {
                 "source_run_id": source_run_id,
+                "recovery_kind": kind,
                 **dict(candidate.source_hashes),
             },
         )
@@ -446,14 +558,20 @@ def recover_trace_race(
             comparison_report=None,
             reason=None,
             failure=None,
+            experiment=candidate.experiment,
             diagnostics={
                 "recovered_from": source_run_id,
-                "recovery_kind": "concurrent-trace-append",
+                "recovery_kind": kind,
+                "execution_mode": "offline-replay",
+                "source_runtime_status": "failed",
+                "restoration_actions": len(candidate.transitions),
+                "new_solver_actions": 0,
                 "source_hashes": dict(candidate.source_hashes),
                 "source_usage_input_tokens": candidate.usage_input_tokens,
                 "source_usage_output_tokens": candidate.usage_output_tokens,
                 "usage_attributed_to_source": True,
                 "worker_cell_count": 0,
+                "model_call_count": 0,
             },
         )
         return private
@@ -477,13 +595,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--operator-root", required=True, type=Path)
     parser.add_argument("--arc-root", required=True, type=Path)
     parser.add_argument("--source-run", required=True)
+    parser.add_argument("--kind", choices=("concurrent-trace-append", "terminal-game-win"), default="concurrent-trace-append")
     return parser
 
 
 def main(arguments: list[str] | None = None) -> int:
     try:
         values = _parser().parse_args(arguments)
-        run = recover_trace_race(
+        recover = recover_terminal_win if values.kind == "terminal-game-win" else recover_trace_race
+        run = recover(
             operator_root=values.operator_root,
             arc_root=values.arc_root,
             source_run_id=values.source_run,

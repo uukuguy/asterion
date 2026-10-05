@@ -166,7 +166,7 @@ def _load_current_roster_prefixes(
 ) -> tuple[object, ...]:
     """Verify current WorldMap sources directly; display caches grant no authority."""
     from .score import partial_game_score
-    from .solutions import VerifiedPrefix, load_exact_prefix, load_resume_worldmap
+    from .solutions import VerifiedPrefix, load_exact_prefix, load_resume_worldmap, source_experiment
 
     if runs_root.is_symlink() or not runs_root.is_dir():
         return ()
@@ -179,7 +179,7 @@ def _load_current_roster_prefixes(
                     or not summary_path.is_file() or summary_path.stat().st_size > 1024 * 1024):
                 continue
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            experiment = summary.get("experiment") if type(summary) is dict else None
+            experiment = source_experiment(run, summary) if type(summary) is dict else None
             if (type(experiment) is not dict
                     or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
                     or summary.get("run_id") != run.name
