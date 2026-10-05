@@ -1,11 +1,12 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05 20:18 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-05 20:19 CST. **Session remains active — not a final handoff.**
 
 ## 已验证事实
 
 - 分支 `feat/p7-live-console`；路由 managed。原生迁移工作表仍是 `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`。本会话推进的是整体设计审查，尚未开始实现或新模型运行。
 - 用户要求：核心是 WorldMap 驱动解题；参考榜首系统实际代码；整体设计而非碎片补丁；利用 Prime 的 IPython；网页控制台配合求解；允许大胆重设计，不迁就当前实现。
+- 本会话设计与状态提交 `0ac742ac`；候选设计已可审阅，未推送。代码能力未变，当前下一动作是整体设计审阅后制定实施计划。
 - 参考源码固定：Tycho `f68912a764372ead0a610db2e1c011d41ce5197e`；Retrodict `71672e8e5adb008360f52a61ef9e2adf91a62d89`。代码只读检查，未执行第三方程序、复现其评分或启动模型。
 - P7 当前 worker 可在同一 namespace 中执行自编 Python 并保留变量；Prime 摘要明确 kernel 跨 compaction 保留。默认策略将 IPython 降为分析/fallback。普通 checked 短列表不要求 DSL 证书；自动模型 context envelope 才有该检查。详见源码审查文件。
 - 本会话 `make docs-check` 通过（272 Markdown、63本地链接）；`git diff --check` 通过。没有重跑源码/模型/打包门禁。

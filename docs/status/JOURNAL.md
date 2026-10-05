@@ -3702,3 +3702,4 @@
 - 20:18 用户指定整体WorldMap/IPython重设计，纳入console，放弃PNG优先及迁就旧实现的方向。
 - 20:18 固定Tycho/Retrodict源码，完成整体设计与独立复审；没有新模型运行或求解代码改动。
 - 20:18 make docs-check通过：272 Markdown/63本地链接；git diff --check通过，能力仍未新增验证。
+- 20:19 Redesigned P7 solver/console around IPython model work to restore the solving loop; proposal only [0ac742ac].
