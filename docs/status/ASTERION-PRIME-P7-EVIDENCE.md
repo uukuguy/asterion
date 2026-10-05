@@ -821,3 +821,22 @@ The final installed-wheel HTTP smoke opened SP80 L1, L2 and L6 directly. Each le
 - Boundary: no new P7 model run or completion; no restored human board checkpoint, human history/export or resumable P7 pause. Visual browser acceptance remains unverified.
 
 Local evidence: `/tmp/p7-direct-level-http-evidence.json`; final wheel `/tmp/p7-direct-level-wheel/asterion-0.1.0-py3-none-any.whl`; self-contained replay `/tmp/p7-direct-level-replay.html`; DOM output `/tmp/p7-direct-level-dom.log`.
+
+
+## Reliable human controls and page-local history — 2026-10-05
+
+The unchanged polling path rebuilt the action buttons while the user pressed them. The detached button lost focus and could miss its click. The UI now keeps keyed action buttons and queue items. Sending, acknowledged execution, no visual change, rejection and uncertain results have distinct compact feedback. Only an exact session/version/action/data acknowledgement confirms execution. An uncertain request retries the same command identity.
+
+HUMAN keeps at most 1001 actual received observations in page memory. Repeated and no-change grids keep separate observation versions. Exact consecutive observations and acknowledged primitive metadata form action edges; missing observations are marked and never reconstructed. RESET stays in the same history with its actual episode. A global manual timeline, playback and compact action queue can review actual frames across levels. Historical views disable execution. Returning to the current frame enables independent human controls. New sessions and browser reload clear this history. The backend remains latest-only, with no manual trajectory persistence or P7 learning.
+
+The installed wheel HTTP smoke performed RESET followed by ACTION4, ACTION4, ACTION1, ACTION1, ACTION4 and ACTION5 in SP80 L1. An additional ACTION4 in L2 brought the total to eight actual acknowledgements, with versions 0–8; the final actual game level was L2 and real completed score was 1. Duplicate exact requests returned their original results. P7 stayed idle, with zero P7 actions and no run directory. SDK temporary recordings and its owned process group were removed. This route was an interface verification, not a new autonomous P7 capability result.
+
+Local artifacts: `/tmp/p7-click-history-http-evidence.json`, `/tmp/p7-click-history-http-fixture.json`, `/tmp/p7-click-history-dom-evidence.json`, `/tmp/p7-click-history-dom.log`, `/tmp/p7-click-history-wheel/asterion-0.1.0-py3-none-any.whl`, `/tmp/p7-click-history-replay.html`.
+
+- PASS: 112 focused Python console tests; 54 DOM tests using the final installed-wheel offline export, zero skips. Covered stable pressed buttons/focus, exact coordinate acknowledgements, retry, no-change/RESET history, source gaps, cross-level playback, historical read-only controls, session replacement and ACTION6/comparison ordering.
+- PASS: final installed SDK HTTP and served-HTML DOM integration. Eight real human actions produced eight queue entries and nine actual observations. Playback crossed L1→L2 and reached the final frame. Unchanged polling retained button identity/focus and historical seek; historical controls and animation sent no game actions. Returning to current restored actual L2 controls. No P7 requests.
+- PASS: independent source review. Three reproduced findings were fixed: cross-level playback cancellation, a hidden ACTION6 target in comparison mode, and old-session feedback. The alternate ACTION6/comparison order was also fixed and independently verified.
+- PASS: final wheel build/isolated install; `make lint docs-check`, JS syntax and `git diff --check`.
+- Non-PASS: promotion attempt taken before the final UI review fixes ran 3888 tests, with 13 failures, 5 errors and 4 skips. Log `/tmp/p7-click-history-promotion.log` retains a tail naming the existing TypeScript source-detachment literals. That tail does not establish the cause of every failure. The full release gate remains open.
+- External-limited: native browser click/visual acceptance, because the cached browser runtime module is missing. DOM/actual SDK evidence does not establish visual acceptance.
+- Boundary: no new P7 model run or autonomous completion; no human trajectory persistence/export, restored board checkpoint or resumable P7 pause.

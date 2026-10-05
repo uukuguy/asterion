@@ -116,6 +116,15 @@ P7 收据只包含该自主运行的动作。人工结果只写人工记录。�
 - `operator.py`、`broker.py`：P7 自主执行与学习；人工试玩不挂载 broker、模型或认知/学习服务。
 - `runtime_binding.py`：现有运行收据。完整过程需应用事件投影，不改通用协议。
 
-同局人工/P7 接管与混合控制方案已撤回。实时服务与 source 过程事件已实现，并通过针对性无模型检查。真实 P7 打包过程和独立人工动作已验证。人工试玩只保留当前画面，不提供人工历史导出。可恢复 P7 暂停尚未实现；目前没有新的 SP80 过关证据。
+同局人工/P7 接管与混合控制方案已撤回。实时服务与 source 过程事件已实现，并通过针对性无模型检查。真实 P7 打包过程和独立人工动作已验证。人工引擎只保留当前画面；用户于 2026-10-05 追加要求页面内动作历史和帧回看。页面历史仅保存本次人工会话收到的实际观察，刷新或新开局后重新建立；不提供人工历史导出。可恢复 P7 暂停尚未实现；目前没有新的 SP80 过关证据。
 
 部署约束：受控 guest 任务保留 Orb 已转换的代理环境。只从 guest 继承固定代理变量，不把 Mac 回环地址加入 ORBENV。变量值不放入启动参数，模型和 CA 配置不变。
+
+
+## Follow-up: reliable human controls and in-page history — 2026-10-05
+
+User reports clicks with no visible result and requests human action history beside the frame timeline. Preserve action-button nodes across polling and ordinary updates so a press or focus is not lost. Use one compact acknowledgement status near the controls. Pending, actually acknowledged execution, explicit rejection and unknown transport outcome remain distinct. A changed frame is not required for an action to count as executed. Unknown outcomes retry the same command identity.
+
+Accumulate actual received manual frames and action acknowledgements in page memory for the same session, bounded by the existing 1000-action controller cap. Repeated identical frames retain distinct observation versions. Link an action only to an exact consecutive before/after pair; display a gap when intermediate evidence is missing. RESET is an action in the same history, with an explicit episode boundary. Opening a new manual session clears old history. An unchanged poll or retried acknowledgement does not append another action or reset the viewer position.
+
+The existing frame slider and playback controls review this history. A compact ordered action queue selects an actual action/frame. When viewing a historical frame, manual execution is disabled. A return-to-current control restores the latest actual observation and enables play. Playback changes the view only; it does not execute actions. New responses follow the latest frame only when the viewer was already at the current end. Historical cross-level frames never change the engine level or completed score. HUMAN history remains separate from P7, is not persisted as learning, and is not reconstructed after browser reload.

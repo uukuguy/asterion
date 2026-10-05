@@ -77,17 +77,111 @@
   let liveConfig = null;
   try { liveConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   if (!isRecord(liveConfig) || typeof liveConfig.token !== 'string' || !liveConfig.token) liveConfig = null;
-  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
+  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const currentLevel = () => levels[state.levelIndex] || emptyLevel;
   const frames = () => array(currentLevel().frames);
   const actions = () => array(currentLevel().actions);
   const currentFrame = () => frames()[state.frameIndex];
-  const frameById = (id) => frames().find((frame) => frame.id === id);
+  const frameById = (id) => (state.mode === 'manual' && run.status === 'manual' ? levels.flatMap((level) => array(level.frames)) : frames()).find((frame) => frame.id === id);
   const selectedAction = () => actions().find((action) => action.id === state.actionId) || null;
   const manualPlayable = () => state.mode === 'manual' && run.status === 'manual' && state.manualView?.state === 'ready' &&
     state.manualView.game_id === run.game_id && manualLevel(state.manualView) === currentLevel().level && !state.manualBusy && !state.manualPending && !state.manualError &&
-    !state.commandBusy && !state.pendingCommand && !activeSession() && Boolean(currentFrame());
+    !state.commandBusy && !state.pendingCommand && !activeSession() && Boolean(currentFrame()) && manualAtCurrent();
+  const manualHistoryActive = () => state.mode === 'manual' && run.status === 'manual' && Boolean(state.manualHistory && state.manualView && state.manualHistory.session_id === state.manualView.session_id);
+  const manualAtCurrent = () => !manualHistoryActive() || state.manualHistory.index === state.manualHistory.entries.length - 1;
+  const timelineCount = () => manualHistoryActive() ? state.manualHistory.entries.length : frames().length;
+  const timelinePosition = () => manualHistoryActive() ? state.manualHistory.index : state.frameIndex;
+
+  function setManualFrame(index, actionId) {
+    const history = state.manualHistory;
+    if (!manualHistoryActive() || !history.entries.length) return;
+    history.index = Math.max(0, Math.min(history.entries.length - 1, index));
+    const entry = history.entries[history.index];
+    const levelIndex = levels.findIndex((level) => level.level === entry.level);
+    if (state.levelIndex !== levelIndex) selectLevel(levelIndex, { pausePlayback: false });
+    state.frameIndex = frames().findIndex((frame) => frame.id === entry.frame.id);
+    state.actionId = actionId === undefined ? entry.action?.id || actions().find((action) => action.after_frame === entry.frame.id)?.id || null : actionId;
+    if (!manualAtCurrent()) state.pointerAction = null;
+    renderFrame(); renderSessionControls();
+  }
+
+  function appendManualObservation(view) {
+    const record = array(view.snapshot?.levels).find((level) => level.level === manualLevel(view));
+    const frame = array(record?.frames).at(-1);
+    if (!frame) return false;
+    const existing = state.manualHistory;
+    const same = existing?.session_id === view.session_id && existing.game_id === view.game_id;
+    const history = same ? { ...existing, entries: [...existing.entries] } : { session_id: view.session_id, game_id: view.game_id, entries: [], index: 0 };
+    const previous = history.entries.at(-1);
+    if (previous?.version >= view.observation_version) return false;
+    const follow = !same || history.index === history.entries.length - 1;
+    const entry = { version: view.observation_version, episode_id: view.episode_id, level: record.level, record, frame,
+      count: view.action_count, gap: previous ? view.observation_version - previous.version - 1 : view.observation_version, action: null };
+    const last = view.last_action;
+    if (previous && entry.version === previous.version + 1 && last?.observation_version === entry.version &&
+        view.action_count === previous.count + 1 && array(previous.frame.available_actions).includes(last.action)) {
+      const before = previous.frame.grid, after = frame.grid;
+      let changed = 0;
+      for (let y = 0; y < Math.max(before.length, after.length); y += 1) {
+        for (let x = 0; x < Math.max(array(before[y]).length, array(after[y]).length); x += 1) {
+          if (before[y]?.[x] !== after[y]?.[x]) changed += 1;
+        }
+      }
+      entry.action = { id: `manual-action-${entry.version}`, name: last.action, data: last.data,
+        before_frame: previous.frame.id, after_frame: frame.id, changed_cells: changed };
+    }
+    history.entries.push(entry);
+    // Match the controller's finite 1000-action session boundary; no persisted history.
+    const removed = Math.max(0, history.entries.length - 1001);
+    if (removed) {
+      history.entries = history.entries.slice(removed);
+      history.entries[0] = { ...history.entries[0], action: null };
+    }
+    history.index = follow ? history.entries.length - 1 : Math.max(0, history.index - removed);
+    state.manualHistory = history;
+    return true;
+  }
+
+  function manualHistorySnapshot(view) {
+    if (!state.manualHistory || state.manualHistory.session_id !== view.session_id || !view.snapshot) return view.snapshot;
+    const records = new Map();
+    state.manualHistory.entries.forEach((entry) => {
+      const previous = records.get(entry.level);
+      const record = { ...entry.record, frames: previous ? [...previous.frames] : [], actions: previous ? [...previous.actions] : [] };
+      array(entry.record.frames).forEach((frame) => { if (!record.frames.some((item) => item.id === frame.id)) record.frames.push(frame); });
+      [...array(entry.record.actions), ...(entry.action ? [entry.action] : [])].forEach((action) => { if (!record.actions.some((item) => item.id === action.id)) record.actions.push(action); });
+      records.set(entry.level, record);
+    });
+    return { ...view.snapshot, levels: [...records.values()].sort((a, b) => a.level - b.level) };
+  }
+
+  function renderManualHistory() {
+    const active = manualHistoryActive();
+    const list = $('manual-action-history');
+    $('manual-history').hidden = !active;
+    $('manual-return-current').hidden = !active || manualAtCurrent();
+    if (!active) return;
+    const history = state.manualHistory;
+    const entries = history.entries.filter((entry) => entry.action);
+    const existing = new Map([...list.children].map((button) => [button.dataset.historyVersion, button]));
+    [...list.children].forEach((button) => { if (!entries.some((entry) => String(entry.version) === button.dataset.historyVersion)) button.remove(); });
+    entries.forEach((entry, index) => {
+      let button = existing.get(String(entry.version));
+      if (!button) {
+        button = node('button', `#${entry.count} ${entry.action.name}`, 'manual-history-action');
+        button.type = 'button'; button.dataset.historyVersion = String(entry.version);
+        button.addEventListener('click', () => { pause(); const position = state.manualHistory.entries.findIndex((item) => item.version === Number(button.dataset.historyVersion)); if (position >= 0) setManualFrame(position); });
+      }
+      const selected = entry.action.id === state.actionId;
+      button.classList.toggle('is-selected', selected);
+      if (selected) button.setAttribute('aria-current', 'true'); else button.removeAttribute('aria-current');
+      if (list.children[index] !== button) list.insertBefore(button, list.children[index] || null);
+    });
+    const missing = history.entries.some((entry) => entry.gap > 0);
+    write('manual-history-note', missing ? '本页试玩记录 · 中间或更早的观察记录缺失，不补写动作' : '本页试玩记录 · 播放与定位只查看画面');
+  }
+
   const statuses = {
     completed: ['已过关', 'success'], successful: ['已成功', 'success'], success: ['已成功', 'success'], won: ['已过关', 'success'],
     running: ['运行中', 'active'], active: ['可继续', 'active'], in_progress: ['进行中', 'active'],
@@ -154,15 +248,15 @@
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') { selectLevel(index); return; }
         if (manualSelectionLocked()) return;
-        if (state.manualView?.state === 'ready' && !state.manualError && state.manualView.game_id === run.game_id && manualLevel(state.manualView) === level.level && array(level.frames).length) selectLevel(index);
+        if (state.manualView?.state === 'ready' && !state.manualError && state.manualView.game_id === run.game_id && manualLevel(state.manualView) === level.level && array(level.frames).length) { if (manualHistoryActive()) { pause(); setManualFrame(state.manualHistory.entries.length - 1); } else selectLevel(index); }
         else openManual(level.level);
       });
       list.append(button);
     });
   }
 
-  function selectLevel(index) {
-    pause();
+  function selectLevel(index, { pausePlayback = true } = {}) {
+    if (pausePlayback) pause();
     state.levelIndex = index;
     state.frameIndex = 0;
     state.actionId = null;
@@ -262,50 +356,69 @@
     const afterIndex = action ? frames().findIndex((item) => item.id === action.after_frame) : -1;
     const linked = action && frame && (frame.id === action.after_frame || (beforeIndex >= 0 && afterIndex >= beforeIndex && state.frameIndex > beforeIndex && state.frameIndex <= afterIndex));
     const manual = state.mode === 'manual' && run.status === 'manual';
-    const activeName = manual ? frame ? state.manualView?.last_action?.action : null : linked ? action.name : null;
+    const activeName = manual ? frame ? manualAtCurrent() ? state.manualView?.last_action?.action : action?.name : null : linked ? action.name : null;
     const meanings = actionMeanings();
-    const card = (name, availability) => {
+    const recordedActions = (name) => actions().filter((entry) => entry.name === name).map((entry) => ({
+      action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
+    })).filter((entry) => entry.index >= 0);
+    const card = (name, availability, wrapper) => {
       const active = name === activeName;
       const armed = manual && name === state.pointerAction;
-      const wrapper = node('div');
-      wrapper.setAttribute('role', 'listitem');
-      const item = node('button', undefined, `available-action${active ? ' is-current' : ''}${armed ? ' is-armed' : ''}`);
-      item.type = 'button';
-      const recorded = actions().filter((entry) => entry.name === name).map((entry) => ({
-        action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
-      })).filter((entry) => entry.index >= 0);
-      item.disabled = manual ? !manualPlayable() || Boolean(availability) : state.mode === 'live' || Boolean(availability) || recorded.length === 0;
-      item.title = manual ? name === 'ACTION6' ? '选择后点击游戏画面上的目标格' : '执行一次人工试玩动作' : state.mode === 'live' ? 'P7 运行中的动作观察；不发送游戏动作' : availability || (recorded.length ? '定位该动作的下一条回放记录' : '没有可定位的已录动作');
-      item.addEventListener('click', () => {
-        if (manual) {
+      const pending = manual && manualAtCurrent() && state.manualBusy && state.manualPending?.path === '/api/manual/action' && state.manualPending.body.action === name;
+      if (!wrapper) {
+        wrapper = node('div');
+        wrapper.setAttribute('role', 'listitem');
+        const item = node('button');
+        item.type = 'button'; item.dataset.availableAction = name;
+        item.append(node('strong', name, 'action-key-label'), node('span', '', 'action-key-meaning'), node('span', '', 'action-key-status'));
+        item.addEventListener('click', () => {
           if (item.disabled) return;
-          if (name === 'ACTION6') { state.pointerAction = 'ACTION6'; renderFrame(); renderSessionControls(); return; }
-          sendManualAction(name); return;
-        }
-        const target = recorded.find((entry) => entry.index > state.frameIndex) || recorded[0];
-        if (!item.disabled && target) locateAction(target.action);
-      });
-      item.dataset.availableAction = name;
-      if (active) item.setAttribute('aria-current', 'true');
-      if (manual && name === 'ACTION6') item.setAttribute('aria-pressed', String(armed));
+          if (state.mode === 'manual' && run.status === 'manual') {
+            if (!manualPlayable()) return;
+            if (name === 'ACTION6') { state.pointerAction = 'ACTION6'; $('compare-toggle').checked = false; renderFrame(); renderSessionControls(); return; }
+            sendManualAction(name); return;
+          }
+          if (state.mode !== 'replay') return;
+          const recorded = recordedActions(name);
+          const target = recorded.find((entry) => entry.index > state.frameIndex) || recorded[0];
+          if (target) locateAction(target.action);
+        });
+        wrapper.append(item);
+      }
+      const item = wrapper.firstElementChild;
+      item.className = `available-action${active ? ' is-current' : ''}${armed ? ' is-armed' : ''}${pending ? ' is-pending' : ''}`;
+      item.disabled = manual ? !manualPlayable() || Boolean(availability) : state.mode === 'live' || Boolean(availability) || recordedActions(name).length === 0;
+      item.title = manual ? name === 'ACTION6' ? '选择后点击游戏画面上的目标格' : '执行一次人工试玩动作' : state.mode === 'live' ? 'P7 运行中的动作观察；不发送游戏动作' : availability || (recordedActions(name).length ? '定位该动作的下一条回放记录' : '没有可定位的已录动作');
+      if (active) item.setAttribute('aria-current', 'true'); else item.removeAttribute('aria-current');
+      if (manual && name === 'ACTION6') item.setAttribute('aria-pressed', String(armed)); else item.removeAttribute('aria-pressed');
+      if (pending) item.setAttribute('aria-busy', 'true'); else item.removeAttribute('aria-busy');
       const short = shortActionMeaning(name, meaningEntries(meanings[name]));
-      item.append(node('strong', name, 'action-key-label'), node('span', short.meaning, 'action-key-meaning'), node('span', short.status, 'action-key-status'));
-      item.setAttribute('aria-label', `${name}，${short.meaning}，${short.status === '?' ? '含义未知' : short.status}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}`);
-      wrapper.append(item);
+      item.querySelector('.action-key-meaning').textContent = short.meaning;
+      item.querySelector('.action-key-status').textContent = short.status;
+      item.setAttribute('aria-label', `${name}，${short.meaning}，${short.status === '?' ? '含义未知' : short.status}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
       return wrapper;
     };
+    const reconcile = (list, names, availability) => {
+      const existing = new Map([...list.children].filter((child) => child.firstElementChild?.dataset.availableAction)
+        .map((child) => [child.firstElementChild.dataset.availableAction, child]));
+      [...list.children].forEach((child) => { if (!names.includes(child.firstElementChild?.dataset.availableAction)) child.remove(); });
+      names.forEach((name, index) => {
+        const wrapper = card(name, availability, existing.get(name));
+        if (list.children[index] !== wrapper) list.insertBefore(wrapper, list.children[index] || null);
+      });
+    };
     const list = $('available-actions');
-    list.replaceChildren();
-    if (!available.length) list.append(node('span', hasAvailability ? '当前帧没有可用动作。' : '未记录可用动作。', 'available-actions-empty'));
-    available.forEach((name) => list.append(card(name)));
+    if (available.length) reconcile(list, available);
+    else if (!list.querySelector('.available-actions-empty')) list.replaceChildren(node('span', hasAvailability ? '当前帧没有可用动作。' : '未记录可用动作。', 'available-actions-empty'));
+    else list.firstElementChild.textContent = hasAvailability ? '当前帧没有可用动作。' : '未记录可用动作。';
     const unavailable = $('unavailable-current-action');
-    unavailable.replaceChildren();
     unavailable.hidden = !activeName || available.includes(activeName);
-    if (!unavailable.hidden) unavailable.append(card(activeName, hasAvailability ? '已执行／当前不可用' : '已执行／可用性未记录'));
+    reconcile(unavailable, unavailable.hidden ? [] : [activeName], hasAvailability ? '已执行／当前不可用' : '已执行／可用性未记录');
   }
 
   function renderFrame() {
-    const count = frames().length;
+    const count = timelineCount();
+    const position = timelinePosition();
     const frame = currentFrame();
     const action = selectedAction();
     renderWorld();
@@ -320,11 +433,13 @@
     $('single-board').hidden = count === 0 || (comparisonRequested && canCompare);
     $('comparison-board').hidden = count === 0 || !comparisonRequested || !canCompare;
     $('frame-slider').max = String(Math.max(0, count - 1));
-    $('frame-slider').value = String(state.frameIndex);
+    $('frame-slider').setAttribute('aria-label', state.mode === 'manual' ? '选择试玩记录帧' : '选择回放帧');
+    $('frame-slider').value = String(position);
     $('frame-slider').disabled = count < 2;
-    write('frame-counter', `${count ? state.frameIndex + 1 : 0} / ${count}`);
+    write('frame-counter', `${count ? position + 1 : 0} / ${count}`);
     write('frame-state', frame ? frameState(frame.state) : '无帧记录');
-    write('frame-caption', run.status === 'manual' && frame ? '人工试玩当前观察 · 尚未启动 P7' : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
+    const manualEntry = manualHistoryActive() ? state.manualHistory.entries[position] : null;
+    write('frame-caption', run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
     $('board-canvas').style.cursor = state.mode === 'manual' && state.pointerAction === 'ACTION6' ? 'crosshair' : '';
     const decision = action && action.decision_id;
     const showDecisionLink = Boolean(action && run.status !== 'manual');
@@ -351,17 +466,19 @@
       write('before-label', `动作前 · ${string(before.id)}`);
       write('after-label', `动作后 · ${string(after.id)}`);
     }
-    $('previous-frame').disabled = !count || state.frameIndex <= 0;
-    $('next-frame').disabled = !count || state.frameIndex >= count - 1;
-    $('play-toggle').disabled = state.mode !== 'replay' || count < 2;
+    $('previous-frame').disabled = !count || position <= 0;
+    $('next-frame').disabled = !count || position >= count - 1;
+    $('play-toggle').disabled = !['replay', 'manual'].includes(state.mode) || count < 2;
     $('play-speed').disabled = count < 2;
     $('previous-action').disabled = actionTarget(-1) === null;
     $('next-action').disabled = actionTarget(1) === null;
+    renderManualHistory();
     document.querySelectorAll('[data-action-id]').forEach((card) => card.classList.toggle('is-selected', card.dataset.actionId === state.actionId));
     document.querySelectorAll('[data-decision-id]').forEach((card) => card.classList.toggle('is-selected', Boolean(decision) && card.dataset.decisionId === decision));
   }
 
   function setFrame(index, actionId) {
+    if (manualHistoryActive()) { setManualFrame(index, actionId); return; }
     if (!frames().length) return;
     state.frameIndex = Math.max(0, Math.min(frames().length - 1, index));
     if (actionId !== undefined) state.actionId = actionId;
@@ -378,6 +495,7 @@
 
   function locateAction(action) {
     pause();
+    if (manualHistoryActive()) { const index = state.manualHistory.entries.findIndex((entry) => entry.frame.id === action.after_frame); if (index >= 0) setManualFrame(index, action.id); return; }
     const target = frames().findIndex((frame) => frame.id === action.after_frame);
     const fallback = frames().findIndex((frame) => frame.id === action.before_frame);
     if (target >= 0 || fallback >= 0) setFrame(target >= 0 ? target : fallback, action.id);
@@ -385,6 +503,12 @@
   }
 
   function actionTarget(direction) {
+    if (manualHistoryActive()) {
+      const linked = state.manualHistory.entries.map((entry, index) => ({ action: entry.action, index })).filter((item) => item.action);
+      const selected = linked.findIndex((item) => item.action.id === state.actionId);
+      if (selected >= 0) return linked[selected + direction] || null;
+      return direction > 0 ? linked.find((item) => item.index > timelinePosition()) || null : linked.filter((item) => item.index < timelinePosition()).at(-1) || null;
+    }
     const linked = actions().map((action) => ({ action, index: frames().findIndex((frame) => frame.id === action.after_frame) })).filter((item) => item.index >= 0);
     const position = linked.findIndex((item) => item.action.id === state.actionId);
     if (position >= 0) return linked[position + direction] || null;
@@ -400,16 +524,16 @@
   }
 
   function play() {
-    if (state.mode !== 'replay' || frames().length < 2) return;
-    if (state.frameIndex >= frames().length - 1) setFrame(0);
+    if (!['replay', 'manual'].includes(state.mode) || timelineCount() < 2) return;
+    if (timelinePosition() >= timelineCount() - 1) setFrame(0);
     pause();
     write('play-toggle', '暂停');
     $('play-toggle').setAttribute('aria-pressed', 'true');
     // Canvas frames switch immediately, including under prefers-reduced-motion.
     state.timer = window.setInterval(() => {
-      if (state.frameIndex >= frames().length - 1) { pause(); return; }
-      setFrame(state.frameIndex + 1);
-      if (state.frameIndex >= frames().length - 1) pause();
+      if (timelinePosition() >= timelineCount() - 1) { pause(); return; }
+      setFrame(timelinePosition() + 1);
+      if (timelinePosition() >= timelineCount() - 1) pause();
     }, 650 / Number($('play-speed').value));
   }
 
@@ -563,7 +687,7 @@
       const before = frameById(action.before_frame), after = frameById(action.after_frame);
       const changed = Number.isFinite(action.changed_cells) ? action.changed_cells : array(action.changed_cells).length;
       addMetadata(card, [`动作前 ${before ? before.id : '记录缺失'}`, `动作后 ${after ? after.id : '记录缺失'}`, `变化 ${changed} 格${changed === 0 ? ' · 画面未变化' : ''}`, before && after ? `已完成关卡 ${number(before.levels_completed)} → ${number(after.levels_completed)}` : '关卡变化无法核对', after && after.state === 'WIN' ? '结算状态 WIN' : null]);
-      addMetadata(card, [action.trace_sequence != null ? `轨迹序号 ${action.trace_sequence}` : '轨迹关联缺失', action.decision_id ? `P7 关联 ${action.decision_id}` : 'P7 轮次关联缺失']);
+      if (run.status !== 'manual') addMetadata(card, [action.trace_sequence != null ? `轨迹序号 ${action.trace_sequence}` : '轨迹关联缺失', action.decision_id ? `P7 关联 ${action.decision_id}` : 'P7 轮次关联缺失']);
       if (!before || !after) card.append(node('p', '动作前后帧不完整，无法建立完整的结果对照。', 'event-note'));
       const evidence = node('div', undefined, 'action-evidence');
       renderActionEvidence(evidence, action); card.append(evidence);
@@ -655,11 +779,18 @@
     });
   });
   $('frame-slider').addEventListener('input', () => { pause(); setFrame(Number($('frame-slider').value)); });
-  $('previous-frame').addEventListener('click', () => { pause(); setFrame(state.frameIndex - 1); });
-  $('next-frame').addEventListener('click', () => { pause(); setFrame(state.frameIndex + 1); });
+  $('previous-frame').addEventListener('click', () => { pause(); setFrame(timelinePosition() - 1); });
+  $('next-frame').addEventListener('click', () => { pause(); setFrame(timelinePosition() + 1); });
+  $('manual-return-current').addEventListener('click', () => { pause(); if (manualHistoryActive()) setManualFrame(state.manualHistory.entries.length - 1); });
   $('play-toggle').addEventListener('click', () => state.timer === null ? play() : pause());
   $('play-speed').addEventListener('change', () => { if (state.timer !== null) play(); });
-  ['diff-toggle', 'highlight-toggle', 'compare-toggle'].forEach((id) => $(id).addEventListener('change', renderFrame));
+  ['diff-toggle', 'highlight-toggle', 'compare-toggle'].forEach((id) => $(id).addEventListener('change', () => {
+    if (id === 'compare-toggle' && $('compare-toggle').checked && state.pointerAction) {
+      state.pointerAction = null;
+      renderSessionControls();
+    }
+    renderFrame();
+  }));
   [-1, 1].forEach((direction) => $(direction < 0 ? 'previous-action' : 'next-action').addEventListener('click', () => {
     const target = actionTarget(direction); if (target) locateAction(target.action);
   }));
@@ -690,7 +821,7 @@
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
   window.addEventListener('pagehide', pause);
-  function replaceSnapshot(next, { follow = state.mode === 'live' } = {}) {
+  function replaceSnapshot(next, { follow = state.mode === 'live', manualPosition = null } = {}) {
     if (!validSnapshot(next)) throw new Error('invalid-response');
     const previous = { snapshot, run, recordedLevels, levelCount, levels,
       levelIndex: state.levelIndex, frameIndex: state.frameIndex, actionId: state.actionId };
@@ -709,7 +840,8 @@
       snapshot = next; run = nextRun; recordedLevels = nextRecordedLevels; levelCount = nextCount; levels = nextLevels;
       renderRunHeader(); selectLevel(index);
       const historical = preserve ? frames().findIndex((frame) => frame.id === previousFrame) : -1;
-      setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
+      if (manualPosition !== null) setManualFrame(manualPosition);
+      else setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
         preserve && actions().some((action) => action.id === previousAction) ? previousAction : undefined);
     } catch (_) {
       snapshot = previous.snapshot; run = previous.run; recordedLevels = previous.recordedLevels;
@@ -745,10 +877,11 @@
     $('console-mode').disabled = !liveConfig || Boolean(state.manualPending && state.manualPending.path === '/api/manual/action');
     $('live-controls').hidden = !liveConfig || (!live && !manual);
     $('replay-controls').hidden = !liveConfig || state.mode !== 'replay';
-    $('replay-transport').hidden = state.mode !== 'replay';
+    $('replay-transport').hidden = state.mode !== 'replay' && !manual;
     $('header-mode').textContent = liveConfig ? (manual ? '人工试玩' : live ? 'P7 实时运行' : '回放记录') : '离线回放';
     write('actions-mode', manual ? '人工试玩动作' : live ? '运行观察' : '只读回放');
-    write('actions-note', manual ? state.pointerAction === 'ACTION6' ? '点击画面目标格执行 ACTION6' : '执行可用动作；按键含义尚未识别' : live ? '动作由 P7 执行，此处只观察' : '点击定位已录动作');
+    write('actions-note', manual ? !manualAtCurrent() ? '历史画面只读；返回当前画面后可操作' : state.pointerAction === 'ACTION6' ? '点击画面目标格执行 ACTION6' : '执行可用动作；按键含义尚未识别' : live ? '动作由 P7 执行，此处只观察' : '点击定位已录动作');
+    renderManualFeedback();
     write('manual-note', liveConfig ? manual ? '点击左侧关卡可直接试玩任意关卡；直接选择不代表已过关。启动 P7 会从第 1 关开始全新运行。画面获得焦点时可按 1–7 选择 ACTION 按键。' : '人工试玩独立于 P7；P7 运行时动作面板仅展示观察。' : '离线回放不执行游戏动作。');
     document.querySelectorAll('.level-button').forEach((button) => { button.disabled = manual && manualSelectionLocked(); });
     $('run-start').disabled = !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
@@ -828,6 +961,7 @@
     state.manualPollGeneration += 1;
     state.manualBusy = false;
     state.manualError = false;
+    state.manualFeedback = null;
     state.pointerAction = null;
   }
 
@@ -837,7 +971,7 @@
     const game = array(liveConfig.games).find((entry) => entry.game_id === gameId);
     if (!game || !validChoice({ game_id: gameId, level })) return;
     state.manualChoice = { game_id: gameId, level };
-    invalidateManual(); state.manualView = null; state.mode = 'manual';
+    invalidateManual(); state.manualView = null; state.manualHistory = null; state.mode = 'manual';
     replaceSnapshot({ schema: 'asterion.arc-agi3-p7-console/v1', generated_at: null,
       run: { run_id: null, game_id: gameId, status: 'manual', win_levels: game.win_levels ?? null, completed_level_count: 0, primitive_action_count: 0 },
       levels: [], decisions: [], warnings: [] });
@@ -857,6 +991,20 @@
     return true;
   }
 
+  function renderManualFeedback() {
+    const panel = $('manual-action-status');
+    const feedback = state.manualFeedback?.session_id === state.manualView?.session_id ? state.manualFeedback : null;
+    const actionPending = state.manualPending?.path === '/api/manual/action';
+    panel.hidden = state.mode !== 'manual' || (!feedback && !actionPending);
+    let text = '';
+    if (actionPending) text = state.manualBusy ? '正在发送 · 等待响应' : '结果未确认 · 请重试原请求';
+    else if (feedback?.status === 'confirmed') text = `已执行 ${feedback.count} 次 · ${feedback.changed === null ? '画面对比不可用' : feedback.changed ? '画面已变化' : '画面未变化'}`;
+    else if (feedback?.status === 'rejected') text = '请求已拒绝 · 请重新打开试玩';
+    else if (feedback?.status === 'ended') text = '试玩已结束 · 动作结果未确认';
+    else if (feedback) text = '动作结果未确认 · 已停止操作';
+    panel.textContent = text;
+  }
+
   function renderManualStatus() {
     write('service-status', state.manualBusy ? '正在处理人工试玩操作' : state.manualPending ? '试玩请求结果未确认 · 请重试原请求' : state.manualError ? '人工试玩操作未确认 · 请重新打开试玩' : `${manualLabels[state.manualView?.state] || '正在打开人工试玩'}${manualLevel(state.manualView) ? ` · 关卡 ${manualLevel(state.manualView)}` : ''}`);
   }
@@ -865,11 +1013,17 @@
     if (!validManual(view)) throw new Error('invalid-response');
     if (state.manualView?.session_id === view.session_id && state.manualView.observation_version > view.observation_version) return;
     const previous = state.manualView;
+    const previousHistory = state.manualHistory;
     state.manualView = view;
     try {
-      if (view.snapshot && (run.status !== 'manual' || previous?.session_id !== view.session_id || previous?.observation_version !== view.observation_version || previous?.state !== view.state || manualLevel(previous) !== manualLevel(view))) replaceSnapshot(view.snapshot, { follow: true });
+      const appended = appendManualObservation(view);
+      if (view.snapshot && (run.status !== 'manual' || previous?.session_id !== view.session_id || previous?.observation_version !== view.observation_version || previous?.state !== view.state || manualLevel(previous) !== manualLevel(view) || appended)) replaceSnapshot(manualHistorySnapshot(view), { follow: false, manualPosition: state.manualHistory?.index ?? null });
       else renderFrame();
-    } catch (error) { state.manualView = previous; throw error; }
+    } catch (error) {
+      state.manualView = previous; state.manualHistory = previousHistory;
+      try { if (manualHistoryActive()) setManualFrame(previousHistory.index); } catch (_) { /* Keep the accepted data on persistent rendering failure. */ }
+      throw error;
+    }
     const choice = { game_id: view.game_id, level: manualLevel(view) };
     if (validChoice(choice)) state.manualChoice = choice;
     renderManualStatus(); renderSessionControls();
@@ -880,17 +1034,32 @@
     const generation = state.manualGeneration;
     state.manualPollGeneration += 1;
     const isCurrent = () => generation === state.manualGeneration && state.mode === 'manual' && !activeSession();
+    if (command.path === '/api/manual/action' && state.manualFeedback?.command_id !== command.body.command_id) {
+      state.manualFeedback = { command_id: command.body.command_id, session_id: command.body.session_id,
+        beforeGrid: currentFrame()?.grid, status: 'unconfirmed' };
+    }
     state.manualBusy = true; state.manualPending = command; state.manualError = false;
     renderFrame(); renderSessionControls(); renderManualStatus();
     try {
       const view = await request(command.path, command.body);
       if (!isCurrent()) return;
       if (!validManual(view) || (command.path === '/api/manual/open' ? view.game_id !== command.body.game_id || manualLevel(view) !== command.body.level : view.session_id !== command.body.session_id)) throw new Error('invalid-response');
+      if (command.path === '/api/manual/action') {
+        const acknowledged = view.observation_version === command.body.observation_version + 1 && view.last_action?.observation_version === view.observation_version &&
+          view.last_action.action === command.body.action && Object.keys(view.last_action.data).length === Object.keys(command.body.data).length &&
+          Object.keys(command.body.data).every((key) => view.last_action.data[key] === command.body.data[key]);
+        // A ready response without action evidence leaves the exact request available for retry.
+        if (view.state === 'ready' && !acknowledged) throw new Error('invalid-response');
+        const afterGrid = array(array(view.snapshot?.levels).find((level) => level.level === manualLevel(view))?.frames).at(-1)?.grid;
+        state.manualFeedback.status = view.state === 'ready' && acknowledged ? 'confirmed' : view.state === 'closed' ? 'ended' : 'unconfirmed';
+        state.manualFeedback.count = view.action_count;
+        state.manualFeedback.changed = state.manualFeedback.beforeGrid && afterGrid ? JSON.stringify(state.manualFeedback.beforeGrid) !== JSON.stringify(afterGrid) : null;
+      }
       acceptManual(view); state.manualPending = null; state.pointerAction = null;
       state.manualPollGeneration += 1;
     } catch (error) {
       if (!isCurrent()) return;
-      if (error.message === 'request-rejected') { state.manualPending = null; state.manualError = true; }
+      if (error.message === 'request-rejected') { state.manualPending = null; state.manualError = true; if (state.manualFeedback) state.manualFeedback.status = 'rejected'; }
       showRequestError(error);
     } finally {
       if (isCurrent()) { state.manualBusy = false; renderFrame(); renderSessionControls(); renderManualStatus(); }
@@ -960,7 +1129,7 @@
       pause(); invalidateManual(); state.manualPending = null; state.mode = $('console-mode').value; state.replayRun = null; state.replayGeneration += 1;
       if (state.mode === 'manual' && activeSession()) { state.mode = 'live'; write('service-status', 'P7 运行期间无法打开人工试玩'); }
       if (state.mode === 'live' && state.liveView) replaceSnapshot(snapshotForView(state.liveView), { follow: true });
-      else if (state.mode === 'manual' && state.manualView?.state === 'ready') { $('game-select').value = state.manualView.game_id; replaceSnapshot(state.manualView.snapshot, { follow: true }); renderManualStatus(); }
+      else if (state.mode === 'manual' && state.manualView?.state === 'ready') { $('game-select').value = state.manualView.game_id; replaceSnapshot(manualHistorySnapshot(state.manualView), { follow: false, manualPosition: state.manualHistory?.index ?? null }); renderManualStatus(); }
       else if (state.mode === 'manual') openManual(rememberedManualLevel());
       else renderFrame();
       renderSessionControls();

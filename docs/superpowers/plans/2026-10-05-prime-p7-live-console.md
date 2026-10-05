@@ -132,3 +132,17 @@ User approved restoring both game and level across restart, and direct level sel
 - [x] Focused Python/DOM tests, independent source review and installed-wheel real SP80 L1/L2/L6 actions, reset, restart and cleanup.
 
 Actual smoke performed six human actions, zero P7 actions and zero artificial completions. Detailed counts and full-gate status are recorded in `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`.
+
+
+## Follow-up: reliable human clicks and browser history — 2026-10-05
+
+Files: `console_assets/app.js`, `index.html`, `styles.css`; DOM regressions in `tests/prime_p7_console_dom.cjs`. Host/controller APIs remain unchanged. Design follows the same independent HUMAN boundary.
+
+- [x] Reproduce unchanged-poll button replacement and focus loss; test sending, no-change acknowledged execution and uncertain retry before implementing stable keyed controls.
+- [x] Add bounded browser-only same-session observation/action history; exact links, no duplicate polls/retries, explicit gaps and RESET episode distinction.
+- [x] Reuse slider/playback, add compact clickable action queue and return-to-current. Historical views reject actual commands; unchanged polls preserve seek position.
+- [x] Run focused DOM/Python, isolated wheel plus real SDK HTTP/action-history integration, source review and lint/docs/promotion. Record exact boundaries and commit.
+
+Verification command: `NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs`; then the named installed-wheel/manual HTTP smoke and related Python console suite. Actual manual route tests establish interface behavior only, not P7 proficiency.
+
+Final follow-up: 112 Python, 54 installed-export DOM and installed real SDK/served-HTML integration pass. Eight human actions, nine actual frames; cross-level playback and cleanup verified, zero P7 requests. Independent final review passes. Full promotion remains non-PASS; browser visual acceptance remains external-limited. See the existing evidence file.

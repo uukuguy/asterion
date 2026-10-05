@@ -35,7 +35,7 @@
 - Use the existing Pi Codex subscription with `gpt-6.1-sol`; do not switch to OpenRouter. Delegate ordinary programming to Sol high and repetitive checks to Luna; independently review changes.
 - The console centers P7 autonomous solving and a readable Chinese gameplay description. Hypotheses fill knowledge gaps; they do not replace the solving task. Show actual public decisions and action feedback.
 - Selecting a game should show its real initial frame and permit human play directly. Human play is independent manual validation. It must not enter P7 context, cognition, history, learning or control workflow. Replay remains separate. Approved design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`.
-- The console should remember the last game and level, including after service restart. Human validation permits direct level choice. Show the current action through its button highlight; keep the action panel compact.
+- The console should remember the last game and level, including after service restart. Human validation permits direct level choice. Show the current action through its button highlight; keep the action panel compact. Human controls need clear execution feedback and a frame timeline/action queue for reviewing the independent manual session.
 - Current contract: `docs/architecture/prime-p7-cognition-and-experience.md`; current evidence and immediate action: `docs/status/RESUME-NEXT-SESSION.md`.
 
 ### feedback — complete `handoff` contract

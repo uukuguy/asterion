@@ -598,6 +598,268 @@ test('replay rejects pending manual open and returning to manual reopens playabl
   } finally { app.dom.window.close(); }
 });
 
+test('unchanged manual polls preserve pressed button identity and keyboard focus', async () => {
+  const manual = manualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+  try {
+    await settle();
+    const button = app.$('available-actions').querySelector('[data-available-action="ACTION4"]');
+    button.focus(); button.dispatchEvent(new app.dom.window.MouseEvent('mousedown', { bubbles: true }));
+    app.tick(); await settle();
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION4"]'), button);
+    assert.equal(button.isConnected, true);
+    assert.equal(app.dom.window.document.activeElement, button);
+    button.dispatchEvent(new app.dom.window.MouseEvent('mouseup', { bubbles: true }));
+    button.click(); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual feedback distinguishes pending from acknowledged action and reports actual frame change', async () => {
+  let manual = manualView('sp80-test', 12, 1), releaseAction;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/manual/action') return new Promise((resolve) => { releaseAction = resolve; });
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle();
+    const button = app.$('available-actions').querySelector('[data-available-action="ACTION1"]');
+    button.click(); button.click(); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+    assert.equal(app.$('available-actions').querySelector('.is-pending'), button);
+    assert.equal(button.getAttribute('aria-busy'), 'true');
+    assert.equal(app.$('available-actions').querySelector('.is-current').dataset.availableAction, 'ACTION4');
+    assert.match(app.$('manual-action-status').textContent, /正在发送.*等待响应/);
+    manual = manualView('sp80-test', 9, 2); manual.last_action.action = 'ACTION1';
+    releaseAction(response(manual)); await settle();
+    assert.equal(app.$('available-actions').querySelector('.is-pending'), null);
+    assert.equal(button.hasAttribute('aria-busy'), false);
+    assert.equal(app.$('available-actions').querySelector('.is-current'), button);
+    assert.match(app.$('manual-action-status').textContent, /已执行.*2.*画面已变化/);
+    assert.doesNotMatch(app.$('manual-action-status').textContent, /ACTION/);
+    app.tick(); await settle();
+    assert.match(app.$('manual-action-status').textContent, /已执行.*2.*画面已变化/);
+    button.click(); await settle();
+    manual = manualView('sp80-test', 9, 3); manual.last_action.action = 'ACTION1';
+    releaseAction(response(manual)); await settle();
+    assert.match(app.$('manual-action-status').textContent, /已执行.*3.*画面未变化/);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual feedback never reports execution for rejected or unconfirmed responses', async () => {
+  for (const outcome of ['disconnected', 'rejected', 'unchanged', 'closed', 'uncertain', 'mismatched', 'later', 'wrong-data']) {
+    const manual = manualView();
+    const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+      if (url === '/api/manual/action') {
+        if (outcome === 'disconnected') throw new Error('/private/sentinel');
+        if (outcome === 'rejected') return response({ error: '/private/sentinel' }, 409);
+        if (outcome === 'mismatched') return response(manualView('sp80-test', 9, 1));
+        if (['later', 'wrong-data'].includes(outcome)) {
+          const acknowledged = manualView('sp80-test', 9, outcome === 'later' ? 2 : 1);
+          acknowledged.last_action.action = 'ACTION1';
+          if (outcome === 'wrong-data') acknowledged.last_action.data = { x: 1, y: 0 };
+          return response(acknowledged);
+        }
+        return response({ ...manual, state: ['closed', 'uncertain'].includes(outcome) ? outcome : 'ready' });
+      }
+      return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+    } });
+    try {
+      await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION1"]').click(); await settle();
+      const feedback = app.$('manual-action-status').textContent;
+      assert.doesNotMatch(feedback, /已执行|private|sentinel/, outcome);
+      assert.match(feedback, outcome === 'rejected' ? /拒绝/ : outcome === 'closed' ? /结束/ : /未确认/, outcome);
+      if (outcome === 'disconnected') { assert.match(feedback, /重试原请求/); assert.equal(app.$('retry-command').hidden, false); }
+      if (['unchanged', 'mismatched', 'later', 'wrong-data'].includes(outcome)) {
+        assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+        assert.equal(app.$('retry-command').hidden, false);
+      }
+      assert.deepEqual(app.errors, [], outcome);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('manual coordinate acknowledgement checks exact coordinates independently of property order', async () => {
+  for (const wrongCoordinate of [false, true]) {
+    let manual = manualView();
+    const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+      if (url === '/api/manual/action') {
+        const body = JSON.parse(options.body); manual = manualView('sp80-test', 9, 1);
+        manual.last_action = { action: body.action, observation_version: 1, data: { y: body.data.y, x: body.data.x + Number(wrongCoordinate) } };
+        return response(manual);
+      }
+      return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+    } });
+    try {
+      await settle(); const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 });
+      app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click();
+      canvas.dispatchEvent(new app.dom.window.MouseEvent('click', { clientX: 75, clientY: 25, bubbles: true })); await settle();
+      assert.match(app.$('manual-action-status').textContent, wrongCoordinate ? /未确认/ : /已执行/);
+      assert.equal(app.$('retry-command').hidden, !wrongCoordinate);
+      assert.equal(app.$('manual-action-history').querySelectorAll('button').length, wrongCoordinate ? 0 : 1);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('manual history retains actual no-change and RESET observations; seeking and animation send no actions', async () => {
+  let manual = manualView(), version = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); version += 1;
+      manual = manualView('sp80-test', 12, version);
+      manual.last_action = { action: body.action, data: body.data, observation_version: version };
+      manual.episode_id = body.action === 'RESET' ? 2 : 1;
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle();
+    for (const name of ['ACTION4', 'RESET']) { app.$('available-actions').querySelector(`[data-available-action="${name}"]`).click(); await settle(); }
+    assert.equal(app.$('frame-slider').max, '2');
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.equal(app.$('replay-transport').hidden, false);
+    assert.match(app.$('manual-action-history').textContent, /#1 ACTION4.*#2 RESET/);
+    assert.match(app.$('frame-caption').textContent, /回合 2/);
+    const historyButton = app.$('manual-action-history').querySelector('button'); historyButton.focus();
+    app.tick(); await settle();
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 2);
+    assert.equal(app.$('manual-action-history').querySelector('button'), historyButton);
+    assert.equal(app.dom.window.document.activeElement, historyButton);
+    app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    assert.equal(app.$('frame-counter').textContent, '1 / 3');
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    app.$('board-section').dispatchEvent(new app.dom.window.KeyboardEvent('keydown', { key: '4', bubbles: true }));
+    app.tick(); await settle(); assert.equal(app.$('frame-counter').textContent, '1 / 3');
+    assert.equal(app.$('manual-return-current').hidden, false);
+    app.$('manual-return-current').click();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION4"]').disabled, false);
+    app.$('manual-action-history').querySelector('button').click();
+    assert.equal(app.$('frame-counter').textContent, '2 / 3');
+    assert.equal(app.$('available-actions').querySelector('.is-current').dataset.availableAction, 'ACTION4');
+    assert.equal(app.$('manual-action-history').querySelector('[aria-current="true"]').textContent, '#1 ACTION4');
+    app.$('play-toggle').click(); app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 2);
+    assert.equal(app.requests.some((entry) => entry.url === '/api/start'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual history crosses actual levels and retains historical selection across new observations and gaps', async () => {
+  let manual = manualView(), version = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); version += 1;
+      manual = manualView('sp80-test', 9, version, 2);
+      manual.last_action = { action: body.action, data: body.data, observation_version: version };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    assert.match(app.$('board-title').textContent, /关卡 2/);
+    assert.equal(app.$('frame-counter').textContent, '2 / 2');
+    const edge = app.dom.window.__ASTERION_STATE__.levels.find((level) => level.level === 2).actions[0];
+    assert.equal(edge.before_frame, 'manual-0'); assert.equal(edge.after_frame, 'manual-1');
+    app.$('compare-toggle').checked = true; app.$('compare-toggle').dispatchEvent(new app.dom.window.Event('change'));
+    assert.equal(app.$('comparison-board').hidden, false);
+    app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    assert.match(app.$('board-title').textContent, /关卡 1/);
+    manual = manualView('sp80-test', 10, 2, 2); app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 3');
+    assert.match(app.$('board-title').textContent, /关卡 1/);
+    manual = manualView('sp80-test', 11, 5, 2); app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 4');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 2);
+    assert.match(app.$('manual-history-note').textContent, /缺失/);
+    app.$('manual-return-current').click();
+    assert.equal(app.$('frame-counter').textContent, '4 / 4');
+    assert.match(app.$('board-title').textContent, /关卡 2/);
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION4"]').disabled, false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual history autoplay continues across actual level transitions', async () => {
+  let manual = manualView(), version = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); version += 1;
+      manual = manualView('sp80-test', 9, version, 2);
+      manual.last_action = { action: body.action, data: body.data, observation_version: version };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle();
+    for (let i = 0; i < 2; i += 1) { app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle(); }
+    app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    app.$('play-toggle').click(); app.tick(); await settle();
+    assert.match(app.$('board-title').textContent, /关卡 2/);
+    assert.equal(app.$('frame-counter').textContent, '2 / 3');
+    assert.equal(app.$('play-toggle').textContent, '暂停');
+    app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '3 / 3');
+    assert.equal(app.$('play-toggle').textContent, '播放');
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 2);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual feedback cannot survive a different same-game session identity', async () => {
+  let manual = manualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); manual = manualView('sp80-test', 9, 1);
+      manual.last_action = { action: body.action, data: body.data, observation_version: 1 }; return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    assert.match(app.$('manual-action-status').textContent, /已执行 1 次/);
+    manual = { ...manualView(), session_id: 'different-session' }; app.tick(); await settle();
+    assert.equal(app.$('action-total').textContent, '0');
+    assert.equal(app.$('frame-counter').textContent, '1 / 1');
+    assert.equal(app.$('manual-action-status').hidden, true);
+    assert.doesNotMatch(app.$('manual-action-status').textContent, /已执行/);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('manual history survives same-session mode changes and resets for a newly opened session', async () => {
+  let manual = manualView(), opens = 0;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); manual = manualView('sp80-test', 9, 1);
+      manual.last_action = { action: body.action, data: body.data, observation_version: 1 }; return response(manual);
+    }
+    if (url === '/api/manual/close') { manual = { ...manual, state: 'closed' }; return response(manual); }
+    if (url === '/api/manual/open') { opens += 1; manual = { ...manualView(), session_id: `new-session-${opens}` }; return response(manual); }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    app.$('frame-slider').value = '0'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+    app.$('console-mode').value = 'manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 2');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 1);
+    app.$('manual-close').click(); await settle(); app.$('manual-close').click(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '1 / 1');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 0);
+    assert.equal(opens, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
 test('manual buttons send versioned actions once and transport retry retains exact identity', async () => {
   let manual = manualView(), failAction = true;
   const app = launch(fixture(), { liveConfig, fetch: async (url) => {
@@ -613,6 +875,9 @@ test('manual buttons send versioned actions once and transport retry retains exa
     const actions = app.requests.filter((entry) => entry.url === '/api/manual/action');
     assert.equal(actions.length, 2);
     assert.deepEqual(JSON.parse(actions[0].options.body), JSON.parse(actions[1].options.body));
+    app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent, '2 / 2');
+    assert.equal(app.$('manual-action-history').querySelectorAll('button').length, 1);
     const body = JSON.parse(actions[0].options.body);
     assert.equal(body.session_id, 'manual-sp80-test'); assert.equal(body.observation_version, 0); assert.equal(body.action, 'ACTION4'); assert.deepEqual(body.data, {});
     assert.equal(app.$('action-total').textContent, '1');
@@ -653,7 +918,14 @@ test('manual action strip only shows real measurements and never suggests a miss
 
 test('manual ACTION6 waits for board click and sends exact grid coordinates; keyboard stays board-scoped', async () => {
   let manual = manualView('sp80-test', 9, 1);
-  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url.startsWith('/api/manual/') ? manual : stateWithManual(manual)) });
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body);
+      manual = manualView('sp80-test', 9, 2); manual.last_action = { action: body.action, data: body.data, observation_version: 2 };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
   try {
     await settle();
     const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 100, height: 100 });
@@ -672,6 +944,45 @@ test('manual ACTION6 waits for board click and sends exact grid coordinates; key
     assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
     app.$('board-section').dispatchEvent(new app.dom.window.KeyboardEvent('keydown', { key: '1', repeat: true, bubbles: true })); await settle();
     assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('arming manual ACTION6 exits comparison so the current clickable board is visible', async () => {
+  let manual = manualView();
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/action') {
+      const body = JSON.parse(options.body); const version = manual.observation_version + 1;
+      manual = manualView('sp80-test', 9, version);
+      manual.last_action = { action: body.action, data: body.data, observation_version: version };
+      return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('available-actions').querySelector('[data-available-action="ACTION4"]').click(); await settle();
+    app.$('compare-toggle').checked = true; app.$('compare-toggle').dispatchEvent(new app.dom.window.Event('change'));
+    assert.equal(app.$('comparison-board').hidden, false);
+    assert.equal(app.$('single-board').hidden, true);
+    app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click();
+    assert.equal(app.$('compare-toggle').checked, false);
+    assert.equal(app.$('comparison-board').hidden, true);
+    assert.equal(app.$('single-board').hidden, false);
+    const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 100, height: 100 });
+    canvas.dispatchEvent(new app.dom.window.MouseEvent('click', { clientX: 75, clientY: 25, bubbles: true })); await settle();
+    const actions = app.requests.filter((entry) => entry.url === '/api/manual/action');
+    assert.equal(actions.length, 2);
+    assert.equal(JSON.parse(actions[1].options.body).action, 'ACTION6');
+    assert.deepEqual(JSON.parse(actions[1].options.body).data, { x: 1, y: 0 });
+    app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click();
+    assert.match(app.$('actions-note').textContent, /点击画面目标格/);
+    app.$('compare-toggle').checked = true; app.$('compare-toggle').dispatchEvent(new app.dom.window.Event('change'));
+    assert.equal(app.$('comparison-board').hidden, false);
+    assert.equal(app.$('available-actions').querySelector('.is-armed'), null);
+    assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION6"]').getAttribute('aria-pressed'), 'false');
+    assert.doesNotMatch(app.$('actions-note').textContent, /点击画面目标格/);
+    canvas.dispatchEvent(new app.dom.window.MouseEvent('click', { clientX: 75, clientY: 25, bubbles: true })); await settle();
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 2);
     assert.deepEqual(app.errors, []);
   } finally { app.dom.window.close(); }
 });
