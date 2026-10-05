@@ -1,442 +1,62 @@
-# Task 1 review-fix: exception-context redaction (2026-09-05)
+# Task 1 report: source process events and public P7 decisions
 
-## Scope delivered
+Status: implemented; provider-free targeted Python and registration checks pass. Full npm suite remains external/test-host limited on existing descriptor communication tests. No real model or game witness was invoked. Root owns commits and final integration.
 
-- Deferred unavailable-error construction until after malformed material
-  normalization leaves its `except` block. The resulting public `ValueError`
-  has no retained `UnicodeEncodeError` context, while the issuer key is still
-  consumed before construction.
-- Regression coverage uses `CONFIG_SECRET_SENTINEL` plus an unpaired surrogate
-  and asserts both redacted traceback text and `exception.__context__ is None`.
+## Changes and frozen UI shape
 
-## TDD evidence
+- New `console_events.py` implements `ConsoleEventWriter(run_root, run_id, game_id)` and `read_console_events`. Rows use `asterion.prime.p7-console-event/v1`, exact run/game identity, contiguous sequence and complete newline JSONL in `console-events.jsonl`. Payloads are closed and bounded; URLs, private paths, credential forms and control characters are rejected/removed before persistence. The reader retains only the safe complete prefix and rejects wrong run/game identity. Symlink evidence is not traversed.
+- `p7_decision` is an actual TypeScript `registerTool` entry, in the Python tool registry, sealed facade, direct Pi method dispatch, socket worker dispatch and generated worker module. Inputs are exact `{goal,basis,expected}`, nonempty and <=600 characters each. It returns a decision ID and `execution_authority: none`. Prompt asks for a brief public Chinese summary before significant plans, explicitly optional and excluding private reasoning.
+- `_P7BrokerClient` records pending summaries at `len(broker.journal)` plus the exact current unified observation digest. The next plan consumes the summary only when both still match. Plans without a new matching summary have no decision ID. Actual transitions include sequence, before/after digests, action/data, levels completed and decision ID. Initial and refreshed cognition captures include generated Chinese narrative, stable description and scalar session state, bound to the actual observation. Writer availability/failure cannot reject or change valid solver execution. Decision remains available before the first cognition probe.
+- `build_console_snapshot` reads these records without requiring a final summary. Source decisions have `{id, source:'p7_decision', goal,basis,expected, source_action_sequence, observation_sha256, action_ids, event_sequence}`. Actions expose `source_action_sequence` and an explicitly linked `decision_id`. Each level exposes `cognition_timeline` entries `{cognition_revision, source_action_sequence, observation_sha256, stable_description,cognition_narrative_zh,session,frame_id,action_id,scope:'observation',event_sequence}`; latest aligned revision becomes `level.cognition`. Source revision/action matching requires actual position and hashes, never timing. Anonymous cognition log projections are never deduplicated across runs; identified session/event snapshots retain existing deduplication. Missing summaries remain missing. Legacy final-scope cognition and audit-only model rounds remain supported.
+- Explicit source RESET transitions remain actions when the image is unchanged. A malformed recording row ends source-position alignment; a later repeated image cannot overwrite an earlier observation position. Recorded pixels remain the only frames.
+- Packaged `resources/ipython-extension.mjs` was rebuilt/synchronized. No framework/runtime contracts or main operator run-ID selection were changed.
 
-RED:
+## Verification
 
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_receipt
-FAILED (failures=3)
-ValueError.__context__ retained the underlying UnicodeEncodeError, whose
-.object included CONFIG_SECRET_SENTINEL and serialized receipt material.
-```
+RED evidence: initial source import/constructor/registration were absent; source reset was incorrectly omitted; a recording gap overwrote frame `f000002` with `f000003`. Each was observed failing before its implementation/fix.
 
-GREEN:
+Passing commands:
 
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_receipt
-Ran 5 tests in 0.003s
-OK
+1. `uv run python -m unittest -q tests.test_prime_p7_console_events tests.test_prime_p7_console tests.test_prime_p7_console_export` — final 52 tests PASS after first-probe/cache advisory tests were added. Log: `/tmp/p7-task1-core.log`.
+2. `uv run python -m unittest -q tests.test_prime_p7_console_events tests.test_prime_p7_console tests.test_prime_p7_console_export tests.test_prime_p7_bridge_dispatch tests.test_prime_p7_tool_registry tests.test_prime_p7_native_provider` — 105 tests PASS before final first-probe/cache advisory tests; the expanded suite below includes them. Log: `/tmp/p7-task1-python.log`.
+3. `uv run ruff check src/asterion/applications/prime/p7/console_events.py src/asterion/applications/prime/p7/console_snapshot.py src/asterion/applications/prime/p7/operator.py src/asterion/applications/prime/p7/ipython_host.py src/asterion/applications/prime/p7/live.py src/asterion/applications/prime/p7/prompt.py src/asterion/applications/prime/p7/tool_registry.py tests/test_prime_p7_console_events.py` — PASS.
+4. `node --test --test-name-pattern='registers the ipython|passes a public decision|built artifact' test/ipython-extension.test.mjs` from extension package — 3 tests PASS, including actual registration, exact goal/basis/expected schema, dispatch and pinned-loader artifact.
+5. `npm --prefix packages/typescript/asterion-prime-extension run sync-resource` and `npm --prefix packages/typescript/asterion-prime-extension run check-resource` — PASS. Resource check log: `/tmp/p7-task1-resource.log`.
 
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
-All checks passed!
+6. `uv run python -m unittest -q tests.test_prime_p7_console_events tests.test_prime_p7_console tests.test_prime_p7_console_export tests.test_prime_p7_bridge_dispatch tests.test_prime_p7_tool_registry tests.test_prime_p7_live_command tests.test_prime_p7_native_broker tests.test_prime_p7_guest tests.test_prime_p7_native_provider` — final 285 tests PASS (1 explicit external skip). Full log: `/tmp/p7-task1-python-expanded.log`.
 
-uv run pyright src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
-0 errors, 0 warnings, 0 informations
+## Known baseline/test-host limits
 
-git diff --check
-exit 0
-```
+- Full `npm --prefix packages/typescript/asterion-prime-extension test` was run. A completed run produced 29 pass / 2 fail / 6 skipped. Existing tests `serializes method calls over the single bridge descriptor` and `recoverable method errors do not poison the bridge` timeout around 60 seconds; failure occurs in descriptor source-detachment behavior, not new tool registration. The latter also failed during the pre-implementation RED run when registration was still absent. Six Pi-mechanics tests explicitly skip because pinned third-party checkout is absent. Final rerun also completed with 29 pass / 2 fail / 6 skipped (182 seconds); all output and both complete failure stacks are saved at `/tmp/p7-task1-npm-full.log`. The targeted new registration/call and artifact tests PASS.
+- Expanded Python run including `tests.test_prime_p7_live_command tests.test_prime_p7_native_broker tests.test_prime_p7_guest` reached 310 tests with one failure: `TestPrimeP7LiveCommand.test_initial_context_logs_cognition_refresh` expected `startup-cognition-marker`, but global cognition log duplicate-snapshot state from earlier suites suppressed it. Exact test run independently PASS. Root requested the lifecycle fix. A targeted RED test proved that anonymous projections with identical missing session/counter values suppressed unrelated run content. Deduplication now requires a nonempty session ID, carrying run identity. Existing identified-session/event deduplication tests remain unchanged and PASS; final expanded suite now PASS.
+- No live level witness, promotion-check or overall task-level docs/status commit was performed by this worker; root owns those integration steps. Implementation and these tests do not prove P7 autonomous game-solving capability or live UI deployment.
 
-## Task 1: P7 structured mechanics prior (2026-09-27)
+## Review corrections (2026-10-05)
 
-- Status: complete; commit `ec69aa51` (`feat(p7): extract structured cross-level mechanics prior`).
-- Tests: `uv run python -m unittest -v tests.test_prime_p7_mechanics_prior` (3 passed).
-- Lint: focused `uv run ruff check` (passed).
-- Scope: bounded, deterministic, redacted summaries of detached history; runtime and prompt wiring landed in the follow-up bridge and guidance commits.
-- Concern: evidence-only extractor; it does not infer universal routes, object identities, or objective rules.
+The three Important findings in `.superpowers/sdd/task-1-review.md` were reproduced with failing regressions before the fixes, then each passed:
 
-## Follow-up: P7 Pi bridge and verified guidance (2026-09-27–28)
+1. Omitted recording rows and repeated pixels: actual source ACTION1 reaches B, its row is absent, a later recorded ACTION2 reaches B; this formerly attached ACTION1 cognition to the ACTION2 row. The new matrix also uses another ACTION1 reaching the same B, where action identity alone cannot resolve the ambiguity. Projection now establishes source positions only from a unique source transition matching actual action/data, completed levels and after digest, then verifies its contiguous native action sequence and before digest. A mismatch or multiple observable matches permanently ends source-prefix association. Recording frame/action ordinals remain replay metadata, not evidence of a broker position. The malformed-row regression now supplies the real initial source transition instead of relying on row counts.
+2. Credential assignment redaction: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `TOKEN`, `ACCESS_TOKEN`, `SECRET` and `CLIENT_SECRET` assignments containing `SENTINELSECRET` formerly survived. Recognizable prefixed assignments now produce empty public prose and writer rejection before any file persistence. These six sentinels pass the regression; this boundary does not claim arbitrary unlabeled strings are detectable secrets.
+3. Non-object source payload: a JSON list of decision key/value pairs formerly validated by coercion, retained the original list and crashed snapshot `.get()`. Writer validation now requires a Mapping; persisted payload validation requires an actual dict, and the reader retains the normalized object. Invalid payload type ends the safe prefix and adds the fixed `console-events-invalid` warning. Recursion errors are also treated as invalid evidence. The regression confirms one retained safe row, no snapshot crash, and public invalid-prefix warning.
 
-- Bridge: `c4b390b5`, `7f463b65`, and `57342951` inject the live prediction client, enforce method/parameter/result contracts, register `p7_mechanics_prior` in Pi, and frame method calls with the required newline.
-- Compatibility and bounds: `7f463b65` preserves legacy facade clients; `08f25fa2` constrains prior records to ACTION1–ACTION7 and bounded levels.
-- Guidance: `df70f09d` adds cross-level prior usage and falsifiable distinguishing probes to the verified prompt while preserving the legacy prompt.
-- Diagnostics: `21fa5a2e` and `830db3ac` add private bridge-call accounting and bounded runtime failure stage/type diagnostics.
-- Verification: 115 focused P7 tests, extension build-closure tests (8), TypeScript typecheck/registration, Ruff, and diff checks passed. Two bounded FT09 next-level runs did not verify a new level; the second failed before any bridge call.
+The two ResourceWarnings were also localized: `SubprocessPythonWorker.close` waited/reaped its child and closed stdin, but left the owned stdout/stderr `Popen` streams open. A real provider-free worker cleanup test failed on `process.stdout.closed` before the fix. Its bounded shutdown now closes all three streams in `finally`; the test passes. The final expanded log contains zero ResourceWarning occurrences.
 
-# Task 1 review-fix: malformed unavailable receipt material (2026-09-05)
+Final commands and output:
 
-## Scope delivered
+- `uv run python -m unittest -q tests.test_prime_p7_console_events` — `Ran 16 tests ... OK`.
+- `uv run python -m unittest -q tests.test_prime_p7_console_events tests.test_prime_p7_console tests.test_prime_p7_console_export tests.test_prime_p7_bridge_dispatch tests.test_prime_p7_tool_registry tests.test_prime_p7_live_command tests.test_prime_p7_native_broker tests.test_prime_p7_guest tests.test_prime_p7_native_provider` — `Ran 289 tests in 0.904s; OK (skipped=1)`. Full log: `/tmp/p7-task1-review-python.log`. Exact warning scan: `ResourceWarning count: 0`.
+- Scoped `uv run ruff check` on the original Task 1 Python ownership and new source test file — `All checks passed!`. Log: `/tmp/p7-task1-review-ruff.log`.
+- `npm --prefix packages/typescript/asterion-prime-extension run check-resource` — exit 0, rebuilt `dist/ipython-extension.mjs 52.8kb`; packaged resource remains synchronized. Log: `/tmp/p7-task1-review-resource.log`.
 
-- Normalized every post-custody material validation, receipt construction, and
-  canonical encoding failure to the public-safe unavailable `ValueError`, with
-  exception chaining suppressed.
-- Added an exact-type guard before the image-digest regex and representative
-  regressions for a non-string digest plus surrogate `authority_version` and
-  `receipt_key_id`; each proves issuer custody remains consumed and redacts the
-  receipt-key/config sentinels.
+No real model/witness, full npm rerun, commit or change to another worker's owned regions was performed during these corrections. The earlier full npm descriptor failures and external skips remain the recorded integration boundary.
 
-## TDD evidence
+### Readable multiline cognition correction
 
-RED:
+Controller integration found that single-line `public_text` had collapsed stable description/narrative sections used by UI `split('\n')`. A real renderer roundtrip regression failed writer validation on multiline output; the actual broker capture regression also failed because its generated descriptions had no newlines. Added cognition-specific `public_narrative`: it retains normalized line breaks and existing bounds while applying the same path/credential redaction. Both writer and reader use this canonical multiline rule; decision goal/basis/expected retain their single-line rule. Source cognition capture now uses `public_narrative`. Field names and UI interfaces did not change. The prefixed-credential matrix also confirms multiline prose containing each sentinel assignment is rejected.
 
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_receipt
-FAILED (failures=2, errors=1)
-TypeError: expected string or bytes-like object, got 'object'
-UnicodeEncodeError escaped for surrogate authority_version and receipt_key_id
-```
+Final verification after this correction:
 
-GREEN:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_receipt
-Ran 5 tests in 0.002s
-OK
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
-All checks passed!
-
-uv run pyright src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
-0 errors, 0 warnings, 0 informations
-
-git diff --check
-exit 0
-```
-
-# Task 1 report: Prime P1 signed unavailable terminal issuer (2026-09-05)
-
-## Scope delivered
-
-- Added private frozen/slot-based terminal binding, unavailable material, and
-  issued-receipt value types in `authority_receipt.py`.
-- Added one-use issuer custody: issuance atomically removes its private HMAC
-  key, signs only the canonical `UNAVAILABLE` / `unavailable` payload, and
-  returns a deeply immutable, redacted, non-pickleable receipt object.
-- The unavailable payload encodes zero model/worker/tool facts and false
-  execution-success booleans. Its absent execution artifacts are deterministic
-  domain-separated `not-created` SHA-256 values.
-- Added representative custody/one-use and altered-binding redaction tests.
-  No IPC, process, lock, Docker, provider, network, or subprocess behavior was
-  changed.
-
-## TDD evidence
-
-RED, after adding the focused private-API test and before implementation:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_receipt
-ImportError: cannot import name '_AuthorityTerminalBinding' from
-asterion.applications.prime_agent.operator.authority_receipt
-```
-
-GREEN:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_receipt tests.test_prime_p1_authority_protocol
-Ran 26 tests in 0.012s
-OK
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
-All checks passed!
-
-uv run pyright src/asterion/applications/prime_agent/operator/authority_receipt.py tests/test_prime_p1_authority_receipt.py
-0 errors, 0 warnings, 0 informations
-
-git diff --check
-exit 0
-```
-
-## Concern / handoff
-
-The global plan requires the packaged authority artifact lock to be refreshed
-when `authority_receipt.py` changes. Per Task 1 ownership, that lock was not
-modified; the Task 2 owner must refresh it alongside its protocol changes.
-
-# Task 1 report: Prime P1 fixed application-resource admission
-
-## Scope delivered
-
-- Added `authority_application_resources.py`, an opaque, idempotently closeable
-  admission proof for the exact eight P1 application inputs.
-- Added the canonical packaged descriptor
-  `resources/prime-p1-application-resource-lock.json`.  It accepts only the
-  locked protocol, exact identity key set, exact contract identities, and the
-  fixed ordered resource paths/digests.
-- Implemented bounded descriptor-relative no-follow reads with pre/post `fstat`
-  identity checks, regular/single-link/non-writable checks, and constant-time
-  SHA-256 comparisons.  Rejections use only
-  `PrimeP1AuthorityResourceError` without retained exception context.
-- Added the child to production aggregate admission directly after authority
-  artifacts and before static/Docker-related admission.  It is exact-type
-  checked and closed once in reverse acquisition order.
-- Added the verifier to the authority artifact lock and updated affected lock
-  digests.
-
-## TDD evidence
-
-RED was run before the verifier existed:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_application_resources tests.test_prime_p1_authority_resources
-ModuleNotFoundError: No module named 'asterion.applications.prime_agent.operator.authority_application_resources'
-```
-
-GREEN verification after implementation:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_application_resources tests.test_prime_p1_authority_resources tests.test_prime_p1_authority_process tests.test_prime_p1_authority_docker_socket
-Ran 87 tests in 2.478s
-OK (skipped=2)
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_application_resources.py src/asterion/applications/prime_agent/operator/authority_resources.py src/asterion/applications/prime_agent/operator/authority_artifact_lock.py tests/test_prime_p1_authority_application_resources.py tests/test_prime_p1_authority_resources.py
-All checks passed!
-
-git diff --check
-exit 0
-```
-
-The two skips are platform-specific existing tests for unavailable Linux atomic
-socket/SCM_RIGHTS facilities, not application-resource tests.
-
-## Safety and limits
-
-No Docker, network, subprocess, model, readiness, or execution operation was
-performed.  This is static resource admission only and does not make a
-production claim.
-
-During focused verification, one authority-process test exposed global mocking
-of `os.close`; the verifier now captures the close primitive at import time,
-matching the existing artifact-lock verifier and preserving descriptor cleanup
-test isolation.
-
-## Review-fix evidence (2026-09-05)
-
-- RED: the added lexical-order assertions failed before the fix because both
-  declared tuples were non-lexical. The application tuple put capability paths
-  before application image paths; the artifact tuple put
-  `authority_artifact_lock.py` before
-  `authority_application_resources.py`.
-- GREEN:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_artifact_lock tests.test_prime_p1_authority_application_resources tests.test_prime_p1_authority_request_contract tests.test_prime_p1_authority_resources
-Ran 41 tests in 0.069s
-OK
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_application_resources.py src/asterion/applications/prime_agent/operator/authority_artifact_lock.py tests/test_prime_p1_authority_application_resources.py tests/test_prime_p1_authority_resources.py
-All checks passed!
-
-authority artifact digests: verified
-git diff --check
-exit 0
-```
-
-- Regression coverage now asserts sorted code/JSON paths, descriptor schema,
-  identity, and digest mutation rejection, hardlink creation during a read,
-  and aggregate acquisition/cleanup ordering with the application child
-  immediately after/before the artifact child respectively.
-
-## Review-fix evidence: aggregate admission order (2026-09-05)
-
-- RED: before wiring admission mock side effects, the strengthened lifecycle
-  assertion observed only reverse cleanup order and failed against the expected
-  acquisition-plus-cleanup sequence.
-- GREEN:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_resources
-Ran 26 tests in 0.061s
-OK
-
-uv run ruff check tests/test_prime_p1_authority_resources.py
-All checks passed!
-
-git diff --check
-exit 0
-```
-
-The aggregate lifecycle test now records and asserts exact acquisition order
-`artifacts, application, static, evidence, docker, socket`, followed by the
-existing reverse close order. This specifically rejects swapping artifacts /
-application or application / static.
-
-## Resource-set identity delivery (2026-09-05)
-
-### Scope delivered
-
-- Added the private `AdmittedProductionAuthorityResources._resource_set_sha256()`
-  aggregate. It requires the exact six admitted child types, rejects closed or
-  substituted children, performs the Docker executable's retained-FD/byte
-  revalidation and the Docker socket's descriptor-relative path revalidation
-  before returning a digest, and redacts every failure as
-  `PrimeP1AuthorityResourceError`.
-- Bound all six existing retained private identities: authority artifact
-  descriptor, application-resource descriptor, static image/seccomp resource,
-  evidence-root FD inode, Docker executable identity plus byte digest, and
-  Docker socket parent/socket identities plus its expected daemon version
-  projection. No configured path, descriptor text, credential, prompt, or
-  model output contributes to or is exposed by the digest.
-- Encoding is SHA-256 over the fixed domain
-  `asterion.prime-p1.resource-set/v1\\0`, followed by six fixed-order,
-  length-delimited typed contributions. Each child contribution encodes sorted,
-  unique field names and length-delimited field values.
-- Refreshed the packaged authority artifact descriptor hashes after source
-  stabilization; descriptor admission passes with the new source set.
-
-### TDD evidence
-
-RED was observed before implementation:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_resource_set_identity
-ERROR: AdmittedProductionAuthorityResources has no attribute
-_resource_set_sha256; exact child classes have no
-_resource_set_contribution.
-```
-
-GREEN and focused regression verification:
-
-```text
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_resources.py src/asterion/applications/prime_agent/operator/authority_artifact_lock.py src/asterion/applications/prime_agent/operator/authority_application_resources.py src/asterion/applications/prime_agent/operator/authority_evidence.py src/asterion/applications/prime_agent/operator/authority_docker_executable.py src/asterion/applications/prime_agent/operator/authority_docker_socket.py tests/test_prime_p1_authority_resources.py tests/test_prime_p1_resource_set_identity.py
-All checks passed!
-
-uv run python -m unittest -v tests.test_prime_p1_resource_set_identity tests.test_prime_p1_authority_resources tests.test_prime_p1_authority_artifact_lock tests.test_prime_p1_authority_application_resources tests.test_prime_p1_authority_docker_executable tests.test_prime_p1_authority_docker_socket
-Ran 71 tests in 2.377s
-OK (skipped=1)
-
-git diff --check
-exit 0
-```
-
-The one skip is the existing platform-specific atomic-Linux-socket test.
-
-### Safety and limits
-
-## Resource-set identity review fix (2026-09-05)
-
-- `authority_version` is now retained by the authority-artifact descriptor and
-  included in its canonical identity input. A version-only descriptor mutation
-  changes the admitted artifact identity.
-- Resource-set assembly now collects and validates all six exact child
-  contributions first; Docker executable and socket revalidation occur only
-  immediately before the final SHA-256 computation. The socket contribution
-  also path-revalidates, so a retained parent descriptor cannot mask a replaced
-  socket path during contribution collection.
-- The resource-set tests now use genuine exact child objects and contribution
-  methods (with only the path revalidation seam suppressed where no real Docker
-  socket is admitted). They cover every child closing, retained identity-value
-  changes, final revalidation order, and isolated Docker/socket revalidation
-  failures. This detects the previously omitted `authority_version`.
-
-### TDD and verification evidence
-
-RED, before the descriptor change:
-
-```text
-TypeError: _Descriptor.__init__() takes 2 positional arguments but 3 were given
-```
-
-GREEN:
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_resource_set_identity
-Ran 5 tests in 0.008s
-OK
-
-uv run python -m unittest -v tests.test_prime_p1_resource_set_identity \
-  tests.test_prime_p1_authority_artifact_lock \
-  tests.test_prime_p1_authority_docker_socket \
-  tests.test_prime_p1_authority_docker_executable \
-  tests.test_prime_p1_authority_resources
-Ran 67 tests in 2.503s
-OK (skipped=1: existing platform-specific atomic socket flag test)
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_artifact_lock.py \
-  src/asterion/applications/prime_agent/operator/authority_resources.py \
-  src/asterion/applications/prime_agent/operator/authority_docker_socket.py \
-  tests/test_prime_p1_resource_set_identity.py
-All checks passed!
-
-git diff --check
-exit 0
-```
-
-The authority-artifact descriptor hashes were refreshed after sources
-stabilized. No Docker connection, daemon probe, network, subprocess, model,
-readiness, or execution action was performed.
-
-No Docker connection, daemon projection probe, subprocess, network request,
-model invocation, readiness frame, execute request, or production claim was
-performed. The new identity operation is a static retained-resource check;
-later authority-process work must decide when it is consumed.
-
-## Task 1: Ready-only authority transport (2026-09-05)
-
-- RED: added focused authority-process checks for the authenticated ready
-  frame and resource-digest-before-transport ordering. They initially failed
-  because aggregate admission exited unavailable before either behavior.
-- GREEN: `_run_ready_execute_exchange()` now derives the complete retained
-  resource-set digest, consumes the key and socket once, uses
-  `AuthoritySession.ready_packet()` with the canonical request-contract SHA,
-  sends exactly one frame, releases every owner, and remains unavailable.
-  It does not receive a supervisor packet or enter execution.
-- Refreshed the packaged authority artifact lock for `authority_process.py`.
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_process \
-  tests.test_prime_p1_authority_protocol \
-  tests.test_prime_p1_resource_set_identity \
-  tests.test_prime_p1_authority_artifact_lock
-Ran 70 tests in 0.035s
-OK (skipped=1: existing Linux SCM_RIGHTS capability test)
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_process.py \
-  tests/test_prime_p1_authority_process.py
-All checks passed!
-```
-
-## Resource-set identity test-evidence follow-up (2026-09-05)
-
-- RED: the strengthened full contribution-trace assertion initially failed:
-  it observed class names rather than the required ordered trace
-  `artifact, application, static, evidence, docker executable, docker socket,
-  socket-revalidate, docker-final, socket-revalidate`.
-- GREEN: `tests/test_prime_p1_resource_set_identity.py` now independently
-  computes the aggregate SHA-256 from the literal resource-set domain and
-  local length-delimiting encoding, then rejects a representative swap of the
-  first two real child contributions. It records the full trace above, so neither a
-  swapped collection order nor an early final revalidation can satisfy it.
-- Representative retained-identity mutations cover the Docker executable,
-  Docker socket identity, socket parent-chain, and daemon-version projection:
-  each either alters the independently expected aggregate or fails at the
-  retained-FD identity check. The only socket seam remains path revalidation,
-  because this test deliberately does not create or connect to a Docker daemon.
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_resource_set_identity \
-  tests.test_prime_p1_authority_resources \
-  tests.test_prime_p1_authority_artifact_lock \
-  tests.test_prime_p1_authority_application_resources \
-  tests.test_prime_p1_authority_docker_executable \
-  tests.test_prime_p1_authority_docker_socket
-Ran 76 tests in 2.330s
-OK (skipped=1: existing unavailable atomic Linux socket-flag test)
-
-uv run ruff check tests/test_prime_p1_resource_set_identity.py
-All checks passed!
-
-git diff --check
-exit 0
-```
-
-## Ready cleanup BaseException regression (2026-09-05)
-
-- RED: a `CloseBomb(BaseException)` from the retained socket escaped pre-ready
-  cleanup and prevented retained key/config closure.
-- GREEN: descriptor and pre-ready cleanup now normalize arbitrary close
-  `BaseException`s, continue each retained owner exactly once, and surface only
-  `PrimeP1AuthorityBootstrapError`. The authority artifact lock was refreshed.
-
-```text
-uv run python -m unittest -v tests.test_prime_p1_authority_process \
-  tests.test_prime_p1_authority_artifact_lock
-Ran 42 tests in 0.022s
-OK (skipped=1: existing Linux SCM_RIGHTS capability test)
-
-uv run ruff check src/asterion/applications/prime_agent/operator/authority_process.py \
-  tests/test_prime_p1_authority_process.py
-All checks passed!
-
-git diff --check
-exit 0
-```
+- Source suite: 17 tests PASS, including actual `render_stable_game_description_zh`/`render_cognition_narrative_zh` newline roundtrip and broker-capture newlines.
+- The same nine-suite expanded command above: `Ran 290 tests in 0.866s; OK (skipped=1)`, `/tmp/p7-task1-review-python.log`; no ResourceWarning remains.
+- Scoped ruff: `All checks passed!`, `/tmp/p7-task1-review-ruff.log`.
+- `npm --prefix packages/typescript/asterion-prime-extension run check-resource`: exit 0, `/tmp/p7-task1-review-resource.log`.

@@ -17,6 +17,7 @@ from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
 from asterion.applications.prime.p7.cognition_narrative import (
     color_label, describe_color_names_zh, render_stable_game_description_zh,
 )
+from asterion.applications.prime.p7.console_events import read_console_events
 from asterion.applications.prime.p7.observation_state import ObservationState
 from asterion.applications.prime.p7.score import digest
 from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
@@ -33,6 +34,7 @@ _OUTPUT_SIGNALS = {"plan", "observation", "prior", "action", "progress"}
 _IDENTIFIER = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z")
 _PRIVATE_TEXT = re.compile(r"(?:https?://|(?<![A-Za-z0-9])/[A-Za-z0-9_.~+-]+(?:/|(?=\s|[。；，]|$))|[A-Za-z]:\\|\b(?:Bearer\s+|sk-[A-Za-z0-9]|api[_ -]?key\s*[:=]|password\s*[:=]|authorization\s*[:=]))", re.IGNORECASE)
 _WARNINGS = {
+    "console-events-invalid": "部分实时过程事件无效，仅保留可验证前缀。",
     "summary-missing": "运行摘要缺失或不可读取。",
     "recording-missing": "没有可验证的游戏录制。",
     "recording-ambiguous": "存在多份录制，无法确定本次游戏身份；未合并录制。",
@@ -465,6 +467,10 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             game, _, wins = valid[0]["game_id"], valid[0]["guid"], valid[0]["wins"]
         if any(o is None for o in observations):
             warn.append("recording-invalid")
+    source_events = read_console_events(root, root.name, game, warnings=warn)
+    if source_events and game is None:
+        game = source_events[0]["game_id"]
+    source_actions = [event["payload"] for event in source_events if event["kind"] == "action"]
     trace, sealed = _trace(root, summary, game, warn)
     trace_actions = [e for e in trace if e["kind"] == "arc.action"]
     levels: dict[int, dict] = {}
@@ -472,9 +478,12 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     def level(number: int) -> dict:
         if number not in levels:
             levels[number] = {"level": number, "status": "not-run", "frames": [], "actions": [], "decisions": [],
-                              "cognition": {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}, "receipt": None}
+                              "cognition_timeline": [], "cognition": {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}, "receipt": None}
         return levels[number]
 
+    observation_positions: dict[int, dict] = {}
+    action_positions: dict[int, dict] = {}
+    source_aligned = True
     previous = None
     frame_count = 0
     action_count = 0
@@ -482,10 +491,16 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     last_level = None
     for observation in observations:
         if observation is None:
+            source_aligned = False
             previous = None
             continue
         if previous and observation["action"] == "RESET" and observation["hash"] == previous["hash"]:
-            continue
+            reset_recorded = source_aligned and any(
+                action["sequence"] == action_count + 1 and action["action"] == "RESET"
+                and action["before_sha256"] in previous["hashes"] and action["after_sha256"] in observation["hashes"]
+                for action in source_actions)
+            if not reset_recorded:
+                continue
         if frame_count + len(observation["layers"]) > _MAX_FRAMES:
             warn.append("evidence-bounded")
             break
@@ -501,6 +516,18 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         bucket["frames"].extend(new_frames)
         if previous:
             action_count += 1
+            # Source positions require an actual, unique transition. A missing
+            # SDK row can make the retained image look like an earlier state;
+            # row counts alone never establish the broker action sequence.
+            source_matches = [action for action in source_actions
+                              if action["action"] == observation["action"]
+                              and action.get("data", {}) == observation["data"]
+                              and action["levels_completed"] == observation["levels"]
+                              and action["after_sha256"] in observation["hashes"]]
+            source_match = source_matches[0] if len(source_matches) == 1 else None
+            if (source_match is None or source_match["sequence"] != action_count
+                or source_match["before_sha256"] not in previous["hashes"]):
+                source_aligned = False
             matches = [e for e in trace_actions if e["payload"].get("action") == observation["action"]
                        and type(e["payload"].get("before_sha256")) is str and e["payload"]["before_sha256"] in previous["hashes"]
                        and type(e["payload"].get("after_sha256")) is str and e["payload"]["after_sha256"] in observation["hashes"]
@@ -517,8 +544,11 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                                       "data": observation["data"], "levels_completed": observation["levels"],
                                       "changed_cells": changed, "trace_sequence": matched["sequence"] if matched else None,
                                       "visual_observations": _visual_observations(previous["layers"][-1], observation["layers"][-1]),
-                                      "decision_id": None})
+                                      "decision_id": None, "source_action_sequence": action_count if source_aligned else None})
+            if source_aligned:
+                action_positions[action_count] = bucket["actions"][-1]
         elif observation["action"] != "RESET":
+            source_aligned = False
             warn.append("recording-invalid")
         completed = observation["levels"]
         last_level = min(completed + 1, wins or 100)
@@ -527,6 +557,8 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         if last_level != action_level:
             level(last_level)["frames"].append(new_frames[-1])
         observation["frame_id"] = new_frames[-1]["id"]
+        if source_aligned:
+            observation_positions[action_count] = observation
         previous = observation
     target = _integer(experiment.get("target_level"), 100) or 1
     for number in range(1, (wins or max(levels, default=target)) + 1):
@@ -546,6 +578,52 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             level(last_level)["status"] = "unsuccessful" if previous and previous["state"] == "GAME_OVER" else "incomplete"
         if receipt and completed >= 1:
             level(min(completed, wins or 100))["receipt"] = receipt
+    source_decisions = []
+    decisions_by_id = {}
+    for event in source_events:
+        payload = event["payload"]
+        position = payload.get("source_action_sequence")
+        observation = observation_positions.get(position)
+        if event["kind"] == "decision":
+            # A summary is public model output at one exact observed position.
+            if not observation or payload["observation_sha256"] not in observation["hashes"] or payload["decision_id"] in decisions_by_id:
+                continue
+            decision = {"id": payload["decision_id"], "source": "p7_decision",
+                        **{key: payload[key] for key in ("goal", "basis", "expected", "source_action_sequence", "observation_sha256")},
+                        "action_ids": [], "event_sequence": event["sequence"]}
+            decisions_by_id[decision["id"]] = decision
+            source_decisions.append(decision)
+            number = min(observation["levels"] + 1, wins or 100)
+            level(number)["decisions"].append(decision)
+        elif event["kind"] == "action":
+            sequence = payload["sequence"]
+            actual = action_positions.get(sequence)
+            before, after = observation_positions.get(sequence - 1), observation_positions.get(sequence)
+            decision = decisions_by_id.get(payload.get("decision_id"))
+            if not actual or not before or not after:
+                continue
+            if (actual["name"] != payload["action"] or actual["data"] != payload.get("data", {})
+                or actual["levels_completed"] != payload["levels_completed"]
+                or payload["before_sha256"] not in before["hashes"] or payload["after_sha256"] not in after["hashes"]):
+                continue
+            if decision and event["sequence"] > decision["event_sequence"]:
+                start = decision["source_action_sequence"]
+                continuation = action_positions.get(sequence - 1)
+                if sequence == start + 1 or (sequence > start + 1 and continuation and continuation["decision_id"] == decision["id"]):
+                    actual["decision_id"] = decision["id"]
+                    decision["action_ids"].append(actual["id"])
+        elif event["kind"] == "cognition":
+            if not observation or payload["observation_sha256"] not in observation["hashes"]:
+                continue
+            action = action_positions.get(position)
+            revision = {**payload, "frame_id": observation["frame_id"], "action_id": action["id"] if action else None,
+                        "scope": "observation", "event_sequence": event["sequence"]}
+            bucket = level(min(observation["levels"] + 1, wins or 100))
+            bucket["cognition_timeline"].append(revision)
+            bucket["cognition"] = {**revision, "updates": [], "world_map_facts": {}}
+    if last_level is not None and level(last_level)["cognition"].get("scope") == "observation":
+        # A current source revision replaces the legacy final/missing fallback.
+        warn = [code for code in warn if code not in {"cognition-final", "cognition-missing"}]
     rounds = []
     for entry in trace:
         if entry["kind"] != "prime.model.round":
@@ -563,7 +641,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         # multi-level runs the run-level array keeps unaligned rounds visible.
         observed_levels = [item for item in levels.values() if item["frames"]]
         if len(observed_levels) == 1:
-            observed_levels[0]["decisions"] = rounds
+            observed_levels[0]["decisions"].extend(rounds)
         warn.append("decision-unaligned")
     replay_verified = (completion_proof and sealed and summary.get("sealed_trace") is True
                        and summary.get("replay_verified") is True)
@@ -574,7 +652,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                     "win_levels": wins, "target_level": target, "primitive_action_count": action_count,
                     "replay_verified": replay_verified, "sealed_trace": sealed,
                     "model": _identifier(experiment.get("model"))},
-            "levels": [levels[n] for n in sorted(levels)], "decisions": rounds,
+            "levels": [levels[n] for n in sorted(levels)], "decisions": source_decisions + rounds,
             "warnings": [_WARNINGS[code] for code in dict.fromkeys(warn)]}
 
 

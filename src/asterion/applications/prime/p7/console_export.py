@@ -51,18 +51,36 @@ def _hash(content: str) -> str:
     return "sha256-" + base64.b64encode(sha256(content.encode("utf-8")).digest()).decode("ascii")
 
 
-def render_console(snapshot: dict[str, object]) -> str:
+def render_console(snapshot: dict[str, object], *,
+                   live_config: dict[str, object] | None = None) -> str:
     """Embed only the projected state, with hashes for the actual inline assets."""
     assets = files("asterion.applications.prime.p7").joinpath("console_assets")
     template = assets.joinpath("index.html").read_text(encoding="utf-8")
     css = assets.joinpath("tailwind.css").read_text(encoding="utf-8") + "\n" + assets.joinpath("styles.css").read_text(encoding="utf-8")
     js = assets.joinpath("app.js").read_text(encoding="utf-8")
+    if live_config is not None:
+        if (not isinstance(live_config, dict) or set(live_config) - {"token", "games"}
+            or not isinstance(live_config.get("token"), str)
+            or not 1 <= len(live_config["token"]) <= 256):
+            raise ValueError("console live configuration invalid")
+        games = live_config.get("games", [])
+        if not isinstance(games, list) or any(
+            not isinstance(game, dict) or set(game) != {"game_id", "alias", "win_levels"}
+            or not isinstance(game["game_id"], str) or not game["game_id"]
+            or not isinstance(game["alias"], str)
+            or type(game["win_levels"]) is not int or game["win_levels"] < 1
+            for game in games
+        ):
+            raise ValueError("console live catalog invalid")
     data = _inline_json(snapshot)
-    csp = ("default-src 'none'; connect-src 'none'; img-src data:; "
-           f"style-src '{_hash(css)}'; script-src '{_hash(js)}' '{_hash(data)}'; "
+    config = _inline_json(live_config)
+    connect = "'self'" if live_config is not None else "'none'"
+    csp = (f"default-src 'none'; connect-src {connect}; img-src data:; "
+           f"style-src '{_hash(css)}'; script-src '{_hash(js)}' '{_hash(data)}' '{_hash(config)}'; "
            "base-uri 'none'; form-action 'none'; object-src 'none'")
     replacements = {"__CONSOLE_CSP__": csp, "__CONSOLE_CSS__": css,
-                    "__CONSOLE_JS__": js, "__CONSOLE_DATA__": data}
+                    "__CONSOLE_JS__": js, "__CONSOLE_DATA__": data,
+                    "__CONSOLE_CONFIG__": config}
     if any(template.count(key) != 1 for key in replacements):
         raise ValueError("console template invalid")
     # One substitution pass: evidence resembling a template marker stays data.
@@ -84,9 +102,12 @@ def export_console(run_root: Path, output: Path | None = None) -> Path:
 
 def main(argv: list[str] | None = None, *, stdout: TextIO | None = None,
          stderr: TextIO | None = None) -> int:
-    """Application CLI; this command never loads a provider or calls a model."""
+    """Export or open the application console; startup never calls a model."""
     stdout = sys.stdout if stdout is None else stdout
     stderr = sys.stderr if stderr is None else stderr
+    arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments[:1] == ["serve"]:
+        return _serve_main(arguments[1:], stdout=stdout, stderr=stderr)
     parser = argparse.ArgumentParser(prog="asterion arc-console", description="导出单文件 ARC-AGI-3 关卡回放")
     parser.add_argument("run_root", type=Path, nargs="?", help="P7 运行目录；默认选择最近一份带录制的运行")
     parser.add_argument("--runs-root", type=Path, default=Path(".asterion-private/prime-p7-live"),
@@ -113,6 +134,32 @@ def main(argv: list[str] | None = None, *, stdout: TextIO | None = None,
             opened = False
         if not opened:
             stderr.write("浏览器未能自动打开；HTML 已导出。请手动用浏览器打开运行目录中的 p7-console.html；指定 --output 时打开该输出文件。\n")
+    return 0
+
+
+def _serve_main(argv: list[str], *, stdout: TextIO, stderr: TextIO) -> int:
+    parser = argparse.ArgumentParser(prog="asterion arc-console serve", description="打开 P7 自主求解控制台")
+    parser.add_argument("--operator-root", type=Path, default=Path.cwd())
+    parser.add_argument("--arc-root", type=Path, default=Path.cwd().parent / "external-prime" / "arc-agi-3")
+    parser.add_argument("--guest-machine", default="ubuntu")
+    parser.add_argument("--no-browser", action="store_true")
+    args = parser.parse_args(argv)
+
+    def ready(url: str) -> None:
+        stdout.write(f"P7 自主求解控制台：{url}\n")
+        stdout.flush()
+
+    try:
+        from .console_server import serve_console
+
+        serve_console(operator_root=args.operator_root, arc_root=args.arc_root,
+                      guest_machine=args.guest_machine, open_browser=not args.no_browser,
+                      on_ready=ready)
+    except KeyboardInterrupt:
+        return 0
+    except Exception:
+        stderr.write("P7 控制台服务无法启动或已异常结束。请检查本地游戏资源及运行配置。\n")
+        return 2
     return 0
 
 

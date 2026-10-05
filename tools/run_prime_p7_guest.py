@@ -41,6 +41,19 @@ def _unit(value: str) -> str:
 
 def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     _unit(unit)
+    console_id = os.environ.get("ASTERION_PRIME_P7_CONSOLE_RUN_ID")
+    mode = os.environ.get("ASTERION_PRIME_P7_RUN_MODE")
+    if console_id is not None or mode == "witness":
+        if (
+            mode != "witness"
+            or console_id is None
+            or re.fullmatch(r"p7-live-[0-9]{14}-[0-9a-f]{24}", console_id) is None
+            or seconds != 900
+            or os.environ.get("ASTERION_PRIME_P7_ATTEMPT_UNIT") != unit
+            or os.environ.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") != "900"
+            or _UNBOUNDED_FIRST_ROUND_ENV in os.environ
+        ):
+            raise ValueError("invalid console attempt")
     # The host-only sweep driver uses zero as an explicit wire sentinel for
     # its separately authorized unbounded first-round campaign.
     if type(seconds) not in (int, float) or isinstance(seconds, bool):
@@ -78,7 +91,7 @@ def cleanup(unit: str) -> bool:
     _unit(unit)
     stopped = subprocess.run(
         ["systemctl", "stop", unit], stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, timeout=12, check=False,
+        stderr=subprocess.DEVNULL, timeout=30, check=False,
     )
     state = subprocess.run(
         ["systemctl", "show", unit, "--property=LoadState,ActiveState,ControlGroup"],

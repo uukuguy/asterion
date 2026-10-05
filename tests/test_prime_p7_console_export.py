@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from asterion.applications.prime.p7.console_export import export_console, main
+from asterion.applications.prime.p7.console_export import export_console, main, render_console
 
 
 class TestConsoleExport(unittest.TestCase):
@@ -41,7 +41,7 @@ class TestConsoleExport(unittest.TestCase):
             self.assertIsNotNone(embedded)
             self.assertEqual(json.loads(embedded[1]), snapshot)
             self.assertNotRegex(html, r'<(?:script|link|img)[^>]+(?:src|href)="(?:https?:|assets/)')
-            self.assertNotIn('fetch(', html)
+            self.assertIn('console-config', html)
             self.assertIn("tailwindcss", html.lower())
             self.assertIn("connect-src 'none'", html)
             # Hashes must cover actual inline bytes, including whitespace.
@@ -49,6 +49,20 @@ class TestConsoleExport(unittest.TestCase):
                 body = re.search(pattern, html, re.S)[1]
                 digest = base64.b64encode(hashlib.sha256(body.encode()).digest()).decode()
                 self.assertIn("sha256-" + digest, html)
+
+    def test_live_config_uses_safe_json_and_same_origin_csp(self):
+        config = {"token": "token</script>sentinel", "games": [
+            {"game_id": "sp80-test", "alias": "SP80", "win_levels": 3}]}
+        html = render_console({"schema": "asterion.arc-agi3-p7-console/v1", "run": {},
+                               "levels": [], "warnings": []}, live_config=config)
+        self.assertIn("connect-src 'self'", html)
+        self.assertNotIn("token</script>sentinel", html)
+        embedded = re.search(r'<script id="console-config" type="application/json">(.*?)</script>', html, re.S)
+        self.assertEqual(json.loads(embedded[1]), config)
+        digest = base64.b64encode(hashlib.sha256(embedded[1].encode()).digest()).decode()
+        self.assertIn("sha256-" + digest, html)
+        with self.assertRaises(ValueError):
+            render_console({}, live_config={"token": "token", "root": "/private/path"})
 
     def test_cli_failure_is_public_safe(self):
         out, err = io.StringIO(), io.StringIO()

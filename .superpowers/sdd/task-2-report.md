@@ -1,379 +1,64 @@
-# Task 2 Report: Extract the domain-neutral Pi RPC session
+# Task 2 report
 
-## Scope
+Implemented bounded P7 console supervision and the loopback HTTP application. No model or real guest attempt was launched by this task. No commits were made; root owns integration.
 
-Implemented the common Asterion Pi JSONL-RPC process/session lifecycle and
-rebound the existing DCI `PiRpcClient` facade to that transport. The shared
-module owns only literal process invocation, JSONL framing, prompt response
-matching, immutable event publication, deadlines, cancellation, output caps,
-and bounded cleanup. DCI command construction, Node/provider configuration,
-context-profile interpretation, observation configuration, Pathlight entry
-validation, prompt recovery, and session-entry interpretation remain in the
-DCI package.
+## Delivered
 
-No Prime Agent source, SDK, checkout, or source lock is imported, inspected,
-loaded, launched, or required by the common transport. The common transport
-does not read `.env`, ambient credentials, or provider settings.
+- `console_session.py`: one activity slot; service-allocated exact run ID and exact guest unit; fixed level-witness argv; 900 second host watchdog; inherited unbounded/attempt/Make control flags removed. Operator/ARC roots and guest are trusted constructor values, passed explicitly. stdout/stderr are discarded and never used as browser data.
+- Startup and stop command IDs deduplicate exact requests. Stop responds immediately with `stopping`; process termination, reap and guest cleanup happen outside the state lock. Natural exit also reaps the process group and independently checks the owned guest unit. Failed cleanup blocks restart.
+- `operator.main`: optional console ID comes only from process environment, matches `p7-live-[0-9]{14}-[0-9a-f]{24}`, and refuses an existing or symlinked evidence directory. Non-console calls continue generating their ID.
+- Make containment branch now admits a console-owned witness. Guest launcher requires witness mode, the complete strict ID/unit/900-second contract, and absence of the unbounded marker; sweep behavior remains. The environment allowlist forwards the console ID.
+- Guest `systemctl stop` timeout is 30 seconds, exceeding the existing 20-second unit stop/KILL window. Console host cleanup timeout is 40 seconds and retains the helper's inactive/not-found and unpopulated-cgroup checks. The unrelated sweep supervisor still has its old host timeout; this task did not change that workflow.
+- `console_server.py`: only 127.0.0.1; exact Host; exact Origin and page-injected random token for POST; bounded JSON and exact keys; fixed routes; no arbitrary file serving or CORS. HTML uses the renderer's actual script/style hashes plus frame-ancestors restriction.
+- `game.public_game_catalog`: returns only validated game ID, alias and win-level metadata without importing game code.
 
-## Files changed
+## Frozen browser interface
 
-- `src/asterion/runtimes/pi_rpc.py` (created): immutable `PiRpcConfig`,
-  `PiRpcEvent`, and `PiRpcResult`; reusable `PiRpcSession` process and JSONL
-  transport; async one-prompt `run()` lifecycle.
-- `tests/test_pi_session.py` (created): lifecycle, immutability, sequence,
-  literal argv, malformed JSON, EOF, response mismatch, ACK/terminal,
-  stdout/final-text/stderr caps, deadline, cancellation, and bounded cleanup.
-- `src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py`: DCI facade
-  now creates and delegates process I/O and cleanup to `PiRpcSession`; all
-  DCI-specific interpretation stays local.
-- `tests/test_dci_pi_rpc_proxy.py`: asserts the exact DCI command and copied
-  child environment are bound into the common session.
-- `tests/test_dci_pi_rpc_recovery.py`: asserts existing recovery JSON frames
-  flow byte-for-byte through the common transport seam.
+- `GET /api/state`: `{session_id,state,game_id,run_id,cleanup_confirmed,snapshot,revision}`. IDs/game/snapshot are null while idle. States: `idle`, `starting`, `running`, `stopping`, `completed`, `incomplete`, `cancelled`, `timed-out`, `failed`, `cleanup-unconfirmed`.
+- `GET /api/games`: `{games:[{game_id,alias,win_levels}]}`.
+- `GET /api/runs`: `{runs:[{run_id,game_id,status}]}` from at most 256 explicitly validated run directories.
+- `GET /api/replay/<run_id>`: safe console snapshot only, with catalog/game/run identity checks.
+- `POST /api/start`: `{game_id,command_id}`; `POST /api/stop`: `{session_id,command_id}`. Both return the state shape with HTTP 202. Use `Content-Type: application/json` and `X-P7-Console-Token` header; browser same-origin Origin is required. Errors use fixed `{error:code}` responses.
+- `render_console(snapshot,live_config={token,games})` receives the token only in the real-time page. No token in URLs or state APIs. Polling state does not start/stop a task.
+- `serve_console(operator_root,arc_root,guest_machine='ubuntu',open_browser=False,on_ready=None)` is the CLI entry; it invokes on_ready with the bound loopback URL and cleans the session on SIGTERM/SIGINT/shutdown.
 
-## P7 Task 2 Addendum
+## Verification
 
-Implemented `_P7BrokerClient.mechanics_prior()` with eight-page maximum history
-paging (32 records per page), detached redacted records, scalar-only unavailable
-fallbacks, and serialized evidence capping. Registered the
-`p7_client.mechanics_prior()` tool with evidence-versus-route wording.
+- PASS: `uv run python -m unittest -q tests.test_prime_p7_console_session tests.test_prime_p7_console_server tests.test_prime_p7_guest tests.test_prime_p7_native_game tests.test_prime_p7_console_cli` — 43 tests, one existing opt-in real Orb probe skipped. Includes actual HTTP using fake processes, exact host/origin/token, immutable views, concurrent start/idempotency, stop during startup, slow cleanup without response blocking, deadline cancellation, natural exit, final success proof, mismatched run/game, environment contamination and reused run IDs.
+- PASS: targeted `ruff check` over session/server/game/operator/guest helper and Task 2 test files; `git diff --check`.
+- PASS: `make -n asterion-prime-p7-level-witness GAME=sp80 LEVEL=1 ...` read-only check confirms console containment branch and `python -I -m ...p7.operator` from wheel path.
+- Related regression run: 138 tests across live-command, native-game, Task 2 and CLI had one failure: `TestPrimeP7LiveCommand.test_initial_context_logs_cognition_refresh` expected `startup-cognition-marker`, but log reported `duplicate-snapshot`. Reported to root/Task 1 owner; not classified as baseline and not fixed outside this task's ownership. Task 2 focused suite passed.
 
-Verification: focused P7 mechanics-prior and native-broker unittest suite passed
-(50 tests); Ruff passed for all assigned files.
+## Boundaries
 
-## TDD RED evidence
+Success is derived from the final safe snapshot's successful status plus sealed/replay-verified evidence, never process exit zero. An exit-zero run without successful evidence is incomplete. Forced stop need not produce final operator summary, but requires independent containment cleanup to permit a new run.
 
-Exact command:
+Real Mac/Orb containment, real wheel/model witness and visual acceptance are not proven by these fake-process tests; root owns that deployment verification. No pause/resume or manual game execution was added.
 
-```text
-uv run python -m unittest -v tests.test_pi_session
-```
+## Review correction: surviving host descendants
 
-Output:
+The important finding in `task-2-review.md` was reproduced before changing the implementation. The real-process regression starts a fresh process group with a Python parent and a child that ignores SIGTERM. Both parent-terminated and parent-natural-exit cases failed with the original helper: the guest-cleanup boundary observed a surviving host group.
+
+`_stop_process` now sends SIGKILL to any remaining group members regardless of whether waiting for the parent timed out, reaps the parent, and waits up to five seconds for `killpg(pgid, 0)` to report group absence. A surviving group or inspection failure raises instead of granting cleanup confirmation. Session shutdown allows 60 seconds for the host teardown plus the existing 40-second guest cleanup. The independent guest cleanup still follows the host phase; any unconfirmed host teardown blocks restart even if guest cleanup succeeds.
+
+Real regression uses actual subprocesses and OS group signals, with a readiness file from the TERM-ignoring child. It checks group absence at guest-cleanup entry for both parent exit modes, parent reaping and the final public cleanup flag. Its finally block forcibly cleans the owned group even on test failure. No model or Orb service is involved.
+
+Fresh command outputs after correction:
 
 ```text
-test_pi_session (unittest.loader._FailedTest.test_pi_session) ... ERROR
-ModuleNotFoundError: No module named 'asterion.runtimes.pi_rpc'
-Ran 1 test in 0.000s
-FAILED (errors=1)
-```
-
-Reason: the new focused suite imported the specified common transport API
-before that module existed.
-
-The DCI delegation seam was also observed RED before rebinding:
-
-```text
-AttributeError: ... dci.implementation.runtime.pi_rpc does not have the
-attribute 'PiRpcSession'
-RuntimeError: RPC client is not running
-Ran 2 tests ... FAILED (errors=2)
-```
-
-A self-review regression for stderr overflow was observed RED before the
-post-drain error gate was added:
-
-```text
-test_stderr_cap_fails_closed_even_when_stdout_settles ... FAIL
-AssertionError: RuntimeError not raised
-Ran 1 test ... FAILED (failures=1)
-```
-
-## GREEN verification
-
-Exact combined command from the brief:
-
-```text
-uv run python -m unittest -v tests.test_pi_session tests.test_dci_pi_rpc_proxy tests.test_dci_pi_rpc_recovery tests.test_dci_pi_rpc_observation
-```
-
-Output summary:
-
-```text
-Ran 32 tests in 1.067s
+$ uv run python -m unittest -q tests.test_prime_p7_console_session.TestPrimeP7ConsoleSession.test_real_process_group_cleans_term_ignoring_child_after_parent_exit
+Ran 1 test in 0.187s
 OK
-```
 
-Additional checks:
+$ uv run python -m unittest -q tests.test_prime_p7_console_session tests.test_prime_p7_console_server tests.test_prime_p7_guest tests.test_prime_p7_console_cli
+Ran 31 tests in 3.487s
+OK (skipped=1)
 
-```text
-uv run ruff check src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
+$ uv run ruff check src/asterion/applications/prime/p7/console_session.py tests/test_prime_p7_console_session.py
 All checks passed!
 
-uv run python -m py_compile src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-PASS
-
-git diff --check -- src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-PASS
+$ git diff --check
+(no output; exit 0)
 ```
 
-## Self-review
-
-- Dependency direction is preserved: DCI imports the domain-neutral runtime;
-  the runtime imports no capability, application, DCI, Prime, provider, or
-  Pathlight module.
-- The child environment is copied and frozen at configuration construction;
-  event payloads are recursively frozen; results expose tuples and bytes.
-- Prompt response IDs must match exactly, sequences are contiguous from one,
-  and success requires an ACK followed by `agent_settled`.
-- Malformed/non-object JSON, premature EOF, mismatched responses, output-cap
-  excess, deadline, and cancellation fail closed.
-- Cancellation emits a literal abort frame where possible. Cleanup closes
-  stdin, waits briefly, terminates, kills if necessary, joins drain threads,
-  and reports an unresolved cleanup timeout.
-- DCI retains its existing command ordering, copied proxy/private observation
-  environment, sorted unique inherited-FD union, `get_state`/`get_entries`
-  validation, max-turn behavior, recovery prompts, and streaming/tool output.
-- DCI stderr remains available after stop through a retained byte snapshot.
-- Only the five assigned implementation/test files are staged for the task
-  commit; unrelated dirty and untracked workspace state is untouched.
-
-## Concerns
-
-No known concern within the requested boundary. The exact focused suite was
-run; the repository-wide `make test`/`make check` were intentionally not run
-because the brief requested the four-module combined suite and the workspace
-contains unrelated concurrent changes.
-
-## Review-fix follow-up
-
-### Scope
-
-Resolved all four review findings without expanding beyond the five owned
-implementation/test files:
-
-1. Added one common `drive_prompt` lifecycle and `PiRpcPromptControl` for
-   response matching, deadline accounting, cancellation polling, abort
-   emission, and bounded settled-state waits. Both `PiRpcSession.run()` and
-   the DCI facade now consume it. DCI retains only streaming, max-turn,
-   recovery, provider-error, and settled-state interpretation.
-2. Replaced session-global drain state with per-launch `_ProcessState` captured
-   by each reader. Cleanup now starts a distinct process group, escalates
-   terminate/kill to that group, explicitly closes pipe descriptors to unblock
-   readers, verifies both joins, retains unresolved process/thread state, and
-   rejects reuse until cleanup succeeds. The DCI facade likewise retains a
-   transport whose cleanup failed.
-3. Restricted immutable event payloads to recursively frozen, finite,
-   JSON-compatible values. Mutable/opaque leaves, non-string keys, cycles, and
-   non-finite floats fail closed.
-4. Added direct aggregate stdout-byte and total event-count limit tests.
-
-### RED evidence
-
-The first review regression command covered lifecycle delegation, stuck-reader
-cleanup, immutable leaves, and both missing direct cap tests:
-
-```text
-uv run python -m unittest -v \
-  tests.test_pi_session.PiRpcSessionTests.test_events_reject_non_json_mutable_leaves \
-  tests.test_pi_session.PiRpcSessionTests.test_aggregate_stdout_byte_cap_fails_closed \
-  tests.test_pi_session.PiRpcSessionTests.test_event_count_cap_fails_closed \
-  tests.test_pi_session.PiRpcSessionTests.test_unresolved_reader_cleanup_is_reported_and_blocks_state_reuse \
-  tests.test_dci_pi_rpc_recovery.DciPiRpcRecoveryTests.test_prompt_lifecycle_is_driven_only_by_common_transport
-```
-
-Observed output:
-
-```text
-mutable bytearray/set/object: FAIL (ValueError not raised)
-unresolved reader cleanup: FAIL (RuntimeError not raised)
-DCI lifecycle delegation: FAIL (AssertionError: direct send)
-aggregate stdout byte cap: PASS on first execution
-event count cap: PASS on first execution
-Ran 5 tests ... FAILED (failures=5)
-```
-
-The last two were coverage-only findings: their production guards already
-existed. A mutation check raised both guards above the fake workload and
-proved the new tests produce RED when either protection is absent:
-
-```text
-test_aggregate_stdout_byte_cap_fails_closed ... FAIL
-test_event_count_cap_fails_closed ... FAIL
-Ran 2 tests in 0.065s
-FAILED (failures=2)
-EXPECTED MUTATION RED
-```
-
-Facade-level cleanup retention also went RED before its fix:
-
-```text
-test_failed_common_cleanup_keeps_transport_for_a_bounded_retry ... FAIL
-AssertionError: None is not <MagicMock ...>
-Ran 1 test ... FAILED (failures=1)
-```
-
-### GREEN evidence
-
-Focused review regressions after implementation:
-
-```text
-test_events_reject_non_json_mutable_leaves ... ok
-test_unresolved_reader_cleanup_is_reported_and_blocks_state_reuse ... ok
-test_prompt_lifecycle_is_driven_only_by_common_transport ... ok
-Ran 3 tests in 0.003s
-OK
-
-test_failed_common_cleanup_keeps_transport_for_a_bounded_retry ... ok
-Ran 1 test in 0.002s
-OK
-```
-
-Exact combined command, with resource leaks promoted to errors:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v tests.test_pi_session tests.test_dci_pi_rpc_proxy tests.test_dci_pi_rpc_recovery tests.test_dci_pi_rpc_observation
-Ran 39 tests in 1.212s
-OK
-```
-
-Review-fix static verification:
-
-```text
-uv run ruff check src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-All checks passed!
-
-uv run python -m py_compile src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-PASS
-
-git diff --check -- src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-PASS
-```
-
-### Review-fix concerns
-
-No known concern within the assigned boundary. The repository-wide suite was
-not rerun; the exact combined transport/DCI suite and owned-file static checks
-are the verified boundary.
-
-## Second review-fix follow-up
-
-### Scope
-
-Resolved both second-review findings within the owned transport/facade surface:
-
-1. Added `PiRpcPromptControl.read_event()` and `request()` so the DCI settled
-   `get_state` exchange reuses the active prompt deadline, cancellation signal,
-   bounded polling, abort state, and common request-ID stream. DCI continues to
-   own only the `get_state` response shape and idle/compaction interpretation.
-2. Kept the synchronous prompt driver for the DCI facade while marshaling the
-   public async session callback onto the calling event-loop thread. Async task
-   cancellation now signals and aborts the driver, waits for its bounded exit,
-   consumes its terminal exception, and only then performs process cleanup and
-   releases the session for reuse.
-
-### RED evidence
-
-The three focused second-review regressions initially failed:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_dci_pi_rpc_recovery.DciPiRpcRecoveryTests.test_settled_validation_uses_common_control_and_shared_request_ids \
-  tests.test_pi_session.PiRpcSessionTests.test_async_callbacks_run_on_calling_loop_thread_and_context \
-  tests.test_pi_session.PiRpcSessionTests.test_async_cancellation_waits_for_prompt_driver_to_quiesce
-
-test_settled_validation_uses_common_control_and_shared_request_ids ... FAIL
-test_async_callbacks_run_on_calling_loop_thread_and_context ... FAIL
-test_async_cancellation_waits_for_prompt_driver_to_quiesce ... FAIL
-Ran 3 tests in 0.465s
-FAILED (failures=3)
-```
-
-The async failures showed a worker-thread callback identity instead of the
-calling loop thread and `driver_exited == False` when cancellation returned.
-The first version of the settled test patched the shared `time` module object
-too broadly; after narrowing that patch to DCI's module binding, a guard
-mutation restoring the reviewed nested call produced the intended RED:
-
-```text
-test_settled_validation_uses_common_control_and_shared_request_ids ... FAIL
-AssertionError: nested DCI lifecycle
-Ran 1 test in 0.088s
-FAILED (failures=1)
-```
-
-### GREEN evidence
-
-Focused second-review regressions after implementation:
-
-```text
-test_settled_validation_uses_common_control_and_shared_request_ids ... ok
-test_async_callbacks_run_on_calling_loop_thread_and_context ... ok
-test_async_cancellation_waits_for_prompt_driver_to_quiesce ... ok
-Ran 3 tests in 0.534s
-OK
-```
-
-Exact combined command, with resource leaks promoted to errors:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v tests.test_pi_session tests.test_dci_pi_rpc_proxy tests.test_dci_pi_rpc_recovery tests.test_dci_pi_rpc_observation
-Ran 41 tests in 4.172s
-OK
-```
-
-Second-review static verification:
-
-```text
-uv run ruff check src/asterion/runtimes/pi_rpc.py tests/test_pi_session.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-All checks passed!
-
-uv run python -m py_compile src/asterion/runtimes/pi_rpc.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_pi_session.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-PASS
-
-git diff --check -- src/asterion/runtimes/pi_rpc.py tests/test_pi_session.py src/asterion/capabilities/dci/implementation/runtime/pi_rpc.py tests/test_dci_pi_rpc_proxy.py tests/test_dci_pi_rpc_recovery.py
-PASS
-```
-
-### Self-review and concerns
-
-- The common layer owns timing/cancellation and response-ID matching but has no
-  DCI provider, observation, recovery, Pathlight, or state-shape knowledge.
-- Public async callbacks execute on the event-loop thread with the caller's
-  context, and cleanup/reuse is conditional on driver quiescence.
-- The DCI synchronous facade and its recovery/streaming behavior remain intact
-  in the exact combined suite.
-- No known concern within the assigned boundary. Repository-wide checks were
-  not rerun; the exact requested combined suite is the verified boundary.
-
-## Task 2 — Transition retrodiction gate (current implementation)
-
-### Status
-PASS. The current Task 2 implementation is recorded in commit `f06921da` (`feat(p7): add transition retrodiction gate`).
-
-### Verification
-
-- `uv run python -m unittest -v tests.test_prime_p7_transition_model` — PASS
-- `uv run python -m unittest -v tests.test_prime_p7_verified_history tests.test_prime_p7_native_broker.TestNativeP7Broker` — PASS
-- `git diff --check` — PASS
-
-### Scope
-
-The implementation adds declarative transition rules, history retrodiction, ordered action expectations, and detached transition observations. It updates `transition_model.py`, `verified_history.py`, and the focused transition-model tests.
-
-### Concern
-
-The evaluator is intentionally bounded: it compares only declared scalar, hash, and sample fields and does not execute model-provided code or infer rules beyond the supplied history.
-
-## Review-fix follow-up (state digest binding and strict rule validation)
-
-Resolved both Task 2 blockers. Declarative `TransitionRule` and
-`ActionExpectation` now carry and validate both prior and after state SHA-256
-digests; `retrodict` compares those digests against every observed transition,
-so after-state tampering fails closed. Direct rule and expectation construction
-now reuses canonical action validation and enforces bounded cell tuple shape,
-coordinate/value ranges, changed-value semantics, and sorted unique cells.
-The unused `transition_observation` import was removed from the evaluator.
-
-Added regressions for after-state digest tampering and malformed rule data/cell
-construction.
-
-Verification:
-
-```text
-uv run python -m unittest -v tests.test_prime_p7_transition_model tests.test_prime_p7_verified_history tests.test_prime_p7_native_broker.TestNativeP7Broker
-Ran 55 tests ... OK
-
-git diff --check
-PASS
-```
+The skipped test remains the opt-in actual Orb probe. Only `console_session.py`, its session tests and this report changed for the review correction; no commit was made.

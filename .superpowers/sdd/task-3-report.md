@@ -1,345 +1,56 @@
-# Task 3 report (historical prior work): exact host-resolved Pi extension bindings
-
-> Historical report retained verbatim for prior Task 3 work. The current
-> same-game Playbook review fixes are appended below and do not replace this
-> history.
-
-Commit: `dde2bac1 feat: bind exact pi application extensions`
-
-## Scope
-
-Implemented the framework-only Pi extension binding/preflight seam and wired it
-through the default `pi.reference` factory and process launch. No P7 extension,
-application, provider configuration, `.env` access, Prime Agent source, or SDK
-dependency was added.
-
-## Files
-
-- `src/asterion/runtimes/pi_extensions.py` — immutable, redacted exact binding
-  with identity/path/capability/FD/environment validation and resource preflight.
-- `src/asterion/runtime/defaults.py` — optional exact host-service resolution,
-  fail-closed ambiguity/collision checks, command/environment/capability wiring.
-- `src/asterion/runtimes/pi.py` — explicit immutable inherited-FD configuration
-  and allowlisted descriptor union at process launch.
-- `tests/test_pi_runtime_extensions.py` — structural, factory, preflight,
-  redaction, no-extension regression, and real-child-process coverage.
-
-## RED evidence
-
-- `uv run python -m unittest -v tests.test_pi_runtime_extensions` initially
-  exited 1 with `ModuleNotFoundError: No module named
-  'asterion.runtimes.pi_extensions'`, proving the required type was missing.
-- After the minimal immutable type was GREEN, the expanded validation suite
-  exited 1 with 24 expected assertion failures for the unimplemented exactness
-  checks.
-- Self-review added an unselected-host-binding preservation test; it exited 1
-  because the factory raised `runtime host Pi extension is ambiguous` without
-  an `extension_host_capability` option.
-
-## GREEN evidence
-
-- Focused extension suite: 12 tests, all passed.
-- Exact requested regression command:
-  `uv run python -m unittest -v tests.test_pi_runtime_extensions tests.test_default_runtime_factory tests.test_asterion_pi_runtime`
-  ran 58 tests in 4.658s, all passed.
-- `uv run ruff check` on all four owned files: `All checks passed!`.
-- `uv run python -m py_compile` on all four owned files: exit 0.
-- `git diff --check` on all four owned files: exit 0.
-
-## Self-review
-
-- Corrected the no-selection branch to ignore unselected extension-shaped host
-  services, preserving existing `pi.reference` behavior exactly.
-- Confirmed selected service identity equals `binding.extension_id`, more than
-  one exact binding is rejected, base/extension capability overlap is rejected,
-  and environment collisions fail before client construction.
-- Confirmed a closed inherited FD fails factory preflight before client/process
-  construction, while the runtime rechecks inherited FDs immediately before
-  spawning to narrow the close-after-factory race.
-- Confirmed the child receives the literal `--extension PATH`, only configured
-  environment plus the extension snapshot, and the allowlisted descriptor;
-  extension secrets and paths do not appear in public runtime events or reprs.
-
-## Concerns
-
-- This seam deliberately does not implement or register the P7 extension.
-- Environment names are confined to the canonical namespace derived from the
-  extension ID (`prime.ipython` -> `ASTERION_PRIME_IPYTHON_*`); values remain
-  opaque and redacted.
-
-## Approved pinned-loader fix
-
-Fix commits:
-
-- `74c246b1 fix: pin pi extension resources through launch`
-- `872709bb fix: preserve pi protocol integers during redaction`
-
-Review identified that the first implementation validated only path and FD
-numbers at factory time. The approved protocol amendment replaces direct
-extension-path loading with an installed Asterion-owned Node loader and an
-explicit single-run resource lease. Preflight now opens the regular `.mjs`
-source without following symlinks, validates its conservative self-contained
-ESM form, snapshots its accepted bytes into an owned inherited FD, duplicates
-every declared inherited descriptor, rewrites only declared `*_FD` values, and
-holds the loader identity through launch. The runtime revalidates the loader
-and every owned FD immediately before spawn and closes the lease on success,
-failure, cancellation, explicit close, or finalization without a run.
-
-Additional owned files:
-
-- `src/asterion/runtimes/resources/asterion_pi_extension_loader.mjs` — reads
-  and closes the pinned source FD, verifies size and SHA-256, imports exactly
-  those bytes through a data URL, and exposes only a generic failure.
-- `tests/test_pi_extension_loader.mjs` — direct loader byte-identity, generic
-  digest-failure, environment removal, and rejection-path FD-cleanup tests.
-- `.superpowers/sdd/task-3-brief.md` — append-only approved protocol amendment.
-
-### Fix RED evidence
-
-- The new Node loader test initially failed because the loader resource did not
-  exist (`ERR_MODULE_NOT_FOUND`).
-- The deterministic Python race tests initially showed the original extension
-  path in argv, unchanged caller FD numbers, no unsupported-source rejection,
-  and no installed-loader locator.
-- The adversarial event test initially exposed the sentinel secret/private path
-  when they appeared as mapping keys; after value/key redaction, the tightened
-  FD-metadata assertion still failed on the embedded source descriptor.
-- The loader rejection-cleanup test initially failed because a valid source FD
-  remained open when another metadata field was invalid.
-- Final independent review reproduced an owned descriptor emitted as a JSON
-  integer in public tool arguments/results; the focused regression failed with
-  `7 != '<redacted>'` before typed descriptor redaction was added.
-- Follow-up review then showed global integer redaction could corrupt a valid
-  usage counter equal to an FD. The strengthened test failed during protocol
-  validation until integer redaction was confined to free-form tool
-  argument/result subtrees.
-
-### Fix GREEN evidence
-
-- `node --check src/asterion/runtimes/resources/asterion_pi_extension_loader.mjs`
-  exited 0.
-- `node --test tests/test_pi_extension_loader.mjs` ran 3 tests, all passed.
-- `uv run python -W error::ResourceWarning -m unittest -v
-  tests.test_pi_runtime_extensions` ran 19 tests, all passed.
-- Exact regression command `uv run python -W error::ResourceWarning -m
-  unittest -v tests.test_pi_runtime_extensions tests.test_default_runtime_factory
-  tests.test_asterion_pi_runtime` ran 65 tests in 4.855s, all passed.
-- `uv run ruff check` and `uv run python -m py_compile` on the four Python
-  owned files passed; `git diff --check` on the expanded owned set passed.
-- Independent scoped re-review returned CLEAN after field-aware integer
-  redaction preserved protocol-owned usage counters.
-- A wheel built with `uv build --wheel` contained
-  `asterion/runtimes/resources/asterion_pi_extension_loader.mjs`, so no package
-  metadata change was required.
-
-### Fix self-review
-
-- Replacing the original path after factory construction executes the pinned
-  original bytes, including through the real Node loader.
-- Closing and reusing an original declared FD number cannot substitute the
-  duplicated resource observed by the child.
-- Relative, symlink, TypeScript, relative/bare/dynamic import, loader
-  replacement, and closed-resource cases fail before child process start.
-- Adversarial stdout, stderr, provider/model, message, tool argument/result,
-  mapping-key, string/integer FD, and error channels do not expose extension
-  paths, environment names/values, loader metadata, or FD metadata in public
-  events/errors; protocol-owned numeric usage fields remain intact.
-- Parent and child descriptors are explicitly closed across normal completion,
-  protocol errors, invalid metadata, launch failure, and pre-start cancellation.
-
-### Remaining concerns
-
-- The loader intentionally accepts only a self-contained `.mjs` artifact with
-  static `node:` imports; source graphs and TypeScript require a host-side build
-  step before binding.
-- This task still does not implement or register the P7 extension itself.
-
-## Final review hardening
-
-Commit: `20b7d90c fix: harden pi extension validation boundaries`
-
-The final Task 3 re-review identified four additional boundary cases. This
-follow-up reserves the loader's internal environment namespace at binding
-construction, scopes redaction to known free-form Pi payload fields, rejects
-multiline re-exports, and removes the obsolete original-path argv API from
-`PiExtensionBinding`.
-
-### Final-review RED evidence
-
-- `test_extension_binding_rejects_reserved_loader_environment_before_io`
-  failed for both `pi` and `pi.extension`: bindings could declare
-  `ASTERION_PI_EXTENSION_SOURCE_FD` without rejection.
-- `test_redaction_preserves_protocol_controls_matching_environment` failed
-  before acknowledgement because global substring replacement corrupted raw
-  event keys/types and the `asterion-1` response ID for environment values
-  exactly `type`, `response`, `1`, and `call-`.
-- `test_factory_rejects_multiline_and_compact_reexports_before_client` failed because a
-  multiline relative re-export reached `PiRuntimeClient` construction.
-- Independent review of the first matcher then reproduced valid compact
-  `export {value}from` and `export*from` forms reaching client construction;
-  both failed the expanded regression before optional whitespace was accepted.
-- The immutable-binding test failed because the obsolete unsafe
-  `PiExtensionBinding.command_args()` method still existed.
-
-### Final-review GREEN evidence
-
-- Reserved internal names now fail during binding construction, with mocked
-  `os.open` and `os.dup` both proven uncalled for both colliding extension IDs.
-- Field-aware redaction preserves Pi event discriminators, response and tool
-  IDs, tool names, booleans, and usage integers; it redacts strings/integers
-  only in tool arguments/results and text only in assistant delta/content
-  fields. The short-value adversarial stream completes validly.
-- Multiline and compact relative/bare `export ... from` forms fail before
-  runtime client/process construction.
-- The focused extension suite ran 22 tests under
-  `-W error::ResourceWarning`, all passed.
-- The exact regression suite ran 68 tests in 5.062s under
-  `-W error::ResourceWarning`, all passed.
-- The Node loader suite remained 3/3 green; both Node syntax checks,
-  `ruff`, `py_compile`, source `pyright`, and `git diff --check` passed.
-
-### Final-review self-review
-
-- No protocol schema change was required: the closed raw Pi event shapes in
-  `PiProtocolAdapter` provide the bounded map of public free-form locations.
-- Redaction no longer mutates arbitrary raw mappings, control keys, event
-  types, IDs, or typed counters before protocol validation.
-- Only `PiExtensionLease.command_args()` can produce extension argv, so callers
-  cannot obtain the unpinned original extension path from the binding API.
-
-## Comment-separated dependency hardening
-
-Commit: `3bd3b0a2 fix: reject commented pi extension sources`
-
-A remaining review reproduced JavaScript comments acting as lexical whitespace
-inside a re-export, bypassing the conservative dependency matcher. Because the
-approved artifact is a generated/self-contained `.mjs`, preflight now rejects
-all source containing line/block comment markers before snapshot or inherited
-descriptor duplication. The loader retains its generic failure defense.
-
-### Comment-bypass RED/GREEN evidence
-
-- RED: `test_factory_rejects_comment_bearing_sources_before_client` reached
-  `PiRuntimeClient` for `export/*gap*/{value}from "./dependency.mjs"`.
-- GREEN: a six-case matrix covering comments after `export`, before/inside
-  braces, around `*`, around `from`, and before the specifier all raises
-  `RuntimeFactoryError`; wrapped `os.dup` and the client are both uncalled.
-- GREEN: `test_factory_accepts_minimal_self_contained_p7_extension` proves a
-  comment-free default factory registering a `prime_ipython` tool remains
-  accepted by the factory/lease seam.
-- Focused extension suite: 24 tests under `-W error::ResourceWarning`, passed.
-- Exact Python regression: 70 tests in 4.876s under
-  `-W error::ResourceWarning`, passed.
-- Node loader: 3/3 passed with both loader/test syntax checks; ruff,
-  py_compile, source pyright, and `git diff --check` passed.
-
-### Comment-bypass self-review
-
-- Rejection is class-based rather than another token-specific re-export regex.
-- Validation occurs after the exact source read (required to inspect bytes) but
-  before the anonymous source snapshot, inherited-FD duplication, loader open,
-  runtime construction, or process spawn.
-- The accepted positive fixture matches the intended P7 integration shape but
-  does not implement the P7 extension.
-
-## Bounded JavaScript dependency scanner
-
-Commit: `642e44a0 fix: lex pi extension dependencies before launch`
-
-The final compact namespace form `export*as ns from "./dependency.mjs"`
-demonstrated that dependency recognition could not remain regex-based. The
-source gate now lexes identifiers, punctuators, quoted strings, and plain
-template literals, rejects executable comments and interpolated templates,
-and validates import/export dependency grammar independently of whitespace.
-
-### Scanner RED evidence
-
-- `test_factory_rejects_every_dependency_syntax_form` failed because compact
-  namespace re-export reached `PiRuntimeClient`.
-- `test_factory_accepts_node_imports_and_harmless_literal_words` failed for a
-  compact namespace `node:` import, a multiline `node:` import, and harmless
-  quoted/template text containing `import` and `from`.
-
-### Scanner GREEN evidence
-
-- The rejection matrix covers named, star, namespace alias, compact,
-  multiline, relative/bare static and side-effect imports, dynamic relative
-  and `node:` imports, and a `node:` re-export. Every case fails before source
-  snapshot duplication or runtime client construction.
-- The acceptance matrix covers named, compact namespace, side-effect, and
-  multiline static `node:` imports plus quoted/plain-template contents holding
-  dependency-like words and comment-like markers.
-- The minimal P7-shaped self-contained extension remains accepted.
-- Focused extension suite: 26 tests under `-W error::ResourceWarning`, passed.
-- Exact Python regression: 72 tests in 6.162s under
-  `-W error::ResourceWarning`, passed.
-- Node loader: 3/3 passed with loader/test syntax checks; ruff, py_compile,
-  source pyright, and `git diff --check` passed.
-
-### Scanner self-review
-
-- Only raw quoted specifiers matching the closed `node:` builtin form are
-  accepted; escapes, relative/bare paths, all re-exports, and all dynamic
-  imports fail closed.
-- Plain string and template contents are opaque to dependency recognition.
-  Template interpolation is rejected because it contains executable code that
-  a bounded non-parser cannot safely ignore.
-- Loader-side size/digest/source-name checks and its generic public error are
-  unchanged.
-- Independent scoped review reproduced the dependency matrix and returned
-  CLEAN, with no correctness, security, regression, or maintainability
-  findings.
-
-## Task 3: bounded same-game Playbook persistence
-
-Implemented `src/asterion/applications/prime/p7/playbook.py` and focused tests in
-`tests/test_prime_p7_playbook.py`.
-
-- Added exact `PlaybookKey` identity, immutable `PlaybookSnapshot`, checked routes,
-  level memory, evidence digest index, and isolated branch records.
-- Added completion capture that copies confirmed facts before per-level world state
-  refresh; raw frame/action evidence and unchecked hypotheses are rejected.
-- Added canonical bounded JSON under `.asterion-private/prime-p7-live/playbooks`,
-  regular-file and symlink checks, `0600` permissions, fsynced temporary sibling
-  writes with atomic replacement, deterministic ordering, and exact identity checks.
-
-Verification:
-
-- `uv run python -m unittest -v tests.test_prime_p7_playbook` — 8 tests passed.
-- `uv run ruff check src/asterion/applications/prime/p7/playbook.py tests/test_prime_p7_playbook.py` — passed.
-- `git diff --check` — passed.
-
-## Task 3 current review fixes: bounded same-game Playbook persistence
-
-Commits: `dd7e3ac1` (original implementation), `f6d17374` (state journal),
-and the follow-up fix commit recorded by the integrator.
-
-This appended section records the review remediation: CheckedFact values now
-use bounded recursive JSON-safe validation with immutable internal storage and
-detached accessors; playbook loading rejects dangling symlinks before existence
-checks; every nested object has a closed key set and bounded canonical arrays;
-malformed route expectations fail closed; completion capture enforces the
-current in-range world level; metadata, evidence indexes, and branch reasons
-are bounded, digest-validated, and duplicate-free. Focused regressions cover
-each finding.
-
-Verification: `uv run python -m unittest -v tests.test_prime_p7_playbook`
-(13 tests passed); `uv run ruff check src/asterion/applications/prime/p7/playbook.py
-tests/test_prime_p7_playbook.py`; and `git diff --check` all passed.
-
-### Current fix index
-
-- `1fd5d84c` — review hardening and focused regressions.
-- `8b9821a3` — follow-up digest-format validation and journal entry.
-- Subsequent level-boundary and per-level-cap fixes are appended after these
-  historical entries; prior report sections remain preserved.
-
-## Task 3 review closeout — 2026-09-30
-
-Append-only closeout for the current Playbook review. The reviewed fix chain is
-`1fd5d84c`, `8b9821a3`, and `a142b5b9`; all three remain part of the current
-history. The final implementation adds per-level memory caps and validates all
-nested fact, route, and memory levels against `PlaybookKey.win_levels`.
-
-Verification: `uv run python -m unittest -v tests.test_prime_p7_playbook` —
-14 tests passed; Ruff and `git diff --check` passed.
+# Task 3 report: shared live/offline P7 console UI
+
+## Implemented
+
+Owned changes: `console_export.render_console` only; `console_assets/index.html`, `app.js`, `styles.css`; `tests/prime_p7_console_dom.cjs`; `tests/test_prime_p7_console_export.py`. CLI/main edits belong to root Task 4. No commit made, as requested.
+
+- `render_console(snapshot, *, live_config=None)` embeds separate script-safe JSON configuration, permits only token and public catalog fields, hashes exact inline JS/CSS/data/config bytes. Offline CSP remains `connect-src 'none'`; live permits same-origin requests only.
+- Live configuration selects the P7 work area by default: exact catalog selector, actual start/stop, source session status, latest observed frame. Actions remain observational; replay transport is hidden in live mode. Manual validation is explicitly not implemented. Opening the page performs state/runs reads only.
+- Fixed GET state/runs/replay and POST start/stop routes use `X-P7-Console-Token`. Start selects the exact game; stop includes the current session ID. A retry preserves its command ID and body. Fixed public messages cover disconnection, rejected requests and malformed responses; exception details never render.
+- Snapshot replacement validates basic nested structure and run identity before changing the screen. Live follows the newest source frame; replay preserves the selected historical frame ID and separately loaded replay runs stay isolated from live polling. Older revisions cannot revert a newer command result. A new session/game with no snapshot clears previous frame/cognition; disconnects within the session retain the last frame.
+- Explicit `p7_decision` rows show recorded goal/basis/expected and linked observed action results. WorldMap follows the source-associated cognition timeline at or before the selected source frame. Intermediate frames cannot see later cognition. Legacy final cognition retains its explicit final/unaligned boundary. Timeline updates and per-action associated cognition are displayed without synthesizing explanations.
+- Offline exports perform zero requests; replay play/pause controls animation only and never send solver stop.
+
+## Verified facts
+
+TDD: new live/timeline/config tests failed before implementation; later race and new-session clearing tests also failed before their fixes.
+
+- `uv run python -m unittest -v tests.test_prime_p7_console_export` — 12 PASS.
+- `uv run ruff check src/asterion/applications/prime/p7/console_export.py tests/test_prime_p7_console_export.py` — PASS.
+- `git diff --check` — PASS.
+- `uv run asterion arc-console --output /tmp/asterion-task3-console.html` — actual historical run `p7-live-20261004140407-76efe9d22e179d6db7810496` exported successfully, no model execution.
+- `uv build --wheel --out-dir /tmp/asterion-task3-wheel` plus isolated `/tmp/asterion-task3-installed` install — PASS. Python `-I` from `/tmp` confirmed imports from site-packages, rendered live/offline HTML, and verified every exact inline resource/data/config CSP digest.
+- `P7_CONSOLE_HTML=/tmp/asterion-task3-installed-console.html NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs` — 18 PASS, zero skipped. Includes actual historical installed-wheel HTML, offline zero network, live request controls, retries, source cognition, isolation, disconnection/malformed responses, stale revision race and session change clearing.
+- `PYTHONPATH=. uv run python /tmp/asterion-task3-http-check.py` — PASS: real `create_console_server` HTTP + shipped rendered HTML/assets + jsdom, `ConsoleSession` with injected fake process/cleanup. Idle no POST; exact-game start; sourced frame/cognition refresh; matching session stop and cleanup confirmed. Exactly one injected launcher and one cleanup observed. Harness exits and joins server/builder threads; no real make, guest or model execution.
+
+## Integration boundaries
+
+The UI freezes to server revision as a nonnegative monotonic integer and nullable snapshot/identities; served server implementation agrees. GET replay returns a snapshot directly. Games are embedded in live configuration; polling reads state and initial runs, not model endpoints.
+
+An earlier expanded Python run of exporter/snapshot/source suites reported 48 PASS and 2 source projection failures: explicit reset action dropped, recording-gap expected frame ID mismatch. Reported to root/source owner, not modified by Task 3. Those source tests require a fresh integrated rerun after source owner's fixes.
+
+No real browser visual/pixel layout verification, authenticated browser operation, actual guest P7 solve, or promotion deployment is claimed here. Root's final integration, promotion checks and any authorized real witness remain separate required boundaries. The HTTP harness is temporary `/tmp` evidence; stable regression coverage is the checked-in DOM suite.
+
+## Task 3 important review fixes
+
+Both Important findings in `task-3-review.md` are fixed. This follow-up modifies only `console_assets/app.js`, the checked-in DOM suite, and this report; exporter/main and other workers' sources were not changed.
+
+1. Replay loads now capture a request generation. Changing mode, changing the selected run, or starting another load invalidates earlier requests. After await, the handler confirms current replay mode, generation and exact selected run before validation or replacement. Superseded responses and their errors are discarded. `replayRun` commits only after replacement succeeds.
+2. Snapshot validation now checks both global and per-level decision records, cognition timeline/updates/change records, action meaning records, and renderer-used identity/string/numeric metadata before any display mutation. The full next derived level view is built before assignment. Replacement publishes `window.__ASTERION_STATE__` only after rendering completes; rendering failure restores the prior internal snapshot/selection and attempts to restore its frame. `acceptView` advances `state.liveView`/revision only after successful replacement. A rejected or failed response therefore leaves the same revision available for a subsequent valid recovery.
+
+Regression evidence (actual commands were run):
+
+- Initial `NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs` after adding regressions: **19 PASS, 6 FAIL, 1 SKIP**. The failures reproduced delayed replay after mode switch, superseded replay requests, global `[null]` decisions, `[null]` cognition updates/changes, and publishing after render failure. Existing level decision/timeline invalid-record guards passed.
+- Added action metadata and cognition type cases plus a no-paint assertion to prove precommit rejection rather than post-render rollback: **25 PASS, 2 FAIL, 1 SKIP** before their field validation. These failures detected rendering/repainting before rejection of malformed scalar metadata. After validation both pass without repainting.
+- Final real historical document command: `uv run asterion arc-console --output /tmp/asterion-task3-console.html` — exit 0; selected the historical `p7-live-20261004140407-76efe9d22e179d6db7810496` run.
+- `P7_CONSOLE_HTML=/tmp/asterion-task3-console.html NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs` — **28 PASS, 0 FAIL, 0 SKIP**.
+- `uv run python -m unittest -v tests.test_prime_p7_console_export` — **Ran 12 tests; OK**.
+- `uv run ruff check src/asterion/applications/prime/p7/console_export.py tests/test_prime_p7_console_export.py` — **All checks passed!**
+- `git diff --check` — exit 0, no output.
+- `PYTHONPATH=. uv run python /tmp/asterion-task3-http-check.py` — exit 0: **Served real assets: idle no start; exact-game start; sourced frame/cognition refresh; session stop and cleanup confirmed.** FakeProcess injection remains provider-free.
+- Rebuilt with `uv build --wheel --out-dir /tmp/asterion-task3-wheel`, reinstalled the wheel into `/tmp/asterion-task3-installed`, then isolated Python `-I` from `/tmp` confirmed site-packages imports and hashes for all rendered live/offline JS/CSS/data/config bodies: **Installed wheel live/offline resources and CSP verified.**
+- `P7_CONSOLE_HTML=/tmp/asterion-task3-installed-console.html NODE_PATH=/tmp/asterion-console-tailwind/node_modules node --test tests/prime_p7_console_dom.cjs` — **28 PASS, 0 FAIL, 0 SKIP** against the newly installed wheel's historical HTML.
+
+No commit made. These checks remain UI/renderer/provider-free integration evidence; no new real guest solve, browser pixel acceptance, or deployment claim is introduced.
+
+Cross-task renderer format check: source cognition `stable_description` must preserve its safe newlines so WorldMap can parse `游戏类型`, `画面物件`, and `动作操作` as separate sections. The existing source-timeline DOM case now uses a multiline description and asserts separate rendered values; the unchanged UI consumer supports that shape. Re-running the installed-wheel real HTML DOM command after this fixture strengthening reports **28 PASS, 0 FAIL, 0 SKIP**. Root assigned source writer newline preservation to the source owner; this consumer check does not itself prove that writer change or promote it to source end-to-end verification. Decisions remain single-line under the source contract.

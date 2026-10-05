@@ -236,6 +236,15 @@ def _read_catalog(arc_root: Path) -> tuple[dict[str, object], ...]:
     return tuple(entries)
 
 
+def public_game_catalog(arc_root: Path) -> tuple[dict[str, object], ...]:
+    """Return validated public selection metadata without loading game code."""
+    try:
+        return tuple({key: entry[key] for key in ("game_id", "alias", "win_levels")}
+                     for entry in _read_catalog(arc_root))
+    except (OSError, ValueError):
+        raise P7GameSelectionError("P7 game selection is unavailable") from None
+
+
 __all__ = (
     "ArcGameContract",
     "DEFAULT_GAME",
@@ -246,4 +255,5 @@ __all__ = (
     "SEED_ENV",
     "TARGET_LEVEL_ENV",
     "resolve_game_selection",
+    "public_game_catalog",
 )

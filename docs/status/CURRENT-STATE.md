@@ -7,7 +7,7 @@
 - Theme-level focus: native P7 builds persistent game knowledge and verifies whether it improves solving
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: P7 cognition-guided solving with action feedback and persistent language hypotheses
+- Active work package: realtime P7 console — finite autonomous start/stop, source decisions/actions/cognition, packaged deployment verification
 
 ## Current Architecture
 
@@ -23,7 +23,7 @@
 - `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
 - Runtime cognition logs print claims, statuses, confidence, evidence and next tests; the persistent ledger remains separate from bounded model projections.
 - `asterion arc-console` exports one P7 run as an offline HTML level console; final cognition and unaligned model signals remain explicitly scoped evidence.
-- The proposed console centers on autonomous P7 solving. Manual validation uses a separate game instance and records, with no actions or experience injected into P7. Only offline replay is implemented; live P7 and independent manual modes remain design work.
+- `make p7-console` now serves the P7 autonomous workspace. A fixed finite L1 witness runs through the existing Make/wheel/Orb operator. Source events bind explicit public decisions and cognition revisions to observed actions; replay remains independent. Python/DOM checks and task reviews pass; real deployment and full promotion are pending. Manual validation remains unimplemented and must not enter P7 history or learning.
 
 ## Open Problems
 
@@ -33,7 +33,7 @@
 - A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
 - Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
 - Sustained L1 feedback-driven solving and improved proficiency from reused cognition remain unverified; transport or unit-test success alone does not establish these capabilities.
-- The current live operator closes the game with the solve run. Resumable P7 pause and source-linked decision/cognition events remain unimplemented; manual mode must isolate every cognition and experience persistence path.
+- The live operator still closes the game with the solve run; resumable P7 pause and independent manual mode remain unimplemented. Console cancellation verifies the Mac process group and owned guest unit before reopening.
 
 ## Key Files
 

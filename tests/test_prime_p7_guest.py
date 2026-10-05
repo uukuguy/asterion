@@ -9,6 +9,33 @@ from tools.run_prime_p7_guest import cleanup, launch
 
 
 class TestPrimeP7Guest(unittest.TestCase):
+    def test_console_containment_requires_fixed_complete_contract(self) -> None:
+        unit = 'asterion-p7-' + 'a' * 32 + '.service'
+        base = {'ASTERION_PRIME_P7_RUN_MODE': 'witness',
+                'ASTERION_PRIME_P7_CONSOLE_RUN_ID': 'p7-live-20261005123456-' + 'a' * 24,
+                'ASTERION_PRIME_P7_ATTEMPT_UNIT': unit,
+                'ASTERION_PRIME_P7_ATTEMPT_SECONDS': '900'}
+        cases = [(base, 900, True), (base, 0, False),
+                 ({k: v for k, v in base.items() if k != 'ASTERION_PRIME_P7_CONSOLE_RUN_ID'}, 900, False),
+                 ({**base, 'ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND': '1'}, 900, False),
+                 ({**base, 'ASTERION_PRIME_P7_RUN_MODE': 'sweep'}, 900, False),
+                 ({**base, 'ASTERION_PRIME_P7_CONSOLE_RUN_ID': '../private'}, 900, False)]
+        for environment, seconds, valid in cases:
+            with self.subTest(environment=environment, seconds=seconds), patch.dict(os.environ, environment, clear=True), \
+                 patch('tools.run_prime_p7_guest.Path.is_file', return_value=True), \
+                 patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as execute:
+                with self.assertRaises(SystemExit if valid else ValueError):
+                    launch(unit, seconds, ['python3', '-V'])
+                self.assertEqual(execute.called, valid)
+
+    def test_cleanup_timeout_exceeds_unit_forced_kill_window(self) -> None:
+        with patch('tools.run_prime_p7_guest.subprocess.run', side_effect=[
+            subprocess.CompletedProcess([], 0),
+            subprocess.CompletedProcess([], 0, stdout='LoadState=not-found\n'),
+        ]) as call, patch('tools.run_prime_p7_guest.Path.exists', return_value=False):
+            self.assertTrue(cleanup('asterion-p7-' + 'a' * 32 + '.service'))
+        self.assertGreaterEqual(call.call_args_list[0].kwargs['timeout'], 30)
+
     def test_only_explicit_zero_sentinel_removes_guest_deadline(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid attempt bounds"):
             launch('asterion-p7-' + 'a' * 32 + '.service', None, ['python3', '-V'])

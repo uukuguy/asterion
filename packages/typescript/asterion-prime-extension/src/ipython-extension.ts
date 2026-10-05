@@ -481,6 +481,16 @@ interface AppToolSpec {
 
 const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   {
+    name: "p7_decision",
+    method: "decision",
+    description: "Before a significant action plan, record a concise public goal, observation basis, and expected feedback. Each field is nonempty and at most 600 characters. Returns the decision ID at the current observation; never grants execution authority. Do not include private reasoning, credentials, paths, or raw context.",
+    parameters: TypeObject({
+      goal: TypeString({ minLength: 1, maxLength: 600 }),
+      basis: TypeString({ minLength: 1, maxLength: 600 }),
+      expected: TypeString({ minLength: 1, maxLength: 600 }),
+    }, { additionalProperties: false }),
+  },
+  {
     name: "p7_act_checked",
     method: "act_checked",
     description:

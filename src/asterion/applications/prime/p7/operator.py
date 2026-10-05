@@ -96,6 +96,7 @@ from asterion.applications.prime.p7.prompt import (
 )
 from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
 from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
+from asterion.applications.prime.p7.console_events import ConsoleEventWriter, public_narrative, public_text
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     CAPABILITY_REF,
@@ -545,6 +546,10 @@ class _IpythonBridgeServer:
                 if params is not None and (type(params) is not dict or params):
                     return error_response()
                 value = getattr(facade, method)()
+            elif method == "decision":
+                if type(params) is not dict:
+                    return error_response()
+                value = facade.decision(params)
             elif method == "cognition_update":
                 if type(params) is not dict or type(params.get("op")) is not str:
                     return error_response()
@@ -625,7 +630,7 @@ class _IpythonBridgeServer:
         """Force cognition mode to execute its first selected probe before detours."""
         client = getattr(self._client, "_P7ClientFacade__client", None)
         if not getattr(client, "_cognition_mode", False) or method in {
-            "observe", "status", "cognition", "planning_background", "cognition_update",
+            "observe", "status", "cognition", "planning_background", "cognition_update", "decision",
         }:
             return False
         broker = getattr(client, "_broker", None)
@@ -1199,6 +1204,9 @@ def _log_cognition_narrative(
     global _LAST_COGNITION_NARRATIVE_FINGERPRINT
     if (
         phase in _COGNITION_NARRATIVE_REPEATABLE_PHASES
+        # Session IDs carry the run identity. An anonymous projection cannot
+        # prove it belongs to the previous run, even if counters are equal.
+        and bool(session_id)
         and _LAST_COGNITION_NARRATIVE_FINGERPRINT == fingerprint
     ):
         print(
@@ -1264,7 +1272,7 @@ def _log_cognition_display(projection: object, *, phase: str) -> None:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence", "_console_writer", "_console_decision_sequence", "_pending_console_decision", "_active_console_decision", "_console_cognition_revision", "_console_cognition_signature")
 
     def __init__(
         self,
@@ -1273,6 +1281,7 @@ class _P7BrokerClient:
         identities: Mapping[str, str] = P7_TRACE_IDENTITIES,
         variant: str = "verified",
         cognition_mode: bool = False,
+        console_writer: ConsoleEventWriter | None = None,
     ) -> None:
         if variant not in {"legacy", "verified"} or type(cognition_mode) is not bool:
             raise P7OperatorError("P7 host services are unavailable")
@@ -1282,6 +1291,12 @@ class _P7BrokerClient:
         self._variant = variant
         self._cognition_mode = cognition_mode
         self._cognition_update_sequence = 0
+        self._console_writer = console_writer
+        self._console_decision_sequence = 0
+        self._pending_console_decision = None
+        self._active_console_decision = None
+        self._console_cognition_revision = 0
+        self._console_cognition_signature = None
         self._route_adoption = RouteAdoptionTracker()
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
@@ -1289,12 +1304,75 @@ class _P7BrokerClient:
             "unexecuted_items": 0, "checked_plan_errors": 0, "uncertain_items": 0,
         }
 
+    def _console_position(self) -> tuple[int, str]:
+        return len(self._broker.journal), digest(self._broker.observation_state().to_projection())
+
+    def _emit_console(self, kind: str, payload: Mapping[str, object]) -> None:
+        writer = getattr(self, "_console_writer", None)
+        if writer is not None:
+            try:
+                writer.append(kind, payload)
+            except Exception:
+                # Display evidence must never alter game authority or settlement.
+                pass
+
+    def decision(self, payload: Mapping[str, object]) -> Mapping[str, object]:
+        if (not isinstance(payload, Mapping) or set(payload) != {"goal", "basis", "expected"}
+            or any(type(payload[k]) is not str or not payload[k].strip() or len(payload[k]) > 600
+                   or not public_text(payload[k]) for k in payload)):
+            raise P7OperatorError("P7 decision summary is unavailable")
+        position, observation_hash = self._console_position()
+        self._console_decision_sequence += 1
+        record = {"decision_id": f"decision-{self._console_decision_sequence}",
+                  "source_action_sequence": position, "observation_sha256": observation_hash,
+                  **{key: public_text(payload[key]) for key in ("goal", "basis", "expected")}}
+        self._pending_console_decision = record
+        self._emit_console("decision", record)
+        return {"status": "recorded", "decision_id": record["decision_id"],
+                "source_action_sequence": position, "execution_authority": "none"}
+
+    def _begin_console_plan(self) -> None:
+        pending = getattr(self, "_pending_console_decision", None)
+        self._pending_console_decision = None
+        self._active_console_decision = None
+        if pending is not None:
+            try:
+                position, observation_hash = self._console_position()
+                if (pending["source_action_sequence"], pending["observation_sha256"]) == (position, observation_hash):
+                    self._active_console_decision = pending["decision_id"]
+            except Exception:
+                pass
+
+    def _capture_console_cognition(self) -> None:
+        if getattr(self, "_console_writer", None) is None:
+            return
+        try:
+            position, observation_hash = self._console_position()
+            projection = self._broker.cognition_projection()
+            semantic = projection.get("semantic")
+            envelope = projection.get("cognition_session")
+            session = envelope.get("session", {}) if isinstance(envelope, Mapping) else {}
+            state = {key: session[key] for key in ("state", "episode", "episode_actions") if key in session}
+            description = public_narrative(render_stable_game_description_zh(semantic), 8000)
+            narrative = public_narrative(render_cognition_narrative_zh(semantic, envelope), 8000)
+            record = {"source_action_sequence": position, "observation_sha256": observation_hash,
+                      "stable_description": description, "cognition_narrative_zh": narrative, "session": state}
+            signature = digest(record)
+            if signature == self._console_cognition_signature:
+                return
+            self._console_cognition_signature = signature
+            self._console_cognition_revision += 1
+            self._emit_console("cognition", {"cognition_revision": self._console_cognition_revision, **record})
+        except Exception:
+            pass
+
     def _count(self, name: str, increment: int = 1) -> None:
         self._counts[name] = min(5000, self._counts[name] + increment)
 
     def _log_current_cognition(self, phase: str) -> None:
         """Refresh the operator's bounded Chinese cognition view after a step."""
 
+        self._capture_console_cognition()
         try:
             _log_cognition_refresh(
                 self._broker.cognition_projection(),
@@ -1613,6 +1691,7 @@ class _P7BrokerClient:
                 result.get("semantic"), result.get("cognition_session")
             )
             result["cognition_narrative_zh"] = narrative
+            self._capture_console_cognition()
             _log_cognition_narrative(result, phase="read", complete=True, max_bytes=128 * 1024)
             _log_cognition_display(result, phase="read")
             return self._attach_planning_background(result)
@@ -1790,6 +1869,7 @@ class _P7BrokerClient:
                 accepted=result.get("accepted") if isinstance(result, Mapping) else None,
                 reason=result.get("reason") if isinstance(result, Mapping) else None,
             )
+            self._capture_console_cognition()
             return self._attach_planning_background(result)
         except ArcBrokerError as exc:
             # Model-authored cognition records can be rejected by the
@@ -2008,6 +2088,7 @@ class _P7BrokerClient:
         return self._broker.promote_hypothesis(key, evidence_kind)
 
     def act_checked(self, plan: object) -> Mapping[str, object]:
+        self._begin_console_plan()
         try:
             journal_start = len(self._broker.journal)
             dispatch_start = self._broker.status().primitive_actions
@@ -2144,6 +2225,9 @@ class _P7BrokerClient:
             self._recorder.append(
                 "arc.action", self._identities, self._transition_view(transition)
             )
+            self._emit_console("action", {**self._transition_view(transition),
+                               "decision_id": getattr(self, "_active_console_decision", None)})
+        self._active_console_decision = None
 
     def observe(self) -> Mapping[str, object]:
         observation, status = self._observation_and_status()
@@ -2239,6 +2323,7 @@ class _P7BrokerClient:
         return hypothesis_store(level).getset(key, value)
 
     def act(self, actions: object, *, _trusted_prefix_replay: bool = False) -> Mapping[str, object]:
+        self._begin_console_plan()
         if type(actions) is not list or not actions:
             raise P7OperatorError("P7 host services are unavailable")
         if self._variant == "verified" and len(actions) != 1:
@@ -3460,13 +3545,20 @@ def build_p7_operator_resources(
             if official
             else solve_trace_identities(selection.model)
         )
+        try:
+            console_writer = ConsoleEventWriter(private_trace_root.parent, history_run_id, game.game_id)
+        except (OSError, ValueError):
+            # Optional display evidence cannot block a valid solver host.
+            console_writer = None
         prediction_client = _P7BrokerClient(
             broker,
             trace,
             identities,
             variant=variant,
             cognition_mode=cognition_mode,
+            console_writer=console_writer,
         )
+        prediction_client._capture_console_cognition()
         ipython = PersistentIpythonHost(
             worker=worker,
             p7_client=p7_client_facade(prediction_client),
@@ -4824,7 +4916,23 @@ def main(argv: list[str] | None = None) -> int:
         pass
     if invocation is None:
         return _reject(reason=preflight_reason)
-    run_id = live.safe_run_id()
+    # The console allocates its identity before launch. Read only the process
+    # environment, never a dotenv-sourced value, and fail rather than attach
+    # to old evidence or silently choose a different run.
+    console_run_id = os.environ.get("ASTERION_PRIME_P7_CONSOLE_RUN_ID")
+    if console_run_id is not None:
+        import re
+
+        if re.fullmatch(r"p7-live-[0-9]{14}-[0-9a-f]{24}", console_run_id) is None:
+            return _reject()
+        run_root = invocation.operator_root / ".asterion-private" / "prime-p7-live"
+        run_path = run_root / console_run_id
+        if (run_path.exists() or any(path.is_symlink() for path in
+                                    (run_root.parent, run_root, run_path))):
+            return _reject()
+        run_id = console_run_id
+    else:
+        run_id = live.safe_run_id()
     try:
         receipt_selection = declared_model_selection(
             getattr(invocation, "environment", {})

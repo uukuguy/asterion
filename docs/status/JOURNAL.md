@@ -3666,3 +3666,6 @@
 - 12:25 修订设计与恢复索引，明确人工动作及收尾均隔离经验归纳、认知、playbook 和 prefix/attempt；架构复审和 docs-check、diff-check 通过。本次只改文档，无新增运行证据。
 - 12:25 以自主 P7 为主流程，隔离人工验证并撤回接管设计。[f9d1634b]
 - 12:55 用户确认 P7 主流程设计；创建实时实施计划与 feat/p7-live-console 分支，先实现源事件，再接固定运行服务与界面。
+- 12:55 固定实时主流程的部署与证据计划，保持人工隔离。[6c494834]
+
+- 2026-10-05 — Realtime console integration: 184 Python checks PASS (1 skip), 28 actual-HTML DOM checks PASS.

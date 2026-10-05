@@ -26,23 +26,25 @@ function fixture() {
   };
 }
 
-function launch(snapshot = fixture()) {
+function launch(snapshot = fixture(), { liveConfig = null, fetch = null } = {}) {
   const errors = [], requests = [], paints = [], outlines = [], pointers = [], timers = new Map();
   const substitutions = {
     __CONSOLE_CSP__: '', __CONSOLE_CSS__: fs.readFileSync(path.join(assets, 'styles.css'), 'utf8'),
     __CONSOLE_DATA__: JSON.stringify(snapshot).replace(/</g, '\\u003c'),
+    __CONSOLE_CONFIG__: JSON.stringify(liveConfig).replace(/</g, '\\u003c'),
     __CONSOLE_JS__: fs.readFileSync(path.join(assets, 'app.js'), 'utf8'),
   };
   const html = fs.readFileSync(path.join(assets, 'index.html'), 'utf8')
-    .replace(/__CONSOLE_(CSP|CSS|DATA|JS)__/g, (marker) => substitutions[marker]);
+    .replace(/__CONSOLE_(CSP|CSS|DATA|CONFIG|JS)__/g, (marker) => substitutions[marker]);
   const vc = new VirtualConsole();
   vc.on('jsdomError', (error) => errors.push(error));
   class NoNetwork extends ResourceLoader { fetch(url) { requests.push(url); return null; } }
-  const dom = new JSDOM(html, { runScripts: 'dangerously', resources: new NoNetwork(), virtualConsole: vc,
+  const dom = new JSDOM(html, { url: 'http://localhost:8765/', runScripts: 'dangerously', resources: new NoNetwork(), virtualConsole: vc,
     beforeParse(window) {
       window.HTMLCanvasElement.prototype.getContext = function () {
         return { fillRect() { paints.push(this.fillStyle); }, strokeRect() { outlines.push(this.strokeStyle); }, beginPath() {}, arc() { pointers.push(this.strokeStyle); }, stroke() {} };
       };
+      window.fetch = async (url, options = {}) => { requests.push({ url, options }); if (!fetch) throw new Error('unexpected network'); return fetch(url, options); };
       window.matchMedia = () => ({ matches: true, addEventListener() {} });
       let next = 0;
       window.setInterval = (fn) => { timers.set(++next, fn); return next; };
@@ -324,4 +326,234 @@ test('exported real HTML loads with zero external resource requests', { skip: !p
   assert.equal(dom.window.__ASTERION_STATE__.schema, 'asterion.arc-agi3-p7-console/v1');
   assert.match(dom.window.document.getElementById('frame-counter').textContent, /\d+ \/ \d+/);
   dom.window.close();
+});
+
+const settle = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
+const liveConfig = { token: 'test-token', games: [{ game_id: 'sp80-test', alias: 'SP80', win_levels: 3 }, { game_id: 'ls20-test', alias: 'LS20', win_levels: 7 }] };
+const view = (snapshot = fixture(), state = 'running') => ({ session_id: 'session-1', state, game_id: snapshot.run.game_id, run_id: snapshot.run.run_id, cleanup_confirmed: false, snapshot, revision: 1 });
+const response = (value, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => value });
+
+test('live initialization polls without starting, start uses exact game, retry preserves command identity, stop owns session', async () => {
+  let current = view(fixture(), 'idle'), rejectStart = true;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/state') return response(current);
+    if (url === '/api/runs') return response({ runs: [] });
+    if (url === '/api/start') { if (rejectStart) { rejectStart = false; throw new Error('private-error'); } current = view(); return response(current, 202); }
+    if (url === '/api/stop') { current = view(fixture(), 'stopping'); return response(current, 202); }
+    throw new Error('unexpected route');
+  } });
+  await settle();
+  assert.equal(app.$('console-mode').value, 'live');
+  assert.equal(app.requests.filter((request) => request.options.method === 'POST').length, 0);
+  app.$('game-select').value = 'ls20-test'; app.$('run-start').click(); await settle();
+  assert.match(app.$('service-status').textContent, /连接中断/);
+  assert.equal(app.$('retry-command').hidden, false);
+  app.$('retry-command').click(); await settle();
+  const starts = app.requests.filter((request) => request.url === '/api/start');
+  assert.equal(starts.length, 2);
+  assert.deepEqual(JSON.parse(starts[0].options.body), JSON.parse(starts[1].options.body));
+  assert.equal(JSON.parse(starts[0].options.body).game_id, 'ls20-test');
+  assert.equal(starts[0].options.headers['X-P7-Console-Token'], 'test-token');
+  assert.equal(starts[0].options.headers['Content-Type'], 'application/json');
+  app.$('run-stop').click(); await settle();
+  const stop = app.requests.find((request) => request.url === '/api/stop');
+  assert.equal(JSON.parse(stop.options.body).session_id, 'session-1');
+  assert.match(app.$('service-status').textContent, /结束中/);
+  assert.match(app.$('manual-note').textContent, /尚未实现/);
+  assert.deepEqual(app.errors, []); app.dom.window.close();
+});
+
+test('live replacement follows newest frame; replay preserves historical selection and animation never stops solver', async () => {
+  let current = view(), revision = 1;
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [{run_id:'old-run',game_id:'sp80-test'}] } : url === '/api/replay/old-run' ? {...fixture(), run: {...fixture().run, run_id:'old-run'}} : current) });
+  await settle(); assert.equal(app.$('frame-counter').textContent, '3 / 3');
+  const next = fixture(); next.levels[0].frames.push({ id: 'f3', grid: [[14]], state: 'NOT_FINISHED', levels_completed: 0, available_actions: ['ACTION4'] });
+  current = {...view(next), revision: ++revision}; app.tick(); await settle();
+  assert.equal(app.$('frame-counter').textContent, '4 / 4');
+  assert.equal(app.paints.at(-1), '#4FCC30');
+  assert.equal(app.$('available-actions').querySelector('button').disabled, true);
+  app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+  app.$('frame-slider').value = '1'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+  current = {...view(next), revision: ++revision}; app.tick(); await settle();
+  assert.equal(app.$('frame-counter').textContent, '2 / 4');
+  app.$('play-toggle').click(); app.$('play-toggle').click();
+  assert.equal(app.requests.some((request) => request.url === '/api/stop'), false);
+  assert.equal(app.$('replay-run').options.length, 1);
+  app.$('replay-load').click(); await settle();
+  assert.ok(app.requests.some((request) => request.url === '/api/replay/old-run'));
+  assert.equal(app.$('run-id').textContent, 'old-run');
+  current = {...view(next), revision: ++revision}; app.tick(); await settle();
+  assert.equal(app.$('run-id').textContent, 'old-run');
+  assert.deepEqual(app.errors, []); app.dom.window.close();
+});
+
+test('disconnected or malformed live state retains frame and shows public safe status', async () => {
+  let result = view();
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/runs') return response({runs:[]});
+    if (result instanceof Error) throw result;
+    return response(result);
+  } });
+  await settle(); const original = app.$('frame-caption').textContent;
+  result = new Error('/private/secret'); app.tick(); await settle();
+  assert.equal(app.$('frame-caption').textContent, original);
+  assert.match(app.$('service-status').textContent, /连接中断/);
+  result = { ...view(), snapshot: { schema: 'asterion.arc-agi3-p7-console/v1', levels: 'private-malformed' } };
+  app.tick(); await settle();
+  assert.equal(app.$('frame-caption').textContent, original);
+  assert.match(app.$('service-status').textContent, /响应无效/);
+  assert.doesNotMatch(app.$('service-status').textContent, /private|secret/);
+  assert.deepEqual(app.errors, []); app.dom.window.close();
+});
+
+test('cognition timeline follows source frames and explicit decisions expose goal, basis, expected and actual result', () => {
+  const snapshot = fixture(); const level = snapshot.levels[0];
+  level.cognition_timeline = [
+    { scope: 'observation', cognition_revision: 1, source_action_sequence: 0, observation_sha256: 'h0', frame_id: 'f0', action_id: null, stable_description: '游戏类型：初始观察认知。\n画面物件：蓝色物件。\n动作操作：观察按键。', cognition_narrative_zh: '初始证据', session: {state:'active',episode:1,episode_actions:0} },
+    { scope: 'observation', cognition_revision: 2, source_action_sequence: 1, observation_sha256: 'h1', frame_id: 'f2', action_id:'a1', stable_description: '游戏类型：动作后认知。', cognition_narrative_zh: '移动后更新', session: {state:'active',episode:1,episode_actions:1} },
+  ];
+  level.decisions = [{ id:'p1',source:'p7_decision',goal:'移到出口',basis:'出口位于右方',expected:'向右一格',action_ids:['a1'],source_action_sequence:0 }];
+  level.actions[0].decision_id = 'p1';
+  const app = launch(snapshot);
+  assert.match(app.$('world-guide').textContent, /初始观察认知/);
+  assert.equal(app.$('world-guide').querySelector('.guide-section p').textContent, '初始观察认知。');
+  assert.match(app.$('world-guide').textContent, /画面物件蓝色物件/);
+  assert.match(app.$('world-guide').textContent, /动作操作观察按键/);
+  assert.doesNotMatch(app.$('world-guide').textContent, /动作后认知/);
+  assert.match(app.$('panel-decisions').textContent, /目标：移到出口/);
+  assert.match(app.$('panel-decisions').textContent, /依据：出口位于右方/);
+  assert.match(app.$('panel-decisions').textContent, /预期：向右一格/);
+  assert.match(app.$('panel-decisions').textContent, /实际结果.*f0 → f2/);
+  app.$('next-frame').click();
+  assert.match(app.$('world-guide').textContent, /初始观察认知/);
+  app.$('next-frame').click();
+  assert.match(app.$('world-guide').textContent, /动作后认知/);
+  assert.match(app.$('panel-cognition').textContent, /移动后更新/);
+  assert.deepEqual(app.errors, []); app.dom.window.close();
+});
+
+test('late polling response cannot revert a successful start to an idle session', async () => {
+  let releasePoll, hold = false;
+  const idle = {...view(fixture(), 'idle'), revision: 0};
+  const app = launch(fixture(), { liveConfig, fetch: async (url) => {
+    if (url === '/api/runs') return response({runs:[]});
+    if (url === '/api/start') return response(view(), 202);
+    if (hold) return new Promise((resolve) => { releasePoll = () => resolve(response(idle)); });
+    return response(idle);
+  } });
+  await settle(); hold = true; app.tick(); await settle();
+  app.$('run-start').click(); await settle();
+  assert.match(app.$('service-status').textContent, /运行中/);
+  releasePoll(); await settle();
+  assert.match(app.$('service-status').textContent, /运行中/);
+  assert.equal(app.$('run-start').disabled, true);
+  assert.deepEqual(app.errors, []); app.dom.window.close();
+});
+
+test('new live session with no observation clears previous session frame and cognition', async () => {
+  let current = view();
+  const app = launch(fixture(), {liveConfig, fetch:async(url)=>response(url==='/api/runs'?{runs:[]}:current)});
+  await settle(); assert.equal(app.$('board-empty').hidden,true);
+  current={...view(),session_id:'session-2',run_id:'new-run',game_id:'ls20-test',snapshot:null,state:'starting',revision:2};
+  app.tick(); await settle();
+  assert.equal(app.$('frame-counter').textContent,'0 / 0');
+  assert.equal(app.$('board-empty').hidden,false);
+  assert.equal(app.$('game-title').textContent,'ls20-test');
+  assert.doesNotMatch(app.$('world-guide').textContent,/网格移动游戏/);
+  assert.equal(app.$('session-id').textContent,'会话 session-2');
+  assert.deepEqual(app.errors,[]); app.dom.window.close();
+});
+
+test('late replay response after mode switch cannot replace live frame at an unchanged revision', async () => {
+  let releaseReplay;
+  const current = view(), replay = {...fixture(), run:{...fixture().run,run_id:'old-run'}};
+  const app = launch(fixture(),{liveConfig,fetch:async(url)=>{
+    if(url==='/api/runs') return response({runs:[{run_id:'old-run',game_id:'sp80-test'}]});
+    if(url==='/api/replay/old-run') return new Promise(resolve=>{releaseReplay=()=>resolve(response(replay));});
+    return response(current);
+  }});
+  try {
+    await settle();
+    app.$('console-mode').value='replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    app.$('replay-load').click(); await settle();
+    app.$('console-mode').value='live'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    releaseReplay(); await settle(); app.tick(); await settle();
+    assert.equal(app.$('run-id').textContent,'test-run');
+    assert.equal(app.$('frame-counter').textContent,'3 / 3');
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'test-run');
+    assert.match(app.$('service-status').textContent,/运行中/);
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
+});
+
+test('superseded replay response cannot replace a newer selected run', async () => {
+  const releases = {};
+  const app = launch(fixture(),{liveConfig,fetch:async(url)=>{
+    if(url==='/api/runs') return response({runs:['old-run','new-run'].map(run_id=>({run_id,game_id:'sp80-test'}))});
+    if(url.startsWith('/api/replay/')) {
+      const run_id=url.split('/').at(-1);
+      return new Promise(resolve=>{releases[run_id]=()=>resolve(response({...fixture(),run:{...fixture().run,run_id}}));});
+    }
+    return response(view());
+  }});
+  try {
+    await settle();
+    app.$('console-mode').value='replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    app.$('replay-load').click(); await settle();
+    app.$('replay-run').value='new-run'; app.$('replay-run').dispatchEvent(new app.dom.window.Event('change'));
+    app.$('replay-load').click(); await settle();
+    releases['new-run'](); await settle(); releases['old-run'](); await settle();
+    assert.equal(app.$('run-id').textContent,'new-run');
+    app.tick(); await settle(); assert.equal(app.$('run-id').textContent,'new-run');
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
+});
+
+const malformedCollections = [
+  ['global decisions',snapshot=>{snapshot.decisions=[null];}],
+  ['level decisions',snapshot=>{snapshot.levels[0].decisions=[null];}],
+  ['cognition timeline',snapshot=>{snapshot.levels[0].cognition_timeline=[null];}],
+  ['cognition updates',snapshot=>{snapshot.levels[0].cognition.updates=[null];}],
+  ['cognition changes',snapshot=>{snapshot.levels[0].cognition.updates=[{sequence:1,changes:[null]}];}],
+  ['action metadata',snapshot=>{snapshot.levels[0].actions[0].trace_sequence={toString:'invalid'};}],
+  ['cognition type',snapshot=>{snapshot.levels[0].cognition.updates=[{sequence:1,type:{toString:'invalid'},changes:[]}];}],
+];
+for (const [name,poison] of malformedCollections) test(`malformed ${name} rejects before committing and a valid same-revision snapshot recovers`, async () => {
+  let current=view();
+  const app=launch(fixture(),{liveConfig,fetch:async(url)=>response(url==='/api/runs'?{runs:[]}:current)});
+  try {
+    await settle(); const previous=app.dom.window.__ASTERION_STATE__, previousCaption=app.$('frame-caption').textContent, previousPaintCount=app.paints.length;
+    const malformed=fixture(); poison(malformed); current={...view(malformed),revision:2};
+    app.tick(); await settle();
+    assert.strictEqual(app.dom.window.__ASTERION_STATE__,previous);
+    assert.equal(app.$('frame-caption').textContent,previousCaption);
+    assert.equal(app.paints.length,previousPaintCount);
+    assert.match(app.$('service-status').textContent,/响应无效/);
+    const valid=fixture(); valid.levels[0].frames.push({id:'f3',grid:[[14]],state:'NOT_FINISHED'});
+    current={...view(valid),revision:2}; app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent,'4 / 4');
+    assert.equal(app.dom.window.__ASTERION_STATE__.levels[0].frames.at(-1).id,'f3');
+    assert.match(app.$('service-status').textContent,/运行中/);
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
+});
+
+test('render failure rolls back snapshot and leaves accepted revision available for recovery', async () => {
+  let current=view();
+  const app=launch(fixture(),{liveConfig,fetch:async(url)=>response(url==='/api/runs'?{runs:[]}:current)});
+  try {
+    await settle(); const previous=app.dom.window.__ASTERION_STATE__, previousCaption=app.$('frame-caption').textContent;
+    const original=app.dom.window.HTMLCanvasElement.prototype.getContext; let fail=true;
+    app.dom.window.HTMLCanvasElement.prototype.getContext=function(){if(fail){fail=false;throw new Error('private-render-detail');}return original.call(this);};
+    const valid=fixture(); valid.levels[0].frames.push({id:'f3',grid:[[14]],state:'NOT_FINISHED'});
+    current={...view(valid),revision:2}; app.tick(); await settle();
+    assert.strictEqual(app.dom.window.__ASTERION_STATE__,previous);
+    assert.equal(app.$('frame-caption').textContent,previousCaption);
+    assert.match(app.$('service-status').textContent,/响应无效/);
+    assert.doesNotMatch(app.$('service-status').textContent,/private/);
+    app.tick(); await settle();
+    assert.equal(app.$('frame-counter').textContent,'4 / 4');
+    assert.equal(app.dom.window.__ASTERION_STATE__.levels[0].frames.at(-1).id,'f3');
+    assert.deepEqual(app.errors,[]);
+  } finally { app.dom.window.close(); }
 });

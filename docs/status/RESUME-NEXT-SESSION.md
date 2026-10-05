@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05. Active checkpoint after P7-first design correction, not a final handoff.
+> Updated: 2026-10-05. Active checkpoint during realtime console implementation, not a final handoff.
 
 ## 已验证事实
 
@@ -44,6 +44,14 @@
 - Live P7 control, independent manual validation, source-linked decision summaries and Mac/Orb console service are not implemented. Current `run_live` closes the game when the solve run ends; cancellation is not a resumable pause. Existing witness receipt/target semantics remain intact. RESET is current-level retry with a new episode; human and P7 never share a game session.
 - Historical P7 decision prose and per-frame cognition cannot be reconstructed from missing data. The UI shows the available signals and marks those limits.
 - Full promotion failures and actual Chrome visual/mobile acceptance remain open.
+
+## 当前执行检查点
+
+- Branch `feat/p7-live-console`; plan commit `6c494834`. Task1 source events/real `p7_decision`, Task2 supervisor/HTTP, Task3 live UI, root CLI/Make are implemented in the shared working tree, not yet committed or deployment-verified.
+- Provider-free focused run: 79 tests OK (one optional Orb probe skipped); reports in `.superpowers/sdd/task-{1,2,3}-report.md`. Extension full test has two descriptor timeouts; full output `/tmp/p7-task1-npm-full.log`.
+- Independent reviews in progress. Material findings: Task2 TERM-exiting parent can leave TERM-ignoring group child; Task3 late replay response can overwrite live and malformed decisions can corrupt revision. Assigned to original transport/UI workers. Task1 reviewer is checking gap identity and prose redaction. Do not mark any task reviewed complete until fixes and re-review.
+- Next: finish review fixes, focused checks and commits; full promotion with full failure capture; isolated wheel HTTP smoke; one real fixed finite SP80 L1 through live API; stop and confirm owned guest cleanup. No real model run has started in this package.
+- Browser retry now failed before connection: runtime imports a missing cached browser-service module. Visual acceptance remains external-limited; no alternate profile launched.
 
 ## 下一动作
 

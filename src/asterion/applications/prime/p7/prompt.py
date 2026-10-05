@@ -15,6 +15,11 @@ snapshot when it is present. Only call p7_client.status() and observe() when
 that snapshot is absent, then continue from the current level; do not repeat
 completed levels.
 
+重要动作计划前，调用 `p7_decision({"goal":"本轮目标","basis":"公开简短依据","expected":"预期反馈"})`。
+三个字段用中文、非空且各不超过600字；只概括可公开的目标、观察依据与预期，
+不输出私有思维链，不放凭据、路径或原始上下文。这是可选的过程记录，不改变动作授权；
+一个摘要可对应紧随其后的多步计划。观察位置改变或新计划后重新记录，未记录时保留缺失。
+
 每轮决策先阅读工具结果最前面的 `cognition_narrative_zh`（当前游戏认知）。
 请用中文理解和表达：假设的 `claim`、理由 `reason`、反证条件
 `falsifier`、下一步测试 `next_test`、实验问题 `question` 和分析解释

@@ -16,10 +16,51 @@
     if (className) element.className = className;
     return element;
   };
+  const isRecord = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+  const optionalRecords = (value, check = isRecord) => value === undefined || (Array.isArray(value) && value.every(check));
+  const optionalString = (value) => value == null || typeof value === 'string';
+  const optionalNumber = (value) => value == null || (typeof value === 'number' && Number.isFinite(value));
+  const stringFields = (value, fields) => fields.every((key) => optionalString(value[key]));
+  const numberFields = (value, fields) => fields.every((key) => optionalNumber(value[key]));
+  const validDecision = (decision) => isRecord(decision) && typeof decision.id === 'string' && decision.id.length > 0 &&
+    (decision.action_ids === undefined || (Array.isArray(decision.action_ids) && decision.action_ids.every((id) => typeof id === 'string'))) &&
+    stringFields(decision, ['source', 'goal', 'basis', 'expected']) && numberFields(decision, ['trace_sequence', 'round_index']);
+  const validClaim = (claim) => isRecord(claim) && stringFields(claim, ['id', 'kind', 'status', 'claim']);
+  const validCognition = (cognition) => cognition === undefined || (isRecord(cognition) &&
+    stringFields(cognition, ['scope', 'stable_description']) &&
+    optionalRecords(cognition.updates, (update) => isRecord(update) && optionalString(update.type) && optionalNumber(update.sequence) && optionalRecords(update.changes, validClaim)) &&
+    (cognition.action_meanings === undefined || (isRecord(cognition.action_meanings) && Object.values(cognition.action_meanings).every((entries) => optionalRecords(entries, validClaim)))));
+  const validTimelineEntry = (entry) => isRecord(entry) &&
+    stringFields(entry, ['scope', 'frame_id', 'action_id', 'stable_description', 'cognition_narrative_zh']) &&
+    numberFields(entry, ['cognition_revision', 'source_action_sequence', 'event_sequence']);
+  function validSnapshot(value) {
+    if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-console/v1' || !isRecord(value.run) || !Array.isArray(value.levels)) return false;
+    if (!optionalRecords(value.decisions, validDecision) || !stringFields(value.run, ['status', 'game_id', 'run_id']) || !optionalString(value.generated_at)) return false;
+    const run = value.run;
+    if (run.win_levels != null && (!Number.isInteger(run.win_levels) || run.win_levels < 0 || run.win_levels > 1000)) return false;
+    const ids = new Set();
+    return value.levels.every((level) => {
+      if (!isRecord(level) || !Number.isInteger(level.level) || level.level < 1 || level.level > 1000 || ids.has(level.level)) return false;
+      ids.add(level.level);
+      if (!Array.isArray(level.frames) || !Array.isArray(level.actions) || !Array.isArray(level.decisions) || !optionalString(level.status) || !validCognition(level.cognition)) return false;
+      const frameIds = new Set(), actionIds = new Set();
+      return level.frames.every((frame) => {
+        if (!isRecord(frame) || typeof frame.id !== 'string' || !frame.id || frameIds.has(frame.id) || !Array.isArray(frame.grid)) return false;
+        if (!stringFields(frame, ['state', 'timestamp'])) return false;
+        frameIds.add(frame.id);
+        const width = frame.grid.length ? array(frame.grid[0]).length : 0;
+        return frame.grid.length <= 256 && width <= 256 && frame.grid.every((row) => Array.isArray(row) && row.length === width && row.every((color) => Number.isInteger(color) && color >= 0 && color < PALETTE.length));
+      }) && level.actions.every((action) => {
+        if (!isRecord(action) || typeof action.id !== 'string' || !action.id || actionIds.has(action.id) || typeof action.name !== 'string') return false;
+        if (!stringFields(action, ['before_frame', 'after_frame', 'decision_id']) || !numberFields(action, ['trace_sequence'])) return false;
+        actionIds.add(action.id); return true;
+      }) && level.decisions.every(validDecision) && (level.cognition_timeline === undefined || (Array.isArray(level.cognition_timeline) && level.cognition_timeline.every(validTimelineEntry)));
+    });
+  }
   let snapshot;
   try {
     snapshot = JSON.parse($('console-data').textContent);
-    if (snapshot.schema !== 'asterion.arc-agi3-p7-console/v1') throw new Error('schema');
+    if (!validSnapshot(snapshot)) throw new Error('schema');
   } catch (_) {
     write('evidence-warning', '控制台快照无法读取，或数据版本不受支持。');
     $('evidence-warning').hidden = false;
@@ -27,13 +68,16 @@
     return;
   }
   window.__ASTERION_STATE__ = snapshot;
-  const run = object(snapshot.run);
-  const recordedLevels = array(snapshot.levels);
-  const levelCount = Math.max(0, number(run.win_levels), ...recordedLevels.map((level) => number(level.level)));
-  const levels = Array.from({ length: levelCount }, (_, index) => recordedLevels.find((level) => level.level === index + 1) || {
+  let run = object(snapshot.run);
+  let recordedLevels = array(snapshot.levels);
+  let levelCount = Math.max(0, number(run.win_levels), ...recordedLevels.map((level) => number(level.level)));
+  let levels = Array.from({ length: levelCount }, (_, index) => recordedLevels.find((level) => level.level === index + 1) || {
     level: index + 1, status: 'not_run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null,
   });
-  const state = { levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
+  let liveConfig = null;
+  try { liveConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
+  if (!isRecord(liveConfig) || typeof liveConfig.token !== 'string' || !liveConfig.token) liveConfig = null;
+  const state = { mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const currentLevel = () => levels[state.levelIndex] || emptyLevel;
   const frames = () => array(currentLevel().frames);
@@ -48,7 +92,7 @@
     unsuccessful: ['未成功', 'failed'], failed: ['失败', 'failed'], game_over: ['游戏结束', 'failed'],
     'not-run': ['未运行', 'neutral'], not_run: ['未运行', 'neutral'], unobserved: ['未运行', 'neutral'], unavailable: ['无证据', 'neutral'],
   };
-  const statusInfo = (value) => statuses[value] || ['信息不足', 'warning'];
+  const statusInfo = (value) => Object.hasOwn(statuses, value) ? statuses[value] : ['信息不足', 'warning'];
   const setStatus = (element, value) => {
     const [label, tone] = statusInfo(value);
     element.textContent = label;
@@ -68,18 +112,18 @@
     return '未记录';
   };
 
-  write('game-title', string(run.game_id, '未识别游戏'));
-  write('run-id', string(run.run_id));
-  write('level-progress', `${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`);
-  write('action-total', number(run.primitive_action_count));
-  write('level-total', levelCount ? `${levelCount} 个关卡` : '总数未知');
-  setStatus($('run-status'), run.status);
-  write('snapshot-date', `快照时间 ${string(snapshot.generated_at)}`);
-  write('verification-note', `${run.replay_verified === true ? '回放已验证。' : '回放验证未确认。'}${run.sealed_trace === true ? '具有封存轨迹。' : '无封存成功证明。'}`);
-  const warnings = array(snapshot.warnings).filter((warning) => typeof warning === 'string');
-  if (warnings.length) {
-    write('evidence-warning', `证据提示 · ${warnings.join('；')}`);
-    $('evidence-warning').hidden = false;
+  function renderRunHeader() {
+    write('game-title', string(run.game_id, '未识别游戏'));
+    write('run-id', string(run.run_id));
+    write('level-progress', `${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`);
+    write('action-total', number(run.primitive_action_count));
+    write('level-total', levelCount ? `${levelCount} 个关卡` : '总数未知');
+    setStatus($('run-status'), run.status);
+    write('snapshot-date', `快照时间 ${string(snapshot.generated_at)}`);
+    write('verification-note', `${run.replay_verified === true ? '回放已验证。' : '回放验证未确认。'}${run.sealed_trace === true ? '具有封存轨迹。' : '无封存成功证明。'}`);
+    const warnings = array(snapshot.warnings).filter((warning) => typeof warning === 'string');
+    $('evidence-warning').hidden = !warnings.length;
+    write('evidence-warning', warnings.length ? `证据提示 · ${warnings.join('；')}` : '');
   }
 
   function renderRail() {
@@ -177,7 +221,7 @@
     $('palette-legend').hidden = used.size === 0;
   }
 
-  const actionMeanings = () => object(currentLevel().cognition).scope === 'final' ? object(object(currentLevel().cognition).action_meanings) : {};
+  const actionMeanings = () => !array(currentLevel().cognition_timeline).length && object(currentLevel().cognition).scope === 'final' ? object(object(currentLevel().cognition).action_meanings) : {};
   const meaningEntries = (entries) => array(entries).filter((entry) => entry && ['certain', 'undetermined', 'falsified'].includes(entry.status) && typeof entry.claim === 'string' && entry.claim);
 
   function shortActionMeaning(name, entries) {
@@ -218,8 +262,8 @@
       const recorded = actions().filter((entry) => entry.name === name).map((entry) => ({
         action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
       })).filter((entry) => entry.index >= 0);
-      item.disabled = Boolean(availability) || recorded.length === 0;
-      item.title = availability || (recorded.length ? '定位该动作的下一条回放记录' : '没有可定位的已录动作');
+      item.disabled = state.mode === 'live' || Boolean(availability) || recorded.length === 0;
+      item.title = state.mode === 'live' ? 'P7 运行中的动作观察；不发送游戏动作' : availability || (recorded.length ? '定位该动作的下一条回放记录' : '没有可定位的已录动作');
       item.addEventListener('click', () => {
         const target = recorded.find((entry) => entry.index > state.frameIndex) || recorded[0];
         if (!item.disabled && target) locateAction(target.action);
@@ -247,6 +291,7 @@
     const count = frames().length;
     const frame = currentFrame();
     const action = selectedAction();
+    renderWorld();
     renderAvailableActions(frame, action);
     const before = action && frameById(action.before_frame);
     const after = action && frameById(action.after_frame);
@@ -286,7 +331,7 @@
     }
     $('previous-frame').disabled = !count || state.frameIndex <= 0;
     $('next-frame').disabled = !count || state.frameIndex >= count - 1;
-    $('play-toggle').disabled = count < 2;
+    $('play-toggle').disabled = state.mode === 'live' || count < 2;
     $('play-speed').disabled = count < 2;
     $('previous-action').disabled = actionTarget(-1) === null;
     $('next-action').disabled = actionTarget(1) === null;
@@ -333,7 +378,7 @@
   }
 
   function play() {
-    if (frames().length < 2) return;
+    if (state.mode === 'live' || frames().length < 2) return;
     if (state.frameIndex >= frames().length - 1) setFrame(0);
     pause();
     write('play-toggle', '暂停');
@@ -346,17 +391,25 @@
     }, 650 / Number($('play-speed').value));
   }
 
+  function observationCognition() {
+    const timeline = array(currentLevel().cognition_timeline);
+    return timeline.filter((entry) => entry.scope === 'observation').map((entry) => ({ entry, index: frames().findIndex((frame) => frame.id === entry.frame_id) }))
+      .filter(({ index }) => index >= 0 && index <= state.frameIndex)
+      .sort((a, b) => a.index - b.index || number(a.entry.event_sequence) - number(b.entry.event_sequence)).pop()?.entry || null;
+  }
+
   function renderWorld() {
-    const cognition = object(currentLevel().cognition);
+    const timeline = array(currentLevel().cognition_timeline);
+    const cognition = timeline.length ? observationCognition() || {} : object(currentLevel().cognition);
     const guide = $('world-guide');
     const facts = $('world-facts');
     guide.replaceChildren(); facts.replaceChildren();
-    if (cognition.scope !== 'final') {
+    if (!['final', 'observation'].includes(cognition.scope)) {
       write('cognition-scope', '当前关卡没有身份匹配的稳定认知。');
       guide.append(node('p', '尚未确定。没有认知记录可供展示。', 'guide-empty'));
       return;
     }
-    write('cognition-scope', '运行结束时的最终认知快照。未与历史帧或动作建立时间对齐，不能视为该帧当时已有的知识。');
+    write('cognition-scope', cognition.scope === 'observation' ? `观察来源 ${string(cognition.frame_id)} · 动作序号 ${number(cognition.source_action_sequence)} · 认知版本 ${number(cognition.cognition_revision)}。当前帧仅使用已关联观察的认知。` : '运行结束时的最终认知快照。未与历史帧或动作建立时间对齐，不能视为该帧当时已有的知识。');
     const world = object(cognition.world_map_facts);
     const confirmed = object(world.confirmed);
     const factLabels = { entities: '对象', mechanics: '机制', relations: '关系' };
@@ -384,7 +437,7 @@
       });
     } else guide.append(node('p', description || '没有可用的稳定游戏认知。', 'guide-empty'));
     const update = node('section', undefined, 'guide-section');
-    update.append(node('h3', '最近一次稳定更新'), node('p', '最终快照；具体更新时间未与回放帧对齐。'));
+    update.append(node('h3', '最近一次稳定更新'), node('p', cognition.scope === 'observation' ? string(cognition.cognition_narrative_zh, '该观察未记录更新说明。') : '最终快照；具体更新时间未与回放帧对齐。'));
     guide.append(update);
   }
 
@@ -407,7 +460,9 @@
       target.append(node('p', `${before.id} → ${after.id} · 起始帧到结算帧`, 'measurement-source'));
       observations.forEach((observation) => target.append(node('p', observation, 'signal-line')));
     }
-    target.append(node('p', 'P7 认知结论：该动作未保存可关联的分析记录。', 'cognition-missing'));
+    const updates = array(currentLevel().cognition_timeline).filter((entry) => entry.scope === 'observation' && entry.action_id === action.id && entry.frame_id === action.after_frame);
+    if (updates.length) updates.forEach((entry) => target.append(node('p', `P7 认知更新（${string(entry.frame_id)}）：${string(entry.cognition_narrative_zh, '未记录更新说明。')}`, 'cognition-narrative')));
+    else target.append(node('p', 'P7 认知结论：该动作未保存可关联的分析记录。', 'cognition-missing'));
   }
 
   function signalLines(signals, target) {
@@ -430,18 +485,19 @@
     array(snapshot.decisions).forEach((decision) => { if (!decisionMap.has(decision.id)) decisionMap.set(decision.id, decision); });
     const decisions = [...decisionMap.values()];
     const updates = array(object(level.cognition).updates);
+    const timeline = array(level.cognition_timeline).filter((entry) => entry.scope === 'observation');
     const meaningRecords = Object.entries(actionMeanings()).map(([name, entries]) => [name, meaningEntries(entries)]).filter(([, entries]) => entries.length);
     write('decision-count', decisions.length);
     write('actions-count', actions().length);
-    write('cognition-count', updates.length + meaningRecords.length);
-    decisionsPanel.append(node('p', '这里只展示模型轮次与输入 / 输出信号。信号不是详细决策解释；缺失的规划目标、依据和下一步判断不会被补写。', 'process-note'));
+    write('cognition-count', updates.length + meaningRecords.length + timeline.length);
+    decisionsPanel.append(node('p', '应用保存的 P7 决策显示目标、依据、预期和关联实际结果。旧轮次仅显示原始信号；未记录的解释不补写。', 'process-note'));
     if (!decisions.length) emptyPanel(decisionsPanel, '没有可审计的 P7 决策信号', '动作记录本身不能证明某一轮次的规划内容。');
     decisions.forEach((decision, index) => {
       const card = node('article', undefined, 'event-card');
       card.dataset.decisionId = string(decision.id, '');
       const header = node('div', undefined, 'event-header');
       const heading = node('div', undefined, 'event-heading');
-      heading.append(node('span', String(index + 1).padStart(2, '0'), 'event-index'), node('h3', `P7 第 ${number(decision.round_index, index + 1)} 轮`), node('span', '决策信号', 'neutral-tag'));
+      heading.append(node('span', String(index + 1).padStart(2, '0'), 'event-index'), node('h3', `P7 第 ${number(decision.round_index, index + 1)} 轮`), node('span', decision.source === 'p7_decision' ? '应用决策' : '决策信号', 'neutral-tag'));
       header.append(heading);
       const linked = actions().filter((action) => array(decision.action_ids).includes(action.id));
       if (linked.length) {
@@ -451,6 +507,17 @@
       card.append(header);
       addMetadata(card, [decision.trace_sequence != null ? `轨迹序号 ${decision.trace_sequence}` : '轨迹序号缺失', `关联动作 ${linked.length}`]);
       if (!linked.length) card.append(node('p', '全运行信号：未建立可靠的关卡、帧或动作关联。该轮次不代表当前画面的决策。', 'event-note'));
+      if (decision.source === 'p7_decision') {
+        const summary = node('div', undefined, 'decision-summary');
+        [['目标', decision.goal], ['依据', decision.basis], ['预期', decision.expected]].forEach(([label, value]) => summary.append(node('p', `${label}：${string(value, '未记录')}`)));
+        linked.forEach((action) => {
+          const before = frameById(action.before_frame), after = frameById(action.after_frame);
+          summary.append(node('p', `实际结果：${actionLabel(action)} · ${before ? before.id : '前帧缺失'} → ${after ? after.id : '后帧缺失'} · ${after ? frameState(after.state) : '状态未记录'}`));
+          array(action.visual_observations).filter((entry) => typeof entry === 'string').forEach((entry) => summary.append(node('p', entry)));
+        });
+        if (!linked.length) summary.append(node('p', '实际结果：没有可关联的动作结果。'));
+        card.append(summary); decisionsPanel.append(card); return;
+      }
       const signals = node('div', undefined, 'signals');
       [['输入信号', decision.prompt_signals], ['输出信号', decision.output_signals]].forEach(([label, source]) => {
         const column = node('div'); column.append(node('p', label, 'signal-heading'));
@@ -479,7 +546,18 @@
       renderActionEvidence(evidence, action); card.append(evidence);
       actionsPanel.append(card);
     });
-    cognitionPanel.append(node('p', '认知事件是最终会话的记录，未与回放帧、动作或模型轮次建立时间关联。展开后可查看保留的认知条目。', 'process-note'));
+    timeline.forEach((entry) => {
+      const card = node('article', undefined, 'event-card timeline-cognition');
+      card.append(node('h3', `观察认知 · 版本 ${number(entry.cognition_revision)}`));
+      addMetadata(card, [`来源帧 ${string(entry.frame_id)}`, `动作序号 ${number(entry.source_action_sequence)}`, entry.action_id ? `关联动作 ${entry.action_id}` : '初始观察']);
+      const button = node('button', '定位观察', 'event-link'); button.type = 'button';
+      const index = frames().findIndex((frame) => frame.id === entry.frame_id); button.disabled = index < 0;
+      button.addEventListener('click', () => { pause(); setFrame(index, entry.action_id); });
+      card.append(button, node('p', string(entry.cognition_narrative_zh, '没有更新说明。'), 'cognition-narrative'));
+      const details = node('details'); details.append(node('summary', '查看该观察的稳定认知'), node('p', string(entry.stable_description, '没有稳定描述。'), 'cognition-narrative'));
+      card.append(details); cognitionPanel.append(card);
+    });
+    cognitionPanel.append(node('p', '以下旧认知事件是最终会话的记录，未与回放帧、动作或模型轮次建立时间关联。展开后可查看保留的认知条目。', 'process-note'));
     if (meaningRecords.length) cognitionPanel.append(node('p', '动作含义来自最终认知，未与历史帧对齐。按键上的简短含义只采用明确的方向记录；完整原始记录保留如下。', 'process-note'));
     const meaningStatuses = { certain: '已识别', undetermined: '推测', falsified: '已否定' };
     meaningRecords.forEach(([name, entries]) => {
@@ -498,7 +576,7 @@
       });
       details.append(list); card.append(details); cognitionPanel.append(card);
     });
-    if (!updates.length && !meaningRecords.length) emptyPanel(cognitionPanel, '没有可展示的认知更新事件', '没有事件证据时，不从最终快照倒推历史认知。');
+    if (!timeline.length && !updates.length && !meaningRecords.length) emptyPanel(cognitionPanel, '没有可展示的认知更新事件', '没有事件证据时，不从最终快照倒推历史认知。');
     const types = { 'cognition.hypothesis.confirmed': '确认事实', 'cognition.hypothesis.falsified': '否定事实', 'cognition.hypothesis.remains_undetermined': '保留未决假说' };
     const claimStatuses = { certain: '已确认', falsified: '已否定', undetermined: '未决假说', superseded: '已替代' };
     const claimKinds = { game_type: '游戏类型', object_role: '物件角色', control: '动作操作', rule: '游戏规则', success_condition: '过关条件', strategy: '规划策略' };
@@ -571,5 +649,175 @@
   });
   document.addEventListener('visibilitychange', () => { if (document.hidden) pause(); });
   window.addEventListener('pagehide', pause);
-  selectLevel(state.levelIndex);
+  function replaceSnapshot(next, { follow = state.mode === 'live' } = {}) {
+    if (!validSnapshot(next)) throw new Error('invalid-response');
+    const previous = { snapshot, run, recordedLevels, levelCount, levels,
+      levelIndex: state.levelIndex, frameIndex: state.frameIndex, actionId: state.actionId };
+    const previousRun = run.run_id, previousLevel = currentLevel().level, previousFrame = currentFrame()?.id, previousAction = state.actionId;
+    // Derive the complete next view before changing the currently accepted state.
+    const nextRun = object(next.run), nextRecordedLevels = array(next.levels);
+    const nextCount = Math.max(0, number(nextRun.win_levels), ...nextRecordedLevels.map((level) => number(level.level)));
+    const nextLevels = Array.from({ length: nextCount }, (_, index) => nextRecordedLevels.find((level) => level.level === index + 1) || {
+      level: index + 1, status: 'not_run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null,
+    });
+    let index = nextLevels.findIndex((level) => level.level === previousLevel);
+    if (follow) index = nextLevels.map((level, i) => array(level.frames).length ? i : -1).filter((i) => i >= 0).pop() ?? 0;
+    else if (previousRun !== nextRun.run_id || index < 0) index = Math.max(0, nextLevels.findIndex((level) => array(level.frames).length));
+    const preserve = !follow && previousRun === nextRun.run_id;
+    try {
+      snapshot = next; run = nextRun; recordedLevels = nextRecordedLevels; levelCount = nextCount; levels = nextLevels;
+      renderRunHeader(); selectLevel(index);
+      const historical = preserve ? frames().findIndex((frame) => frame.id === previousFrame) : -1;
+      setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
+        preserve && actions().some((action) => action.id === previousAction) ? previousAction : undefined);
+    } catch (_) {
+      snapshot = previous.snapshot; run = previous.run; recordedLevels = previous.recordedLevels;
+      levelCount = previous.levelCount; levels = previous.levels;
+      state.levelIndex = previous.levelIndex; state.frameIndex = previous.frameIndex; state.actionId = previous.actionId;
+      // Restore the old rendered frame if the failing canvas/DOM operation was transient.
+      try {
+        renderRunHeader(); selectLevel(previous.levelIndex); setFrame(previous.frameIndex, previous.actionId);
+      } catch (_) { /* Persistent rendering failure must not commit data or revision. */ }
+      state.levelIndex = previous.levelIndex; state.frameIndex = previous.frameIndex; state.actionId = previous.actionId;
+      throw new Error('invalid-response');
+    }
+    window.__ASTERION_STATE__ = snapshot;
+  }
+
+  const sessionLabels = { idle: '就绪 · 尚未启动', starting: '启动中', running: 'P7 运行中', stopping: '结束中 · 等待清理确认', completed: '运行完成 · 有完成证据', incomplete: '运行未完成', cancelled: '运行已结束', 'timed-out': '运行超时', failed: '运行失败', 'cleanup-unconfirmed': '清理未确认 · 无法启动新运行' };
+  const activeSession = () => ['starting', 'running', 'stopping', 'cleanup-unconfirmed'].includes(state.liveView?.state);
+  function renderSessionControls() {
+    const live = state.mode === 'live';
+    $('console-mode').value = state.mode;
+    $('live-controls').hidden = !liveConfig || !live;
+    $('replay-controls').hidden = !liveConfig || live;
+    $('replay-transport').hidden = live;
+    $('header-mode').textContent = liveConfig ? (live ? 'P7 实时运行' : '回放记录') : '离线回放';
+    write('actions-mode', live ? '运行观察' : '只读回放');
+    write('actions-note', live ? '动作由 P7 执行，此处只观察' : '点击定位已录动作');
+    $('run-start').disabled = !liveConfig || !state.liveView || activeSession() || state.commandBusy || Boolean(state.pendingCommand) || !$('game-select').value;
+    $('game-select').disabled = activeSession() || state.commandBusy || Boolean(state.pendingCommand);
+    $('run-stop').disabled = !state.liveView?.session_id || !['starting', 'running'].includes(state.liveView?.state) || state.commandBusy || Boolean(state.pendingCommand);
+    $('retry-command').hidden = !state.pendingCommand || state.commandBusy;
+    $('replay-load').disabled = !$('replay-run').value;
+    write('session-id', state.liveView?.session_id ? `会话 ${state.liveView.session_id}` : '');
+  }
+
+  function validView(view) {
+    if (!isRecord(view) || !Object.hasOwn(sessionLabels, view.state) || !Number.isInteger(view.revision) || view.revision < 0 || typeof view.cleanup_confirmed !== 'boolean') return false;
+    if (!['session_id', 'game_id', 'run_id'].every((key) => view[key] === null || (typeof view[key] === 'string' && view[key].length > 0))) return false;
+    if (view.snapshot !== null && !validSnapshot(view.snapshot)) return false;
+    if (view.snapshot !== null && (view.snapshot.run.run_id !== view.run_id || view.snapshot.run.game_id !== view.game_id)) return false;
+    return true;
+  }
+
+  function snapshotForView(view) {
+    if (view.snapshot) return view.snapshot;
+    const game = array(liveConfig?.games).find((entry) => entry.game_id === view.game_id);
+    return { schema: 'asterion.arc-agi3-p7-console/v1', generated_at: null,
+      run: { run_id: view.run_id, game_id: view.game_id, status: view.state, win_levels: game?.win_levels ?? null,
+        completed_level_count: 0, primitive_action_count: 0, replay_verified: false, sealed_trace: false },
+      levels: [], decisions: [], warnings: [] };
+  }
+
+  function acceptView(view) {
+    if (!validView(view)) throw new Error('invalid-response');
+    const previous = state.liveView;
+    if (previous && view.revision < previous.revision) return;
+    if (!view.snapshot && state.mode === 'live' && (run.run_id !== view.run_id || run.game_id !== view.game_id || (previous && previous.session_id !== view.session_id))) replaceSnapshot(snapshotForView(view));
+    if (view.snapshot && (state.mode === 'live' || (!state.replayRun && run.run_id === view.run_id)) &&
+        (!previous || previous.revision !== view.revision || previous.run_id !== view.run_id)) replaceSnapshot(view.snapshot);
+    // Publish the accepted session/revision only after snapshot replacement rendered successfully.
+    state.liveView = view;
+    write('service-status', `${sessionLabels[view.state]}${view.cleanup_confirmed ? ' · 清理已确认' : ''}`);
+    renderSessionControls();
+  }
+
+  async function request(path, command = null) {
+    // Fixed relative routes and the injected same-origin token are the only request authority.
+    let result;
+    try {
+      result = await window.fetch(path, {
+        method: command ? 'POST' : 'GET', credentials: 'same-origin', cache: 'no-store',
+        headers: { 'X-P7-Console-Token': liveConfig.token, ...(command ? { 'Content-Type': 'application/json' } : {}) },
+        ...(command ? { body: JSON.stringify(command) } : {}),
+      });
+    } catch (_) { throw new Error('disconnected'); }
+    if (!result.ok) throw new Error('request-rejected');
+    try { return await result.json(); } catch (_) { throw new Error('invalid-response'); }
+  }
+
+  function showRequestError(error) {
+    const labels = { disconnected: '连接中断 · 保留最近画面', 'invalid-response': '服务响应无效 · 保留最近画面', 'request-rejected': '服务拒绝请求 · 保留最近画面' };
+    write('service-status', labels[error.message] || labels['invalid-response']);
+    renderSessionControls();
+  }
+
+  async function pollState() {
+    if (!liveConfig || state.pollBusy || state.commandBusy) return;
+    state.pollBusy = true;
+    try { acceptView(await request('/api/state')); } catch (error) { showRequestError(error); }
+    finally { state.pollBusy = false; }
+  }
+
+  async function sendCommand(command) {
+    if (!liveConfig || state.commandBusy) return;
+    state.commandBusy = true; state.pendingCommand = command; renderSessionControls();
+    try {
+      acceptView(await request(command.path, command.body));
+      state.pendingCommand = null;
+    } catch (error) {
+      // An unknown transport outcome can be retried only with the original command identity.
+      if (error.message === 'request-rejected') state.pendingCommand = null;
+      showRequestError(error);
+    } finally { state.commandBusy = false; renderSessionControls(); }
+  }
+
+  async function loadRuns() {
+    try {
+      const result = await request('/api/runs');
+      if (!isRecord(result) || !Array.isArray(result.runs) || !result.runs.every((run) => isRecord(run) && typeof run.run_id === 'string' && /^[A-Za-z0-9_-]+$/.test(run.run_id) && typeof run.game_id === 'string')) throw new Error('invalid-response');
+      const select = $('replay-run'); select.replaceChildren();
+      result.runs.forEach((run) => { const option = node('option', `${run.game_id} · ${run.run_id}`); option.value = run.run_id; select.append(option); });
+      renderSessionControls();
+    } catch (error) { showRequestError(error); }
+  }
+
+  function initializeLive() {
+    $('console-mode').disabled = !liveConfig;
+    renderRunHeader(); selectLevel(state.levelIndex); renderSessionControls();
+    $('console-mode').addEventListener('change', () => {
+      pause(); state.mode = $('console-mode').value; state.replayRun = null; state.replayGeneration += 1;
+      if (state.mode === 'live' && state.liveView) replaceSnapshot(snapshotForView(state.liveView), { follow: true });
+      else renderFrame();
+      renderSessionControls();
+    });
+    if (!liveConfig) return;
+    const games = array(liveConfig.games);
+    games.filter((game) => isRecord(game) && typeof game.game_id === 'string').forEach((game) => {
+      const option = node('option', `${string(game.alias, game.game_id)} · ${game.game_id}`); option.value = game.game_id; $('game-select').append(option);
+    });
+    $('run-start').addEventListener('click', () => sendCommand({ path: '/api/start', body: { game_id: $('game-select').value, command_id: window.crypto.randomUUID() } }));
+    $('run-stop').addEventListener('click', () => sendCommand({ path: '/api/stop', body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } }));
+    $('retry-command').addEventListener('click', () => { if (state.pendingCommand) sendCommand(state.pendingCommand); });
+    $('replay-run').addEventListener('change', () => { state.replayGeneration += 1; });
+    $('replay-load').addEventListener('click', async () => {
+      const runId = $('replay-run').value;
+      if (!runId || state.mode !== 'replay') return;
+      const generation = ++state.replayGeneration;
+      const isCurrent = () => state.mode === 'replay' && state.replayGeneration === generation && $('replay-run').value === runId;
+      try {
+        const replay = await request(`/api/replay/${encodeURIComponent(runId)}`);
+        if (!isCurrent()) return;
+        if (!validSnapshot(replay) || replay.run.run_id !== runId) throw new Error('invalid-response');
+        replaceSnapshot(replay, { follow: false }); state.replayRun = runId;
+      } catch (error) { if (isCurrent()) showRequestError(error); }
+    });
+    write('service-status', '正在连接本地服务');
+    pollState(); loadRuns();
+    state.pollTimer = window.setInterval(pollState, 1000);
+    window.addEventListener('pagehide', () => { if (state.pollTimer !== null) window.clearInterval(state.pollTimer); });
+  }
+
+  initializeLive();
 })();

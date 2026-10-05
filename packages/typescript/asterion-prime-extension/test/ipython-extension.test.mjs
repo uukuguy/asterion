@@ -179,6 +179,7 @@ test("registers the ipython and P7 application tools", async () => {
     "p7_cognition",
     "p7_cognition_update",
     "p7_counterfactual_search",
+    "p7_decision",
     "p7_frame_at",
     "p7_game_mechanics",
     "p7_history",
@@ -625,6 +626,7 @@ test("built artifact is comment-free and loads through the pinned loader", async
       "p7_cognition",
       "p7_cognition_update",
       "p7_counterfactual_search",
+    "p7_decision",
       "p7_frame_at",
       "p7_game_mechanics",
       "p7_history",
@@ -831,4 +833,15 @@ test("P7 decision results lead with Chinese prose and retain exact details", asy
     assert.equal(output.details, result);
     assert.equal(result.semantic.claims.full, "LEDGER_ONLY");
   }
+});
+
+ test("passes a public decision summary through its registered method", async () => {
+  const calls = [];
+  const tool = createAppLevelTools({callMethod: async (...args) => {calls.push(args); return {status: "recorded", execution_authority: "none"};}}).find(t => t.name === "p7_decision");
+  assert.ok(tool);
+  assert.deepEqual(tool.parameters.required, ["goal", "basis", "expected"]);
+  assert.equal(tool.parameters.properties.goal.maxLength, 600);
+  const payload = {goal: "移动", basis: "当前观察", expected: "位置变化"};
+  await tool.execute("decision-1", payload);
+  assert.deepEqual(calls, [["decision-1", "decision", payload, undefined]]);
 });
