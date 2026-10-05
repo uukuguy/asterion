@@ -3802,3 +3802,7 @@
 - 2026-10-06 03:59 CST — 653a587f: Rank fixed replays by verified route quality and source modification time; refresh unchanged source exports.
 - 2026-10-06 04:01 CST — 4d7bc8d4: Preview every catalog level without model execution or solved-state promotion.
 - 2026-10-06 04:04 CST — ONE25 official receipt closed-confirmed, cardfb5ae449-b935-498f-a1e6-5b31c1633056:12.00,3games,19levels,793actions; channel verified.
+- 2026-10-06 04:04 CST — 01af8e70: Recorded official12.00 receipt and unified console evidence to release remaining-game research.
+- 2026-10-06 04:08 CST — User authorizes TWO concurrent games; preserve active AR25 while adding a separate second workspace and coordinator.
+- 2026-10-06 04:08 CST — Final make promotion-check PASS25 commands/provider_operations0/full_datasetno; packaged console/route changes verified.
+- 2026-10-06 04:11 CST — AR25/BP35 actual concurrent model/action/IPython evidence verified; single-writer two-slot pool90979 preserves the originalAR25 guest.

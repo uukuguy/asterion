@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under one finite guest at a time. Current saved-route integration, named verification and the one complete25-game official submission gate belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
+- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most two independent finite guests. Current saved-route integration, named verification and the one complete25-game official submission gate belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
 ## Current Architecture
 
@@ -46,6 +46,8 @@
 - `src/asterion/applications/prime/p7/operator.py`, `runtime_binding.py`, `prompt.py`, `tool_registry.py` — selected default/legacy application wiring.
 - `packages/typescript/asterion-prime-extension/` and `src/asterion/applications/prime/resources/ipython-extension.mjs` — typed tool registration and packaged resource.
 - `src/asterion/applications/prime/p7/solver_control.py`, `console_events.py`, `console_snapshot.py`, `console_session.py`, `console_server.py`, `console_assets/` — control handshake, timeline and web console.
+- `src/asterion/applications/prime/p7/route_composition.py`, `solutions.py` — pinned offline saved-route composition/admission, independent of new model solving.
+- `src/asterion/applications/prime/p7/console_preview.py` — isolated each-level initial preview, no solved-state promotion.
 - `src/asterion/applications/prime/p7/console_manual.py`, `console_manual_saves.py`, `console_preferences.py` — independent HUMAN lifecycle, journals and selection metadata.
 
 ## Evidence Boundary
