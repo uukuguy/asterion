@@ -28,6 +28,62 @@ class TestPrimeP7Guest(unittest.TestCase):
                     launch(unit, seconds, ['python3', '-V'])
                 self.assertEqual(execute.called, valid)
 
+    def test_console_preserves_only_existing_guest_proxy_environment(self) -> None:
+        unit = 'asterion-p7-' + 'a' * 32 + '.service'
+        base = {'ASTERION_PRIME_P7_RUN_MODE': 'witness',
+                'ASTERION_PRIME_P7_CONSOLE_RUN_ID': 'p7-live-20261005123456-' + 'a' * 24,
+                'ASTERION_PRIME_P7_ATTEMPT_UNIT': unit,
+                'ASTERION_PRIME_P7_ATTEMPT_SECONDS': '900',
+                'MAC_PROXY': 'http://127.0.0.1:7897', 'SECRET_KEY': 'SENTINELSECRET'}
+        proxy = {name: 'localhost,127.0.0.1' if name.lower() == 'no_proxy'
+                 else 'http://host.orb.internal:7897'
+                 for name in ('HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                              'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy')}
+        for present in (True, False):
+            environment = {**base, **(proxy if present else {})}
+            inherited = {}
+            def execute(program, args):
+                inherited.update(os.environ)
+                raise SystemExit(0)
+            with self.subTest(proxy_present=present), patch.dict(os.environ, environment, clear=True), \
+                 patch('tools.run_prime_p7_guest.Path.is_file', return_value=True), \
+                 patch('tools.run_prime_p7_guest.os.execvp', side_effect=execute) as call:
+                with self.assertRaises(SystemExit):
+                    launch(unit, 900, ['python3', '-V'])
+            args = call.call_args.args[1]
+            passed = [arg.removeprefix('--setenv=') for arg in args if arg.startswith('--setenv=')]
+            names = {arg.partition('=')[0] for arg in passed}
+            expected = set(base) - {'MAC_PROXY', 'SECRET_KEY'}
+            self.assertEqual(names, expected | (set(proxy) if present else set()))
+            self.assertIn('--property=RuntimeMaxSec=900s', args)
+            self.assertIn('--unit=' + unit, args)
+            if present:
+                for name, value in proxy.items():
+                    # systemd-run NAME-only copies its inherited guest value;
+                    # no Mac address reconstruction or private values in argv.
+                    self.assertIn(name, passed)
+                    self.assertEqual(inherited[name], value)
+            self.assertNotIn('127.0.0.1:7897', ' '.join(args))
+            self.assertNotIn('SENTINELSECRET', ' '.join(args))
+
+    def test_proxy_userinfo_never_reaches_argv_or_public_launch_error(self) -> None:
+        import io
+        from contextlib import redirect_stderr, redirect_stdout
+        from tools.run_prime_p7_guest import main
+        secret = 'http://user:SENTINELSECRET@host.orb.internal:7897'
+        unit = 'asterion-p7-' + 'a' * 32 + '.service'
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, {'HTTPS_PROXY': secret}, clear=True), \
+             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True), \
+             patch('tools.run_prime_p7_guest.os.execvp', side_effect=OSError(secret)) as call, \
+             patch('sys.argv', ['guest', 'launch', '--unit', unit, '--seconds', '30', '--', 'python3', '-V']), \
+             redirect_stderr(stderr), redirect_stdout(stdout):
+            self.assertEqual(main(), 1)
+        self.assertIn('--setenv=HTTPS_PROXY', call.call_args.args[1])
+        self.assertNotIn('SENTINELSECRET', ' '.join(call.call_args.args[1]))
+        self.assertEqual(stdout.getvalue(), '')
+        self.assertEqual(stderr.getvalue(), 'P7 guest containment unavailable\n')
+
     def test_cleanup_timeout_exceeds_unit_forced_kill_window(self) -> None:
         with patch('tools.run_prime_p7_guest.subprocess.run', side_effect=[
             subprocess.CompletedProcess([], 0),

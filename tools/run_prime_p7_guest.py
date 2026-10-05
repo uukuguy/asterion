@@ -13,6 +13,12 @@ import sys
 _UNIT = re.compile(r"^asterion-p7-[0-9a-f]{32}\.service$")
 _ENVIRONMENT_FILE = Path(__file__).with_name("p7_guest_environment.txt")
 _UNBOUNDED_FIRST_ROUND_ENV = "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND"
+# Guest-only: Orb has already translated host loopback proxy addresses. Keep
+# these out of the shared ORBENV contract so that translation remains owned by Orb.
+_GUEST_PROXY_ENVIRONMENT = (
+    "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+    "http_proxy", "https_proxy", "all_proxy", "no_proxy",
+)
 
 
 def _environment_names() -> tuple[str, ...]:
@@ -80,7 +86,12 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
         if name in {_UNBOUNDED_FIRST_ROUND_ENV, "OPERATION_MODE"} and os.environ.get(_UNBOUNDED_FIRST_ROUND_ENV) != "1":
             continue
         args.append(f"--setenv={name}={value}")
-    # systemd-run owns no private provider settings; the operator reads its .env.
+    for name in _GUEST_PROXY_ENVIRONMENT:
+        if name in os.environ:
+            # NAME-only copies systemd-run's inherited guest value without
+            # placing optional proxy credentials in the command arguments.
+            args.append(f"--setenv={name}")
+    # Model credentials remain operator-owned and are resolved from its .env/profile.
     # Replace the Orb-managed process: no launcher child can outlive a killed
     # Orb session and submit a new service after cleanup has checked absence.
     os.execvp(args[0], [*args, "--", *command])
