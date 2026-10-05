@@ -3722,3 +3722,5 @@
 - 21:40 Committed test inventory/tool assertions matching the new runtime, preserving original boundary checks [b45977e6].
 - 21:40 Fresh SP80 L1→L2 PASS:20 actions,0 cells,0 WorldMap publications; no route reuse; replay/sealing/cleanup verified.
 - 21:41 Live evidence exposed WorldMap bypass; implementing direct semantic revisions and evidence-bound plan admission, without compulsory computation.
+- 21:46 Recorded fresh two-level success and semantic revision contract to close the observed WorldMap bypass [50e8bd2f].
+- 21:56 Semantic main-path implementation reviewed;317 related Python tests passed,resource synced; final task event tests passed,promotion running.

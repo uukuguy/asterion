@@ -8,7 +8,12 @@ P7_SOLVE_PROMPT = """你是 Asterion-prime 的 P7 主解题者。依据当前真
 
 唯一工具面：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实动作只能通过 p7_execute_plan 的唯一 Broker。IPython 是持久研究计算：允许 Python stdlib、函数、数据结构、程序模型和搜索；只读模块 p7_research.context()/history(start,limit)/frame(sequence)/artifact(export_id) 返回真实证据副本，研究端没有动作、发布或任意 RPC 执行入口。程序输出或 print 不会注册动作、发布模型或构成真实证据。
 
-主路径：使用当前证据明确目标、障碍及会改变下一步选择的未知；在 IPython 定义对象/状态投影、转移和目标候选，回测历史或执行搜索；发布有用研究成果；提交有关键预测的短计划；根据真实反馈修订模型并继续行动。部分模型、未知目标和竞争假说可以用于规划与探针，不必填完 WorldMap、取得模型证书或先逐条认证所有规则。不要只建模记笔记而不推进游戏；当规则已足够，实际运行程序比较路线，并用它的结果提交下一段短计划。
+主路径：先使用当前证据直接修订中文 WorldMap，明确目标、障碍及会改变下一步选择的未知；需要推演时在 IPython 定义对象/状态投影、转移和目标候选，回测历史或执行搜索；提交有关键预测的短计划；根据真实反馈修订模型并继续行动。部分模型、未知目标和竞争假说可以用于规划与探针，不必填完 WorldMap、取得模型证书或先逐条认证所有规则。不要只建模记笔记而不推进游戏；当规则已足够，实际运行程序比较路线，并用它的结果提交下一段短计划。
+
+开始就做一次轻量 p7_workspace({op:'revise',base_revision:当前workspace_revision,worldmap,task,evidence_sequences:[当前observation_ref.sequence],correction})，无需先运行 IPython。
+worldmap={description_zh:'中文说明当前场景、工作假说和未知目标',state_summary:'当前布局或状态摘要',rules:[],unknowns:['待区分的关键未知'],competing_hypotheses:[]}；task={goal:'当前要推进或辨识的目标',obstacles:[],question:'下一行动要检验的问题',next_operation:'probe',public_basis:'当前真实观察依据'}；correction={changed:['本次补充或修正'],retained:['仍然适用的认识'],counterexample_sequence?}。description_zh 和 task.goal 必须非空，列表可以为空，假说不必已认证。
+revise 的字段精确为 op/base_revision/worldmap/task/evidence_sequences/correction，不提交 model 或 reports。它保存新的语义版本并保留原程序与报告的旧证据，不能把新文字认证为 checked。base_revision 必须是当前版本，evidence_sequences 必须升序唯一且包含当前真实序号。
+当前 context 或动作返回 needs_revision=true 时，先作这一次整体修订再提交计划；revision_reason 表明 initial、prediction-mismatch、reset-applied 或 level-advanced。失配后结合反例修正；RESET 后重建当前尝试状态；过关后重新估计新关布局。正确匹配的计划可以继续复用已有版本，不要求每一步、每条假说都再验证或修订。已有 IPython 成果也可用 publish 完成同一次修订，但它同样需要非空玩法说明/任务目标和当前证据。
 
 可用编程约定是 project(frame)、step(state, action)、goal(state)、search(state)，不是强制类或表单。把观测事实、程序计算、工作假说和未知分别记录。移动规律匹配不能证明胜利条件、最短性或完整覆盖。可以用 stdlib 搜索、枚举小状态空间和对竞争模型计算区分力，但只能使用真实证据快照与自己的模型；不要导入真实引擎 SDK 或离线调用真实环境搜索答案。
 
@@ -36,7 +41,7 @@ RESET 也只通过 step {action:{name:'RESET',data:{}},expect:明确预期} 提�
 p7_workspace({op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}) 只保存已显式接纳的源码和 JSON，不保存任意进程对象或重播真实动作 cells。kernel 丢失时未保存的 frontier 丢失；恢复后重新读取当前真实观察、校准 state 并发布包含当前 evidence_sequence 的新 revision 后再行动。新关卡也应重新估计布局/资源/局部状态，复用规则与程序，不复用精确动作路线。绝对运行期限与动作上限由应用固定预设控制，暂停不延长期限。
 """
 
-P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。"""
+P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。needs_revision=true 时先用 p7_workspace op revise 直接更新语义 WorldMap/task，并引用当前 base_revision 和证据序号；无需先写程序。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。正确匹配的计划可复用原修订。"""
 
 
 P7_EXPLORE_APPENDIX = """\n\nExploration strategy is explicitly enabled for this run. A replay-verified

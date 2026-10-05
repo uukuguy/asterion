@@ -82,21 +82,15 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["stop_reason"], "prediction-mismatch")
         self.assertEqual(len(self.trace.transitions), 2)
         self.assertEqual(len(self.engine.calls), 2)
-        corrected = await self.host.execute(
-            "cell-correction",
-            "assert p7_research.context()['observation_ref']['sequence'] == 2\n"
-            "def transition(position): return position + 1\n"
-            "draft['evidence_sequences'] = [0, 1, 2]\n"
-            "draft['correction']['changed'] = ['第二步反例否定位置相关步幅']\n"
-            "prime_workspace.export('corrected-draft', draft)", _Signal(),
-        )
-        self.assertEqual(corrected.status, 'ok')
-        correction_id = json.loads(corrected.content[0]['text'])['kernel_exports'][0]['export_id']
+        self.assertTrue(self.host.current_context()['needs_revision'])
+        value['evidence_sequences'] = [0, 1, 2]
+        value['correction']['changed'] = ['第二步反例否定位置相关步幅']
         revised = self.host.method_call('workspace', {
-            'op': 'publish', 'base_revision': self.host.current_context()['workspace_revision'],
-            'draft_export_id': correction_id,
+            'op': 'revise', 'base_revision': self.host.current_context()['workspace_revision'],
+            **{key: value[key] for key in ('worldmap', 'task', 'evidence_sequences', 'correction')},
         }, _Signal())
-        self.assertEqual(revised['status'], 'published')
+        self.assertEqual(revised['status'], 'revised')
+        self.assertFalse(self.host.current_context()['needs_revision'])
         rows = read_console_events(self.root, self.run_id, self.broker.game.game_id)
         kinds = [row["kind"] for row in rows]
         for kind in ("compute_task", "model_revision", "plan", "feedback"):

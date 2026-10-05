@@ -54,6 +54,13 @@ const workspaceFocus: Static<typeof P7_WORKSPACE_PARAMETERS> = {
   op: "focus", task: { goal: "移动", obstacles: [], question: "移动规律？",
     next_operation: "probe", public_basis: "真实观察" },
 };
+const semanticRevision: Static<typeof P7_WORKSPACE_PARAMETERS> = {
+  op: 'revise', base_revision: 'sha256:' + 'b'.repeat(64),
+  worldmap: { description_zh: '当前游戏工作模型，目标未知。', state_summary: '当前起点',
+    rules: [], unknowns: ['移动方向'], competing_hypotheses: [] },
+  task: { goal: '辨识控制', obstacles: [], question: '哪个对象移动？', next_operation: 'probe', public_basis: '当前画面' },
+  evidence_sequences: [0], correction: { changed: ['记录初始观察'], retained: [] },
+};
 const shortPlan: Static<typeof P7_EXECUTE_PLAN_PARAMETERS> = {
   plan_id: "plan-1", start: { run_id: "run-1", attempt_id: "attempt-1", level: 1,
     sequence: 0, observation_sha256: "sha256:" + "a".repeat(64) },
@@ -66,4 +73,5 @@ void registeredResult;
 void extensionFactory;
 void workspaceRead;
 void workspaceFocus;
+void semanticRevision;
 void shortPlan;

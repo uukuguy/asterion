@@ -92,6 +92,39 @@ def task(value: object) -> dict:
     }
 
 
+def worldmap(value: object) -> dict:
+    if type(value) is not dict or set(value) != {
+        "description_zh",
+        "state_summary",
+        "rules",
+        "unknowns",
+        "competing_hypotheses",
+    }:
+        raise ValueError("research worldmap invalid")
+    return {
+        "description_zh": _text(value["description_zh"], limit=8000),
+        "state_summary": _text(value["state_summary"]),
+        **{
+            key: _texts(value[key])
+            for key in ("rules", "unknowns", "competing_hypotheses")
+        },
+    }
+
+
+def correction(value: object, latest: int) -> dict:
+    if (
+        type(value) is not dict
+        or not {"changed", "retained"} <= set(value)
+        or not set(value) <= {"counterexample_sequence", "changed", "retained"}
+    ):
+        raise ValueError("research correction invalid")
+    _texts(value["changed"])
+    _texts(value["retained"])
+    if "counterexample_sequence" in value:
+        evidence([value["counterexample_sequence"]], latest)
+    return copy_json(value)
+
+
 def _atomic(path: Path, value: object) -> None:
     if path.is_symlink() or path.parent.is_symlink():
         raise ValueError("research path invalid")
@@ -300,23 +333,7 @@ class ResearchWorkspace:
             "correction",
         }:
             raise ValueError("research draft invalid")
-        world = value["worldmap"]
-        if type(world) is not dict or set(world) != {
-            "description_zh",
-            "state_summary",
-            "rules",
-            "unknowns",
-            "competing_hypotheses",
-        }:
-            raise ValueError("research worldmap invalid")
-        world = {
-            "description_zh": _text(world["description_zh"], limit=8000),
-            "state_summary": _text(world["state_summary"]),
-            **{
-                k: _texts(world[k])
-                for k in ("rules", "unknowns", "competing_hypotheses")
-            },
-        }
+        world = worldmap(value["worldmap"])
         model = value["model"]
         if (
             type(model) is not dict
@@ -384,17 +401,7 @@ class ResearchWorkspace:
                     ),
                 }
             )
-        correction = value["correction"]
-        if (
-            type(correction) is not dict
-            or not {"changed", "retained"} <= set(correction)
-            or not set(correction) <= {"counterexample_sequence", "changed", "retained"}
-        ):
-            raise ValueError("research correction invalid")
-        _texts(correction["changed"])
-        _texts(correction["retained"])
-        if "counterexample_sequence" in correction:
-            evidence([correction["counterexample_sequence"]], latest)
+        accepted_correction = correction(value["correction"], latest)
         accepted = {
             "scope": self.scope,
             "parent_revision": self.revision,
@@ -403,12 +410,38 @@ class ResearchWorkspace:
             "model": copy_json(model),
             "reports": accepted_reports,
             "evidence_sequences": evidence(value["evidence_sequences"], latest),
-            "correction": copy_json(correction),
+            "correction": accepted_correction,
         }
         for eid, record in candidates.items():
             self._admit(eid, record)
         self._admit(draft_export_id, draft_record)
         self.revision = self._save_revision(accepted)
+        return self.read()
+
+    def revise(self, request: Mapping, *, latest: int) -> dict:
+        if request["base_revision"] != self.revision:
+            raise ValueError("stale-workspace-revision")
+        world = worldmap(request["worldmap"])
+        focused = task(request["task"])
+        sequences = evidence(request["evidence_sequences"], latest)
+        if (
+            not world["description_zh"].strip()
+            or not focused["goal"].strip()
+            or latest not in sequences
+        ):
+            raise ValueError("current-semantic-revision-required")
+        previous = self.read()
+        revised = {
+            "scope": self.scope,
+            "parent_revision": self.revision,
+            "worldmap": world,
+            "task": focused,
+            "evidence_sequences": sequences,
+            "correction": correction(request["correction"], latest),
+            "model": previous["model"],
+            "reports": previous["reports"],
+        }
+        self.revision = self._save_revision(revised)
         return self.read()
 
     def focus(self, value: Mapping) -> dict:

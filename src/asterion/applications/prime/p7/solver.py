@@ -42,6 +42,8 @@ class Solver:
         self._plans = {}
         self._lock = RLock()
         self._needs_calibration = self._workspace.loaded
+        self._needs_revision = True
+        self._revision_reason = "initial"
         self._environment_uncertain = False
         self._active_task = None
         self._cell_tasks = {}
@@ -95,6 +97,8 @@ class Solver:
                 "budget": self._budget(),
                 "lifecycle": copy_json(self.control.snapshot()),
                 "requires_calibration": self._needs_calibration,
+                "needs_revision": self._needs_revision,
+                "revision_reason": self._revision_reason,
                 "environment_result_unknown": self._environment_uncertain,
                 "checkpoint": self._workspace.checkpoint_manifest(),
             }
@@ -149,18 +153,24 @@ class Solver:
             ]
             context["reports"] = context["reports"][:4]
         if len(canonical_bytes(context)) > 56 * 1024:
-            world['description_zh'] = world['description_zh'][:256]
-            world['state_summary'] = world['state_summary'][:64]
-            for key in ('rules', 'unknowns', 'competing_hypotheses'):
+            world["description_zh"] = world["description_zh"][:256]
+            world["state_summary"] = world["state_summary"][:64]
+            for key in ("rules", "unknowns", "competing_hypotheses"):
                 world[key] = [v[:64] for v in world[key][:2]]
-            for key in ('changed', 'retained'):
-                context['correction'][key] = [v[:64] for v in context['correction'][key][:2]]
-            context['model']['coverage'] = context['model']['coverage'][:64]
-            context['model']['assumptions'] = [v[:64] for v in context['model']['assumptions'][:2]]
-            for key in ('goal', 'question', 'public_basis'):
-                context['task'][key] = context['task'][key][:64]
-            context['task']['obstacles'] = [v[:64] for v in context['task']['obstacles'][:2]]
-            context['reports'] = context['reports'][:2]
+            for key in ("changed", "retained"):
+                context["correction"][key] = [
+                    v[:64] for v in context["correction"][key][:2]
+                ]
+            context["model"]["coverage"] = context["model"]["coverage"][:64]
+            context["model"]["assumptions"] = [
+                v[:64] for v in context["model"]["assumptions"][:2]
+            ]
+            for key in ("goal", "question", "public_basis"):
+                context["task"][key] = context["task"][key][:64]
+            context["task"]["obstacles"] = [
+                v[:64] for v in context["task"]["obstacles"][:2]
+            ]
+            context["reports"] = context["reports"][:2]
         if len(canonical_bytes(context)) > 56 * 1024:
             raise ValueError("actor context too large")
         return context
@@ -330,6 +340,17 @@ class Solver:
                         focused_result["projection_truncated"] = True
                     return focused_result
                 latest = self._observation()[1]["sequence"]
+                if op == "revise" and set(value) == {
+                    "op",
+                    "base_revision",
+                    "worldmap",
+                    "task",
+                    "evidence_sequences",
+                    "correction",
+                }:
+                    revised = self._workspace.revise(value, latest=latest)
+                    self._accept_revision(revised, latest)
+                    return {"status": "revised", **self.current_context()}
                 if op == "publish" and set(value) == {
                     "op",
                     "base_revision",
@@ -341,32 +362,7 @@ class Solver:
                         latest=latest,
                         verify_report=self._verify_report,
                     )
-                    # Recovery requires evidence explicitly covering the current real observation.
-                    if latest in published["evidence_sequences"]:
-                        self._needs_calibration = False
-                    self._active_task = published["task"]
-                    self._workspace.focus(published["task"])
-                    world, model, correction = (
-                        published["worldmap"],
-                        published["model"],
-                        published["correction"],
-                    )
-                    self._emit(
-                        "model_revision",
-                        "actor",
-                        revision=published["workspace_revision"],
-                        parent_revision=published["parent_revision"],
-                        description_zh=world["description_zh"],
-                        state_summary=world["state_summary"],
-                        rule_summaries=world["rules"],
-                        unknowns=world["unknowns"],
-                        coverage_summary=model["coverage"],
-                        validation_summary=self._validation_summary(
-                            published["reports"]
-                        ),
-                        correction_summary="；".join(correction["changed"]),
-                        evidence_sequences=published["evidence_sequences"],
-                    )
+                    self._accept_revision(published, latest)
                     return {"status": "published", **self.current_context()}
                 if (
                     op == "checkpoint"
@@ -392,14 +388,54 @@ class Solver:
                     "workspace_revision": self._workspace.revision,
                 }
 
+    def _accept_revision(self, revised: dict, latest: int) -> None:
+        world, model, correction = (
+            revised["worldmap"],
+            revised["model"],
+            revised["correction"],
+        )
+        if (
+            world["description_zh"].strip()
+            and revised["task"]["goal"].strip()
+            and latest in revised["evidence_sequences"]
+            and not getattr(self.kernel, "lost", False)
+        ):
+            self._needs_revision = False
+            self._revision_reason = None
+            self._needs_calibration = False
+        else:
+            self._needs_revision = True
+            self._revision_reason = self._revision_reason or "initial"
+        self._active_task = revised["task"]
+        self._workspace.focus(revised["task"])
+        self._focus_event(
+            "declared", origin="actor", summary=revised["task"]["public_basis"]
+        )
+        self._emit(
+            "model_revision",
+            "actor",
+            revision=revised["workspace_revision"],
+            parent_revision=revised["parent_revision"],
+            description_zh=world["description_zh"],
+            state_summary=world["state_summary"],
+            rule_summaries=world["rules"],
+            unknowns=world["unknowns"],
+            coverage_summary=model["coverage"],
+            validation_summary=self._validation_summary(revised["reports"]),
+            correction_summary="；".join(correction["changed"]),
+            evidence_sequences=revised["evidence_sequences"],
+        )
+
     @staticmethod
     def _validation_summary(reports):
         return (
-            "；".join(
+            "历史报告核对（只对应原报告证据，不认证新语义）："
+            + "；".join(
                 f"{report['kind']}：{report['validation']['status']}，已核对{report['validation']['checked_count']}项"
                 for report in reports
             )
-            or "尚无可核对的程序报告，目标与覆盖保持未知。"
+            if reports
+            else "尚无可核对的程序报告，目标与覆盖保持未知。"
         )
 
     def _verify_report(
@@ -537,6 +573,7 @@ class Solver:
             plan["start"] != context["observation_ref"]
             or plan["workspace_revision"] != self._workspace.revision
             or self._needs_calibration
+            or self._needs_revision
             or self._environment_uncertain
             or getattr(self.kernel, "lost", False)
         ):
@@ -661,7 +698,13 @@ class Solver:
             except (ValueError, TypeError, KeyError, AttributeError):
                 return {
                     "status": "rejected",
-                    "reason": "invalid-actor-plan",
+                    "reason": "worldmap-revision-required"
+                    if self._needs_revision
+                    else "invalid-actor-plan",
+                    "needs_revision": self._needs_revision,
+                    "revision_reason": self._revision_reason,
+                    "observation_ref": self._observation()[1],
+                    "requires_calibration": self._needs_calibration,
                     "workspace_revision": self._workspace.revision,
                 }
             observation, reference = self._observation()
@@ -761,6 +804,19 @@ class Solver:
                         stop_reason = "level-advanced"
                     elif native_reason != "matched":
                         stop_reason = native_reason
+                    if count:
+                        reason = (
+                            "reset-applied"
+                            if native["action"]["name"] == "RESET"
+                            else "level-advanced"
+                            if observation["levels_completed"] > before_levels
+                            else "prediction-mismatch"
+                            if differences or native_reason == "prediction-mismatch"
+                            else None
+                        )
+                        if reason is not None:
+                            self._needs_revision = True
+                            self._revision_reason = reason
                     self.control.poll(
                         reference["sequence"], reference["observation_sha256"]
                     )
@@ -803,6 +859,8 @@ class Solver:
                 observation=observation,
                 observation_ref=reference,
                 budget=self._budget(),
+                needs_revision=self._needs_revision,
+                revision_reason=self._revision_reason,
                 unexecuted_steps=copy_json(value["steps"][unexecuted_start:]),
             )
             emit_plan("completed" if stop_reason == "matched" else "stopped")

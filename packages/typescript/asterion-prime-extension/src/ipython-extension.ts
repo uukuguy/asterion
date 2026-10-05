@@ -673,6 +673,16 @@ const TASK_PARAMETERS = TypeObject({
   next_operation: TypeUnion([TypeLiteral("analyze"), TypeLiteral("model"), TypeLiteral("validate"), TypeLiteral("search"), TypeLiteral("probe"), TypeLiteral("execute")]),
   public_basis: PUBLIC_TEXT,
 }, { additionalProperties: false });
+const WORLDMAP_PARAMETERS = TypeObject({
+  description_zh: TypeString({ minLength: 1, maxLength: 8000 }),
+  state_summary: PUBLIC_TEXT, rules: TypeArray(PUBLIC_TEXT, { maxItems: 32 }),
+  unknowns: TypeArray(PUBLIC_TEXT, { maxItems: 32 }),
+  competing_hypotheses: TypeArray(PUBLIC_TEXT, { maxItems: 32 }),
+}, { additionalProperties: false });
+const CORRECTION_PARAMETERS = TypeObject({
+  changed: TypeArray(PUBLIC_TEXT, { maxItems: 32 }), retained: TypeArray(PUBLIC_TEXT, { maxItems: 32 }),
+  counterexample_sequence: TypeOptional(TypeInteger({ minimum: 0 })),
+}, { additionalProperties: false });
 
 export const P7_WORKSPACE_PARAMETERS = TypeUnion([
   TypeObject({ op: TypeLiteral("read"), revision: TypeOptional(EXPORT_ID) }, { additionalProperties: false }),
@@ -680,6 +690,9 @@ export const P7_WORKSPACE_PARAMETERS = TypeUnion([
   TypeObject({ op: TypeLiteral("checkpoint"), revision: EXPORT_ID, state_export_id: TypeOptional(EXPORT_ID),
     frontier_export_id: TypeOptional(EXPORT_ID), analyzed_through: TypeInteger({ minimum: 0 }) }, { additionalProperties: false }),
   TypeObject({ op: TypeLiteral("focus"), task: TASK_PARAMETERS }, { additionalProperties: false }),
+  TypeObject({ op: TypeLiteral('revise'), base_revision: EXPORT_ID, worldmap: WORLDMAP_PARAMETERS,
+    task: TASK_PARAMETERS, evidence_sequences: TypeArray(TypeInteger({ minimum: 0 }), { minItems: 1, maxItems: 128, uniqueItems: true }),
+    correction: CORRECTION_PARAMETERS }, { additionalProperties: false }),
 ]);
 const ACTION_PARAMETERS = TypeUnion([
   TypeObject({ name: TypeUnion([TypeLiteral("RESET"), TypeLiteral("ACTION1"), TypeLiteral("ACTION2"), TypeLiteral("ACTION3"), TypeLiteral("ACTION4"), TypeLiteral("ACTION5"), TypeLiteral("ACTION7")]),
@@ -704,9 +717,9 @@ export const P7_EXECUTE_PLAN_PARAMETERS = TypeObject({
 }, { additionalProperties: false });
 const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   { name: "p7_workspace", method: "workspace", parameters: P7_WORKSPACE_PARAMETERS,
-    description: "Read the current or historical WorldMap and real observation; focus a public research task; publish an IPython draft export against base_revision; or checkpoint explicit source/JSON exports. Publishing never dispatches actions. Reports remain model declarations until host comparisons. Use partial models and retain unknown goals." },
+    description: "Start with op revise: directly record a concise Chinese WorldMap and task from the current observation, using exact base_revision and evidence_sequences containing the current sequence. No IPython, program model or prior certification is required. Revise again once after a mismatch, RESET or level advance; matched plans may reuse the revision. Revise retains prior program/report evidence and never certifies new prose. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions." },
   { name: "p7_execute_plan", method: "execute_plan", parameters: P7_EXECUTE_PLAN_PARAMETERS,
-    description: "Submit one short actor plan from the current observation_ref and workspace_revision. Each of 1–20 actions needs explicit key-cell, frame, state or progress predictions. The unique Broker executes sequentially and stops the suffix on mismatch, pause or a level boundary. Returns actual feedback and unexecuted steps. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." },
+    description: "Submit one short actor plan from the current observation_ref and a nonempty semantic workspace_revision. If needs_revision is true, first use p7_workspace op revise (or publish) with current evidence; partial rules and unknown goals are sufficient. Each of 1–20 actions needs explicit key-cell, frame, state or progress predictions. The unique Broker executes sequentially and stops the suffix on mismatch, pause or a level boundary. Returns actual feedback, unexecuted steps and needs_revision/revision_reason. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." },
 ]);
 
 export function toolNames(): string[] {

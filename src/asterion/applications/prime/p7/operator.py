@@ -4269,7 +4269,7 @@ async def run_live(
                     "game": invocation.game.game_id,
                     "seed": invocation.game.seed,
                     "target_level": invocation.game.target_level,
-                    "strategy": strategy,
+                    "strategy": "worldmap" if research_mode else strategy,
                     "cognition_mode": cognition_mode,
                 },
                 sort_keys=True,

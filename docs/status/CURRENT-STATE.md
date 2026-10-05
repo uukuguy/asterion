@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 solver/console redesign; research execution is deployed, direct semantic revision admission is being completed from live evidence.
+- Active work package: P7 solver/console redesign; research execution is deployed; direct semantic revision admission is implemented and under packaged live verification.
 
 ## Current Architecture
 
@@ -15,7 +15,7 @@
 - Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
 - P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.
 - Default verified runs register exactly `ipython`, `p7_workspace`, `p7_execute_plan` through the packaged TypeScript extension. The actor alone publishes research and submits short predictions through the existing Broker. Default runs do not load Playbook, shared cognition, exact prefixes or offline engine search.
-- Semantic `revise` is the low-cost WorldMap path being completed: current evidence and parent revision bind a language model of goals/rules/unknowns. Program `publish` and host-checked reports remain available when computation is useful. A checked report certifies comparison with its referenced observations, not model completeness or new prose.
+- Semantic `revise` is the low-cost WorldMap path: current evidence and parent revision bind a language model of goals/rules/unknowns. Program `publish` and host-checked reports remain available when computation is useful. A checked report certifies comparison with its referenced observations, not model completeness or new prose.
 - Plans bind exact observation and workspace revision. Mismatch, RESET, level change, pause and unknown environment results stop the remaining steps. Matched plans can retain their model. Unknown actions are never automatically replayed.
 - Kernel recovery restores only explicit source and JSON, then requires current-observation calibration. It does not reconstruct arbitrary process objects or replay action cells.
 - `SolverControl` uses the existing shared run directory for bounded pause/resume acknowledgments. The current bounded cell/action settles before pause; its tool response is held so Pi cannot request another model turn. Resume retains the absolute deadline; stop uses actual process cleanup.
@@ -25,7 +25,7 @@
 
 ## Open Problems
 
-- Direct planning can solve simple levels without external WorldMap publication; the semantic main-path revision contract is being completed and requires new deployment evidence.
+- Direct planning can solve simple levels without external WorldMap publication; the semantic main-path revision contract now closes this bypass and requires new deployment evidence.
 - Program-model-driven search, multi-level program reuse and cold/warm improvement remain unproven by the current live attempts.
 - Full promotion is non-PASS. Current and historical failures are classified in the implementation review; environment-specific differences must not be silently treated as old failures.
 - The read service is an application boundary under the operator UID, not a host filesystem/SDK sandbox. Enforcing a stronger sandbox is outside this research change.

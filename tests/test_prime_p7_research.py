@@ -5,6 +5,84 @@ from tests.test_prime_p7_solver import P7SolverFixture, draft
 
 
 class TestP7Research(P7SolverFixture):
+    def test_semantic_revision_rejects_stale_scope_or_claimed_program_authority(self):
+        self.revise()
+        self.solver.execute_plan(self.plan((1,)))
+        value = draft()
+        request = {
+            "op": "revise",
+            "base_revision": self.solver.current_context()["workspace_revision"],
+            **{
+                key: value[key]
+                for key in ("worldmap", "task", "evidence_sequences", "correction")
+            },
+        }
+        request["evidence_sequences"] = [1]
+        for mutate in (
+            lambda candidate: candidate.update(base_revision="sha256:" + "a" * 64),
+            lambda candidate: candidate.update(evidence_sequences=[0]),
+            lambda candidate: candidate.update(model={"source_export_ids": []}),
+            lambda candidate: candidate.update(reports=[]),
+        ):
+            with self.subTest(mutate=mutate):
+                from copy import deepcopy
+
+                candidate = deepcopy(request)
+                mutate(candidate)
+                previous = self.solver.current_context()["workspace_revision"]
+                self.assertEqual(self.solver.workspace(candidate)["status"], "rejected")
+                self.assertEqual(
+                    self.solver.current_context()["workspace_revision"], previous
+                )
+        self.assertEqual(len(self.engine.calls), 1)
+
+    def test_semantic_revision_preserves_historical_checked_report_without_rechecking(
+        self,
+    ):
+        self.revise()
+        self.solver.execute_plan(self.plan((1, 2)))
+        report_id = self.kernel.export(
+            "checked-report",
+            {
+                "predictions": [
+                    {
+                        "sequence": sequence,
+                        "expect": {"cells": [{"x": 0, "y": 0, "value": sequence}]},
+                    }
+                    for sequence in (1, 2)
+                ]
+            },
+        )
+        value = draft()
+        value["evidence_sequences"] = [0, 1, 2]
+        value["reports"] = [
+            {
+                "kind": "dynamics",
+                "export_id": report_id,
+                "evidence_sequences": [1, 2],
+                "claim_status": "reported",
+            }
+        ]
+        eid = self.kernel.export("checked-draft", value)
+        published = self.solver.workspace(
+            {
+                "op": "publish",
+                "base_revision": self.solver.current_context()["workspace_revision"],
+                "draft_export_id": eid,
+            }
+        )
+        self.assertEqual(published["reports"][0]["claim_status"], "checked")
+
+        def forbidden_verification(*args):
+            self.fail("semantic revise must not certify reports")
+
+        self.solver._verify_report = forbidden_verification
+        revised = self.revise()
+        self.assertEqual(revised["status"], "revised")
+        self.assertEqual(revised["model"], published["model"])
+        self.assertEqual(revised["reports"], published["reports"])
+        self.assertEqual(revised["parent_revision"], published["workspace_revision"])
+
     def test_large_worldmap_and_focus_return_bounded_projections(self):
         value = draft()
         value["worldmap"]["description_zh"] = "研究" * 4000
@@ -142,6 +220,7 @@ class TestP7Research(P7SolverFixture):
     def test_program_reports_compare_two_real_transitions_and_find_first_counterexample(
         self,
     ):
+        self.revise()
         self.solver.execute_plan(self.plan((1, 2)))
         cases = [
             ("dynamics", [1, 2], "checked", None),

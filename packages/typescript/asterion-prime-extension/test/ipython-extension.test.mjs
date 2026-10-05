@@ -833,7 +833,7 @@ test("P7 decision results lead with Chinese prose and retain exact details", asy
   assert.deepEqual(tools.map(t => t.name), ["p7_execute_plan", "p7_workspace"]);
   assert.equal(IsSchema(P7_WORKSPACE_PARAMETERS), true);
   assert.equal(IsSchema(P7_EXECUTE_PLAN_PARAMETERS), true);
-  assert.deepEqual(P7_WORKSPACE_PARAMETERS.anyOf.map(s => s.properties.op.const), ["read", "publish", "checkpoint", "focus"]);
+  assert.deepEqual(P7_WORKSPACE_PARAMETERS.anyOf.map(s => s.properties.op.const), ["read", "publish", "checkpoint", "focus", "revise"]);
   assert.equal(P7_EXECUTE_PLAN_PARAMETERS.properties.steps.maxItems, 20);
   assert.ok(P7_EXECUTE_PLAN_PARAMETERS.properties.steps.items.properties.expect.properties.cells);
   const request = {op: "read"};

@@ -122,9 +122,141 @@ class P7SolverFixture(unittest.TestCase):
             ],
         }
 
+    def revise(self, solver=None):
+        solver = self.solver if solver is None else solver
+        value = draft()
+        value["evidence_sequences"] = [
+            solver.current_context()["observation_ref"]["sequence"]
+        ]
+        return solver.workspace(
+            {
+                "op": "revise",
+                "base_revision": solver.current_context()["workspace_revision"],
+                **{
+                    key: value[key]
+                    for key in ("worldmap", "task", "evidence_sequences", "correction")
+                },
+            }
+        )
+
 
 class TestP7Solver(P7SolverFixture):
+    def test_first_plan_requires_semantic_revision_without_computation(self):
+        self.assertEqual(
+            self.solver.execute_plan(self.plan((1,)))["status"], "rejected"
+        )
+        self.assertEqual(self.engine.calls, [])
+        self.assertTrue(self.solver.current_context()["needs_revision"])
+        self.assertEqual(self.revise()["status"], "revised")
+        self.assertEqual(
+            [kind for kind, _ in self.events], ["compute_task", "model_revision"]
+        )
+        declared = self.events[0][1]
+        self.assertEqual(
+            (declared["origin"], declared["status"], declared["goal"]),
+            ("actor", "declared", "移动"),
+        )
+        self.assertEqual(
+            declared["workspace_revision"],
+            self.solver.current_context()["workspace_revision"],
+        )
+        self.assertFalse(self.solver.current_context()["needs_revision"])
+        self.assertEqual(self.solver.execute_plan(self.plan((1,)))["applied_count"], 1)
+
+    def test_mismatch_requires_current_evidence_revision_then_next_plan(self):
+        self.revise()
+        first = self.solver.execute_plan(self.plan((1, 9, 3)))
+        self.assertTrue(first["needs_revision"])
+        self.assertEqual(first["revision_reason"], "prediction-mismatch")
+        next_plan = self.plan((3,))
+        next_plan["plan_id"] = "next-plan"
+        self.assertEqual(self.solver.execute_plan(next_plan)["status"], "rejected")
+        self.assertEqual(self.revise()["status"], "revised")
+        next_plan = self.plan((3,))
+        next_plan["plan_id"] = "next-plan"
+        self.assertEqual(self.solver.execute_plan(next_plan)["applied_count"], 1)
+
+    def test_matched_feedback_reuses_existing_semantic_revision(self):
+        self.revise()
+        revision = self.solver.current_context()["workspace_revision"]
+        first = self.solver.execute_plan(self.plan((1,)))
+        self.assertFalse(first["needs_revision"])
+        second = self.plan((2,))
+        second["plan_id"] = "matched-next"
+        result = self.solver.execute_plan(second)
+        self.assertEqual(result["applied_count"], 1)
+        self.assertEqual(result["workspace_revision"], revision)
+        self.assertFalse(result["needs_revision"])
+
+    def test_real_reset_requires_one_fresh_semantic_revision(self):
+        self.revise()
+        self.solver.execute_plan(self.plan((1,)))
+        reset = self.plan((2,))
+        reset["plan_id"] = "reset-plan"
+        reset["steps"][0]["action"]["name"] = "RESET"
+        result = self.solver.execute_plan(reset)
+        self.assertEqual(result["stop_reason"], "reset-applied")
+        self.assertEqual(result["revision_reason"], "reset-applied")
+        self.assertTrue(result["needs_revision"])
+        self.revise()
+        following = self.plan((3,))
+        following["plan_id"] = "after-reset"
+        self.assertEqual(self.solver.execute_plan(following)["applied_count"], 1)
+
+    def test_empty_or_stale_publish_does_not_open_the_action_gate(self):
+        self.revise()
+        self.solver.execute_plan(self.plan((1,)))
+        for name, mutate in (
+            ("stale", lambda value: None),
+            (
+                "empty-description",
+                lambda value: value["worldmap"].update(description_zh=" "),
+            ),
+            ("empty-goal", lambda value: value["task"].update(goal=" ")),
+        ):
+            with self.subTest(name=name):
+                value = draft()
+                if name != "stale":
+                    value["evidence_sequences"] = [1]
+                mutate(value)
+                eid = self.kernel.export(name, value)
+                result = self.solver.workspace(
+                    {
+                        "op": "publish",
+                        "base_revision": self.solver.current_context()[
+                            "workspace_revision"
+                        ],
+                        "draft_export_id": eid,
+                    }
+                )
+                self.assertEqual(result["status"], "published")
+                self.assertTrue(result["needs_revision"])
+                following = self.plan((2,))
+                following["plan_id"] = "blocked-" + name
+                rejection = self.solver.execute_plan(following)
+                self.assertEqual(rejection["reason"], "worldmap-revision-required")
+                self.assertEqual(rejection["observation_ref"]["sequence"], 1)
+        self.assertEqual(len(self.engine.calls), 1)
+
+    def test_revise_cannot_wash_out_actual_kernel_loss_or_environment_unknown(self):
+        self.kernel.lost = True
+        self.solver.kernel_recovered()
+        self.assertEqual(self.revise()["status"], "revised")
+        self.assertTrue(self.solver.current_context()["requires_calibration"])
+        self.assertEqual(
+            self.solver.execute_plan(self.plan((1,)))["status"], "rejected"
+        )
+        self.kernel.lost = False
+        self.revise()
+        self.engine.raises_on = 1
+        self.solver.execute_plan(self.plan((1,)))
+        self.revise()
+        self.assertEqual(
+            self.solver.execute_plan(self.plan((1,)))["status"], "rejected"
+        )
+
     def test_mismatch_stops_suffix_and_duplicate_is_idempotent(self):
+        self.revise()
         plan = self.plan((1, 9, 3))
         result = self.solver.execute_plan(plan)
         self.assertEqual(result["applied_count"], 2)
@@ -137,12 +269,14 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(self.solver.execute_plan(plan)["status"], "rejected")
 
     def test_all_predictions_validate_before_first_action(self):
+        self.revise()
         plan = self.plan()
         plan["steps"][2]["expect"]["cells"][0]["x"] = 99
         self.assertEqual(self.solver.execute_plan(plan)["status"], "rejected")
         self.assertEqual(self.engine.calls, [])
 
     def test_stale_start_and_revision_fail_before_action(self):
+        self.revise()
         for field in ("start", "workspace_revision"):
             with self.subTest(field=field):
                 plan = self.plan()
@@ -154,6 +288,7 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(self.engine.calls, [])
 
     def test_pause_and_level_advance_stop_suffix(self):
+        self.revise()
         original = self.broker.act_checked
 
         def action(plan):
@@ -167,6 +302,7 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(result["stop_reason"], "pause_requested")
 
     def test_multiple_cells_compare_host_evidence(self):
+        self.revise()
         plan = self.plan((1, 2))
         plan["steps"][0]["expect"]["cells"].append({"x": 1, "y": 0, "value": 9})
         result = self.solver.execute_plan(plan)
@@ -174,6 +310,7 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(result["feedback"][0]["mismatch_kind"], "state")
 
     def test_unknown_dispatched_result_is_distinct_from_unexecuted_suffix(self):
+        self.revise()
         self.engine.raises_on = 2
         plan = self.plan()
         result = self.solver.execute_plan(plan)
@@ -189,12 +326,15 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(self.solver.execute_plan(other)["status"], "rejected")
 
     def test_level_advance_stops_remaining_steps(self):
+        self.revise()
         self.engine.level_after = 1
         plan = self.plan()
         plan["steps"][0]["expect"]["levels_completed"] = 1
         result = self.solver.execute_plan(plan)
         self.assertEqual(result["applied_count"], 1)
         self.assertEqual(result["stop_reason"], "level-advanced")
+        self.assertTrue(result["needs_revision"])
+        self.assertEqual(result["revision_reason"], "level-advanced")
 
     def test_public_calculation_events_pair_by_host_call_id(self):
         payload = {
@@ -243,6 +383,7 @@ class TestP7Solver(P7SolverFixture):
         self.assertLess(len(canonical_bytes(context)), 64 * 1024)
 
     def test_large_plan_feedback_preserves_suffix_and_marks_projection_omissions(self):
+        self.revise()
         plan = self.plan(tuple(range(1, 21)))
         cells = [{"x": x, "y": y, "value": 1} for y in range(2) for x in range(64)]
         for step in plan["steps"]:
@@ -272,6 +413,7 @@ class TestP7Solver(P7SolverFixture):
             event_sink=lambda kind, payload: self.events.append((kind, payload)),
         )
         for level in range(1, 8):
+            self.revise(solver)
             context = solver.current_context()
             result = solver.execute_plan(
                 {
