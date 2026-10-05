@@ -23,7 +23,7 @@
 - `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
 - Runtime cognition logs print claims, statuses, confidence, evidence and next tests; the persistent ledger remains separate from bounded model projections.
 - `asterion arc-console` exports one P7 run as an offline HTML level console; final cognition and unaligned model signals remain explicitly scoped evidence.
-- The proposed three-mode console uses a Python-owned game session for replay, P7 solving and human play. Only offline replay is implemented; live sessions and control transfer remain design work.
+- The proposed console centers on autonomous P7 solving. Manual validation uses a separate game instance and records, with no actions or experience injected into P7. Only offline replay is implemented; live P7 and independent manual modes remain design work.
 
 ## Open Problems
 
@@ -33,7 +33,7 @@
 - A pure P7 SP80 L1→L2→L3 run has not yet completed; prior L1 prefixes may be replayed evidence rather than fresh solving.
 - Completion requires a cold-start versus warm-start comparison with confirmed model, simulator use, and current-level action counts.
 - Sustained L1 feedback-driven solving and improved proficiency from reused cognition remain unverified; transport or unit-test success alone does not establish these capabilities.
-- The current live operator closes the game with the solve run. Same-game human/P7 transfer requires separate session and solver-segment lifecycles, safe pause boundaries and explicit action attribution.
+- The current live operator closes the game with the solve run. Resumable P7 pause and source-linked decision/cognition events remain unimplemented; manual mode must isolate every cognition and experience persistence path.
 
 ## Key Files
 
@@ -66,7 +66,7 @@
 - `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
 - `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
 - `src/asterion/applications/prime/p7/console_assets/` — packaged Tailwind CSS, canvas playback and Chinese process UI
-- `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — proposed replay/live P7/manual modes, lifecycle and implementation stages; pending user review
+- `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — proposed P7-first console with replay and independent manual validation; same-game takeover withdrawn
 
 ## Execution and evidence boundary
 

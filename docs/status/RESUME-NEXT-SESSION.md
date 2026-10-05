@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05. Session checkpoint, not a final handoff.
+> Updated: 2026-10-05. Active checkpoint after P7-first design correction, not a final handoff.
 
 ## 已验证事实
 
@@ -29,7 +29,7 @@
 - The single-run console makes existing evidence inspectable. It does not create decision explanations or historically aligned world-model snapshots that the source run never recorded.
 - The prior 16 KiB limit was an application budget, not a model context limit. Initial game context is bounded at 64 KiB and complete solver/backend input at 256 KiB. Earlier real runs accepted approximately 81 KiB prompts.
 - Primary cognition contract: `docs/architecture/prime-p7-cognition-and-experience.md`; decision D-2026-10-03-01. Chinese gameplay descriptions should use short, consistent statements, distinguish observations from inference, and remain incomplete where evidence is missing.
-- User now requires three modes: replay, live P7 solving and human play. Proposed design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`. One Python-owned game session, separate solver segments, serialized broker actions and explicit control epochs allow same-game takeover. This is a reviewed architectural proposal awaiting user review, not implemented live capability.
+- User clarified that autonomous P7 solving is the core; manual play is independent validation and must not enter the P7 workflow. Revised design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`. P7 and manual modes have distinct game instances and records. Manual observations/actions must not write P7 cognition or experience or enter model context. Same-game takeover and mixed control are withdrawn. Real-time modes remain unimplemented.
 
 ## 历史归档
 
@@ -41,14 +41,14 @@
 
 - No fresh SP80 L1 completion or cold/warm proficiency comparison is established by this work. Cross-level learning and simulator benefit remain unverified.
 - This approved first console exports one run; it is not a live multi-game scheduler or an aggregate of all historical runs.
-- Live human/P7 controls, same-session takeover, source-linked decision summaries and Mac/Orb console service are not implemented. Current `run_live` closes the game when the solve run ends; cancellation is not a resumable pause. Stage completion must not seal a continuing game; RESET is current-level retry with a new episode, not a new session.
+- Live P7 control, independent manual validation, source-linked decision summaries and Mac/Orb console service are not implemented. Current `run_live` closes the game when the solve run ends; cancellation is not a resumable pause. Existing witness receipt/target semantics remain intact. RESET is current-level retry with a new episode; human and P7 never share a game session.
 - Historical P7 decision prose and per-frame cognition cannot be reconstructed from missing data. The UI shows the available signals and marks those limits.
 - Full promotion failures and actual Chrome visual/mobile acceptance remain open.
 
 ## 下一动作
 
-1. Obtain user review of the written three-mode design. If approved, create an implementation plan for the first package: human live session with shared UI and broker-validated actions. Do not claim real controls are provided by the current offline HTML.
-2. Follow with P7 solver attachment, safe pause and same-game takeover as separate packages. Preserve independent witness receipt semantics and attribute human/mixed results correctly.
+1. Use the revised P7-first design as the review basis. Next implementation package is the real-time autonomous P7 main flow: connect existing run lifecycle, actual frames, decision summaries and cognition revisions. Do not build manual-first or same-game takeover. Current offline HTML does not provide live control.
+2. Follow with genuine P7 pause/resume and then independent manual validation. Keep manual persistence, history, model calls and game results isolated from P7; verify isolation rather than handoff.
 3. Open the delivered replay with `make p7-console`. Actual visual/mobile checks still require a functioning existing Chrome transport.
 4. For subsequent real solving, use configured Pi Codex `gpt-6.1-sol`, keep exact-route injection disabled, and report current actions, replay prefixes, level progress and stop cause separately.
 5. Diagnose promotion failures from complete retained test output before claiming a release gate PASS.
