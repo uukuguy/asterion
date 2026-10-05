@@ -74,3 +74,10 @@ Final extension test34 PASS/six external-Pi skips; related installed checks pass
 
 
 Final-run background UI: `/tmp/p7-final-real-console.html`, SHA256 `817a7e7be75d2f854c4239d5e3ba67befa14ede7c89af3e271380b8ebe38cfa5`. One focused actual-export DOM test passed all45 historical positions: four revisions, four task declarations, three started/completed calculation pairs,15 plans,16 feedback. Started cards remain unfinished; completed cards show actual elapsed time and remove the unfinished marker. Zero JS errors/network requests. Actual selected-run HTTP replay/page/state200; complete replay event list equals export,zero provider/actions,server cleaned. Commands: `/tmp/p7-final-real-console-acceptance.md`. No repeated full DOM suite or historical-directory listing.
+
+
+## Persistent console and authorized continuation
+
+User requested saving the solved baseline and continuing levels; exported HTML must not depend on a temporary directory. The sealed/replayed two-level run remains unchanged. Console export uses its existing default persistent output `.asterion-private/prime-p7-live/p7-live-20261005221958-e3d73e5ff66547bc9a6ff731/p7-console.html`; acceptance report/manifest are archived in that run’s `console-acceptance/`. A regenerated projection differs from the previous temporary export, so it is under fresh background verification rather than inheriting the earlier byte hash.
+
+Next bounded scope is this same SP80 game through Level6 in one fresh verified run:900 seconds, baseline action cap518. The completed prior process cannot be resumed; the existing verified route starts a new environment and naturally carries its own computation/WorldMap through levels. No successful action prefix is injected. Full25 scope remains unapproved.

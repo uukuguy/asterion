@@ -3736,3 +3736,4 @@
 - 22:25 Fixed-ID721c8ae5 freshSP80 Level2 PASS:16actions/0RESET/3successfulcells/4revisions; sealed/replayed/cleaned,guestinactive. Program exports/cross-run reuse unverified.
 - Final real-console45cursors/three calculation pairs/HTTP replay PASS; documented bounded solving evidence and unresolved reuse,listing latency,promotion.
 - Recorded deployed computation/two-level evidence and remaining boundaries so future sessions resume accurately [fa564c92].
+- User authorized later SP80 levels; persisted two-level console/evidence in its run directory, regenerated projection verification pending.
