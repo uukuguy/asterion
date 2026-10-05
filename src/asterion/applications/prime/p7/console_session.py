@@ -15,6 +15,7 @@ import threading
 import time
 
 from .console_snapshot import build_console_snapshot
+from .console_preferences import read_selection, valid_selection, write_selection
 from .game import public_game_catalog
 from .live import safe_run_id
 
@@ -24,7 +25,7 @@ _COMMAND_ID = re.compile(r"[A-Za-z0-9_-]{1,80}\Z")
 _SECONDS = 900
 _ACTIVE = {"starting", "running", "stopping"}
 _MANUAL_ERRORS = {"session-busy", "command-invalid", "command-conflict", "command-limit",
-                  "game-unavailable", "session-mismatch", "observation-stale", "action-invalid",
+                  "game-unavailable", "level-unavailable", "session-mismatch", "observation-stale", "action-invalid",
                   "action-unavailable", "manual-unavailable", "manual-uncertain",
                   "manual-cleanup-unconfirmed", "manual-expired"}
 _MANUAL_IDLE = {"session_id": None, "game_id": None, "state": "idle", "observation_version": 0,
@@ -95,6 +96,8 @@ class ConsoleSession:
         self._guest = guest_machine
         self._catalog = tuple(deepcopy(catalog if catalog is not None else public_game_catalog(self._arc_root)))
         self._games = {entry["game_id"] for entry in self._catalog}
+        self._game_levels = {entry["game_id"]: entry["win_levels"] for entry in self._catalog}
+        self._selection = read_selection(self._root, self._game_levels)
         self._runs = self._root / ".asterion-private" / "prime-p7-live"
         self._process_factory = process_factory
         self._process_stopper = process_stopper
@@ -124,6 +127,7 @@ class ConsoleSession:
     def view(self) -> dict[str, object]:
         with self._lock:
             value = deepcopy(self._view)
+            value["selection"] = deepcopy(self._selection)
             manual = self._manual
         value["manual"] = deepcopy(manual.view() if manual is not None else _MANUAL_IDLE)
         return value
@@ -157,6 +161,14 @@ class ConsoleSession:
             with self._lock:
                 if self._closed:
                     raise ConsoleSessionError("session-busy")
+                if method in {"open", "act"}:
+                    # A retry can return an old acknowledgement. Remember the
+                    # current controller position, never that cached response.
+                    current = self._manual.view()
+                    choice = {"game_id": current["game_id"], "level": current.get("level", 1)}
+                    if current["state"] == "ready" and valid_selection(choice, self._game_levels):
+                        self._selection = choice
+                        write_selection(self._root, choice, self._game_levels)
             return deepcopy(result)
         except Exception as error:
             raise self._manual_error(error) from None
@@ -165,11 +177,13 @@ class ConsoleSession:
                 self._manual_inflight = False
                 self._manual_done.set()
 
-    def manual_open(self, game_id: str, command_id: str) -> dict:
+    def manual_open(self, game_id: str, command_id: str, level: int = 1) -> dict:
         if type(game_id) is not str or game_id not in self._games:
             raise ConsoleSessionError("game-unavailable")
         wins = next(entry["win_levels"] for entry in self._catalog if entry["game_id"] == game_id)
-        return self._manual_call("open", (game_id, wins, command_id), game_id=game_id)
+        if type(level) is not int or not 1 <= level <= wins:
+            raise ConsoleSessionError("level-unavailable")
+        return self._manual_call("open", (game_id, wins, command_id, level), game_id=game_id)
 
     def manual_action(self, session_id: str, command_id: str, observation_version: int,
                       action: str, data: dict) -> dict:

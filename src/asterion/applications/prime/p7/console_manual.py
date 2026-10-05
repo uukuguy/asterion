@@ -34,10 +34,12 @@ class ManualConsoleError(ValueError):
 def _observation(value: object, game_id: str, win_levels: int) -> dict:
     try:
         if (type(value) is not dict
-                or set(value) != {'game_id', 'win_levels', 'levels_completed', 'state', 'available_actions', 'frame'}
+                or set(value) != {'game_id', 'win_levels', 'levels_completed', 'current_level',
+                                  'state', 'available_actions', 'frame'}
                 or value['game_id'] != game_id or type(value['win_levels']) is not int
                 or value['win_levels'] != win_levels or type(value['levels_completed']) is not int
                 or not 0 <= value['levels_completed'] <= win_levels
+                or type(value['current_level']) is not int or not 1 <= value['current_level'] <= win_levels
                 or value['state'] not in ('NOT_FINISHED', 'WIN', 'GAME_OVER')):
             raise ValueError
         actions, frame = value['available_actions'], value['frame']
@@ -74,23 +76,72 @@ def _snapshot(observation: dict, version: int, action_count: int) -> dict:
                     'completed_level_count': completed, 'win_levels': wins, 'target_level': wins,
                     'primitive_action_count': action_count, 'replay_verified': False,
                     'sealed_trace': False, 'model': None},
-            'levels': [{'level': min(completed + 1, wins), 'status': 'manual', 'frames': [frame],
+            'levels': [{'level': observation['current_level'], 'status': 'manual', 'frames': [frame],
                         'actions': [], 'decisions': [], 'cognition_timeline': [],
                         'cognition': {'scope': 'unavailable', 'stable_description': '独立人工验证，不生成 P7 认知。',
                                       'updates': [], 'world_map_facts': {}}, 'receipt': None}],
             'decisions': [], 'warnings': []}
 
 
+class _ManualEngine:
+    """HUMAN-only direct level adapter for arc-agi 0.9.9 / arcengine 0.9.3.
+
+    The pinned local wrapper has no public game accessor. Its typed ``_game``
+    is the sole SDK-private seam; all level selection, reset, rendering and
+    actions then use public SDK APIs. No game source or score is inspected or
+    modified. P7 continues to use its unchanged fresh-L1 ArcadeEngine.
+    """
+
+    def __init__(self, engine, level: int):
+        from importlib.metadata import version
+        from arc_agi.local_wrapper import LocalEnvironmentWrapper
+        from arcengine import ARCBaseGame
+
+        if (version('arc-agi'), version('arcengine')) != ('0.9.9', '0.9.3'):
+            raise ManualConsoleError('manual-unavailable')
+        environment = engine._environment
+        if not isinstance(environment, LocalEnvironmentWrapper) or not isinstance(environment._game, ARCBaseGame):
+            raise ManualConsoleError('manual-unavailable')
+        self._engine, self._game = engine, environment._game
+        self._latest = dict(engine.observe())
+        if (type(level) is not int or not 1 <= level <= self._latest['win_levels']
+                or self._latest['levels_completed'] != 0 or self._latest['state'] != 'NOT_FINISHED'):
+            raise ManualConsoleError('manual-unavailable')
+        self._game.set_level(level - 1)
+        self._render()
+
+    def _render(self):
+        # set_level / level_reset do not refresh the wrapper's last FrameData.
+        # Render the actual sprites without issuing an action (RESET at action
+        # count zero would otherwise perform a full reset and return to L1).
+        self._latest['frame'] = self._game.camera.render(self._game.current_level.get_sprites()).tolist()
+
+    def observe(self) -> dict:
+        return {'game_id': self._engine.game_id, **deepcopy(self._latest),
+                'current_level': self._game.level_index + 1}
+
+    def step(self, action: str, data: dict) -> dict:
+        if action == 'RESET':
+            self._game.level_reset()
+            # Public level_reset preserves the SDK score and sets NOT_FINISHED.
+            self._latest['state'] = 'NOT_FINISHED'
+            self._render()
+        else:
+            # The SDK owns the complete action/animation and real score change.
+            self._latest = dict(self._engine.step(action, data))
+        return self.observe()
+
+
 class _Worker:
     """Private JSON pipe to exactly one installed, isolated offline engine."""
 
-    def __init__(self, arc_root: Path, game_id: str):
+    def __init__(self, arc_root: Path, game_id: str, level: int = 1):
         self._directory = tempfile.TemporaryDirectory(prefix='asterion-manual-')
         self._process = None
         try:
             self._process = subprocess.Popen(
                 [sys.executable, '-I', '-m', __name__, '--arc-root', str(arc_root),
-                 '--game-id', game_id, '--recordings', self._directory.name],
+                 '--game-id', game_id, '--level', str(level), '--recordings', self._directory.name],
                 cwd=self._directory.name, env={'OPERATION_MODE': 'offline'},
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                 start_new_session=True, bufsize=0,
@@ -173,7 +224,7 @@ class ManualConsole:
         self._worker, self._observation, self._closed = None, None, False
         self._commands: dict[str, tuple[str, dict]] = {}
         self._created = self._last_action = 0.0
-        self._view = {'session_id': None, 'game_id': None, 'state': 'idle', 'observation_version': 0,
+        self._view = {'session_id': None, 'game_id': None, 'level': None, 'state': 'idle', 'observation_version': 0,
                       'episode_id': 0, 'action_count': 0, 'snapshot': None, 'last_action': None}
         self._stop = threading.Event()
         self._thread = threading.Thread(target=self._monitor, daemon=True, name='manual-console-expiry')
@@ -213,14 +264,16 @@ class ManualConsole:
                 raise ManualConsoleError('manual-cleanup-unconfirmed') from None
             self._worker = None
 
-    def open(self, game_id: str, win_levels: int, command_id: str) -> dict:
+    def open(self, game_id: str, win_levels: int, command_id: str, level: int = 1) -> dict:
         if not self._gate.acquire(blocking=False):
             raise ManualConsoleError('session-busy')
         try:
             if (type(game_id) is not str or len(game_id) > 80 or not _GAME_ID.fullmatch(game_id)
                     or type(win_levels) is not int or not 1 <= win_levels <= 100):
                 raise ManualConsoleError('game-unavailable')
-            signature = json.dumps(['open', game_id, win_levels])
+            if type(level) is not int or not 1 <= level <= win_levels:
+                raise ManualConsoleError('level-unavailable')
+            signature = json.dumps(['open', game_id, win_levels, level])
             prior = self._prior(command_id, signature)
             if prior is not None:
                 return prior
@@ -229,16 +282,17 @@ class ManualConsole:
             self._close_worker()
             self._change(state='closed')
             try:
-                self._worker = self._factory(self._arc_root, game_id)
+                self._worker = self._factory(self._arc_root, game_id, level)
                 value = _observation(self._worker.observe(), game_id, win_levels)
-                if value['levels_completed'] != 0 or value['state'] != 'NOT_FINISHED':
+                if (value['levels_completed'] != 0 or value['state'] != 'NOT_FINISHED'
+                        or value['current_level'] != level):
                     raise ManualConsoleError('manual-unavailable')
             except Exception:
                 self._close_worker()
                 raise ManualConsoleError('manual-unavailable') from None
             self._observation = value
             self._created = self._last_action = self._clock()
-            self._change(session_id='manual-' + secrets.token_hex(16), game_id=game_id, state='ready',
+            self._change(session_id='manual-' + secrets.token_hex(16), game_id=game_id, level=level, state='ready',
                          observation_version=0, episode_id=1, action_count=0,
                          snapshot=_snapshot(value, 0, 0), last_action=None)
             return self._remember(command_id, signature)
@@ -283,7 +337,7 @@ class ManualConsole:
             self._observation = value
             version, count = observation_version + 1, self._view['action_count'] + 1
             self._last_action = self._clock()
-            self._change(observation_version=version, action_count=count,
+            self._change(observation_version=version, action_count=count, level=value['current_level'],
                          episode_id=self._view['episode_id'] + int(action == 'RESET'),
                          snapshot=_snapshot(value, version, count),
                          last_action={'action': action, 'data': deepcopy(data), 'observation_version': version})
@@ -343,6 +397,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--arc-root', type=Path, required=True)
     parser.add_argument('--game-id', required=True)
+    parser.add_argument('--level', type=int, default=1)
     parser.add_argument('--recordings', type=Path, required=True)
     args = parser.parse_args()
     output_fd = os.dup(sys.stdout.fileno())
@@ -359,8 +414,9 @@ def main() -> int:
         if game.game_id != args.game_id:
             raise ValueError
         engine = ArcadeEngine(arc_root=args.arc_root, recordings_dir=args.recordings, game=game)
+        manual = _ManualEngine(engine, args.level)
         deadline, count = time.monotonic() + _TOTAL_SECONDS, 0
-        value = {'game_id': game.game_id, **engine.observe()}
+        value = manual.observe()
         while True:
             _observation(value, game.game_id, game.win_levels)
             body = json.dumps(value, separators=(',', ':'), allow_nan=False).encode() + b'\n'
@@ -379,7 +435,7 @@ def main() -> int:
             command = json.loads(raw)
             if type(command) is not dict or set(command) != {'action', 'data'}:
                 raise ValueError
-            value = {'game_id': game.game_id, **engine.step(command['action'], command['data'])}
+            value = manual.step(command['action'], command['data'])
             count += 1
         return 0
     except Exception:

@@ -3681,3 +3681,6 @@
 - 14:43 Record packaged console process verification, guest proxy repair and remaining release/visual/manual boundaries. `ac040db1`
 
 - 2026-10-05 — Verified independent playable selection: 79 Python, 39 DOM, installed SP80 actions/cleanup; promotion remains 13 failures/5 errors.
+- 2026-10-05 — 83a4f404: Open independent playable games on selection so humans can verify actions without entering P7 workflows.
+
+- 2026-10-05: Direct-level HUMAN verification: 112 Python, 44 DOM, installed SP80 L1/L2/L6/reset/restart PASS; full promotion remains non-PASS.

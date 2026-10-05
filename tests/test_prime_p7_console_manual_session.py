@@ -1,6 +1,7 @@
 """Application integration keeps human play independent from P7 runs."""
 
 from copy import deepcopy
+import json
 import threading
 
 from asterion.applications.prime.p7.console_session import ConsoleSessionError
@@ -17,10 +18,10 @@ class FakeManualController:
     def view(self):
         return deepcopy(self.current)
 
-    def open(self, game_id, win_levels, command_id):
-        self.calls.append(('open', game_id, win_levels, command_id))
+    def open(self, game_id, win_levels, command_id, level=1):
+        self.calls.append(('open', game_id, win_levels, command_id, level))
         self.current.update(session_id='manual-1', game_id=game_id, state='ready',
-                            observation_version=1, snapshot={'run': {'game_id': game_id}})
+                            level=level, observation_version=1, snapshot={'run': {'game_id': game_id}})
         return self.view()
 
     def act(self, session_id, command_id, observation_version, action, data):
@@ -40,6 +41,37 @@ class FakeManualController:
 
 
 class TestPrimeP7ConsoleManualSession(ConsoleSessionFixture):
+    def test_selected_game_and_level_survive_service_restart_without_launching(self):
+        manual = FakeManualController()
+        session = self.session(manual_controller=manual)
+        session.manual_open('test-1', 'open-second', 2)
+        self.assertEqual(manual.calls[0], ('open', 'test-1', 2, 'open-second', 2))
+        self.assertEqual(session.view()['selection'], {'game_id': 'test-1', 'level': 2})
+        session.close()
+        restarted = self.session()
+        self.assertEqual(restarted.view()['selection'], {'game_id': 'test-1', 'level': 2})
+        self.assertEqual(restarted.view()['manual']['state'], 'idle')
+        self.assertFalse(self.calls)
+        remembered = self.root / '.asterion-private' / 'p7-console-selection.json'
+        self.assertEqual(json.loads(remembered.read_text()), {'game_id': 'test-1', 'level': 2})
+
+    def test_invalid_levels_and_saved_choices_cannot_load_game_code(self):
+        manual = FakeManualController()
+        session = self.session(manual_controller=manual)
+        for level in (0, 3, True, '2', None):
+            with self.subTest(level=level), self.assertRaisesRegex(ConsoleSessionError, '^level-unavailable$'):
+                session.manual_open('test-1', 'invalid', level)
+        self.assertFalse(manual.calls)
+        directory = self.root / '.asterion-private'
+        directory.mkdir()
+        remembered = directory / 'p7-console-selection.json'
+        for choice in ({'game_id': '../private', 'level': 1}, {'game_id': 'test-1', 'level': 3},
+                       {'game_id': 'test-1', 'level': True}):
+            with self.subTest(choice=choice):
+                remembered.write_text(json.dumps(choice))
+                self.assertIsNone(self.session().view()['selection'])
+        self.assertFalse(self.calls)
+
     def test_session_exposes_manual_without_loading_game(self):
         before = self.session().view()
         self.assertIn('manual', before)
@@ -51,7 +83,7 @@ class TestPrimeP7ConsoleManualSession(ConsoleSessionFixture):
         session = self.session(manual_controller=manual)
         opened = session.manual_open('test-1', 'open')
         self.assertEqual(opened['state'], 'ready')
-        self.assertEqual(manual.calls[0], ('open', 'test-1', 2, 'open'))
+        self.assertEqual(manual.calls[0], ('open', 'test-1', 2, 'open', 1))
         session.manual_action('manual-1', 'action', 1, 'ACTION1', {})
         self.assertEqual(session.view()['manual']['action_count'], 1)
         self.assertEqual(session.view()['state'], 'idle')

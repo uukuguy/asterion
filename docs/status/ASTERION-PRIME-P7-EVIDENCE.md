@@ -806,3 +806,18 @@ Closing the game removed the temporary SDK recordings and confirmed the owned pr
 - Boundary: no new P7 model run; no new visual browser acceptance; no persisted manual trajectory or resumable pause.
 
 Local evidence: `/tmp/p7-manual-http-evidence.json`; wheel `/tmp/p7-manual-console-wheel/asterion-0.1.0-py3-none-any.whl`; installed interpreter `/tmp/p7-manual-console-installed/bin/python`.
+
+
+## Direct human levels and remembered selection — 2026-10-05
+
+The user approved direct human level selection and restoring both game and level across service restart. HUMAN uses the pinned `arc-agi 0.9.9` / `arcengine 0.9.3` adapter. Public level selection, reset and camera rendering produce genuine observations. Actual SDK current level is separate from real completed score. P7 retains its independent fresh L1 preset. A private preference contains only game ID and level. It does not contain game state, human history or P7 cognition. Current actions appear as highlighted buttons; HUMAN does not display missing P7 association warnings.
+
+The final installed-wheel HTTP smoke opened SP80 L1, L2 and L6 directly. Each level had a distinct real initial frame and zero completed score. ACTION4 changed its frame; RESET restored that selected level's initial frame. Six human actions ran, with zero P7 actions. An old L1 open retry returned its cached acknowledgement while current state and remembered selection remained L6. After closing the service, a new server at a different port recovered L6 metadata and opened the same real L6 initial frame. Temporary recordings and every owned worker process group were removed. No P7 run directory was created.
+
+- PASS: 112 focused console Python checks; 44 actual-asset DOM checks, including final installed-wheel offline HTML. Direct levels, restart choice, wrong-level replies, busy rail, current/armed button distinction and independent P7 controls are covered.
+- PASS: independent source review against pinned SDK selection/reset semantics, real score separation, metadata persistence, protected HTTP writes and UI races. Final HUMAN evidence-strip follow-up reviewed separately.
+- PASS: final wheel build/isolated install, real HTTP smoke, lint, docs and diff checks.
+- Non-PASS: promotion attempt ran 3888 tests, with 13 failures, 5 errors and 4 skips. Retained tail identifies the existing TypeScript source-detachment literals; it does not show the cause of every failure. Log: `/tmp/p7-direct-level-promotion.log`.
+- Boundary: no new P7 model run or completion; no restored human board checkpoint, human history/export or resumable P7 pause. Visual browser acceptance remains unverified.
+
+Local evidence: `/tmp/p7-direct-level-http-evidence.json`; final wheel `/tmp/p7-direct-level-wheel/asterion-0.1.0-py3-none-any.whl`; self-contained replay `/tmp/p7-direct-level-replay.html`; DOM output `/tmp/p7-direct-level-dom.log`.

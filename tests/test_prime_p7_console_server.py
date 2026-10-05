@@ -123,6 +123,28 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
         self.assertEqual(json.loads(body), {'error': 'manual-unavailable'})
         self.assertEqual(self.session_.view()['revision'], 0)
 
+    def test_manual_direct_level_uses_exact_shape_and_preserves_p7_state(self):
+        request = {'game_id': 'test-1', 'command_id': 'level-two', 'level': 2}
+        for level in (True, '2', None, 2.0):
+            with self.subTest(level=level):
+                self.assertEqual(self.write('/api/manual/open', {**request, 'level': level})[0], 400)
+        for level in (0, 3):
+            with self.subTest(level=level):
+                status, _, body = self.write('/api/manual/open', {**request, 'level': level})
+                self.assertEqual(status, 409)
+                self.assertEqual(json.loads(body), {'error': 'level-unavailable'})
+        self.assertEqual(self.write('/api/manual/open', {**request, 'extra': 1})[0], 400)
+        self.assertFalse(self.manual.calls)
+        status, _, body = self.write('/api/manual/open', request)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['level'], 2)
+        status, _, body = self.request('GET', '/api/state')
+        state = json.loads(body)
+        self.assertEqual(state['selection'], {'game_id': 'test-1', 'level': 2})
+        self.assertEqual(state['state'], 'idle')
+        self.assertIsNone(state['run_id'])
+        self.assertFalse(self.calls)
+
     def test_real_renderer_serves_only_same_origin_connections_and_hashed_assets(self):
         from asterion.applications.prime.p7.console_export import render_console
         self.server.renderer = render_console

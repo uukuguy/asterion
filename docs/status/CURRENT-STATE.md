@@ -23,7 +23,7 @@
 - `planning_background` combines semantic cognition, WorldMap, simulator and retrodiction as advisory context; observation/action/update responses refresh it with an aggregate response budget.
 - Runtime cognition logs present the stable Chinese gameplay guide and post-action cognition changes; the persistent hypothesis ledger remains separate from bounded model projections.
 - `asterion arc-console` exports one P7 run as an offline HTML level console; final cognition and unaligned model signals remain explicitly scoped evidence.
-- `make p7-console` now serves the P7 autonomous workspace. A fixed finite L1 witness runs through the existing Make/wheel/Orb operator. Source events bind explicit public decisions and cognition revisions to observed actions; replay remains independent. Focused Python/DOM and final code reviews pass; packaged live decisions/actions/cognition and stop/cleanup are verified. Full promotion remains non-PASS; no fresh SP80 completion follows. Game selection opens an independent SDK-only manual game with real actions; P7 start closes it and starts fresh. Human actions never enter P7 history or learning. Manual recordings are temporary and removed at close.
+- `make p7-console` now serves the P7 autonomous workspace. A fixed finite L1 witness runs through the existing Make/wheel/Orb operator. Source events bind explicit public decisions and cognition revisions to observed actions; replay remains independent. Focused Python/DOM and final code reviews pass; packaged live decisions/actions/cognition and stop/cleanup are verified. Full promotion remains non-PASS; no fresh SP80 completion follows. Game selection opens an independent SDK-only manual game with real actions. Human play can directly select any catalog level; SDK current level and actual completed score remain separate. A private metadata preference restores the last game/level on service restart, at that level’s initial pose. Current actions use button highlights. P7 start closes manual and starts fresh at L1. Human actions never enter P7 history or learning. Manual recordings are temporary and removed at close.
 
 ## Open Problems
 
@@ -65,7 +65,8 @@
 - `src/asterion/applications/prime/p7/live.py` — live RPC and worker plumbing
 - `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
 - `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
-- `src/asterion/applications/prime/p7/console_manual.py` — isolated human game worker, versioned commands and finite cleanup
+- `src/asterion/applications/prime/p7/console_manual.py` — isolated human game worker, pinned SDK level selection/reset, versioned commands and finite cleanup
+- `src/asterion/applications/prime/p7/console_preferences.py` — validated last game/level metadata only; no game history or P7 state
 - `src/asterion/applications/prime/p7/console_assets/` — packaged Tailwind CSS, canvas playback and Chinese process UI
 - `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` — approved P7-first console with replay and independent manual validation; same-game takeover withdrawn
 

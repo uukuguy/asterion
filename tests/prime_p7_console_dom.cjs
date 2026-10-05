@@ -141,13 +141,17 @@ test('read-only action panel follows frame availability and preserves final mean
   assert.deepEqual(availableNames(), ['ACTION1', 'ACTION4']);
   assert.equal(highlighted().length, 1);
   assert.equal(highlighted()[0].dataset.availableAction, 'ACTION4');
-  assert.match(highlighted()[0].parentElement.textContent, /当前动作/);
+  assert.equal(highlighted()[0].classList.contains('is-current'), true);
+  assert.doesNotMatch(highlighted()[0].parentElement.textContent, /当前动作/);
+  assert.equal($('current-action'), null);
   assert.equal($('unavailable-current-action').hidden, true);
   $('next-frame').click();
   assert.deepEqual(availableNames(), ['ACTION1', 'ACTION5']);
   assert.equal(highlighted().length, 1);
   assert.equal($('unavailable-current-action').hidden, false);
-  assert.match($('unavailable-current-action').textContent, /已执行／当前不可用/);
+  assert.equal(highlighted()[0].dataset.availableAction, 'ACTION4');
+  assert.match(highlighted()[0].getAttribute('aria-label'), /已执行／当前不可用/);
+  assert.doesNotMatch($('unavailable-current-action').textContent, /已执行／当前不可用|当前动作/);
   assert.equal($('unavailable-current-action').querySelector('button').disabled, true);
   $('level-2').click();
   assert.deepEqual(availableNames(), []);
@@ -167,7 +171,7 @@ test('action panel does not invent availability or use cognition without final s
   assert.doesNotMatch(app.$('available-actions').textContent, /不得展示/);
   app.$('next-frame').click();
   assert.match(app.$('available-actions').textContent, /未记录可用动作/);
-  assert.match(app.$('unavailable-current-action').textContent, /已执行／可用性未记录/);
+  assert.match(app.$('unavailable-current-action').querySelector('button').getAttribute('aria-label'), /已执行／可用性未记录/);
   assert.deepEqual(app.errors, []);
   app.dom.window.close();
 });
@@ -270,7 +274,8 @@ test('real assets: slider, animation/action link, tabs, compare, level switch, p
   assert.equal($('frame-counter').textContent, '1 / 3');
   assert.equal(paints[0], '#FF851B');
   $('frame-slider').value = '1'; $('frame-slider').dispatchEvent(new dom.window.Event('input'));
-  assert.equal($('current-action').textContent, 'ACTION4'); // intermediate layer belongs to action
+  assert.equal($('unavailable-current-action').querySelector('[aria-current="true"]').dataset.availableAction, 'ACTION4'); // intermediate layer belongs to action
+  assert.equal($('current-action'), null);
   $('next-frame').click();
   assert.equal($('frame-counter').textContent, '3 / 3');
   assert.equal(paints.at(-1), '#1E93FF');
@@ -333,12 +338,12 @@ const liveConfig = { token: 'test-token', games: [{ game_id: 'sp80-test', alias:
 const view = (snapshot = fixture(), state = 'running') => ({ session_id: 'session-1', state, game_id: snapshot.run.game_id, run_id: snapshot.run.run_id, cleanup_confirmed: false, snapshot, revision: 1 });
 const response = (value, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => value });
 const idleView = () => ({ session_id: null, state: 'idle', game_id: null, run_id: null, cleanup_confirmed: true, snapshot: null, revision: 0 });
-const manualView = (game_id = 'sp80-test', color = 12, version = 0) => ({
-  session_id: `manual-${game_id}`, game_id, state: 'ready', observation_version: version,
+const manualView = (game_id = 'sp80-test', color = 12, version = 0, level = 1) => ({
+  session_id: `manual-${game_id}`, game_id, level, state: 'ready', observation_version: version,
   episode_id: 1, action_count: version, last_action: version ? { action: 'ACTION4', data: {}, observation_version: version } : null,
   snapshot: { schema: 'asterion.arc-agi3-p7-console/v1', generated_at: null,
-    run: { game_id, run_id: null, status: 'manual', win_levels: 3, completed_level_count: 0, primitive_action_count: version },
-    levels: [{ level: 1, status: 'manual', frames: [{ id: `manual-${version}`, grid: [[color, color], [color, color]], available_actions: ['ACTION1', 'ACTION4', 'ACTION6', 'RESET'], state: 'NOT_FINISHED', levels_completed: 0 }], actions: [], decisions: [], cognition: { scope: 'unavailable' } }],
+    run: { game_id, run_id: null, status: 'manual', win_levels: game_id === 'ls20-test' ? 7 : 3, completed_level_count: 0, primitive_action_count: version },
+    levels: [{ level, status: 'manual', frames: [{ id: `manual-${version}`, grid: [[color, color], [color, color]], available_actions: ['ACTION1', 'ACTION4', 'ACTION6', 'RESET'], state: 'NOT_FINISHED', levels_completed: 0 }], actions: [], decisions: [], cognition: { scope: 'unavailable' } }],
     decisions: [], warnings: [] },
 });
 const changeGame = (app, game) => { app.$('game-select').value = game; app.$('game-select').dispatchEvent(new app.dom.window.Event('change')); };
@@ -347,7 +352,7 @@ const stateWithManual = (manual) => ({ ...idleView(), manual });
 test('selected game opens real playable manual session without P7 and idle polls retain it', async () => {
   let manual = null;
   const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
-    if (url === '/api/manual/open') { const game = JSON.parse(options.body).game_id; manual = manualView(game, game === 'ls20-test' ? 9 : 12); return response(manual); }
+    if (url === '/api/manual/open') { const choice = JSON.parse(options.body); manual = manualView(choice.game_id, choice.game_id === 'ls20-test' ? 9 : 12, 0, choice.level); return response(manual); }
     return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
   } });
   try {
@@ -369,21 +374,139 @@ test('selected game opens real playable manual session without P7 and idle polls
     app.$('level-2').click();
     assert.equal(app.$('board-empty').hidden, false);
     assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => button.disabled));
+    await settle();
+    const opens = app.requests.filter((entry) => entry.url === '/api/manual/open');
+    assert.equal(JSON.parse(opens.at(-1).options.body).level, 2);
+    assert.equal(app.$('board-empty').hidden, true);
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 02');
+    assert.match(app.$('board-title').textContent, /关卡 2 · 人工试玩/);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => !button.disabled));
     assert.equal(app.requests.some((entry) => entry.url === '/api/start'), false);
     assert.deepEqual(app.errors, []);
   } finally { app.dom.window.close(); }
 });
 
-test('startup resumes existing manual game and observation without opening or resetting it', async () => {
-  const manual = manualView('ls20-test', 9, 4);
+test('startup resumes existing manual game, actual level and observation without opening or resetting it', async () => {
+  const manual = manualView('ls20-test', 9, 4, 3);
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
   try {
     await settle();
     assert.equal(app.$('console-mode').value, 'manual');
     assert.equal(app.$('game-select').value, 'ls20-test');
     assert.equal(app.$('action-total').textContent, '4');
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(app.$('level-3').getAttribute('aria-current'), 'true');
+    assert.equal(app.$('level-progress').textContent, '0 / 7');
     assert.equal(app.dom.window.__ASTERION_STATE__.levels[0].frames[0].id, 'manual-4');
     assert.equal(app.requests.some((entry) => entry.url === '/api/manual/open'), false);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('fresh server selection restores the saved game and direct level without implying completed levels', async () => {
+  const selection = { game_id: 'ls20-test', level: 3 };
+  let manual = null;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/open') {
+      const body = JSON.parse(options.body); manual = manualView(body.game_id, 9, 0, body.level); return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : { ...stateWithManual(manual), selection });
+  } });
+  try {
+    await settle();
+    const opens = app.requests.filter((entry) => entry.url === '/api/manual/open');
+    assert.equal(opens.length, 1);
+    const body = JSON.parse(opens[0].options.body);
+    assert.equal(body.game_id, 'ls20-test'); assert.equal(body.level, 3);
+    assert.equal(app.$('game-select').value, 'ls20-test');
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(app.$('level-progress').textContent, '0 / 7');
+    assert.equal(app.$('run-status').textContent, '人工试玩');
+    assert.doesNotMatch(app.$('level-list').textContent, /已过关|已成功/);
+    assert.match(app.$('level-1').textContent, /可直接试玩/);
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => !button.disabled));
+    app.$('level-3').click(); await settle(); // The actual current observation does not open another engine.
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/open').length, 1);
+    app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    app.$('level-1').click();
+    app.$('console-mode').value = 'manual'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/open').length, 1);
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('legacy manual view infers the actual frame level and invalid saved selection falls back to level 1', async () => {
+  const legacy = manualView('ls20-test', 9, 2, 3); delete legacy.level;
+  const resumed = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(legacy)) });
+  try {
+    await settle(); assert.equal(resumed.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(resumed.requests.some((entry) => entry.url === '/api/manual/open'), false);
+    assert.deepEqual(resumed.errors, []);
+  } finally { resumed.dom.window.close(); }
+  for (const selection of [{ game_id: 'unknown', level: 3 }, { game_id: 'ls20-test', level: 8 }, { game_id: 'ls20-test', level: '3' }, null]) {
+    const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url === '/api/manual/open' ? manualView() : { ...idleView(), selection }) });
+    try {
+      await settle(); const body = JSON.parse(app.requests.find((entry) => entry.url === '/api/manual/open').options.body);
+      assert.equal(body.game_id, 'sp80-test'); assert.equal(body.level, 1);
+      assert.equal(app.$('board-kicker').textContent, 'LEVEL 01');
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
+test('direct level opening locks the rail until its exact response and changing game starts at level 1', async () => {
+  let manual = manualView(), releaseOpen;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/open') {
+      const body = JSON.parse(options.body);
+      if (body.level === 3) return new Promise((resolve) => { releaseOpen = resolve; });
+      manual = manualView(body.game_id, 9, 0, body.level); return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('level-3').click(); await settle();
+    const request = app.requests.find((entry) => entry.url === '/api/manual/open');
+    assert.equal(JSON.parse(request.options.body).level, 3);
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(app.$('board-empty').hidden, false);
+    assert.ok([...app.dom.window.document.querySelectorAll('.level-button')].every((button) => button.disabled));
+    app.$('level-2').dispatchEvent(new app.dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/open').length, 1);
+    manual = manualView('sp80-test', 9, 0, 3); releaseOpen(response(manual)); await settle();
+    assert.equal(app.$('board-empty').hidden, true);
+    assert.equal(app.$('level-3').disabled, false);
+    assert.equal(app.$('level-progress').textContent, '0 / 3');
+    changeGame(app, 'ls20-test'); await settle();
+    const next = JSON.parse(app.requests.filter((entry) => entry.url === '/api/manual/open').at(-1).options.body);
+    assert.equal(next.game_id, 'ls20-test'); assert.equal(next.level, 1);
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 01');
+    assert.deepEqual(app.errors, []);
+  } finally { app.dom.window.close(); }
+});
+
+test('direct level open rejects a different actual level and retry keeps the original choice', async () => {
+  let manual = manualView(), wrongLevel = true;
+  const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
+    if (url === '/api/manual/open') {
+      const body = JSON.parse(options.body);
+      manual = manualView(body.game_id, 9, 0, wrongLevel ? 1 : body.level); return response(manual);
+    }
+    return response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual));
+  } });
+  try {
+    await settle(); app.$('level-3').click(); await settle();
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(app.$('board-empty').hidden, false);
+    assert.equal(app.$('retry-command').hidden, false);
+    assert.ok([...app.dom.window.document.querySelectorAll('.level-button')].every((button) => button.disabled));
+    wrongLevel = false; app.$('retry-command').click(); await settle();
+    const requests = app.requests.filter((entry) => entry.url === '/api/manual/open');
+    assert.equal(requests.length, 2);
+    assert.deepEqual(JSON.parse(requests[0].options.body), JSON.parse(requests[1].options.body));
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
+    assert.equal(app.$('board-empty').hidden, true);
     assert.deepEqual(app.errors, []);
   } finally { app.dom.window.close(); }
 });
@@ -425,6 +548,9 @@ test('manual opening disables selection and active session poll rejects its dela
   try {
     await settle(); assert.equal(app.$('run-start').disabled, true);
     assert.equal(app.$('game-select').disabled, true);
+    assert.ok([...app.dom.window.document.querySelectorAll('.level-button')].every((button) => button.disabled));
+    app.$('level-2').dispatchEvent(new app.dom.window.MouseEvent('click', { bubbles: true }));
+    assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/open').length, 1);
     current = view(); app.tick(); await settle(); releaseOpen(response(manualView())); await settle();
     assert.equal(app.$('run-id').textContent, 'test-run');
     assert.equal(app.$('frame-counter').textContent, '3 / 3');
@@ -490,7 +616,12 @@ test('manual buttons send versioned actions once and transport retry retains exa
     const body = JSON.parse(actions[0].options.body);
     assert.equal(body.session_id, 'manual-sp80-test'); assert.equal(body.observation_version, 0); assert.equal(body.action, 'ACTION4'); assert.deepEqual(body.data, {});
     assert.equal(app.$('action-total').textContent, '1');
-    assert.equal(app.$('current-action').textContent, '人工操作 · ACTION4');
+    const current = app.$('available-actions').querySelector('[aria-current="true"]');
+    assert.equal(current.dataset.availableAction, 'ACTION4');
+    assert.equal(current.classList.contains('is-current'), true);
+    assert.equal(app.$('current-action'), null);
+    assert.equal(app.$('current-action-strip').hidden, true);
+    assert.doesNotMatch(app.$('board-section').textContent, /人工操作 · ACTION4|当前动作/);
     assert.equal(app.paints.at(-1), '#1E93FF');
     assert.equal(app.$('decision-count').textContent, '0');
     assert.equal(app.$('cognition-count').textContent, '0');
@@ -499,17 +630,44 @@ test('manual buttons send versioned actions once and transport retry retains exa
   } finally { app.dom.window.close(); }
 });
 
+test('manual action strip only shows real measurements and never suggests a missing P7 association', async () => {
+  for (const observations of [[], ['蓝色物件向右移动。']]) {
+    const manual = manualView('sp80-test', 9, 1);
+    const level = manual.snapshot.levels[0];
+    level.frames.unshift({ ...level.frames[0], id: 'manual-before' });
+    level.actions = [{ id: 'manual-action', name: 'ACTION4', before_frame: 'manual-before', after_frame: 'manual-1', data: {}, visual_observations: observations }];
+    const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : stateWithManual(manual)) });
+    try {
+      await settle();
+      assert.equal(app.$('available-actions').querySelector('.is-current').dataset.availableAction, 'ACTION4');
+      assert.equal(app.$('current-action-link').hidden, true);
+      assert.equal(app.$('current-action-link').textContent, '');
+      assert.equal(app.$('current-action-strip').hidden, observations.length === 0);
+      assert.equal(app.$('current-action-evidence').hidden, observations.length === 0);
+      assert.doesNotMatch(app.$('current-action-strip').textContent, /P7|当前动作|ACTION4/);
+      if (observations.length) assert.match(app.$('current-action-evidence').textContent, /蓝色物件向右移动/);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
 test('manual ACTION6 waits for board click and sends exact grid coordinates; keyboard stays board-scoped', async () => {
-  let manual = manualView();
+  let manual = manualView('sp80-test', 9, 1);
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [] } : url.startsWith('/api/manual/') ? manual : stateWithManual(manual)) });
   try {
     await settle();
     const canvas = app.$('board-canvas'); canvas.getBoundingClientRect = () => ({ left: 10, top: 20, width: 100, height: 100 });
     app.$('available-actions').querySelector('[data-available-action="ACTION6"]').click(); await settle();
     assert.equal(app.requests.some((entry) => entry.url === '/api/manual/action'), false);
+    const armed = app.$('available-actions').querySelector('.is-armed');
+    assert.equal(armed.dataset.availableAction, 'ACTION6');
+    assert.equal(armed.getAttribute('aria-pressed'), 'true');
+    assert.equal(armed.hasAttribute('aria-current'), false);
+    assert.equal(app.$('available-actions').querySelector('.is-current').dataset.availableAction, 'ACTION4');
     canvas.dispatchEvent(new app.dom.window.MouseEvent('click', { clientX: 85, clientY: 45, bubbles: true })); await settle();
     const request = app.requests.find((entry) => entry.url === '/api/manual/action');
     assert.deepEqual(JSON.parse(request.options.body).data, { x: 1, y: 0 });
+    assert.equal(app.$('available-actions').querySelector('.is-armed'), null);
     app.dom.window.document.body.dispatchEvent(new app.dom.window.KeyboardEvent('keydown', { key: '1', bubbles: true })); await settle();
     assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
     app.$('board-section').dispatchEvent(new app.dom.window.KeyboardEvent('keydown', { key: '1', repeat: true, bubbles: true })); await settle();
@@ -540,12 +698,12 @@ test('manual busy operation rejects extra clicks and closed or uncertain session
   }
 });
 
-test('closed manual session reopens selected game with a fresh command and no P7 start', async () => {
-  let manual = manualView('ls20-test'), opens = 0;
+test('closed manual session reopens the selected game and actual level with a fresh command and no P7 start', async () => {
+  let manual = manualView('ls20-test', 9, 0, 3), opens = 0;
   const app = launch(fixture(), { liveConfig, fetch: async (url, options) => {
     if (url === '/api/runs') return response({ runs: [] });
     if (url === '/api/manual/close') { manual = { ...manual, state: 'closed' }; return response(manual); }
-    if (url === '/api/manual/open') { opens += 1; manual = manualView(JSON.parse(options.body).game_id); return response(manual); }
+    if (url === '/api/manual/open') { opens += 1; const body = JSON.parse(options.body); manual = manualView(body.game_id, 9, 0, body.level); return response(manual); }
     return response(stateWithManual(manual));
   } });
   try {
@@ -557,6 +715,8 @@ test('closed manual session reopens selected game with a fresh command and no P7
     const open = app.requests.find((entry) => entry.url === '/api/manual/open');
     assert.equal(opens, 1);
     assert.equal(JSON.parse(open.options.body).game_id, 'ls20-test');
+    assert.equal(JSON.parse(open.options.body).level, 3);
+    assert.equal(app.$('board-kicker').textContent, 'LEVEL 03');
     assert.notEqual(JSON.parse(open.options.body).command_id, JSON.parse(close.options.body).command_id);
     assert.equal(app.$('manual-close').textContent, '结束试玩');
     assert.ok([...app.$('available-actions').querySelectorAll('button')].every((button) => !button.disabled));
@@ -600,15 +760,20 @@ test('live replacement follows newest frame; replay preserves historical selecti
   let current = view(), revision = 1;
   const app = launch(fixture(), { liveConfig, fetch: async (url) => response(url === '/api/runs' ? { runs: [{run_id:'old-run',game_id:'sp80-test'}] } : url === '/api/replay/old-run' ? {...fixture(), run: {...fixture().run, run_id:'old-run'}} : current) });
   await settle(); assert.equal(app.$('frame-counter').textContent, '3 / 3');
+  assert.equal(app.$('unavailable-current-action').querySelector('.is-current').dataset.availableAction, 'ACTION4');
+  assert.equal(app.$('unavailable-current-action').querySelector('button').disabled, true);
+  assert.equal(app.$('current-action'), null);
   const next = fixture(); next.levels[0].frames.push({ id: 'f3', grid: [[14]], state: 'NOT_FINISHED', levels_completed: 0, available_actions: ['ACTION4'] });
   current = {...view(next), revision: ++revision}; app.tick(); await settle();
   assert.equal(app.$('frame-counter').textContent, '4 / 4');
   assert.equal(app.paints.at(-1), '#4FCC30');
   assert.equal(app.$('available-actions').querySelector('button').disabled, true);
+  assert.equal(app.$('available-actions').querySelector('.is-current'), null); // no action links to the new observation
   app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
   app.$('frame-slider').value = '1'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
   current = {...view(next), revision: ++revision}; app.tick(); await settle();
   assert.equal(app.$('frame-counter').textContent, '2 / 4');
+  assert.equal(app.$('unavailable-current-action').querySelector('[aria-current="true"]').dataset.availableAction, 'ACTION4');
   app.$('play-toggle').click(); app.$('play-toggle').click();
   assert.equal(app.requests.some((request) => request.url === '/api/stop'), false);
   assert.equal(app.$('replay-run').options.length, 1);

@@ -153,9 +153,12 @@ class _Handler(BaseHTTPRequestHandler):
             keys = ({"game_id", "command_id"} if self.path in {"/api/start", "/api/manual/open"}
                     else {"session_id", "command_id", "observation_version", "action", "data"}
                     if self.path == "/api/manual/action" else {"session_id", "command_id"})
-            if type(value) is not dict or set(value) != keys:
+            if type(value) is not dict or (set(value) != keys
+                    and not (self.path == "/api/manual/open" and set(value) == keys | {"level"})):
                 raise ValueError
-            if any(type(v) is not str for key, v in value.items() if key not in {"observation_version", "data"}):
+            if any(type(v) is not str for key, v in value.items() if key not in {"observation_version", "data", "level"}):
+                raise ValueError
+            if "level" in value and type(value["level"]) is not int:
                 raise ValueError
             if self.path == "/api/manual/action" and (
                     type(value["observation_version"]) is not int or value["observation_version"] < 0
@@ -170,7 +173,7 @@ class _Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/stop":
                 result = self.server.session.stop(value["session_id"], value["command_id"])
             elif self.path == "/api/manual/open":
-                result = self.server.session.manual_open(value["game_id"], value["command_id"])
+                result = self.server.session.manual_open(value["game_id"], value["command_id"], value.get("level", 1))
             elif self.path == "/api/manual/action":
                 result = self.server.session.manual_action(value["session_id"], value["command_id"],
                                                          value["observation_version"], value["action"], value["data"])

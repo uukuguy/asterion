@@ -120,3 +120,15 @@ User requests selection to show the real initial frame and immediately permit hu
 - [x] Focused Python/actual-asset DOM checks, source review, installed-wheel real manual actions, lifecycle cleanup, lint/docs/promotion checks. Report boundaries and commit code/state.
 
 Evidence: 79 focused Python PASS; actual SDK HTTP SP80 3 independent actions and cleanup PASS; independent review fixes verified; 39 DOM and wheel checks passed. Full promotion remains non-PASS (3879 tests, 13 failures, 5 errors, 4 skips). No new P7 completion or manual trajectory export.
+
+
+## Follow-up: direct human levels and remembered selection — 2026-10-05
+
+User approved restoring both game and level across restart, and direct level selection for independent human play. P7 remains a separate fresh L1 run.
+
+- [x] Current action uses button highlight only; ACTION6 arming remains distinct.
+- [x] HUMAN-only pinned SDK selection/reset adapter; actual current level is separate from real completed score.
+- [x] Validated metadata preference; page restores active sessions first, otherwise saved choice. Busy selection is blocked; delayed retries keep latest choice.
+- [x] Focused Python/DOM tests, independent source review and installed-wheel real SP80 L1/L2/L6 actions, reset, restart and cleanup.
+
+Actual smoke performed six human actions, zero P7 actions and zero artificial completions. Detailed counts and full-gate status are recorded in `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`.
