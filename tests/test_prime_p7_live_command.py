@@ -2340,7 +2340,11 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("[asterion-prime-p7] error", stderr.getvalue())
 
     def test_run_live_seals_replayed_first_level_failure_without_reusable_prefix(self) -> None:
-        """Historical legacy sealing remains independent of the research host."""
+        for outcome in ("game-over", "interrupted", "untrusted-cancel"):
+            with self.subTest(outcome=outcome):
+                self._assert_replayed_first_level_failure(outcome)
+
+    def _assert_replayed_first_level_failure(self, outcome: str) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import DEFAULT_GAME
         from asterion.applications.prime.p7.operator import (
@@ -2354,7 +2358,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
         class Engine(_Engine):
             def __init__(self, **kwargs: object) -> None:
-                super().__init__(game_over_after=1)
+                super().__init__(game_over_after=1 if outcome == "game-over" else None)
 
             def close(self) -> None:
                 pass
@@ -2365,7 +2369,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         async def composed(*args: object, **kwargs: object) -> None:
             assert client is not None
             client.act([{"name": "ACTION1", "data": {}}])
-            raise RuntimeError("private model detail")
+            if outcome == "game-over":
+                raise RuntimeError("private model detail")
+            raise asyncio.CancelledError("supervisor interrupt")
 
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -2419,12 +2425,19 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 mock.patch("asterion.applications.prime.p7.operator.live.worker_cell_count", return_value=0),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
+                cancellation = live_module.ProcessCancellation()
+                if outcome == "interrupted":
+                    cancellation.cancel()
                 with self.assertRaises(P7LiveAttemptFailure) as caught:
-                    asyncio.run(run_live(invocation, "p7-live-test"))
+                    asyncio.run(run_live(invocation, "p7-live-test", cancellation_signal=cancellation))
 
             failure = caught.exception
+            if outcome == "untrusted-cancel":
+                self.assertFalse(failure.sealed_trace)
+                self.assertFalse(failure.replay_verified)
+                return
             self.assertEqual(failure.primitive_actions, 1)
-            self.assertEqual(failure.terminal_reason, "game-over")
+            self.assertEqual(failure.terminal_reason, outcome)
             self.assertTrue(failure.replay_verified)
             self.assertTrue(failure.cleanup_complete)
             self.assertTrue(failure.sealed_trace)
@@ -2443,10 +2456,12 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             failure_entry = entries[-2]
             self.assertEqual(failure_entry.payload["primitive_actions"], 1)
             self.assertEqual(failure_entry.payload["levels_completed"], 0)
-            self.assertEqual(failure_entry.payload["terminal_reason"], "game-over")
+            self.assertEqual(failure_entry.payload["terminal_reason"], outcome)
             summary = json.loads((run / "summary.json").read_text())
             self.assertEqual(summary["broker"]["primitive_actions"], 1)
-            self.assertEqual(summary["broker"]["terminal_reason"], "game-over")
+            self.assertEqual(summary["broker"]["terminal_reason"], outcome)
+            self.assertEqual(summary["receipt"], {})
+            self.assertIsNone(summary.get("completed_prefix"))
             self.assertTrue(summary["replay_verified"])
             self.assertTrue(summary["sealed_trace"])
 

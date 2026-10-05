@@ -3819,3 +3819,4 @@
 - 04:38 User requires BP35L2 redo before full-game completion; froze dispatcher only, preserving both finite guests.
 - 04:40 d7e9ef52: Admit partial saved-route suffixes so low-score levels retry before full completion while retaining later progress.
 - 04:44 0fe30fb0: Checkpoint immediate BP35L2 retry, CD82L1 parallel start and new-game announcement preference.
+- 04:54 Resumed offline-route cognition repair committed; valid inherited beliefs retain exact restored observations and source provenance.

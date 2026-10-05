@@ -57,6 +57,7 @@ def replay_arc_run(
             ({"game-won", "game-incomplete", "action-cap", "game-over"}
              if game.is_full_game else {"level-completed", "action-cap", "game-over"})
             | ({"human-baseline"} if game.action_cap_override is not None else set())
+            | {"interrupted"}
         )
         or (receipt.terminal_reason in {"level-completed", "game-won", "game-incomplete"}) != (
             receipt.levels_completed == game.target_level
@@ -76,6 +77,10 @@ def replay_arc_run(
             )
         )
         or len(journal) != receipt.primitive_actions
+        or (receipt.terminal_reason == "interrupted" and not (
+            1 <= receipt.primitive_actions < game.action_cap
+            and receipt.levels_completed < game.target_level
+        ))
     ):
         raise ArcBrokerError("unavailable")
     engine = None
@@ -119,6 +124,7 @@ def replay_arc_run(
             or (receipt.terminal_reason == "game-over" and current.state != "GAME_OVER")
             or (receipt.terminal_reason == "game-won" and current.state != "WIN")
             or (receipt.terminal_reason == "game-incomplete" and current.state == "WIN")
+            or (receipt.terminal_reason == "interrupted" and current.state != "NOT_FINISHED")
             or (receipt.terminal_reason in {"level-completed", "game-won", "game-incomplete"} and current.levels_completed != game.target_level)
             or replay_sha256(journal, terminal_reason=receipt.terminal_reason) != receipt.replay_sha256
             or (receipt.terminal_reason in {"action-cap", "human-baseline"} and receipt.primitive_actions != game.action_cap)

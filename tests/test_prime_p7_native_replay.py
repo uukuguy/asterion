@@ -10,6 +10,30 @@ from tests.test_prime_p7_native_broker import _Engine, _ResetEngine
 
 
 class TestNativeP7Replay(unittest.TestCase):
+    def test_operator_interruption_replays_acknowledged_actions_without_progress(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
+
+        broker = ArcBroker(engine=_Engine())
+        broker.act(("ACTION1", "ACTION2"))
+        broker.interrupt()
+        receipt = broker.seal()
+        self.assertEqual(receipt.terminal_reason, "interrupted")
+        self.assertEqual(receipt.levels_completed, 0)
+        self.assertEqual(broker.replay(_Engine), receipt)
+        with self.assertRaises(ArcBrokerError):
+            broker.act(("ACTION1",))
+        for state in ("empty", "inflight", "uncertain", "terminal"):
+            with self.subTest(state=state):
+                candidate = ArcBroker(engine=_Engine(level_after=1 if state == "terminal" else None))
+                if state != "empty":
+                    candidate.act(("ACTION1",))
+                if state == "inflight":
+                    candidate._actions_dispatched += 1
+                elif state == "uncertain":
+                    candidate._failed_action = "ACTION1"
+                with self.assertRaises(ArcBrokerError):
+                    candidate.interrupt()
+
     def test_human_baseline_replays_only_with_exact_sweep_cap(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
         from asterion.applications.prime.p7.game import P7GameSelection

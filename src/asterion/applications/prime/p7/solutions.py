@@ -567,7 +567,7 @@ def _load_attempt_one(
                 broker_status.get("terminal_reason")
                 if type(broker_status) is dict else summary.get("terminal_reason")
             )
-            if type(terminal) is not str or terminal not in {"action-cap", "game-over", "human-baseline"}:
+            if type(terminal) is not str or terminal not in {"action-cap", "game-over", "human-baseline", "interrupted"}:
                 return None
         elif set(evidence) != required:
             return None
@@ -591,7 +591,7 @@ def _load_attempt_one(
             or type(actions) is not int
             or actions < 1
             or type(terminal) is not str
-            or terminal not in {"action-cap", "game-over", "human-baseline"}
+            or terminal not in {"action-cap", "game-over", "human-baseline", "interrupted"}
             or (not is_partial and type(digest) is not str)
         ):
             return None

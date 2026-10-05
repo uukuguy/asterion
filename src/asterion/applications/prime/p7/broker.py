@@ -3126,6 +3126,19 @@ class ArcBroker:
             no_effect[action_name] = count
         return {"attempts": attempts, "no_effect": no_effect}
 
+    def interrupt(self) -> None:
+        """Freeze a fully acknowledged active journal for operator cancellation.
+
+        This is an operator lifecycle hook, never a model tool. Unknown or
+        in-flight environment outcomes cannot become replayable evidence.
+        """
+        if (self._terminal_reason != "active" or self._failed_action is not None
+                or not self._journal or self._actions_dispatched != len(self._journal)
+                or self._current.state != "NOT_FINISHED"
+                or self._current.levels_completed >= self._game.target_level):
+            raise ArcBrokerError("unavailable")
+        self._terminal_reason = "interrupted"
+
     def seal(self) -> ArcRunReceipt:
         if self._terminal_reason == "active":
             raise ArcBrokerError("unavailable")

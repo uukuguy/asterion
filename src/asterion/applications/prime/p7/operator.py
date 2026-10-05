@@ -3312,11 +3312,11 @@ def _seal_replay_verified_first_level_failure(
             if entry.kind == "arc.action"
         )
         if (
-            broker.game.target_level != 1
+            (broker.game.target_level != 1 and receipt.terminal_reason != "interrupted")
             or receipt != broker.seal()
             or receipt.levels_completed != 0
             or receipt.terminal_reason
-            not in {"action-cap", "game-over", "human-baseline"}
+            not in {"action-cap", "game-over", "human-baseline", "interrupted"}
             or len(recorded_actions) != len(journal)
             or any(
                 row.get("sequence") != item.sequence
@@ -4698,6 +4698,14 @@ async def run_live(
         try:
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
+                if (isinstance(failure, asyncio.CancelledError)
+                        and type(run_signal) is live.ProcessCancellation and run_signal.cancelled):
+                    try:
+                        broker_value.interrupt()
+                    except ArcBrokerError:
+                        # A terminal game or an uncertain in-flight action
+                        # retains its original state and existing seal policy.
+                        pass
                 if prefix_journal_start is not None:
                     diagnostics["replayed_prefix_actions"] = _prefix_replayed_count(
                         prefix, prefix_journal_start, len(broker_value.journal)
