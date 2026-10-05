@@ -730,6 +730,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     status = "successful" if successful else "unsuccessful" if previous and previous["state"] == "GAME_OVER" else "incomplete"
     return {"schema": "asterion.arc-agi3-p7-console/v1", "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {"run_id": root.name, "game_id": game, "status": status, "completed_level_count": completed,
+                    "seed": _integer(experiment.get("seed")),
                     "win_levels": wins, "target_level": target, "primitive_action_count": action_count,
                     "replay_verified": replay_verified, "sealed_trace": sealed,
                     "model": _identifier(experiment.get("model"))},

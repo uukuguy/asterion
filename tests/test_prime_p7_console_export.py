@@ -15,6 +15,21 @@ from asterion.applications.prime.p7.console_export import export_console, main, 
 
 
 class TestConsoleExport(unittest.TestCase):
+    def test_export_retains_exact_seed_for_saved_partial_identity(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            run = self.make_run(root, '20261006005914')
+            for seed, expected in ((0, 0), (1, 1), (True, None), (-1, None)):
+                with self.subTest(seed=seed):
+                    (run / 'summary.json').write_text(json.dumps({
+                        'schema': 'asterion.prime.p7-live-private-summary/v1',
+                        'run_id': run.name, 'experiment': {'game_id': 'dc22-test', 'seed': seed}}))
+                    path = export_console(run)
+                    embedded = json.loads(re.search(
+                        r'<script id="console-data" type="application/json">(.*?)</script>',
+                        path.read_text(), re.S)[1])
+                    self.assertEqual(embedded['run']['seed'], expected)
+
     def test_fixed_replays_keep_verified_progress_and_latest_run(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
