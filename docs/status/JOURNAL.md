@@ -3829,3 +3829,4 @@
 - 05:22 8298dcf1: Checkpoint passing common console package and two active finite guests so recovery preserves sources and experience.
 - 07:26 Verified54levels/seven games; background exited06:57 HOLD after LF52L2 replay failed despite observed pass; investigate before release.
 - 07:29 User authorized green passed progress, one additional official25 saved-route card and continued two-game background solving.
+- 07:30 35f5f8c9: Use green passed progress and retain the new finite official-card authorization while preserving two-game research.
