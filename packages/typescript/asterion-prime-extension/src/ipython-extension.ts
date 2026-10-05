@@ -12,6 +12,7 @@ import {
   String as TypeString,
   Union as TypeUnion,
   Optional as TypeOptional,
+  Literal as TypeLiteral,
   type Static,
 } from "typebox";
 
@@ -19,7 +20,7 @@ export const PROTOCOL = "asterion.prime-ipython/v1";
 
 const DEFAULT_CODE_CAP = 16 * 1024;
 const DEFAULT_OUTPUT_CAP = 64 * 1024;
-const DEFAULT_LINE_CAP = 128 * 1024;
+const DEFAULT_LINE_CAP = 256 * 1024;
 const DEFAULT_DEADLINE_MS = 60_000;
 const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
@@ -203,9 +204,20 @@ export class IpythonBridge {
         this.#exchange(raw, request.request_id),
         signal,
       );
-      if (response.status !== "ok") throw unavailable();
+      if (response.type !== "result" || response.status === "uncertain") throw unavailable();
+      let output = response.output;
+      if (response.status === "error") {
+        // A settled cell rejection does not invalidate the actor's shared FD.
+        // Preserve genuine kernel metadata; redact non-kernel host failures.
+        let metadata: unknown;
+        try { metadata = JSON.parse(output); } catch { metadata = undefined; }
+        if (typeof metadata !== "object" || metadata === null || Array.isArray(metadata)
+          || !["python-error", "interrupted", "lost"].includes((metadata as Record<string, unknown>).execution_status as string)) {
+          output = JSON.stringify({execution_status: "python-error", error: "IPython cell rejected"});
+        }
+      }
       return {
-        content: [{ type: "text", text: response.output }],
+        content: [{ type: "text", text: output }],
         details: {},
       };
     } catch {
@@ -479,7 +491,7 @@ interface AppToolSpec {
   inputKey?: string;
 }
 
-const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
+const P7_LEGACY_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   {
     name: "p7_decision",
     method: "decision",
@@ -653,6 +665,50 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   },
 ]);
 
+const PUBLIC_TEXT = TypeString({ maxLength: 600 });
+const EXPORT_ID = TypeString({ pattern: "^sha256:[0-9a-f]{64}$" });
+const ID = TypeString({ pattern: "^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}$" });
+const TASK_PARAMETERS = TypeObject({
+  goal: PUBLIC_TEXT, obstacles: TypeArray(PUBLIC_TEXT, { maxItems: 32 }), question: PUBLIC_TEXT,
+  next_operation: TypeUnion([TypeLiteral("analyze"), TypeLiteral("model"), TypeLiteral("validate"), TypeLiteral("search"), TypeLiteral("probe"), TypeLiteral("execute")]),
+  public_basis: PUBLIC_TEXT,
+}, { additionalProperties: false });
+
+export const P7_WORKSPACE_PARAMETERS = TypeUnion([
+  TypeObject({ op: TypeLiteral("read"), revision: TypeOptional(EXPORT_ID) }, { additionalProperties: false }),
+  TypeObject({ op: TypeLiteral("publish"), base_revision: EXPORT_ID, draft_export_id: EXPORT_ID }, { additionalProperties: false }),
+  TypeObject({ op: TypeLiteral("checkpoint"), revision: EXPORT_ID, state_export_id: TypeOptional(EXPORT_ID),
+    frontier_export_id: TypeOptional(EXPORT_ID), analyzed_through: TypeInteger({ minimum: 0 }) }, { additionalProperties: false }),
+  TypeObject({ op: TypeLiteral("focus"), task: TASK_PARAMETERS }, { additionalProperties: false }),
+]);
+const ACTION_PARAMETERS = TypeUnion([
+  TypeObject({ name: TypeUnion([TypeLiteral("RESET"), TypeLiteral("ACTION1"), TypeLiteral("ACTION2"), TypeLiteral("ACTION3"), TypeLiteral("ACTION4"), TypeLiteral("ACTION5"), TypeLiteral("ACTION7")]),
+    data: TypeObject({}, { additionalProperties: false }) }, { additionalProperties: false }),
+  TypeObject({ name: TypeLiteral("ACTION6"), data: TypeObject({ x: TypeInteger({ minimum: 0, maximum: 63 }),
+    y: TypeInteger({ minimum: 0, maximum: 63 }) }, { additionalProperties: false }) }, { additionalProperties: false }),
+]);
+export const P7_EXECUTE_PLAN_PARAMETERS = TypeObject({
+  plan_id: ID,
+  start: TypeObject({ run_id: ID, attempt_id: ID, level: TypeInteger({ minimum: 1 }),
+    sequence: TypeInteger({ minimum: 0 }), observation_sha256: EXPORT_ID }, { additionalProperties: false }),
+  workspace_revision: EXPORT_ID, goal: PUBLIC_TEXT, purpose: TypeUnion([TypeLiteral("advance"), TypeLiteral("probe")]),
+  assumptions: TypeArray(PUBLIC_TEXT, { maxItems: 32 }),
+  steps: TypeArray(TypeObject({ action: ACTION_PARAMETERS, expect: TypeObject({
+    cells: TypeOptional(TypeArray(TypeObject({ x: TypeInteger({ minimum: 0, maximum: 63 }),
+      y: TypeInteger({ minimum: 0, maximum: 63 }), value: TypeInteger({ minimum: 0, maximum: 255 }) },
+      { additionalProperties: false }), { minItems: 1, maxItems: 128 })),
+    frame_sha256: TypeOptional(EXPORT_ID),
+    state: TypeOptional(TypeUnion([TypeLiteral("NOT_FINISHED"), TypeLiteral("WIN"), TypeLiteral("GAME_OVER")])),
+    levels_completed: TypeOptional(TypeInteger({ minimum: 0 })),
+  }, { additionalProperties: false, minProperties: 1 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 20 }),
+}, { additionalProperties: false });
+const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
+  { name: "p7_workspace", method: "workspace", parameters: P7_WORKSPACE_PARAMETERS,
+    description: "Read the current or historical WorldMap and real observation; focus a public research task; publish an IPython draft export against base_revision; or checkpoint explicit source/JSON exports. Publishing never dispatches actions. Reports remain model declarations until host comparisons. Use partial models and retain unknown goals." },
+  { name: "p7_execute_plan", method: "execute_plan", parameters: P7_EXECUTE_PLAN_PARAMETERS,
+    description: "Submit one short actor plan from the current observation_ref and workspace_revision. Each of 1–20 actions needs explicit key-cell, frame, state or progress predictions. The unique Broker executes sequentially and stops the suffix on mismatch, pause or a level boundary. Returns actual feedback and unexecuted steps. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." },
+]);
+
 export function toolNames(): string[] {
   return ["ipython", ...P7_TOOL_SPECS.map((spec) => spec.name)].sort();
 }
@@ -722,6 +778,11 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
   );
 }
 
+export function createLegacyAppLevelTools(bridge: IpythonBridge): MethodTool[] {
+  return [...P7_LEGACY_TOOL_SPECS].sort((a, b) => a.name.localeCompare(b.name)).map((spec) =>
+    makeMethodTool(bridge, spec.name, spec.description, spec.parameters, spec.method, spec.inputKey));
+}
+
 export function createIpythonTool(bridge: IpythonBridge) {
   return {
     name: "ipython" as const,
@@ -756,7 +817,10 @@ export function register(pi: ExtensionApi, dependencies?: unknown): void {
     const bridge = createIpythonBridge(descriptor);
     witness = registerContextWitnessFromEnvironment(pi, dependencies);
     pi.registerTool(createIpythonTool(bridge));
-    for (const tool of createAppLevelTools(bridge)) {
+    const mode = process.env.ASTERION_PRIME_P7_TOOL_MODE;
+    if (mode !== undefined && mode !== "research" && mode !== "legacy") throw unavailable();
+    delete process.env.ASTERION_PRIME_P7_TOOL_MODE;
+    for (const tool of mode === "legacy" ? createLegacyAppLevelTools(bridge) : createAppLevelTools(bridge)) {
       pi.registerTool(tool as unknown as ReturnType<typeof createIpythonTool>);
     }
   } catch {

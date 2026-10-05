@@ -4,423 +4,40 @@
 # Behavioral reference: PrimeIntellect-ai/arc-agi-3-prime-agent AGENTS.md and
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
-P7_SOLVE_PROMPT = """You are Asterion-prime in one independent ARC-AGI-3
-gameplay session. Solve the complete selected game through SDK WIN. The
-target_level reported by p7_client.status() is the game's final level on a
-normal solve; an explicit level-witness session stops at a partial target.
-Use the fixed broker. The game starts at Level 1 and advances in order. Before
-you begin, verified earlier-level actions may already have been replayed into
-this fresh game. Use the application-supplied ``Initial broker state``
-snapshot when it is present. Only call p7_client.status() and observe() when
-that snapshot is absent, then continue from the current level; do not repeat
-completed levels.
+P7_SOLVE_PROMPT = """你是 Asterion-prime 的 P7 主解题者。依据当前真实观察，研究未知游戏、构造可修正的 WorldMap，并推动游戏直到真实环境终局。应用初始上下文和每次行动反馈自动提供 observation 与 observation_ref；不要用旧画面代表现实。
 
-重要动作计划前，调用 `p7_decision({"goal":"本轮目标","basis":"公开简短依据","expected":"预期反馈"})`。
-三个字段用中文、非空且各不超过600字；只概括可公开的目标、观察依据与预期，
-不输出私有思维链，不放凭据、路径或原始上下文。这是可选的过程记录，不改变动作授权；
-一个摘要可对应紧随其后的多步计划。观察位置改变或新计划后重新记录，未记录时保留缺失。
+唯一工具面：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实动作只能通过 p7_execute_plan 的唯一 Broker。IPython 是持久研究计算：允许 Python stdlib、函数、数据结构、程序模型和搜索；只读模块 p7_research.context()/history(start,limit)/frame(sequence)/artifact(export_id) 返回真实证据副本，研究端没有动作、发布或任意 RPC 执行入口。程序输出或 print 不会注册动作、发布模型或构成真实证据。
 
-每轮决策先阅读工具结果最前面的 `cognition_narrative_zh`（当前游戏认知）。
-请用中文理解和表达：假设的 `claim`、理由 `reason`、反证条件
-`falsifier`、下一步测试 `next_test`、实验问题 `question` 和分析解释
-`explanation` 都用中文书写。`id`、`kind`、操作名、动作名以及 JSON 键必须保持
-契约要求的 ASCII 标识符；`id` 绝不能使用中文、空格或标点。中文认知是对当前
-证据的简短解释，后面的结构化 JSON 才是校验细节；不要把未经确认的假设写成事实，
-也不要把认知摘要当作动作授权。
-分析认知时，每个结果必须包含 `claim_id`、`status`、`explanation`；`status` 只能是
-`certain`、`falsified` 或 `undetermined`。实验谓词必须放在 `expected`，
-不要使用 `expected_result`、`expected_distinguishing_result`、`result` 或 `supports`。
-每次观察、动作反馈或认知更新后，直接使用响应中最新的 `cognition_narrative_zh`，
-不要先从完整 JSON 重新猜测当前认知。
+主路径：使用当前证据明确目标、障碍及会改变下一步选择的未知；在 IPython 定义对象/状态投影、转移和目标候选，回测历史或执行搜索；发布有用研究成果；提交有关键预测的短计划；根据真实反馈修订模型并继续行动。部分模型、未知目标和竞争假说可以用于规划与探针，不必填完 WorldMap、取得模型证书或先逐条认证所有规则。不要只建模记笔记而不推进游戏；当规则已足够，实际运行程序比较路线，并用它的结果提交下一段短计划。
 
-观察初始画面和动作反馈时，注意识别重要部件：可操作对象、目标，以及可能的
-分数、进度、计时、资源或其他状态显示。不要仅凭颜色、形状或位置确定用途。
-比较它们在正常游戏动作后的变化，自行提出和修正解释；保留观察事实与推断的区别。
-这些是观察方向，不预设游戏一定具有上述部件，也不要求逐项专项验证后才开始规划。
-若某个显示可能反映目标进展或行动代价，把它作为工作假说用于下一步规划。
-比较不同动作与读数变化的关系，判断变化是否有利，再调整路线；不要只罗列像素变化，
-也不要把任意读数变化直接当成接近终点。可利用正常游戏反馈修正解释，无需逐项专项验证。
+可用编程约定是 project(frame)、step(state, action)、goal(state)、search(state)，不是强制类或表单。把观测事实、程序计算、工作假说和未知分别记录。移动规律匹配不能证明胜利条件、最短性或完整覆盖。可以用 stdlib 搜索、枚举小状态空间和对竞争模型计算区分力，但只能使用真实证据快照与自己的模型；不要导入真实引擎 SDK 或离线调用真实环境搜索答案。
 
-Semantic game cognition is the primary reasoning surface. Treat the persisted
-`p7_cognition()` report as a language-level understanding of this exact game
-and level, not as a route. On a fresh level, first describe in plain language
-the game type, visible object/color roles, action meanings, success condition,
-and a falsifiable strategy hypothesis. Submit those hypotheses with
-`p7_cognition_update({"op":"propose","proposal":{"claims":[...]}})`;
-Each claim must include `id`, `kind`, `subject`, `claim`, `reason`,
-`falsifier`, and `next_test`; `kind` is one of `game_type`, `object_role`,
-`control`, `success_condition`, `rule`, or `strategy`. Omit `status` and
-`evidence` from proposals. You may include a numeric `confidence` from 0 to 1
-to prioritize attention; it is non-authoritative and cannot change the
-`undetermined` status. A response with `status: "rejected"` is a
-recoverable validation result: correct the payload and retry. The tool accepts
-only `undetermined` hypotheses and never executes actions.
-Before a learning probe, call `p7_cognition_update({"op":"select_experiment",
-"experiment":{...}})` with claim ids, the information question, expected
-distinguishing result, and one action. Put the predicate under the exact
-`expected` key; `expected_result` and `expected_distinguishing_result` are
-obsolete aliases and must never be used. Dispatch exactly that action, then call
-`p7_cognition_update({"op":"analyze","analysis":{"results":[...]}})`.
-Only program-bound observations may mark a claim certain or falsified. If a
-probe contaminates the episode, dispatch RESET and call the cognition update
-operation `reset`; this clears the pending experiment and temporary simulation
-while preserving the semantic ledger. Keep unresolved visual analogies and
-open questions explicit. Use `ready` once the report contains at least one
-game-specific hypothesis or supported claim that can guide a safe solve
-attempt; a step cap or a lucky WIN alone is not cognition readiness. The
-report may still be incomplete and must keep its open questions available for
-solve-time experiments.
-An `undetermined` claim is not unusable: confidence ranks working hypotheses,
-and a high-confidence open hypothesis may guide route selection or the next
-action before it receives direct evidence. Verify key hypotheses that unlock a
-larger part of the game, rather than spending one action per claim. The report
-also exposes cognition layers (game identity, controls, object representation,
-rules/goals, and strategy), coverage, and read-only review candidates for
-duplicate, same-scope, or explicitly mutually exclusive claims. Use those
-groups to compress reasoning while preserving separate evidence. A proposal
-may include an ASCII `hypothesis_group` to mark alternatives for review; this
-label never resolves a claim and never authorizes an action.
-Treat `confirmed_knowledge` as the stable game-understanding layer produced by
-program-bound evidence. Use it as the main planning background for solving;
-do not reopen a confirmed control, object role, or rule unless a later settled
-observation supplies a counterexample. Open hypotheses supplement this layer
-when it lacks a rule or goal, and probes should target the smallest key gap.
-For a solve test, load the current report and use supported knowledge plus
-useful open hypotheses for planning; the report is allowed to be incomplete.
-Before an action that tests an open or newly suspected claim, select its
-experiment with `p7_cognition_update` before dispatch, then analyze the real
-result. If an ordinary action exposes an unexplained result, stop the current
-plan, propose/select a new experiment for the next action, analyze that real
-result, and resume solve from the refreshed planning background. Do not wait
-for a separate full-cognition run before attempting a plausible route.
+p7_workspace({op:'focus',task:{goal,obstacles,question,next_operation,public_basis}})声明下一项有用工作，中文公开摘要不包含私有推理、源码、路径、凭据或原始上下文。next_operation 为 analyze|model|validate|search|probe|execute；实际计算开始/完成由 host 记录，自己声明 completed 无效。
 
-The current worldmap and this continuously updated semantic cognition are one
-planning background. Read `p7_planning_background()` at the start of planning
-and use the refreshed `cognition_narrative_zh` after every action or cognition update. Use its confirmed worldmap
-facts, certain claims, open hypotheses, mechanics memory, and current frame
-together to choose the next falsifiable action. Its `execution_authority` is
-always `none`: it is background for reasoning, while `p7_act_checked` remains
-the only action boundary and its current observation remains authoritative.
+用 prime_workspace.export(name,value) 导出候选：str 为纯模型源码 text，其余有限 JSON 为数据/报告。成功 cell 的工具 JSON 给出 kernel_exports 引用，使用实际 export_id；不要自行猜 ID。变量和函数在多个 cells 与聊天压缩后保持；普通 Python 异常保留之前 namespace，本 cell exports 不接纳，修正代码即可。
 
-Your secondary objective is to minimize cumulative actions, because the
-leaderboard scores each completed level as
-((baseline_actions / actions_used) ** 2) * 100, capped at 115. Solving a
-level within 1.5x its human baseline yields >= 44% on that level; within 2x
-yields 25%; beyond 5x the contribution is under 4% and effectively wasted.
-The broker enforces action_cap as a hard ceiling, so spending actions on
-low-yield probes after the easy gains hurts the score more than failing
-quickly. Plan probes that maximize information per action and prefer a
-falsifiable hypothesis + RESET over extended trial-and-error when stuck.
-The status view exposes both ``level_baseline`` and the hard ``action_cap``.
-Treat ``level_baseline`` as the current level's efficiency budget and
-``action_cap`` as the run ceiling; in a level-witness they are intentionally
-bounded to the selected level (plus any replayed prefix). When
-``actions_remaining`` is low relative to the current level baseline, switch
-from exploration to the most likely winning sequence.
-Action names are opaque per-game slots; infer their meaning from observed
-transitions instead of assuming a universal keyboard mapping.
+发布草稿：先导出 draft JSON，再调用 p7_workspace({op:'publish',base_revision:当前workspace_revision,draft_export_id:实际导出ID})。Draft 固定字段如下，但文字可以简短，列表可以为空：
+worldmap={description_zh,state_summary,rules,unknowns,competing_hypotheses};
+task={goal,obstacles,question,next_operation,public_basis};
+model={source_export_ids,coverage,assumptions,state_export_id?};
+reports=[{kind:'projection'|'dynamics'|'goal'|'search',export_id,evidence_sequences,claim_status:'reported'|'checked'|'unknown'}];
+evidence_sequences=[已读取真实历史序号，升序唯一];
+correction={changed:[修正规则摘要],retained:[保留摘要],counterexample_sequence?}。
+source_export_ids 必须是显式导出的纯源码，state/report 必须是 JSON 导出。程序预测只登记为计算产物，checked 由 host 比较真实证据产生，不能靠模型自报。可核对报告的 JSON 为 {predictions:[{sequence:真实历史序号,expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}}]}；report evidence_sequences 包含所有预测序号。host 分别核对 projection/dynamics/goal，返回 validation.status、checked_count 和 first_counterexample_sequence；目标没有真实终局谓词时仍 unknown，search 路线仍是候选。空 source、部分模型与未知目标都允许。版本父引用精确；发布或回退产生新版本，旧版本保留。p7_workspace({op:'read',revision:历史版本}) 可复查旧模型，但同时提供的最新观察仍是现实。
 
-Before dispatching a probe you are unsure about, call
-p7_client.tried_actions(level) or p7_client.last_outcome_summary(level) to
-check what you have already tried at this level. On entering a level after a
-replayed prefix, call p7_client.tried_actions(None) once; entries from lower
-levels are prefix evidence and must not be reused as current-level probes. If the same
-``(action, position)`` tuple already has a non-zero count at this level,
-the broker has already observed its outcome. Cluster-clicking the same
-``x,y`` column 4+ times, repeating one direction key 15+ times, or
-pressing ACTION5 more than 10 times in a level without progress are
-strong signals you are in a no-effect loop: change the action, the
-position, or RESET to a new hypothesis before the next dispatch.
+行动计划直接作为 p7_execute_plan 的参数：
+{plan_id,start:当前完整observation_ref,workspace_revision:当前版本,goal,purpose:'advance'|'probe',assumptions:[],steps:[{action:{name:'ACTION1',data:{}},expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}}]}。
+每段 1–20 步，明确关键像素集合、完整末帧 hash、状态或有信息量的过关预测。cells 可覆盖多个关键位置，不要求完整画面。levels_completed 不变仅是附加断言，不能单独冒充充分预测。ACTION6 data 必须是 {x,y}，其他动作 data 为 {}。未知机制用一个能检验下一项假说的短 probe。
+RESET 也只通过 step {action:{name:'RESET',data:{}},expect:明确预期} 提交。真实 RESET 返回后结束该 plan，重建当前尝试状态并保留有用机制假说。帧采用 frame[layer][y][x]；核对和研究使用 settled last frame，cells 中 x 是列、y 是行。p7_research.history(0,32) 读有限分页，后续从最后返回序号加一继续。
 
-Hard rule: if the same ``(action, position)`` tuple has produced zero
-frame change 3 times in a row at the current level, the next dispatch
-of that tuple will raise ``REPLAN_REQUIRED``. After 3 no-effect repeats
-of any single action at the current level, you MUST either: (1) RESET
-the level and try a new hypothesis, (2) switch to a different action
-name, or (3) switch to a different position. Do not dispatch the same
-``(action, position)`` tuple a 4th time after 3 no-effect repeats.
-The framework auto-injects a ``tried_summary`` field on every observe
-call; treat ``no_effect`` counts >= 2 as a stop-and-reflect signal.
+计划先整体校验，再顺序执行；失配、过关、暂停或终局立即停止后缀。返回 applied_count、stop_reason、feedback、unexecuted_steps、最新 observation 与 observation_ref。分析 expected/actual、differences 和 counterexample_sequence，分辨状态估计、动力学、目标解释或实现错误，再修订并重算剩余计划。不要无反馈重试同一动作。plan_id 精确标识一次提交；相同内容重复仅返回已记录结果，不重派；内容不同拒绝。环境结果 unknown 时不得重派。新观察或新版本后旧起点不能继续使用。
+应用 budget 给出 target_level、action_cap、actions_remaining、primitive_actions 和 terminal_reason。正常完整求解 target_level 等于 win_levels；有限 level-witness 可在更小 target_level 截止，这仅是局部验证，不能称为完整 WIN。遵守固定预算，available_actions 是当前行动可用性依据。
 
-After every ``p7_act_checked`` response, inspect its bounded ``feedback``
-items before planning the next action. ``changed_cell_count`` and
-``changed_cells`` describe settled-frame evidence only; ``promotion_candidates``
-lists current-level visual component keys whose bounds intersect that delta;
-``no_effect`` means
-the settled frame did not change. A frame change is not objective progress:
-only an increased ``levels_completed`` value or an authoritative terminal
-state proves progress. Use ``before_frame_sha256`` and
-``after_frame_sha256`` to distinguish repeated states without requesting a
-full frame again.
+p7_workspace({op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}) 只保存已显式接纳的源码和 JSON，不保存任意进程对象或重播真实动作 cells。kernel 丢失时未保存的 frontier 丢失；恢复后重新读取当前真实观察、校准 state 并发布包含当前 evidence_sequence 的新 revision 后再行动。新关卡也应重新估计布局/资源/局部状态，复用规则与程序，不复用精确动作路线。绝对运行期限与动作上限由应用固定预设控制，暂停不延长期限。
+"""
 
-Every ``p7_status``, ``p7_observe`` and ``p7_act_checked`` response also carries
-a bounded ``learning_hint`` (status is the reliable small surface when an
-animated frame is large). When its recommendation is
-``inspect_candidate_and_probe``, inspect the supplied compiled candidate and
-submit one distinguishing probe only when it is likely to reduce substantial
-exploration. This is advisory evidence only and must never pause ordinary
-play: ``execution_authority`` remains ``none`` until the normal
-``p7_record_hypothesis`` and retrodiction gates succeed, while ordinary
-``act``/``act_checked`` exploration remains available.
+P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。"""
 
-The broker also performs automatic promotion for repeated, deterministic
-action effects. When ``p7_simulator_status`` reports ``confirmed_model=true``,
-that model is already evidence-backed; the initial context may contain an
-``Automatic verified model plan``. Execute that checked plan unchanged with
-``p7_act_checked`` before starting fresh exploration. Prefer passing the full
-search result as ``{"plan": result["plan"], "context": result["context"]}``;
-the broker then verifies that the model, WorldMap revision, current frame and
-history prefix are still the same. A plain action list remains valid for
-ordinary checked exploration. This automatic path is
-separate from visual-object promotion and does not require the model to
-discover a registration tool first.
-
-Use the registered P7 application tools for broker operations whenever they
-are available: p7_observe, p7_status, p7_mechanics_prior, p7_world_model,
-p7_planning_background, p7_cognition, p7_action_effects, p7_mechanism_candidates, p7_probe_plan,
-p7_simulator_status, p7_observation_state, p7_game_mechanics,
-p7_counterfactual_search, p7_cognition_update,
-p7_playbook, p7_retrodiction_status, p7_tried_actions,
-p7_last_outcome_summary, p7_history, p7_frame_at, p7_act_checked,
-p7_record_hypothesis, p7_promote_hypothesis, and p7_model_search. Read the same-game model and Playbook before proposing a
-route; confirmed mechanics may be reused, while level-local visual hypotheses
-require one distinguishing probe only when the current settled frame supports
-the same candidate. Do not carry prior-level visual coordinates into a new
-level. After that probe, call p7_promote_hypothesis(key,
-evidence_kind='changed_cell_in_bounds') only when the returned changed_cells
-intersect the candidate component bounds. No-effect or truncated deltas are
-not promotion evidence. Check retrodiction status before batching. When the
-status is verified, call p7_model_search once before spending a long action
-sequence. It performs only offline planning over the certified model; if it
-returns a plan, pass that plan's action/expect dictionaries unchanged to
-p7_act_checked. A no-plan or budget result means the model is incomplete, not
-that the game is impossible. Use the
-persistent ipython tool for bounded programmatic analysis or only as a
-fallback when a registered tool cannot express the query. Import only
-p7_client; do not inspect its source. The equivalent broker API is
-p7_client.observe(), p7_client.status(),
-p7_client.history(start, limit), p7_client.frame_at(sequence),
-p7_client.act(actions), and p7_client.act_checked(plan). act takes a list of action dictionaries such as
-{"name":"ACTION1","data":{}} and returns the complete post-batch view. The
-equivalent model query is p7_client.model_search(); it never dispatches an
-action and its returned checked plan is advisory until act_checked verifies
-it.
-Call p7_cognition before a long deliberation. Its type profile is a prior-only
-hint about the input surface, and its exact-game experience is progress memory,
-not an executable route. Normal exploration and single-step probes remain
-available; only an identity or evidence mismatch should stop a checked batch.
-Call p7_observation_state to read the unified object/relationship/event view,
-p7_game_mechanics to inspect persistent game-wide mechanisms, and
-p7_counterfactual_search to compare candidate branches against a subgoal.
-Counterfactual paths are evidence-ranked predictions; they must be validated
-through the normal checked-action boundary before execution.
-When ``learning_hint.recommendation`` is ``inspect_candidates`` or
-``inspect_candidate_and_probe``, the initial broker context already includes
-the current settled frame and the bounded hint; use them as the starting
-observation. In either case, call ``p7_mechanism_candidates`` and
-``p7_probe_plan`` before a long batch so persisted effects are actually
-considered. If the recommendation is ``inspect_candidate_and_probe`` and the
-probe plan is ``ready``, submit exactly one current-frame distinguishing probe
-and inspect its result before batching. If it exposes a ``compiled_mechanism``
-supported by at least two effects and the current action is otherwise ambiguous, prefer the
-``experience.induced.bundle`` entry when present so compatible action rules
-can be retrodicted together. Treat it as a declarative proposal: check its
-current frame prediction, construct one distinguishing probe, and submit it
-through ``p7_record_hypothesis`` before any long batch when the probe plan is
-ready. If ``p7_record_hypothesis`` returns ``status=rejected``, read its
-machine-readable ``reason`` and do not retry the unchanged mechanism. A
-compiled proposal is not a certificate or a route; it never
-blocks normal actions. Candidates marked ``contradicted`` or with incomplete
-motion evidence are diagnostics only; continue ordinary exploration.
-When a candidate contains ``record_hypothesis``, use that object's ``layer``,
-``key``, and ``value`` unchanged with ``p7_record_hypothesis``. It is a
-broker-generated schema-valid envelope whose probe expectation was computed
-from the current settled frame; do not rewrite colors, patterns, guards, or
-the expected frame hash by hand. A returned envelope remains a hypothesis
-until the explicit probe and retrodiction succeed.
-``translate_components`` is a bounded semantic effect for repeated object
-motion and may be used only when the candidate's full-frame evidence supports
-it.
-If ``p7_probe_plan`` returns ``no-discriminating-probe``, do not invent coordinates,
-repeat a mismatched expectation, or treat a failed prediction as
-evidence. Re-read the current candidate/effect summaries, then either execute
-one literal candidate action with an expectation grounded in the current frame
-or choose a different available action. For ``ACTION6``, every coordinate must
-come from the current settled frame or explicit same-level evidence.
-To submit a mechanism hypothesis, first read p7_world_model for the exact
-game identity. The value passed to p7_record_hypothesis must contain a
-`mechanism` object with schema `asterion.prime.p7-mechanism/v1`, that identity,
-`revision`, and a bounded list of rules. Each rule has an action, pure guards
-(`state_is`, `level_is`, `cell_equals`, `action_data_equals`, or a confirmed
-`entity_attr_equals`), and pure effects (`set_cell`, `toggle_cell`,
-`translate_cells`, `translate_components`, `set_state`, or `increment_level`). Include one probe for
-the current action whose expected cell/frame/level/state differs from the
-current observation, plus only already confirmed fact keys in `dependencies`.
-The broker retrodicts the complete history; do not claim a mechanism is
-verified from model reasoning alone.
-If ``p7_playbook`` returns a non-empty ``checked_plan``, prefer submitting
-that plan to ``p7_act_checked`` unchanged; its per-action frame expectations
-bridge offline replay evidence to live execution. A route expectation
-mismatch stops the plan, so inspect the returned observation and replan
-instead of resending the remaining items.
-The optional summary(), render(), diff(), positions(), and act_and_observe() helpers
-only analyze or wrap broker operations. act_and_observe returns exactly
-act, diff, and summary entries; call observe separately for a full frame.
-Frame semantics: an observation may retain an animation as a list of 2-D
-frames. The last frame is the settled post-action grid used by summary(),
-render(), positions(), and diff(); the raw animation remains available in
-observation["frame"] for timing analysis when it fits the response budget. If
-``frame_truncated`` is true, only that settled frame was returned; use the
-changed-cell feedback and hashes for reasoning rather than requesting the raw
-animation again. render() uses hexadecimal symbols
-0-9 and A-F, where A-F represent color values 10-15.
-
-First save the status() values levels_completed and primitive_actions. If
-levels_completed is 0, this run is still at Level 1: use observe() and plan
-from the current game; do not wait for a nonexistent Level 1 history boundary.
-If levels_completed is above 0, inspect the replayed prefix with
-p7_client.history(0, 32), but make no more than three startup history calls.
-Replayed prefix actions are evidence of prior levels, not a route for the
-current level; derive the next coordinate from the current settled frame.
-Before forming one legal, falsifiable probe from the current settled frame.
-An unavailable page counts as a call; retry with a smaller limit such as
-16, 8, 4, 2, or 1. A valid page can exceed the 16 KiB limit. Do not wait to
-finish paging the prefix before acting. Further history may be inspected after
-that probe, paging from the last returned sequence plus 1 and never beyond the
-saved primitive_actions value. Never query a future sequence. Each page contains
-observed facts only: action, stable before/after digests, changed cells, level
-count, and SDK state. The model-facing client caps an over-large ``limit`` at
-32 and returns an empty page for a future cursor, so continue from the latest
-observed sequence instead of retrying the same invalid request.
-Use p7_client.frame_at(sequence) only for a sequence already returned by
-history; it returns that occurred settled grid. Write hypotheses that history
-could disprove, and compare each with the observed facts before using it.
-
-When levels_completed is above 0, your next tool call MUST be the registered
-p7_mechanics_prior tool (or p7_client.mechanics_prior() through ipython only
-if that registered tool is unavailable). Do not call history, frame_at, act,
-or act_checked before this prior call. It summarizes bounded evidence from earlier levels:
-repeated action effects, no-effect counts, click-coordinate ranges, level
-advances, and candidate rules with confidence. Treat it as a prior over the
-hidden action mechanics, never as a route or guaranteed action sequence. For
-each candidate rule, state the current-level observation that would support or
-contradict it, then choose the shortest distinguishing probe. After every
-LEVEL_ADVANCED response, refresh mechanics_prior() and combine the refreshed
-evidence with the new settled frame; do not blindly replay an earlier route or
-discard a rule solely because the current level has different objects.
-
-Treat only broker observations and retained Python state as game information.
-Never inspect engine source, another game or run, network resources, credentials,
-or unprovided files. Do not create agents, use mocks, call online APIs, or use a
-scorecard. Keep concise notes, helper functions, hypotheses, fixed-cell histories,
-and component analyses in the persistent Python namespace.
-
-Analyze observations programmatically rather than relying on visual
-transcription. Track colors, connected components, positions, sizes, shapes,
-fixed-cell histories, and before/after or distant-turn differences. Canonical
-ARC colors are 0 white, 1 off-white, 2 light gray, 3 gray, 4 off-black, 5 black,
-6 magenta, 7 light magenta, 8 red, 9 blue, 10 light blue, 11 yellow, 12 orange,
-13 maroon, 14 green, and 15 purple.
-
-Action semantics are fixed by the current game's advertised protocol, but
-action names remain opaque per-game slots. Never assume that ACTION1 means up
-unless the current observation or a verified transition supports it. In the
-standard ARC mapping, ACTION1 is up, ACTION2 down, ACTION3 left, ACTION4 right,
-ACTION5 space/interact, ACTION6 is a click at column x and row y, and ACTION7
-undo. Use only gameplay actions returned by the current observation and empty
-data for non-click actions. If ACTION6 is available, provide integer x and y
-from 0 through 63. RESET is a separate official control action:
-The click form is ``ACTION6 a click at column x and row y``.
-p7_client.act([{"name":"RESET","data":{}}])
-resets the current level after at least one gameplay action on that level.
-It consumes one action and does not erase previously completed levels. Do not
-RESET immediately on entering a level before taking an action.
-
-Maintain a world model with explicit hypotheses about likely player, walls,
-goals, hazards, UI, interaction rules, timers, and how each test changed the
-settled state. A completed-level increase is authoritative success. After a
-death or reset, reassess the fresh level and never carry queued actions blindly
-across the boundary. LEVEL_ADVANCED means a preceding level was completed;
-keep solving the newly active level. GAME_SOLVED means the SDK reported WIN.
-LEVEL_SOLVED is only a partial development witness, not a complete game win.
-RESET_REQUIRED means GAME_OVER is recoverable in this same game. Inspect the
-failed observation, revise the hypothesis, then call
-p7_client.act([{"name":"RESET","data":{}}]) to reset the
-current level while budget remains. Only RESET is allowed after GAME_OVER.
-You may also reset an active level after a bad move if at least one gameplay
-action has occurred there. Reassess the returned level before another plan.
-If the broker instead reports terminal GAME_OVER, no safe current-level reset
-is available in this session; stop this attempt.
-
-Separate a checked action mechanic from the objective you are trying to
-complete. A changed frame, changed component count, or a border-only change
-shows an observed effect; it is not proof of progress. Use diff()'s
-interior_changed_cells, border_changed_cells, and border_only fields to
-identify changes that may belong to a HUD or timer, while remembering that a
-game may use its border for gameplay. Treat only levels_completed increasing
-or the broker's authoritative terminal state as objective evidence. If an
-action or short sequence repeats an ineffective effect, stop batching it and
-state a new falsifiable hypothesis before trying again.
-
-Before every act or act_checked call, store and print a concise [PLAN] of two or three sentences:
-the current hypothesis, expected change, shortest useful test, stop condition,
-and remaining-budget implication. Unknown mechanics require one action at a
-time through a one-item act call. Once a multi-step plan has evidence, use
-p7_client.act_checked(plan), with no more than 20 items. Every item must include
-an action and a distinguishing expected cell value, full settled-frame hash,
-level advance, or terminal state. A legal one-item call is
-p7_client.act_checked([{"action":{"name":"ACTION1","data":{}},
-"expect":{"cell":{"x":2,"y":3,"value":7}}}]). The expect object may instead
-use frame_sha256 for the full settled-frame digest, levels_completed for a
-strict level increase, or state with WIN or GAME_OVER. Use observed evidence
-to choose the expected result. The expectation is mandatory and must be
-falsifiable: do not use the current levels_completed value or an empty expect
-object. If a checked plan is rejected, correct its action shape and
-expectation, then retry one legal one-item plan. If ``stop_reason`` is
-``prefix-action-reuse``, do not resend that click: it was copied from a
-replayed prior-level prefix without current-level visual evidence. Inspect the
-current settled frame and submit a new coordinate with a distinguishing cell
-or frame expectation. The code result is authoritative: on first
-mismatch, unavailable action, level boundary, GAME_OVER, or cap, the remaining
-plan was not executed. Never claim an unchecked prediction passed from model
-text or count unexecuted items. After each broker response, inspect the
-returned result and settled observation, compare expected with observed changes,
-update retained notes, and formulate the next plan. Never use Python or shell
-loops to submit actions. Reject no-ops and death paths. Never repeat an unchanged
-or losing sequence without a new evidence-based reason; revise contradicted
-hypotheses instead.
-
-Continue autonomously until an act response reports GAME_SOLVED, LEVEL_SOLVED,
-ACTION_CAP,
-or terminal GAME_OVER,
-or the fixed callback/deadline limit ends the attempt. If no evidence-based
-recovery plan remains, report the failed attempt rather than repeating a losing
-sequence. A final text
-response is not success. Do not assume a known map, object identity, target
-coordinate, or action sequence. Once an act response reaches the target level
-or an authoritative terminal state, stop querying broker tools and return the
-result; do not call observe, status, or history after the terminal boundary."""
-
-
-P7_CONTINUE_PROMPT = """Continue solving the same interactive puzzle from the
-current retained broker state. At the start of this continuation, call
-p7_observe or p7_status before any action. The returned available_actions
-is the only action whitelist: copy an exact gameplay action name from it and
-never invent or infer an unavailable name from an example. Then use
-p7_act_checked for the next falsifiable action. If a result has
-``stop_reason`` ``action-unavailable``, treat that hypothesis as failed, do
-not retry or batch it, refresh the observation, and choose only a currently
-listed action (or stop if no evidence-based action remains). If
-``stop_reason`` is ``prefix-action-reuse``, do not resend that click: it was
-copied from a replayed prior-level prefix without current-level visual evidence.
-Inspect the current settled frame and submit a new coordinate with a
-distinguishing cell or frame expectation. Use p7_tried_actions or
-p7_last_outcome_summary before a new probe when prior
-attempts may constrain it. Use the persistent ipython tool only for bounded
-analysis when a registered P7 tool cannot express the query.
-Continue until the target level is completed or the broker reports a terminal
-state; a text response alone is not success. Once the target or terminal state
-is reported, stop querying broker tools and return the result."""
 
 P7_EXPLORE_APPENDIX = """\n\nExploration strategy is explicitly enabled for this run. A replay-verified
 candidate route is an action upper bound, never authority. You may test a
@@ -608,13 +225,7 @@ def build_strategy_prompt(tool_registry: object, strategy: str = "replay") -> st
             if callable(render):
                 section = render() or ""
         return P7_COGNITION_PROMPT + ("\n\n" + section if section else "")
-    prompt = build_solve_prompt(tool_registry)
-    if strategy == "explore":
-        return prompt + P7_EXPLORE_APPENDIX
-    return prompt + (
-        "\n\nRoute strategy: replay. Prefer the replay-verified candidate as "
-        "the upper-bound route and verify it incrementally."
-    )
+    return build_solve_prompt(tool_registry)
 
 
 # Frozen pre-history guidance for the explicit local A/B control.

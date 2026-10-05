@@ -512,8 +512,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         )
         tools = command[command.index("--tools") + 1].split(",")
         self.assertEqual(tools, list(live_module.P7_APPLICATION_TOOL_NAMES))
-        self.assertIn("p7_observe", tools)
-        self.assertIn("p7_act_checked", tools)
+        self.assertEqual(tools, ["ipython", "p7_execute_plan", "p7_workspace"])
 
     def test_verified_l1_route_hint_is_bounded_and_replayable(self) -> None:
         from asterion.applications.prime.p7.operator import _summarize_verified_route
@@ -736,25 +735,11 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_generic_prompt_uses_feedback_and_has_no_game_route(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT, P7_CONTINUE_PROMPT
-
-        self.assertIn("changed_cell_count", P7_SOLVE_PROMPT)
-        self.assertIn("stop querying", P7_SOLVE_PROMPT)
-        self.assertIn("p7_world_model", P7_SOLVE_PROMPT)
-        self.assertIn("p7_planning_background", P7_SOLVE_PROMPT)
-        self.assertIn("p7_retrodiction_status", P7_SOLVE_PROMPT)
-        self.assertIn("Do not carry prior-level visual coordinates", P7_SOLVE_PROMPT)
-        self.assertIn("Replayed prefix actions are evidence of prior levels", P7_SOLVE_PROMPT)
-        self.assertIn("p7_client.tried_actions(None)", P7_SOLVE_PROMPT)
-        self.assertIn("Action semantics are fixed", P7_SOLVE_PROMPT)
-        self.assertIn("ACTION1 is up", P7_SOLVE_PROMPT)
-        self.assertIn("ACTION6 a click at column x and row y", P7_SOLVE_PROMPT)
-        self.assertIn("no-discriminating-probe", P7_SOLVE_PROMPT)
-        self.assertIn("do not invent coordinates", P7_SOLVE_PROMPT.lower())
-        self.assertIn("current settled frame", P7_SOLVE_PROMPT)
-        self.assertIn("In either case, call ``p7_mechanism_candidates`` and", P7_SOLVE_PROMPT)
-        self.assertIn("submit exactly one current-frame distinguishing probe", P7_SOLVE_PROMPT)
-        self.assertIn("stop querying", P7_CONTINUE_PROMPT)
-        self.assertNotIn("bp35", P7_SOLVE_PROMPT.lower())
+        for term in ('p7_research', 'p7_workspace', 'p7_execute_plan', 'WorldMap', 'counterexample_sequence', '未知目标', 'predictions', 'checked_count', 'RESET', 'target_level', 'actions_remaining'):
+            self.assertIn(term, P7_SOLVE_PROMPT)
+        for term in ('p7_client', 'p7_cognition_update', 'fallback', 'replay-verified', 'bp35'):
+            self.assertNotIn(term, P7_SOLVE_PROMPT)
+        self.assertIn('失配先修订模型并重算', P7_CONTINUE_PROMPT)
 
     def test_initial_context_keeps_settled_frame_and_learning_hint(self) -> None:
         from asterion.applications.prime.p7.operator import _initial_game_context
@@ -1037,12 +1022,9 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_continue_prompt_reestablishes_action_whitelist_after_retry(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_CONTINUE_PROMPT
-
-        normalized = " ".join(P7_CONTINUE_PROMPT.split()).lower()
-        self.assertIn("call p7_observe or p7_status before any action", normalized)
-        self.assertIn("available_actions is the only action whitelist", normalized)
-        self.assertIn("action-unavailable", normalized)
-        self.assertIn("do not retry", normalized)
+        self.assertIn('真实 observation/ref', P7_CONTINUE_PROMPT)
+        self.assertIn('不重派旧起点或未知结果', P7_CONTINUE_PROMPT)
+        self.assertNotIn('p7_client', P7_CONTINUE_PROMPT)
 
     def test_offline_optimization_is_disabled_without_explicit_integration_mode(self) -> None:
         from asterion.applications.prime.p7.operator import _offline_optimization_enabled
@@ -1723,28 +1705,12 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(border_only["interior_changed_cells"], 0)
 
     def test_operator_prompt_explains_settled_frame_axis(self) -> None:
-        from asterion.applications.prime.p7 import operator
-        from asterion.applications.prime.p7 import official_operator
+        from asterion.applications.prime.p7 import operator, official_operator
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
-
-        self.assertIn("settled", P7_SOLVE_PROMPT.lower())
-        self.assertIn("last", P7_SOLVE_PROMPT.lower())
-        self.assertIn("a-f represent color values 10-15", P7_SOLVE_PROMPT.lower())
-        self.assertIn("p7_client.history(0, 32)", P7_SOLVE_PROMPT)
-        self.assertIn("p7_client.frame_at(sequence)", P7_SOLVE_PROMPT)
-        self.assertIn("p7_client.act_checked(plan)", P7_SOLVE_PROMPT)
-        self.assertIn("remaining plan was not executed", " ".join(P7_SOLVE_PROMPT.split()))
-        normalized = " ".join(P7_SOLVE_PROMPT.split())
-        self.assertIn("levels_completed is 0", normalized)
-        self.assertIn("primitive_actions", normalized)
-        self.assertIn("retry with a smaller limit", normalized)
-        self.assertIn("last returned sequence plus 1", normalized)
-        self.assertIn('"action":{"name":"ACTION1","data":{}}', normalized)
-        self.assertIn('"expect":{"cell":{"x":2,"y":3,"value":7}}', normalized)
-        for key in ('frame_sha256', 'levels_completed', 'state'):
-            self.assertIn(key, normalized)
+        for term in ('settled last frame', 'frame[layer][y][x]', 'p7_research.history(0,32)', 'p7_execute_plan', 'cells', 'frame_sha256', 'levels_completed', 'unexecuted_steps'):
+            self.assertIn(term, P7_SOLVE_PROMPT)
         self.assertIs(official_operator.P7_SOLVE_PROMPT, P7_SOLVE_PROMPT)
-        self.assertFalse(hasattr(operator, "_P7_FRAME_SEMANTICS"))
+        self.assertFalse(hasattr(operator, '_P7_FRAME_SEMANTICS'))
 
     def test_saved_level_prefix_reenters_broker_and_rejects_mismatch(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcTransition
@@ -1856,15 +1822,13 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
 
     def test_explore_prompt_is_explicit_and_replay_prompt_is_conservative(self) -> None:
         from asterion.applications.prime.p7.operator import _prompt_for_strategy
-
-        replay = _prompt_for_strategy("replay")
-        explore = _prompt_for_strategy("explore")
-        self.assertIn("replay-verified", replay.lower())
-        self.assertIn("shorter", explore.lower())
-        self.assertIn("offline replay", explore.lower())
-        self.assertNotEqual(replay, explore)
+        replay = _prompt_for_strategy('replay')
+        explore = _prompt_for_strategy('explore')
+        self.assertEqual(replay, explore)
+        self.assertIn('WorldMap', replay)
+        self.assertNotIn('replay-verified', replay)
         with self.assertRaises(Exception):
-            _prompt_for_strategy("unknown")
+            _prompt_for_strategy('unknown')
 
     def test_strategy_does_not_replace_legacy_history_prompt(self) -> None:
         from asterion.applications.prime.p7.operator import _prompt_for_variant
@@ -2316,6 +2280,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("[asterion-prime-p7] error", stderr.getvalue())
 
     def test_run_live_seals_replayed_first_level_failure_without_reusable_prefix(self) -> None:
+        """Historical legacy sealing remains independent of the research host."""
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import DEFAULT_GAME
         from asterion.applications.prime.p7.operator import (
@@ -2354,7 +2319,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 evidence = P7PrivateTraceReceipt(
                     broker, PrimeTraceRecorder(kwargs["private_trace_root"])
                 )
-                client = _P7BrokerClient(broker, evidence.runtime_recorder)
+                client = _P7BrokerClient(broker, evidence.runtime_recorder, variant="legacy")
 
                 async def close_resources() -> None:
                     evidence.close()
@@ -2378,7 +2343,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 operator_root=root,
                 arc_root=root,
                 game=DEFAULT_GAME,
-                environment={},
+                environment={"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"},
                 pi_base_command=(),
                 extension_path=root,
             )
@@ -2469,6 +2434,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             other_recorder.close()
 
     def test_run_live_retains_completed_level_when_model_fails_later(self) -> None:
+        """Legacy model failure still retains only the replay-verified prefix."""
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -2517,7 +2483,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 plan=object(),
             )
             application = SimpleNamespace(assemblies=[assembly], implementations=())
-            invocation = P7Invocation(root, {}, root, (), root, game)
+            invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, (), root, game)
             with (
                 mock.patch("asterion.applications.prime.p7.operator.live.SubprocessPythonWorker", return_value=worker),
                 mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: Engine()),
@@ -2561,6 +2527,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertEqual((prefix.levels_completed, len(prefix.transitions)), (1, 2))
 
     def test_run_live_cancellation_seals_completed_prefix(self) -> None:
+        """Legacy supervisor cancellation still seals completed-level evidence."""
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -2612,7 +2579,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 plan=object(),
             )
             application = SimpleNamespace(assemblies=[assembly], implementations=())
-            invocation = P7Invocation(root, {}, root, (), root, game)
+            invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, (), root, game)
             with (
                 mock.patch(
                     "asterion.applications.prime.p7.operator.live.SubprocessPythonWorker",

@@ -51,7 +51,7 @@ from asterion.applications.prime.p7.operator import (
 )
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
-from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
+from asterion.applications.prime.p7.tool_registry import P7_LEGACY_TOOL_REGISTRY
 from asterion.capabilities.execution import CapabilityInvocation
 from asterion.capabilities.prime_arc_agi_3_solver.host import (
     PrimeArcAgi3SolveReceipt,
@@ -122,6 +122,9 @@ class _Worker:
 
     async def close(self) -> None:
         pass
+
+    async def restore(self, *args, **kwargs):
+        raise AssertionError("worker must remain inert")
 
 
 class _CompletingEngine(_Engine):
@@ -431,46 +434,13 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             self.assertNotIn(forbidden, serialized)
 
     def test_prompt_is_game_agnostic_and_experiment_driven(self) -> None:
-        lowered = " ".join(P7_SOLVE_PROMPT.lower().split())
-
         for required in (
-            "ipython",
-            "hypotheses",
-            "shortest useful test",
-            "checked_plan",
-            "offline replay evidence to live execution",
-            "before/after",
-            "no-ops",
-            "death paths",
-            "target_level",
-            "action names are opaque per-game slots",
-            "reset_required",
-            "reset the current level",
-            "never use python or shell loops to submit actions",
-            "[plan]",
-            "p7_client.history(0, 32)",
-            "p7_client.act_checked(plan)",
-            "p7_client.mechanics_prior()",
-            "registered p7_mechanics_prior",
-            "next tool call must be the registered p7_mechanics_prior",
-            "shortest distinguishing probe",
-            "prior over the hidden action mechanics",
+            "ipython", "p7_workspace", "p7_execute_plan", "p7_research",
+            "competing_hypotheses", "checkpoint", "source_export_ids",
         ):
-            self.assertIn(required, lowered)
-        for forbidden in (
-            "ls20",
-            "9607627b",
-            "seed",
-            "golden trace",
-            "action3, action3, action3",
-        ):
-            self.assertNotIn(forbidden, lowered)
-        self.assertIn(
-            "do not assume a known map, object identity, target coordinate, "
-            "or action sequence",
-            lowered,
-        )
-        self.assertIn("never assume that action1 means up", lowered)
+            self.assertIn(required, P7_SOLVE_PROMPT)
+        for forbidden in ("ls20", "9607627b", "golden trace", "p7_client."):
+            self.assertNotIn(forbidden, P7_SOLVE_PROMPT)
 
     def test_operator_selection_is_fixed_and_runtime_options_are_immutable(
         self,
@@ -538,6 +508,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             root = Path(directory).resolve()
             extension = root / "prime_ipython.mjs"
             extension.write_text("export default function extension() {}\n")
+            trace_root = root / "trace"
+            trace_root.mkdir()
             resources = build_p7_operator_resources(
                 environment={
                     "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol",
@@ -547,7 +519,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 },
                 pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
                 extension_path=extension, working_directory=root,
-                worker=_Worker(), engine=_CompletingEngine(), private_trace_root=root,
+                worker=_Worker(), engine=_CompletingEngine(), private_trace_root=trace_root,
                 game=game,
             )
             try:
@@ -1000,7 +972,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 binding_environment=dict(binding.environment),
                 extension_lease=lease,
                 deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
-                tool_registry=P7_TOOL_REGISTRY,
+                tool_registry=P7_LEGACY_TOOL_REGISTRY,
             ),
             P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root)),
         )

@@ -1,4 +1,4 @@
-"""Installed-wheel proof for the provider-free native P7 route."""
+"""Installed-wheel proof for the explicit historical legacy P7 route."""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ def _run(command: tuple[str, ...], *, cwd: Path, environment: dict[str, str]) ->
 
 
 class TestPrimeP7NativeInstalled(unittest.TestCase):
-    def test_installed_route_runs_without_prime_checkout(self) -> None:
+    def test_installed_legacy_route_runs_without_prime_checkout(self) -> None:
         with tempfile.TemporaryDirectory(prefix="asterion-prime-p7-installed-", dir="/tmp") as temporary:
             root = Path(temporary).resolve()
             dist = root / "dist"
@@ -192,6 +192,7 @@ async def main():
             "ASTERION_PRIME_MODEL": "deepseek-flash",
             "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
             "DEEPSEEK_API_KEY": "fixture-only",
+            "ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy",
         },
         pi_base_command=(sys.executable, str(root / "fake_pi_rpc.py"), "__NODE__"),
         extension_path=extension,

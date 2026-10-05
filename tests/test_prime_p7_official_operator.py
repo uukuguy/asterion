@@ -153,7 +153,9 @@ class TestOfficialOperator(unittest.TestCase):
     def test_reset_guidance_uses_the_actual_broker_call_shape(self) -> None:
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 
-        self.assertIn('p7_client.act([{"name":"RESET","data":{}}])', P7_SOLVE_PROMPT)
+        self.assertIn("p7_execute_plan", P7_SOLVE_PROMPT)
+        self.assertIn("RESET", P7_SOLVE_PROMPT)
+        self.assertNotIn("p7_client.act", P7_SOLVE_PROMPT)
         self.assertNotIn('act("RESET")', P7_SOLVE_PROMPT)
 
     def test_official_game_uses_bounded_gameplay_runtime(self) -> None:
@@ -193,6 +195,9 @@ class TestOfficialOperator(unittest.TestCase):
                 pass
 
             async def close(self) -> None:
+                pass
+
+            async def restore(self, *args: object, **kwargs: object) -> None:
                 pass
 
         with TemporaryDirectory() as directory:

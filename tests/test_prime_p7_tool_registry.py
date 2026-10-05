@@ -18,7 +18,7 @@ class TestP7ToolRegistry(unittest.TestCase):
         self.assertEqual(P7_TOOL_CAPABILITY_ID, "prime.tool.p7")
         self.assertEqual(P7_TOOL_REGISTRY.allowed_tool_names, P7_APPLICATION_TOOL_NAMES)
         self.assertEqual(P7_APPLICATION_TOOL_NAMES, tuple(sorted(set(P7_APPLICATION_TOOL_NAMES))))
-        self.assertIn("p7_promote_hypothesis", P7_APPLICATION_TOOL_NAMES)
+        self.assertEqual(P7_APPLICATION_TOOL_NAMES, ('ipython', 'p7_execute_plan', 'p7_workspace'))
 
     def test_live_reexports_one_registry_tuple(self) -> None:
         from asterion.applications.prime.p7 import live

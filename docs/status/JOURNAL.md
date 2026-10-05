@@ -3711,3 +3711,6 @@
 - 21:04 Astra复核通用kernel/轮次准入修复及console通过；部署接线与真实求解仍待验收。
 - 21:10 Committed generic persistent kernel and bounded round admission after review; no solving claim [209baf19].
 - 21:13 Console/control 105 Python tests passed; 74 DOM checks passed earlier; actual browser and deployment remain pending.
+- 21:15 Committed console research timeline and pause handshake for solver supervision [63af3505].
+- 21:20 用户纠正UI验收沿用后台DOM/HTTP/导出方式；停止不必要Chrome操作，不将插件连接作为门禁。
+- 21:22 Related Python 365 tests passed; lint/docs passed; independent implementation review passed; promotion and bounded live evidence pending.

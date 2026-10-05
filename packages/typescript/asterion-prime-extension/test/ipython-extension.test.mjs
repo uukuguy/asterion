@@ -22,6 +22,9 @@ import register, {
   canonicalJson,
   composeSummarizationRequest,
   createAppLevelTools,
+  createLegacyAppLevelTools,
+  P7_WORKSPACE_PARAMETERS,
+  P7_EXECUTE_PLAN_PARAMETERS,
   createIpythonBridge,
   registerContextWitness,
   summarizeInstruction,
@@ -55,6 +58,11 @@ async function socketPair() {
   // The bridge consumes the client descriptor with fs.read(). Pause the
   // net.Socket wrapper so its own stream reader cannot race that consumer.
   client.pause();
+  // Node 24 leaves the native handle reading after pause when the stream was
+  // never flowing. Stop it explicitly before handing the FD to fs.read;
+  // otherwise responses silently accumulate in client.readableLength.
+  client._handle.readStop();
+  client._handle.reading = false;
   return {
     descriptor: client._handle.fd,
     client,
@@ -172,48 +180,15 @@ test("registers the ipython and P7 application tools", async () => {
   const registered = [];
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
   register({ registerTool: (tool) => registered.push(tool) });
-  const expectedNames = [
-    "ipython",
-    "p7_act_checked",
-    "p7_action_effects",
-    "p7_cognition",
-    "p7_cognition_update",
-    "p7_counterfactual_search",
-    "p7_decision",
-    "p7_frame_at",
-    "p7_game_mechanics",
-    "p7_history",
-    "p7_last_outcome_summary",
-    "p7_mechanics_prior",
-    "p7_mechanism_candidates",
-    "p7_model_search",
-    "p7_observation_state",
-    "p7_observe",
-    "p7_planning_background",
-    "p7_playbook",
-    "p7_probe_plan",
-    "p7_promote_hypothesis",
-    "p7_record_hypothesis",
-    "p7_retrodiction_status",
-    "p7_simulator_status",
-    "p7_status",
-    "p7_tried_actions",
-    "p7_world_model",
-  ];
+  const expectedNames = ["ipython", "p7_execute_plan", "p7_workspace"];
   assert.deepEqual(toolNames(), expectedNames);
   assert.deepEqual(registered.map((tool) => tool.name), expectedNames);
   assert.deepEqual(
     registered.slice(1).map((tool) => tool.executionMode),
     registered.slice(1).map(() => "sequential"),
   );
-  assert.match(
-    registered.find((tool) => tool.name === "p7_act_checked").description,
-    /invalid-checked-plan.*one-item.*RESET/s,
-  );
-  assert.match(
-    registered.find((tool) => tool.name === "p7_observe").description,
-    /changed_cell_count.*does not prove objective progress.*levels_completed/s,
-  );
+  assert.match(registered.find((tool) => tool.name === "p7_execute_plan").description, /unique Broker.*stops the suffix/);
+  assert.match(registered.find((tool) => tool.name === "p7_workspace").description, /Publishing never dispatches actions/);
   assert.equal(registered[0].label, "ipython");
   assert.equal(
     registered[0].description,
@@ -235,7 +210,7 @@ test("wraps application tool results for the Pi AgentToolResult contract", async
     calls.push(args);
     return { available: true, current_level: 2 };
   } };
-  const tool = createAppLevelTools(fakeBridge).find((candidate) => candidate.name === "p7_mechanics_prior");
+  const tool = createLegacyAppLevelTools(fakeBridge).find((candidate) => candidate.name === "p7_mechanics_prior");
   assert.ok(tool);
   assert.equal(IsSchema(tool.parameters), true);
   assert.deepEqual(tool.parameters.properties, {});
@@ -251,7 +226,7 @@ test("wraps application tool results for the Pi AgentToolResult contract", async
 
 test("passes cognition operations directly through the method bridge", async () => {
   const calls = [];
-  const tool = createAppLevelTools({
+  const tool = createLegacyAppLevelTools({
     callMethod: async (...args) => {
       calls.push(args);
       return { status: "ok" };
@@ -267,7 +242,7 @@ test("passes cognition operations directly through the method bridge", async () 
 });
 
 test("level queries and hypothesis registration expose the Python bridge contract", () => {
-  const tools = createAppLevelTools({ callMethod: async () => ({}) });
+  const tools = createLegacyAppLevelTools({ callMethod: async () => ({}) });
   for (const name of ["p7_playbook", "p7_tried_actions", "p7_last_outcome_summary"]) {
     const schema = tools.find((tool) => tool.name === name).parameters;
     assert.equal(schema.required, undefined, name);
@@ -423,8 +398,8 @@ test("recoverable method errors do not poison the bridge", async () => {
   }
 });
 
-test("non-ok worker results are redacted and permanently poison the bridge", async (t) => {
-  for (const status of ["error", "uncertain"]) {
+test("uncertain worker results are redacted and permanently poison the bridge", async (t) => {
+  for (const status of ["uncertain"]) {
     await t.test(status, async () => {
       const pair = await socketPair();
       try {
@@ -453,6 +428,39 @@ test("non-ok worker results are redacted and permanently poison the bridge", asy
       }
     });
   }
+});
+
+test("settled Python errors and kernel loss preserve the actor bridge", async () => {
+  for (const status of ["python-error", "interrupted", "lost"]) {
+  const pair = await socketPair();
+  try {
+    const running = runInheritedSequence(pair, {requestId: "python-error", code: "raise ValueError()", options: {deadlineMs: 2000}});
+    await readJsonLine(pair.peer);
+    const error = {execution_status: status, generation: "g1", stdout: "ValueError", stdout_truncated: false, kernel_exports: []};
+    pair.peer.write(JSON.stringify({protocol: PROTOCOL, request_id: "python-error", type: "result", status: "error", output: JSON.stringify(error)}) + "\n");
+    const next = await Promise.race([readJsonLine(pair.peer),
+      new Promise((_resolve, reject) => setTimeout(() => reject(new Error("settled error poisoned bridge")), 2000))]);
+    assert.equal(next.request_id, "followup");
+    pair.peer.write(JSON.stringify({protocol: PROTOCOL, request_id: "followup", type: "result", status: "ok", output: "1"}) + "\n");
+    const result = await running;
+    assert.equal(result.first.ok, true);
+    assert.equal(JSON.parse(result.first.result.content[0].text).execution_status, status);
+    assert.equal(result.second.ok, true);
+  } finally { pair.close(); }
+  }
+});
+
+test("bounded output survives envelope JSON escaping at the output cap", async () => {
+  const pair = await socketPair();
+  try {
+    const running = runInheritedBridge(pair, {requestId: "escaped-output", code: "print(1)", options: {deadlineMs: 2000}});
+    await readJsonLine(pair.peer);
+    const output = '"'.repeat(64 * 1024);
+    pair.peer.write(JSON.stringify({protocol: PROTOCOL, request_id: "escaped-output", type: "result", status: "ok", output}) + "\n");
+    const result = await running.result;
+    assert.equal(result.ok, true);
+    assert.equal(result.result.content[0].text.length, 64 * 1024);
+  } finally { pair.close(); }
 });
 
 test("post-dispatch invalid UTF-8 text poisons the bridge without disclosure", async () => {
@@ -619,34 +627,7 @@ test("built artifact is comment-free and loads through the pinned loader", async
     writeFileSync(loaderCopy, readFileSync(loaderPath));
     const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
     await loader.default({ registerTool: (tool) => registered.push(tool) });
-    assert.deepEqual(registered.map((tool) => tool.name), [
-      "ipython",
-      "p7_act_checked",
-      "p7_action_effects",
-      "p7_cognition",
-      "p7_cognition_update",
-      "p7_counterfactual_search",
-    "p7_decision",
-      "p7_frame_at",
-      "p7_game_mechanics",
-      "p7_history",
-      "p7_last_outcome_summary",
-      "p7_mechanics_prior",
-      "p7_mechanism_candidates",
-      "p7_model_search",
-      "p7_observation_state",
-      "p7_observe",
-      "p7_planning_background",
-      "p7_playbook",
-      "p7_probe_plan",
-      "p7_promote_hypothesis",
-      "p7_record_hypothesis",
-      "p7_retrodiction_status",
-      "p7_simulator_status",
-      "p7_status",
-      "p7_tried_actions",
-      "p7_world_model",
-    ]);
+    assert.deepEqual(registered.map((tool) => tool.name), ["ipython", "p7_execute_plan", "p7_workspace"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -825,7 +806,7 @@ test("P7 decision results lead with Chinese prose and retain exact details", asy
   const narrative = "当前游戏认知\n已确认：横条可以移动。\n待验证：接触目标是否过关。";
   for (const name of ["p7_observe", "p7_act_checked", "p7_cognition", "p7_cognition_update", "p7_planning_background"]) {
     const result = { cognition_narrative_zh: narrative, applied_count: 1, observation: {frame: [[1]]}, semantic: {claims: {full: "LEDGER_ONLY"}}, planning_background: {semantic_cognition: {semantic: {claims: "LEDGER_ONLY"}}, revision: {primitive_actions: 1}} };
-    const tool = createAppLevelTools({callMethod: async () => result}).find(t => t.name === name);
+    const tool = createLegacyAppLevelTools({callMethod: async () => result}).find(t => t.name === name);
     const output = await tool.execute("zh", {});
     assert.ok(output.content[0].text.startsWith(narrative));
     assert.ok(output.content[0].text.includes('"applied_count":1'));
@@ -837,11 +818,25 @@ test("P7 decision results lead with Chinese prose and retain exact details", asy
 
  test("passes a public decision summary through its registered method", async () => {
   const calls = [];
-  const tool = createAppLevelTools({callMethod: async (...args) => {calls.push(args); return {status: "recorded", execution_authority: "none"};}}).find(t => t.name === "p7_decision");
+  const tool = createLegacyAppLevelTools({callMethod: async (...args) => {calls.push(args); return {status: "recorded", execution_authority: "none"};}}).find(t => t.name === "p7_decision");
   assert.ok(tool);
   assert.deepEqual(tool.parameters.required, ["goal", "basis", "expected"]);
   assert.equal(tool.parameters.properties.goal.maxLength, 600);
   const payload = {goal: "移动", basis: "当前观察", expected: "位置变化"};
   await tool.execute("decision-1", payload);
   assert.deepEqual(calls, [["decision-1", "decision", payload, undefined]]);
+});
+
+ test("research tools expose tagged workspace requests and complete actor predictions", async () => {
+  const calls = [];
+  const tools = createAppLevelTools({callMethod: async (...args) => { calls.push(args); return {status: "published"}; }});
+  assert.deepEqual(tools.map(t => t.name), ["p7_execute_plan", "p7_workspace"]);
+  assert.equal(IsSchema(P7_WORKSPACE_PARAMETERS), true);
+  assert.equal(IsSchema(P7_EXECUTE_PLAN_PARAMETERS), true);
+  assert.deepEqual(P7_WORKSPACE_PARAMETERS.anyOf.map(s => s.properties.op.const), ["read", "publish", "checkpoint", "focus"]);
+  assert.equal(P7_EXECUTE_PLAN_PARAMETERS.properties.steps.maxItems, 20);
+  assert.ok(P7_EXECUTE_PLAN_PARAMETERS.properties.steps.items.properties.expect.properties.cells);
+  const request = {op: "read"};
+  await tools.find(t => t.name === "p7_workspace").execute("research-1", request);
+  assert.deepEqual(calls, [["research-1", "workspace", request, undefined]]);
 });

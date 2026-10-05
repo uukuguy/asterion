@@ -20,6 +20,7 @@ from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
+from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
 from asterion.applications.prime.p7.model_selection import valid_selection_name
 from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
@@ -31,6 +32,7 @@ from asterion.applications.prime.p7.gameplay_trace import (
 )
 from asterion.applications.prime.p7.tool_registry import (
     P7_APPLICATION_TOOL_NAMES,
+    P7_LEGACY_TOOL_REGISTRY,
     P7_TOOL_CAPABILITY_ID,
     P7_TOOL_MODULE_ID,
 )
@@ -509,8 +511,11 @@ def build_p7_runtime(
             "launch": launch is not None,
             "selection": declared == (provider, model),
             "tool_registry": launch is not None and launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID),
-            "allowlist": launch is not None and launch.tool_registry.allowed_tool_names == P7_APPLICATION_TOOL_NAMES,
-            "ipython_type": type(ipython) is PersistentIpythonHost,
+            "allowlist": launch is not None and launch.tool_registry.allowed_tool_names == (
+                P7_APPLICATION_TOOL_NAMES if type(ipython) is P7ResearchRuntime
+                else P7_LEGACY_TOOL_REGISTRY.allowed_tool_names
+            ),
+            "ipython_type": type(ipython) in (PersistentIpythonHost, P7ResearchRuntime),
             "ipython_open": not getattr(ipython, "_closed", True),
             "ipython_lost": not getattr(ipython, "_lost", True),
             "broker_type": type(broker) is ArcBroker,
@@ -557,7 +562,9 @@ def build_p7_runtime(
             approved_environment=launch.approved_environment,
             limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
             completion_predicate=lambda: _p7_terminal(broker),
-            continuation_prompt=lambda round_index: _p7_continuation_prompt(broker, round_index),
+            continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
+                                 else lambda round_index: _p7_continuation_prompt(broker, round_index)),
+            round_admission=ipython.admit_round if type(ipython) is P7ResearchRuntime else None,
             round_diagnostic=_p7_round_diagnostic(trace_adapter),
             failure_diagnostic=getattr(trace_adapter, "record_failure", None),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,
@@ -605,8 +612,11 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             or launch is None
             or declared != (provider, model)
             or not launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID)
-            or launch.tool_registry.allowed_tool_names != P7_APPLICATION_TOOL_NAMES
-            or type(ipython) is not PersistentIpythonHost
+            or launch.tool_registry.allowed_tool_names != (
+                P7_APPLICATION_TOOL_NAMES if type(ipython) is P7ResearchRuntime
+                else P7_LEGACY_TOOL_REGISTRY.allowed_tool_names
+            )
+            or type(ipython) not in (PersistentIpythonHost, P7ResearchRuntime)
             or getattr(ipython, "_closed", True)
             or getattr(ipython, "_lost", True)
             or type(broker) is not ArcBroker
@@ -650,6 +660,9 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
             completion_predicate=lambda: _p7_gameplay_terminal(broker),
+            continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
+                                 else lambda round_index: _p7_continuation_prompt(broker, round_index)),
+            round_admission=ipython.admit_round if type(ipython) is P7ResearchRuntime else None,
             round_diagnostic=_p7_round_diagnostic(trace_adapter),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,
         )

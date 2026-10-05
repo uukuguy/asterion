@@ -1,15 +1,15 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-05 21:10 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-05 21:22 CST. **Session remains active — not a final handoff.**
 
 ## 已验证事实
 
 - 用户已批准整体重设计并要求继续实施。分支 `feat/p7-live-console`，managed worklist `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`。
 - 设计批准提交 `447bb65a`；通用 Prime kernel/exports/recovery 与有限模型轮次准入 `209baf19` 已提交，未推送。
 - 通用 kernel 16 tests、轮次准入/会话40 tests通过；console DOM74 tests通过；research/runtime/provider-free整体故事3 tests通过。上述不证明真实过关。
-- Console 与 P7 solver/operator 接线仍在工作树，尚未提交或打包运行。
+- Console已提交 `63af3505`；P7 solver/operator生产实现与mjs已同步，准备提交。最终相关Python365 tests、lint/docs通过，promotion正在运行（exec session 77854，日志 `/tmp/p7-redesign-promotion.log`）。
 - 当前默认 verified 路线是 ipython / p7_workspace / p7_execute_plan；Prime持久计算，P7唯一真实动作入口；旧cognition路线显式legacy保留。默认不加载精确成功路线或旧共享认知。
-- Astra整体实现复审发现待修：普通Python error误poison共享工具桥、bridge每次asyncio.run导致worker跨loop、终局level超末关丢事件、完整动画帧导致工具返回越界。正在修复，不可宣布部署完成。
+- Astra整体复审F1–F4及focus/lost/cleanup口径均修复，最终实现复核通过。实际kernel/bridge连续错误恢复、checkpoint重建和校准测试通过；仍无新真实求解。
 
 ## 当前判断
 
@@ -25,11 +25,10 @@
 
 - 新模型真实求解、跨关与冷/热对照未运行。全25 benchmark没有授权。
 - 必须同步打包mjs，按npm扩展→Python→promotion→实际有限level-witness验证。历史全仓promotion3908 tests/13fail/5error/4skip不能当当前PASS。
-- Console实际浏览器验收仍待，复用已有profile。人工SP80 L2 85动作存档保留。
+- 用户纠正：沿用后台DOM/HTTP/导出HTML验收，不要求Chrome前台打开。后台105 Python/74 DOM通过；不必要Chrome连接尝试失败不作为门禁。人工SP80 L2 85动作存档保留。
 
-## 下一动作与所有权
+## 下一动作
 
-1. 根线程修operator持久loop和error内容，集成/状态/部署；Astra `/root/worldmap_reasoning` 关键复审。
-2. `/root/p7_solver` 修solver/TS桥、bounded projection、终局level，报告 `/tmp/asterion-p7-solver-report.md`。
-3. `/root/prime_workspace` 适配installed测试；`/root/p7_visual_memory` console已完成可召回修复，报告 `/tmp/asterion-p7-console-redesign-report.md`。
-4. 复审后及时分组提交，同步mjs并跑有限真实打包witness，记录实际结果，不把基础设施测试当能力完成。
+1. 等promotion结果，记录新旧失败，不把全仓失败隐去。代码生产改动已冻结；Task2报告 `/tmp/asterion-p7-solver-report.md` 将完成，Astra报告 `/tmp/asterion-p7-redesign-review.md` 已最终通过。
+2. 提交solver/runtime/tools/generated resource及状态；运行一次SP80 L1固定witness，采用现有console 900秒cgroup预设、人类baseline动作cap、新run隔离旧知识和prefix。开启现有private debug transcript以检查程序→计划→反馈，不公开原始推理。
+3. 实际结果和任何第一个断点记入 `docs/reviews/2026-10-05-p7-worldmap-implementation-review.md`。没有真实能力证据不得宣称过关/跨关；禁止擅自扩到25游戏。

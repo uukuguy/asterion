@@ -33,7 +33,7 @@ from .transition_model import ActionExpectation, TransitionModel
 from .verified_history import ArcHistoryRecord, ArcPredictionError, validate_history_query, validate_prediction
 from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
 from .visual_priors import derive_visual_candidates
-from .tool_registry import P7_APPLICATION_TOOL_NAMES
+from .tool_registry import P7_APPLICATION_TOOL_NAMES, P7_LEGACY_APPLICATION_TOOL_NAMES
 from asterion.runtime.protocol import ProtocolError
 
 
@@ -88,7 +88,7 @@ class P7ToolRegistry:
             canonical_name = (
                 tool.name if tool.name.startswith("p7_") else f"p7_{tool.name}"
             )
-            if canonical_name not in P7_APPLICATION_TOOL_NAMES:
+            if canonical_name not in (*P7_APPLICATION_TOOL_NAMES, *P7_LEGACY_APPLICATION_TOOL_NAMES):
                 raise ProtocolError(
                     "P7 prompt tool is not registered in the Prime tool module"
                 )

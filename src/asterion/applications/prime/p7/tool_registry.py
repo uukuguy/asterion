@@ -7,7 +7,7 @@ from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 
 P7_TOOL_MODULE_ID = "prime.p7.application-tools"
 P7_TOOL_CAPABILITY_ID = "prime.tool.p7"
-P7_APPLICATION_TOOL_NAMES = tuple(sorted({
+P7_LEGACY_APPLICATION_TOOL_NAMES = tuple(sorted({
     "ipython",
     "p7_act_checked",
     "p7_action_effects",
@@ -35,15 +35,23 @@ P7_APPLICATION_TOOL_NAMES = tuple(sorted({
     "p7_tried_actions",
     "p7_world_model",
 }))
+P7_APPLICATION_TOOL_NAMES = ('ipython', 'p7_execute_plan', 'p7_workspace')
 P7_TOOL_REGISTRY = PrimeApplicationToolRegistry(
     P7_TOOL_MODULE_ID,
     P7_TOOL_CAPABILITY_ID,
     P7_APPLICATION_TOOL_NAMES,
 )
+P7_LEGACY_TOOL_REGISTRY = PrimeApplicationToolRegistry(
+    P7_TOOL_MODULE_ID,
+    P7_TOOL_CAPABILITY_ID,
+    P7_LEGACY_APPLICATION_TOOL_NAMES,
+)
 
 
 __all__ = (
     "P7_APPLICATION_TOOL_NAMES",
+    "P7_LEGACY_APPLICATION_TOOL_NAMES",
+    "P7_LEGACY_TOOL_REGISTRY",
     "P7_TOOL_CAPABILITY_ID",
     "P7_TOOL_MODULE_ID",
     "P7_TOOL_REGISTRY",

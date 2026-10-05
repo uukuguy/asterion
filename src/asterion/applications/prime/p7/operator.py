@@ -95,7 +95,7 @@ from asterion.applications.prime.p7.prompt import (
     build_strategy_prompt,
 )
 from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
-from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
+from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY, P7_LEGACY_TOOL_REGISTRY
 from asterion.applications.prime.p7.console_events import ConsoleEventWriter, public_narrative, public_text
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
@@ -127,7 +127,7 @@ _ROUTE_OPTIMIZER_CANDIDATE_BUDGET = 64
 _ROUTE_OPTIMIZER_MAX_REMOVED = 3
 _ROUTE_OPTIMIZER_TIME_BUDGET_SECONDS = 8.0
 _BRIDGE_PROTOCOL = "asterion.prime-ipython/v1"
-_BRIDGE_JOIN_SECONDS = 1.0
+_BRIDGE_JOIN_SECONDS = 6.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 
 
@@ -334,9 +334,12 @@ class P7LiveAttemptFailure(live.P7LiveSolveError):
 
 
 class _BridgeSignal:
+    def __init__(self, stop: threading.Event | None = None) -> None:
+        self._stop = stop
+
     @property
     def cancelled(self) -> bool:
-        return False
+        return self._stop is not None and self._stop.is_set()
 
 
 class _IpythonBridgeServer:
@@ -350,12 +353,17 @@ class _IpythonBridgeServer:
     ) -> None:
         self._channel = channel
         self._host = host
-        self._client = p7_client_facade(client)
+        from .research_runtime import P7ResearchRuntime
+        self._client = None if isinstance(host, P7ResearchRuntime) else p7_client_facade(client)
         self._method_calls: dict[str, int] = {}
         self._method_failures: dict[str, int] = {}
         self._stop = threading.Event()
+        self._signal = _BridgeSignal(self._stop)
         self._thread = threading.Thread(target=self._serve, daemon=True)
         self._started = False
+        self._loop = asyncio.new_event_loop()
+        self._host_closed = False
+        self._close_error = False
 
     def __repr__(self) -> str:
         return "<_IpythonBridgeServer redacted>"
@@ -385,8 +393,29 @@ class _IpythonBridgeServer:
         self._channel.close()
         if self._started:
             self._thread.join(_BRIDGE_JOIN_SECONDS)
+        else:
+            self._close_host()
+        if self._thread.is_alive() or self._close_error:
+            raise P7OperatorError("P7 computation cleanup is incomplete")
+
+    def _close_host(self) -> None:
+        if not self._loop.is_closed():
+            try:
+                self._loop.run_until_complete(self._host.close())
+                self._host_closed = True
+            except BaseException:
+                self._close_error = True
+            finally:
+                self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+                self._loop.close()
 
     def _serve(self) -> None:
+        try:
+            self._serve_requests()
+        finally:
+            self._close_host()
+
+    def _serve_requests(self) -> None:
         pending = bytearray()
         while not self._stop.is_set():
             try:
@@ -422,11 +451,11 @@ class _IpythonBridgeServer:
                     or not value["code"]
                 ):
                     raise ValueError
-                result = asyncio.run(
-                    self._host.execute(request_id, value["code"], _BridgeSignal())
+                result = self._loop.run_until_complete(
+                    self._host.execute(request_id, value["code"], self._signal)
                 )
                 output = ""
-                if result.status == "ok" and result.content:
+                if result.content:
                     candidate = result.content[0].get("text")
                     if type(candidate) is str:
                         output = candidate
@@ -463,7 +492,7 @@ class _IpythonBridgeServer:
                 "status": "error",
                 "type": "result",
             }
-        return json.dumps(response, separators=(",", ":"), sort_keys=True).encode()
+        return json.dumps(response, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
 
     def _dispatch_method_call(
         self, request_id: str, method: str, params: object
@@ -477,6 +506,17 @@ class _IpythonBridgeServer:
         path.
         """
         self._method_calls[method] = min(5000, self._method_calls.get(method, 0) + 1)
+
+        # The research host is an application adapter over Prime computation.
+        # Only this actor channel can publish research or submit real plans.
+        from .research_runtime import P7ResearchRuntime
+        if isinstance(getattr(self, "_host", None), P7ResearchRuntime):
+            result = self._host.method_call(method, params, self._signal)
+            return {
+                "output": json.dumps(result, allow_nan=False, ensure_ascii=False, separators=(",", ":")),
+                "protocol": _BRIDGE_PROTOCOL, "request_id": request_id,
+                "status": "ok", "type": "method_result",
+            }
 
         def error_response() -> dict[str, object]:
             return {
@@ -3329,10 +3369,16 @@ class P7OperatorResources:
         trace = self.host_services.get("prime.private-trace") or self.host_services.get("prime.arc-run-evidence")
         launch = cast(PrimeLaunch, self.host_services["prime.launch"])
         try:
-            self._bridge.close()
+            request_stop = getattr(ipython, "request_stop", None)
+            try:
+                if callable(request_stop):
+                    request_stop()
+            finally:
+                await asyncio.to_thread(self._bridge.close)
         finally:
             try:
-                await ipython.close()
+                if not hasattr(self._bridge, "_loop"):
+                    await ipython.close()
             finally:
                 try:
                     if trace is None:
@@ -3461,6 +3507,7 @@ def build_p7_operator_resources(
     try:
         variant = _resolve_history_variant(environment, game)
         selection = resolve_p7_runtime(environment, game)
+        research_mode = variant == "verified" and not cognition_mode
         # The ARC credential belongs only to the SDK session. The Pi model
         # subprocess needs the model host key, never the scorecard key.
         provider_environment = {
@@ -3470,6 +3517,9 @@ def build_p7_operator_resources(
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
             }
         }
+        provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
+        if not research_mode:
+            provider_environment["ASTERION_PRIME_P7_TOOL_MODE"] = "legacy"
         if environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT") == "1":
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT"] = "1"
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH"] = str(
@@ -3519,8 +3569,14 @@ def build_p7_operator_resources(
         if set(provider_environment).intersection(lease.environment):
             raise ValueError
         approved_environment = {**provider_environment, **dict(lease.environment)}
+        # The installed Pi command and runtime registry must expose the same
+        # exact tool set. Historical cognition uses its explicit legacy set.
+        selected_tools = P7_TOOL_REGISTRY if research_mode else P7_LEGACY_TOOL_REGISTRY
+        base_command = list(pi_base_command)
+        if "--tools" in base_command:
+            base_command[base_command.index("--tools") + 1] = ",".join(selected_tools.tool_names)
         command = (
-            *pi_base_command,
+            *base_command,
             "--provider",
             selection.provider,
             "--model",
@@ -3537,7 +3593,7 @@ def build_p7_operator_resources(
             binding_environment=dict(binding.environment),
             extension_lease=lease,
             deadline_seconds=None if selection.deadline_ms is None else selection.deadline_ms / 1000,
-            tool_registry=P7_TOOL_REGISTRY,
+            tool_registry=selected_tools,
             compact_events=True,
             approved_environment=approved_environment,
         )
@@ -3545,11 +3601,11 @@ def build_p7_operator_resources(
         broker = ArcBroker(
             engine=engine,
             game=game,
-            world_model=WorldModelStore(game.game_id, game.seed, game.win_levels),
-            cognition_store=cognition_store,
-            semantic_cognition_store=semantic_cognition_store,
+            world_model=None if research_mode else WorldModelStore(game.game_id, game.seed, game.win_levels),
+            cognition_store=None if research_mode else cognition_store,
+            semantic_cognition_store=None if research_mode else semantic_cognition_store,
             semantic_cognition_read_only=semantic_cognition_read_only,
-            game_mechanics_store=GameMechanicsStore(
+            game_mechanics_store=None if research_mode else GameMechanicsStore(
                 working_directory,
                 game.game_id,
                 game.seed,
@@ -3583,16 +3639,27 @@ def build_p7_operator_resources(
             cognition_mode=cognition_mode,
             console_writer=console_writer,
         )
-        prediction_client._capture_console_cognition()
-        ipython = PersistentIpythonHost(
-            worker=worker,
-            p7_client=p7_client_facade(prediction_client),
-        )
+        if research_mode:
+            from .research_runtime import P7ResearchRuntime
+            from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
+            ipython = P7ResearchRuntime(
+                broker=broker, trace_client=prediction_client,
+                run_root=private_trace_root.parent, run_id=history_run_id,
+                deadline_seconds=(selection.deadline_ms or 3_600_000) / 1000,
+                event_sink=prediction_client._emit_console,
+                worker=SubprocessPythonWorker() if isinstance(worker, live.SubprocessPythonWorker) else worker,
+            )
+        else:
+            prediction_client._capture_console_cognition()
+            ipython = PersistentIpythonHost(
+                worker=worker,
+                p7_client=p7_client_facade(prediction_client),
+            )
+        bridge = _IpythonBridgeServer(parent, ipython, prediction_client)
         private_trace = (
             PrimeGameplayTrace(broker, trace, engine.guid, identities)
             if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
-        bridge = _IpythonBridgeServer(parent, ipython, prediction_client)
         bridge.start()
         parent = None
         return P7OperatorResources(
@@ -3674,7 +3741,7 @@ def _select_game_for_mode(
         # own caps.
         prefix = None
         route_source = None
-        if game.target_level > 1:
+        if game.target_level > 1 and resolved_environment.get(P7_HISTORY_VARIANT_ENV) == "legacy":
             from .solutions import load_best_prefix
 
             try:
@@ -3898,41 +3965,7 @@ def _prefix_replayed_count(prefix: object, journal_start: int, journal_length: i
     return min(expected, max(0, journal_length - journal_start))
 
 
-async def run_live(
-    invocation: P7Invocation,
-    run_id: str,
-    *,
-    cancellation_signal: object | None = None,
-) -> live.P7LiveExecution:
-    """Run the one fixed solve and seal its private evidence.
-
-    Recovered from the removed driver's live body, with the orchestration order
-    unchanged: preflight every host service, run the composed application, seal
-    and replay the broker, verify the sealed trace, then compare, and always
-    release. Only the value sources differ; see
-    :mod:`asterion.applications.prime.p7.live`.
-    """
-
-    from .solutions import load_best_prefix, load_verified_attempt
-
-    variant = _resolve_history_variant(invocation.environment, invocation.game)
-    cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
-    run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
-    if type(getattr(run_signal, "cancelled", None)) is not bool:
-        raise P7OperatorError("P7 cancellation signal is unavailable")
-
-    root = invocation.operator_root
-    playbook_snapshot: PlaybookSnapshot | None = None
-    playbook_loaded = False
-    playbook_saved = False
-    try:
-        playbook_snapshot = load_playbook(
-            root, PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels)
-        )
-        playbook_loaded = playbook_snapshot is not None
-    except (OSError, ValueError):
-        # A malformed private playbook cannot grant authority; use baseline.
-        playbook_snapshot = None
+def _legacy_tool_reference() -> P7ToolRegistry:
     # Build the application-level tool registry. The framework prompt
     # carries only general principles; this is where P7 surfaces its
     # own tools (retrodict query APIs, no-effect hint, etc.) to the model.
@@ -4099,6 +4132,46 @@ async def run_live(
         category="model",
     ))
     tool_registry.validate_executable_names()
+    return tool_registry
+
+
+async def run_live(
+    invocation: P7Invocation,
+    run_id: str,
+    *,
+    cancellation_signal: object | None = None,
+) -> live.P7LiveExecution:
+    """Run the one fixed solve and seal its private evidence.
+
+    Recovered from the removed driver's live body, with the orchestration order
+    unchanged: preflight every host service, run the composed application, seal
+    and replay the broker, verify the sealed trace, then compare, and always
+    release. Only the value sources differ; see
+    :mod:`asterion.applications.prime.p7.live`.
+    """
+
+    from .solutions import load_best_prefix, load_verified_attempt
+
+    variant = _resolve_history_variant(invocation.environment, invocation.game)
+    cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
+    research_mode = variant == "verified" and not cognition_mode
+    run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
+    if type(getattr(run_signal, "cancelled", None)) is not bool:
+        raise P7OperatorError("P7 cancellation signal is unavailable")
+
+    root = invocation.operator_root
+    playbook_snapshot: PlaybookSnapshot | None = None
+    playbook_loaded = False
+    playbook_saved = False
+    try:
+        playbook_snapshot = None if research_mode else load_playbook(
+            root, PlaybookKey(invocation.game.game_id, invocation.game.seed, invocation.game.win_levels)
+        )
+        playbook_loaded = playbook_snapshot is not None
+    except (OSError, ValueError):
+        # A malformed private playbook cannot grant authority; use baseline.
+        playbook_snapshot = None
+    tool_registry = None if research_mode else _legacy_tool_reference()
     strategy = _resolve_strategy(invocation.environment)
     if variant == "legacy":
         prompt = _prompt_for_variant(variant, tool_registry)
@@ -4106,7 +4179,7 @@ async def run_live(
             prompt += P7_EXPLORE_APPENDIX
     else:
         prompt = _prompt_for_strategy(strategy, tool_registry)
-    prefix = None if strategy == "cognition" else load_best_prefix(
+    prefix = None if research_mode or strategy == "cognition" else load_best_prefix(
         invocation.arc_root,
         root / ".asterion-private" / "prime-p7-live",
         invocation.game.game_id,
@@ -4120,7 +4193,7 @@ async def run_live(
         summary = _summarize_prefix_mechanics(prefix)
         if summary:
             prompt = prompt + "\n\n" + summary
-    offline_optimization_enabled = strategy != "cognition" and _offline_optimization_enabled(invocation.environment)
+    offline_optimization_enabled = not research_mode and strategy != "cognition" and _offline_optimization_enabled(invocation.environment)
     if offline_optimization_enabled:
         route_source = load_best_prefix(
             invocation.arc_root,
@@ -4224,8 +4297,8 @@ async def run_live(
         private_trace_root=trace_root,
         game=invocation.game,
         run_id=run_id,
-        cognition_store=GameCognitionStore(root),
-        semantic_cognition_store=SemanticCognitionStore(
+        cognition_store=None if research_mode else GameCognitionStore(root),
+        semantic_cognition_store=None if research_mode else SemanticCognitionStore(
             root, invocation.game.game_id, invocation.game.seed,
             invocation.game.win_levels, level=0,
         ),
@@ -4236,7 +4309,7 @@ async def run_live(
         cognition_mode=cognition_mode,
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
-    if isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
+    if not research_mode and isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
         try:
             broker_for_playbook.load_playbook(playbook_snapshot)
         except (OSError, ValueError, TypeError):
@@ -4328,7 +4401,12 @@ async def run_live(
                         target_level=invocation.game.target_level,
                         expectations=parsed_expectations,
                     )
-        if prediction_client is not None:
+        if research_mode:
+            prompt += "\n\nInitial research context (authoritative observation):\n" + json.dumps(
+                resources_.host_services["prime.ipython"].current_context(),
+                ensure_ascii=False, separators=(",", ":"),
+            )
+        elif prediction_client is not None:
             print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"initial-context\"}", "stage"), file=sys.stderr, flush=True)
             prompt = prompt + "\n\n" + _initial_game_context(
                 prediction_client,
@@ -4350,7 +4428,7 @@ async def run_live(
             file=sys.stderr,
             flush=True,
         )
-        if isinstance(broker_for_log, ArcBroker):
+        if not research_mode and isinstance(broker_for_log, ArcBroker):
             _log_cognition_narrative(
                 broker_for_log.cognition_projection(), phase="initial-context"
             )
@@ -4534,7 +4612,7 @@ async def run_live(
                         )
                     ):
                         sealed_trace = True
-                if sealed_trace and replay_verified:
+                if not research_mode and sealed_trace and replay_verified:
                     try:
                         snapshot = broker_value.export_playbook(successful=failure is None)
                     except (OSError, ValueError) as error:
@@ -4551,7 +4629,7 @@ async def run_live(
                         except (OSError, ValueError) as error:
                             playbook_saved = False
                             diagnostics["playbook_save_error"] = f"write:{type(error).__name__}"
-                elif failure is not None:
+                elif not research_mode and failure is not None:
                     try:
                         if isinstance(broker_value, ArcBroker):
                             baseline = broker_value.export_playbook(successful=False)
@@ -4607,7 +4685,10 @@ async def run_live(
                 diagnostics["route_adoption"] = route_adoption()
             elif isinstance(prediction_client, _P7BrokerClient):
                 diagnostics["route_adoption"] = prediction_client.route_adoption()
-            diagnostics["worker_cell_count"] = live.worker_cell_count(private)
+            research_host = resources_.host_services.get("prime.ipython") if research_mode else None
+            diagnostics["worker_cell_count"] = (
+                research_host.cell_count if research_mode else live.worker_cell_count(private)
+            )
             cleanup_failed = False
             try:
                 await resources_.close()
@@ -4623,7 +4704,11 @@ async def run_live(
                 if failure is None:
                     failure = error
                     reason = "P7 live solve unsuccessful"
-            cleanup_complete = worker.closed and not cleanup_failed
+            computation_closed = (
+                bool(getattr(bridge, "_host_closed", False))
+                if research_mode else worker.closed
+            )
+            cleanup_complete = computation_closed and not cleanup_failed
             diagnostics["failure_classification"] = classify_failure_cause(
                 failure=failure,
                 broker_status=diagnostics.get("broker_status"),

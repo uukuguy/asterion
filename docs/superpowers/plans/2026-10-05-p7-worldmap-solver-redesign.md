@@ -236,9 +236,9 @@ class TestPrimeIpython(unittest.IsolatedAsyncioTestCase):
 
 **Interfaces:** 消费接口 A 和 D；产出接口 B/C 及 solver event envelope。Task 4 为它注入 Broker、host evidence reader、kernel、control、公共事件 sink。
 
-- [ ] 用两个短历史转移构造研究数据：正确移动模型能解释两次，错误目标仍 unknown；错误转移返回最小反例序号。验证模型变量更改不会覆盖 host 原始 frame。
-- [ ] 实现 `research.py`：内容寻址 artifacts、revision、Draft 接纳、checkpoint、当前 context；作用域绑定 game/seed/attempt，source/model/reports 通过 ID 关联，不重复保存独立“确定认知”账本。
-- [ ] 实现 `research_bridge.py` 只读四方法，伪造旧 `act_checked` 请求必须在 server 拒绝。输入返回有限副本；任何 unknown 方法、越界序号或非本 run artifact 都明确拒绝。
+- [x] 用两个短历史转移构造研究数据：正确移动模型能解释两次，错误目标仍 unknown；错误转移返回最小反例序号。验证模型变量更改不会覆盖 host 原始 frame。
+- [x] 实现 `research.py`：内容寻址 artifacts、revision、Draft 接纳、checkpoint、当前 context；作用域绑定 game/seed/attempt，source/model/reports 通过 ID 关联，不重复保存独立“确定认知”账本。
+- [x] 实现 `research_bridge.py` 只读四方法，伪造旧 `act_checked` 请求必须在 server 拒绝。输入返回有限副本；任何 unknown 方法、越界序号或非本 run artifact 都明确拒绝。
 
 ```python
 def test_research_wire_cannot_dispatch(self):
@@ -247,12 +247,12 @@ def test_research_wire_cannot_dispatch(self):
     self.assertEqual(self.engine.actions, [])
 ```
 
-- [ ] 实现 `solver.py` 三工具入口，发布/行动均核对父 revision；host 比较预测与真实证据，报告 projection/dynamics/goal 分离。程序建模/search helper 输出候选和 unknown，不自动提交行动、不扫描真实 SDK。
-- [ ] 使用实际现有 Broker 行动路径验证短计划：正确首步、错误第二步、第三步未执行；过关/暂停也停止后缀；旧起点、重复 ID、旧 revision 在动作前拒绝或返回既有结果。source/revision 不完整时仍允许有起点和明确预期的单步 probe。
-- [ ] 将 prompt 重写成“读取当前证据→在 IPython 定义/检验模型→推进目标或区分未知→发布成果→明确提交短计划→分析反馈”的主路径。允许 stdlib 研究编程，移除只导入旧 p7_client、只能 fallback 和强制旧账本实验流程。解释变量跨压缩保留、源码/JSON checkpoint、无模型证书前置门槛。
-- [ ] TypeScript 注册精确三工具；allowlist、Python registry 和描述统一。`p7_workspace` 的 tagged union 及 ActorPlan 参数可由模型实际表达；不只改工具文案。旧应用工具退出新默认路径，需要保留的历史解析不可成为双执行入口。
-- [ ] 跑 `npm --prefix packages/typescript/asterion-prime-extension test` 与 `uv run python -m unittest -v tests.test_prime_p7_research tests.test_prime_p7_solver tests.test_prime_p7_tool_registry tests.test_prime_p7_bridge_dispatch`；针对 obsolete 接口的测试更新为新行为，保留权限/identity/redaction边界。
-- [ ] 提交所属文件，并向 Task 3/4 交付一条脱敏 fixture 事件链：任务→计算→发布→计划→动作→失配→修订，用于同一故事的 UI 与集成验收。
+- [x] 实现 `solver.py` 三工具入口，发布/行动均核对父 revision；host 比较预测与真实证据，报告 projection/dynamics/goal 分离。程序建模/search helper 输出候选和 unknown，不自动提交行动、不扫描真实 SDK。
+- [x] 使用实际现有 Broker 行动路径验证短计划：正确首步、错误第二步、第三步未执行；过关/暂停也停止后缀；旧起点、重复 ID、旧 revision 在动作前拒绝或返回既有结果。source/revision 不完整时仍允许有起点和明确预期的单步 probe。
+- [x] 将 prompt 重写成“读取当前证据→在 IPython 定义/检验模型→推进目标或区分未知→发布成果→明确提交短计划→分析反馈”的主路径。允许 stdlib 研究编程，移除只导入旧 p7_client、只能 fallback 和强制旧账本实验流程。解释变量跨压缩保留、源码/JSON checkpoint、无模型证书前置门槛。
+- [x] TypeScript 注册精确三工具；allowlist、Python registry 和描述统一。`p7_workspace` 的 tagged union 及 ActorPlan 参数可由模型实际表达；不只改工具文案。旧应用工具退出新默认路径，需要保留的历史解析不可成为双执行入口。
+- [x] 跑 `npm --prefix packages/typescript/asterion-prime-extension test` 与 `uv run python -m unittest -v tests.test_prime_p7_research tests.test_prime_p7_solver tests.test_prime_p7_tool_registry tests.test_prime_p7_bridge_dispatch`；针对 obsolete 接口的测试更新为新行为，保留权限/identity/redaction边界。
+- [x] 提交所属文件，并向 Task 3/4 交付一条脱敏 fixture 事件链：任务→计算→发布→计划→动作→失配→修订，用于同一故事的 UI 与集成验收。
 
 ## Task 3: 控制台协同、历史与生命周期
 
@@ -277,7 +277,7 @@ def test_pause_waits_for_dispatched_action(self):
 - [x] ConsoleSession/server 增加 pause/resume 路由与确认回执；控制请求到 operator 的路径复用本 run guest 映射，不能写入 worker 可发布产物集合。断连或未知回执显示请求未确认，不猜为成功。
 - [x] 消费公共事件构建画面/任务/WorldMap/研究计划/反馈五区：真实帧与预测区分，已执行/未执行后缀明确；修订链接到反例，错误来源可区分状态/动力学/目标/实现。
 - [x] 使用同一 Task 2 fixture 检查历史 event N 展示 revision N，而不是最终 revision；现场停止按钮不作用于被查看的历史 run。HUMAN 试玩与自主证据保持独立。
-- [ ] 在浏览器当前已登录实例验证开始、暂停请求、已暂停、继续、停止请求、已清理状态以及历史回看；只用 provider-free fixture/synthetic adapter 做 UI 阶段验证，不能称为真实求解胜利。无可计算总量时不显示百分比。
+- [x] 按用户纠正沿用后台 DOM、HTTP 与实际导出 HTML 验收开始、暂停请求、已暂停、继续、停止请求、清理及历史回看。105 Python / 74 DOM 检查通过；不再要求打开 Chrome，浏览器插件连接不作为门禁。此处为 provider-free UI 验证，不代表真实求解胜利；无可计算总量时不显示百分比。
 - [x] 跑针对 console/control unittest。用 sentinel 对公共 snapshot 断言不出现 stdout、prompt、provider payload、路径、源码；提交所属文件并交付 Task 4 控制握手格式。
 
 ## Task 4: 实际接线、共同复审与有限真实验证
@@ -286,13 +286,13 @@ def test_pause_waits_for_dispatched_action(self):
 
 **Interfaces:** 在 existing `build_p7_operator_resources` 注入 Prime host、只读研究 server、Solver、SolverControl、事件 sink。既有 runtime/runner/assembly 继续负责执行；只替换应用工具 dispatch 和 kernel host 接线。
 
-- [ ] 移除新运行路径上的旧可写 worker API，适配 native 与 official operator 到同一个通用 kernel；`p7/ipython_host.py` 仅保留必要兼容导出或删除重复实现。generic Prime 不反向依赖应用，不把 P1 coding assembly 当通用 kernel 启动器。
-- [ ] 默认 verified 路径的 `build_strategy_prompt`、`_initial_game_context` 与 continuation 同时切换：不因历史默认值 `replay` 注入旧认知表单、DSL 自动搜索或精确路线。显式 legacy/cognition 路径可保留原实现，不默认加载共享 Playbook/GameCognitionStore/SemanticCognitionStore 或成功 prefix；研究记忆是否复用必须由当前运行模式明确决定。
-- [ ] actor method_call 只接受新三工具对应请求；research server 与 action bridge 分离。为每次 cell/action 用真实取消 signal 替换当前 `_BridgeSignal.cancelled=False`，暂停门禁位于新派发之前。
-- [ ] 在既有 Prime continuation/round 边界接应用提供的 admission hook，暂停不继续生成新轮模型请求；通用 hook 不认识 P7 目标。应用明确注入 continuation prompt，移除默认提示中对 `p7_client` 的依赖。不增加外层自主循环来复制 PrimeSession。
-- [ ] 在 root 拥有的 `p7/research_runtime.py` 写薄适配器 `P7ResearchRuntime`，组合 generic host、Solver、control 和 read server，提供 `execute/admit_round/continuation_prompt/close`；现有 runtime_binding 接受它并向 generic Prime 注入 `before_round` async hook。不要给 PrimeLaunch plain-data 附加 live callback。一次模型 round 内含 tool cells，不能把整个 round 记作控制活动计数，否则暂停等待 round 结束、tool 又等待暂停解除会死锁；`before_round` 只做 admission 等待，活动计数仅覆盖真正的有界计算/环境动作。
-- [ ] 用一条实际 wiring 的 provider-free story 验证：cell 建模导出→publish→actor plan→Broker action→真实差异→workspace 修订→console 历史；checkpoint 重建 kernel 后强制校准；环境丢失不自动恢复游戏或重派未知动作。
-- [ ] 实现复审重点：WorldMap 是否改变下一次计算/动作、程序是否实际执行、原始证据与派生报告是否分离、pause是否真正截断后缀、旧工具是否仍暴露行动捷径、公共投影是否越界。修复结论后再扩大检查。
+- [x] 移除新运行路径上的旧可写 worker API，适配 native 与 official operator 到同一个通用 kernel；`p7/ipython_host.py` 仅保留必要兼容导出或删除重复实现。generic Prime 不反向依赖应用，不把 P1 coding assembly 当通用 kernel 启动器。
+- [x] 默认 verified 路径的 `build_strategy_prompt`、`_initial_game_context` 与 continuation 同时切换：不因历史默认值 `replay` 注入旧认知表单、DSL 自动搜索或精确路线。显式 legacy/cognition 路径可保留原实现，不默认加载共享 Playbook/GameCognitionStore/SemanticCognitionStore 或成功 prefix；研究记忆是否复用必须由当前运行模式明确决定。
+- [x] actor method_call 只接受新三工具对应请求；research server 与 action bridge 分离。为每次 cell/action 用真实取消 signal 替换当前 `_BridgeSignal.cancelled=False`，暂停门禁位于新派发之前。
+- [x] 在既有 Prime continuation/round 边界接应用提供的 admission hook，暂停不继续生成新轮模型请求；通用 hook 不认识 P7 目标。应用明确注入 continuation prompt，移除默认提示中对 `p7_client` 的依赖。不增加外层自主循环来复制 PrimeSession。
+- [x] 在 root 拥有的 `p7/research_runtime.py` 写薄适配器 `P7ResearchRuntime`，组合 generic host、Solver、control 和 read server，提供 `execute/admit_round/continuation_prompt/close`；现有 runtime_binding 接受它并向 generic Prime 注入 `before_round` async hook。不要给 PrimeLaunch plain-data 附加 live callback。一次模型 round 内含 tool cells，不能把整个 round 记作控制活动计数，否则暂停等待 round 结束、tool 又等待暂停解除会死锁；`before_round` 只做 admission 等待，活动计数仅覆盖真正的有界计算/环境动作。
+- [x] 用一条实际 wiring 的 provider-free story 验证：cell 建模导出→publish→actor plan→Broker action→真实差异→workspace 修订→console 历史；checkpoint 重建 kernel 后强制校准；环境丢失不自动恢复游戏或重派未知动作。
+- [x] 实现复审重点：WorldMap 是否改变下一次计算/动作、程序是否实际执行、原始证据与派生报告是否分离、pause是否真正截断后缀、旧工具是否仍暴露行动捷径、公共投影是否越界。修复结论后再扩大检查。
 - [ ] 依次跑 `npm --prefix packages/typescript/asterion-prime-extension test`、本次相关 Python tests、`make promotion-check`；执行 `make lint`、`make docs-check` 并按仓库要求完成必要 `make check`，既有无关失败记录其边界。确认 wheel 内新 Prime worker、新 P7 modules、打包扩展与 allowlist 一致。
 - [ ] 用固定预设执行 `make asterion-prime-p7-level-witness GAME=<已选择的本地游戏> LEVEL=1`。只选一个有限新运行，隔离旧 knowledge stores，不能注入人工路线、成功 prefix 或真实 SDK 离线搜索答案。选择已有数据且允许本地运行的游戏，由集成方在执行记录中写清确切 GAME 与 preset；命令成功仅证明实际结果，不据synthetic story预先宣称过关。现有 witness action cap 基于 human baseline，不能为得到成功偷偷扩大。
 - [ ] 检查真实证据中至少有一次“程序模型/搜索结果→明确计划→真实反馈”的可追溯连接；若失败，记录第一个模型/控制/目标断点而不是盲目扩大预算。下一关迁移必须在全新 run 中自然连续过关，使用固定有限预设；旧 LEVEL=2 自动 replay prefix 的 witness 不能作跨关能力证据。再次求解只复用明确保存的规则/程序，不复用精确动作路线；无授权或外部阻塞则明确留作未完成边界，不标完整能力通过。

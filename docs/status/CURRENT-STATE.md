@@ -7,7 +7,7 @@
 - Theme-level focus: native P7 WorldMap-driven solving through its existing persistent IPython
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` (native-detachment plan remains historical migration evidence)
-- Active work package: P7 WorldMap solver and console redesign — approved direction; Prime workspace, P7 solver and console implementation underway, capability evidence pending
+- Active work package: P7 WorldMap solver and console redesign — Prime workspace, P7 solver and console implemented and reviewed; packaged live capability evidence pending
 
 ## Current Architecture
 

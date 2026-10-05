@@ -299,13 +299,12 @@ class TestNarrativeDelivery(unittest.TestCase):
 
     def test_prompts_require_chinese_and_no_redundant_refresh_queries(self):
         from asterion.applications.prime.p7.prompt import build_strategy_prompt
-        for strategy in ("replay", "explore", "cognition"):
+        for strategy in ('replay', 'explore'):
             prompt = build_strategy_prompt(None, strategy)
-            self.assertIn("请用中文", prompt)
-            self.assertIn("cognition_narrative_zh", prompt)
-            self.assertIn("id`、`kind`", prompt)
-            self.assertIn("expected_result", prompt)
-            self.assertIn("expected_distinguishing_result", prompt)
-            self.assertIn("不要使用", prompt)
-            self.assertIn("`supports`", prompt)
-            self.assertNotIn("and again after every action or cognition update", prompt)
+            self.assertIn('中文公开摘要', prompt)
+            self.assertIn('WorldMap', prompt)
+            self.assertNotIn('cognition_narrative_zh', prompt)
+            self.assertNotIn('p7_cognition_update', prompt)
+        cognition = build_strategy_prompt(None, 'cognition')
+        self.assertIn('请用中文', cognition)
+        self.assertIn('cognition_narrative_zh', cognition)

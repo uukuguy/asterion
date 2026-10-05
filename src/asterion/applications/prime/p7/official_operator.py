@@ -265,7 +265,10 @@ async def _run_game(
             implementations=application.implementations,
             runtime=runtime,
             run_id=run_id,
-            input_text=P7_SOLVE_PROMPT,
+            input_text=P7_SOLVE_PROMPT + "\n\nInitial research context:\n" + json.dumps(
+                resources.host_services["prime.ipython"].current_context(),
+                ensure_ascii=False, separators=(",", ":"),
+            ),
             host_services=resources.host_services,
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
             signal=live.NeverCancelled(),
