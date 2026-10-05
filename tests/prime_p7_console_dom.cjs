@@ -1913,16 +1913,17 @@ const overviewRow = (app, game=0) => app.$('overview-game-list').querySelector(`
 test('unplayed game shows a readonly initial preview and a late preview cannot replace another selection', async () => {
   const config = {token:'test-token',games:[{game_id:'first-test',alias:'first',win_levels:2},
                                          {game_id:'second-test',alias:'second',win_levels:2}]};
-  const preview = (game_id, color) => ({schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+  const preview = (game_id, color, level=1) => ({schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
     run:{game_id,run_id:null,status:'preview',seed:0,win_levels:2,completed_level_count:0,
-         primitive_action_count:0,replay_verified:false,sealed_trace:false},
-    levels:[{level:1,status:'preview',frames:[{id:'preview-initial',grid:Array.from({length:64},()=>Array(64).fill(color)),
-      available_actions:['ACTION1','ACTION6','RESET'],state:'NOT_FINISHED',levels_completed:0}],
+         target_level:level,primitive_action_count:0,replay_verified:false,sealed_trace:false},
+    levels:[{level,status:'preview',frames:[{id:'preview-initial',grid:Array.from({length:64},()=>Array(64).fill(color)),
+      available_actions:['ACTION1','ACTION6','RESET'],state:'NOT_FINISHED',levels_completed:level-1}],
       actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]});
-  let release;
+  let release, releaseLevel;
   const app = launch(fixture(), {liveConfig:config,fetch:async url=>{
     if(url==='/api/preview/first-test')return new Promise(resolve=>{release=resolve;});
     if(url==='/api/preview/second-test')return response(preview('second-test',9));
+    if(url==='/api/preview/second-test/2')return new Promise(resolve=>{releaseLevel=resolve;});
     return response(idleView());
   }});
   try {
@@ -1930,12 +1931,29 @@ test('unplayed game shows a readonly initial preview and a late preview cannot r
     changeGame(app,'second-test'); await settle();
     assert.equal(app.$('game-title').textContent,'second-test');
     assert.equal(app.$('board-empty').hidden,true);
-    assert.match(app.$('frame-caption').textContent,/尚未开始 · 初始画面/);
+    assert.match(app.$('frame-caption').textContent,/关卡初始预览 · 尚未开始/);
     assert.match(app.$('run-id').textContent,/尚未启动 P7/);
     assert.equal(app.$('board-canvas').width,512);
     assert.equal(app.$('action-total').textContent,'0');
     assert.equal(app.$('console-mode').value,'replay');
     assert.ok([...app.$('available-actions').querySelectorAll('button')].every(button=>button.disabled));
+    app.$('level-2').click(); await settle();
+    assert.ok(releaseLevel);
+    assert.equal(app.$('board-empty').hidden,false);
+    assert.match(app.$('level-2').getAttribute('aria-label'),/尚未开始/);
+    app.$('level-1').click(); await settle();
+    releaseLevel(response(preview('second-test',12,2))); await settle();
+    assert.equal(app.$('level-1').getAttribute('aria-current'),'true');
+    assert.equal(app.paints.at(-1),'#1E93FF');
+    app.$('level-2').click(); await settle();
+    assert.equal(app.$('board-empty').hidden,true);
+    assert.equal(app.paints.at(-1),'#FF851B');
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.completed_level_count,0);
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.target_level,2);
+    assert.equal(app.dom.window.__ASTERION_STATE__.levels[1].frames[0].levels_completed,1);
+    assert.equal(app.$('action-total').textContent,'0');
+    assert.ok([...app.$('available-actions').querySelectorAll('button')].every(button=>button.disabled));
+    app.$('level-1').click(); await settle();
     release(response(preview('first-test',12))); await settle();
     assert.equal(app.$('game-title').textContent,'second-test');
     assert.equal(app.paints.at(-1),'#1E93FF');

@@ -59,8 +59,8 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
 
     def test_initial_preview_get_uses_catalog_members_and_redacts_failure_without_starting(self):
         calls = []
-        def preview(root, game):
-            calls.append(game['game_id'])
+        def preview(root, game, level):
+            calls.append((game['game_id'], level))
             return {'run': {'game_id': game['game_id'], 'status': 'preview', 'run_id': None},
                     'levels': [{'frames': [{'grid': [[9]]}], 'actions': []}]}
         self.session_._preview_reader = preview
@@ -69,12 +69,16 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(raw)['run']['status'], 'preview')
         self.assertEqual(self.request('GET', '/api/preview/test-1')[0], 200)
-        self.assertEqual(calls, ['test-1'])
+        self.assertEqual(calls, [('test-1', 1)])
+        self.assertEqual(self.request('GET', '/api/preview/test-1/2')[0], 200)
+        self.assertEqual(self.request('GET', '/api/preview/test-1/2')[0], 200)
+        self.assertEqual(calls, [('test-1', 1), ('test-1', 2)])
         self.assertEqual(self.session_.view(), before)
         self.assertFalse(self.calls)
-        for path in ('/api/preview/unknown-test', '/api/preview/../test-1'):
+        for path in ('/api/preview/unknown-test', '/api/preview/../test-1', '/api/preview/test-1/0',
+                     '/api/preview/test-1/3', '/api/preview/test-1/02', '/api/preview/test-1/nope'):
             self.assertGreaterEqual(self.request('GET', path)[0], 400)
-        self.assertEqual(calls, ['test-1'])
+        self.assertEqual(calls, [('test-1', 1), ('test-1', 2)])
         self.session_._previews.clear()
         def fail(*_):
             raise ValueError('/private/sk-preview-secret')

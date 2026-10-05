@@ -15,22 +15,27 @@ class _PreviewWorker(_Worker):
         return self._read(seconds=8)
 
 
-def build_preview_snapshot(arc_root: Path, game: dict, *, worker_factory=_PreviewWorker) -> dict:
+def build_preview_snapshot(arc_root: Path, game: dict, selected_level: int = 1, *, worker_factory=_PreviewWorker) -> dict:
     # The existing worker clears the environment, bounds its initial read, and
     # owns an ephemeral recording directory. Never activate a HUMAN controller
     # or send a game action; close its engine and recordings after this one read.
     worker = None
     try:
-        worker = worker_factory(arc_root, game['game_id'], 1)
+        if type(selected_level) is not int or not 1 <= selected_level <= game['win_levels']:
+            raise ValueError
+        worker = worker_factory(arc_root, game['game_id'], selected_level)
         observation = _observation(worker.observe(), game['game_id'], game['win_levels'])
-        if (observation['current_level'] != 1 or observation['levels_completed'] != 0
+        if (observation['current_level'] != selected_level or observation['levels_completed'] != 0
                 or observation['state'] != 'NOT_FINISHED'):
             raise ValueError
         value = _snapshot(observation, 0, 0)
-        value['run'].update(status='preview', seed=0, target_level=1)
+        value['run'].update(status='preview', seed=0, target_level=selected_level)
         level = value['levels'][0]
         level['status'] = 'preview'
         level['frames'][0]['id'] = 'preview-initial'
+        # Position context for this frame only; the preview has zero completed
+        # levels and cannot establish passed levels or an official score.
+        level['frames'][0]['levels_completed'] = selected_level - 1
         level['cognition'] = {'scope': 'unavailable', 'updates': []}
         return deepcopy(value)
     except Exception:

@@ -113,7 +113,11 @@ class _Handler(BaseHTTPRequestHandler):
             elif self.path.startswith("/api/replay/"):
                 self._send(200, session.replay(self.path.removeprefix("/api/replay/")))
             elif self.path.startswith("/api/preview/"):
-                self._send(200, session.preview(self.path.removeprefix("/api/preview/")))
+                parts = self.path.removeprefix('/api/preview/').split('/')
+                if (len(parts) not in (1, 2) or (len(parts) == 2 and
+                        (not parts[1].isascii() or not parts[1].isdigit() or str(int(parts[1])) != parts[1]))):
+                    raise ConsoleSessionError('preview-unavailable')
+                self._send(200, session.preview(parts[0], int(parts[1]) if len(parts) == 2 else 1))
             else:
                 self._error(404, "not-found")
         except ConsoleSessionError:

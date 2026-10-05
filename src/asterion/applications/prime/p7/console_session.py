@@ -140,7 +140,7 @@ class ConsoleSession:
         self._snapshot_reader = snapshot_reader
         self._preview_reader = preview_reader
         self._preview_lock = threading.Lock()
-        self._previews: dict[str, dict | None] = {}
+        self._previews: dict[tuple[str, int], dict | None] = {}
         self._manual = manual_controller
         self._manual_save_root = (Path(manual_save_root) if manual_save_root is not None
                                   else self._root / '.asterion-private' / 'p7-console-manual')
@@ -170,23 +170,26 @@ class ConsoleSession:
                 game["baseline_actions"] = list(self._baseline_actions[game["game_id"]])
         return games
 
-    def preview(self, game_id: str) -> dict:
+    def preview(self, game_id: str, level: int = 1) -> dict:
         if type(game_id) is not str or game_id not in self._games or self._closed:
             raise ConsoleSessionError('preview-unavailable')
         # At most one short-lived engine is constructed at a time, and at most
-        # one result (including unavailable) is retained per explicit catalog game.
+        # one result per explicit catalog game/level (including unavailable).
+        game = next(game for game in self.games() if game['game_id'] == game_id)
+        if type(level) is not int or not 1 <= level <= game['win_levels']:
+            raise ConsoleSessionError('preview-unavailable')
+        key = (game_id, level)
         with self._preview_lock:
             if self._closed:
                 raise ConsoleSessionError('preview-unavailable')
-            if game_id not in self._previews:
+            if key not in self._previews:
                 try:
-                    game = next(game for game in self.games() if game['game_id'] == game_id)
-                    self._previews[game_id] = self._preview_reader(self._arc_root, game)
+                    self._previews[key] = self._preview_reader(self._arc_root, game, level)
                 except Exception:
-                    self._previews[game_id] = None
-            if self._previews[game_id] is None or self._closed:
+                    self._previews[key] = None
+            if self._previews[key] is None or self._closed:
                 raise ConsoleSessionError('preview-unavailable')
-            return deepcopy(self._previews[game_id])
+            return deepcopy(self._previews[key])
 
     def overview(self) -> dict:
         with self._lock:

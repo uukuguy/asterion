@@ -282,7 +282,8 @@
 
   function currentRunLevelLabel(level) {
     if (state.mode === 'manual') return statusInfo(level.status)[0];
-    if (level.status === 'preview') return '尚未开始 · 初始画面';
+    if (level.status === 'preview') return '关卡初始预览 · 尚未开始';
+    if (level.status === 'preview-unavailable') return '初始画面暂不可用 · 尚未开始';
     if (level.status === 'successful') return '本轮已过关';
     if (['not_run', 'not-run', 'unobserved'].includes(level.status)) return liveConfig ? '本轮未运行' : '本轮未记录';
     if (level.status === 'incomplete' && activeSession() && state.liveView?.run_id === run.run_id) return '本轮进行中';
@@ -293,7 +294,7 @@
     const manual = state.mode === 'manual', game = verifiedSavedGame();
     const current = `本轮 ${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`;
     $('run-progress-summary').hidden = manual;
-    write('run-progress-summary', string(run.status, '').startsWith('preview') ? '尚未开始 · 初始画面预览' : game ? `游戏已保存 ${game.completed_levels} / ${game.win_levels} · ${current}` : current);
+    write('run-progress-summary', string(run.status, '').startsWith('preview') ? '关卡初始预览 · 尚未开始' : game ? `游戏已保存 ${game.completed_levels} / ${game.win_levels} · ${current}` : current);
     setStatus($('level-status'), currentLevel().status === 'successful' ? 'completed' : currentLevel().status);
     if (!manual) write('level-status', currentRunLevelLabel(currentLevel()));
     const saved = game && currentLevel().status !== 'successful' && currentLevel().level <= game.completed_levels;
@@ -334,7 +335,11 @@
       }
       button.append(content);
       button.addEventListener('click', () => {
-        if (state.mode !== 'manual') { selectLevel(index); seekFrame(0); return; }
+        if (state.mode !== 'manual') {
+          selectLevel(index); seekFrame(0);
+          if (string(run.status, '').startsWith('preview')) loadGamePreview(overviewGame(run.game_id), level.level);
+          return;
+        }
         if (manualSelectionLocked()) return;
         if (state.manualView?.state === 'ready' && !state.manualError && state.manualView.game_id === run.game_id && manualLevel(state.manualView) === level.level && array(level.frames).length) { if (manualHistoryActive()) { pause(); setManualFrame(state.manualHistory.entries.length - 1); } else selectLevel(index); }
         else openManual(level.level);
@@ -349,6 +354,7 @@
     state.eventSequence = null;
     state.frameIndex = 0;
     state.actionId = null;
+    if (run.status === 'preview') run.target_level = currentLevel().level;
     renderRail();
     write('board-kicker', currentLevel().level === null ? 'LEVEL —' : `LEVEL ${String(currentLevel().level).padStart(2, '0')}`);
     write('board-title', run.status === 'manual' ? `关卡 ${currentLevel().level} · 人工试玩` : currentLevel().level === null ? '游戏画面 · 未记录关卡' : `关卡 ${currentLevel().level} · 游戏画面`);
@@ -546,7 +552,7 @@
     const comparisonRequested = $('compare-toggle').checked;
     const canCompare = Boolean(before && after);
     $('board-empty').hidden = count > 0;
-    $('board-empty').querySelector('h3').textContent = run.status === 'preview-unavailable' ? '初始画面暂不可用' : run.status === 'preview' && currentLevel().level === 1 ? '正在读取初始画面' : run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
+    $('board-empty').querySelector('h3').textContent = currentLevel().status === 'preview-unavailable' ? '初始画面暂不可用' : run.status === 'preview' ? '正在读取关卡初始画面' : run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
     $('board-empty').querySelector('p').textContent = string(run.status, '').startsWith('preview') ? '尚未启动 P7；可启动求解，或明确切换人工试玩。' : run.status === 'manual' ? (state.manualBusy ? '正在读取所选游戏的初始观察，尚未启动 P7。' : state.manualError ? '试玩操作未确认；可重新选择游戏开启新的试玩。' : '该关卡尚无真实观察记录；人工试玩仅展示当前关卡的真实画面。') : '没有记录帧，无法恢复该关卡的画面。';
     $('single-board').hidden = count === 0 || (comparisonRequested && canCompare);
     $('comparison-board').hidden = count === 0 || !comparisonRequested || !canCompare;
@@ -557,7 +563,7 @@
     write('frame-counter', `${count ? position + 1 : 0} / ${count}`);
     write('frame-state', frame ? frameState(frame.state) : '无帧记录');
     const manualEntry = manualHistoryActive() ? state.manualHistory.entries[position] : null;
-    write('frame-caption', run.status === 'preview' && frame ? '尚未开始 · 初始画面 · 只读预览' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
+    write('frame-caption', run.status === 'preview' && frame ? '关卡初始预览 · 尚未开始 · 只读' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
     $('board-canvas').style.cursor = state.mode === 'manual' && state.pointerAction === 'ACTION6' ? 'crosshair' : '';
     const decision = action && action.decision_id;
     const showDecisionLink = Boolean(action && run.status !== 'manual');
@@ -1618,41 +1624,43 @@
     return {schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
       run:{run_id:null,game_id:game.game_id,status,seed:0,win_levels:game.win_levels,
            completed_level_count:0,primitive_action_count:0,replay_verified:false,sealed_trace:false},
-      levels:[],decisions:[],warnings:[]};
+      levels:Array.from({length:game.win_levels}, (_,index) => ({level:index+1,status,
+        frames:[],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null})),decisions:[],warnings:[]};
   }
 
-  function validGamePreview(value, game) {
+  function validGamePreview(value, game, selectedLevel) {
     if (!validSnapshot(value)) return false;
     const record = value.run, level = value.levels[0];
     return record.game_id === game.game_id && record.win_levels === game.win_levels && record.run_id === null &&
       record.status === 'preview' && record.seed === 0 && record.completed_level_count === 0 && record.primitive_action_count === 0 &&
-      record.replay_verified === false && record.sealed_trace === false && value.levels.length === 1 &&
-      level.level === 1 && level.status === 'preview' && level.frames.length === 1 && level.frames[0].grid.length > 0 &&
-      level.frames[0].state === 'NOT_FINISHED' && level.frames[0].levels_completed === 0 &&
+      record.target_level === selectedLevel && record.replay_verified === false && record.sealed_trace === false && value.levels.length === 1 &&
+      level.level === selectedLevel && level.status === 'preview' && level.frames.length === 1 && level.frames[0].grid.length > 0 &&
+      level.frames[0].state === 'NOT_FINISHED' && level.frames[0].levels_completed === selectedLevel - 1 &&
       level.actions.length === 0 && level.decisions.length === 0 && array(value.decisions).length === 0 &&
       level.cognition?.scope === 'unavailable' && level.receipt == null;
   }
 
-  async function loadGamePreview(game) {
+  async function loadGamePreview(game, selectedLevel = currentLevel().level || 1) {
     if (!game || (run.game_id === game.game_id &&
-        (run.status === 'preview-unavailable' || (run.status === 'preview' && recordedLevels.some(level => level.frames.length))))) return;
+        (currentLevel().status === 'preview-unavailable' || (run.status === 'preview' && currentLevel().frames.length)))) return;
     const generation = state.replayGeneration;
     const isCurrent = () => state.mode === 'replay' && state.replayGeneration === generation &&
-      $('game-select').value === game.game_id && run.run_id === null && !latestReplayId(overviewGame(game.game_id));
-    if (!gamePreviews.has(game.game_id)) {
-      gamePreviews.set(game.game_id, request('/api/preview/' + game.game_id).then(value => {
-        if (!validGamePreview(value, game)) throw new Error('invalid-response');
+      $('game-select').value === game.game_id && currentLevel().level === selectedLevel && run.run_id === null && !latestReplayId(overviewGame(game.game_id));
+    const key = `${game.game_id}/${selectedLevel}`;
+    if (!gamePreviews.has(key)) {
+      gamePreviews.set(key, request('/api/preview/' + game.game_id + (selectedLevel === 1 ? '' : '/' + selectedLevel)).then(value => {
+        if (!validGamePreview(value, game, selectedLevel)) throw new Error('invalid-response');
         return value;
       }));
     }
     try {
-      const preview = await gamePreviews.get(game.game_id);
+      const preview = await gamePreviews.get(key);
       if (!isCurrent()) return;
-      replaceSnapshot(preview, {follow:false});
-      write('service-status','尚未开始 · 初始画面预览 · 可启动 P7 或选择人工试玩');
+      replaceSnapshot({...preview, levels:levels.map(level => level.level === selectedLevel ? preview.levels[0] : level)}, {follow:false});
+      write('service-status','关卡初始预览 · 尚未开始 · 可启动 P7 或选择人工试玩');
     } catch (_) {
       if (!isCurrent()) return;
-      replaceSnapshot(emptyGamePreview(game, 'preview-unavailable'), {follow:false});
+      replaceSnapshot({...snapshot,levels:levels.map(level => level.level === selectedLevel ? {...level,status:'preview-unavailable'} : level)}, {follow:false});
       write('service-status','初始画面暂不可用 · 尚未启动 P7');
     }
   }
