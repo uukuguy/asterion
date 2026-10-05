@@ -124,6 +124,10 @@ class AsterionPrimeSession:
     def last_diagnostic(self) -> FailureDiagnostic | None:
         return self._kernel.last_diagnostic
 
+    @property
+    def native_event_summary(self) -> tuple[Mapping[str, object], ...]:
+        return self._kernel.native_event_summary
+
     def close(self) -> None:
         """Release the owned single-run lease without invoking the transport."""
 

@@ -8,6 +8,7 @@ import math
 import json
 import os
 import sys
+from collections import deque
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from enum import Enum
@@ -47,6 +48,17 @@ _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
 _NATIVE_EVENT_ERROR = "Asterion-prime native event is invalid"
 _DEFAULT_TOOL_NAMES = ("ipython",)
+_NATIVE_SUMMARY_LIMIT = 128
+# Only source-defined labels may appear in content-free diagnostics. Unknown
+# labels can themselves contain provider text, so retain a fixed placeholder.
+_NATIVE_SUMMARY_TYPES = frozenset({
+    "response", "agent_start", "agent_end", "agent_settled", "turn_start", "turn_end",
+    "message_start", "message_update", "message_end", "tool_execution_start",
+    "tool_execution_update", "tool_execution_end", "entry_appended", "auto_retry_start",
+    "auto_retry_end", "compaction_start", "compaction_end", "queue_update",
+    "session_info_changed", "thinking_level_changed", "summarization_retry_scheduled",
+    "summarization_retry_attempt_start", "summarization_retry_finished", "bash_execution_update",
+})
 
 
 class _CallbackRejected(Exception):
@@ -309,6 +321,7 @@ class PrimeExecutionKernel:
         self.tool_callbacks = 0
         self._sequence = 0
         self._native_events: list[PiRpcEvent] = []
+        self._native_event_summary: deque[Mapping[str, object]] = deque(maxlen=_NATIVE_SUMMARY_LIMIT)
         self._final_text = ""
 
     def __repr__(self) -> str:
@@ -324,6 +337,11 @@ class PrimeExecutionKernel:
         value = getattr(self._rpc_session, "last_diagnostic", None)
         return value if type(value) is FailureDiagnostic else None
 
+    @property
+    def native_event_summary(self) -> tuple[Mapping[str, object], ...]:
+        """Bounded immutable labels/cursors retained even when a callback rejects."""
+        return tuple(self._native_event_summary)
+
     async def invoke(
         self,
         request: RunRequest,
@@ -336,6 +354,7 @@ class PrimeExecutionKernel:
         ):
             raise ProtocolError("Asterion-prime model callback limit exceeded")
         self._native_events = []
+        self._native_event_summary.clear()
         self._final_text = ""
         await self._invoke(request, signal, emit)
         return PrimeExecutionResult(tuple(self._native_events), self._final_text)
@@ -432,6 +451,8 @@ class PrimeExecutionKernel:
         model_callbacks = self.model_callbacks
         round_start = 0
         round_terminal_seen = False
+        compaction_reason: str | None = None
+        compaction_retry_pending = False
         callback_failure: ProtocolError | None = None
 
         def report_failure() -> None:
@@ -446,7 +467,7 @@ class PrimeExecutionKernel:
                 pass
 
         def consume_checked(event: PiRpcEvent) -> None:
-            nonlocal model_callbacks, round_terminal_seen
+            nonlocal model_callbacks, round_terminal_seen, compaction_reason, compaction_retry_pending
             expected_sequence = (
                 self._sequence + 1 if self._reusable else len(native) - round_start + 1
             )
@@ -457,6 +478,10 @@ class PrimeExecutionKernel:
             self._native_events.append(event)
             event_type = event.type
             payload = event.payload
+            if compaction_reason is not None and event_type not in {
+                "compaction_end", "entry_appended", "response",
+            }:
+                raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
             if os.environ.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition":
                 event_log = {"type": event_type}
                 for key in ("toolName", "toolCallId", "isError", "willRetry"):
@@ -472,6 +497,36 @@ class PrimeExecutionKernel:
                 # Post-run work may start another agent cycle before the
                 # prompt's settlement barrier. Its terminal is still required.
                 round_terminal_seen = False
+                compaction_retry_pending = False
+                return
+            if event_type in {"compaction_start", "compaction_end"}:
+                # Pi 1.0.0 AgentSessionEvent: post-agent compaction is private
+                # bookkeeping, followed by agent_settled or a new agent cycle.
+                reason = payload.get("reason")
+                if (type(reason) is not str or reason not in {"manual", "threshold", "overflow"}
+                        or not round_terminal_seen or pending_calls or compaction_retry_pending):
+                    raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                if event_type == "compaction_start":
+                    if compaction_reason is not None:
+                        raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                    compaction_reason = reason
+                    return
+                aborted, retry = payload.get("aborted"), payload.get("willRetry")
+                result, error = payload.get("result"), payload.get("errorMessage")
+                if (type(aborted) is not bool or type(retry) is not bool
+                        or (result is not None and not isinstance(result, Mapping))
+                        or (error is not None and type(error) is not str)
+                        or (aborted and result is not None)
+                        or (retry and (reason != "overflow" or aborted or result is None))):
+                    raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                if compaction_reason != reason:
+                    # _checkCompaction emits an unpaired failed overflow end
+                    # after exhausting its single compact-and-retry recovery.
+                    if not (compaction_reason is None and reason == "overflow"
+                            and not aborted and not retry and result is None and type(error) is str):
+                        raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
+                compaction_reason = None
+                compaction_retry_pending = retry
                 return
             if event_type in {
                 "response",
@@ -560,13 +615,18 @@ class PrimeExecutionKernel:
                 round_terminal_seen = True
                 return
             if event_type == "agent_settled":
-                if not round_terminal_seen:
+                if not round_terminal_seen or compaction_retry_pending:
                     raise _NativeEventRejected(_NativeDiagnostic.EVENT_MALFORMED)
                 return
             raise _NativeEventRejected(_NativeDiagnostic.EVENT_TYPE_INVALID)
 
         def consume(event: PiRpcEvent) -> None:
             nonlocal callback_failure
+            if type(event) is PiRpcEvent:
+                event_type = event.type
+                label = event_type if type(event_type) is str and event_type in _NATIVE_SUMMARY_TYPES else "unknown"
+                sequence = event.sequence if type(event.sequence) is int and event.sequence > 0 else None
+                self._native_event_summary.append(MappingProxyType({"sequence": sequence, "type": label}))
             try:
                 trusted_event = _snapshot_native_event(event)
             except BaseException:
@@ -673,6 +733,7 @@ class PrimeExecutionKernel:
             current_round = native[round_start:]
             if (
                 not round_terminal_seen
+                or compaction_reason is not None or compaction_retry_pending
                 or not current_round
                 or current_round[-1].type not in {"agent_end", "agent_settled"}
             ):

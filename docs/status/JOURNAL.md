@@ -3754,3 +3754,5 @@
 - 2026-10-06 00:34 CST — Corrected durable console checkpoint: fixed 25-game overview rules and acceptance counts; recorded SP80 6/6 receipt with RESET=2; identified active DC22 run without duplicating it; replaced superseded “25-game unauthorized” wording with explicit sequential local-solve authorization. Final root HTTP/DOM/export check and commit remain pending.
 - 2026-10-06 00:34 CST — Updated live checkpoint: DC22 terminated by Pi `prime-event-type` callback rejection (14 actions, 0 levels, 5 cells; cleanup true, unsealed/unreplayed), classified as runtime interruption. Recorded user authorization for exactly one full official 25-task submission after DC22/VC33 finite attempts, pausing remaining local games until official score/channel are recorded.
 - 2026-10-06 00:34 CST — Persistent console static/export DOM acceptance completed: 86/86 PASS, 0 skips; command and private log indexed in the live checkpoint.
+
+- 2026-10-06 — `2fec6fd3`: Added current-P7 overview, scoring, latest replay and fixed console address; excluded legacy results.

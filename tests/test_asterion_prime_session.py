@@ -497,6 +497,97 @@ class TestAsterionPrimeSession(unittest.TestCase):
         self.assertEqual(public[-1].payload, {"status": "completed"})
         self.assertNotIn("PRIVATE-ANSWER", repr(public))
 
+    def test_documented_compaction_lifecycle_preserves_settlement_and_redaction(self) -> None:
+        for reason, retry in (("threshold", False), ("overflow", True), ("manual", False)):
+            with self.subTest(reason=reason):
+                values = [
+                    ("agent_start", {}), ("turn_start", {}), ("agent_end", {}),
+                    ("compaction_start", {"reason": reason}),
+                    ("entry_appended", {"entry": {"summary": "PRIVATE-COMPACTION"}}),
+                    ("compaction_end", {"reason": reason, "aborted": False,
+                                        "willRetry": retry, "result": {"summary": "PRIVATE-COMPACTION"}}),
+                ]
+                if retry:
+                    values.extend((("agent_start", {}), ("turn_start", {}), ("agent_end", {})))
+                values.append(("agent_settled", {}))
+                session, _rpc, _lease = self.fixture.make(native_events(*values))
+                public = asyncio.run(collect(session))
+                self.assertEqual(public[-1].payload, {"status": "completed"})
+                validate_event_stream([event.to_mapping() for event in public])
+                self.assertNotIn("PRIVATE-COMPACTION", repr(public))
+
+    def test_compaction_failure_without_start_matches_pi_overflow_recovery_notice(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(
+            ("agent_end", {}),
+            ("compaction_end", {"reason": "overflow", "aborted": False,
+                                "willRetry": False, "errorMessage": "PRIVATE-RECOVERY-ERROR"}),
+            ("agent_settled", {}),
+        ))
+        public = asyncio.run(collect(session))
+        self.assertEqual(public[-1].payload, {"status": "completed"})
+        self.assertNotIn("PRIVATE-RECOVERY-ERROR", repr(public))
+
+    def test_compaction_rejects_invalid_order_and_control_fields(self) -> None:
+        start = ("compaction_start", {"reason": "threshold"})
+        end = ("compaction_end", {"reason": "threshold", "aborted": False, "willRetry": False})
+        cases = {
+            "before terminal": (start, end, ("agent_end", {})),
+            "unmatched end": (("agent_end", {}), end, ("agent_settled", {})),
+            "duplicate start": (("agent_end", {}), start, start),
+            "settled while compacting": (("agent_end", {}), start, ("agent_settled", {})),
+            "retry while compacting": (("agent_end", {}), start, ("agent_start", {})),
+            "mismatched reason": (("agent_end", {}), start, ("compaction_end", {"reason": "overflow", "aborted": False, "willRetry": False})),
+            "boolean control is integer": (("agent_end", {}), start, ("compaction_end", {"reason": "threshold", "aborted": 0, "willRetry": False})),
+            "invalid reason type": (("agent_end", {}), ("compaction_start", {"reason": ["PRIVATE-REASON"]})),
+            "unclosed compaction": (("agent_end", {}), start),
+            "no settlement after compaction": (("agent_end", {}), start, end),
+            "retry without agent cycle": (("agent_end", {}), ("compaction_start", {"reason": "overflow"}),
+                                         ("compaction_end", {"reason": "overflow", "aborted": False,
+                                                             "willRetry": True, "result": {}}), ("agent_settled", {})),
+            "unresolved tool": (("tool_execution_start", {"toolName": "ipython", "toolCallId": "call-1", "args": {"code": "PRIVATE-CODE"}}),
+                                ("agent_end", {}), start, end, ("agent_settled", {})),
+            "result control is invalid": (("agent_end", {}), start, ("compaction_end", {"reason": "threshold", "aborted": False, "willRetry": False, "result": "PRIVATE-SUMMARY"})),
+        }
+        for label, values in cases.items():
+            with self.subTest(label=label):
+                session, _rpc, _lease = self.fixture.make(native_events(*values))
+                with self.assertRaises(ProtocolError) as caught:
+                    asyncio.run(collect(session))
+                self.assertNotIn("PRIVATE", str(caught.exception))
+
+    def test_compaction_markers_do_not_relax_native_sequence_validation(self) -> None:
+        events = (
+            PiRpcEvent(sequence=1, type="agent_end", payload={}),
+            PiRpcEvent(sequence=3, type="compaction_start", payload={"reason": "threshold"}),
+        )
+        session, _rpc, _lease = self.fixture.make(events)
+        with self.assertRaisesRegex(ProtocolError, "event is malformed"):
+            asyncio.run(collect(session))
+        self.assertEqual(dict(session.native_event_summary[-1]), {"sequence": 3, "type": "compaction_start"})
+
+    def test_native_event_summary_survives_rejection_without_payload_or_unknown_type(self) -> None:
+        values = [("response", {"payload": "PRIVATE-PAYLOAD"})] * 140
+        values.append(("PRIVATE-SECRET-AS-TYPE", {"payload": "PRIVATE-PAYLOAD"}))
+        session, _rpc, _lease = self.fixture.make(native_events(*values))
+        with self.assertRaisesRegex(ProtocolError, "event type is invalid"):
+            asyncio.run(collect(session))
+        summary = session.native_event_summary
+        self.assertEqual(len(summary), 128)
+        self.assertEqual(dict(summary[-1]), {"sequence": 141, "type": "unknown"})
+        self.assertEqual(dict(summary[0]), {"sequence": 14, "type": "response"})
+        self.assertNotIn("PRIVATE", repr(summary))
+        with self.assertRaises(TypeError):
+            summary[-1]["type"] = "modified"
+
+    def test_native_event_summary_identifies_known_unsupported_pi_marker(self) -> None:
+        session, _rpc, _lease = self.fixture.make(native_events(
+            ("agent_end", {}), ("queue_update", {"steering": ["PRIVATE-PROMPT"]}),
+        ))
+        with self.assertRaisesRegex(ProtocolError, "event type is invalid"):
+            asyncio.run(collect(session))
+        self.assertEqual(dict(session.native_event_summary[-1]), {"sequence": 2, "type": "queue_update"})
+        self.assertNotIn("PRIVATE", repr(session.native_event_summary))
+
     def test_maps_only_exact_native_tool_events(self) -> None:
         events = native_events(
             ("response", {"id": "py-1", "success": True}),
