@@ -7,8 +7,12 @@ from collections.abc import Mapping
 from pathlib import Path
 from threading import Lock
 
+from .observation_state import ObservationState
+from .score import digest
+
 SCHEMA = 'asterion.prime.p7-console-event/v1'
-_MAX_ROW_BYTES = 48 * 1024
+_MAX_ROW_BYTES = 1100 * 1024
+_MAX_FILE_BYTES = 32 * 1024 * 1024
 _MAX_ROWS = 16384
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z')
 _HASH = re.compile(r'sha256:[0-9a-f]{64}\Z')
@@ -42,6 +46,33 @@ def _hash(value: object) -> bool:
     return type(value) is str and _HASH.fullmatch(value) is not None
 
 
+def _observation(value: object) -> bool:
+    """Only actual bounded pixels and public game-state fields may be persisted."""
+    if (type(value) is not dict
+        or set(value) != {'frame', 'available_actions', 'state', 'levels_completed', 'win_levels'}
+        or value['state'] not in ('NOT_STARTED', 'NOT_FINISHED', 'WIN', 'GAME_OVER')
+        or not _int(value['win_levels']) or not 1 <= value['win_levels'] <= 100
+        or not _int(value['levels_completed']) or value['levels_completed'] > value['win_levels']):
+        return False
+    actions, layers = value['available_actions'], value['frame']
+    if (type(actions) is not list or len(actions) > 7
+        or any(type(a) is not str or a not in {f'ACTION{i}' for i in range(1, 8)} for a in actions)
+        or actions != sorted(set(actions)) or type(layers) is not list or not 1 <= len(layers) <= 64):
+        return False
+    shape = None
+    for grid in layers:
+        if type(grid) is not list or not 1 <= len(grid) <= 64:
+            return False
+        width = len(grid[0]) if type(grid[0]) is list else 0
+        if not 1 <= width <= 64 or (shape is not None and shape != (len(grid), width)):
+            return False
+        shape = (len(grid), width)
+        if any(type(row) is not list or len(row) != width
+               or any(type(c) is not int or not 0 <= c <= 255 for c in row) for row in grid):
+            return False
+    return True
+
+
 def _payload(kind: str, payload: Mapping[str, object]) -> dict:
     if not isinstance(payload, Mapping):
         raise ValueError('console event unavailable')
@@ -53,6 +84,11 @@ def _payload(kind: str, payload: Mapping[str, object]) -> dict:
         for key in ('goal', 'basis', 'expected'):
             prose = value.get(key)
             valid = valid and type(prose) is str and bool(prose.strip()) and len(prose) <= 600 and public_text(prose) == prose
+    elif kind == 'observation':
+        valid = (set(value) == {'source_action_sequence', 'observation_sha256', 'observation'}
+                 and _int(value.get('source_action_sequence')) and _hash(value.get('observation_sha256'))
+                 and _observation(value.get('observation'))
+                 and digest(ObservationState.from_observation(value['observation']).to_projection()) == value['observation_sha256'])
     elif kind == 'action':
         valid = (set(value) <= {'action', 'sequence', 'before_sha256', 'after_sha256', 'levels_completed', 'data', 'decision_id'}
                  and {'action', 'sequence', 'before_sha256', 'after_sha256', 'levels_completed', 'decision_id'} <= set(value)
@@ -92,10 +128,12 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
         if warnings is not None:
             warnings.append('console-events-invalid')
 
+    total_bytes = 0
     with path.open('rb') as stream:
         for _ in range(_MAX_ROWS):
             line = stream.readline(_MAX_ROW_BYTES + 1)
-            if len(line) > _MAX_ROW_BYTES:
+            total_bytes += len(line)
+            if len(line) > _MAX_ROW_BYTES or total_bytes > _MAX_FILE_BYTES:
                 invalid()
                 break
             if not line or not line.endswith(b'\n'):
@@ -139,6 +177,7 @@ class ConsoleEventWriter:
         if path.exists() or path.is_symlink():
             raise ValueError('console event unavailable')
         self._sequence = 0
+        self._bytes = 0
 
     def append(self, kind: str, payload: Mapping[str, object]) -> None:
         safe = _payload(kind, payload)
@@ -146,7 +185,7 @@ class ConsoleEventWriter:
             row = {'schema': SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
                    'sequence': self._sequence + 1, 'kind': kind, 'payload': safe}
             line = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(',', ':')) + '\n').encode()
-            if len(line) > _MAX_ROW_BYTES or self._sequence >= _MAX_ROWS:
+            if len(line) > _MAX_ROW_BYTES or self._sequence >= _MAX_ROWS or self._bytes + len(line) > _MAX_FILE_BYTES:
                 raise ValueError('console event unavailable')
             path = self._root / 'console-events.jsonl'
             if path.is_symlink():
@@ -155,3 +194,4 @@ class ConsoleEventWriter:
                 stream.write(line)
                 stream.flush()
             self._sequence += 1
+            self._bytes += len(line)

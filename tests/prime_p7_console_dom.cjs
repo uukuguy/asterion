@@ -420,6 +420,7 @@ test('cognition timeline follows source frames and explicit decisions expose goa
   assert.match(app.$('world-guide').textContent, /画面物件蓝色物件/);
   assert.match(app.$('world-guide').textContent, /动作操作观察按键/);
   assert.doesNotMatch(app.$('world-guide').textContent, /动作后认知/);
+  assert.equal(app.$('panel-decisions').querySelector('h3').textContent, 'P7 决策 1');
   assert.match(app.$('panel-decisions').textContent, /目标：移到出口/);
   assert.match(app.$('panel-decisions').textContent, /依据：出口位于右方/);
   assert.match(app.$('panel-decisions').textContent, /预期：向右一格/);

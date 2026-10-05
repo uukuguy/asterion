@@ -497,7 +497,7 @@
       card.dataset.decisionId = string(decision.id, '');
       const header = node('div', undefined, 'event-header');
       const heading = node('div', undefined, 'event-heading');
-      heading.append(node('span', String(index + 1).padStart(2, '0'), 'event-index'), node('h3', `P7 第 ${number(decision.round_index, index + 1)} 轮`), node('span', decision.source === 'p7_decision' ? '应用决策' : '决策信号', 'neutral-tag'));
+      heading.append(node('span', String(index + 1).padStart(2, '0'), 'event-index'), node('h3', decision.source === 'p7_decision' ? `P7 决策 ${index + 1}` : `P7 第 ${number(decision.round_index, index + 1)} 轮`), node('span', decision.source === 'p7_decision' ? '应用决策' : '决策信号', 'neutral-tag'));
       header.append(heading);
       const linked = actions().filter((action) => array(decision.action_ids).includes(action.id));
       if (linked.length) {

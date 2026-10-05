@@ -356,6 +356,7 @@ class ArcBroker:
         self._mechanism_spec: MechanismSpec | None = None
         self._initial = initial
         self._current = initial
+        self._observation_listener: Callable[[int, str, ArcObservation], None] | None = None
         self._journal: list[ArcTransition] = []
         self._terminal_reason = "active"
         self._actions_dispatched = 0
@@ -650,6 +651,21 @@ class ArcBroker:
         self._experience_inducer = ExperienceInducer(win_levels=self._game.win_levels)
         if self._world_model is not None:
             self._world_model = WorldModelStore(self._game.game_id, self._game.seed, self._game.win_levels)
+
+    def set_observation_listener(self, listener: Callable[[int, str, ArcObservation], None]) -> None:
+        """Attach one application-owned advisory sink before any action dispatch."""
+        if self._journal or self._actions_dispatched or self._observation_listener is not None or not callable(listener):
+            raise ArcBrokerError("unavailable")
+        self._observation_listener = listener
+        self._notify_observation(0, _observation_digest(self._initial), self._initial)
+
+    def _notify_observation(self, sequence: int, observation_hash: str, observation: ArcObservation) -> None:
+        if self._observation_listener is not None:
+            try:
+                self._observation_listener(sequence, observation_hash, observation)
+            except Exception:
+                # Display failures cannot change settlement or execution authority.
+                pass
 
     def observation_state(self) -> ObservationState:
         """Return the current unified observation for model-side reasoning."""
@@ -2927,6 +2943,7 @@ class ArcBroker:
             self._journal.append(transition)
             transitions.append(transition)
             self._current = after
+            self._notify_observation(transition.sequence, transition.after_sha256, after)
             self._record_semantic_action(action, after)
             self._record_cognition()
             if action.name == "RESET" or after.levels_completed > before.levels_completed:

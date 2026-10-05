@@ -431,6 +431,56 @@ def _completion_proof(summary: dict, trace: list[dict], game: str | None,
                ("game_id", "seed", "win_levels", "levels_completed", "primitive_actions", "replay_sha256", "terminal_reason"))
 
 
+def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict], list[dict]]:
+    """Use the source's own settled observations, never SDK row positions.
+
+    A completed action/observation pair extends the prefix once. Later repeated
+    pixels cannot change an earlier pair, and a gap cannot be bridged by pixels.
+    """
+    observations: list[dict] = []
+    pending = None
+    retained = []
+    for event in events:
+        payload = event['payload']
+        if event['kind'] == 'action':
+            if pending is not None or not observations or payload['sequence'] != len(observations):
+                warn.append('console-events-invalid')
+                break
+            pending = payload
+        elif event['kind'] == 'observation':
+            sequence, raw = payload['source_action_sequence'], payload['observation']
+            if sequence != len(observations):
+                warn.append('console-events-invalid')
+                break
+            if observations:
+                previous = observations[-1]
+                if (pending is None or pending['sequence'] != sequence
+                    or pending['before_sha256'] != previous['hash']
+                    or pending['after_sha256'] != payload['observation_sha256']
+                    or pending['levels_completed'] != raw['levels_completed']
+                    or raw['win_levels'] != previous['wins']
+                    or raw['levels_completed'] not in (previous['levels'], previous['levels'] + 1)
+                    or (pending['action'] == 'RESET' and (raw['levels_completed'] != previous['levels'] or raw['state'] != 'NOT_FINISHED'))
+                    or (len(raw['frame'][-1]), len(raw['frame'][-1][0])) != (len(previous['layers'][-1]), len(previous['layers'][-1][0]))):
+                    warn.append('console-events-invalid')
+                    break
+            elif pending is not None or raw['levels_completed'] != 0 or raw['state'] != 'NOT_FINISHED':
+                warn.append('console-events-invalid')
+                break
+            observations.append({
+                'game_id': event['game_id'], 'wins': raw['win_levels'],
+                'levels': raw['levels_completed'], 'state': raw['state'],
+                'layers': raw['frame'], 'available_actions': raw['available_actions'],
+                'timestamp': '', 'action': pending['action'] if pending else 'RESET',
+                'data': pending.get('data', {}) if pending else {},
+                'hash': payload['observation_sha256'], 'hashes': {payload['observation_sha256']},
+                'source_action_sequence': sequence, 'source_action': pending,
+            })
+            pending = None
+        retained.append(event)
+    return observations, retained
+
+
 def build_console_snapshot(run_root: Path) -> dict[str, object]:
     """Project explicitly selected evidence without modifying it or running P7."""
     if not isinstance(run_root, Path) or run_root.is_symlink() or not run_root.is_dir():
@@ -471,6 +521,13 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     if source_events and game is None:
         game = source_events[0]["game_id"]
     source_actions = [event["payload"] for event in source_events if event["kind"] == "action"]
+    source_mode = any(event["kind"] == "observation" for event in source_events)
+    if source_mode:
+        observations, source_events = _source_observations(source_events, warn)
+        if observations:
+            wins = observations[0]["wins"]
+            if "recording-missing" in warn:
+                warn.remove("recording-missing")
     trace, sealed = _trace(root, summary, game, warn)
     trace_actions = [e for e in trace if e["kind"] == "arc.action"]
     levels: dict[int, dict] = {}
@@ -494,7 +551,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             source_aligned = False
             previous = None
             continue
-        if previous and observation["action"] == "RESET" and observation["hash"] == previous["hash"]:
+        if not source_mode and previous and observation["action"] == "RESET" and observation["hash"] == previous["hash"]:
             reset_recorded = source_aligned and any(
                 action["sequence"] == action_count + 1 and action["action"] == "RESET"
                 and action["before_sha256"] in previous["hashes"] and action["after_sha256"] in observation["hashes"]
@@ -516,15 +573,17 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         bucket["frames"].extend(new_frames)
         if previous:
             action_count += 1
-            # Source positions require an actual, unique transition. A missing
-            # SDK row can make the retained image look like an earlier state;
-            # row counts alone never establish the broker action sequence.
-            source_matches = [action for action in source_actions
-                              if action["action"] == observation["action"]
-                              and action.get("data", {}) == observation["data"]
-                              and action["levels_completed"] == observation["levels"]
-                              and action["after_sha256"] in observation["hashes"]]
-            source_match = source_matches[0] if len(source_matches) == 1 else None
+            if source_mode:
+                source_match = observation["source_action"]
+            else:
+                # Legacy SDK rows lack source identity. Only a unique matching
+                # transition can establish position; omitted rows stay ambiguous.
+                source_matches = [action for action in source_actions
+                                  if action["action"] == observation["action"]
+                                  and action.get("data", {}) == observation["data"]
+                                  and action["levels_completed"] == observation["levels"]
+                                  and action["after_sha256"] in observation["hashes"]]
+                source_match = source_matches[0] if len(source_matches) == 1 else None
             if (source_match is None or source_match["sequence"] != action_count
                 or source_match["before_sha256"] not in previous["hashes"]):
                 source_aligned = False
@@ -544,7 +603,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                                       "data": observation["data"], "levels_completed": observation["levels"],
                                       "changed_cells": changed, "trace_sequence": matched["sequence"] if matched else None,
                                       "visual_observations": _visual_observations(previous["layers"][-1], observation["layers"][-1]),
-                                      "decision_id": None, "source_action_sequence": action_count if source_aligned else None})
+                                      "decision_id": None, "source_action_sequence": (observation["source_action_sequence"] if source_mode else action_count) if source_aligned else None})
             if source_aligned:
                 action_positions[action_count] = bucket["actions"][-1]
         elif observation["action"] != "RESET":

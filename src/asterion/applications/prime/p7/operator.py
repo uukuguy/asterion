@@ -1272,7 +1272,7 @@ def _log_cognition_display(projection: object, *, phase: str) -> None:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence", "_console_writer", "_console_decision_sequence", "_pending_console_decision", "_active_console_decision", "_console_cognition_revision", "_console_cognition_signature")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence", "_console_writer", "_console_decision_sequence", "_pending_console_decision", "_active_console_decision", "_console_cognition_revision", "_console_cognition_signature", "_console_observation_attached")
 
     def __init__(
         self,
@@ -1297,12 +1297,36 @@ class _P7BrokerClient:
         self._active_console_decision = None
         self._console_cognition_revision = 0
         self._console_cognition_signature = None
+        self._console_observation_attached = False
+        if console_writer is not None and isinstance(broker, ArcBroker):
+            try:
+                broker.set_observation_listener(self._capture_console_observation)
+                self._console_observation_attached = True
+            except Exception:
+                pass
         self._route_adoption = RouteAdoptionTracker()
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
             "checked_plans": 0, "matched_expectations": 0, "mismatches": 0,
             "unexecuted_items": 0, "checked_plan_errors": 0, "uncertain_items": 0,
         }
+
+    def _capture_console_observation(self, sequence: int, observation_hash: str, observation: ArcObservation) -> None:
+        # Persist the exact settled public observation, never a reconstructed
+        # intermediate frame or optional metadata that may contain private text.
+        if sequence:
+            transition = self._broker.journal[-1]
+            if transition.sequence != sequence or transition.after_sha256 != observation_hash:
+                return
+            self._emit_console("action", {**self._transition_view(transition),
+                               "decision_id": getattr(self, "_active_console_decision", None)})
+        self._emit_console("observation", {
+            "source_action_sequence": sequence, "observation_sha256": observation_hash,
+            "observation": {"available_actions": list(observation.available_actions),
+                            "frame": [[list(row) for row in grid] for grid in observation.frame],
+                            "levels_completed": observation.levels_completed, "state": observation.state,
+                            "win_levels": observation.win_levels},
+        })
 
     def _console_position(self) -> tuple[int, str]:
         return len(self._broker.journal), digest(self._broker.observation_state().to_projection())
@@ -2225,8 +2249,9 @@ class _P7BrokerClient:
             self._recorder.append(
                 "arc.action", self._identities, self._transition_view(transition)
             )
-            self._emit_console("action", {**self._transition_view(transition),
-                               "decision_id": getattr(self, "_active_console_decision", None)})
+            if not getattr(self, "_console_observation_attached", False):
+                self._emit_console("action", {**self._transition_view(transition),
+                                   "decision_id": getattr(self, "_active_console_decision", None)})
         self._active_console_decision = None
 
     def observe(self) -> Mapping[str, object]:
