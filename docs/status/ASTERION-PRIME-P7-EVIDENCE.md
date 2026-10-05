@@ -878,3 +878,8 @@ The installed SDK HTTP proof performed ten genuine SP80 HUMAN actions and two cl
 - PASS: independent final recovery review. Fixed UI blockers after unsaved/action-rejected states and permanent stale/expired restart rejection. Unknown transport/startup/save outcomes preserve exact retry; definitive stale/session/expiry rejections release pending and refresh the real state.
 - Non-PASS: final packaged promotion attempt ran 3908 tests, 13 failures, 5 errors and 4 skips. Log `/tmp/p7-manual-restart-promotion.log` ends with previously recorded TypeScript source-detachment literals; the retained tail does not identify every failure. The full release gate remains open.
 - Boundary: this is independent HUMAN restart verification, not new P7 solving capability. Native browser visual/click acceptance remains external-limited by the unavailable cached browser runtime. Ordinary RESET remains history-preserving.
+
+
+## Handoff cleanup — 2026-10-05
+
+The local console at port 53747 was P7-idle with no run ID and cleanup confirmed. HUMAN was expired/saved in SP80 L2, action count 85. Normal SIGTERM closed the console and its Make/uv parents (69559/69549/69558). The two persistent HUMAN save files were hashed before/after and remained byte-identical. No new actions, model requests or save deletion occurred. Local proof: `/tmp/p7-console-handoff-cleanup.json`. No console endpoint remains active; next session starts `make p7-console` and restores saved selection/progress.

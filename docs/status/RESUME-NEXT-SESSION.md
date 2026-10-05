@@ -1,61 +1,52 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-10-05. Realtime P7, direct-level play, reliable human controls and durable per-level HUMAN save/resume delivered. Final installed SDK/HTTP/DOM verification passes; full promotion remains non-PASS. Current-level HUMAN clear/restart delivered and verified; full promotion remains non-PASS.
+> Updated: 2026-10-05 19:20 CST. 会话已收口。控制台已正常关闭，人工存档保留；下一会话先读取本文件，不依赖聊天记录。
 
 ## 已验证事实
 
-- Branch `feat/p7-live-console`. Plan `6c494834`, feature `ed6fa64b`, source-frame fix `004442f2`, guest transport fix `9e98b49e`. Playable-selection follow-up committed as `83a4f404`; direct levels, remembered game/level and compact action highlights committed as `8974457b`; stable human controls and page-local history committed as `898f7536`; durable per-level HUMAN save/resume committed as `a50044d1`. Task1–4 completed within the approved first-package boundary; independent source reviews PASS.
-- `make p7-console` opens the local autonomous P7 workspace. The page reads 25 local game records and starts no model until the user selects a game and clicks start. The first preset runs L1 with a fixed 900-second bound. Offline single HTML replay remains available.
-- Source public observations, decisions, actual actions and cognition revisions use exact run/game/sequence/hash links. New source records retain repeated/no-effect frames. SDK-only historical records keep honest final-scope/association limitations. Optional display failures cannot change action authority.
-- Final installed-wheel run `p7-live-20261005063214-b9a30b6cbfd609490469887f` through the live service: 2 genuine P7 public decisions, 5 actual actions, 33 real frames, 5 cognition versions. Every action has a source sequence and decision link. Explicit HTTP stop returns stopping then cancelled, cleanup true. Exact unit not-found/inactive, cgroup and host parent absent. Service stopped. Zero completed levels.
-- Final real-run offline HTML `/tmp/p7-live-console-final-run.html`: 28 DOM tests PASS. Root guest/CLI/session suite: 29 OK, one existing opt-in Orb skip. Broader source suite: 297 OK, one skip; service/CLI suite: 21 OK. Lint, docs and diff checks PASS.
-- Final full promotion non-PASS: 3861 tests, 13 failures, 5 errors, 4 skips. Full log `/tmp/p7-live-console-promotion-full.log`. Same named failures remain in source-detachment literals, old preset/fixture/API, cognition ANSI logging, replay digests and sweep contracts. Full npm also non-PASS: 29 pass, 2 descriptor timeouts, 6 skips; focused actual tool/resource checks passed.
-- Independent manual play now opens on game selection. Installed-wheel SP80 HTTP open → ACTION4 → ACTION5 → RESET → close: 3 human actions, right shift by 4 cells, duplicate replay/stale rejection, temporary recordings and worker group removed. P7 stayed idle, no P7 run directory created. Root focused Python: 79 PASS; DOM: 39 PASS, including final installed-wheel HTML. Independent source review confirmed reload/close-poll race fixes.
-- New promotion attempt: 3879 tests, 13 failures, 5 errors, 4 skips; non-PASS. Log `/tmp/p7-manual-console-promotion.log`. No new P7 solving result.
-- Direct-level follow-up: actual installed-wheel HTTP SP80 L1/L2/L6, six human actions, distinct real frames, RESET retains selected level, old open retry preserves latest L6, service restart restores L6 at initial pose. P7 stayed idle; temporary worker directories/process groups removed. Root focused console Python 112 PASS, final installed-asset DOM 44 PASS. Independent source/final UI reviews PASS. No new P7 solving result.
-- Direct-level promotion attempt: 3888 tests, 13 failures, 5 errors, 4 skips; non-PASS. Log `/tmp/p7-direct-level-promotion.log`. No new P7 solving result.
-- Browser visual acceptance remains external-limited: cached browser runtime module missing; no new or isolated profile was created. DOM evidence does not prove visual acceptance.
-
-- Manual-history follow-up: stable keyed controls fix unchanged-poll focus/click loss. Exact command acknowledgement and compact feedback distinguish sending, no-change execution and uncertainty. Page-local timeline/queue keeps real versions, RESET and cross-level observations; historical execution is disabled. Final verification: 112 Python, 54 installed-export DOM, installed SDK HTTP/served-HTML eight SP80 human actions with nine frames, L1→L2 playback to end, duplicate requests do not re-execute, zero P7 requests. Worker recordings/process group removed. Independent final review PASS after playback, ACTION6/comparison and stale-session feedback fixes. Artifacts `/tmp/p7-click-history-{http,dom}-evidence.json`.
-- Manual-history promotion attempt before final UI review fixes: 3888 tests, 13 failures, 5 errors, 4 skips; non-PASS. Log `/tmp/p7-click-history-promotion.log`. No new P7 capability result.
-
-- Saved HUMAN levels: private per-game/current-level JSON journals restore through the pinned SDK and verify origin/content identity plus every observation. RESET preserves the origin prefix; automatic advance retains real score and saves the new level. Returning to an earlier level restores its last playable pre-advance pose. A pre-existing next-level slot survives automatic entry until an explicit action; the entry shows pending. Separate bounded restoration/live budgets, pre-step capacity reservation and failed-save exact retries preserve the recovery boundary.
-- Final saved-level verification: 124 focused Python and 63 installed-export DOM tests PASS. Final installed SDK HTTP performed 10 human actions, restored SP80 L1/L2/L6 across switches and two service restarts, retained RESET, real completed score 1 and ten history frames. Duplicate requests never re-executed. Served-HTML DOM hydrated actual history on reload/switch and retained focus/seek. Zero P7 actions/requests; temporary recordings and all owned worker groups removed. Independent recovery-contract source review PASS after atomic-publication, pre-step capacity and hidden-retry fixes. Artifacts `/tmp/p7-manual-save-{http,dom}-evidence.json`.
-- Saved-level promotion attempt before final review fixes: 3896 tests, 13 failures, 5 errors, 4 skips; non-PASS. Log `/tmp/p7-manual-save-promotion.log` ends with existing TypeScript source-detachment literals; this tail does not identify every failure. Final focused checks and installed-wheel proof were rerun after all fixes.
-
-- Current-level HUMAN clear/restart now creates a new genuine initial session and replaces only its saved slot, with zero counters and one history frame. Ordinary RESET keeps history. Final root 132 Python, 72 installed-export DOM and installed SDK/HTTP/served-HTML proofs PASS; ten human actions and two restart commands, actual L1/L2 clear, other L1/L6 saved bytes preserved, service restart/new history/duplicate/stale/cleanup verified. Independent recovery review PASS. Zero P7 actions. Artifacts `/tmp/p7-manual-restart-{http,dom}-evidence.json`. Final packaged promotion: 3908 tests, 13 failures, 5 errors, 4 skips; non-PASS. Log `/tmp/p7-manual-restart-promotion.log` ends with existing TypeScript source-detachment literals; not every failure cause is retained.
+- 分支：`feat/p7-live-console`。路由：managed；原生迁移工作表仍是 `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`。本轮控制台计划：`docs/superpowers/plans/2026-10-05-prime-p7-live-console.md`，已交付实时主流程及人工功能追加项。
+- 关键提交：`ed6fa64b` 实时控制台；`004442f2` 重复帧源身份；`9e98b49e` guest 代理；`83a4f404` 独立人工局；`8974457b` 直接选关及记住选择；`898f7536` 按钮反馈和帧历史；`a50044d1` 逐关存档；`bc01bd80` 当前关卡清空重开。本地提交未在本轮推送。
+- `make p7-console` 是启动入口。页面包含 P7 自主运行、独立人工试玩和离线回放。人工可直接选任何有效关卡。动作按钮高亮当前动作；变化格覆盖默认关闭。P7 只在点击启动后运行，固定 L1 预设最多 900 秒。
+- 人工每步自动保存。切关、刷新、服务重启会恢复该关实际位置及动作历史。存档只属于 HUMAN，不进入 P7 认知、上下文、历史、attempt 或经验。SDK 临时录制与持久人工 JSON 存档是不同文件，关闭只删除前者。
+- 恢复使用实际 SDK 重放，并核对 seed、原始起点、固定 SDK/game 身份及每步观察。保留完整起点前缀，页面展示最近 1001 帧；恢复与新局操作预算分开。RESET 保留历史。自动过关保存新关，并保留上一关最后可玩的画面。进入已有存档的新关时显示 pending，首次明确动作后才替换旧槽。
+- “清空并重新开始”只替换当前人工关卡存档，建立真实初始画面、新会话、零动作计数和一帧历史。其他关卡及其前缀保留。SDK 初始化和保存成功后才发布新会话；失败保留原存档和原身份/历史并允许重试。成功命令的重复请求不会清空后续动作。
+- 最终针对性验证：132 项 Python、72 项最终安装包 HTML DOM 检查通过；lint、docs、JS 语法、diff 检查通过。独立恢复合同复审通过。真实 SDK/HTTP 清空 L1/L2、保留其他存档字节、重复/旧请求、重启后恢复及收尾通过：10 个人工动作，2 次清空，0 个 P7 动作。
+- 存档功能的另一组真实证据：SP80 L1/L2/L6 切换、两次服务重启、RESET 和实际完成数 1 的原始前缀恢复通过。实际 HTTP 响应被最终页面用于时间轴/队列及清空按钮验证。
+- 本轮真实 P7 过程证据为 `p7-live-20261005063214-b9a30b6cbfd609490469887f`：2 个公开决策、5 个真实动作、33 帧、5 个认知版本，动作源序列与决策相联。显式停止及 guest unit/cgroup/host 清理通过；完成关卡数为 0。人工过关不算 P7 成果。
+- 最终全仓 promotion 未通过：3908 tests，13 failures、5 errors、4 skips。`/tmp/p7-manual-restart-promotion.log` 尾部指向已记录的 TypeScript source-detachment 字面量；仅凭尾部不能归因所有失败。早先完整 npm 也未通过；本轮未修改扩展注册。
+- 收口时本地控制台为 P7 idle，人工 SP80 L2 expired/saved、85 个动作。正常关闭 PID 69559 及 Make/uv 父进程；两份人工存档字节保持一致。无本轮遗留测试、promotion 或控制台进程。清理证据：`/tmp/p7-console-handoff-cleanup.json`。
 
 ## 当前判断
 
-- P7自主过关是核心。稳定认知是一份逐步完善的中文玩法介绍。假说针对认识缺口；常识与高置信推断可用于规划，再随正常动作检视。P7公开摘要不等于私有思维链。
-- 人工验证必须有独立游戏、记录和无学习路径，不进入P7内部工作流。独立人工试玩和逐关存档恢复已实现；可恢复 P7 暂停尚未实现。人工记录保存真实起点及完整动作/观察前缀，切关或重启通过 SDK 重放并校验后恢复；页面提供最近 1001 帧回看。存档不会成为 P7 认知、历史或学习。取消不会保留可继续的模型会话。
-- The first live package is implemented and verified at the process/lifecycle boundary. It is not a new solving-proficiency result or a full release PASS.
+- 核心目标仍是 P7 自主过关。稳定认知应是一份逐步补全的中文玩法介绍，作为 WorldMap 的主要规划背景。假说补知识缺口；常识和高置信推断可先用于规划，再从正常动作反馈校正。不要要求每条假说专项动作验证。
+- 控制台已验证过程观测、生命周期和独立人工操作。下一步先做操作者验收，再围绕 P7 实际决策、反馈和认识更新推进求解；这些界面证明不能代替自主能力评估。
+- 人工试玩始终独立。它便于检视游戏，不为 P7 注入路线或学习记录。公开决策摘要不是私有思维链。
 
 ## 历史归档
 
-- Whole-branch review found repeated-frame source links could disappear; `004442f2` replaced pixel matching with actual source observations. Keep conservative legacy behavior rather than infer missing identity.
-- First two real console attempts returned only initial frames/cognition and zero actions. Failure-only diagnostics plus no-auth GET comparison isolated systemd dropping Orb's rewritten proxy. `9e98b49e` keeps guest proxy names only; normal real model/tool operation then resumed. Do not change credentials/model/CA based on the generic RPC error.
-- The temporary private probe entry was deleted; all probe/console processes and units are stopped. Only private failure evidence remains. Operator `.env` and persistent Pi configuration were never changed.
-- Earlier capture wrappers accidentally exported UV_BIN into nested Make tests. The final wrapper clears UV_BIN and Make flags; the final 3861-test result is clean of that instrumentation pollution. Do not use prior polluted totals.
-- Shared human/P7 takeover, manual-first flow, full hypothesis dumps and mandatory per-hypothesis action proof are superseded.
+- 同局人工/P7 接管、manual-first 主流程、全量假说刷屏和逐假说强制验证已撤回。
+- 页面只存内存、重启从初始位置开始的旧边界，已被 `a50044d1` 替代。更新前没有持久记录的人工局不能恢复。
+- 曾因仅按像素匹配丢失重复帧关联；现在按实际 source 序列/hash 绑定，不从历史 SDK 行号补造关联。
+- 最初真实 console RPC 失败的原因是 systemd 丢失 Orb 已转换代理。`9e98b49e` 只保留 guest 固定代理变量名，成功恢复工具/模型运行。不要据泛化 RPC 错误改模型、凭据或 CA。诊断入口已删除，`.env` 与持久 Pi 配置未更改。
+- 旧门禁封装曾污染 UV_BIN/Make 标志；最终检查清理了这些变量。旧污染结果不作为最终证据。
 
 ## 未完成边界
 
-- Resumable P7 pause and optional manual history export remain subsequent packages. Durable human save/resume and history are implemented and verified at the installed HTTP/DOM/SDK boundary. Keep manual state out of P7 cognition/history/experience and do not rename cancellation as pause.
-- Full repository promotion/extension checks still fail; exact recorded failures need separate scoped repairs. Do not silently label them PASS or expand this console task into a full framework audit.
-- Fresh SP80 completion, cold/warm proficiency comparison, cross-level learning and simulator benefit remain unproven. The final run deliberately stopped after live evidence, before any completed level.
-- Actual browser visual/mobile acceptance remains unverified due the external browser tool failure.
+- 可恢复 P7 暂停未实现；结束是取消，不能称为暂停。可选人工历史导出仍是后续项。
+- 本轮未证明新的自主 SP80 过关、持续 L1→L2→L3 求解、冷/热启动改善、跨关学习或模拟器收益。
+- 全仓 promotion 与完整扩展门禁未通过，需单独缩小范围修复；本轮不扩成全框架审计。
+- 原生浏览器视觉/点击和移动端验收未完成：缓存 browser runtime 模块不可用。未创建新浏览器 profile；DOM/SDK 测试不算视觉验收。
 
 ## 下一动作
 
-1. Use `make p7-console` for operator UAT of the delivered autonomous workspace. Its live endpoint is selected dynamically; prior `/tmp` URLs are stopped. The page restores the last selected game/level. Select any human level directly in the independent manual view; previous completion is not required. Played human levels auto-save; switching/reload/service restart resumes the saved pose and actual timeline/action queue. Unplayed levels open their initial frame. Use 返回当前画面 before sending more actions. 清空并重新开始 clears only the selected current HUMAN level and opens its real initial frame; RESET preserves history. Restart the console service with `make p7-console` to load changed assets. Start P7 to close that game and begin fresh. Inspect actual public P7 decisions/actions and matching current cognition, keeping overlays off by default.
-2. Plan resumable pause or optional independent manual history export as separate packages under the approved three-mode design. Do not re-dispatch the completed Task1–3 or introduce human assistance into P7.
-3. If investigating full-gate failures, use the named final log and narrow ownership. Preserve operator/backend configuration and compare against observed successful model/tool execution before declaring host wiring unavailable.
+1. 执行 `project-state resume`，读取 INDEX、CURRENT、此交接、最近 JOURNAL、MEMORY 和 Git。没有遗留运行要续接，也没有未提交实现。
+2. 用 `make p7-console` 做操作者验收。上次题目/关卡及持久人工进度会恢复；原端口 53747 已关闭。检查动作按钮反馈、帧回看、切回存档、“清空并重新开始”和 RESET 的区别。历史画面先点击“返回当前画面”才能操作。
+3. 用户继续授权后，将主线回到 P7：启动独立有限自主局，观察公开目标/依据/预期、真实动作及对应认知变化。P7 启动会关闭人工局并从独立 L1 开始。继续保留停止与 guest 清理的证据，不把人工轨迹当模型上下文。
+4. 若用户优先处理门禁、可恢复暂停或人工导出，按既有三模式设计选择一个小范围任务；不要重做已交付控制台包或合并人工/P7 工作流。
 
-## Key references
+关键路径：
 
-- Design: `docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`
-- Plan/evidence: `docs/superpowers/plans/2026-10-05-prime-p7-live-console.md`, `docs/status/ASTERION-PRIME-P7-EVIDENCE.md`
-- Cognition contract: `docs/architecture/prime-p7-cognition-and-experience.md`
-- Operator guide: `docs/guides/prime-p7-games-and-official-results.md`
-- Runtime: `console_export.py`, `console_server.py`, `console_session.py`, `console_manual.py`, `console_manual_saves.py`, `console_preferences.py`, `console_events.py`, `console_snapshot.py` under `src/asterion/applications/prime/p7/`; guest containment `tools/run_prime_p7_guest.py`.
+- 设计/计划：`docs/superpowers/specs/2026-10-05-prime-p7-console-modes-design.md`、`docs/superpowers/plans/2026-10-05-prime-p7-live-console.md`。
+- 完整证据/操作：`docs/status/ASTERION-PRIME-P7-EVIDENCE.md`、`docs/guides/prime-p7-games-and-official-results.md`；认识合同：`docs/architecture/prime-p7-cognition-and-experience.md`。
+- 实现：`src/asterion/applications/prime/p7/console_{server,session,manual,manual_saves,preferences,events,snapshot,export}.py`、`console_assets/`；guest 收尾：`tools/run_prime_p7_guest.py`。
+- 本地附加证据：`/tmp/p7-manual-save-{http,dom}-evidence.json`、`/tmp/p7-manual-restart-{http,dom}-evidence.json`。`/tmp` 不是永久存储；关键事实已写入上面的受版本控制证据文件。

@@ -3694,3 +3694,6 @@
 - 2026-10-05: 用户要求当前人工关卡清空动作重新开始；新增独立 restart，普通 RESET 保留历史。
 - 2026-10-05: 当前关卡清空重开通过 132 Python、72 DOM、真实 SDK 双关清空及其他存档保留；复审通过，promotion 运行中。
 - 2026-10-05: 清空重开最终打包检查：3908 tests，13 failures / 5 errors / 4 skips；针对性验证通过，全仓仍未通过。
+- 2026-10-05: Added current-level human clear/restart to remove old action history while preserving other saves [bc01bd80]
+- 19:20 Closed idle console for handoff; SP80 L2 85-action save and both persistent files remain unchanged.
+- 19:20 Consolidated final console evidence and recovery boundaries; next session starts operator acceptance, with full gate non-PASS.

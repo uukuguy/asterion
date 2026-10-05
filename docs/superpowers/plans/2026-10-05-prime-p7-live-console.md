@@ -98,7 +98,7 @@ def render_console(snapshot: dict[str, object], *, live_config: dict[str, object
 
 ## Scope self-review
 
-This plan implements the first approved package and its deployment proof. Resumable P7 pause and independent manual verification remain subsequent packages. No shared human/P7 state, human-derived experience or manual-first flow is introduced. Finite snapshot polling is the first live event transport; source event associations remain durable for offline replay. The UI does not claim unavailable controls are present.
+The initial plan implemented the first approved package and its deployment proof. Independent manual verification was subsequently delivered in the follow-ups below; resumable P7 pause remains a future package. No shared human/P7 state, human-derived experience or manual-first flow is introduced. Finite snapshot polling is the first live event transport; source event associations remain durable for offline replay. The UI does not claim unavailable controls are present.
 
 ## Delivery evidence — 2026-10-05
 
@@ -107,7 +107,7 @@ This plan implements the first approved package and its deployment proof. Resuma
 - Final real-run self-contained HTML: `/tmp/p7-live-console-final-run.html`; 28 actual-asset DOM checks PASS. Final guest/CLI/session checks: 29 OK, one existing opt-in Orb skip. Broader source checks: 297 OK, one skip; service/CLI checks 21 OK. Root lint/docs/diff checks PASS.
 - Full promotion non-PASS: 3861 tests, 13 failures, 5 errors, 4 skips. Complete log `/tmp/p7-live-console-promotion-full.log`. Known failures remain in source-detachment test literals, legacy preset/fixture/API, cognition ANSI logging, replay digests and sweep boundaries. Full npm also remains non-PASS (29 pass, 2 descriptor timeouts, 6 skips); targeted real tool/resource checks passed. No full-gate PASS or merge claim.
 - Initial two deployment runs stopped before actions because systemd dropped Orb-resolved proxy environment. No-auth probes isolated that boundary; the guest-only fix restored actual model/decision/action operation. No model, credentials, CA or shared ORBENV change. Temporary diagnostic entry removed; all owned services stopped.
-- Browser visual acceptance remains external-limited by unavailable cached browser runtime. No alternate profile was created. Resumable pause and independent manual execution remain future packages.
+- Browser visual acceptance remains external-limited by unavailable cached browser runtime. No alternate profile was created. At this initial delivery, resumable pause and independent manual execution remained future packages; independent manual execution was subsequently delivered below.
 
 
 ## Follow-up: open a playable independent game — 2026-10-05

@@ -7,7 +7,7 @@
 - Theme-level focus: native P7 builds persistent game knowledge and verifies whether it improves solving
 - Project route: managed
 - Canonical worklist: `docs/superpowers/plans/2026-09-12-asterion-prime-p1-p7-native-detachment.md`
-- Active work package: realtime P7 console — finite autonomous start/stop, source decisions/actions/cognition, verified first realtime package plus independent playable game selection; resumable pause remains future work
+- Active work package: P7 autonomous console — realtime process evidence and independent HUMAN selection/history/save/restart delivered; operator acceptance and autonomous solving evidence remain open; resumable pause remains future work
 
 ## Current Architecture
 
@@ -65,6 +65,8 @@
 - `src/asterion/applications/prime/p7/live.py` — live RPC and worker plumbing
 - `src/asterion/applications/prime/p7/console_snapshot.py` — bounded incomplete-run evidence projection
 - `src/asterion/applications/prime/p7/console_export.py` — offline HTML exporter and application CLI
+- `src/asterion/applications/prime/p7/console_server.py` — protected local HTTP service and fixed route surface
+- `src/asterion/applications/prime/p7/console_session.py` — finite autonomous/manual lifecycle and selected-game restoration
 - `src/asterion/applications/prime/p7/console_manual.py` — isolated human game worker, pinned SDK level selection/reset, versioned commands and finite cleanup
 - `src/asterion/applications/prime/p7/console_manual_saves.py` — bounded private HUMAN journals, atomic saves and restore compatibility
 - `src/asterion/applications/prime/p7/console_preferences.py` — validated last game/level metadata only; no game history or P7 state
