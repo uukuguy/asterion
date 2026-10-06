@@ -83,6 +83,8 @@
   let consoleConfig = null;
   try { consoleConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.token === 'string' && consoleConfig.token ? consoleConfig : null;
+  const levelReplayEnabled = liveConfig?.replay_loading === 'level-manifest/v1';
+  const validatedReplayViews = new WeakSet();
   const state = { selectionReady: false, gameSelectionTouched: false, overview: null, overviewFresh: false, overviewBusy: false, overviewPending: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
@@ -91,7 +93,11 @@
   // Auxiliary views retain their own run authority. Never merge them into the
   // currently observed attempt or attach its events to another run's frames.
   const savedViews = new Map(), savedRequests = new Map(), previewViews = new Map(), boardSavedViews = new Map();
+  const replayManifests = new Map(), manifestRequests = new Map(), replayLevelRequests = new Map(), replayLevelViews = new Map(), replayViewSizes = new WeakMap();
+  let replayLoad = null, replayLoadTimer = null;
   const primaryLevel = () => levels[state.levelIndex] || emptyLevel;
+  const levelFrameCount = level => level.replay_unloaded ? number(level.frame_count) : array(level.frames).length;
+  const levelActionCount = level => level.replay_unloaded ? number(level.action_count) : array(level.actions).length;
   function cachedSavedView() {
     if (state.mode === 'manual') return null;
     const view = savedViews.get(run.game_id), game = verifiedSavedGame();
@@ -105,13 +111,13 @@
   const savedLevel = (level) => array(savedView()?.levels).find(entry => entry.level === level && entry.status === 'successful') || null;
   const retainedSavedLevel = (level) => savedView() ? null : array(cachedSavedView()?.levels).find(entry => entry.level === level && entry.status === 'successful') || null;
   function levelSource(level = primaryLevel()) {
-    if (state.mode === 'manual' || array(level.frames).length) return {scope: string(run.status, '').startsWith('preview') ? 'preview' : 'current', snapshot, level, key:`${run.game_id}/${run.run_id || 'preview'}/${level.level}`};
+    if (state.mode === 'manual' || levelFrameCount(level) > 0) return {scope: string(run.status, '').startsWith('preview') ? 'preview' : 'current', snapshot, level, key:`${run.game_id}/${run.run_id || 'preview'}/${snapshot.replay_revision || ''}/${level.level}/${level.replay_unloaded ? 'unloaded' : 'loaded'}`};
     const view = boardSavedViews.get(`${run.game_id}/${level.level}`);
     const saved = state.mode !== 'manual' && view && view.run.seed === run.seed && view.run.win_levels === run.win_levels ?
       array(view.levels).find(entry => entry.level === level.level && entry.status === 'successful') : null;
-    if (saved && array(saved.frames).length) return {scope:'saved',snapshot:view,level:saved,key:`${run.game_id}/${view.run.run_id}/${level.level}`};
+    if (saved && levelFrameCount(saved) > 0) return {scope:'saved',snapshot:view,level:saved,key:`${run.game_id}/${view.run.run_id}/${view.replay_revision || ''}/${level.level}/${saved.replay_unloaded ? 'unloaded' : 'loaded'}`};
     const preview = previewViews.get(`${run.game_id}/${level.level}`);
-    return preview ? {scope:'preview',snapshot:preview,level:preview.levels[0],key:`${run.game_id}/preview/${level.level}`} : {scope:'current',snapshot,level,key:`${run.game_id}/${run.run_id}/${level.level}`};
+    return preview ? {scope:'preview',snapshot:preview,level:preview.levels[0],key:`${run.game_id}/preview/${level.level}`} : {scope:'current',snapshot,level,key:`${run.game_id}/${run.run_id}/${snapshot.replay_revision || ''}/${level.level}/${level.replay_unloaded ? 'unloaded' : 'loaded'}`};
   }
   const currentLevel = () => levelSource().level;
   const frames = () => array(currentLevel().frames);
@@ -290,7 +296,7 @@
   function levelEfficiency(level) {
     const game = array(consoleConfig?.games).find((entry) => entry.game_id === run.game_id && entry.win_levels === run.win_levels);
     const baseline = array(game?.baseline_actions)[level.level - 1];
-    const actual = array(level.actions).length;
+    const actual = levelActionCount(level);
     const known = Number.isInteger(baseline) && baseline > 0;
     const completed = level.status === 'successful';
     const score = completed && known && actual > 0 ? Math.min(115, 100 * (baseline / actual) ** 2) : null;
@@ -305,8 +311,19 @@
     return best?.verified === true && best.completed_levels === game.completed_levels && game.completed_levels > 0 ? game : null;
   }
 
+  function matchesVerifiedSavedRun(meta, game, seed) {
+    // Validate immutable request evidence here. Current selection/authority is
+    // rechecked by the caller before applying a shared asynchronous response.
+    const best = array(game.runs).find(entry => entry.run_id === game.best_run_id);
+    return best?.verified === true && best.completed_levels === game.completed_levels && game.best_run_id === meta.run_id &&
+      game.completed_levels === meta.completed_level_count && meta.game_id === game.game_id &&
+      meta.seed === seed && meta.win_levels === game.win_levels && meta.sealed_trace === true;
+  }
+
   function currentRunLevelLabel(level) {
     if (state.mode === 'manual') return statusInfo(level.status)[0];
+    if (level.replay_unloaded && levelFrameCount(level) > 0) return level.status === 'successful' ? '已过关 · 画面按需读取' : '已有记录 · 画面按需读取';
+    if (level.status === 'loading') return '正在读取记录';
     if (level.status === 'preview') return '关卡初始预览 · 尚未开始';
     if (level.status === 'preview-unavailable') return '初始画面暂不可用 · 尚未开始';
     if (level.status === 'successful') return '本轮已过关';
@@ -348,7 +365,7 @@
       button.disabled = manual && manualSelectionLocked();
       const saved = manual && state.manualView?.game_id === run.game_id && array(state.manualView.saved_levels).includes(level.level);
       const verified = savedGame && level.status !== 'successful' && level.level <= savedGame.completed_levels;
-      button.setAttribute('aria-label', `关卡 ${level.level}，${label}${saved ? '，已保存，可继续' : ''}${verified ? '，已有过关记录' : ''}，${array(displayed.actions).length} 个动作`);
+      button.setAttribute('aria-label', `关卡 ${level.level}，${label}${saved ? '，已保存，可继续' : ''}${verified ? '，已有过关记录' : ''}，${levelActionCount(displayed)} 个动作`);
       button.append(node('span', String(level.level).padStart(2, '0'), 'level-number'));
       const content = node('div', undefined, 'level-item-content');
       const heading = node('div', undefined, 'level-item-heading');
@@ -358,7 +375,7 @@
       if (saved) heading.append(node('span', '已保存', 'level-saved-badge'));
       if (verified) heading.append(node('span', '已有过关记录', 'level-verified-badge'));
       content.append(heading, node('p', label, 'level-item-status'));
-      content.append(node('p', `${authority ? '已保存 · ' : retained ? '历史已保存 · ' : ''}${array(displayed.actions).length} 动作 · ${array(displayed.frames).length ? `${array(displayed.frames).length} 帧` : '无画面'}${displayed.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
+      content.append(node('p', `${authority ? '已保存 · ' : retained ? '历史已保存 · ' : ''}${levelActionCount(displayed)} 动作 · ${levelFrameCount(displayed) ? `${levelFrameCount(displayed)} 帧${displayed.replay_unloaded ? ' · 按需读取' : ''}` : '无画面'}${displayed.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
       if (!manual) {
         const efficiency = levelEfficiency(displayed);
         content.append(node('p', efficiency.text, `level-item-detail${efficiency.low ? ' efficiency-low' : ''}`));
@@ -367,7 +384,8 @@
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') {
           selectLevel(index); seekFrame(0);
-          ensureSelectedSource();
+          if (levelReplayEnabled && state.mode === 'replay' && run.run_id && primaryLevel().replay_unloaded) loadReplay({ preserveSelection:true });
+          else ensureSelectedSource();
           return;
         }
         if (manualSelectionLocked()) return;
@@ -378,13 +396,15 @@
     });
   }
 
-  function selectLevel(index, { pausePlayback = true, bindSavedSource = true } = {}) {
+  function selectLevel(index, { pausePlayback = true, bindSavedSource = true, retireLoad = true } = {}) {
     if (pausePlayback) pause();
+    if (retireLoad && replayLoad && replayLoad.level !== levels[index]?.level) clearReplayLoad();
     state.levelIndex = index;
     state.eventSequence = null;
     state.frameIndex = 0;
     state.actionId = null;
     const saved = savedView() || cachedSavedView();
+    if (levelReplayEnabled) [...boardSavedViews.keys()].forEach(key => {if (key !== `${run.game_id}/${primaryLevel().level}`) boardSavedViews.delete(key);});
     if (saved && bindSavedSource) boardSavedViews.set(`${run.game_id}/${primaryLevel().level}`, saved);
     if (run.status === 'preview') run.target_level = currentLevel().level;
     renderRail();
@@ -590,8 +610,8 @@
     const comparisonRequested = $('compare-toggle').checked;
     const canCompare = Boolean(before && after);
     $('board-empty').hidden = count > 0;
-    $('board-empty').querySelector('h3').textContent = currentLevel().status === 'preview-unavailable' ? '初始画面暂不可用' : run.status === 'preview' ? '正在读取关卡初始画面' : run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
-    $('board-empty').querySelector('p').textContent = string(run.status, '').startsWith('preview') ? '尚未启动 P7；可启动求解，或明确切换人工试玩。' : run.status === 'manual' ? (state.manualBusy ? '正在读取所选游戏的初始观察，尚未启动 P7。' : state.manualError ? '试玩操作未确认；可重新选择游戏开启新的试玩。' : '该关卡尚无真实观察记录；人工试玩仅展示当前关卡的真实画面。') : '没有记录帧，无法恢复该关卡的画面。';
+    $('board-empty').querySelector('h3').textContent = currentLevel().replay_unloaded || run.status === 'loading' ? '正在读取所选关卡记录' : currentLevel().status === 'preview-unavailable' ? '初始画面暂不可用' : run.status === 'preview' ? '正在读取关卡初始画面' : run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
+    $('board-empty').querySelector('p').textContent = currentLevel().replay_unloaded || run.status === 'loading' ? '读取当前关卡的画面与认知；其他关卡将在选择后加载。' : string(run.status, '').startsWith('preview') ? '尚未启动 P7；可启动求解，或明确切换人工试玩。' : run.status === 'manual' ? (state.manualBusy ? '正在读取所选游戏的初始观察，尚未启动 P7。' : state.manualError ? '试玩操作未确认；可重新选择游戏开启新的试玩。' : '该关卡尚无真实观察记录；人工试玩仅展示当前关卡的真实画面。') : '没有记录帧，无法恢复该关卡的画面。';
     $('single-board').hidden = count === 0 || (comparisonRequested && canCompare);
     $('comparison-board').hidden = count === 0 || !comparisonRequested || !canCompare;
     $('frame-slider').max = String(Math.max(0, count - 1));
@@ -1082,12 +1102,13 @@
   window.addEventListener('pagehide', pause);
   window.addEventListener('resize', renderFrame);
   function replaceSnapshot(next, { follow = state.mode === 'live' && state.replayFollow, manualPosition = null } = {}) {
-    if (!validSnapshot(next)) throw new Error('invalid-response');
+    if (!validatedReplayViews.has(next) && !validSnapshot(next)) throw new Error('invalid-response');
     follow = follow && state.eventSequence === null;
     const previousEvent = state.eventSequence;
+    const previousEventRecord = processEvents().find(event=>event.event_sequence===previousEvent);
     const previous = { snapshot, run, recordedLevels, levelCount, levels,
       levelIndex: state.levelIndex, frameIndex: state.frameIndex, actionId: state.actionId };
-    const previousSource = levelSource().key;
+    const previousSource = levelSource();
     const previousGame = run.game_id, previousLevel = currentLevel().level, previousFrame = currentFrame()?.id, previousAction = state.actionId;
     // Derive the complete next view before changing the currently accepted state.
     const nextRun = object(next.run), nextRecordedLevels = array(next.levels);
@@ -1096,19 +1117,23 @@
       level: index + 1, status: 'not_run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null,
     });
     let index = nextLevels.findIndex((level) => level.level === previousLevel);
-    if (follow) index = nextLevels.map((level, i) => array(level.frames).length ? i : -1).filter((i) => i >= 0).pop() ?? 0;
-    else if (previousGame !== nextRun.game_id || index < 0) index = Math.max(0, nextLevels.findIndex((level) => array(level.frames).length));
+    if (follow) index = nextLevels.map((level, i) => levelFrameCount(level) > 0 ? i : -1).filter((i) => i >= 0).pop() ?? 0;
+    else if (previousGame !== nextRun.game_id || index < 0) index = Math.max(0, nextLevels.findIndex((level) => levelFrameCount(level) > 0));
     try {
       snapshot = next; run = nextRun; recordedLevels = nextRecordedLevels; levelCount = nextCount; levels = nextLevels;
-      const sameSource = levelSource(nextLevels[index] || emptyLevel).key === previousSource;
+      const nextSource = levelSource(nextLevels[index] || emptyLevel);
+      const sameSource = nextSource.scope === previousSource.scope && nextSource.snapshot.run.game_id === previousSource.snapshot.run.game_id &&
+        nextSource.snapshot.run.run_id === previousSource.snapshot.run.run_id && nextSource.level.level === previousSource.level.level;
       const preserve = !follow && sameSource;
       const preservePlayback = state.timer !== null && state.mode === 'replay' && sameSource && index === state.levelIndex;
-      renderRunHeader(); selectLevel(index, { pausePlayback: !preservePlayback, bindSavedSource:false });
+      renderRunHeader(); selectLevel(index, { pausePlayback: !preservePlayback, bindSavedSource:false, retireLoad:false });
       const historical = preserve ? frames().findIndex((frame) => frame.id === previousFrame) : -1;
       if (manualPosition !== null) setManualFrame(manualPosition);
       else setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
         preserve && actions().some((action) => action.id === previousAction) ? previousAction : undefined);
-      if (preserve && (previousEvent === 0 || processEvents().some((event) => event.event_sequence === previousEvent))) { state.eventSequence = previousEvent; renderFrame(); }
+      if (preserve && (previousEvent === 0 || processEvents().some((event) => event.event_sequence === previousEvent &&
+        (!levelReplayEnabled || event.kind===previousEventRecord?.kind && event.frame_id===previousEventRecord?.frame_id &&
+          JSON.stringify(event.provenance)===JSON.stringify(previousEventRecord?.provenance) && JSON.stringify(event.payload)===JSON.stringify(previousEventRecord?.payload))))) { state.eventSequence = previousEvent; renderFrame(); }
     } catch (_) {
       snapshot = previous.snapshot; run = previous.run; recordedLevels = previous.recordedLevels;
       levelCount = previous.levelCount; levels = previous.levels;
@@ -1250,6 +1275,7 @@
             'command-invalid', 'command-conflict', 'command-limit', 'game-unavailable', 'level-unavailable'].includes(value.error);
         } catch (_) { /* An unknown rejection leaves the original request retryable. */ }
       }
+      error.status = result.status;
       throw error;
     }
     try { return await result.json(); } catch (_) { throw new Error('invalid-response'); }
@@ -1630,6 +1656,7 @@
   }
 
   function stopReplayPolling() {
+    clearReplayLoad();
     state.replayGeneration += 1; state.replayRun = null; state.replayPollBusy = false; state.replayFailures = 0; state.replayRetryAt = 0;
     if (state.replayPollTimer !== null) window.clearInterval(state.replayPollTimer);
     state.replayPollTimer = null;
@@ -1662,7 +1689,257 @@
     array(overviewGame(replay.run.game_id)?.runs).some((run) => run.run_id === replay.run.run_id &&
       (run.recording === true || ['starting', 'running', 'pause_requested', 'paused', 'resume_requested', 'stopping'].includes(run.status)));
 
+  function clearReplayLoad(ticket = null) {
+    if (ticket && replayLoad !== ticket) return;
+    replayLoad = null;
+    if (replayLoadTimer !== null) window.clearInterval(replayLoadTimer);
+    replayLoadTimer = null;
+    $('replay-loading').hidden = true; $('replay-retry').hidden = true;
+  }
+
+  function beginReplayLoad(game, runId, level, phase, retry) {
+    const key = `${state.replayGeneration}/${game.game_id}/${runId}/${level}`;
+    if (replayLoad?.key !== key) {
+      clearReplayLoad();
+      replayLoad = {key, started:Date.now(), gameId:game.game_id, runId, level};
+    }
+    const ticket = replayLoad;
+    Object.assign(ticket, {phase, retry, failed:false, waiting:false});
+    const update = () => {
+      if (replayLoad !== ticket) return;
+      $('replay-loading').hidden = false;
+      $('replay-loading').classList.toggle('load-failed', ticket.failed);
+      $('replay-loading').setAttribute('aria-busy', String(!ticket.failed));
+      const elapsed = Math.floor((Date.now() - ticket.started) / 1000);
+      write('replay-loading-text', `${string(game.alias, game.game_id)} · ${ticket.phase} · 已等待 ${elapsed} 秒`);
+      $('replay-retry').hidden = !ticket.failed;
+      if (ticket.waiting && Date.now() >= ticket.retryAt) {
+        ticket.waiting = false; ticket.retry();
+      }
+    };
+    update();
+    if (replayLoadTimer === null) replayLoadTimer = window.setInterval(update, 1000);
+    return ticket;
+  }
+
+  function waitReplayLoad(ticket) {
+    if (replayLoad !== ticket) return;
+    ticket.waiting = true; ticket.retryAt = Date.now() + 2000;
+  }
+
+  function failReplayLoad(ticket) {
+    if (replayLoad !== ticket) return;
+    ticket.phase = '读取失败，请重新加载'; ticket.failed = true; ticket.waiting = false;
+    $('replay-loading').classList.add('load-failed'); $('replay-loading').setAttribute('aria-busy','false');
+    write('replay-loading-text', `${ticket.gameId} · 读取失败，请重新加载`);
+    $('replay-retry').hidden = false;
+  }
+
+  function validReplayManifest(value, game, runId) {
+    if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-replay-manifest/v1' || value.run_id !== runId ||
+        !Array.isArray(value.levels) || !Array.isArray(value.warnings) || !value.warnings.every(warning => typeof warning === 'string')) return false;
+    if (value.state === 'loading') return value.revision === null && value.run === null && value.levels.length === 0;
+    const meta = value.run, ids = new Set();
+    return value.state === 'ready' && typeof value.revision === 'string' && /^[a-f0-9]{64}$/.test(value.revision) &&
+      isRecord(meta) && meta.run_id === runId && meta.game_id === game.game_id && meta.seed === 0 && meta.win_levels === game.win_levels &&
+      Number.isInteger(meta.completed_level_count) && meta.completed_level_count >= 0 && meta.completed_level_count <= game.win_levels &&
+      Number.isInteger(meta.primitive_action_count) && meta.primitive_action_count >= 0 && typeof meta.status === 'string' &&
+      value.levels.length === game.win_levels && value.levels.every(level => isRecord(level) &&
+        Number.isInteger(level.level) && level.level > 0 && level.level <= game.win_levels && !ids.has(level.level) && ids.add(level.level) &&
+        typeof level.status === 'string' && Number.isInteger(level.frame_count) && level.frame_count >= 0 &&
+        Number.isInteger(level.action_count) && level.action_count >= 0 && typeof level.has_cognition === 'boolean');
+  }
+
+  async function readReplayManifest(game, runId) {
+    if (!manifestRequests.has(runId)) {
+      const pending = request(`/api/replay/${encodeURIComponent(runId)}/manifest`).then(value => {
+        if (!validReplayManifest(value, game, runId)) throw new Error('invalid-response');
+        if (value.state === 'loading') {
+          replayManifests.delete(runId);
+          [...replayLevelViews.keys()].forEach(key=>{if (key.startsWith(runId+'/')) replayLevelViews.delete(key);});
+        }
+        if (value.state === 'ready') {
+          replayManifests.delete(runId);replayManifests.set(runId,value);
+          while(replayManifests.size > 4) replayManifests.delete(replayManifests.keys().next().value);
+          [...replayLevelViews.keys()].forEach(key => {if (key.startsWith(runId+'/') && !key.startsWith(`${runId}/${value.revision}/`)) replayLevelViews.delete(key);});
+        }
+        return value;
+      }).finally(() => manifestRequests.delete(runId));
+      manifestRequests.set(runId, pending);
+    }
+    return manifestRequests.get(runId);
+  }
+
+  async function readReplayLevel(manifest, level) {
+    const generation=state.replayGeneration;
+    const runId = manifest.run_id, key = `${runId}/${manifest.revision}/${level}`;
+    if (replayLevelViews.has(key)) {const cached=replayLevelViews.get(key);replayLevelViews.delete(key);replayLevelViews.set(key,cached);return cached;}
+    while (!replayLevelRequests.has(key) && replayLevelRequests.size >= 2) {
+      await Promise.race([...replayLevelRequests.values()].map(pending=>pending.catch(()=>null)));
+      if (generation!==state.replayGeneration) throw new Error('obsolete-request');
+      assertReplayRevision(manifest);
+    }
+    if (!replayLevelRequests.has(key)) {
+      const pending = request(`/api/replay/${encodeURIComponent(runId)}/levels/${level}/${manifest.revision}`).then(value => {
+        const meta = manifest.levels.find(entry => entry.level === level), record = value?.levels?.[0];
+        if (!validSnapshot(value) || value.replay_revision !== manifest.revision || value.run.run_id !== runId ||
+            JSON.stringify(value.run) !== JSON.stringify(manifest.run) || value.run.game_id !== manifest.run.game_id || value.run.seed !== manifest.run.seed || value.run.win_levels !== manifest.run.win_levels ||
+            value.run.completed_level_count !== manifest.run.completed_level_count || value.run.primitive_action_count !== manifest.run.primitive_action_count ||
+            value.run.replay_verified !== manifest.run.replay_verified || value.run.sealed_trace !== manifest.run.sealed_trace ||
+            value.levels.length !== 1 || record.level !== level || record.status !== meta?.status ||
+            record.frames.length !== meta.frame_count || record.actions.length !== meta.action_count) throw new Error('invalid-response');
+        assertReplayRevision(manifest);
+        const bytes=estimateReplayBytes(value);
+        if (bytes <= 32*1024*1024) {
+          replayLevelViews.set(key,value);
+          while (replayLevelViews.size > 4 || [...replayLevelViews.values()].reduce((sum,view)=>sum+estimateReplayBytes(view),0) > 32*1024*1024) replayLevelViews.delete(replayLevelViews.keys().next().value);
+        }
+        return value;
+      }).catch(error=>{error.replayRevision=manifest.revision;throw error;}).finally(() => replayLevelRequests.delete(key));
+      replayLevelRequests.set(key,pending);
+    }
+    return replayLevelRequests.get(key);
+  }
+
+  function estimateReplayBytes(value) {
+    if (!replayViewSizes.has(value)) {
+      const grids=value.levels.reduce((sum,level)=>sum+level.frames.reduce((total,frame)=>total+frame.grid.reduce((n,row)=>n+row.length*8+32,256),0),0);
+      // A conservative cache estimate, not a browser heap guarantee. Include
+      // every public field, plus numeric-grid storage, once per immutable view.
+      replayViewSizes.set(value,JSON.stringify(value).length*2+grids);
+    }
+    return replayViewSizes.get(value);
+  }
+
+  function assertReplayRevision(manifest) {
+    if (replayManifests.get(manifest.run_id)?.revision !== manifest.revision) {const error=new Error('replay-stale');error.status=409;error.obsolete=true;throw error;}
+  }
+
+  function replayManifestView(manifest, selectedDetail = null) {
+    const details = manifest.levels.map(level => replayLevelViews.get(`${manifest.run_id}/${manifest.revision}/${level.level}`)).filter(Boolean);
+    if (selectedDetail && !details.includes(selectedDetail)) details.push(selectedDetail);
+    const byLevel=new Map(details.map(detail=>[detail.levels[0].level,detail.levels[0]]));
+    const decisions = new Map(), events = new Map();
+    details.forEach(detail => {
+      array(detail.decisions).forEach(decision => decisions.set(decision.id,decision));
+      array(detail.process_events).forEach(event => events.set(event.event_sequence,event));
+    });
+    const view = {schema:'asterion.arc-agi3-p7-console/v1', generated_at:details[0]?.generated_at ?? null,
+      run:manifest.run, replay_revision:manifest.revision, warnings:manifest.warnings,
+      levels:manifest.levels.map(meta => byLevel.get(meta.level) || {
+        ...meta,replay_unloaded:true,frames:[],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}),
+      decisions:[...decisions.values()],process_events:[...events.values()].sort((a,b) => a.event_sequence-b.event_sequence)};
+    validatedReplayViews.add(view); return view;
+  }
+
+  async function loadLevelReplay({initial = false, preserveSelection = false} = {}) {
+    const runId = $('replay-run').value, game = overviewGame($('game-select').value);
+    if (!game || !runId || state.mode !== 'replay' || (state.replayPollBusy && !initial)) return;
+    if (initial) { stopReplayPolling(); state.replayRun = runId; if (!preserveSelection) {state.replayFollow = true;state.eventSequence = null;} }
+    const generation = state.replayGeneration;
+    const isCurrent = () => state.mode === 'replay' && state.replayGeneration === generation &&
+      $('replay-run').value === runId && $('game-select').value === game.game_id;
+    if (run.game_id !== game.game_id || run.run_id !== runId) {
+      const placeholder = emptyGamePreview(game,'loading'); placeholder.run.run_id = runId;
+      [...savedViews.keys()].forEach(id=>{if (id!==game.game_id) savedViews.delete(id);});
+      replaceSnapshot(placeholder,{follow:false});
+    }
+    const selectedLevel = primaryLevel().level || 1;
+    const retry = () => loadReplay({preserveSelection:true});
+    const ticket = beginReplayLoad(game,runId,selectedLevel,'正在整理回放',retry);
+    state.replayPollBusy = true;
+    try {
+      const manifest = await readReplayManifest(game,runId);
+      if (!isCurrent()) return;
+      if (manifest.state === 'loading') {waitReplayLoad(ticket);return;}
+      const currentSelected = primaryLevel().level;
+      const target = state.replayFollow ? manifest.levels.filter(level => level.frame_count > 0).at(-1)?.level || 1 : currentSelected;
+      if (currentSelected !== selectedLevel) return;
+      ticket.level=target;
+      if (snapshot.replay_revision !== manifest.revision && !frames().length) {
+        replaceSnapshot(replayManifestView(manifest),{follow:false});
+        selectLevel(target-1,{bindSavedSource:false,retireLoad:false});
+      } else if (state.replayFollow && target !== currentSelected) selectLevel(target-1,{bindSavedSource:false,retireLoad:false});
+      assertReplayRevision(manifest);
+      const level = manifest.levels.find(entry => entry.level === target);
+      let detail=null;
+      if (level.frame_count > 0) {
+        ticket.phase = `正在加载第 ${target} 关`; ticket.level = target;
+        write('replay-loading-text',`${string(game.alias,game.game_id)} · ${ticket.phase} · 已等待 ${Math.floor((Date.now()-ticket.started)/1000)} 秒`);
+        detail=await readReplayLevel(manifest,target);
+        if (!isCurrent() || primaryLevel().level !== target) return;
+      }
+      assertReplayRevision(manifest);
+      const previousCompleted = number(run.completed_level_count);
+      replaceSnapshot(replayManifestView(manifest,detail),{follow:state.replayFollow});
+      state.replayRun = runId;state.replayFailures = 0;state.replayRetryAt = 0;
+      clearReplayLoad(ticket);ensureSelectedSource();
+      write('service-status',replayUnsealed(snapshot) ? '只读观察 · 记录未封口 · 每 2 秒更新' : '回放记录 · 按关卡读取 · 只读');
+      if (replayUnsealed(snapshot) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(),2000);
+      else if (!replayUnsealed(snapshot) && state.replayPollTimer !== null) {window.clearInterval(state.replayPollTimer);state.replayPollTimer = null;}
+      renderSessionControls();
+      if (number(run.completed_level_count)>previousCompleted) loadOverview();
+    } catch(error) {
+      if (!isCurrent() || primaryLevel().level !== ticket.level) return;
+      if (error.status === 409) {
+        if (!error.obsolete && (!error.replayRevision || replayManifests.get(runId)?.revision===error.replayRevision)) replayManifests.delete(runId);
+        waitReplayLoad(ticket);
+      }
+      else failReplayLoad(ticket);
+    } finally {
+      if (isCurrent()) {
+        state.replayPollBusy = false;
+        if (primaryLevel().replay_unloaded && primaryLevel().level !== selectedLevel) loadReplay({preserveSelection:true});
+      }
+    }
+  }
+
+  async function loadSavedLevelView(game) {
+    const bestId = game.best_run_id, generation = state.replayGeneration, currentRun = run.run_id;
+    const selectedLevel = primaryLevel().level, seed = run.seed;
+    if (run.status === 'loading' && state.replayRun === currentRun) return;
+    const isCurrent = () => state.mode !== 'manual' && state.replayGeneration === generation && run.game_id === game.game_id &&
+      run.run_id === currentRun && $('game-select').value === game.game_id && verifiedSavedGame()?.best_run_id === bestId && verifiedSavedGame()?.completed_levels === game.completed_levels && run.seed === seed;
+    const selected = () => isCurrent() && primaryLevel().level === selectedLevel;
+    const retry = () => ensureSelectedSource();
+    let ticket = null;
+    try {
+      const manifest = await readReplayManifest(game,bestId);
+      if (!isCurrent()) return;
+      if (manifest.state === 'loading') {
+        if (selected() && !frames().length) {ticket=beginReplayLoad(game,bestId,selectedLevel,'正在整理已保存回放',retry);waitReplayLoad(ticket);}
+        return;
+      }
+      if (manifest.run.seed !== seed || !matchesVerifiedSavedRun(manifest.run,game,seed)) throw new Error('invalid-response');
+      assertReplayRevision(manifest);
+      savedViews.set(game.game_id,replayManifestView(manifest));
+      renderRail();renderLevelEfficiency();
+      const meta = manifest.levels.find(level => level.level===selectedLevel);
+      let detail=null;
+      // A selected level already present in the current attempt needs no saved grids.
+      if (levelFrameCount(primaryLevel()) > 0 && (currentRun !== bestId || !primaryLevel().replay_unloaded)) return;
+      if (meta?.frame_count > 0 && (!array(primaryLevel().frames).length || currentRun === bestId)) {
+        if (selected()) ticket=beginReplayLoad(game,bestId,selectedLevel,`正在加载已保存第 ${selectedLevel} 关`,retry);
+        detail=await readReplayLevel(manifest,selectedLevel);
+      }
+      if (!isCurrent()) return;
+      assertReplayRevision(manifest);
+      const saved=replayManifestView(manifest,detail);savedViews.set(game.game_id,saved);
+      if (selected()) {
+        const previousSource=levelSource().key;
+        boardSavedViews.set(`${run.game_id}/${selectedLevel}`,saved);
+        refreshLevelSource(previousSource);if (ticket) clearReplayLoad(ticket);
+      } else {renderRail();renderProgressContext();renderLevelEfficiency();}
+    } catch(error) {
+      if (!selected()) return;
+      if (error.obsolete && replayManifests.has(bestId)) return;
+      if (error.status===409) {if (!error.replayRevision || replayManifests.get(bestId)?.revision===error.replayRevision) replayManifests.delete(bestId);ticket=ticket||beginReplayLoad(game,bestId,selectedLevel,'正在刷新已保存回放',retry);waitReplayLoad(ticket);}
+      else if (!frames().length) {ticket=ticket||beginReplayLoad(game,bestId,selectedLevel,'读取已保存关卡',retry);failReplayLoad(ticket);}
+    }
+  }
+
   async function loadReplay({ initial = false, preserveSelection = false } = {}) {
+    if (levelReplayEnabled) return loadLevelReplay({initial,preserveSelection});
     const runId = $('replay-run').value;
     if (!runId || state.mode !== 'replay' || (state.replayPollBusy && !initial)) return;
     if (initial) { stopReplayPolling(); state.replayRun = runId; if (!preserveSelection) { state.replayFollow = true; state.eventSequence = null; } }
@@ -1735,6 +2012,7 @@
 
   async function loadSavedView(game) {
     if (!game || !verifiedSavedGame() || game.game_id !== run.game_id) return;
+    if (levelReplayEnabled) return loadSavedLevelView(game);
     const bestId = game.best_run_id;
     if (savedViews.get(game.game_id)?.run.run_id === bestId) {
       const previousSource = levelSource().key;
@@ -1746,11 +2024,10 @@
     const generation = state.replayGeneration, currentRun = run.run_id, selectedLevel = primaryLevel().level, seed = run.seed;
     const isCurrent = () => state.mode !== 'manual' && state.replayGeneration === generation &&
       run.game_id === game.game_id && run.run_id === currentRun && $('game-select').value === game.game_id &&
-      verifiedSavedGame()?.best_run_id === bestId;
+      verifiedSavedGame()?.best_run_id === bestId && verifiedSavedGame()?.completed_levels === game.completed_levels && run.seed === seed;
     if (!savedRequests.has(bestId)) savedRequests.set(bestId, request(`/api/replay/${encodeURIComponent(bestId)}`).then(value => {
       if (!validSnapshot(value) || value.run.run_id !== bestId || value.run.game_id !== game.game_id ||
-        value.run.seed !== seed || value.run.win_levels !== game.win_levels || value.run.completed_level_count !== game.completed_levels ||
-        value.run.replay_verified !== true || value.run.sealed_trace !== true) throw new Error('invalid-response');
+        value.run.seed !== seed || !matchesVerifiedSavedRun(value.run,game,seed)) throw new Error('invalid-response');
       return value;
     }).catch(error => { savedRequests.delete(bestId); throw error; }));
     try {
@@ -1774,6 +2051,8 @@
     await loadSavedView(game);
     if (state.mode === 'manual' || state.replayGeneration !== generation || run.run_id !== currentRun ||
       run.game_id !== game.game_id || primaryLevel().level !== selectedLevel) return;
+    if (levelReplayEnabled && (levelFrameCount(primaryLevel()) > 0 || levelFrameCount(savedLevel(selectedLevel) || emptyLevel) > 0 ||
+      (verifiedSavedGame()?.completed_levels >= selectedLevel && !frames().length))) return;
     if (!array(levelSource().level.frames).length) loadGamePreview(game, selectedLevel);
   }
 
@@ -1803,6 +2082,7 @@
         refreshLevelSource(previousSource);
       }
     } catch (_) {
+      gamePreviews.delete(key);
       if (!isCurrent()) return;
       if (currentRun === null) {
         replaceSnapshot({...snapshot,levels:levels.map(level => level.level === selectedLevel ? {...level,status:'preview-unavailable'} : level)}, {follow:false});
@@ -1897,6 +2177,7 @@
       else openManual(rememberedManualLevel());
     });
     $('replay-run').addEventListener('change', () => { stopReplayPolling(); renderSessionControls(); });
+    $('replay-retry').addEventListener('click', () => replayLoad?.retry?.());
     $('replay-load').addEventListener('click', () => loadReplay({ initial: true }));
     $('replay-follow').addEventListener('click', () => { state.replayFollow = true; state.eventSequence = null; replaceSnapshot(snapshot, { follow: true }); renderSessionControls(); });
     write('service-status', '正在连接本地服务');

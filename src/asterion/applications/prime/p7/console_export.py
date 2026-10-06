@@ -15,6 +15,8 @@ from typing import TextIO
 import webbrowser
 
 from .console_snapshot import build_console_snapshot
+from .console_replay import replay_fingerprint
+from .console_prepared import publish_prepared
 from .run_story.storage import write_atomic_file
 
 
@@ -64,9 +66,10 @@ def render_console(snapshot: dict[str, object], *,
     if live_config is not None and replay_config is not None:
         raise ValueError("console configuration ambiguous")
     if live_config is not None:
-        if (not isinstance(live_config, dict) or set(live_config) - {"token", "games"}
+        if (not isinstance(live_config, dict) or set(live_config) - {"token", "games", "replay_loading"}
             or not isinstance(live_config.get("token"), str)
-            or not 1 <= len(live_config["token"]) <= 256):
+            or not 1 <= len(live_config["token"]) <= 256
+            or ("replay_loading" in live_config and live_config["replay_loading"] != "level-manifest/v1")):
             raise ValueError("console live configuration invalid")
     if replay_config is not None and (not isinstance(replay_config, dict)
                                      or set(replay_config) != {"games"}):
@@ -281,7 +284,14 @@ def export_console(run_root: Path, output: Path | None = None, *,
     destination = Path(output) if output is not None else Path(run_root) / "p7-console.html"
     if destination.suffix.lower() != ".html" or destination.is_symlink():
         raise ValueError("console output must be a regular HTML file")
+    root = Path(run_root).resolve()
+    try:
+        fingerprint = replay_fingerprint(root)
+    except (OSError, ValueError, TypeError):
+        fingerprint = None
     snapshot = build_console_snapshot(Path(run_root))
+    if fingerprint is not None:
+        publish_prepared(root, snapshot, fingerprint)
     payload = render_console(snapshot, replay_config=replay_config).encode("utf-8")
     # Resolve operator-selected parents (macOS /tmp and /var are aliases),
     # while refusing to replace a symbolic-link output file above.

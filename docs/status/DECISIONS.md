@@ -36,6 +36,7 @@
 | D-2026-10-05-01 | 🟢 active | Prime owns computation; P7 owns WorldMap research and prediction-bound action submission |
 | D-2026-10-06-01 | 🟢 active | Failed research is reusable independently of success routes; official submission has an explicit campaign gate |
 | D-2026-10-06-02 | 🟢 active | Every continuation retains per-level cognition through explicit provenance, including live replay |
+| D-2026-10-06-03 | 🟢 active | Prepare saved replay projections during export and load only the selected level |
 
 ## D-2026-10-01-01 — Certificate-gated same-game simulator
 
@@ -1002,3 +1003,12 @@
 - Decision: Inherit recorded per-level beliefs only through the explicit resumed source, with exact scope, sealed/replayed source and matching validated trace/console action prefixes. Keep original run/event provenance separate from the display cursor. Record closed startup identity/link after restoration settles so live and finalized projections share the same merge. Already-active compatibility reads only exact-run launch metadata; a present final summary prevents fallback. Never search for a latest same-game source or backfill later-level knowledge.
 - Display: Before an aligned revision exists, this level’s saved cognition is labeled later planning background with formation step/source. Actor beliefs remain hypotheses, not certified rules or action authority. Same-run/same-level refresh preserves replay playback; selecting another run/level pauses it.
 - Evidence:205 related Python PASS; DOM86 PASS/one existing skip;21 actual served-HTML checkpoints PASS across SP80 L1–5/DC22 L1–2; final full promotion at `002f37a0` PASS25 commands. Chrome transport timed out, so no Chrome visual acceptance is claimed.
+
+
+## D-2026-10-06-03 — Save-time prepared replay and exact-source progressive display
+
+- Status: 🟢 active.
+- Authority: user reports slow and confused game switching, rejects fragile cache-only optimization, and explicitly requires parsing during passed-level saving.
+- Decision: Export builds one authoritative public snapshot, then saves an immutable manifest and per-level projections under an opaque source/projector/content generation. Publish the current pointer last. Requests validate source coherence and selected-file size/hash/public schema. Derived files cannot authorize solving or promote a partial prefix to a full run. Legacy or active evidence uses bounded background projection with loading/error/retry.
+- Display: Clear the prior game's board and cognition immediately, load manifest counts first, and request only the selected level. Capture immutable requested best-source evidence; apply replies only after rechecking current game/run/seed/best/revision/selection generation. Deduplicate current requests and bound retained detail memory. Revalidate manifests; corruption repair creates a different immutable revision.
+- Verification: Named final commands and actual prepared-source timings are recorded in the live checkpoint. HTTP/DOM validation does not establish Chrome visual acceptance.

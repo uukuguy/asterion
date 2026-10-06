@@ -750,13 +750,21 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     game = _identifier(experiment.get("game_id"))
     wins = None
     observations: list[dict | None] = []
+    source_events = read_console_events(root, root.name, game, warnings=warn)
+    source_mode = any(event["kind"] == "observation" for event in source_events)
+    source_observations = []
+    if source_mode:
+        source_observations, source_events = _source_observations(source_events, warn)
     directory = root / "recordings"
     recordings = sorted(directory.glob("*/*.jsonl")) if directory.is_dir() and not directory.is_symlink() else []
     if len(recordings) > 1:
         warn.append("recording-ambiguous")
     elif not recordings:
         warn.append("recording-missing")
-    else:
+    elif not source_observations:
+        # Validated source observations own their exact positions. SDK grids
+        # are a legacy fallback and would be discarded in this mode; avoid
+        # decoding and hashing the entire second copy of every animation.
         rows = _rows(recordings[0], warn, "recording-missing", "recording-invalid")
         observations = [_observation(row) for row in rows]
         valid = [o for o in observations if o]
@@ -768,13 +776,13 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             game, _, wins = valid[0]["game_id"], valid[0]["guid"], valid[0]["wins"]
         if any(o is None for o in observations):
             warn.append("recording-invalid")
-    source_events = read_console_events(root, root.name, game, warnings=warn)
+    if source_events and game is not None and source_events[0]['game_id'] != game:
+        raise ValueError('console identity unavailable')
     if source_events and game is None:
         game = source_events[0]["game_id"]
     source_actions = [event["payload"] for event in source_events if event["kind"] == "action"]
-    source_mode = any(event["kind"] == "observation" for event in source_events)
     if source_mode:
-        observations, source_events = _source_observations(source_events, warn)
+        observations = source_observations
         if observations:
             wins = observations[0]["wins"]
             if "recording-missing" in warn:
@@ -810,6 +818,11 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                          for index, event in enumerate(source_events, 1)]
         observations, source_events = _source_observations(source_events, warn)
     trace_actions = [e for e in trace if e["kind"] == "arc.action"]
+    trace_actions_by_sequence: dict[int, list[dict]] = {}
+    for entry in trace_actions:
+        sequence = entry['payload'].get('sequence')
+        if type(sequence) is int:
+            trace_actions_by_sequence.setdefault(sequence, []).append(entry)
     levels: dict[int, dict] = {}
 
     def level(number: int) -> dict:
@@ -857,9 +870,8 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             if source_mode:
                 source_match = observation["source_action"]
             elif recorded_lineage:
-                source_matches = [entry['payload'] for entry in trace_actions
-                                  if entry['payload'].get('sequence') == action_count
-                                  and entry['payload'].get('action') == observation['action']
+                source_matches = [entry['payload'] for entry in trace_actions_by_sequence.get(action_count, [])
+                                  if entry['payload'].get('action') == observation['action']
                                   and entry['payload'].get('data', {}) == observation['data']
                                   and entry['payload'].get('levels_completed') == observation['levels']
                                   and entry['payload'].get('after_sha256') in observation['hashes']]
@@ -876,7 +888,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             if (source_match is None or source_match["sequence"] != action_count
                 or source_match["before_sha256"] not in previous["hashes"]):
                 source_aligned = False
-            matches = [e for e in trace_actions if e["payload"].get("action") == observation["action"]
+            matches = [e for e in trace_actions_by_sequence.get(action_count, []) if e["payload"].get("action") == observation["action"]
                        and type(e["payload"].get("before_sha256")) is str and e["payload"]["before_sha256"] in previous["hashes"]
                        and type(e["payload"].get("after_sha256")) is str and e["payload"]["after_sha256"] in observation["hashes"]
                        and e["payload"].get("sequence") == action_count

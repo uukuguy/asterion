@@ -43,6 +43,12 @@ class TestConsoleExport(unittest.TestCase):
         with self.assertRaises(ValueError):
             render_console({}, live_config={"token": "token", "games": [game]},
                            replay_config={"games": [game]})
+        html = render_console({}, live_config={"token": "token", "games": [game],
+                                               "replay_loading": "level-manifest/v1"})
+        self.assertIn('"replay_loading":"level-manifest/v1"', html)
+        for mode in (None, True, "level-manifest/v2"):
+            with self.subTest(replay_loading=mode), self.assertRaises(ValueError):
+                render_console({}, live_config={"token": "token", "games": [game], "replay_loading": mode})
 
     def test_worldmap_render_uses_cursor_belief_and_labels_saved_planning_fallback(self):
         node = shutil.which('node')

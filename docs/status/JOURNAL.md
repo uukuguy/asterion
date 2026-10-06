@@ -3848,3 +3848,7 @@
 - 08:20 Separate saved-result and orange attempt badges; missing-summary recording evidence never proves a live solver. DOM99/HTTP/wheel resources PASS.
 - 08:20 e3e9eae3: Separate saved results and attempt badges so ongoing records cannot obscure confirmed completion.
 - 08:25 Use pink for partial progress/counts/result badges at user request; saved completion green and attempt orange retained. HTTP/wheel PASS.
+- 08:25 223df120: Use pink partial-progress styling to make unfinished games distinct from green completed games.
+- 09:03 Split-level loading passed full promotion25/provider0 and servedDOM; user superseded ephemeral warming with save-time durable replay preparation.
+
+- 2026-10-06 09:27 CST — Prepared replay implementation frozen after Astra review: save-time immutable manifest/per-level files, exact-source progressive UI; backend160PASS, DOM105PASS/1real-HTML environment skip; SP80 served switching825ms/revisit445ms. BP35 actual restored-cognition preparation repaired; final promotion/backfill/deployment remain pending. Background resumed with LF52/LS20 explicit quarantine, R11L L1 and M0R0 L4.

@@ -100,7 +100,8 @@ class _Handler(BaseHTTPRequestHandler):
             if self.path == "/":
                 view = session.view()
                 page = self.server.renderer(view["snapshot"] or _empty_snapshot(),
-                                            live_config={"token": self.server.token, "games": session.games()})
+                                            live_config={"token": self.server.token, "games": session.games(),
+                                                         "replay_loading": "level-manifest/v1"})
                 self._send(200, page, html=True)
             elif self.path == "/api/state":
                 self._send(200, session.view())
@@ -111,7 +112,17 @@ class _Handler(BaseHTTPRequestHandler):
             elif self.path == "/api/runs":
                 self._send(200, {"runs": session.recorded_runs()})
             elif self.path.startswith("/api/replay/"):
-                self._send(200, session.replay(self.path.removeprefix("/api/replay/")))
+                parts = self.path.removeprefix('/api/replay/').split('/')
+                if len(parts) == 2 and parts[1] == 'manifest':
+                    manifest = session.replay_manifest(parts[0])
+                    self._send(202 if manifest['state'] == 'loading' else 200, manifest)
+                elif (len(parts) == 4 and parts[1] == 'levels' and parts[2].isascii()
+                      and parts[2].isdigit() and str(int(parts[2])) == parts[2]):
+                    self._send(200, session.replay_level(parts[0], int(parts[2]), parts[3]))
+                elif len(parts) == 1:
+                    self._send(200, session.replay(parts[0]))
+                else:
+                    self._error(404, 'run-unavailable')
             elif self.path.startswith("/api/preview/"):
                 parts = self.path.removeprefix('/api/preview/').split('/')
                 if (len(parts) not in (1, 2) or (len(parts) == 2 and
@@ -120,11 +131,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(200, session.preview(parts[0], int(parts[1]) if len(parts) == 2 else 1))
             else:
                 self._error(404, "not-found")
-        except ConsoleSessionError:
+        except ConsoleSessionError as error:
             if self.path == "/api/overview":
                 self._error(503, "overview-unavailable")
             elif self.path.startswith('/api/preview/'):
                 self._error(503, 'preview-unavailable')
+            elif self.path.startswith('/api/replay/') and '/' in self.path.removeprefix('/api/replay/'):
+                self._error(409 if str(error) == 'replay-stale' else 503,
+                            'replay-stale' if str(error) == 'replay-stale' else 'replay-unavailable')
             else:
                 self._error(404, "run-unavailable")
         except Exception:

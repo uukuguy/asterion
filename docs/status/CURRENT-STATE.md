@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most two independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and the one complete25-game official submission gate belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
+- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most two independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and the two completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
 ## Current Architecture
 
@@ -24,6 +24,7 @@
 - Efficiency tasks persist once per game/seed/level when actual actions >= baseline and per-level score <115. Explicit target witnesses clip an SDK-verified source before that level; only improved results replace saved routes. Scheduling accepts a native partial suffix at the current saved highest level; prioritize a pending efficiency task when that game is free.
 - Saved routes, current attempts and offline previews are separate console scopes. Live observed completions update overview immediately, while saved-route score/action authority remains sealed. Saved-route progress/actions use one selected verified route per game; attempt diagnostics retain failed/repeated execution. Offline route composition replays existing actions with pinned source evidence and a checked settled seam, without launching the model.
 - A selected console level binds one observation source for frames, actions, decisions and cognition. Saved-route authority requires the exact current best-run ID; historical retained views remain labeled while replacement loads. Preview fallback covers missing levels in attempted games as well as unplayed games.
+- Sealed saved-route export prepares immutable manifest and per-level public files before publishing an atomic current pointer. The live reader verifies exact source/projector revision, selected-file hash and public shape; it reads only the requested level. Missing or invalid prepared artifacts use a bounded rebuild with visible loading/retry. Derived artifacts never grant scoring, success or execution authority.
 - A trusted acknowledged process interruption may seal failed research without a success receipt. Uncertain environment results and ordinary model errors do not become replayable failures by relabeling.
 - HUMAN play is independent of P7, with one finite SDK worker and per-game/per-level persisted origin/action/observation journals. Selection/restart restores verified poses. Current-level clear/restart replaces only that save; ordinary RESET preserves history. Human actions never enter P7 history or learning.
 
@@ -50,6 +51,7 @@
 - `packages/typescript/asterion-prime-extension/` and `src/asterion/applications/prime/resources/ipython-extension.mjs` — typed tool registration and packaged resource.
 - `src/asterion/applications/prime/p7/solver_control.py`, `console_events.py`, `console_snapshot.py`, `console_session.py`, `console_server.py`, `console_assets/` — control handshake, timeline and web console.
 - `src/asterion/applications/prime/p7/route_composition.py`, `solutions.py` — pinned offline saved-route composition/admission, independent of new model solving.
+- `src/asterion/applications/prime/p7/console_prepared.py`, `console_replay.py`, `console_export.py` — save-time durable replay preparation, bounded legacy/live projection fallback and fixed offline exports.
 - `src/asterion/applications/prime/p7/console_preview.py` — isolated each-level initial preview, no solved-state promotion.
 - `src/asterion/applications/prime/p7/console_manual.py`, `console_manual_saves.py`, `console_preferences.py` — independent HUMAN lifecycle, journals and selection metadata.
 

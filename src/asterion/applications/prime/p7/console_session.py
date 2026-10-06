@@ -15,6 +15,7 @@ import threading
 import time
 
 from .console_snapshot import build_console_snapshot
+from .console_replay import ReplayProjectionCache
 from .console_export import export_console
 from .console_preview import build_preview_snapshot
 from .solver_control import read_control_ack, write_control_request
@@ -130,6 +131,7 @@ class ConsoleSession:
         self._selection = read_selection(self._root, self._game_levels)
         self._runs = self._root / ".asterion-private" / "prime-p7-live"
         self._overview_reader = None
+        self._prewarm_best: dict[str, str | None] | None = None
         self._process_factory = process_factory
         self._process_stopper = process_stopper
         self._guest_cleanup = guest_cleanup or self._cleanup_guest
@@ -138,6 +140,7 @@ class ConsoleSession:
         self._activity_cache: tuple[float, bool | None] | None = None
         self._activity_lock = threading.Lock()
         self._snapshot_reader = snapshot_reader
+        self._replay_cache = ReplayProjectionCache(snapshot_reader, self._games)
         self._preview_reader = preview_reader
         self._preview_lock = threading.Lock()
         self._previews: dict[tuple[str, int], dict | None] = {}
@@ -211,6 +214,7 @@ class ConsoleSession:
             reader = self._overview_reader
             active = self._view["run_id"] if self._view["state"] in _ACTIVE else None
         value = reader.build(active_run_id=active)
+        self._prewarm_overview(value, active)
         busy = self._read_guest_activity()
         block = "guest-unavailable" if busy is None else "session-busy" if busy else None
         try:
@@ -222,6 +226,48 @@ class ConsoleSession:
                 block = "session-busy"
         value.update(guest_busy=busy, start_ready=block is None, start_block_reason=block)
         return value
+
+    def _prewarm_overview(self, overview: dict, active_run_id: str | None) -> None:
+        """Warm changed verified sources while later work runs; initial load seeds only."""
+        games = overview.get('games', [])
+        scope = overview.get('scope', {})
+        if type(games) is not list or type(scope) is not dict:
+            return
+        with self._lock:
+            if self._closed:
+                return
+            current = {game['game_id']: game.get('best_run_id') for game in games
+                       if type(game) is dict and game.get('game_id') in self._games}
+            previous, self._prewarm_best = self._prewarm_best, current
+            if previous is None:
+                return
+        # A declined warm is still an observed best change, preventing repeated
+        # scans at every overview poll. Fingerprinting and builds hold no
+        # session lock, and queue priority is enforced by the cache itself.
+        if scope.get('model_id') != MODEL_ID or type(scope.get('seed')) is not int or scope['seed'] != 0:
+            return
+        for game in games:
+            if type(game) is not dict or game.get('game_id') not in self._games:
+                continue
+            game_id, run_id = game['game_id'], game.get('best_run_id')
+            if (type(run_id) is not str or run_id == previous.get(game_id)
+                    or run_id in {active_run_id, game.get('active_run_id')}
+                    or game.get('win_levels') != self._game_levels[game_id]
+                    or type(game.get('completed_levels')) is not int
+                    or not 1 <= game['completed_levels'] <= self._game_levels[game_id]
+                    or type(game.get('runs')) is not list):
+                continue
+            candidate = next((run for run in game['runs'] if type(run) is dict and run.get('run_id') == run_id), None)
+            if (candidate is None or candidate.get('verified') is not True or candidate.get('sealed_trace') is not True
+                    or candidate.get('status') not in {'partial', 'completed'}
+                    or type(candidate.get('completed_levels')) is not int
+                    or candidate['completed_levels'] != game['completed_levels']):
+                continue
+            try:
+                self._replay_cache.prewarm(self._run_path(run_id))
+            except (OSError, ValueError, TypeError):
+                # Display warming cannot change score or solver readiness.
+                continue
 
     def _query_guest_activity(self) -> bool:
         result = subprocess.run(
@@ -639,11 +685,31 @@ class ConsoleSession:
         except (OSError, ValueError, KeyError, TypeError):
             raise ConsoleSessionError("run-unavailable") from None
 
+    def replay_manifest(self, run_id: str) -> dict:
+        try:
+            path = self._run_path(run_id)
+            if self._closed or not path.is_dir():
+                raise ValueError
+            return self._replay_cache.manifest(path)
+        except (OSError, ValueError, TypeError):
+            raise ConsoleSessionError('replay-unavailable') from None
+
+    def replay_level(self, run_id: str, level: int, revision: str) -> dict:
+        try:
+            path = self._run_path(run_id)
+            if self._closed or not path.is_dir():
+                raise ValueError
+            return self._replay_cache.level(path, level, revision)
+        except (OSError, ValueError, TypeError) as error:
+            code = 'replay-stale' if str(error) == 'replay stale' else 'replay-unavailable'
+            raise ConsoleSessionError(code) from None
+
     def close(self) -> None:
         with self._lock:
             self._closed = True
             self._stop.set()
             thread = self._thread
+        replay_finished = self._replay_cache.close()
         manual_finished = self._manual_done.wait(timeout=30)
         try:
             if self._manual is not None:
@@ -655,7 +721,7 @@ class ConsoleSession:
             if thread.is_alive():
                 with self._lock:
                     self._change(state="cleanup-unconfirmed", cleanup_confirmed=False)
-        if not manual_finished:
+        if not manual_finished or not replay_finished:
             with self._lock:
                 self._change(state="cleanup-unconfirmed", cleanup_confirmed=False)
 

@@ -2550,3 +2550,197 @@ test('live level completion refreshes both games overview immediately without mo
     assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
 });
+
+function levelReplayFixture(gameId, runId, {sealed=true, color=12}={}) {
+  const record={schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+    run:{game_id:gameId,run_id:runId,seed:0,win_levels:3,status:sealed?'incomplete':'running',
+      completed_level_count:2,primitive_action_count:3,replay_verified:sealed,sealed_trace:sealed},
+    levels:[1,2,3].map(level=>({level,status:level<3?'successful':'not-run',
+      frames:level<3?Array.from({length:3},(_,i)=>({id:`${runId}-l${level}-f${i}`,grid:[[color]],state:'NOT_FINISHED',levels_completed:level-1})):[],
+      actions:level<3?Array.from({length:level},(_,i)=>({id:`${runId}-l${level}-a${i}`,name:'ACTION1',data:{},before_frame:`${runId}-l${level}-f0`,after_frame:`${runId}-l${level}-f2`})):[],
+      decisions:[],cognition:{scope:level<3?'final':'unavailable',stable_description:`游戏规则：${runId} 第${level}关的真实认知`}})),decisions:[],process_events:[],warnings:[]};
+  const revision=(color===12?'a':'b').repeat(64);
+  const manifest={schema:'asterion.arc-agi3-p7-replay-manifest/v1',state:'ready',run_id:runId,revision,run:record.run,
+    levels:record.levels.map(level=>({level:level.level,status:level.status,frame_count:level.frames.length,action_count:level.actions.length,has_cognition:level.cognition.scope==='final'})),warnings:[]};
+  return {record,manifest,detail:level=>({...record,replay_revision:revision,levels:[record.levels[level-1]]})};
+}
+const levelReplayConfig={token:'test-token',replay_loading:'level-manifest/v1',games:[
+  {game_id:'game0-catalog',alias:'first',win_levels:3,baseline_actions:[1,2,3]},
+  {game_id:'game1-catalog',alias:'second',win_levels:3,baseline_actions:[1,2,3]}]};
+function levelReplayOverview(records) {
+  const overview=overviewFixture(levelReplayConfig);
+  records.forEach((data,index)=>{
+    overview.games[index]={...overview.games[index],status:data.record.run.sealed_trace?'partial':'running',completed_levels:2,
+      best_run_id:data.record.run.sealed_trace?data.record.run.run_id:null,runs:[{...catalogRun(data.record.run.run_id,data.record.run.status,data.record.run.sealed_trace),completed_levels:2}]};
+  });
+  return overview;
+}
+
+const settleReplay=async()=>{await settle();await settle();await settle();};
+
+test('per-level replay shows loading, manifest counts, and reads only the chosen level with shared saved cache',async()=>{
+  const data=levelReplayFixture('game0-catalog','level-first');let ready=false,releaseDetail;
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
+    if(url.endsWith('/manifest'))return response(ready?data.manifest:{schema:data.manifest.schema,state:'loading',run_id:data.manifest.run_id,revision:null,run:null,levels:[],warnings:[]},ready?200:202);
+    if(url.includes('/levels/2/'))return new Promise(resolve=>{releaseDetail=resolve;});
+    if(url.includes('/levels/1/'))return response(data.detail(1));
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();assert.equal(app.$('game-title').textContent,'game0-catalog');assert.equal(app.$('replay-loading').hidden,false);
+    assert.match(app.$('replay-loading-text').textContent,/正在整理回放/);assert.equal(app.$('board-empty').hidden,false);
+    ready=true;const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
+    assert.ok(releaseDetail);assert.match(app.$('level-1').textContent,/1 动作 · 3 帧/);assert.match(app.$('level-2').textContent,/2 动作 · 3 帧/);
+    assert.match(app.$('replay-loading-text').textContent,/正在加载第 2 关/);assert.equal(app.$('replay-loading').hidden,false);
+    assert.equal(app.requests.some(request=>request.url==='/api/replay/level-first'),false);
+    assert.equal(app.requests.some(request=>request.url.includes('/levels/1/')),false);
+    releaseDetail(response(data.detail(2)));await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'3 / 3');assert.match(app.$('world-guide').textContent,/第2关/);assert.equal(app.$('replay-loading').hidden,true);
+    assert.equal(app.requests.filter(request=>request.url.includes('/levels/2/')).length,1);
+    app.$('level-1').click();await settleReplay();assert.equal(app.$('frame-counter').textContent,'1 / 3');assert.match(app.$('world-guide').textContent,/第1关/);
+    app.$('level-2').click();await settleReplay();assert.equal(app.requests.filter(request=>request.url.includes('/levels/2/')).length,1);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('per-level replay retries failures and rejects obsolete games and stale revision replies',async()=>{
+  const first=levelReplayFixture('game0-catalog','first-slow'),second=levelReplayFixture('game1-catalog','second-ready',{color:14});
+  let releaseFirst,failSecond=true,staleSecond=true;
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([first,second]),fetch:async url=>{
+    if(url==='/api/replay/first-slow/manifest')return new Promise(resolve=>{releaseFirst=resolve;});
+    if(url==='/api/replay/second-ready/manifest')return failSecond?response({},503):response(second.manifest);
+    if(url.includes('/second-ready/levels/')){if(staleSecond){staleSecond=false;return response({error:'replay-stale'},409);}return response(second.detail(2));}
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();assert.ok(releaseFirst);overviewRow(app,1).querySelector('[data-overview-select]').click();await settleReplay();
+    assert.equal(app.$('game-title').textContent,'game1-catalog');assert.equal(app.$('replay-retry').hidden,false);
+    assert.match(app.$('replay-loading-text').textContent,/读取失败/);
+    failSecond=false;app.$('replay-retry').click();await settleReplay();
+    const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'3 / 3');assert.match(app.$('world-guide').textContent,/second-ready/);
+    releaseFirst(response(first.manifest));await settleReplay();assert.equal(app.$('game-title').textContent,'game1-catalog');
+    assert.equal(app.requests.some(request=>request.url.includes('/first-slow/levels/')),false);
+    assert.ok(app.requests.filter(request=>request.url==='/api/replay/second-ready/manifest').length>=3);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('per-level live revision updates preserve a historical frame and playback and do not load future previews',async()=>{
+  const data=levelReplayFixture('game0-catalog','live-level',{sealed:false});let current=data;
+  const overview=levelReplayOverview([data]);
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview,fetch:async url=>{
+    if(url.endsWith('/manifest'))return response(current.manifest);
+    if(url.includes('/levels/2/'))return response(current.detail(2));
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();await settleReplay();app.$('frame-slider').value='0';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));app.$('play-toggle').click();
+    const timer=[...app.timers.values()].find(fn=>fn.intervalMs<1000);assert.ok(timer);
+    current=levelReplayFixture('game0-catalog','live-level',{sealed:false,color:14});
+    [...app.timers.values()].find(fn=>fn.intervalMs===2000)();await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'1 / 3');assert.equal(app.$('play-toggle').textContent,'暂停');assert.ok([...app.timers.values()].includes(timer));
+    assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);
+    assert.equal(app.requests.some(request=>request.url==='/api/replay/live-level'),false);assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('per-level saved fallback uses the exact improved best and retires a loading ticket after selecting loaded history',async()=>{
+  const live=levelReplayFixture('game0-catalog','active-retry',{sealed:false});
+  live.record.run.completed_level_count=1;live.manifest.run=live.record.run;
+  const makeBest=(id,color)=>{
+    const data=levelReplayFixture('game0-catalog',id,{color});
+    data.record.run.completed_level_count=3;data.record.run.primitive_action_count=6;
+    data.record.levels[2]={...data.record.levels[1],level:3,frames:data.record.levels[1].frames.map(frame=>({...frame,id:frame.id.replace('l2','l3')})),
+      actions:[...data.record.levels[1].actions,{...data.record.levels[1].actions[0],id:id+'-l3-a2'}],cognition:{scope:'final',stable_description:`游戏规则：${id} 第3关`}};
+    data.manifest.run=data.record.run;data.manifest.levels=data.record.levels.map(level=>({level:level.level,status:level.status,frame_count:level.frames.length,action_count:level.actions.length,has_cognition:true}));
+    return data;
+  };
+  const old=makeBest('saved-old',12),improved=makeBest('saved-improved',14);let best=old,releaseOld,releaseImproved;
+  const overview=levelReplayOverview([live]);
+  const setBest=()=>{overview.games[0]={...overview.games[0],completed_levels:3,best_run_id:best.record.run.run_id,
+    runs:[{...catalogRun(best.record.run.run_id),completed_levels:3},{...catalogRun(live.record.run.run_id,'running',false),recording:true}]};};setBest();
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:()=>overview,fetch:async url=>{
+    if(url.includes('/active-retry/manifest'))return response(live.manifest);
+    if(url.includes('/active-retry/levels/'))return response(live.detail(url.includes('/levels/1/')?1:2));
+    if(url.includes('/saved-old/manifest'))return response(old.manifest);
+    if(url.includes('/saved-improved/manifest'))return response(improved.manifest);
+    if(url.includes('/saved-old/levels/3/'))return new Promise(resolve=>{releaseOld=resolve;});
+    if(url.includes('/saved-improved/levels/3/'))return new Promise(resolve=>{releaseImproved=resolve;});
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();assert.match(app.$('world-guide').textContent,/active-retry/);
+    app.$('level-3').click();await settleReplay();assert.ok(releaseOld);assert.equal(app.$('replay-loading').hidden,false);
+    assert.match(app.$('level-3').textContent,/已保存.*3 动作/);assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);
+    best=improved;setBest();[...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();assert.ok(releaseImproved);
+    releaseImproved(response(improved.detail(3)));await settleReplay();assert.match(app.$('world-guide').textContent,/saved-improved/);
+    releaseOld(response(old.detail(3)));await settleReplay();assert.match(app.$('world-guide').textContent,/saved-improved/);
+    assert.equal(app.$('single-board').dataset.sourceRunId,'saved-improved');
+    // A new uncached revision for the selected saved level must not own another level's spinner.
+    best=old;setBest();[...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
+    app.$('level-2').click();await settleReplay();assert.equal(app.$('replay-loading').hidden,true);assert.match(app.$('world-guide').textContent,/active-retry/);
+    releaseOld(response(old.detail(3)));await settleReplay();assert.equal(app.$('replay-loading').hidden,true);assert.equal(app.$('level-2').getAttribute('aria-current'),'true');
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('fresh loading manifest invalidates an in-flight detail from the same saved run revision',async()=>{
+  const live=levelReplayFixture('game0-catalog','revision-live',{sealed:false});
+  const saved=levelReplayFixture('game0-catalog','revision-saved');
+  live.record.run.completed_level_count=1;
+  // Level one exists only in the saved route, while the active attempt is on level two.
+  live.record.levels[0]={...live.record.levels[0],status:'not-run',frames:[],actions:[],cognition:{scope:'unavailable'}};
+  live.manifest.levels[0]={...live.manifest.levels[0],status:'not-run',frame_count:0,action_count:0,has_cognition:false};
+  const overview=levelReplayOverview([live]);overview.games[0]={...overview.games[0],best_run_id:'revision-saved',
+    runs:[{...catalogRun('revision-saved'),completed_levels:2},{...catalogRun('revision-live','running',false),recording:true}]};
+  let ready=true,releaseSaved;
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview,fetch:async url=>{
+    if(url.includes('/revision-live/manifest'))return response(live.manifest);
+    if(url.includes('/revision-live/levels/'))return response(live.detail(2));
+    if(url.includes('/revision-saved/manifest'))return response(ready?saved.manifest:{schema:saved.manifest.schema,state:'loading',run_id:'revision-saved',revision:null,run:null,levels:[],warnings:[]},ready?200:202);
+    if(url.includes('/revision-saved/levels/1/'))return new Promise(resolve=>{releaseSaved=resolve;});
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();app.$('level-1').click();await settleReplay();assert.ok(releaseSaved);
+    assert.equal(app.$('board-empty').hidden,false);ready=false;
+    [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
+    releaseSaved(response(saved.detail(1)));await settleReplay();
+    assert.equal(app.$('board-empty').hidden,false);assert.doesNotMatch(app.$('world-guide').textContent,/revision-saved/);
+    assert.equal(app.$('replay-loading').hidden,false);assert.match(app.$('level-1').textContent,/已保存.*1 动作/);
+    assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('verified sealed partial saved prefixes load history without claiming full-run replay success',async()=>{
+  for (const lazy of [true,false]) {
+    const live=levelReplayFixture('game0-catalog','partial-active',{sealed:false});
+    live.record.run.completed_level_count=1;live.record.levels[0]={...live.record.levels[0],frames:[],actions:[],cognition:{scope:'unavailable'}};
+    live.record.levels[1].status='incomplete';
+    live.manifest.levels=live.record.levels.map(level=>({level:level.level,status:level.status,frame_count:level.frames.length,action_count:level.actions.length,has_cognition:level.cognition.scope==='final'}));
+    const saved=levelReplayFixture('game0-catalog','verified-partial');saved.record.run.replay_verified=false;
+    const overview=levelReplayOverview([live]);overview.games[0]={...overview.games[0],completed_levels:2,best_run_id:'verified-partial',
+      runs:[{...catalogRun('verified-partial','incomplete',true),completed_levels:2},{...catalogRun('partial-active','running',false),recording:true}]};
+    const config=lazy?levelReplayConfig:{...levelReplayConfig,replay_loading:undefined};
+    const app=launch(fixture(),{liveConfig:config,overview,fetch:async url=>{
+      if(url==='/api/replay/partial-active')return response(live.record);
+      if(url==='/api/replay/verified-partial')return response(saved.record);
+      if(url.includes('/partial-active/manifest'))return response(live.manifest);
+      if(url.includes('/partial-active/levels/'))return response(live.detail(2));
+      if(url.includes('/verified-partial/manifest'))return response(saved.manifest);
+      if(url.includes('/verified-partial/levels/1/'))return response(saved.detail(1));
+      return response(idleView());
+    }});
+    try {
+      await settleReplay();app.$('level-1').click();await settleReplay();
+      assert.equal(app.$('single-board').dataset.sourceRunId,'verified-partial');assert.equal(app.$('single-board').dataset.sourceScope,'saved');
+      assert.equal(app.$('frame-counter').textContent,'1 / 3');assert.match(app.$('world-guide').textContent,/verified-partial 第1关/);
+      assert.match(app.$('level-1').textContent,/已保存.*1 动作/);assert.match(app.$('run-progress-summary').textContent,/已保存 2 \/ 3/);
+      assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'partial-active');assert.equal(app.dom.window.__ASTERION_STATE__.run.replay_verified,false);
+      assert.equal(saved.record.run.replay_verified,false);assert.equal(saved.record.run.status,'incomplete');
+      assert.equal(overviewRow(app).querySelector('.overview-result-badge').textContent,'◐ 部分通关');
+      assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);assert.deepEqual(app.errors,[]);
+    } finally {app.dom.window.close();}
+  }
+});

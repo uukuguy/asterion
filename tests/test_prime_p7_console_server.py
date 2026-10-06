@@ -3,10 +3,13 @@ from __future__ import annotations
 import http.client
 import json
 import threading
+import time
 import unittest
 
 from asterion.applications.prime.p7.console_server import create_console_server
 from tests.test_prime_p7_console_session import ConsoleSessionFixture
+from tests.test_prime_p7_console_session import RUN_ID
+from tests.test_prime_p7_console_replay import projection
 from tests.test_prime_p7_console_manual_session import FakeManualController
 
 
@@ -55,6 +58,48 @@ class TestPrimeP7ConsoleServer(ConsoleSessionFixture):
             self.assertEqual(status, 200)
             self.assertIn(key, json.loads(body))
             self.assertNotIn(self.server.token.encode(), body)
+        self.assertFalse(self.calls)
+
+    def test_progressive_replay_responds_while_building_and_fences_exact_level_revision(self):
+        entered, release = threading.Event(), threading.Event()
+        root = self.session_._runs / RUN_ID
+        root.mkdir(parents=True)
+
+        def read(_):
+            entered.set()
+            release.wait(2)
+            return projection()
+
+        self.session_._replay_cache._reader = read
+        self.addCleanup(release.set)
+        status, _, raw = self.request('GET', f'/api/replay/{RUN_ID}/manifest')
+        self.assertEqual(status, 202)
+        self.assertEqual(json.loads(raw)['state'], 'loading')
+        self.assertTrue(entered.wait(1))
+        self.assertEqual(self.request('GET', '/api/state')[0], 200)
+        release.set()
+        until = time.monotonic() + 2
+        while time.monotonic() < until:
+            status, _, raw = self.request('GET', f'/api/replay/{RUN_ID}/manifest')
+            if status == 200:
+                break
+            time.sleep(.005)
+        self.assertEqual(status, 200)
+        manifest = json.loads(raw)
+        self.assertNotIn(b'grid', raw)
+        revision = manifest['revision']
+        status, _, raw = self.request('GET', f'/api/replay/{RUN_ID}/levels/2/{revision}')
+        self.assertEqual(status, 200)
+        detail = json.loads(raw)
+        self.assertEqual([level['level'] for level in detail['levels']], [2])
+        self.assertEqual(detail['levels'][0]['cognition']['provenance']['event_sequence'], 7)
+        (root / 'console-events.jsonl').write_text('changed')
+        status, _, raw = self.request('GET', f'/api/replay/{RUN_ID}/levels/2/{revision}')
+        self.assertEqual(status, 409)
+        self.assertEqual(json.loads(raw), {'error': 'replay-stale'})
+        status, _, raw = self.request('GET', f'/api/replay/{RUN_ID}/levels/0/{revision}')
+        self.assertEqual(status, 503)
+        self.assertEqual(json.loads(raw), {'error': 'replay-unavailable'})
         self.assertFalse(self.calls)
 
     def test_initial_preview_get_uses_catalog_members_and_redacts_failure_without_starting(self):

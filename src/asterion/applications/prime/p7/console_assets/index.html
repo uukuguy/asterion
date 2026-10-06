@@ -35,6 +35,7 @@
       <div class="run-heading"><p class="eyebrow">GAME EXPLORATION</p><h1 id="game-title">游戏运行</h1><div class="run-id-row"><span class="meta-label">运行</span><span id="run-id" class="run-id"></span></div><p id="run-progress-summary" class="muted"></p></div>
       <div class="run-metrics flex items-center gap-2"><div class="metric"><span class="meta-label">本轮关卡进度</span><strong id="level-progress">—</strong></div><div class="metric"><span class="meta-label">记录动作</span><strong id="action-total">—</strong></div><div class="metric"><span class="meta-label">运行状态</span><span id="run-status" class="status-tag"></span></div></div>
     </section>
+    <div id="replay-loading" class="replay-loading" role="status" aria-live="polite" hidden><span id="replay-loading-text"></span><button id="replay-retry" class="event-link" type="button" hidden>重新加载</button></div>
     <div id="evidence-warning" class="evidence-warning" hidden></div>
     <div class="workspace grid">
       <aside class="level-rail rounded-xl" aria-labelledby="levels-title"><div class="section-heading"><h2 id="levels-title">游戏关卡</h2><span id="level-total" class="count-label"></span></div><nav id="level-list" aria-label="选择游戏关卡"></nav><div class="rail-footer"><span class="mini-label">证据边界</span><p id="verification-note"></p></div></aside>
