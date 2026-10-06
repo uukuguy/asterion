@@ -4096,3 +4096,6 @@
 - 23:20 23a1b19c records retained L8 exploration and released RESET repair so recovery preserves finite continuation and saved authority.
 - 23:22 RESET2f parent61777 adoption released, guest signals0, new rounds0; same b5 L8 guest57837/deadline/history retained.
 - 23:22 Correction: L8 ladder first8 full matches; ninth red-position mismatch while role/support matched; subsequent293-295 all matched.
+- 23:24 2e34315e records parent-only RESET deployment and actual map reuse so recovery retains the running finite attempt.
+- 23:34 BP L8 certified46new/0RESET/1UNDO,8/292; local99.20/182/6711. L9 native2f actually launched from292.
+- 23:34 Console68369 exact2f fixed57515 PASS; owned expired zero-action session safe; guest/publisher untouched; overview saved authority intact.
