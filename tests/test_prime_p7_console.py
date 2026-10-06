@@ -638,6 +638,11 @@ class TestOfflineReplayCognition(unittest.TestCase):
         self.assertEqual([item['stable_description'] for item in timeline], ['第一关原始规则', '第三关原始规则'])
         self.assertEqual([item['provenance']['run_id'] for item in timeline], [first[0].name, last[0].name])
         self.assertFalse(any('恢复来源的认知证据不匹配' in warning for warning in snapshot['warnings']))
+        with patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=segments):
+            with patch('asterion.applications.prime.p7.console_snapshot._MAX_SOURCE_REQUESTS', 1):
+                limited = build_console_snapshot(composed)
+        self.assertTrue(any('认知继承超过读取容量' in warning for warning in limited['warnings']))
+        self.assertFalse(any('恢复来源的认知证据不匹配' in warning for warning in limited['warnings']))
         with patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=None):
             rejected = build_console_snapshot(current)
         self.assertFalse(any(level['cognition_timeline'] for level in rejected['levels']))

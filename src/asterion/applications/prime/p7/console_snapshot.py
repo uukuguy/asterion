@@ -53,6 +53,7 @@ _WARNINGS = {
     "cognition-missing": "没有身份匹配的稳定认知。",
     "cognition-events-invalid": "部分认知事件格式或会话身份不匹配；未使用这些事件。",
     "restored-cognition-invalid": "恢复来源的认知证据不匹配或超过边界；未用于历史认知。",
+    "restored-cognition-capacity-exceeded": "恢复来源的认知继承超过读取容量；未用于历史认知。",
     "receipt-missing": "没有经过核对的最终回执；录制进度不等于完整运行成功。",
 }
 
@@ -541,6 +542,10 @@ def _aligned_restored_observation(source: dict, current: dict, position: int, de
             and observations_match(actual[destination], expected[position]))
 
 
+class _RestoredCognitionCapacityError(ValueError):
+    """Finite source traversal was exhausted independently of authenticity."""
+
+
 def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], current_events: list[dict],
                                seen: tuple[str, ...] = (), *,
                                recorded_positions: dict[int, dict] | None = None,
@@ -561,7 +566,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
             result = None
             requests += 1
             if requests > _MAX_SOURCE_REQUESTS:
-                raise ValueError('restored cognition unavailable')
+                raise _RestoredCognitionCapacityError('restored cognition capacity exceeded')
             tasks.append(_restored_cognition_task(*arguments, **options))
         return result
     finally:
@@ -855,6 +860,9 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                         and diagnostics.get('recovery_kind') in {'saved-route-composition', 'terminal-game-win', 'animation-replay'})
     try:
         restored_events = [] if recorded_lineage else _restored_cognition_events(root, summary, trace, source_events)
+    except _RestoredCognitionCapacityError:
+        restored_events = []
+        warn.append('restored-cognition-capacity-exceeded')
     except (ValueError, OSError):
         restored_events = []
         warn.append('restored-cognition-invalid')
@@ -997,6 +1005,8 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
             # unique display cursor.
             source_events = [{**event, 'sequence': index}
                              for index, event in enumerate(restored_events, 1)]
+        except _RestoredCognitionCapacityError:
+            warn.append('restored-cognition-capacity-exceeded')
         except (ValueError, OSError):
             warn.append('restored-cognition-invalid')
     source_decisions = []

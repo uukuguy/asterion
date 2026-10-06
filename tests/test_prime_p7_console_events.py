@@ -761,7 +761,8 @@ class TestRestoredResearchProjection(unittest.TestCase):
         with patch('asterion.applications.prime.p7.console_snapshot._MAX_SOURCE_REQUESTS', 2):
             limited = build_console_snapshot(current)
         self.assertEqual(limited['levels'][0]['cognition_timeline'], [])
-        self.assertTrue(any('恢复来源的认知证据不匹配' in warning for warning in limited['warnings']))
+        self.assertTrue(any('认知继承超过读取容量' in warning for warning in limited['warnings']))
+        self.assertFalse(any('恢复来源的认知证据不匹配' in warning for warning in limited['warnings']))
         path = original / 'summary.json'
         original_summary = path.read_bytes()
         summary = json.loads(original_summary)
