@@ -63,4 +63,18 @@ def build_solver_payload(
         value["description_zh"] = public_narrative(value["description_zh"], 8000)
     for key in _LISTS & value.keys():
         value[key] = [public_text(v) for v in value[key]][:32]
+    if 'action_labels' in value:
+        from .research import action_labels
+
+        labels = action_labels(value['action_labels'], latest=source_action_sequence)
+        public = []
+        for item in labels:
+            label = None if item['label'] is None else public_text(item['label'], 24)
+            purpose = public_text(item['purpose'], 600)
+            # Reject a redacted meaning as a whole; never substitute a guessed
+            # label or retain a confidence claim after its meaning was removed.
+            if (item['label'] is not None and not label) or (item['purpose'] and not purpose):
+                continue
+            public.append({**item, 'label': label, 'purpose': purpose})
+        value['action_labels'] = public
     return validate_solver_payload(kind, value)

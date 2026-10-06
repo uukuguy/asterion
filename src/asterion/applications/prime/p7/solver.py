@@ -433,6 +433,7 @@ class Solver:
             validation_summary=self._validation_summary(revised["reports"]),
             correction_summary="；".join(correction["changed"]),
             evidence_sequences=revised["evidence_sequences"],
+            **({'action_labels': world['action_labels']} if 'action_labels' in world else {}),
         )
         if self._experience is not None:
             exports = []

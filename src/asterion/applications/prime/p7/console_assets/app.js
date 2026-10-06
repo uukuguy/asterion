@@ -26,22 +26,35 @@
     (decision.action_ids === undefined || (Array.isArray(decision.action_ids) && decision.action_ids.every((id) => typeof id === 'string'))) &&
     stringFields(decision, ['source', 'goal', 'basis', 'expected']) && numberFields(decision, ['trace_sequence', 'round_index']);
   const validClaim = (claim) => isRecord(claim) && stringFields(claim, ['id', 'kind', 'status', 'claim']);
+  const ACTION_NAMES = ['ACTION1', 'ACTION2', 'ACTION3', 'ACTION4', 'ACTION5', 'ACTION6', 'ACTION7', 'RESET'];
+  const validActionLabels = (value) => (value.action_labels === undefined || (Array.isArray(value.action_labels) && value.action_labels.length <= 8 &&
+      value.action_labels.every((entry, index, entries) => isRecord(entry) &&
+        Object.keys(entry).sort().join(',') === 'action,confidence,evidence_sequences,label,purpose' &&
+        ACTION_NAMES.includes(entry.action) && (index === 0 || entry.action > entries[index - 1].action) &&
+        ['certain', 'hypothesis', 'unknown', 'conflict'].includes(entry.confidence) &&
+        (entry.label === null || (typeof entry.label === 'string' && entry.label.trim().length > 0 && [...entry.label].length <= 24)) &&
+        typeof entry.purpose === 'string' && [...entry.purpose].length <= 600 &&
+        (['unknown', 'conflict'].includes(entry.confidence) ? entry.label === null : entry.label !== null && Boolean(entry.purpose.trim()) && Boolean(entry.evidence_sequences?.length)) &&
+        Array.isArray(entry.evidence_sequences) && entry.evidence_sequences.length <= 32 &&
+        entry.evidence_sequences.every((sequence, i, sequences) => Number.isInteger(sequence) && sequence >= 0 && sequence <= 1000000000 &&
+          (i === 0 || sequence > sequences[i - 1]) && (value.provenance !== undefined || !Number.isInteger(value.source_action_sequence) || sequence <= value.source_action_sequence)))));
   const validProvenance = (value) => value === undefined || (isRecord(value) && Object.keys(value).sort().join(',') === 'event_sequence,run_id' &&
     typeof value.run_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}$/.test(value.run_id) && Number.isInteger(value.event_sequence) && value.event_sequence > 0);
   const validCognition = (cognition) => cognition === undefined || (isRecord(cognition) &&
-    stringFields(cognition, ['scope', 'stable_description']) && validProvenance(cognition.provenance) &&
+    stringFields(cognition, ['scope', 'stable_description']) && validProvenance(cognition.provenance) && validActionLabels(cognition) &&
     optionalRecords(cognition.updates, (update) => isRecord(update) && optionalString(update.type) && optionalNumber(update.sequence) && optionalRecords(update.changes, validClaim)) &&
     (cognition.action_meanings === undefined || (isRecord(cognition.action_meanings) && Object.values(cognition.action_meanings).every((entries) => optionalRecords(entries, validClaim)))));
   const validTimelineEntry = (entry) => isRecord(entry) &&
     stringFields(entry, ['scope', 'frame_id', 'action_id', 'stable_description', 'cognition_narrative_zh']) &&
-    numberFields(entry, ['cognition_revision', 'source_action_sequence', 'event_sequence']) && validProvenance(entry.provenance);
+    numberFields(entry, ['cognition_revision', 'source_action_sequence', 'event_sequence']) && validProvenance(entry.provenance) && validActionLabels(entry);
   function validSnapshot(value) {
     if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-console/v1' || !isRecord(value.run) || !Array.isArray(value.levels)) return false;
     if (!optionalRecords(value.decisions, validDecision) || !stringFields(value.run, ['status', 'game_id', 'run_id']) || !optionalString(value.generated_at)) return false;
     if (value.process_events !== undefined && (!Array.isArray(value.process_events) || value.process_events.length > 16384 ||
       value.process_events.some((event, index, events) => !isRecord(event) || !Number.isInteger(event.event_sequence) || event.event_sequence < 1 ||
         (index > 0 && event.event_sequence <= events[index - 1].event_sequence) || !['observation', 'action', 'decision', 'cognition', 'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind) ||
-        typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload) || !validProvenance(event.provenance)))) return false;
+        typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload) || !validProvenance(event.provenance) ||
+        !validActionLabels({ ...event.payload, source_action_sequence: event.source_action_sequence, provenance: event.provenance })))) return false;
     const run = value.run;
     if (run.win_levels != null && (!Number.isInteger(run.win_levels) || run.win_levels < 0 || run.win_levels > 1000)) return false;
     const ids = new Set();
@@ -515,58 +528,17 @@
   }
 
   const actionMeanings = () => !array(currentLevel().cognition_timeline).length && object(currentLevel().cognition).scope === 'final' ? object(object(currentLevel().cognition).action_meanings) : {};
-  const meaningEntries = (entries) => array(entries).filter((entry) => entry && ['certain', 'undetermined', 'falsified'].includes(entry.status) && typeof entry.claim === 'string' && entry.claim);
-  const purposeVerb = /提交|触发|重置|旋转|切换|交互|选择|覆盖|恢复|回放|交换|跳跃|启动|发射|填充|生成|复位|传送|开启|关闭|撤销|确认|取消|释放|缩放|改变|调整|染色|擦除|设置/;
-  const nonMovementPurpose = claim => purposeVerb.test(claim);
-  const deniedPurpose = new RegExp('(?:ACTION[1-7]|RESET)\\s*[:：=]?\\s*(?:不|未)\\s*(?:'+purposeVerb.source+')');
-  const uncertainClaim = claim => /候选|可能|假设|假说|推测|待验证|未确认|未证实/.test(claim);
-
-  function shortActionMeaning(name, entries) {
-    const directions = { 上: '上移', 下: '下移', 左: '左移', 右: '右移' };
-    const candidates = [];
-    entries.forEach((entry) => {
-      entry.claim.split(/[。；;\n]/).forEach((clause) => {
-        const names = [...new Set(clause.match(/(?<![A-Za-z0-9_])ACTION[1-7](?![A-Za-z0-9_])/g) || [])];
-        if (names.length !== 1 || names[0] !== name) return;
-        if (nonMovementPurpose(clause) || /之后|以后|后[，,]/.test(clause)) return;
-        const denied = [...new Set([...clause.matchAll(/(?:不会|不能|无法|并非|没有|未曾|不曾|不|未)\s*(?:向([上下左右])(?:移动|平移)|([上下左右])移)/g)].map((match) => match[1] || match[2]))];
-        denied.forEach((direction) => candidates.push({ status: entry.status, direction, affirmative: false }));
-        if (/不|未|无|否|并非/.test(clause)) return;
-        const found = [...new Set([...clause.matchAll(/(?:向([上下左右])(?:移动|平移)|([上下左右])移)/g)].map((match) => match[1] || match[2]))];
-        if (found.length === 1) candidates.push({ status: entry.status, direction: found[0], affirmative: true });
-      });
-    });
-    const supported = candidates.filter((entry) => entry.affirmative && entry.status !== 'falsified');
-    const found = [...new Set(supported.map((entry) => entry.direction))];
-    const contradicted = candidates.some((entry) => entry.direction === found[0] && (entry.affirmative ? entry.status === 'falsified' : entry.status !== 'falsified'));
-    if (found.length !== 1 || contradicted) return { meaning: '未识别', status: '?' };
-    return { meaning: directions[found[0]], status: supported.some((entry) => entry.status === 'certain') ? '已识别' : '推测' };
-  }
-
-  function currentActionClaims(name) {
-    const cognition = selectedCognition();
-    if (!['final','observation','planning'].includes(cognition.scope)) return [];
-    const background = cognition.scope !== 'observation';
-    const claims = meaningEntries(object(cognition.action_meanings)[name]).map(entry=>({...entry,
-      status:entry.status==='certain' && uncertainClaim(entry.claim)?'undetermined':entry.status,background}));
-    const sequence = cognition.event_sequence ?? cognition.cognition_revision;
-    const revision = array(currentLevel().research_timeline).find(event => event.kind === 'model_revision' &&
-      event.event_sequence === sequence && event.frame_id === cognition.frame_id &&
-      event.level === currentLevel().level);
-    array(revision?.payload?.rule_summaries).filter(rule=>typeof rule==='string').forEach(claim=>{
-      const names=[...new Set(claim.match(/(?<![A-Za-z0-9_])(?:ACTION[1-7]|RESET)(?![A-Za-z0-9_])/g) || [])];
-      if (names.length===1 && names[0]===name && !/未知|未识别|尚不清楚/.test(claim))
-        claims.push({claim,status:uncertainClaim(claim)?'undetermined':'certain',background});
-    });
-    return claims;
-  }
-
+  // Preserve historical prose as evidence in the cognition panel, without
+  // interpreting it as a control label.
+  const meaningEntries = entries => array(entries).filter(entry => entry && ['certain', 'undetermined', 'falsified'].includes(entry.status) && typeof entry.claim === 'string' && entry.claim);
   function recordedActionMeaning(name) {
-    if (name === 'RESET') return {meaning:'重置',status:'协议'};
-    if (name === 'ACTION6') return {meaning:'点击',status:'协议'};
-    const claims = currentActionClaims(name);
-    if (claims.length) return {...shortActionMeaning(name, claims),background:claims.some(entry=>entry.background)};
-    return {meaning:'未识别',status:'?'};
+    const cognition = selectedCognition();
+    const label = ['final', 'observation', 'planning'].includes(cognition.scope) && validActionLabels(cognition)
+      ? array(cognition.action_labels).find(entry => entry.action === name) : null;
+    if (label) return { ...label, background: cognition.scope !== 'observation', provenance: cognition.provenance };
+    if (name === 'RESET') return { label: '重置', purpose: '原生输入接口的重置动作；不代表当前关卡的具体机制。', confidence: 'certain', native: true };
+    if (name === 'ACTION6') return { label: '点击', purpose: '原生输入接口的坐标点击动作；不代表当前关卡的具体机制。', confidence: 'certain', native: true };
+    return { label: null, purpose: '', confidence: null };
   }
 
   function renderAvailableActions(frame, action) {
@@ -615,33 +587,25 @@
       // Manual snapshots can omit actions while retaining a played journal.
       // Their empty action array is not evidence that a key was unused.
       const actionCount = manual ? null : actions().filter(entry => entry.name === name).length;
-      const relevantClaims = short.status === '?' ? currentActionClaims(name).filter(entry => {
-        const names=[...new Set(entry.claim.match(/(?<![A-Za-z0-9_])(?:ACTION[1-7]|RESET)(?![A-Za-z0-9_])/g) || [])];
-        return names.length === 1 && names[0] === name;
-      }) : [];
-      const fullClaims=relevantClaims.filter(entry=>entry.status!=='falsified').slice(0,4);
-      const contradictedPurpose=relevantClaims.some(entry=>entry.status==='falsified' || deniedPurpose.test(entry.claim) ||
-        /不会|不能|无法|并非|没有|不(?:是|会|能|可)|未(?:能|曾|见)/.test(entry.claim));
-      const knownPurpose=!contradictedPurpose && fullClaims.some(entry=>entry.status==='certain' &&
-        nonMovementPurpose(entry.claim) && !/未知|不清楚|未识别/.test(entry.claim));
-      const meaning = short.status === '?' ? knownPurpose ? '特殊用途' : '未识别' : short.meaning;
-      const status = short.status === '?' ? knownPurpose ? '已识别' : fullClaims.some(entry=>entry.status==='undetermined') ? '推测' : !manual && !actionCount ? '本关未使用' : ''
-        : ({协议:'固定含义',记录:'已观察',实测:'已观察'})[short.status] ?? short.status;
-      const explanation = short.status === '?' ? fullClaims.length ? fullClaims.map(entry=>(entry.status==='undetermined'?'推测：':'')+entry.claim).join('；') : '未识别' : '';
-      const symbol = ['已识别','实测','记录','协议'].includes(short.status)
-        ? ({上移:'↑',下移:'↓',左移:'←',右移:'→',点击:'点击',重置:'重置',交互:'交互'}[short.meaning] || '') : '';
-      item.querySelector('.action-key-label').textContent = `${name}${symbol ? ' '+symbol : ''}`;
+      const identified = short.confidence === 'certain' && Boolean(short.label || short.purpose);
+      const meaning = short.label || (short.confidence === null ? '未记录' : '未识别');
+      const status = short.native ? '固定含义' : identified ? '已识别' : short.confidence === 'hypothesis' ? '推测'
+        : short.confidence === 'conflict' ? '有冲突' : !manual && !actionCount ? '本关未使用' : '';
+      const explanation = short.purpose || (short.confidence === null ? '未记录动作含义' : '未识别');
+      item.querySelector('.action-key-label').textContent = name;
       item.querySelector('.action-key-meaning').textContent = meaning;
-      item.querySelector('.action-key-status').textContent = status;
+      const statusNode = item.querySelector('.action-key-status');
+      statusNode.textContent = status;
+      statusNode.className = `action-key-status${short.native ? '' : ({ certain: ' status-active', hypothesis: ' status-warning', conflict: ' status-failed' })[short.confidence] || ''}`;
       if (actionCount !== null) item.title += `；本关已记录 ${actionCount} 次`;
-      if (explanation) item.title += `；${explanation}`;
-      if (short.status === '?' && actionCount) {
+      item.title += `；${short.confidence === 'hypothesis' ? '推测：' : ''}${explanation}`;
+      if (short.confidence === null || short.confidence === 'unknown' || short.confidence === 'conflict') {
         const responses=[...new Set(actions().filter(entry=>entry.name===name).flatMap(entry=>array(entry.visual_observations)).filter(text=>typeof text==='string'))].slice(0,3);
-        item.title += responses.length ? `；动作响应：${responses.join('；')}` : '；响应见动作记录';
+        if (actionCount) item.title += responses.length ? `；动作响应：${responses.join('；')}` : '；响应见动作记录';
       }
-      if (fullClaims.length) item.title += `；依据本关认知 · 来源 ${levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关${short.background ? ' · 仅作规划背景，不表示当前帧当时已知' : ''}`;
-      if (symbol) item.title += `；${short.status === '协议' ? '固定含义' : `来源 ${levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关`}：${meaning}（${status}）${short.background ? ' · 本关已保存记录，仅作规划背景，不表示当前帧当时已知' : ''}`;
-      item.setAttribute('aria-label', `${name}，${meaning}${status ? '，'+status : ''}${actionCount !== null ? `，本关已记录 ${actionCount} 次` : ''}${explanation ? '，'+explanation : ''}${short.background ? '，本关已保存记录，仅作规划背景' : ''}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
+      if (short.native) item.title += `；固定含义：${meaning}`;
+      else if (short.label || short.purpose) item.title += `；P7 的动作理解（不等于机制已验证） · 来源 ${short.provenance?.run_id || levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关${short.background ? ' · 仅作规划背景，不表示当前帧当时已知' : ''}`;
+      item.setAttribute('aria-label', `${name}，${meaning}${status ? '，'+status : ''}${actionCount !== null ? `，本关已记录 ${actionCount} 次` : ''}，${explanation}${short.background ? '，本关已保存记录，仅作规划背景' : ''}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
       return wrapper;
     };
     const reconcile = (list, names, availability) => {
@@ -816,7 +780,8 @@
     const revision = researchEvents().filter((event) => event.kind === 'model_revision').at(-1);
     const aligned = timeline.length ? observationCognition() : revision ? { scope: 'observation', frame_id: revision.frame_id,
       source_action_sequence: revision.source_action_sequence, cognition_revision: revision.event_sequence, event_sequence: revision.event_sequence,
-      stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary, origin: 'actor', provenance: revision.provenance } : null;
+      stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary, origin: 'actor', provenance: revision.provenance,
+      action_labels: revision.payload.action_labels } : null;
     const saved = object(currentLevel().cognition);
     return aligned || (timeline.length && saved.scope === 'observation' ? { ...saved, scope: 'planning' }
       : state.eventSequence !== null ? {} : saved);

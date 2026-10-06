@@ -578,6 +578,19 @@ def research_payloads(observation_hash='sha256:' + 'a' * 64):
 class TestConsoleResearchEvents(unittest.TestCase):
     setUp = TestConsoleEvents.setUp
     decision = TestConsoleEvents.decision
+    def test_native_action_labels_are_optional_public_and_evidence_bounded(self):
+        label = {'action': 'ACTION5', 'label': '旋转 ↻', 'purpose': '将选中形状顺时针旋转一次。',
+                 'confidence': 'certain', 'evidence_sequences': [0]}
+        payload = {**research_payloads()['model_revision'], 'action_labels': [label]}
+        self.writer.append('model_revision', payload)
+        label['label'] = 'mutated'
+        rows = read_console_events(self.root, 'run-test', 'sp80-test')
+        self.assertEqual(rows[0]['payload']['action_labels'][0]['label'], '旋转 ↻')
+        for change in ({'evidence_sequences': [1]}, {'purpose': 'token=SENTINEL'},
+                       {'debug': 'SENTINEL'}, {'confidence': 'unknown'}):
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.writer.append('model_revision', {**payload, 'action_labels': [{**label, **change}]})
+
     def test_v1_and_v2_share_real_contiguous_sequence(self):
         self.writer.append('decision', self.decision())
         for kind, payload in research_payloads().items():
@@ -611,6 +624,27 @@ class TestConsoleResearchProjection(unittest.TestCase):
     observation = TestConsoleSourceProjection.observation
     write_recording = TestConsoleSourceProjection.write_recording
     observation_hash = TestConsoleSourceProjection.observation_hash
+    def test_native_labels_follow_exact_model_revision_without_filling_absence(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        initial = self.observation()
+        self.write_recording([initial])
+        writer = ConsoleEventWriter(self.root, self.root.name, 'sp80-test')
+        payload = research_payloads(self.observation_hash(initial))['model_revision']
+        labels = [{'action': 'ACTION5', 'label': '提交', 'purpose': '提交当前布局。',
+                   'confidence': 'certain', 'evidence_sequences': [0]}]
+        writer.append('model_revision', {**payload, 'action_labels': labels})
+        snapshot = build_console_snapshot(self.root)
+        bucket = snapshot['levels'][0]
+        self.assertEqual(bucket['cognition']['action_labels'], labels)
+        self.assertEqual(bucket['cognition_timeline'][0]['action_labels'], labels)
+        self.assertEqual(bucket['research_timeline'][0]['payload']['action_labels'], labels)
+        writer.append('model_revision', {**payload, 'revision': 'model-2', 'parent_revision': 'model-1',
+                      'workspace_revision': 'model-2'})
+        bucket = build_console_snapshot(self.root)['levels'][0]
+        self.assertNotIn('action_labels', bucket['cognition'])
+        self.assertNotIn('action_labels', bucket['cognition_timeline'][1])
+        self.assertEqual(bucket['cognition_timeline'][0]['action_labels'], labels)
+
     def test_same_observation_keeps_distinct_model_revisions_and_real_event_cursor(self):
         from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
         initial = self.observation()

@@ -92,14 +92,44 @@ def task(value: object) -> dict:
     }
 
 
-def worldmap(value: object) -> dict:
-    if type(value) is not dict or set(value) != {
+def action_labels(value: object, *, latest: int = 10**9) -> list[dict]:
+    """Validate actor-authored display meaning, never infer action semantics."""
+    if (type(value) is not list or len(value) > 8 or type(latest) is not int
+            or not 0 <= latest <= 10**9):
+        raise ValueError('research action labels invalid')
+    names = []
+    for item in value:
+        if (type(item) is not dict or set(item) != {'action', 'label', 'purpose', 'confidence', 'evidence_sequences'}
+                or type(item['action']) is not str or item['action'] not in {'RESET', *(f'ACTION{i}' for i in range(1, 8))}
+                or type(item['confidence']) is not str
+                or item['confidence'] not in {'certain', 'hypothesis', 'unknown', 'conflict'}):
+            raise ValueError('research action labels invalid')
+        label, purpose = item['label'], _text(item['purpose'])
+        if item['confidence'] in {'unknown', 'conflict'}:
+            if label is not None:
+                raise ValueError('uncertain action label must be absent')
+        elif (type(label) is not str or not 1 <= len(label) <= 24 or not label.strip()
+              or not purpose.strip() or not item['evidence_sequences']):
+            raise ValueError('asserted action label requires purpose and evidence')
+        sequences = evidence(item['evidence_sequences'], latest)
+        if len(sequences) > 32:
+            raise ValueError('research action label evidence exceeds cap')
+        names.append(item['action'])
+    if names != sorted(set(names)):
+        raise ValueError('research action labels must be sorted and unique')
+    return copy_json(value)
+
+
+def worldmap(value: object, *, latest: int = 10**9) -> dict:
+    required = {
         "description_zh",
         "state_summary",
         "rules",
         "unknowns",
         "competing_hypotheses",
-    }:
+    }
+    if (type(value) is not dict or not required <= set(value)
+            or set(value) - (required | {'action_labels'})):
         raise ValueError("research worldmap invalid")
     return {
         "description_zh": _text(value["description_zh"], limit=8000),
@@ -108,6 +138,8 @@ def worldmap(value: object) -> dict:
             key: _texts(value[key])
             for key in ("rules", "unknowns", "competing_hypotheses")
         },
+        **({'action_labels': action_labels(value['action_labels'], latest=latest)}
+           if 'action_labels' in value else {}),
     }
 
 
@@ -333,7 +365,7 @@ class ResearchWorkspace:
             "correction",
         }:
             raise ValueError("research draft invalid")
-        world = worldmap(value["worldmap"])
+        world = worldmap(value["worldmap"], latest=latest)
         model = value["model"]
         if (
             type(model) is not dict
@@ -421,7 +453,7 @@ class ResearchWorkspace:
     def revise(self, request: Mapping, *, latest: int) -> dict:
         if request["base_revision"] != self.revision:
             raise ValueError("stale-workspace-revision")
-        world = worldmap(request["worldmap"])
+        world = worldmap(request["worldmap"], latest=latest)
         focused = task(request["task"])
         sequences = evidence(request["evidence_sequences"], latest)
         if (

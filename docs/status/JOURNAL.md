@@ -3870,3 +3870,11 @@
 - 2026-10-06 10:06 CST — Actual CD82/RE86 solving markers confirmed;15fixed HTML aliases refreshed without raw parsing; real export1PASS.
 - 2026-10-06 10:17 CST — SP80L1 exposed pixel-motion label error; reject generic visual displacement→control semantics, preserve actual responses.
 - 2026-10-06 10:22 CST — Actor-only action labels/known-purpose tooltips pass real SP80/CN04 records, final11focused checks, servedHTTP/DOM; visual misclassification removed.
+
+- 2026-10-06 10:23 CST — 974a0f92 replaces pixel-motion guesses with source-bound actor purposes; unknown and special-purpose labels remain distinct.
+- 2026-10-06 10:26 CST — Final974 wheel17resources/preflight PASS; parent2575 adopted two unchanged guests;16HTML refreshed without raw rebuilding.
+- 2026-10-06 10:27 CST — User authorized one third25-game saved-route submission after current CD82/RE86 finite rounds; two local games continue.
+- 2026-10-06 10:32 CST — G50TL2 actor already records numbered controls; frontend alias parser misses them; visual effects remain valid actor evidence.
+- 2026-10-06 10:34 CST — User requires LLM action judgment; numbered-rule patch rejected before implementation; structured actor conclusions under design.
+- 2026-10-06 10:43 CST — Native actor labels implemented;114DOM113PASS, actor/projection/RPC focused gates PASS; independent review clear; promotion running.
+- 2026-10-06 10:43 CST — RE86 sealed6/271 resumes freshL7; S5I5L2 parallel; third25 watcher23760 waiting/unclaimed after preserved infrastructure failure.

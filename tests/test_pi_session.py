@@ -49,6 +49,18 @@ elif mode == "agent-end":
 elif mode == "oversized":
     sys.stdout.write(" " * (1024 * 1024 + 1) + "\n")
     sys.stdout.flush()
+elif mode in {"aggregate-agent-end", "raw-aggregate-oversized", "response-oversized", "tool-args-oversized"}:
+    emit({"type": "response", "id": request["id"], "success": True})
+    size = 16 * 1024 * 1024 if mode == "raw-aggregate-oversized" else 2 * 1024 * 1024
+    if mode == "response-oversized":
+        event = {"type": "response", "id": request["id"], "success": True, "data": "PRIVATE-SENTINEL" + "x" * size}
+    elif mode == "tool-args-oversized":
+        event = {"type": "tool_execution_start", "toolCallId": "call-1", "toolName": "fixture", "args": {"text": "PRIVATE-SENTINEL" + "x" * size}}
+    else:
+        event = {"type": "agent_end", "willRetry": False, "messages": [{"role": "assistant", "content": "PRIVATE-SENTINEL" + "x" * size}]}
+    emit(event)
+    emit({"type": "agent_settled"})
+    time.sleep(60)
 elif mode == "final-oversized":
     emit({"type": "response", "id": request["id"], "success": True})
     for _ in range(33):
@@ -344,6 +356,35 @@ class PiRpcSessionTests(unittest.TestCase):
     def test_stdout_line_cap_fails_closed(self) -> None:
         with self.assertRaisesRegex(RuntimeError, "output limit"):
             self.collect("oversized")
+
+    def test_compact_agent_end_can_drop_bounded_large_native_history(self) -> None:
+        result = self.collect("aggregate-agent-end", compact_events=True)
+        terminal = next(event for event in result.events if event.type == 'agent_end')
+        self.assertEqual(dict(terminal.payload), {'willRetry': False})
+        self.assertEqual(result.events[-1].type, 'agent_settled')
+        with self.assertRaisesRegex(RuntimeError, 'output limit.*line'):
+            self.collect("aggregate-agent-end")
+
+    def test_compact_preserved_payloads_keep_one_mib_line_cap(self) -> None:
+        for mode in ('response-oversized', 'tool-args-oversized'):
+            with self.subTest(mode=mode), self.assertRaisesRegex(RuntimeError, 'output limit.*projected line') as raised:
+                self.collect(mode, compact_events=True)
+            self.assertNotIn('PRIVATE-SENTINEL', str(raised.exception))
+
+    def test_compact_raw_line_over_sixteen_mib_fails_and_closes_child(self) -> None:
+        session = PiRpcSession(PiRpcConfig(self.command('raw-aggregate-oversized'),
+                                          self.work, {}, compact_events=True, deadline_seconds=2))
+        processes = []
+        original = session.start
+        def record_process():
+            original()
+            processes.append(session._state.process)
+        with patch.object(session, 'start', record_process):
+            with self.assertRaisesRegex(RuntimeError, 'output limit.*line') as raised:
+                asyncio.run(session.run('inspect', signal=FakeSignal(False), on_event=lambda _: None))
+        self.assertNotIn('PRIVATE-SENTINEL', str(raised.exception))
+        self.assertIsNotNone(processes[0].poll())
+        self.assertIsNone(session._state)
 
     def test_final_text_cap_truncates_without_breaking_terminal(self) -> None:
         result = self.collect("final-oversized")

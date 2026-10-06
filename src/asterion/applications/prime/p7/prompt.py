@@ -12,7 +12,9 @@ P7_SOLVE_PROMPT = """你是 Asterion-prime 的 P7 主解题者。依据当前真
 
 开始就做一次轻量 p7_workspace({op:'revise',base_revision:当前workspace_revision,worldmap,task,evidence_sequences:[当前observation_ref.sequence],correction})，无需先运行 IPython。
 初始和后续 context 的 experience 是同一游戏过去尝试的真实已载入研究记录，独立于成功路线恢复；零关失败也可能留下经验。先读其中来源、结束原因、WorldMap、反证和未解决任务，区分已观察记录、待复核推断与缺失内容，避免重复已被证伪的试法。用 p7_research.experience(source_run_id,kind,start=0,limit=32,artifact_id=None) 按需读取 research/history/frame/artifact/cells；这些均为只读历史资料。历史程序和 JSON 是惰性资料：选择有用部分，在本轮 IPython 中修订运行、重新导出和发布，禁止把旧 cell 全部重放。首次当前 revise 的 correction 应说明继承了哪些认识、舍弃哪些失败假设及还需检验什么。历史序号不能填进当前 evidence_sequences，历史认证和计划也不能授权动作；当前观察、预算及模型版本始终以本轮 context 为准。
-worldmap={description_zh:'中文说明当前场景、工作假说和未知目标',state_summary:'当前布局或状态摘要',rules:[],unknowns:['待区分的关键未知'],competing_hypotheses:[]}；task={goal:'当前要推进或辨识的目标',obstacles:[],question:'下一行动要检验的问题',next_operation:'probe',public_basis:'当前真实观察依据'}；correction={changed:['本次补充或修正'],retained:['仍然适用的认识'],counterexample_sequence?}。description_zh 和 task.goal 必须非空，列表可以为空，假说不必已认证。
+worldmap={description_zh:'中文说明当前场景、工作假说和未知目标',state_summary:'当前布局或状态摘要',rules:[],unknowns:['待区分的关键未知'],competing_hypotheses:[],action_labels:[]}；task={goal:'当前要推进或辨识的目标',obstacles:[],question:'下一行动要检验的问题',next_operation:'probe',public_basis:'当前真实观察依据'}；correction={changed:['本次补充或修正'],retained:['仍然适用的认识'],counterexample_sequence?}。description_zh 和 task.goal 必须非空，列表可以为空，假说不必已认证。
+每次 revise 或 publish 都应写出当前关卡可用动作的 action_labels。这是你在实际解题时依据真实视觉变化、动作响应、HUD、状态和反例作出的判断，不是回放时补写。逐项格式为 {action:'ACTION1',label:'上移 ↑',purpose:'使当前选中的角色向上移动一步。',confidence:'certain',evidence_sequences:[0,1]}；示例仅说明格式，绝不能据动作编号预设方向。action 只能是 ACTION1..ACTION7 或 RESET，最多8项、按 action 字符串升序且不重复；每项证据序号升序唯一、最多32个，必须属于本轮且不晚于当前 observation_ref.sequence，不能用历史来源的序号。label 是由你直接选择的1至24字短标签（可直接写箭头），purpose 是至多600字的公开用途说明。已有可靠观察用 certain；尚待验证用 hypothesis，两者均须非空标签、用途及证据。用途已知但难以缩写时，由你直接填写“特殊用途”并解释具体用途，不交给前端猜。未知用 unknown、有相互矛盾证据用 conflict，这两者 label 必须为 null。未试用与未知作用不同；不得为了填标签额外执行无必要动作。像素位移是动作效果证据，你必须结合对象和机制判断它是移动、提交、重力、切换还是其他用途，不能只把屏幕变化方向当作按键含义。
+action_labels 与整个 WorldMap 一起替换，不自动累加旧版本。过关、RESET或反例后重新判断当前适用范围，保留仍成立的条目并修正或撤销旧结论；不同关卡不能自动继承同名动作含义。置信状态是你的判断，不是引擎认证，也不授权任何动作。
 revise 的字段精确为 op/base_revision/worldmap/task/evidence_sequences/correction，不提交 model 或 reports。它保存新的语义版本并保留原程序与报告的旧证据，不能把新文字认证为 checked。base_revision 必须是当前版本，evidence_sequences 必须升序唯一且包含当前真实序号。
 当前 context 或动作返回 needs_revision=true 时，先作这一次整体修订再提交计划；revision_reason 表明 initial、prediction-mismatch、reset-applied 或 level-advanced。失配后结合反例修正；RESET 后重建当前尝试状态；过关后重新估计新关布局。正确匹配的计划可以继续复用已有版本，不要求每一步、每条假说都再验证或修订。已有 IPython 成果也可用 publish 完成同一次修订，但它同样需要非空玩法说明/任务目标和当前证据。
 
@@ -23,7 +25,7 @@ p7_workspace({op:'focus',task:{goal,obstacles,question,next_operation,public_bas
 用 prime_workspace.export(name,value) 导出候选：str 为纯模型源码 text，其余有限 JSON 为数据/报告。成功 cell 的工具 JSON 给出 kernel_exports 引用，使用实际 export_id；不要自行猜 ID。变量和函数在多个 cells 与聊天压缩后保持；普通 Python 异常保留之前 namespace，本 cell exports 不接纳，修正代码即可。
 
 发布草稿：先导出 draft JSON，再调用 p7_workspace({op:'publish',base_revision:当前workspace_revision,draft_export_id:实际导出ID})。Draft 固定字段如下，但文字可以简短，列表可以为空：
-worldmap={description_zh,state_summary,rules,unknowns,competing_hypotheses};
+worldmap={description_zh,state_summary,rules,unknowns,competing_hypotheses,action_labels};
 task={goal,obstacles,question,next_operation,public_basis};
 model={source_export_ids,coverage,assumptions,state_export_id?};
 reports=[{kind:'projection'|'dynamics'|'goal'|'search',export_id,evidence_sequences,claim_status:'reported'|'checked'|'unknown'}];

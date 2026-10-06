@@ -16,6 +16,7 @@ import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import test from "node:test";
 import { IsSchema } from "typebox";
+import { Check } from "typebox/value";
 
 import register, {
   PROTOCOL,
@@ -861,6 +862,19 @@ test("P7 decision results lead with Chinese prose and retain exact details", asy
   const payload = {goal: "移动", basis: "当前观察", expected: "位置变化"};
   await tool.execute("decision-1", payload);
   assert.deepEqual(calls, [["decision-1", "decision", payload, undefined]]);
+});
+
+test("research workspace accepts direct actor action labels with closed confidence shapes", () => {
+  const schema = P7_WORKSPACE_PARAMETERS.anyOf.find(s => s.properties.op.const === "revise").properties.worldmap;
+  const world = {description_zh:"当前观察",state_summary:"起点",rules:[],unknowns:[],competing_hypotheses:[]};
+  assert.equal(Check(schema, world), true);
+  const label = {action:"ACTION1",label:"上移 ↑",purpose:"向上移动角色。",confidence:"certain",evidence_sequences:[0]};
+  assert.equal(Check(schema, {...world,action_labels:[label]}), true);
+  assert.equal(Check(schema, {...world,action_labels:[{...label,label:null,confidence:"unknown",purpose:"",evidence_sequences:[]}]}), true);
+  for (const changes of [{confidence:"unknown"},{label:null},{purpose:""},{label:"长".repeat(25)},
+    {confidence:"confirmed"},{action:"ACTION8"},{evidence_sequences:[true]},{private:"sentinel"}]) {
+    assert.equal(Check(schema, {...world,action_labels:[{...label,...changes}]}), false, JSON.stringify(changes));
+  }
 });
 
  test("research tools expose tagged workspace requests and complete actor predictions", async () => {

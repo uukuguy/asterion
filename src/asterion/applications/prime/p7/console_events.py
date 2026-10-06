@@ -88,6 +88,17 @@ def _public_prose(value: object, limit: int = 600) -> bool:
     return type(value) is str and len(value) <= limit and public_narrative(value, limit) == value
 
 
+def public_action_labels(value: object, *, latest: int) -> list[dict]:
+    """Copy exact actor-authored labels with the public event privacy boundary."""
+    from .research import action_labels
+    result = action_labels(value, latest=latest)
+    for item in result:
+        if (not _public_prose(item['purpose'])
+                or (item['label'] is not None and public_text(item['label'], 24) != item['label'])):
+            raise ValueError('console event unavailable')
+    return result
+
+
 def _research_payload(kind: str, value: dict) -> bool:
     common = {'source_action_sequence', 'observation_sha256', 'level', 'workspace_revision', 'task_id', 'origin'}
     fields = {
@@ -98,7 +109,8 @@ def _research_payload(kind: str, value: dict) -> bool:
         'feedback': {'plan_id', 'expected_summary', 'actual_summary', 'mismatch_kind', 'unexecuted_count', 'counterexample_sequence'},
         'run_control': {'state', 'command_id', 'request_sequence', 'reason'},
     }
-    if (set(value) != common | fields[kind] or not _int(value['source_action_sequence'])
+    optional = {'action_labels'} if kind == 'model_revision' else set()
+    if (set(value) - optional != common | fields[kind] or not _int(value['source_action_sequence'])
         or not _hash(value['observation_sha256']) or not _int(value['level']) or value['level'] < 1
         or not _optional_id(value['workspace_revision']) or not _optional_id(value['task_id'])
         or value['origin'] not in {'actor', 'calculation', 'environment', 'operator'}):
@@ -109,6 +121,8 @@ def _research_payload(kind: str, value: dict) -> bool:
                 and all(_public_prose(value[k]) for k in ('goal', 'question', 'summary'))
                 and _texts(value['obstacles']) and all(value[k] is None or _int(value[k]) for k in ('elapsed_ms', 'completed_units')))
     if kind == 'model_revision':
+        if 'action_labels' in value:
+            public_action_labels(value['action_labels'], latest=value['source_action_sequence'])
         return (_id(value['revision']) and _optional_id(value['parent_revision'])
                 and _public_prose(value['description_zh'], 8000)
                 and all(_public_prose(value[k]) for k in ('state_summary', 'coverage_summary', 'validation_summary', 'correction_summary'))
@@ -149,7 +163,7 @@ def _payload(kind: str, payload: Mapping[str, object]) -> dict:
     if kind in RESEARCH_KINDS:
         try:
             valid = _research_payload(kind, value)
-        except (TypeError, KeyError):
+        except (TypeError, KeyError, ValueError):
             valid = False
     elif kind == 'decision':
         valid = (set(value) == {'decision_id', 'source_action_sequence', 'observation_sha256', 'goal', 'basis', 'expected'}

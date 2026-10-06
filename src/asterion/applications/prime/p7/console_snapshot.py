@@ -17,7 +17,7 @@ from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
 from asterion.applications.prime.p7.cognition_narrative import (
     color_label, describe_color_names_zh, render_stable_game_description_zh,
 )
-from asterion.applications.prime.p7.console_events import read_console_events
+from asterion.applications.prime.p7.console_events import public_action_labels, read_console_events
 from asterion.applications.prime.p7.observation_state import ObservationState
 from asterion.applications.prime.p7.score import digest
 from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
@@ -987,6 +987,10 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                                 'cognition_narrative_zh': payload['correction_summary'], 'origin': 'actor'}
                     if 'provenance' in event:
                         revision['provenance'] = event['provenance']
+                    if 'action_labels' in payload:
+                        # Restored actor evidence retains its original run coordinates.
+                        revision['action_labels'] = public_action_labels(
+                            payload['action_labels'], latest=10**9 if 'provenance' in event else position)
                     level(number)['cognition_timeline'].append(revision)
                     level(number)['cognition'] = {**revision, 'updates': [], 'world_map_facts': {}}
         if event["kind"] == "decision":

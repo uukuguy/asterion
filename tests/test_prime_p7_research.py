@@ -5,6 +5,67 @@ from tests.test_prime_p7_solver import P7SolverFixture, draft
 
 
 class TestP7Research(P7SolverFixture):
+    def test_actor_action_labels_are_optional_detached_and_current_evidence_bound(self):
+        from copy import deepcopy
+        from asterion.applications.prime.p7.research import worldmap
+
+        old = draft()['worldmap']
+        self.assertEqual(canonical_bytes(worldmap(old)), canonical_bytes(old))
+        label = {'action': 'ACTION1', 'label': '上移 ↑', 'purpose': '向上移动当前角色。',
+                 'confidence': 'certain', 'evidence_sequences': [0]}
+        value = {**old, 'action_labels': [label]}
+        accepted = worldmap(value, latest=0)
+        self.assertEqual(accepted, value)
+        accepted['action_labels'][0]['label'] = '修改副本'
+        self.assertEqual(value['action_labels'][0]['label'], '上移 ↑')
+        for change in ({'evidence_sequences': [1]}, {'evidence_sequences': [True]},
+                       {'confidence': 'unknown'}, {'confidence': 'conflict'},
+                       {'label': None}, {'label': '长' * 25}, {'purpose': ''},
+                       {'private': 'sentinel'}, {'action': 'ACTION8'}):
+            with self.subTest(change=change):
+                invalid = deepcopy(value)
+                invalid['action_labels'][0].update(change)
+                with self.assertRaises(ValueError):
+                    worldmap(invalid, latest=0)
+        with self.assertRaises(ValueError):
+            worldmap({**old, 'action_labels': [label, label]}, latest=0)
+        unknown = {**label, 'confidence': 'unknown', 'label': None, 'purpose': ''}
+        self.assertEqual(worldmap({**old, 'action_labels': [unknown]}, latest=0)['action_labels'], [unknown])
+
+    def test_actor_action_labels_revise_publish_and_public_event_without_game_actions(self):
+        value = draft()
+        labels = [{'action': 'ACTION1', 'label': '特殊用途', 'purpose': '切换当前选择。',
+                   'confidence': 'hypothesis', 'evidence_sequences': [0]}]
+        value['worldmap']['action_labels'] = labels
+        request = {'op': 'revise', 'base_revision': self.solver.current_context()['workspace_revision'],
+                   **{key: value[key] for key in ('worldmap', 'task', 'evidence_sequences', 'correction')}}
+        labels[0]['evidence_sequences'] = [1]
+        self.assertEqual(self.solver.workspace(request)['status'], 'rejected')
+        future_export = self.kernel.export('future-label-draft', value)
+        self.assertEqual(self.solver.workspace({
+            'op': 'publish', 'base_revision': request['base_revision'],
+            'draft_export_id': future_export,
+        })['status'], 'rejected')
+        self.assertEqual(self.solver.current_context()['workspace_revision'], request['base_revision'])
+        labels[0]['evidence_sequences'] = [0]
+        result = self.solver.workspace(request)
+        self.assertEqual(result['status'], 'revised')
+        self.assertEqual(result['worldmap']['action_labels'], labels)
+        event = self.events[-1][1]
+        self.assertEqual(event['action_labels'], labels)
+        self.assertEqual((event['origin'], event['source_action_sequence'], event['level']), ('actor', 0, 1))
+        labels[0]['purpose'] = '凭据 sk-action-label-secret'
+        eid = self.kernel.export('label-draft', value)
+        result = self.solver.workspace({'op': 'publish', 'base_revision': result['workspace_revision'],
+                                        'draft_export_id': eid})
+        self.assertEqual(result['status'], 'published')
+        self.assertEqual(self.events[-1][1]['action_labels'], [])
+        self.assertNotIn('sk-action-label-secret', str(self.events))
+        self.revise()
+        self.assertNotIn('action_labels', self.solver.current_context()['worldmap'])
+        self.assertNotIn('action_labels', self.events[-1][1])
+        self.assertEqual(self.engine.calls, [])
+
     def test_semantic_revision_rejects_stale_scope_or_claimed_program_authority(self):
         self.revise()
         self.solver.execute_plan(self.plan((1,)))

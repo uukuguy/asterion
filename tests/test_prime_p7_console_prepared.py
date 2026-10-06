@@ -221,7 +221,7 @@ class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
         self.assertNotIn('debug', value['levels'][0]['cognition']['provenance'])
 
     def test_restored_model_evidence_keeps_original_sequence_space(self):
-        from asterion.applications.prime.p7.console_prepared import _events
+        from asterion.applications.prime.p7.console_prepared import _cognition, _events
         root, snapshot = self.saved()
         event = {'event_sequence': 4, 'kind': 'model_revision', 'source_action_sequence': 59,
                  'frame_id': 'f2', 'level': 2,
@@ -231,7 +231,11 @@ class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
                      'revision': 'model-1', 'parent_revision': None, 'description_zh': 'safe restored belief',
                      'state_summary': 'safe', 'rule_summaries': [], 'unknowns': [],
                      'coverage_summary': 'safe', 'validation_summary': 'safe', 'correction_summary': 'safe',
-                     'evidence_sequences': [68]}}
+                     'evidence_sequences': [68],
+                     'action_labels': [{'action': 'ACTION5', 'label': '旋转', 'purpose': '旋转当前形状。',
+                                        'confidence': 'certain', 'evidence_sequences': [68]}]}}
+        cognition = snapshot['levels'][1]['cognition']
+        cognition.update(source_action_sequence=59, action_labels=deepcopy(event['payload']['action_labels']))
         snapshot['process_events'].append(deepcopy(event))
         snapshot['levels'][1]['research_timeline'].append(deepcopy(event))
         self.save(root, snapshot)
@@ -240,6 +244,15 @@ class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
         self.assertEqual(manifest['state'], 'ready')
         detail = session.replay_level(RUN_ID, 2, manifest['revision'])
         self.assertEqual(detail['levels'][0]['research_timeline'], [event])
+        self.assertEqual(detail['levels'][0]['cognition']['action_labels'], event['payload']['action_labels'])
+        native_cognition = deepcopy(cognition)
+        del native_cognition['provenance']
+        with self.assertRaises(ValueError):
+            _cognition(native_cognition)
+        private_cognition = deepcopy(cognition)
+        private_cognition['action_labels'][0]['purpose'] = 'token=PREPARED-SENTINEL'
+        with self.assertRaises(ValueError):
+            _cognition(private_cognition)
         native = deepcopy(event)
         del native['provenance']
         with self.assertRaises(ValueError):

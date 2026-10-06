@@ -28,6 +28,7 @@ from asterion.services.diagnostics import (
 
 
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
+_MAX_COMPACT_RAW_LINE_BYTES = 16 * 1024 * 1024
 _MAX_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_COMPACT_STDOUT_BYTES = 64 * 1024 * 1024
 _MAX_RAW_STDOUT_BYTES = 2 * 1024 * 1024 * 1024
@@ -671,11 +672,18 @@ class PiRpcSession:
         raw_bytes = 0
         total_bytes = 0
         event_count = 0
+        raw_line_limit = (
+            _MAX_COMPACT_RAW_LINE_BYTES
+            if self.config.compact_events
+            else _MAX_STDOUT_LINE_BYTES
+        )
         try:
-            for raw in process.stdout:
+            while raw := process.stdout.readline(raw_line_limit + 1):
                 raw_bytes += len(raw)
-                if len(raw) > _MAX_STDOUT_LINE_BYTES:
-                    self._fail_output(state, "Pi RPC output limit exceeded (line)")
+                if len(raw) > raw_line_limit:
+                    self._fail_output(
+                        state, f"Pi RPC output limit exceeded (line; observed bytes={len(raw)}, limit={raw_line_limit})"
+                    )
                     return
                 if raw_bytes > _MAX_RAW_STDOUT_BYTES:
                     self._fail_output(state, "Pi RPC output limit exceeded (raw total)")
@@ -711,9 +719,17 @@ class PiRpcSession:
                     return
                 if self.config.compact_events:
                     payload = _compact_rpc_event(payload)
-                total_bytes += len(
+                projected_bytes = len(
                     json.dumps(payload, separators=(",", ":")).encode("utf-8")
                 )
+                if self.config.compact_events and projected_bytes > _MAX_STDOUT_LINE_BYTES:
+                    # Native aggregates may be larger, but retained command
+                    # responses/tool arguments still obey the semantic line cap.
+                    self._fail_output(
+                        state, f"Pi RPC output limit exceeded (projected line; bytes={projected_bytes}, limit={_MAX_STDOUT_LINE_BYTES})"
+                    )
+                    return
+                total_bytes += projected_bytes
                 projected_limit = (
                     _MAX_COMPACT_STDOUT_BYTES
                     if self.config.compact_events

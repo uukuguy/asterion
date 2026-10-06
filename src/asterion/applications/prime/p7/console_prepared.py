@@ -17,7 +17,7 @@ import re
 import secrets
 import shutil
 
-from .console_events import _payload, _PRIVATE
+from .console_events import _payload, _PRIVATE, public_action_labels
 from .console_replay import projection_manifest, projection_level, projection_revision, replay_fingerprint
 from .run_story.storage import publish_directory, write_atomic_file
 
@@ -39,7 +39,7 @@ _DECISION_FIELDS = {'id', 'source', 'goal', 'basis', 'expected', 'source_action_
                     'action_ids', 'event_sequence', 'round_index', 'trace_sequence', 'prompt_signals', 'output_signals'}
 _COGNITION_FIELDS = {'stable_description', 'scope', 'updates', 'world_map_facts', 'action_meanings',
     'frame_id', 'action_id', 'source_action_sequence', 'observation_sha256', 'cognition_revision',
-    'event_sequence', 'cognition_narrative_zh', 'origin', 'provenance', 'session'}
+    'event_sequence', 'cognition_narrative_zh', 'origin', 'provenance', 'session', 'action_labels'}
 _PRIVATE_FIELDS = {'prompt', 'answer', 'credentials', 'provider_payload', 'raw_output', 'path',
                    'environment', 'token', 'secret', 'api_key', 'password', 'authorization'}
 
@@ -102,6 +102,12 @@ def _cognition(value):
         raise ValueError('prepared replay unavailable')
     if 'provenance' in value:
         _provenance(value['provenance'])
+    if 'action_labels' in value:
+        if not _count(value.get('source_action_sequence')) or value['scope'] != 'observation':
+            raise ValueError('prepared replay unavailable')
+        # Authenticated restored conclusions keep evidence in the source run space.
+        public_action_labels(value['action_labels'],
+                             latest=10**9 if 'provenance' in value else value['source_action_sequence'])
     session = value.get('session', {})
     if (type(session) is not dict or set(session) - {'state', 'episode', 'episode_actions'}
             or any(not (_identifier(item) if key == 'state' else _count(item)) for key, item in session.items())):
