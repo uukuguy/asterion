@@ -357,3 +357,14 @@ ARC Competition 的官方说明见 [Competition mode](https://docs.arcprize.org/
 社区展示另走GitHub流程：公开可复现的通用求解系统，在官方社区仓库建立 `submissions/<id>/submission.yaml`，填写方法、作者、模型版本、公开 `code_url` 与 Competition Mode 的 `scorecard_url`，向 `main` 提交PR。ARC-AGI-3条目不能手填数值成绩；审核合并后展示方法。当前README说明只有ARC Prize Verified成绩显示数字，社区接收条目不等于官方验证。[提交说明](https://github.com/arcprize/ARC-AGI-Community-Leaderboard/blob/main/CONTRIBUTING.md)、[社区资格](https://github.com/arcprize/ARC-AGI-Community-Leaderboard/blob/main/README.md)
 
 发布应包含P7的WorldMap推理、Prime工作区与经验复用代码，说明预先探索和保存路线复放的评估口径。仅发布逐题答案表不符合社区的通用系统要求；已有路线复放证明执行与提交通道，不单独证明首次陌生游戏的泛化能力。当前尚未发布社区PR。
+
+
+## Vercel 只读控制台
+
+远端地址：[https://asterion-p7-console.vercel.app](https://asterion-p7-console.vercel.app)。展示本地保存成绩、稳定认知与回放；默认打开已验证存档，没有存档时展示预构建初始画面。动作及求解控制仍在本地执行。
+
+本地发布器 `tools/p7_console_cloud_sync.py` 从57515端口读取公开投影，主动上传至私有Blob；远端不连接本地网络。普通过程数据每30分钟合并上传，新过关记录优先（至少间隔60秒），远端页面每5分钟检查更新。打开游戏或关卡立即读取。标题显示数据更新时间，不代表无变化时也刷新心跳。
+
+首次上传包含25题、183预览、24份保存记录及580页画面，压缩数据约4.9MB，含索引约5.5MB；不是全部历史私有记录。Hobby计划免费Blob存储1GB、下载10GB/月，写入类操作2000次/月；参考[官方额度](https://vercel.com/docs/vercel-blob/usage-and-pricing)。上传器记录操作次数，默认1500次保护线；存储750MiB警告、900MiB拒绝。达到保护线暂停上传并记录错误，本地解题和已有成绩保留。
+
+运维入口：`node deploy/p7-console-vercel/upload.mjs --spool <private-spool> --token-file <private-token-file>`；持续发布：`python tools/p7_console_cloud_sync.py --spool <private-spool> --watch --uploader-script deploy/p7-console-vercel/upload.mjs`，由操作者环境提供 `BLOB_READ_WRITE_TOKEN`。密钥只存私有文件或服务环境，不能放进仓库、页面或参数值。Vercel界面源码改动需先 `npm --prefix deploy/p7-console-vercel run refresh-assets` 和 `npm --prefix deploy/p7-console-vercel test`，再部署该独立目录；数据更新不需要重新部署。

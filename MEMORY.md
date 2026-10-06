@@ -10,6 +10,7 @@
 |---|---|---|
 | feedback | ✅ verified-active | `handoff` means a fast, complete cross-session closeout |
 | feedback | ✅ verified-active | P7 learning must be visible during play and evaluated through improving game understanding |
+| project | ✅ verified-active | Four bounded parallel games and readonly Vercel progress sharing |
 | feedback | ✅ verified-active | Reconcile diagnostics with observed successful execution before concluding setup is missing |
 | feedback | ✅ verified-active | Preserve approved architecture across sessions; P7 is the native base for rebuilding P1-P6 |
 | feedback | ✅ verified-active | Research intensity — review changed code, not the whole gate |
@@ -27,6 +28,12 @@
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
+
+### project — P7 parallel solving and remote sharing
+
+- Latest user authorization is four concurrent local games, with900seconds per level attempt. Each explicit restart starts a fresh two-genuine-failure count per blocked level; previous failures and experience remain intact. This supersedes older two-slot scheduling preferences.
+- User prioritizes SB26 next after all other games gained at least one saved level. Restart its initial state in a distinct cycle, preserve its old unsealed failure, and never admit the old prefix as a saved route.
+- Vercel shares broad progress and replay with others, so remote updates may be slower. User chose observation/replay only and requires local-to-cloud push, not a cloud connection back into local data. Local console should continue updating normally. Free storage capacity matters; no paid plan upgrade is authorized.
 
 ### feedback — P7 cognition and visible play
 

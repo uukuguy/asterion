@@ -3959,3 +3959,42 @@
 - 2026-10-06 15:29 CST — 1d0安装包旧21证书及完整当前roster静态PASS；Darwin/Linux资源558一致；后续说明修正包待核对。
 
 - 2026-10-06 15:40 CST: final frozen4bb clean promotion PASS25/provider_operations0/full_datasetno; exact558resources Darwin/Linux PASS. Installed certificate audit21frozen sources unchanged/current23selected138levels,54.06sec,SDK/model/API/recert0. Parent-only adoption released47399→48414 preserving TU93L5/WA30L3 oldguestPID/deadlines and original failure history; guest signals0. Once-only BP35L6/G50TL3 capacity trials queued900+180 each; not yet launched. Proof launches/capacity-adoption-4bb89296-1791272310321358000-proof.json. Console newbackend/v2activation remains pending.
+- 2026-10-06 15:41 CST: 9220a64d records promoted capacity deployment and finite retry adoption so recovery preserves scores and active guests.
+- 2026-10-06 15:46 CST: exact4bb live trials launched BP35L6 runp7-live-20261006154205-802912c18310413bb28b26b6 and G50TL3 runp7-live-20261006154459-9b1a8f526e8d4ff08d0262ab, both actual Linux wheelSHA ee00d962 matches,900+180 each, original prefixes150/63. Completion/long-reply acceptance pending.
+- 2026-10-06 15:46 CST: 57515 exact4bb console update PASS ownedoldlistener29955 TERM only/newPID53435; actual embedded resources558 match and oldSP80 read27frames7actions PASS. Newprepared stage18/23 then failed valid SU15L9 at pre-existing fingerprint depth8; old pointers unchanged, separate iterative-closure fix authorized, trials unaffected.
+- 2026-10-06 15:51 CST: actual4bb BP35seq164 GAME_OVER57frames233472cells569657bytes persisted; G50Tseq97 NOT_FINISHED95frames389120cells794723bytes persisted and continued through127. Both old capacity thresholds no longer cause unknown lock; puzzlecompletion remains pending, proof capacity-trials-readonly-proof.json.
+- 2026-10-06 15:52 CST: Preserved deep replay source chains and off-page boundary events; a3667ed5.
+- 2026-10-06 16:00 CST: Versioned paged projections to reject incomplete v2 generations while retaining genuine v1 reads; d4c6000b.
+
+- 2026-10-06 16:17 CST: G50T capacity trial passed L3 in64newactions; BP35L6 longreply57frames fully durable but actualGAME_OVER14newactions. Trial proof separates storage PASS from puzzle outcome.
+- 2026-10-06 16:17 CST: Reviewed max4 coordinator adopted parent75516; BP exactGAME_OVER resolution append-only, original histories preserved. User now explicitly requests four actual parallel games; LF52L8 finite fourth-slot preparation started.
+- 2026-10-06 16:17 CST: Exactd4 promotion PASS25/provider0 and old21certificates staticPASS/current23selected144saved at audit. Parent-only futurepackage adoption75516→88949 released/max4, existing3guestidentities/deadlines preserved/signals0.
+- 2026-10-06 16:20 CST: Allcurrent23 stage ready147saved/5124actions/168details109lastpages, source/cognition/event/labels equivalencePASS. Owned57515service d4 updatePASS/newPID91920/558resources; activationHTTPverification follows. Userclarifies twofailures per restartcycle; historical counters retained.
+
+## 2026-10-06
+- 16:22 修正三、四路并发导致解题中标记全消失；28项聚焦测试通过，尚待服务部署 [182f0732]
+- 2026-10-06 16:26 CST: Explicitrestart cycle LF/BP/SK/TN adopted98318; histories/cumulativecounters/current3 preserved, oldqueuedfollowup archived/superseded. LF52L8 newunit205338 running900+180; WA5/G50L5/TU9 also active, fouractualunits. Proof restart-cycle-adoption-d4c6000b-1791275085451712000-proof.json.
+
+- 2026-10-06 16:46 CST — a2a98cb8: Capture public console projections into immutable gzip objects for outbound cloud synchronization. Seven focused tests PASS.
+- 2026-10-06 16:46 CST — 7fd82b4b: Mark only the latest unsealed attempt to avoid stale activity on completed games. Three focused DOM checks PASS.
+- 2026-10-06 16:46 CST — Vercel asterion-p7-console project linked; private hkg1 Blob created, production token private. No deployed-view claim yet.
+- 16:48 d2ee0dea Added private Blob readonly console and packed sync transport to enable bounded cloud deployment.
+- 2026-10-06 16:51 CST — 99f87905: Coalesce cloud writes and expose quota pauses to protect free synchronization allowance. Nine focused tests PASS.
+- 16:51 7db732a4 Coalesced cloud pack reads and reduced remote polling to prevent cache corruption and unnecessary storage operations.
+- 2026-10-06 17:01 CST — 76097bc9: Keep cloud saved replay capture independent of active churn and unrelated historical resume sources. Ten focused tests PASS.
+- 2026-10-06 16:56 CST — c81a8a23: Reject empty or mismatched saved cloud manifests to preserve admitted progress. Eleven focused checks PASS.
+- 2026-10-06 16:56 CST — Independent cloud-code review: shared pack-fetch race fixed; source/readonly/atomic index paths clear. Actual upload needs operator proxy.
+- 16:59 4968b410 Honored operator proxy in local Blob uploader to recover outbound synchronization without changing cloud networking.
+- 2026-10-06 16:59 CST — bf1c5a36: Remove unused cloud-sync test import so the promotion lint gate accepts the new tooling.
+- 17:03 abbe12e3 Clarified readonly cloud refresh status and hid local controls to remove misleading readiness messages.
+- 17:05 3f778248 Preferred saved cloud replay or initial preview to avoid unavailable current-attempt defaults while preserving explicit attempt selection.
+- 2026-10-06 17:09 CST — Vercel HTTP/replay PASS; automatic publisher46549 changes generations without redeploy, retained storage under7MB; readonly POST405.
+- 2026-10-06 17:09 CST — SB fresh priority reviewedCLEAR; parent49324 preservesfourguests, oldunseal/counters; actualSB26L1running900+180, guest signals0.
+- 2026-10-06 17:10 CST — Userrequests game-switch full→L1, others→firstunpassed; source/assetsdeploymentpending, noautopollcursorreset.
+- 17:15 ceeea8e1 Refreshed cloud UI switch defaults to show level one for completed games and first unpassed level otherwise.
+
+- 2026-10-06 — 5d47f51c selects saved-progress switch defaults; 97e715a1 verifies replay cursors, cognition, polling and historical playback.
+- 2026-10-06 — Frozen bf1c5a36 promotion passed25commands/provider0; final97e715a1 package remains pending until its independent gate completes.
+- 2026-10-06 — Chrome reconnected but naming the session again timed out; visual browser acceptance remains unverified.
+- 2026-10-06 17:18 CST — Cloud ceeea8e1 actual exact assets/switch helper HTTP PASS; automatic saved progress160/183,18full,83.299856.
+- 2026-10-06 17:18 CST — Four actual units running WA30L7/G50TL6/TN36L6/SB26L5; SB saved first four, inactive BP/LF/SK each at fresh two-failure boundary.

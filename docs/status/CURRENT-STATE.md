@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most two independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
+- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most four independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
 ## Current Architecture
 
@@ -33,9 +33,11 @@
 
 - Compact Pi RPC separately bounds native raw lines16MiB and retained event lines1MiB; ordinary mode remains1MiB. Repeated native message aggregates can be projected before semantic limits, without dropping needed responses or changing deadlines.
 
+- The readonly sharing console lives in `deploy/p7-console-vercel/`. The operator-owned `tools/p7_console_cloud_sync.py` captures only existing public local projections and pushes compressed content-addressed packs to private Vercel Blob; cloud reads have no local-network dependency. Normal uploads coalesce30minutes, saved-progress changes have priority, cloud pages check updates5minutes. Local control/solver remain independent.
+
 ## Open Problems
 
-- Historical BP57/G95-frame replies exposed shared aggregate limits and lost known-result semantics. Dynamic evidence now uses scope-bound authenticated animation chunks, streaming v1 identities, settled model views and bounded research/console pages. Typed diagnostics preserve returned-result and durable-commit stages. Implementation/review and exact4bb package promotion PASS; parent48414 adopted future attempts while preserving old active guests. BP35L6/G50TL3 finite long-animation trials queued; console same-port backend update/prepared-v2 activation remain pending. See `docs/superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md`.
+- Historical BP57/G95-frame replies exposed shared aggregate limits and lost known-result semantics. Dynamic evidence now uses scope-bound authenticated animation chunks, streaming v1 identities, settled model views and bounded research/console pages. Typed diagnostics preserve returned-result and durable-commit stages. Implementation/review and exact4bb package promotion PASS. Deployment uses frozen package identities, preserves active guest versions and deadlines, and grants each explicitly authorized capacity retry once. Actual long-animation handling and puzzle efficacy remain separate live verification boundaries. See `docs/superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md`.
 - Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.
 - Failure-experience reuse delivers bounded historical evidence, inert source code and explicit provenance. Loading/reading historical research is observed; improved success probability is not established.
 - Model runtime settlement and game outcome are separate evidence boundaries. Post-WIN runtime failure keeps its original failure/empty model receipt; a separately audited full SDK replay may create a new sealed game record with immutable source lineage. This does not certify the original native execution.

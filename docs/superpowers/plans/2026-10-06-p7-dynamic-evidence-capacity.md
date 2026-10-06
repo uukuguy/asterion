@@ -13,7 +13,7 @@
 - 动画没有人为单批/单run总帧、总cell、总字节上限，不能纳入context/RPC/console/经验正文累计预算。
 - 每块、每页、并发驻留缓冲有界；实际资源错误明确记录。不能读回全部块再拼成一条大消息。
 - 完整观察哈希保持v1规范字节语义；原sealed route、后续关卡、分数和失败记录不改写。
-- 两个存活guest及其部署、期限不变；新代码仅在验证和自然关卡边界后接入。
+- 存活guest及其部署、期限不变；新代码仅在验证和自然关卡边界后接入。用户已明确授权最多四路并行。
 - 不开新官方卡；不做全目录模型评估；旧证书静态兼容不得调用SDK重放。
 - public diagnostics不包含私有路径、凭据、provider原始数据或模型思维链。
 
@@ -57,8 +57,8 @@
 - [x] 使用帧分页，稳定frame ID/cursor，播放跨页连续；动作面板标识和点击位置、稳定游戏认知绑定原source，缺页只影响该页。
 - [ ] 核对全部已保存游戏关卡的来源、动作数、认知和ready证书；静态校验禁止SDK构造。
 - [x] 交叉变更评审，运行必要Python/DOM检查；若Prime工具扩展资源变动，先跑TypeScript测试并同步打包资源。
-- [x] `make promotion-check`通过后冻结exact wheel/source/resources，保留两路guest原版本和deadline；parent/future guest自然边界接入。
-- [ ] 使用下一次已授权自然关卡尝试验证实际打包路径和诊断，不加付费见证；诚实记录未遇到的新故障分支。
+- [x] `make promotion-check`通过后冻结exact wheel/source/resources，保留已有guest原版本和deadline；parent/future guest自然边界接入。
+- [x] 使用已授权BP35L6/G50TL3验证真实打包路径：57/95帧回复完整保存；G50L3通过，BP实际GAME_OVER。未遇到的故障分支不宣称验证。
 - [ ] 提交代码、named checks和活动恢复检查点；原官方成绩不变，README仍保持用户暂停范围。
 
 ## Completion Boundary
