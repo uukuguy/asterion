@@ -2556,7 +2556,7 @@ test('external unsealed replay polling preserves chosen history, switches runs w
     return response(idleView());
   }});
   try {
-    await settle(); const row=overviewRow(app); assert.equal(row.querySelector('.overview-result-badge').textContent,'尚未通关'); assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 求解中'); assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/); assert.doesNotMatch(row.textContent,/外部只读/);
+    await settle(); const row=overviewRow(app); assert.equal(row.querySelector('.overview-result-badge').textContent,'尚未通关'); assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 解题中'); assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/); assert.doesNotMatch(row.textContent,/外部只读/);
     assert.equal(row.querySelector('[data-overview-start]').disabled,true);
     row.querySelector('[data-overview-watch]').click();await settle();
     assert.equal(app.$('run-pause').disabled,true);assert.equal(app.$('run-stop').disabled,true);
@@ -2576,6 +2576,34 @@ test('external unsealed replay polling preserves chosen history, switches runs w
   } finally { app.dom.window.close(); }
 });
 
+test('overview shows four corroborated attempts with levels, recent phases and update age',async()=>{
+  const overview=overviewFixture(catalog25), phases=['modeling','computing','executing','waiting'];
+  for(let i=0;i<4;i++) overview.games[i]={...overview.games[i],solving:true,solving_run_id:`active-${i}`,
+    runs:[{...catalogRun(`active-${i}`,'unverified',false),recording:true,activity:{level:1,target_level:2,
+      phase:phases[i],event_sequence:12,updated_at:new Date(Date.now()-65000).toISOString()}}]};
+  overview.games[4]={...overview.games[4],solving:false,solving_run_id:null,
+    runs:[{...catalogRun('stale','unverified',false),recording:true,activity:{level:1,target_level:2,
+      phase:'executing',event_sequence:99,updated_at:new Date().toISOString()}}]};
+  overview.games[5]={...overview.games[5],status:'running',active_run_id:'stopped-local',solving:false,solving_run_id:null,
+    runs:[{...catalogRun('stopped-local','running',false),recording:true,activity:{level:1,target_level:2,
+      phase:'executing',event_sequence:100,updated_at:new Date().toISOString()}}]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async()=>response(idleView())});
+  try {
+    await settle();
+    for(let i=0;i<4;i++) {
+      const row=overviewRow(app,i);
+      assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 解题中 · L2');
+      assert.equal(row.querySelector('.overview-activity-phase').textContent,`最近${['建模','计算','执行','等待'][i]} · 1分钟前`);
+      assert.match(row.querySelector('.overview-activity-phase').title,/最近确认阶段.*事件 #12/);
+    }
+    assert.equal(overviewRow(app,4).querySelector('.overview-activity-phase'),null);
+    assert.equal(overviewRow(app,5).querySelector('.overview-activity-phase'),null);
+    assert.equal(overviewRow(app,5).querySelector('.overview-activity-badge').textContent,'● 新尝试');
+    assert.equal([...app.timers.values()].some(fn=>fn.intervalMs===5000),true);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('overview subtly marks confirmed solving and never treats old recording files as alive',async()=>{
   const overview=overviewFixture(catalog25);
   overview.games[0]={...overview.games[0],status:'unverified',solving:false,solving_run_id:null,
@@ -2587,7 +2615,7 @@ test('overview subtly marks confirmed solving and never treats old recording fil
     await settle();assert.equal(overviewRow(app,0).classList.contains('is-solving'),false);
     assert.equal(overviewRow(app,1).classList.contains('is-solving'),true);
     assert.equal(overviewRow(app,0).querySelector('.overview-activity-badge').textContent,'● 新尝试');
-    assert.equal(overviewRow(app,1).querySelector('.overview-activity-badge').textContent,'● 求解中');
+    assert.equal(overviewRow(app,1).querySelector('.overview-activity-badge').textContent,'● 解题中');
     assert.equal(overviewRow(app,2).classList.contains('is-solving'),false);
     assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
@@ -2604,6 +2632,19 @@ test('overview processing warning remains separate from saved progress and solvi
     assert.equal(warning.textContent,'⚠ 1');assert.match(warning.title,/证据保存失败.*结果已知/);
     assert.match(row.querySelector('.overview-result-badge').textContent,/部分通关/);
     assert.equal(row.querySelector('progress').value,1);assert.equal(row.classList.contains('is-solving'),false);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('an action not dispatched remains a public warning with known outcome',async()=>{
+  const overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],diagnostics_count:1,
+    latest_diagnostic:{diagnostic_id:'not-dispatched-1',code:'action-not-dispatched',severity:'error',stage:'not-dispatched',
+      action_sequence:152,outcome_known:true,durable:false,observed:null,limit:null,unit:null,recovery:'stop-without-redispatch'}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async()=>response(idleView())});
+  try {
+    await settle();
+    assert.match(overviewRow(app).querySelector('.overview-processing-warning').title,/动作未派发.*结果已知.*未持久化.*尚未执行/);
     assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
 });

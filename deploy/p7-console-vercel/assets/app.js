@@ -51,7 +51,7 @@
     'evidence-write-failed':'证据保存失败', 'evidence-read-failed':'证据读取失败', 'evidence-hash-failed':'证据校验失败',
     'observation-validation-failed':'观察校验失败', 'derived-projection-failed':'展示数据整理失败',
     'console-publication-failed':'控制台发布失败', 'research-read-failed':'研究记录读取失败',
-    'research-response-budget-exceeded':'研究响应容量超限', 'engine-no-reply':'环境未返回结果', 'engine-response-invalid':'环境返回结果无效',
+    'research-response-budget-exceeded':'研究响应容量超限', 'engine-no-reply':'环境未返回结果', 'engine-response-invalid':'环境返回结果无效', 'action-not-dispatched':'动作未派发',
     'evidence-cancelled':'证据处理已取消', 'evidence-deadline-exceeded':'证据处理达到本轮时限',
   };
   const DIAGNOSTIC_STAGES = {
@@ -1671,6 +1671,17 @@
   }
 
   const overviewLabels = { unplayed: '尚未开始', partial: '部分通关', completed: '全部通关', running: '正在运行', unverified: '记录未验证' };
+  const activityPhases = { modeling: '建模', computing: '计算', executing: '执行', waiting: '等待' };
+  function validActivity(activity, winLevels) {
+    return activity === null || (isRecord(activity) && Number.isInteger(activity.level) && activity.level >= 1 && activity.level <= winLevels &&
+      Number.isInteger(activity.target_level) && activity.target_level >= activity.level && activity.target_level <= winLevels &&
+      Object.hasOwn(activityPhases, activity.phase) && Number.isInteger(activity.event_sequence) && activity.event_sequence > 0 &&
+      typeof activity.updated_at === 'string' && Number.isFinite(Date.parse(activity.updated_at)));
+  }
+  function activityAge(updatedAt) {
+    const seconds = Math.max(0, Math.floor((Date.now() - Date.parse(updatedAt)) / 1000));
+    return seconds < 60 ? `${seconds}秒前` : seconds < 3600 ? `${Math.floor(seconds / 60)}分钟前` : `${Math.floor(seconds / 3600)}小时前`;
+  }
   const overviewGame = (id) => array(state.overview?.games).find((game) => game.game_id === id);
   const startLocked = () => manualUnsaved() || !liveConfig || !state.liveView || activeSession() ||
     state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand) ||
@@ -1702,6 +1713,7 @@
       if (!game.runs.every((run) => isRecord(run) && id(run.run_id) && run.run_id !== null && !runs.has(run.run_id) && runs.add(run.run_id) &&
         typeof run.status === 'string' && typeof run.verified === 'boolean' &&
         ['completed_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(run[key])) &&
+        (run.activity === undefined || validActivity(run.activity, game.win_levels)) &&
         (run.observed_completed_levels === undefined || count(run.observed_completed_levels) && run.observed_completed_levels <= game.win_levels))) return false;
       if (game.solving !== undefined || game.solving_run_id !== undefined) {
         if (typeof game.solving !== 'boolean' || !id(game.solving_run_id) ||
@@ -1750,6 +1762,7 @@
   }
 
   function gameSolving(game) {
+    if (typeof game.solving === 'boolean') return game.solving;
     return game.solving === true || (state.liveView?.state === 'running' && activeSession() &&
       state.liveView.game_id === game.game_id && game.runs.some(entry=>entry.run_id===state.liveView.run_id));
   }
@@ -1798,7 +1811,7 @@
       const latestRunId = latestReplayId(game);
       const recording = game.runs.some((run) => run.run_id === latestRunId && run.recording === true);
       const solving = gameSolving(game);
-      const active = solving || game.status === 'running' || recording;
+      const active = solving || (game.solving === undefined && game.status === 'running') || recording;
       const external = active && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
       const completed = game.win_levels > 0 && game.completed_levels === game.win_levels;
       const resultKind = completed ? 'completed' : game.completed_levels > 0 ? 'partial' : !active && game.status === 'unverified' ? 'unverified' : 'unplayed';
@@ -1814,10 +1827,17 @@
         status.append(warning);
       }
       if (active) {
-        const running = solving || game.status === 'running';
-        const activity = node('span', running ? '● 求解中' : '● 新尝试', 'overview-activity-badge');
-        activity.title = (running ? '求解中' : '最新尝试记录尚未封存') + (external ? ' · 外部只读' : ' · 当前会话');
+        const running = solving || (game.solving === undefined && game.status === 'running');
+        const solvingRunId = game.solving_run_id || game.active_run_id || (solving ? state.liveView?.run_id : null);
+        const recent = running ? game.runs.find(run => run.run_id === solvingRunId)?.activity : null;
+        const activity = node('span', running ? `● 解题中${recent ? ' · L' + recent.target_level : ''}` : '● 新尝试', 'overview-activity-badge');
+        activity.title = (running ? '解题中' : '最新尝试记录尚未封存') + (external ? ' · 外部只读' : ' · 当前会话');
         activity.setAttribute('aria-label', activity.title); status.append(activity);
+        if (recent) {
+          const phase = node('span', `最近${activityPhases[recent.phase]} · ${activityAge(recent.updated_at)}`, 'overview-activity-phase');
+          phase.title = `最近确认阶段：${activityPhases[recent.phase]} · 事件 #${recent.event_sequence} · ${recent.updated_at}`;
+          phase.setAttribute('aria-label', phase.title); status.append(phase);
+        }
       }
       row.children[4].textContent = String(game.route_actions);
       const start = row.querySelector('[data-overview-start]');

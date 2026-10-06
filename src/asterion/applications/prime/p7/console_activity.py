@@ -8,11 +8,53 @@ import re
 import stat
 import subprocess
 
+from .console_events import SCHEMA, SCHEMA_V2, SCHEMA_V3, RESEARCH_KINDS, _payload
+
 
 _RUN = re.compile(r'p7-live-[0-9]{14}-[0-9a-f]{24}\Z')
 _UNIT = re.compile(r'asterion-p7-[0-9a-f]{32}\.service\Z')
 _MAX_BYTES = 64 * 1024
 _MAX_ACTIVE_GUESTS = 4
+
+
+def recorded_activity_events(run: Path, game_id: str) -> list[dict] | None:
+    """Bounded metadata projection; activity never requires replay pixel hydration."""
+    path = run / 'console-events.jsonl'
+    try:
+        if not _safe(path) or not path.is_file() or path.stat().st_size > 32 * 1024 * 1024:
+            return None
+        events = []
+        total_bytes = 0
+        with path.open('rb') as source:
+            for _ in range(16384):
+                raw = source.readline(1100 * 1024 + 1)
+                if not raw:
+                    break
+                total_bytes += len(raw)
+                if not raw.endswith(b'\n') or len(raw) > 1100 * 1024 or total_bytes > 32 * 1024 * 1024:
+                    return None
+                row = json.loads(raw)
+                if (type(row) is not dict or set(row) != {'schema', 'run_id', 'game_id', 'sequence', 'kind', 'payload'}
+                        or row['run_id'] != run.name or row['game_id'] != game_id
+                        or type(row['sequence']) is not int or row['sequence'] != len(events) + 1
+                        or row['schema'] not in {SCHEMA, SCHEMA_V2, SCHEMA_V3}
+                        or type(row['payload']) is not dict
+                        or row['kind'] == 'diagnostic' and row['schema'] != SCHEMA_V3
+                        or 'evidence_ref' in row['payload'] and row['schema'] != SCHEMA_V3
+                        or row['schema'] == SCHEMA and row['kind'] in RESEARCH_KINDS):
+                    return None
+                # Pixels are irrelevant to a phase. Research/action payloads
+                # still pass the canonical validator before projection.
+                payload = {} if row['kind'] == 'observation' else _payload(row['kind'], row['payload'])
+                events.append({'sequence': row['sequence'], 'kind': row['kind'],
+                               'payload': {key: value for key, value in payload.items()
+                                           if key in {'level', 'status', 'operation', 'sequence', 'state'}}})
+            else:
+                if source.read(1):
+                    return None
+        return events
+    except (OSError, ValueError, TypeError, KeyError, RecursionError, UnicodeError):
+        return None
 
 
 def _safe(path):

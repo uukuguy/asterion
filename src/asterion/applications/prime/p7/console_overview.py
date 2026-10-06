@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from dataclasses import replace
+from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
 import json
 from pathlib import Path
@@ -19,6 +20,7 @@ from .live import read_trace_entries
 from .private_trace import trace_identities_for
 from .score import digest, partial_game_score, replay_sha256
 from .processing_diagnostics import public_diagnostic
+from .console_activity import recorded_activity_events
 from .solutions import (VerifiedPrefix, _partial_summary_matches, _prefix_values,
                         _summary_matches, _transitions, _truncate, load_resume_worldmap, source_experiment)
 
@@ -109,6 +111,54 @@ def _recorded_actions(path: Path) -> int:
         return 0
 
 
+def _recorded_activity(run: Path, game: dict, entries: tuple) -> dict | None:
+    """Latest recorded phase, displayed as live only after process corroboration."""
+    try:
+        contexts = [entry.payload for entry in entries if entry.kind == 'arc.run.context']
+        if len(contexts) != 1:
+            return None
+        context = contexts[0]
+        if (set(context) != {'run_id', 'game_id', 'model_id', 'seed', 'win_levels',
+                             'target_level', 'restoration_actions', 'source_run_id'}
+                or context.get('run_id') != run.name or context.get('game_id') != game['game_id']
+                or context.get('model_id') != MODEL_ID or type(context.get('seed')) is not int
+                or context['seed'] != SEED or type(context.get('win_levels')) is not int
+                or context['win_levels'] != game['win_levels']
+                or type(context.get('restoration_actions')) is not int or context['restoration_actions'] < 0
+                or type(context.get('target_level')) is not int
+                or not 1 <= context['target_level'] <= game['win_levels']):
+            return None
+        events = recorded_activity_events(run, game['game_id'])
+        if not events:
+            return None
+        phase, level = 'waiting', context['target_level']
+        for event in events:
+            payload, kind = event['payload'], event['kind']
+            if type(payload.get('level')) is int and 1 <= payload['level'] <= game['win_levels']:
+                level = payload['level']
+            if level > context['target_level']:
+                return None
+            if kind == 'compute_task':
+                phase = 'waiting'
+                if payload['status'] == 'started':
+                    phase = 'modeling' if payload['operation'] == 'model' else 'computing'
+            elif kind == 'plan':
+                phase = 'executing' if payload['status'] == 'executing' else 'waiting'
+            elif kind == 'model_revision':
+                phase = 'modeling'
+            elif kind == 'action':
+                if payload['sequence'] > context['restoration_actions']:
+                    phase = 'executing'
+            elif kind == 'run_control':
+                phase = 'waiting'
+        return {'level': level, 'target_level': context['target_level'], 'phase': phase,
+                'event_sequence': events[-1]['sequence'],
+                'updated_at': datetime.fromtimestamp((run / 'console-events.jsonl').stat().st_mtime,
+                                                     timezone.utc).isoformat()}
+    except (OSError, ValueError, TypeError, KeyError):
+        return None
+
+
 def _observed_completed_levels(run: Path, game: dict) -> int:
     """Provisional game progress, never a saved route, score or resume grant."""
     try:
@@ -169,7 +219,29 @@ class ConsoleOverview:
         self._catalog = deepcopy(catalog)
         self._catalog_id = digest(self._catalog)
         self._cache: dict[str, tuple[tuple, dict | None]] = {}
+        self._activity_cache: dict[str, tuple] = {}
         self._lock = threading.RLock()
+
+    def _activity(self, run: Path, game: dict) -> dict | None:
+        # Event-only updates must not invalidate saved scores or replay data.
+        # Reuse the validated trace while only research events are advancing.
+        try:
+            paths = (run / 'trace' / 'prime-trace.jsonl', run / 'console-events.jsonl')
+            if any(not _safe(path) for path in paths):
+                return None
+            key = tuple((info.st_size, info.st_mtime_ns, info.st_ctime_ns, info.st_ino)
+                        for info in (path.stat() for path in paths))
+            if key[1][0] > _MAX_FILE:
+                return None
+            cached = self._activity_cache.get(run.name)
+            if cached is None or cached[0] != key:
+                entries = (cached[1] if cached is not None and cached[0][0] == key[0]
+                           else _recorded_entries(paths[0], strict=True))
+                cached = (key, entries, _recorded_activity(run, game, entries))
+                self._activity_cache[run.name] = cached
+            return deepcopy(cached[2])
+        except (OSError, ValueError, TypeError):
+            return None
 
     def _read_run(self, run: Path, games: dict[str, dict]) -> dict | None:
         try:
@@ -349,6 +421,8 @@ class ConsoleOverview:
                     self._cache[run.name] = cached
                 if cached[1] is not None:
                     item = deepcopy(cached[1])
+                    if item.get('recording') is True:
+                        item['activity'] = self._activity(run, games[item['game_id']])
                     records = []
                     try:
                         summary = _json(run / 'summary.json')
@@ -371,6 +445,8 @@ class ConsoleOverview:
                         item['status'] = 'running'
                     grouped[item.pop('game_id')].append(item)
         self._cache = {key: value for key, value in self._cache.items() if key in seen}
+        recording_ids = {item['run_id'] for items in grouped.values() for item in items if item.get('recording') is True}
+        self._activity_cache = {key: value for key, value in self._activity_cache.items() if key in recording_ids}
         output = []
         for game in self._catalog:
             attempts = grouped[game['game_id']]

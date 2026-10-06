@@ -120,6 +120,59 @@ class TestConsoleOverview(unittest.TestCase):
         self.assertEqual(value['totals']['saved_route_actions'], 0)
         self.assertIsNone(value['games'][0]['resume_run_id'])
 
+    def test_recording_activity_tracks_actual_events_and_exact_run_context(self):
+        from asterion.applications.prime.p7.console_events import ConsoleEventWriter
+        from tests.test_prime_p7_console_events import research_payloads
+        run = self.write_recording('current', levels=2)
+        writer = ConsoleEventWriter(run, run.name, 'test-1')
+        payload = {**research_payloads()['compute_task'], 'level': 3, 'origin': 'calculation'}
+        writer.append('compute_task', payload)
+        overview = self.overview()
+        activity = overview.build()['games'][0]['runs'][0]['activity']
+        self.assertEqual((activity['level'], activity['phase'], activity['event_sequence']), (3, 'computing', 1))
+        self.assertEqual(activity['target_level'], 6)
+        self.assertNotIn('goal', activity)
+        writer.append('compute_task', {**payload, 'status': 'completed'})
+        with patch.object(overview, '_read_run', wraps=overview._read_run) as read_run:
+            with patch('asterion.applications.prime.p7.console_overview._recorded_entries') as read_trace:
+                activity = overview.build()['games'][0]['runs'][0]['activity']
+        self.assertEqual(read_run.call_count, 0)
+        self.assertEqual(read_trace.call_count, 0)
+        self.assertEqual((activity['phase'], activity['event_sequence']), ('waiting', 2))
+        rows = (run / 'console-events.jsonl').read_text().replace('"game_id":"test-1"', '"game_id":"other-1"')
+        (run / 'console-events.jsonl').write_text(rows)
+        self.assertIsNone(overview.build()['games'][0]['runs'][0]['activity'])
+
+    def test_activity_requires_matching_seed_context_and_complete_event_prefix(self):
+        from asterion.applications.prime.p7.console_events import ConsoleEventWriter
+        from tests.test_prime_p7_console_events import research_payloads
+        run = self.write_recording('wrong-seed', context_update={'seed': 1})
+        writer = ConsoleEventWriter(run, run.name, 'test-1')
+        writer.append('compute_task', research_payloads()['compute_task'])
+        self.assertIsNone(self.overview().build()['games'][0]['runs'][0]['activity'])
+        run = self.write_recording('corrupt-events')
+        writer = ConsoleEventWriter(run, run.name, 'test-1')
+        writer.append('compute_task', research_payloads()['compute_task'])
+        with (run / 'console-events.jsonl').open('a') as handle:
+            handle.write('{}\n')
+        self.assertIsNone(self.overview().build()['games'][0]['runs'][0]['activity'])
+
+    def test_restored_actions_are_waiting_and_oversized_events_are_not_read(self):
+        from asterion.applications.prime.p7.console_events import ConsoleEventWriter
+        run = self.write_recording('restoring', levels=2, restoration_actions=1)
+        writer = ConsoleEventWriter(run, run.name, 'test-1')
+        writer.append('action', {'action': 'ACTION1', 'sequence': 1, 'levels_completed': 1,
+                      'before_sha256': 'sha256:' + '0' * 64, 'after_sha256': 'sha256:' + '1' * 64,
+                      'decision_id': None})
+        overview = self.overview()
+        activity = overview.build()['games'][0]['runs'][0]['activity']
+        self.assertEqual((activity['phase'], activity['target_level']), ('waiting', 6))
+        with (run / 'console-events.jsonl').open('ab') as handle:
+            handle.truncate(32 * 1024 * 1024 + 1)
+        with patch('asterion.applications.prime.p7.console_overview.recorded_activity_events') as read:
+            self.assertIsNone(overview.build()['games'][0]['runs'][0]['activity'])
+        self.assertEqual(read.call_count, 0)
+
     def test_fresh_and_restored_context_boundaries_reject_inconsistent_journals(self):
         cases = (
             {'restoration_actions': 1, 'context_update': {'restoration_actions': 0}},
