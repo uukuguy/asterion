@@ -26,6 +26,11 @@ _SCHEMA = 'asterion.prime.p7-solution-certificate/v1'
 _REGISTRY = 'asterion.prime.p7-solution-registry/v1'
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z')
 _MAX_FILE = 64 * 1024 * 1024
+_MAX_SOURCE_NODES = 4096
+# Aggregate descriptor limits are independent of ancestry depth.
+_MAX_SOURCE_FILES = 2304
+_MAX_SOURCE_DIRECTORIES = 576
+_MAX_REGISTRY_BYTES = 2 * 1024 * 1024
 _VERIFIERS = ('solutions.py', 'solution_certificates.py', 'replay.py', 'score.py',
               'broker.py', 'game.py', 'observation_state.py', 'private_trace.py', 'live.py',
               'route_composition.py', 'animation_replay.py', 'dynamic_evidence.py',
@@ -34,6 +39,15 @@ _VERIFIERS = ('solutions.py', 'solution_certificates.py', 'replay.py', 'score.py
 
 class SolutionCertificateError(ValueError):
     """Public-safe pending/stale status, without source contents or private paths."""
+
+
+class SourceProvenanceCapacityError(SolutionCertificateError):
+    """Finite provenance metadata capacity, distinct from corrupt evidence."""
+    code = 'source-provenance-capacity-exceeded'
+    stage = 'source-provenance'
+
+    def __init__(self):
+        super().__init__(self.code)
 
 
 def _bytes(value):
@@ -123,10 +137,10 @@ def compatible_deployed_identities(arc_root: Path, game_id: str) -> tuple[str, .
     Neither these identities nor a cached certificate can mint a new save
     witness or authorize gameplay. Certificate source identities stay exact.
     """
-    from .legacy_verifier_profile import DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298
+    from .legacy_verifier_profile import DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298, DEPLOYED_3108995D
     game, sdk = game_identity(arc_root, game_id), _sdk_identity()
     return tuple(_digest({'game': game, 'sdk': sdk, 'verifier': profile, 'format': _SCHEMA})
-                 for profile in (DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298))
+                 for profile in (DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298, DEPLOYED_3108995D))
 
 
 @dataclass(frozen=True, slots=True)
@@ -156,11 +170,13 @@ def _source_identity(run: Path, *, descriptor=False):
     """Hash explicit source evidence and recorded ancestors; derived output is excluded."""
     stamps, visiting, seen, files, directories = [], set(), set(), [], []
     parent = run.parent
-    def visit(current, depth):
-        if depth > 8 or current.name in visiting:
+    def visit(current):
+        if current.name in visiting:
             raise ValueError('solution source unavailable')
         if current.name in seen:
-            return
+            return None
+        if len(seen) + len(visiting) >= _MAX_SOURCE_NODES:
+            raise SourceProvenanceCapacityError()
         if not _ID.fullmatch(current.name) or not _safe(current).is_dir():
             raise ValueError('solution source unavailable')
         visiting.add(current.name)
@@ -203,6 +219,9 @@ def _source_identity(run: Path, *, descriptor=False):
                     paths.extend((pointer, scope / 'revisions' / (revision[7:] + '.json')))
         if len(paths) > 256:
             raise ValueError('solution source unavailable')
+        if (len(files) + len(paths) > _MAX_SOURCE_FILES
+                or len(directories) > _MAX_SOURCE_DIRECTORIES):
+            raise SourceProvenanceCapacityError()
         for path in sorted(paths):
             # SDK recordings belong to the independent animation area. Hash
             # every byte with bounded reads; no aggregate evidence quota.
@@ -225,13 +244,24 @@ def _source_identity(run: Path, *, descriptor=False):
             event = json.loads(line)
             if event.get('kind') == 'arc.run.context':
                 links.append(event.get('payload', {}).get('source_run_id'))
-        for link in sorted(set(value for value in links if value is not None)):
+        links = sorted(set(value for value in links if value is not None))
+        for link in links:
             if type(link) is not str or not _ID.fullmatch(link):
                 raise ValueError('solution source unavailable')
-            visit(parent / link, depth + 1)
-        visiting.remove(current.name)
-        seen.add(current.name)
-    visit(run, 0)
+        return links
+    # Match the old recursive preorder exactly so existing certificates retain
+    # their source hashes. Exit markers distinguish shared ancestors from cycles.
+    stack = [(run, False)]
+    while stack:
+        current, exiting = stack.pop()
+        if exiting:
+            visiting.remove(current.name)
+            seen.add(current.name)
+            continue
+        links = visit(current)
+        if links is not None:
+            stack.append((current, True))
+            stack.extend((parent / link, False) for link in reversed(links))
     identity = _digest(stamps)
     return {'source_identity': identity, 'files': files,
             'directories': [list(item) for item in directories]} if descriptor else identity
@@ -246,8 +276,8 @@ def _metadata_matches(runs, value):
     """
     try:
         if (type(value) is not dict or set(value) != {'source_identity', 'files', 'directories'}
-                or type(value['files']) is not list or len(value['files']) > 2304
-                or type(value['directories']) is not list or len(value['directories']) > 576):
+                or type(value['files']) is not list or len(value['files']) > _MAX_SOURCE_FILES
+                or type(value['directories']) is not list or len(value['directories']) > _MAX_SOURCE_DIRECTORIES):
             return False
         for item in value['files']:
             if type(item) is not dict or set(item) != {'path', 'size', 'mtime_ns', 'small_sha256'}:
@@ -387,22 +417,24 @@ def _publish(arc_root, run, witness, *, expected_model_id, legacy_inventory):
                         winner = prior
         record = _record(prefix, receipt, before, witness.verification_identity, expected_model_id)
         token = _digest(record)
+        selected = ({'source_run_id': run.name, 'certificate': token}
+                    if winner.source_run_id == run.name else old['winner'])
+        registry = {'schema': _REGISTRY, 'game_id': prefix.game_id,
+                    'seed': 0, 'model_id': expected_model_id, 'winner': selected,
+                    'eligible_sources': inventory, 'rejected_sources': rejected}
+        registry_bytes = _bytes(registry)
+        if len(registry_bytes) > _MAX_REGISTRY_BYTES:
+            raise SourceProvenanceCapacityError()
         revision = root / 'revisions' / (token + '.json')
         if revision.exists():
             if _json(revision) != record:
                 raise ValueError('solution certificate corrupt')
         else:
             write_atomic_file(revision, _bytes(record))
-        if winner.source_run_id == run.name:
-            selected = {'source_run_id': run.name, 'certificate': token}
-        else:
-            selected = old['winner']
         if (_source_identity(run) != before
                 or capture_verification_identity(arc_root, prefix.game_id) != witness.verification_identity):
             raise ValueError('solution source changed during certification')
-        write_atomic_file(path, _bytes({'schema': _REGISTRY, 'game_id': prefix.game_id,
-            'seed': 0, 'model_id': expected_model_id, 'winner': selected,
-            'eligible_sources': inventory, 'rejected_sources': rejected}))
+        write_atomic_file(path, registry_bytes)
     return prefix
 
 
@@ -412,23 +444,36 @@ def _potential_sources(runs, catalog, model):
     metadata = {game['game_id']: game for game in catalog}
     result = {game: [] for game in metadata}
     children = list(_safe(runs).iterdir())
-    if len(children) > 4096:
-        raise ValueError('solution registry unavailable')
-    def prior(current, seen=()):
-        if current.name in seen or len(seen) > 8:
-            return None
-        summary = _json(current / 'summary.json', 1024 * 1024)
-        experiment, diagnostics = summary.get('experiment'), summary.get('diagnostics', {})
-        if type(experiment) is dict and experiment.get('prediction_variant') == 'verified':
-            return current, experiment
-        if type(diagnostics) is dict:
-            links = [diagnostics.get('recovered_from')]
-            links.extend(item.get('source_run_id') for item in diagnostics.get('route_sources', []) if type(item) is dict)
-            for link in links:
-                if type(link) is str and _ID.fullmatch(link):
-                    value = prior(runs / link, (*seen, current.name))
-                    if value is not None:
-                        return value
+    if len(children) > _MAX_SOURCE_NODES:
+        raise SourceProvenanceCapacityError()
+    def prior(current):
+        stack, visiting, seen = [(current, False)], set(), set()
+        while stack:
+            current, exiting = stack.pop()
+            if exiting:
+                visiting.remove(current.name)
+                seen.add(current.name)
+                continue
+            if current.name in visiting:
+                raise ValueError('solution source unavailable')
+            if current.name in seen:
+                continue
+            if len(seen) + len(visiting) >= _MAX_SOURCE_NODES:
+                raise SourceProvenanceCapacityError()
+            visiting.add(current.name)
+            summary = _json(current / 'summary.json', 1024 * 1024)
+            experiment, diagnostics = summary.get('experiment'), summary.get('diagnostics', {})
+            if type(experiment) is dict and experiment.get('prediction_variant') == 'verified':
+                return current, experiment
+            links = []
+            if type(diagnostics) is dict:
+                links.append(diagnostics.get('recovered_from'))
+                links.extend(item.get('source_run_id') for item in diagnostics.get('route_sources', []) if type(item) is dict)
+            # Match the original first-valid attribution order, independent of
+            # the sorted order used for hashing the complete provenance graph.
+            stack.append((current, True))
+            stack.extend((runs / link, False) for link in reversed(links)
+                         if type(link) is str and _ID.fullmatch(link))
         return None
     for run in children:
         try:
@@ -454,6 +499,8 @@ def _potential_sources(runs, catalog, model):
             if not _safe(world_run / 'research' / digest(scope)[7:] / 'current.json').is_file():
                 continue
             result[game_id].append(run.name)
+        except SourceProvenanceCapacityError:
+            raise
         except (OSError, ValueError, TypeError, KeyError):
             continue
     return result
@@ -462,6 +509,8 @@ def _potential_sources(runs, catalog, model):
 def read_certified_roster(arc_root: Path, runs_root: Path, catalog: tuple[dict, ...], *, expected_model_id: str):
     try:
         return _read_certified_roster(arc_root, runs_root, catalog, expected_model_id=expected_model_id)
+    except SourceProvenanceCapacityError:
+        raise
     except (OSError, ValueError, TypeError, KeyError, ImportError):
         raise SolutionCertificateError('saved solution certification pending or stale') from None
 

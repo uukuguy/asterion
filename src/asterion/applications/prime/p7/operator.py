@@ -3304,6 +3304,9 @@ def _publish_save_certificate(
             status["status"] = "ready"
     except Exception as error:
         status["error_type"] = type(error).__name__
+        from .solution_certificates import SourceProvenanceCapacityError
+        if isinstance(error, SourceProvenanceCapacityError):
+            status.update(code=error.code, stage=error.stage)
     # This derivative is deliberately separate: modifying summary.json here
     # would invalidate the exact evidence that the certificate just bound.
     temporary = None
