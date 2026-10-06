@@ -9,6 +9,8 @@
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
 - Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most four independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
+- Remaining-game research requires evidence-based diagnosis and a concrete intervention after two round-local failures. Immutable saved-prefix authority takes precedence over stale campaign progress; restoring authenticated past actions never enlarges the new research budget. Current release evidence belongs to the live checkpoint.
+
 ## Current Architecture
 
 - Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.

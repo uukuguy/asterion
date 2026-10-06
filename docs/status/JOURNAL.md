@@ -4012,3 +4012,8 @@
 - 1e874dda — Record per-round renewal and four actual guests so future recovery avoids permanent historical limits.
 - 2026-10-06 18:07 CST — Generic deferred-round joining AstraCLEAR/9testsPASS; WA scope renewed, parent4227→9526released/guest signals0.
 - 2026-10-06 18:07 CST — Fouractualunitsactive; WA newrun180432 continuesL8 with23newactions and nativecompute/modelrevisionevents.
+- 13fe8bac — Record deferred round joining and active WA actions to prevent missed parallel-slot renewal.
+- eda6a5d6 — Repair grounded probes, real witness deadlines and authenticated long-prefix recovery to prevent blocked experiments and lost progress.
+- Witness cancellation review blocked eda6a5d6 release; preserve original process authority so acknowledged failure evidence remains sealable.
+- 1d803298 — Preserve trusted cancellation authority under witness deadlines so failure journals, replay receipts and experience remain valid.
+- 2026-10-06 18:48 CST — Final1d fullpromotionPASS25/provider0 and installedcertificateauditPASS21frozen/all25; diagnosedrestart51967 resumesfouractualunits, preservesLF/WA8, console52543at57515.

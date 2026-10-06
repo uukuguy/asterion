@@ -10,6 +10,7 @@
 |---|---|---|
 | feedback | ✅ verified-active | `handoff` means a fast, complete cross-session closeout |
 | feedback | ✅ verified-active | P7 learning must be visible during play and evaluated through improving game understanding |
+| feedback | ✅ verified-active | Remaining-game failures require diagnosis and a concrete intervention before another round |
 | project | ✅ verified-active | Four bounded parallel games and readonly Vercel progress sharing |
 | feedback | ✅ verified-active | Reconcile diagnostics with observed successful execution before concluding setup is missing |
 | feedback | ✅ verified-active | Preserve approved architecture across sessions; P7 is the native base for rebuilding P1-P6 |
@@ -379,3 +380,7 @@
   paths against the installed package root.
 - Durable lesson: successful examples are evidence that must be reconciled,
   not dismissed by a contradictory preflight result.
+
+## Remaining-game failures require diagnosis and a concrete intervention before another round
+
+User steering2026-10-06: the remaining BP35/LF52/SK48/WA30 games must not just be abandoned after two failures. Keep the per-round finite boundary, inspect observed transitions, model revisions, actual computations and tool rejections, repair demonstrated defects or choose an evidence-based discriminating experiment, then retry. Retain cumulative experience, saved prefixes and certificates. A zero-dispatch rejection is not an environment counterexample; a tested infrastructure repair is not proof of level completion.

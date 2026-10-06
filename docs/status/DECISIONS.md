@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-06-07 | 🟢 active | Diagnose two failed attempts and bind retries to concrete repairs while preserving certified progress |
 | D-2026-10-03-01 | 🟢 active | Solve with partial cognition and refine hypotheses through action feedback |
 | D-2026-07-26-01 | 🟢 active | Anchor explicit operator configuration to the environment-file directory |
 | D-2026-07-31-02 | 🟢 active | Complete every DCI instance's 50-case result before considering full datasets |
@@ -1044,3 +1045,11 @@
 - Decision: Publish existing public projections into compressed immutable packs in private Blob, then publish the route index last. Remote read APIs never contact the operator machine. Default selection shows verified saved replay, otherwise prepared initial view; current attempts are explicit diagnostic choices. Local actors, controls, certificates and fixed57515 service remain independent.
 - Free-plan controls: verify Hobby account; pack small files, reuse SHA-equal packs and operation receipts, coalesce ordinary uploads30minutes, prioritize saved progress with60second minimum, and poll cloud5minutes. Guard1500attempted PUTs/month and900MiB retained packs; expose errors/age and preserve the prior complete generation. These are local guards, not total account-usage measurements.
 - Evidence: actual production URL https://asterion-p7-console.vercel.app,25games and183prepared initial views; first151/183saved score79.299856. First dataset31packs4,904,992compressed bytes; storage with index5,524,057bytes;32uploadoperations. Automatic later generation39operations/5,750,086retained bytes. AR25L8/SP80L1/RE86L8 source-hash/cognition/lastpage checks PASS and POST405. HTTP checks do not establish Chrome visual acceptance.
+
+## D-2026-10-06-07 — Diagnose finite failed rounds before retrying
+
+- User authority: after two failures in a remaining game, investigate and solve the cause rather than only switching or resetting counters. Two failures remain a round-local finite boundary; this does not create permanent exclusion or unlimited unexamined retries.
+- Evidence2026-10-06: SK48 novel click coordinates were rejected by the action-name no-effect guard; BP35/LF52 preparatory current-level clicks collided with historical prefix coordinates. These zero-dispatch outcomes are tool admission results, not game counterexamples. Witnesses had an external900-second cutoff but internal3600-second limits and no trusted remaining wall-time field.
+- Repair eda6a5d6: bounded grounded novel-click probes, exact current-observation preparatory probe handoff, full multi-cell validation, one guest-generated monotonic witness deadline and unchanged900-second/180-second cleanup bounds. Preserve raw repeated-action protection and old-route rejection.
+- Saved progress: WA180432 has an exact8/572 certificate and LF181056 has8/557. Default500-action historical replay admission rejected both before an engine could run. Restore the exact bounded historical action length separately from new gameplay budgets; preserve original sources/certificates and accept only exact0f4fb448/d4c6000b historical verifier profiles with the current exact game/SDK.
+- Verification boundary: final1d803298 fullpromotionPASS25/provider0 and installedstaticcertificateauditPASS21frozen/all25winners; actualfour nativeunits resumed BP35L6/SK48L5/LF52L9/WA30L9 with research/action events. Cancellation-wrapper follow-up preserves trusted interrupted journals. These repairs do not prove the remaining four games solved. Runtime failure, local saved score and official cold-start score remain separate.
