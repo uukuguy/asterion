@@ -27,6 +27,12 @@ class TestPrimeP7Guest(unittest.TestCase):
                 with self.assertRaises(SystemExit if valid else ValueError):
                     launch(unit, seconds, ['python3', '-V'])
                 self.assertEqual(execute.called, valid)
+                if valid:
+                    args = execute.call_args.args[1]
+                    self.assertIn('--property=RuntimeMaxSec=900s', args)
+                    self.assertIn('--property=TimeoutStopSec=180s', args)
+                    self.assertIn('--property=KillMode=control-group', args)
+                    self.assertIn('--property=SendSIGKILL=yes', args)
 
     def test_console_preserves_only_existing_guest_proxy_environment(self) -> None:
         unit = 'asterion-p7-' + 'a' * 32 + '.service'
@@ -90,7 +96,7 @@ class TestPrimeP7Guest(unittest.TestCase):
             subprocess.CompletedProcess([], 0, stdout='LoadState=not-found\n'),
         ]) as call, patch('tools.run_prime_p7_guest.Path.exists', return_value=False):
             self.assertTrue(cleanup('asterion-p7-' + 'a' * 32 + '.service'))
-        self.assertGreaterEqual(call.call_args_list[0].kwargs['timeout'], 30)
+        self.assertGreaterEqual(call.call_args_list[0].kwargs['timeout'], 190)
 
     def test_only_explicit_zero_sentinel_removes_guest_deadline(self) -> None:
         with self.assertRaisesRegex(ValueError, "invalid attempt bounds"):
@@ -138,6 +144,7 @@ class TestPrimeP7Guest(unittest.TestCase):
         args = call.call_args.args[1]
         self.assertIn('--property=KillMode=control-group', args)
         self.assertIn('--property=RuntimeMaxSec=30s', args)
+        self.assertIn('--property=TimeoutStopSec=20s', args)
         self.assertIn('--setenv=ASTERION_PRIME_P7_GAME_ID=a-1', args)
         self.assertIn('--setenv=ASTERION_PRIME_PROVIDER=openai-codex', args)
         self.assertIn('--setenv=ASTERION_PRIME_MODEL=gpt-6.1-sol', args)

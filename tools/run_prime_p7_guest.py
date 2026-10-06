@@ -70,10 +70,15 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
         raise ValueError("invalid attempt bounds")
     if not Path("/sys/fs/cgroup/cgroup.controllers").is_file():
         raise ValueError("guest cgroup unavailable")
+    # The fixed witness still cancels the entire solve at 900 seconds. Its
+    # existing replay/seal/summary cleanup may outlast the generic 20s stop
+    # grace, especially after restoring several completed levels. This is
+    # cleanup time, not another model/gameplay interval or a caller knob.
+    stop_seconds = 180 if mode == "witness" else 20
     args = [
         "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
         "--service-type=exec", f"--unit={unit}",
-        "--property=KillMode=control-group", "--property=TimeoutStopSec=20s",
+        "--property=KillMode=control-group", f"--property=TimeoutStopSec={stop_seconds}s",
         "--property=SendSIGKILL=yes",
         "--property=WorkingDirectory=/tmp",
     ]
@@ -102,7 +107,7 @@ def cleanup(unit: str) -> bool:
     _unit(unit)
     stopped = subprocess.run(
         ["systemctl", "stop", unit], stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL, timeout=30, check=False,
+        stderr=subprocess.DEVNULL, timeout=190, check=False,
     )
     state = subprocess.run(
         ["systemctl", "show", unit, "--property=LoadState,ActiveState,ControlGroup"],
