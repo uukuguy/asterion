@@ -6,9 +6,9 @@
 
 Asterion Prime P7 通过编程、真实观察和可修正的假说研究 ARC-AGI-3 交互游戏，并把有用经验带入后续尝试。产生结果的系统代码在本仓库公开：包括 LLM、持久 IPython 工作区、版本化 WorldMap、预测核对与动作 Broker、经验存储，以及认证和提交流程。
 
-## ARC-AGI-3 当前结果
+## ARC-AGI-3 官方评测结果
 
-截至 **2026 年 10 月 7 日（UTC+8）**，累计公开题研究记录达到 **25/25 题、183/183 关**，选定保存路线共 **6,781 个动作**，**本地汇总分 100.000000**。选定路线记录模型 `gpt-6.1-sol`、seed `0`；最终执行版本为 [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21)。此前保存的路线保留原始代码身份和认证。
+**2026 年 10 月 7 日（UTC+8），Asterion Prime P7 在 ARC-AGI-3 官方评测中取得 100.00 分**，完成 **25/25 道公开题、183/183 关，共 6,781 次动作**。[Competition 成绩卡](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a)已正常关闭，最终回执与每题提交路线逐项核对通过。研究模型为 `gpt-6.1-sol`、seed `0`；最终执行版本为 [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21)。此前保存的路线保留原始代码身份和认证。
 
 | 证据 | 状态及含义 |
 |---|---|

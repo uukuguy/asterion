@@ -6,9 +6,9 @@
 
 Asterion Prime P7 studies interactive ARC-AGI-3 games by writing programs, testing hypotheses against real observations, and carrying useful experience into later attempts. Its producing system is public: the LLM, persistent IPython workspace, versioned WorldMap, checked action broker, experience store, and certification/submission code are in this repository.
 
-## ARC-AGI-3: current result
+## ARC-AGI-3: official result
 
-The accumulated public-game research record reached **25/25 games and 183/183 levels**, with **6,781 actions in the selected saved routes** and a **100.000000 local aggregate score**, on 7 October 2026 (UTC+8). The selected routes record `gpt-6.1-sol`, seed `0`; the final execution snapshot is [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21). Earlier saved routes retain their original code identities and certificates.
+On 7 October 2026 (UTC+8), Asterion Prime P7 achieved an **official ARC-AGI-3 score of 100.00**, completing **25/25 public games and 183/183 levels in 6,781 actions**. The [Competition scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) is normally closed, and its final receipt has been checked against every submitted route. The research model was `gpt-6.1-sol`, seed `0`; the final execution snapshot is [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21). Earlier saved routes retain their original code identities and certificates.
 
 | Evidence | Status and meaning |
 |---|---|
