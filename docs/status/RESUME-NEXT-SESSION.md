@@ -1,19 +1,17 @@
 # Live Session Checkpoint
 
-Updated2026-10-06 21:17 CST. Active session, not handoff. Main; local http://127.0.0.1:57515/; readonly cloud https://asterion-p7-console.vercel.app. User requires fixing all previously diagnosed defects, not just one source-chain path. README deferred. Actual local certified saved-route progress94.272727,22full,175/183,6385savedactions; LF L10 observed WIN but certification pending (details below); distinct from official cold score.
+Updated2026-10-06 21:52 CST. Active session, not handoff. Main; local http://127.0.0.1:57515/; readonly cloud https://asterion-p7-console.vercel.app. User requires fixing all previously diagnosed defects, not just one source-chain path. README deferred. Actual local certified saved-route progress97.333333,24full,179/183,6569savedactions. LF52 sealed10/724; SK48 sealed8/303; BP35 fresh-cognition L6 actually running. Distinct from official cold score.
 
 ## Current verified facts
 
-- New package gate boundary: 5263fullpromotion4209tests failed one obsolete test fixture that replaced all certificate APIs with SimpleNamespace. Root corrected ordering-only fixture using actual certificate module;3focusedPASS. BPfresh-target app implementation29focusedtests (28PASS/OrbSKIP), explicitenv+closedhistorical-ID policy, staticcountguard beforeSDK, originalrawreads retained/newroundpositivecognition reused; independentAstrareview. Combine test-only correction + BP application into next exactcommit/wheel/fullgate; unreleased5263 is NOT authorized for actualLFexecution. Reviewed finiteLF wrapper cancellation now SIGINT/wait/kill/reap ownchildonallpaths; SolCLEAR hash4b47eab2. Update exactcommit/wheelbindings after gatePASS, then ONE recovery.
+- SK48 L8 native completed34newsteps, full8/303 source p7-live-20261006213620-f55d15e6663240028aba2442; solution-certification-status ready, replay/seal/cleanup verified in normal summary. LocalHTTP overview confirms current24full/179levels/6569actions/97.333333. Only BP35 remains incomplete. Fifthhelpers8provider-freeguardsPASS/independentCLEAR; one authorized launch now active under monitor4036/host4043/guest221599, currently nativeprecard certification, no card ID yet.
+- ACTUAL LF seal COMPLETE: lf52-terminal-final-d406e298-proof.json PASS130.643s, exactly2SDKfactories/1448steps(724each), model/API0. Newsource p7-live-20261006133121-40d6e5a1741bd61b0258529c normalcertificateREADY10/724; originalL10 native62newsteps attribution preserved, offline recovery solver0. OriginalnativeLF10, previousLF9 sources/ancestry/fullrawanimations and oldcertificate bytes unchanged. Originalfallbacksource only rejected, never grantedauthority. Fullnormal25certificate audit +21frozen certificates PASS123.848s, SDK/model/recert0 inlf52-terminal-d406e298-all-certificates-proof.json.
+- Exact d406e29879b6cc6cbd55cc8338e1dabbe4184884 package fullpromotionPASS25/provider0, wheel8ef424be20fd11cafef4724951007a620a9c50438298fc68ff84efb0403fe4b8/558resources, pinned-capacity-d406e298-deployment.json released. Localfixed57515service92298 and cloudUI2a kept; LF10 preparedmanifest/all10details/stablecognition PASS inlf52-terminal-d406e298-console-http-proof.json. Actual cloud overview/manifest/L10 stablecognition PASS inlf52-terminal-d406e298-cloud-http-proof.json. No Chromevisualacceptance; connectortransport remainsunavailable.
+- BP userexplicitAGREED freshL6 cognition. Publicclosedpolicyimplementation d406 +privateadopter12tests/Astra/SolCLEAR. Actual releasedparent95909 (deadold59635cleanstart, no guestsignals), proofbp35-l6-fresh-cognition-1791293768757571000-proof.json. BP L6 p7-live-20261006213616-3732eb7090884f60b0313a5e exact5/150 restoration, policyfixed79oldsourceIDs, raw9admittedsourcesavailable/oldpositive0; persistedactualpolicyproofbp35-fresh-cognition-d406e298-actual-policy-proof.json. Newround2genuine/900s each, newattemptcognition reusable. SK L8 p7-live-20261006213620-f55d15e6663240028aba2442 fromsaved7/269 (L6+57,L7+31). SK L8 subsequently completed; BP continues. Bothnewd406package; LFheld remainsfullydone/excluded. No originalsource/ledgerhistoryreset.
+- Fifth25 ACTUAL launched ONCE at21:51CST: user-authorized-fifth25-20261006; monitor4036/host4043/guest221599; asterion-official-fifth25-20261006.service active/running, RuntimeMax2h +180cleanup/SIGINT/control-group. launch-fifth25.py and submit-fifth25-installed.py hash-bound rootrelease +independentCLEAR/8pureguardsPASS. Nativeprecard checking saved certification underway atcheckpoint; no card/sourceproofyet. Track launches/fifth25-launch-state.json, fifth25-source-proof.json, fifth25-final-proof.json and official/<newrun>/submission-progress.json. DO NOT launch again, resetclaim, orretryoldthird/fourth. Previousclosedcard15ffcc07 untouched. Frozen native certified currentselection will includeSK8 ifsamewinner; localfutureprogress notinsertedmidflight. Officialscore onlynormalclosedmatchedreceipt; README deferred.
+- Recovery tool itself does not publish console prebuild at write_summary; this LF newsource was subsequently backfilled by the normal replay service before final local/cloud acceptance. Native save-time preparation stays intact. Further offline recoveries require explicit normal preparation before declaring replay ready. This boundary is not solved by the certificate repair.
 
-
-- User explicitly AGREED BP35 L6 fresh cognition after diagnosis. Preserve exact certified5/150 + all old failures; isolate old L6 hypotheses/executable artifacts through application-owned policy, fixed historical source IDs. New-round attempts may reuse newly learned models; no permanent experience erasure. Application implementation/private finite adoption are in progress; BP is NOT running yet. SK48 L6 actual passed57new/statusready, saved6/238; parent59635 naturally started L7 p7-live-20261006211510-115f0d0883fe4aefac231898, exact0d900s.
-- LFrepair committed5263e188; frozen558resourcewheelff992d068af8fc024d660f74f1403d20e33ef6685c49eb3804618c6755fc49d4, fullpromotion currently running. Static21frozen certificate compatibility succeeded before normal roster correctly refused unregistered LF10 pending. ActualSDK recovery NOT started; a single600s/two-pass wrapper is being prepared. Fullnormalroster check follows successful seal, not bypassed.
-
-
-- Latest explicit task: seal LF52 pending WIN10/724. Frozen repair removes redundant replay and admits individually authenticated animations with settled equivalence; real recovery still NOT executed. 25focusedtests/Ruff/diff PASS; independent Sol CLEAR. Exact0d historical verifier profile read-only compatibility added because recovery contract changes verifier identity. Next commit/build/fullpromotion/static oldcert check, then ONE finite two-pass1448-action SDK recovery, normal certificate publication and local/cloud refresh. Old originalsource/rawanimations/9-level certificates stay preserved. Publication failure can leave roster pending, never grant success.
-- Frontend deployment proof: console-source-2a7f4a2e-service-proof.json PASS; console-attempt-source-2a7f4a2e-http-dom-proof.json PASS; console-source-2a7f4a2e-cloud-http-proof.json PASS, production dpl_6y1QNxNtKnUEVXGetRedJwU77QNz. Same fixed57515, no all25 reparse/SDK/model/guest operations. Background cloud publisher46549 unchanged.
-
+### Prior checkpoint observations (superseded by facts above)
 
 - Latest continuation: actual parent59635 runs SK48 L6 p7-live-20261006205935-42dcef6eefcc48fdbc7c0680 from saved5/181 on exact0d; LFexplicitrepairhold only. ExistingCLI independentreview/startproof PASS, no newround/counters reset or guest signals. BPfinitephase remains paused.
 - BP35 L6 readonly diagnosis complete: `launches/bp35-l6-second-attempt-cognition-diagnosis-20261006.md`. Actor reused old partial model after 9 historical sources/28 reads; unverified model screened real probes. Rejected blue/exit hypotheses were withdrawn; no direct L1–5 rule contamination proven. Current judgment favors isolating L6 positive hypotheses/executable model while retaining L1–5 certificates and all raw counterexamples. User requested discussion after diagnosis; NO BP restart/reset/knowledge deletion authorized yet.
@@ -89,21 +87,25 @@ Updated2026-10-06 21:17 CST. Active session, not handoff. Main; local http://127
 | CN04 | 6/6, 186 | `p7-live-20261006060831-921fdc8fc1b140b1b19fde00` |
 | DC22 | 6/6, 474 | `p7-live-20261005190338-478eb1c2a4011d0600897097` |
 | FT09 | 6/6, 75 | `p7-live-20261006055733-ec244b3b50484023a74085de` |
-| G50T | 2/7, 63 | `p7-live-20261006060637-1bf8d2618aff4766831143de` |
+| G50T | 7/7, 302 | `p7-live-20261006172313-59774b583a27479ead380ea8` |
 | KA59 | 7/7, 350 | `p7-live-20261006064538-1760635dd5aa46bb98a05745` |
-| LF52 | 7/10, 489 | `p7-live-20261006112622-95a4fc2b99e44d8b99902677` |
+| LF52 | 10/10, 724 | `p7-live-20261006133121-40d6e5a1741bd61b0258529c` |
 | LP85 | 8/8, 93 | `p7-live-20261006080754-3fbd0c18c5294c7d998bd1f7` |
 | LS20 | 7/7, 467 | `p7-live-20261006111802-8f90b88b601f43a09fef4d17` |
 | M0R0 | 6/6, 218 | `p7-live-20261006093411-74b9467567db4c0f91cd879f` |
 | R11L | 6/6, 75 | `p7-live-20261006094947-b1659572744e4e84875d7929` |
 | RE86 | 8/8, 551 | `p7-live-20261006105543-d1218b9e364d498fb0b788d9` |
 | S5I5 | 8/8, 244 | `p7-live-20261006113727-6519465ec8f1418588a788c2` |
+| SB26 | 8/8, 124 | `p7-live-20261006172932-8181c73c09354d9e87701633` |
 | SC25 | 6/6, 175 | `p7-live-20261006140038-36d501ff6f344b8698292117` |
-| SK48 | 4/8, 121 | `p7-live-20261006134737-18085b70de114bd7bf24600b` |
-| SU15 | 9/9, 122 | `p7-live-20261006150717-d20c6754e0754057bf11b3af` |
-| TR87 | 6/6, 161 | `p7-live-20261006151055-fb5116e3931742efbbf96538` |
+| SK48 | 7/8, 269 | `p7-live-20261006211510-115f0d0883fe4aefac231898` |
 | SP80 | 6/6, 143 | `p7-live-20261006001222-3a7662493aa44f01b109e5f9` |
+| SU15 | 9/9, 122 | `p7-live-20261006150717-d20c6754e0754057bf11b3af` |
+| TN36 | 7/7, 215 | `p7-live-20261006172836-43a826a6aef34dd1bdbe1bc9` |
+| TR87 | 6/6, 161 | `p7-live-20261006151055-fb5116e3931742efbbf96538` |
+| TU93 | 9/9, 193 | `p7-live-20261006170102-2d5088fea22c4edbbf19bf0c` |
 | VC33 | 7/7, 176 | `p7-live-20261005194027-dc14efb28c722e59760af7b3` |
+| WA30 | 9/9, 705 | `p7-live-20261006184525-780dcef3264444fca9f97097` |
 
 - Table sources have sealed trace, independent replay, model scope and cleanup. DC22 is a separate offline recovery; VC33 contains explicit offline composition. These do not certify original failed model runtime settlement.
 - Frozen fourth-card source roster109 differs from current local123 after fourteen further saved levels. Actual API measured123/4441 at14:34. Exact original roster/proof remains immutable; pending observations cannot authorize resume or scoring.
