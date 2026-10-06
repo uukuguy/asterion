@@ -4153,3 +4153,9 @@
 2026-10-07 01:27 CST — Community59a04dc: Complete author profiles, software citation and result metadata; disclose unsupported USD totals and keep final entry local.
 
 2026-10-07 01:55 CST — Token cost audit: selected25 subtotal undercovers research; Oct6 228 P7 traces total723793948input/3382772output; assumed97%cache Standard147.46–158.32USD, not actual/fullstudy cost.
+
+2026-10-07 01:56 CST — 784c46c7: Record scoped token estimates and corrected recovery state to prevent research cost undercounting.
+
+2026-10-07 01:56 CST — Community7ce4d19: Document overlapping inventories and cache assumptions for transparent cost comparison; keep preparation local.
+
+2026-10-07 02:02 CST — Communityc4ce7d5: Distinguish Codex access, actual spend and scoped API estimates; validated submission remains local.

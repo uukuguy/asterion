@@ -30,7 +30,69 @@
     "verified_at": "2026-10-07 01:13 CST"
   },
   "cost_usd": null,
-  "cost_note": "Complete exploration cost was not audited; no monetary estimate is reported.",
+  "cost_note": "Actual complete monetary cost is unknown. The cost_estimate reports API-price equivalents for a scoped recorded-usage cohort, not actual payment or a campaign total.",
+  "cost_estimate": {
+    "kind": "api_price_equivalent",
+    "scope": {
+      "selection": "228 persisted P7 research runs selected by a shared run-label prefix; not a uniform UTC+8 calendar-day cohort",
+      "runs": 228,
+      "usage_records": 6885,
+      "valid_hash_chains": 228,
+      "sealed_runs": 220,
+      "unsealed_runs": 8,
+      "runs_missing_summary": 4,
+      "runs_with_zero_recorded_usage": 1,
+      "coverage_note": "Interrupted runs can lack usage records. Provider request IDs were not retained, so deduplication across runs cannot be proved.",
+      "selected_route_subset": {
+        "runs": 25,
+        "usage_records": 618,
+        "input_tokens": 65878471,
+        "output_tokens": 301489,
+        "relationship": "Overlapping subset of the 228-run cohort; do not add these tokens to cohort totals."
+      }
+    },
+    "model": "gpt-6.1-sol",
+    "provider": "openai-codex",
+    "tokens": {
+      "input": 723793948,
+      "output": 3382772,
+      "maximum_single_usage_input": 262180
+    },
+    "assumptions": {
+      "cached_read_fraction": 0.97,
+      "remaining_input_fraction": 0.03,
+      "remaining_input_scenarios": [
+        "uncached",
+        "cache_write"
+      ],
+      "cache_classification": "Persisted input tokens mix cache categories; cache classification and service mode were not retained. The 97% cached-read share is an assumption, not a measured cache-hit rate.",
+      "standard_context_threshold_tokens": 272000,
+      "fast_multiplier": 2
+    },
+    "rates_usd_per_million_tokens": {
+      "standard_uncached_input": 2,
+      "standard_cached_read": 0.1,
+      "standard_cache_write": 2.5,
+      "standard_output": 10
+    },
+    "values_usd": {
+      "standard_97_percent_read_3_percent_uncached": 147.463369836,
+      "standard_97_percent_read_3_percent_write": 158.320279056,
+      "fast_97_percent_read_3_percent_uncached": 294.926739672,
+      "fast_97_percent_read_3_percent_write": 316.640558112
+    },
+    "exclusions": [
+      "Earlier P7 research",
+      "Supervisor and development work",
+      "Missing usage records",
+      "Regional premiums",
+      "Tool fees",
+      "Account-specific discounts"
+    ],
+    "interpretation": "These scenario values are API-price equivalents, not actual payments, a complete campaign ledger, or proven cost bounds. Official saved-route replay uses zero model calls; this does not imply zero research cost.",
+    "source_url": "https://developers.openai.com/api/docs/models/gpt-6.1-sol",
+    "pricing_checked_on": "2026-10-07"
+  },
   "generalization_note": "These results concern the 25 public games; no private-set or unseen-game result is claimed.",
   "games": [
     {
