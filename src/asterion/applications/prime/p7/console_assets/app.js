@@ -516,6 +516,10 @@
 
   const actionMeanings = () => !array(currentLevel().cognition_timeline).length && object(currentLevel().cognition).scope === 'final' ? object(object(currentLevel().cognition).action_meanings) : {};
   const meaningEntries = (entries) => array(entries).filter((entry) => entry && ['certain', 'undetermined', 'falsified'].includes(entry.status) && typeof entry.claim === 'string' && entry.claim);
+  const purposeVerb = /提交|触发|重置|旋转|切换|交互|选择|覆盖|恢复|回放|交换|跳跃|启动|发射|填充|生成|复位|传送|开启|关闭|撤销|确认|取消|释放|缩放|改变|调整|染色|擦除|设置/;
+  const nonMovementPurpose = claim => purposeVerb.test(claim);
+  const deniedPurpose = new RegExp('(?:ACTION[1-7]|RESET)\\s*[:：=]?\\s*(?:不|未)\\s*(?:'+purposeVerb.source+')');
+  const uncertainClaim = claim => /候选|可能|假设|假说|推测|待验证|未确认|未证实/.test(claim);
 
   function shortActionMeaning(name, entries) {
     const directions = { 上: '上移', 下: '下移', 左: '左移', 右: '右移' };
@@ -524,6 +528,7 @@
       entry.claim.split(/[。；;\n]/).forEach((clause) => {
         const names = [...new Set(clause.match(/(?<![A-Za-z0-9_])ACTION[1-7](?![A-Za-z0-9_])/g) || [])];
         if (names.length !== 1 || names[0] !== name) return;
+        if (nonMovementPurpose(clause) || /之后|以后|后[，,]/.test(clause)) return;
         const denied = [...new Set([...clause.matchAll(/(?:不会|不能|无法|并非|没有|未曾|不曾|不|未)\s*(?:向([上下左右])(?:移动|平移)|([上下左右])移)/g)].map((match) => match[1] || match[2]))];
         denied.forEach((direction) => candidates.push({ status: entry.status, direction, affirmative: false }));
         if (/不|未|无|否|并非/.test(clause)) return;
@@ -538,27 +543,29 @@
     return { meaning: directions[found[0]], status: supported.some((entry) => entry.status === 'certain') ? '已识别' : '推测' };
   }
 
+  function currentActionClaims(name) {
+    const cognition = selectedCognition();
+    if (!['final','observation','planning'].includes(cognition.scope)) return [];
+    const background = cognition.scope !== 'observation';
+    const claims = meaningEntries(object(cognition.action_meanings)[name]).map(entry=>({...entry,
+      status:entry.status==='certain' && uncertainClaim(entry.claim)?'undetermined':entry.status,background}));
+    const sequence = cognition.event_sequence ?? cognition.cognition_revision;
+    const revision = array(currentLevel().research_timeline).find(event => event.kind === 'model_revision' &&
+      event.event_sequence === sequence && event.frame_id === cognition.frame_id &&
+      event.level === currentLevel().level);
+    array(revision?.payload?.rule_summaries).filter(rule=>typeof rule==='string').forEach(claim=>{
+      const names=[...new Set(claim.match(/(?<![A-Za-z0-9_])(?:ACTION[1-7]|RESET)(?![A-Za-z0-9_])/g) || [])];
+      if (names.length===1 && names[0]===name && !/未知|未识别|尚不清楚/.test(claim))
+        claims.push({claim,status:uncertainClaim(claim)?'undetermined':'certain',background});
+    });
+    return claims;
+  }
+
   function recordedActionMeaning(name) {
     if (name === 'RESET') return {meaning:'重置',status:'协议'};
     if (name === 'ACTION6') return {meaning:'点击',status:'协议'};
-    const meanings = array(currentLevel().cognition_timeline).length
-      ? object(observationCognition()?.action_meanings) : actionMeanings();
-    const claims = meaningEntries(meanings[name]);
-    if (claims.length) return {...shortActionMeaning(name, claims),background:!array(currentLevel().cognition_timeline).length};
-    const observed = actions().filter(action => {
-      const index = frames().findIndex(frame => frame.id === action.after_frame);
-      return action.name === name && index >= 0 && frameById(action.before_frame);
-    });
-    // Saved effects from this same level are planning background when viewed
-    // before their source actions. Never infer a direction from an ACTION ID.
-    const directions = new Set(observed.flatMap(action => array(action.visual_observations).flatMap(text => {
-      const match = typeof text === 'string' && text.match(/^.+像素整体向([上下左右])\d+格；形状和数量不变。$/);
-      return match ? [match[1]] : [];
-    })));
-    if (directions.size === 1) {
-      const background=observed.some(action=>frames().findIndex(frame=>frame.id===action.after_frame)>state.frameIndex);
-      return {meaning:{上:'上移',下:'下移',左:'左移',右:'右移'}[[...directions][0]],status:background?'记录':'实测',background};
-    }
+    const claims = currentActionClaims(name);
+    if (claims.length) return {...shortActionMeaning(name, claims),background:claims.some(entry=>entry.background)};
     return {meaning:'未识别',status:'?'};
   }
 
@@ -605,13 +612,36 @@
       if (manual && name === 'ACTION6') item.setAttribute('aria-pressed', String(armed)); else item.removeAttribute('aria-pressed');
       if (pending) item.setAttribute('aria-busy', 'true'); else item.removeAttribute('aria-busy');
       const short = recordedActionMeaning(name);
+      // Manual snapshots can omit actions while retaining a played journal.
+      // Their empty action array is not evidence that a key was unused.
+      const actionCount = manual ? null : actions().filter(entry => entry.name === name).length;
+      const relevantClaims = short.status === '?' ? currentActionClaims(name).filter(entry => {
+        const names=[...new Set(entry.claim.match(/(?<![A-Za-z0-9_])(?:ACTION[1-7]|RESET)(?![A-Za-z0-9_])/g) || [])];
+        return names.length === 1 && names[0] === name;
+      }) : [];
+      const fullClaims=relevantClaims.filter(entry=>entry.status!=='falsified').slice(0,4);
+      const contradictedPurpose=relevantClaims.some(entry=>entry.status==='falsified' || deniedPurpose.test(entry.claim) ||
+        /不会|不能|无法|并非|没有|不(?:是|会|能|可)|未(?:能|曾|见)/.test(entry.claim));
+      const knownPurpose=!contradictedPurpose && fullClaims.some(entry=>entry.status==='certain' &&
+        nonMovementPurpose(entry.claim) && !/未知|不清楚|未识别/.test(entry.claim));
+      const meaning = short.status === '?' ? knownPurpose ? '特殊用途' : '未识别' : short.meaning;
+      const status = short.status === '?' ? knownPurpose ? '已识别' : fullClaims.some(entry=>entry.status==='undetermined') ? '推测' : !manual && !actionCount ? '本关未使用' : ''
+        : ({协议:'固定含义',记录:'已观察',实测:'已观察'})[short.status] ?? short.status;
+      const explanation = short.status === '?' ? fullClaims.length ? fullClaims.map(entry=>(entry.status==='undetermined'?'推测：':'')+entry.claim).join('；') : '未识别' : '';
       const symbol = ['已识别','实测','记录','协议'].includes(short.status)
         ? ({上移:'↑',下移:'↓',左移:'←',右移:'→',点击:'点击',重置:'重置',交互:'交互'}[short.meaning] || '') : '';
       item.querySelector('.action-key-label').textContent = `${name}${symbol ? ' '+symbol : ''}`;
-      item.querySelector('.action-key-meaning').textContent = short.meaning;
-      item.querySelector('.action-key-status').textContent = short.status;
-      if (symbol) item.title += `；${short.status === '协议' ? '协议定义' : `来源 ${levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关`}：${short.meaning}（${short.status}）${short.background ? ' · 本关已保存记录，仅作规划背景，不表示当前帧当时已知' : ''}`;
-      item.setAttribute('aria-label', `${name}，${short.meaning}，${short.status === '?' ? '含义未知' : short.status}${short.background ? '，本关已保存记录，仅作规划背景' : ''}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
+      item.querySelector('.action-key-meaning').textContent = meaning;
+      item.querySelector('.action-key-status').textContent = status;
+      if (actionCount !== null) item.title += `；本关已记录 ${actionCount} 次`;
+      if (explanation) item.title += `；${explanation}`;
+      if (short.status === '?' && actionCount) {
+        const responses=[...new Set(actions().filter(entry=>entry.name===name).flatMap(entry=>array(entry.visual_observations)).filter(text=>typeof text==='string'))].slice(0,3);
+        item.title += responses.length ? `；动作响应：${responses.join('；')}` : '；响应见动作记录';
+      }
+      if (fullClaims.length) item.title += `；依据本关认知 · 来源 ${levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关${short.background ? ' · 仅作规划背景，不表示当前帧当时已知' : ''}`;
+      if (symbol) item.title += `；${short.status === '协议' ? '固定含义' : `来源 ${levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关`}：${meaning}（${status}）${short.background ? ' · 本关已保存记录，仅作规划背景，不表示当前帧当时已知' : ''}`;
+      item.setAttribute('aria-label', `${name}，${meaning}${status ? '，'+status : ''}${actionCount !== null ? `，本关已记录 ${actionCount} 次` : ''}${explanation ? '，'+explanation : ''}${short.background ? '，本关已保存记录，仅作规划背景' : ''}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
       return wrapper;
     };
     const reconcile = (list, names, availability) => {
@@ -781,15 +811,19 @@
       .sort((a, b) => a.index - b.index || number(a.entry.event_sequence) - number(b.entry.event_sequence)).pop()?.entry || null;
   }
 
-  function renderWorld() {
+  function selectedCognition() {
     const timeline = array(currentLevel().cognition_timeline);
     const revision = researchEvents().filter((event) => event.kind === 'model_revision').at(-1);
     const aligned = timeline.length ? observationCognition() : revision ? { scope: 'observation', frame_id: revision.frame_id,
-      source_action_sequence: revision.source_action_sequence, cognition_revision: revision.event_sequence,
+      source_action_sequence: revision.source_action_sequence, cognition_revision: revision.event_sequence, event_sequence: revision.event_sequence,
       stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary, origin: 'actor', provenance: revision.provenance } : null;
     const saved = object(currentLevel().cognition);
-    const cognition = aligned || (timeline.length && saved.scope === 'observation' ? { ...saved, scope: 'planning' }
+    return aligned || (timeline.length && saved.scope === 'observation' ? { ...saved, scope: 'planning' }
       : state.eventSequence !== null ? {} : saved);
+  }
+
+  function renderWorld() {
+    const cognition = selectedCognition();
     const guide = $('world-guide');
     const facts = $('world-facts');
     guide.replaceChildren(); facts.replaceChildren();

@@ -3866,3 +3866,7 @@
 - 2026-10-06 10:02 CST — CD82 explicit one-shot priority launched with RE86L3; two slots and prior failure history/deadlines preserved.
 - 2026-10-06 — Full promotion PASS25/provider0 for frozen183-ready and compact-status snapshot; later action/activity increments checked separately.
 - 2026-10-06 10:04 CST — Action/status increment DOM110PASS, relatedPython70PASS; actual served arrows/compact layout/corroborated live-row markers PASS.
+- 2026-10-06 10:05 CST — 7f99ea67 removes loading whitespace, exposes learned actions, and marks only confirmed running games.
+- 2026-10-06 10:06 CST — Actual CD82/RE86 solving markers confirmed;15fixed HTML aliases refreshed without raw parsing; real export1PASS.
+- 2026-10-06 10:17 CST — SP80L1 exposed pixel-motion label error; reject generic visual displacement→control semantics, preserve actual responses.
+- 2026-10-06 10:22 CST — Actor-only action labels/known-purpose tooltips pass real SP80/CN04 records, final11focused checks, servedHTTP/DOM; visual misclassification removed.
