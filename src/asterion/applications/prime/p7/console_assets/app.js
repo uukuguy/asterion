@@ -47,12 +47,35 @@
   const validTimelineEntry = (entry) => isRecord(entry) &&
     stringFields(entry, ['scope', 'frame_id', 'action_id', 'stable_description', 'cognition_narrative_zh']) &&
     numberFields(entry, ['cognition_revision', 'source_action_sequence', 'event_sequence']) && validProvenance(entry.provenance) && validActionLabels(entry);
+  const DIAGNOSTIC_LABELS = {
+    'evidence-write-failed':'证据保存失败', 'evidence-read-failed':'证据读取失败', 'evidence-hash-failed':'证据校验失败',
+    'observation-validation-failed':'观察校验失败', 'derived-projection-failed':'展示数据整理失败',
+    'console-publication-failed':'控制台发布失败', 'research-read-failed':'研究记录读取失败',
+    'research-response-budget-exceeded':'研究响应容量超限', 'engine-no-reply':'环境未返回结果', 'engine-response-invalid':'环境返回结果无效',
+  };
+  const DIAGNOSTIC_STAGES = {
+    'not-dispatched':'尚未执行', 'dispatched-no-reply':'已执行，未收到结果', 'reply-received-invalid':'收到结果，校验失败',
+    'validated-not-durable':'结果有效，保存未完成', 'durably-committed':'结果已保存', 'derived-failed':'展示或研究数据处理失败',
+  };
+  const DIAGNOSTIC_RECOVERY = {
+    'pause-and-rebuild':'暂停并重建', 'read-only-rebuild':'从已保存证据重建', 'stop-without-redispatch':'停止，避免重复执行',
+    'fix-request':'修正请求', 'retry-read':'重试读取', 'operator-recovery':'等待恢复处理', 'none':'无需恢复操作',
+  };
+  const validDiagnostic = value => isRecord(value) && Object.hasOwn(DIAGNOSTIC_LABELS,value.code) &&
+    ['info','warning','error'].includes(value.severity) && Object.hasOwn(DIAGNOSTIC_STAGES,value.stage) &&
+    Object.hasOwn(DIAGNOSTIC_RECOVERY,value.recovery) && Number.isInteger(value.action_sequence) && value.action_sequence >= 0 &&
+    typeof value.outcome_known === 'boolean' && typeof value.durable === 'boolean' && (!value.durable || value.outcome_known) &&
+    [value.observed,value.limit].every(metric => metric === null || (Number.isInteger(metric) && metric >= 0)) &&
+    (value.unit === null || ['bytes','cells','frames','rows','events'].includes(value.unit)) &&
+    (value.status === undefined || ['active','recovered'].includes(value.status)) &&
+    (value.count === undefined || (Number.isInteger(value.count) && value.count > 0));
   function validSnapshot(value) {
-    if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-console/v1' || !isRecord(value.run) || !Array.isArray(value.levels)) return false;
+    if (!isRecord(value) || !['asterion.arc-agi3-p7-console/v1','asterion.arc-agi3-p7-console/v2'].includes(value.schema) || !isRecord(value.run) || !Array.isArray(value.levels)) return false;
+    if (!optionalRecords(value.diagnostics,validDiagnostic)) return false;
     if (!optionalRecords(value.decisions, validDecision) || !stringFields(value.run, ['status', 'game_id', 'run_id']) || !optionalString(value.generated_at)) return false;
     if (value.process_events !== undefined && (!Array.isArray(value.process_events) || value.process_events.length > 16384 ||
       value.process_events.some((event, index, events) => !isRecord(event) || !Number.isInteger(event.event_sequence) || event.event_sequence < 1 ||
-        (index > 0 && event.event_sequence <= events[index - 1].event_sequence) || !['observation', 'action', 'decision', 'cognition', 'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind) ||
+        (index > 0 && event.event_sequence <= events[index - 1].event_sequence) || !['observation', 'action', 'decision', 'cognition', 'compute_task', 'model_revision', 'plan', 'feedback', 'run_control', 'diagnostic'].includes(event.kind) ||
         typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload) || !validProvenance(event.provenance) ||
         !validActionLabels({ ...event.payload, source_action_sequence: event.source_action_sequence, provenance: event.provenance })))) return false;
     const run = value.run;
@@ -316,17 +339,28 @@
     setStatus($('run-status'), run.status);
     write('snapshot-date', `快照时间 ${string(snapshot.generated_at)}`);
     write('verification-note', run.status === 'manual' ? '独立人工试玩；启动 P7 会重置游戏并开始新的运行。' : string(run.status, '').startsWith('preview') ? '只读初始画面；尚未启动 P7，没有求解或试玩动作记录。' : `${run.replay_verified === true ? '回放已验证。' : '回放验证未确认。'}${run.sealed_trace === true ? '具有封存轨迹。' : '无封存成功证明。'}`);
-    renderEvidenceWarnings(array(snapshot.warnings).filter((warning) => typeof warning === 'string'));
+    renderEvidenceWarnings(array(snapshot.warnings).filter((warning) => typeof warning === 'string'),array(snapshot.diagnostics),`${run.game_id}/${run.run_id}`);
   }
 
-  function renderEvidenceWarnings(warnings) {
-    const details = $('evidence-details'), text = warnings.join('；');
-    if ($('evidence-warning').textContent !== text) details.open = false;
-    details.hidden = !warnings.length;
+  function diagnosticText(diagnostic) {
+    const unit={bytes:'字节',cells:'格',frames:'帧',rows:'行',events:'事件'}[diagnostic.unit] || '';
+    const size=diagnostic.observed === null ? '' : ` · ${diagnostic.observed}${unit}${diagnostic.limit === null ? '' : ` / 上限 ${diagnostic.limit}${unit}`}`;
+    return `${diagnostic.status === 'recovered' ? '已恢复 · ' : ''}${DIAGNOSTIC_LABELS[diagnostic.code]} · 动作 ${diagnostic.action_sequence} · ${diagnostic.outcome_known ? '结果已知' : '结果未知'} · ${diagnostic.durable ? '已持久化' : '未持久化'} · ${DIAGNOSTIC_STAGES[diagnostic.stage]}${size} · ${DIAGNOSTIC_RECOVERY[diagnostic.recovery]}${diagnostic.count > 1 ? ` · 累计 ${diagnostic.count} 次` : ''}`;
+  }
+
+  function renderEvidenceWarnings(warnings,diagnostics=[],source='invalid-snapshot') {
+    const details = $('evidence-details'), records=diagnostics.filter(validDiagnostic);
+    const active=records.filter(record=>record.status !== 'recovered' && record.severity !== 'info');
+    const text=[...records.map(diagnosticText),...warnings].join('；');
+    if (details.dataset.source !== source) details.open = false;
+    details.dataset.source=source;
+    details.classList.toggle('has-processing-warning',active.length > 0);
+    details.hidden = !text;
     write('evidence-warning', text);
-    write('evidence-summary', `说明 ${warnings.length}`);
+    const label=active.length ? `警告 ${active.length}` : records.length && records.every(record=>record.status === 'recovered') ? `已恢复 ${records.length}` : `说明 ${warnings.length + records.length}`;
+    write('evidence-summary',label);
     $('evidence-summary').title = text;
-    $('evidence-summary').setAttribute('aria-label', `证据说明，${warnings.length} 项：${text}`);
+    $('evidence-summary').setAttribute('aria-label', `${label}：${text}`);
   }
 
   function levelEfficiency(level) {
@@ -1813,8 +1847,9 @@
   }
 
   function validReplayManifest(value, game, runId) {
-    if (!isRecord(value) || value.schema !== 'asterion.arc-agi3-p7-replay-manifest/v1' || value.run_id !== runId ||
+    if (!isRecord(value) || !['asterion.arc-agi3-p7-replay-manifest/v1','asterion.arc-agi3-p7-replay-manifest/v2'].includes(value.schema) || value.run_id !== runId ||
         !Array.isArray(value.levels) || !Array.isArray(value.warnings) || !value.warnings.every(warning => typeof warning === 'string')) return false;
+    if (!optionalRecords(value.diagnostics,validDiagnostic)) return false;
     if (value.state === 'loading') return value.revision === null && value.run === null && value.levels.length === 0;
     const meta = value.run, ids = new Set();
     return value.state === 'ready' && typeof value.revision === 'string' && /^[a-f0-9]{64}$/.test(value.revision) &&
@@ -1902,7 +1937,7 @@
       array(detail.process_events).forEach(event => events.set(event.event_sequence,event));
     });
     const view = {schema:'asterion.arc-agi3-p7-console/v1', generated_at:details[0]?.generated_at ?? null,
-      run:manifest.run, replay_revision:manifest.revision, warnings:manifest.warnings,
+      run:manifest.run, replay_revision:manifest.revision, warnings:manifest.warnings,diagnostics:manifest.diagnostics,
       levels:manifest.levels.map(meta => byLevel.get(meta.level) || {
         ...meta,replay_unloaded:true,frames:[],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}),
       decisions:[...decisions.values()],process_events:[...events.values()].sort((a,b) => a.event_sequence-b.event_sequence)};

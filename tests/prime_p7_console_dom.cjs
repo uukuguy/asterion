@@ -2858,6 +2858,35 @@ test('real evidence warnings remain accessible as compact status details without
   } finally {app.dom.window.close();}
 });
 
+test('processing faults stay visible and expanded through polling and recovery without a layout row',async()=>{
+  const record=fixture();record.schema='asterion.arc-agi3-p7-console/v2';
+  record.diagnostics=[{diagnostic_id:'fault-1',code:'evidence-write-failed',severity:'error',
+    stage:'validated-not-durable',action_sequence:97,outcome_known:true,durable:false,
+    observed:null,limit:null,unit:null,recovery:'stop-without-redispatch',
+    first_seen:'2026-10-06T06:30:00Z',last_seen:'2026-10-06T06:30:00Z',count:1,status:'active',recovered_at:null}];
+  let revision=1,current=record;
+  const app=launch(record,{liveConfig,fetch:async url=>{
+    assert.equal(url,'/api/state');return response({...view(current),revision});
+  }});
+  try {
+    await settle();
+    const details=app.$('evidence-details');
+    assert.equal(details.hidden,false);assert.equal(app.$('evidence-summary').textContent,'警告 1');
+    assert.match(app.$('evidence-warning').textContent,/保存失败.*动作 97.*结果已知.*未持久化/);
+    details.open=true;
+    current=structuredClone(record);current.diagnostics[0].count=2;revision++;
+    app.tick();await settle();
+    assert.equal(details.open,true);assert.match(app.$('evidence-warning').textContent,/累计 2 次/);
+    current=structuredClone(current);Object.assign(current.diagnostics[0],{status:'recovered',recovered_at:'2026-10-06T06:31:00Z'});revision++;
+    app.tick();await settle();
+    assert.equal(details.open,true);assert.equal(details.hidden,false);
+    assert.equal(app.$('evidence-summary').textContent,'已恢复 1');
+    assert.match(app.$('evidence-warning').textContent,/已恢复/);
+    assert.equal(app.dom.window.getComputedStyle(app.$('evidence-warning')).position,'absolute');
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('per-level replay shows loading, manifest counts, and reads only the chosen level with shared saved cache',async()=>{
   const data=levelReplayFixture('game0-catalog','level-first');let ready=false,releaseDetail;
   const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
