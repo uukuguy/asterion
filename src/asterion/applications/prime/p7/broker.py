@@ -320,7 +320,7 @@ def persist_observation(value: ArcObservation, root, *, scope=None, cancelled=No
 
 
 def read_observation(root, reference, *, expected_scope=None, expected_sha256=None) -> ArcObservation:
-    """Authenticate a descriptor and complete original animation, without SDK."""
+    """Authenticate a descriptor and complete animation without executing the environment."""
     from pathlib import Path
     import re
     from .dynamic_evidence import _safe
