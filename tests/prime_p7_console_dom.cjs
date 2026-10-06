@@ -1653,6 +1653,7 @@ test('live replacement follows newest frame; replay preserves historical selecti
   assert.equal(app.$('available-actions').querySelector('button').disabled, true);
   assert.equal(app.$('available-actions').querySelector('.is-current'), null); // no action links to the new observation
   app.$('console-mode').value = 'replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change')); await settle();
+  app.$('overview-game-list').querySelector('[data-overview-attempt]').click(); await settle();
   app.$('frame-slider').value = '1'; app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
   current = {...view(next), revision: ++revision}; app.tick(); await settle();
   assert.equal(app.$('frame-counter').textContent, '2 / 3');
@@ -1785,7 +1786,8 @@ test('superseded replay response cannot replace a newer selected run', async () 
     await settle();
     app.$('console-mode').value='replay'; app.$('console-mode').dispatchEvent(new app.dom.window.Event('change'));
     await settle();
-    app.$('overview-game-list').querySelector('[data-game-id="ls20-test"] [data-overview-select]').click();await settle();
+    app.$('overview-game-list').querySelector('[data-game-id="sp80-test"] [data-overview-attempt]').click();await settle();
+    app.$('overview-game-list').querySelector('[data-game-id="ls20-test"] [data-overview-attempt]').click();await settle();
     releases['new-run'](); await settle(); releases['old-run'](); await settle();
     assert.equal(app.$('run-id').textContent,'new-run');
     app.tick(); await settle(); assert.equal(app.$('run-id').textContent,'new-run');
@@ -1989,7 +1991,7 @@ test('recorded games load readonly previews for missing levels without replacing
     snapshot.levels = [snapshot.levels[0]];
     const config = {token:'test-token', games:[{game_id:gameId, alias:gameId, win_levels:winLevels}]};
     const overview = overviewFixture(config);
-    overview.games[0] = {...overview.games[0], status:'running', recording_run_id:'active-attempt',
+    overview.games[0] = {...overview.games[0], status:'running', active_run_id:'active-attempt', recording_run_id:'active-attempt',
       runs:[{...catalogRun('active-attempt','running',false), completed_levels:0, recording:true}]};
     let releasePreview;
     const preview = {schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
@@ -2036,7 +2038,7 @@ test('a redo preserves saved level counts and uses saved frames only where its o
     actions:Array.from({length:count},(_,i)=>({id:`saved-a${index}-${i}`,name:'ACTION1',before_frame:`saved-f${index}`,after_frame:`saved-f${index}`,data:{}})),
     decisions:[],cognition:{scope:'final',stable_description:`游戏规则：保存关卡 ${index+1} 的认知。`,updates:[]}}));
   const overview=overviewFixture(config);
-  overview.games[0]={...overview.games[0],status:'running',completed_levels:4,best_run_id:'saved-four',recording_run_id:'redo-attempt',
+  overview.games[0]={...overview.games[0],status:'running',active_run_id:'redo-attempt',completed_levels:4,best_run_id:'saved-four',recording_run_id:'redo-attempt',
     runs:[{...catalogRun('saved-four'),completed_levels:4},{...catalogRun('redo-attempt','running',false),recording:true}]};
   const app=launch(active,{liveConfig:config,overview,fetch:async url=>{
     if(url==='/api/replay/redo-attempt')return response(active);
@@ -2082,7 +2084,7 @@ test('saved level sources survive improved routes, continuation, game changes an
   const next=record('next-level5',[2],{firstLevel:5,color:10});
   let overview=overviewFixture(config), best=original, active=redo, holdPoll=false, releasePoll, releaseImproved;
   const updateOverview=()=>{
-    overview.games[0]={...overview.games[0],status:'running',completed_levels:4,best_run_id:best.run.run_id,recording_run_id:active.run.run_id,
+    overview.games[0]={...overview.games[0],status:'running',active_run_id:active.run.run_id,completed_levels:4,best_run_id:best.run.run_id,recording_run_id:active.run.run_id,
       runs:[{...catalogRun(best.run.run_id),completed_levels:4,execution_mode:best===improved?'offline-replay':null},
         {...catalogRun(active.run.run_id,'running',false),recording:true}]};
   };
@@ -2153,7 +2155,7 @@ test('saved route is the default after an attempt ends and latest attempt is an 
   const app = launch(fixture(),{liveConfig:config,overview:()=>overview,fetch:async url=>response(
     url==='/api/replay/a-saved-full'?replay('a-saved-full',3):url==='/api/replay/z-new-attempt'?replay('z-new-attempt',11):idleView())});
   try {
-    await settle(); assert.equal(app.$('run-id').textContent,'z-new-attempt');
+    await settle(); assert.equal(app.$('run-id').textContent,'a-saved-full');
     delete overview.games[0].recording_run_id; overview.games[0].runs[1].recording=false;
     overview.games[0].runs[1].status='cancelled';
     const refresh = [...app.timers.values()].find(fn=>fn.intervalMs===5000);
@@ -2320,8 +2322,8 @@ test('unplayed games start fresh, completed games require explicit restart, and 
 test('external unsealed replay polling preserves chosen history, switches runs without stale updates, and stops after sealing', async () => {
   const overview=overviewFixture(catalog25);
   overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
-  overview.games[0]={...overview.games[0],status:'running',runs:[catalogRun('external-one','running',false)]};
-  overview.games[1]={...overview.games[1],runs:[catalogRun('external-two')]};
+  overview.games[0]={...overview.games[0],status:'running',active_run_id:'external-one',runs:[catalogRun('external-one','running',false)]};
+  overview.games[1]={...overview.games[1],active_run_id:'external-two',runs:[catalogRun('external-two')]};
   let replay={...researchStory(),run:{...fixture().run,run_id:'external-one',game_id:'game0-catalog',win_levels:2,sealed_trace:false,status:'incomplete'}};
   let delayed=null,hold=false;
   const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async(url)=>{
@@ -2370,19 +2372,20 @@ test('unresumable saved progress and stale overview disable default start withou
   }finally{app.dom.window.close();}
 });
 
-test('recording overview watches the unsealed external attempt before best saved route and preserves frame history',async()=>{
+test('recording overview keeps saved route by default and explicitly watches an unsealed external attempt',async()=>{
   const overview=overviewFixture(catalog25);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
-  overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,best_run_id:'old-best',resume_run_id:'old-best',runs:[catalogRun('old-best'),{...catalogRun('new-recording','unverified',false),recording:true,sealed_trace:false}]};
+  overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,best_run_id:'old-best',resume_run_id:'old-best',latest_run_id:'new-recording',runs:[catalogRun('old-best'),{...catalogRun('new-recording','unverified',false),recording:true,sealed_trace:false}]};
   overview.games[1]={...overview.games[1],status:'completed',completed_levels:3,best_run_id:'full-best',runs:[catalogRun('full-best'),{...catalogRun('full-redo','unverified',false),recording:true}]};
   overview.games[3]={...overview.games[3],status:'unverified',runs:[catalogRun('pending-verification','unverified',false)]};
   let replay={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'new-recording',win_levels:2,sealed_trace:false}};
-  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
+  const saved={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'old-best',win_levels:2,seed:0,completed_level_count:1,replay_verified:true,sealed_trace:true}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url==='/api/replay/old-best'?saved:url.startsWith('/api/replay/')?replay:idleView())});
   try {
-    await settle();const row=overviewRow(app);assert.equal(row.querySelector('.overview-result-badge').textContent,'◐ 部分通关');assert.equal(row.querySelector('.overview-result-badge').classList.contains('partial'),true);assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 新尝试');assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/);assert.match(row.querySelector('.overview-activity-badge').getAttribute('aria-label'),/外部只读/);assert.doesNotMatch(row.textContent,/外部只读/);assert.match(row.querySelector('.overview-progress').textContent,/1 \/ 2/);
+    await settle();assert.equal(app.$('run-id').textContent,'old-best');const row=overviewRow(app);assert.equal(row.querySelector('.overview-result-badge').textContent,'◐ 部分通关');assert.equal(row.querySelector('.overview-result-badge').classList.contains('partial'),true);assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 新尝试');assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/);assert.match(row.querySelector('.overview-activity-badge').getAttribute('aria-label'),/外部只读/);assert.doesNotMatch(row.textContent,/外部只读/);assert.match(row.querySelector('.overview-progress').textContent,/1 \/ 2/);
     const full=overviewRow(app,1);assert.equal(full.querySelector('.overview-result-badge').textContent,'✓ 全部通关');assert.equal(full.querySelector('.overview-result-badge').classList.contains('completed'),true);assert.equal(full.querySelector('.overview-progress').classList.contains('completed'),true);assert.equal(full.querySelector('.overview-activity-badge').textContent,'● 新尝试');
     assert.equal(overviewRow(app,2).querySelector('.overview-result-badge').textContent,'尚未开始');assert.equal(overviewRow(app,2).querySelector('.overview-activity-badge'),null);
     assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').textContent,'待验证');assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').classList.contains('unverified'),true);
-    row.querySelector('[data-overview-watch]').click();await settle();assert.equal(app.$('replay-run').value,'new-recording');assert.equal(app.$('run-id').textContent,'new-recording');
+    row.querySelector('[data-overview-attempt]').click();await settle();assert.equal(app.$('replay-run').value,'new-recording');assert.equal(app.$('run-id').textContent,'new-recording');
     app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
     replay={...replay,levels:replay.levels.map((level,i)=>i?level:{...level,frames:[...level.frames,{id:'f3',grid:[[14]],state:'NOT_FINISHED'}]})};
     app.tick();await settle();assert.equal(app.$('frame-counter').textContent,'2 / 4');assert.equal(app.$('replay-follow').hidden,false);
@@ -2396,7 +2399,7 @@ test('recording overview watches the unsealed external attempt before best saved
 test('unsealed replay polling keeps active playback and its pinned frame cursor', async () => {
   const overview = overviewFixture(catalog25);
   overview.guest_busy = true; overview.start_ready = false; overview.start_block_reason = 'session-busy';
-  overview.games[0] = { ...overview.games[0], runs: [{ ...catalogRun('playing-recording', 'unverified', false), recording: true }] };
+  overview.games[0] = { ...overview.games[0], active_run_id:'playing-recording', runs: [{ ...catalogRun('playing-recording', 'unverified', false), recording: true }] };
   let replay = { ...fixture(), run: { ...fixture().run, game_id: 'game0-catalog', run_id: 'playing-recording', sealed_trace: false } };
   const app = launch(fixture(), { liveConfig: catalog25, overview, fetch: async url =>
     url === '/api/manual/open' ? response({}, 503) : response(url.startsWith('/api/replay/') ? replay : idleView()) });
@@ -2447,7 +2450,7 @@ test('unsealed replay polling keeps active playback and its pinned frame cursor'
 
 test('replay frame and user level cursors pin the existing event when new revisions arrive at the same frame',async()=>{
   const overview=overviewFixture(catalog25);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
-  overview.games[0]={...overview.games[0],runs:[{...catalogRun('cursor-recording','unverified',false),recording:true}]};
+  overview.games[0]={...overview.games[0],active_run_id:'cursor-recording',runs:[{...catalogRun('cursor-recording','unverified',false),recording:true}]};
   let replay={...researchStory(),run:{...fixture().run,game_id:'game0-catalog',run_id:'cursor-recording',sealed_trace:false}};
   const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
   try{
@@ -2463,7 +2466,7 @@ test('replay frame and user level cursors pin the existing event when new revisi
 });
 
 test('loading another replay clears a previous event cursor and follows its latest frame',async()=>{
-  const overview=overviewFixture(catalog25);overview.games[0]={...overview.games[0],runs:[catalogRun('first-replay')]};overview.games[1]={...overview.games[1],runs:[catalogRun('second-replay')]};
+  const overview=overviewFixture(catalog25);overview.games[0]={...overview.games[0],best_run_id:'first-replay',completed_levels:1,runs:[catalogRun('first-replay')]};overview.games[1]={...overview.games[1],best_run_id:'second-replay',completed_levels:1,runs:[catalogRun('second-replay')]};
   const first={...researchStory(),run:{...fixture().run,game_id:'game0-catalog',run_id:'first-replay',sealed_trace:true}};
   const second={...fixture(),run:{...fixture().run,game_id:'game1-catalog',run_id:'second-replay',sealed_trace:true},process_events:[{...first.process_events[4],event_sequence:99,frame_id:'f2'}]};
   const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url==='/api/replay/first-replay'?first:url==='/api/replay/second-replay'?second:idleView())});
@@ -2489,7 +2492,7 @@ test('stale unsealed recording does not veto a ready guest and backend readiness
 test('explicit game selection mounts its latest WorldMap P7 recording at level 6 without manual state overwrites',async()=>{
   const config={...catalog25,games:catalog25.games.map((game,i)=>i===5?{...game,game_id:'sp80-test',alias:'SP80',win_levels:7}:game)};
   const overview=overviewFixture(config);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
-  overview.games[5]={...overview.games[5],completed_levels:5,status:'partial',score:'59.523810',best_run_id:'saved-five',resume_run_id:'saved-five',recording_run_id:'current-six',runs:[{...catalogRun('saved-five'),completed_levels:5},{...catalogRun('current-six','unverified',false),recording:true}]};
+  overview.games[5]={...overview.games[5],completed_levels:5,status:'partial',score:'59.523810',best_run_id:'saved-five',resume_run_id:'saved-five',active_run_id:'current-six',recording_run_id:'current-six',runs:[{...catalogRun('saved-five'),completed_levels:5},{...catalogRun('current-six','unverified',false),recording:true}]};
   const replay={...fixture(),run:{...fixture().run,game_id:'sp80-test',run_id:'current-six',win_levels:7,completed_level_count:5,sealed_trace:false},levels:Array.from({length:6},(_,i)=>({level:i+1,status:i<5?'successful':'incomplete',frames:[{id:`l${i+1}`,grid:[[i]],state:'NOT_FINISHED'}],actions:[],decisions:[],cognition:{scope:'unavailable'}}))};
   const savedManual=manualView('sp80-test',9,0,2);
   const session={...stateWithManual(savedManual),selection:{game_id:'sp80-test',level:2}};
@@ -2524,7 +2527,7 @@ test('game selection automatically loads the current source and unplayed games o
 test('live level completion refreshes both games overview immediately without moving pinned playback', async () => {
   let overview = overviewFixture(catalog25);
   overview.guest_busy = true; overview.start_ready = false; overview.start_block_reason = 'session-busy';
-  overview.games[0] = {...overview.games[0], runs:[{...catalogRun('live-first','unverified',false),recording:true}]};
+  overview.games[0] = {...overview.games[0], active_run_id:'live-first', runs:[{...catalogRun('live-first','unverified',false),recording:true}]};
   let replay = {...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'live-first',sealed_trace:false}};
   const app=launch(fixture(),{liveConfig:catalog25,overview:()=>overview,fetch:async url =>
     url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
@@ -2571,7 +2574,7 @@ function levelReplayOverview(records) {
   const overview=overviewFixture(levelReplayConfig);
   records.forEach((data,index)=>{
     overview.games[index]={...overview.games[index],status:data.record.run.sealed_trace?'partial':'running',completed_levels:2,
-      best_run_id:data.record.run.sealed_trace?data.record.run.run_id:null,runs:[{...catalogRun(data.record.run.run_id,data.record.run.status,data.record.run.sealed_trace),completed_levels:2}]};
+      best_run_id:data.record.run.sealed_trace?data.record.run.run_id:null,active_run_id:data.record.run.sealed_trace?null:data.record.run.run_id,runs:[{...catalogRun(data.record.run.run_id,data.record.run.status,data.record.run.sealed_trace),completed_levels:2}]};
   });
   return overview;
 }
@@ -2743,4 +2746,24 @@ test('verified sealed partial saved prefixes load history without claiming full-
       assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);assert.deepEqual(app.errors,[]);
     } finally {app.dom.window.close();}
   }
+});
+
+test('recording-only failed attempts default to real initial preview and remain explicitly selectable',async()=>{
+  const config={token:'test-token',games:[{game_id:'game0-catalog',alias:'preview',win_levels:3}]};
+  const overview=overviewFixture(config);overview.games[0]={...overview.games[0],status:'unverified',recording_run_id:'stopped-recording',latest_run_id:'stopped-recording',
+    runs:[{...catalogRun('stopped-recording','unverified',false),completed_levels:0,recording:true}]};
+  const initial={schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+    run:{game_id:'game0-catalog',run_id:null,status:'preview',seed:0,win_levels:3,completed_level_count:0,primitive_action_count:0,target_level:1,replay_verified:false,sealed_trace:false},
+    levels:[{level:1,status:'preview',frames:[{id:'real-initial',grid:[[12]],state:'NOT_FINISHED',levels_completed:0}],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]};
+  const attempt={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'stopped-recording',seed:0,sealed_trace:false}};
+  const app=launch(fixture(),{liveConfig:config,overview,fetch:async url=>response(url==='/api/preview/game0-catalog'?initial:url==='/api/replay/stopped-recording'?attempt:idleView())});
+  try {
+    await settleReplay();assert.equal(app.$('board-empty').hidden,true);assert.match(app.$('frame-caption').textContent,/初始预览/);
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,null);assert.equal(app.$('level-progress').textContent,'0 / 3');
+    assert.equal(app.requests.some(request=>request.url==='/api/replay/stopped-recording'),false);
+    overviewRow(app).querySelector('[data-overview-attempt]').click();await settleReplay();assert.equal(app.$('run-id').textContent,'stopped-recording');
+    [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();assert.equal(app.$('run-id').textContent,'stopped-recording');
+    overviewRow(app).querySelector('[data-overview-watch]').click();await settleReplay();assert.match(app.$('frame-caption').textContent,/初始预览/);
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,null);assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
 });

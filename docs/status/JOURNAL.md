@@ -3852,3 +3852,6 @@
 - 09:03 Split-level loading passed full promotion25/provider0 and servedDOM; user superseded ephemeral warming with save-time durable replay preparation.
 
 - 2026-10-06 09:27 CST — Prepared replay implementation frozen after Astra review: save-time immutable manifest/per-level files, exact-source progressive UI; backend160PASS, DOM105PASS/1real-HTML environment skip; SP80 served switching825ms/revisit445ms. BP35 actual restored-cognition preparation repaired; final promotion/backfill/deployment remain pending. Background resumed with LF52/LS20 explicit quarantine, R11L L1 and M0R0 L4.
+- 2026-10-06 09:28 CST — 41f02b61 prepares saved replay files and fences per-level loading to prevent slow switches and mixed saved records.
+- 2026-10-06 09:32 CST — Prepared core full promotion PASS25/provider0; actual14 saved games/78 levels HTTP counts/cognition PASS; stopped LS20/LF52 now select saved sources146/175ms.
+- 2026-10-06 09:33 CST — Default saved-source/preview selection and stable loading slot passed106 DOM checks; explicit latest attempts remain separately pinned.

@@ -84,6 +84,7 @@
   try { consoleConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.token === 'string' && consoleConfig.token ? consoleConfig : null;
   const levelReplayEnabled = liveConfig?.replay_loading === 'level-manifest/v1';
+  $('replay-loading-slot').hidden = !levelReplayEnabled;
   const validatedReplayViews = new WeakSet();
   const state = { selectionReady: false, gameSelectionTouched: false, overview: null, overviewFresh: false, overviewBusy: false, overviewPending: false, overviewTimer: null, replayPollTimer: null, replayPollBusy: false, replayFailures: 0, replayRetryAt: 0, replayFollow: true, mode: liveConfig ? 'live' : 'replay', replayRun: null, replayGeneration: 0, manualGeneration: 0, manualPollGeneration: 0, manualBusy: false, manualError: false, manualView: null, manualChoice: null, manualPending: null, manualSaveRetry: null, manualFeedback: null, manualHistory: null, pointerAction: null, liveView: null, pendingCommand: null, commandBusy: false, pollBusy: false, pollTimer: null, levelIndex: Math.max(0, levels.findIndex((level) => array(level.frames).length)), frameIndex: 0, eventSequence: null, actionId: null, timer: null, tab: 'decisions' };
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
@@ -1970,19 +1971,21 @@
   function activeReplayId(game) {
     if (!game?.runs.length) return null;
     const ids = new Set(game.runs.map((entry) => entry.run_id));
-    for (const id of [game.recording_run_id, game.active_run_id]) { if (ids.has(id)) return id; }
-    const active = game.runs.find((run) => run.recording === true || ['starting', 'running', 'pause_requested', 'paused', 'resume_requested', 'stopping'].includes(run.status));
-    return active?.run_id || null;
+    if (activeSession() && state.liveView?.game_id === game.game_id && ids.has(state.liveView.run_id)) return state.liveView.run_id;
+    return ids.has(game.active_run_id) ? game.active_run_id : null;
   }
 
   function latestReplayId(game) {
     if (!game?.runs.length) return null;
     const explicit = game.runs.some(entry => entry.run_id === game.latest_run_id) ? game.latest_run_id : null;
-    return activeReplayId(game) || explicit || [...game.runs].sort((a, b) => b.run_id.localeCompare(a.run_id))[0].run_id;
+    const recording = game.runs.some(entry => entry.run_id === game.recording_run_id) ? game.recording_run_id : null;
+    return explicit || recording || activeReplayId(game) || [...game.runs].sort((a, b) => b.run_id.localeCompare(a.run_id))[0].run_id;
   }
 
   function preferredReplayId(game) {
-    return activeReplayId(game) || game?.best_run_id || latestReplayId(game);
+    const best = array(game?.runs).find(entry => entry.run_id === game.best_run_id && entry.verified === true &&
+      entry.completed_levels === game.completed_levels && entry.completed_levels > 0);
+    return activeReplayId(game) || best?.run_id || null;
   }
 
   function emptyGamePreview(game, status = 'preview') {
