@@ -2659,6 +2659,7 @@ test('recording overview keeps saved route by default and explicitly watches an 
     assert.equal(overviewRow(app,2).querySelector('.overview-result-badge').textContent,'尚未开始');assert.equal(overviewRow(app,2).querySelector('.overview-activity-badge'),null);
     assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').textContent,'未通关');assert.match(overviewRow(app,3).querySelector('.overview-result-badge').title,/没有已保存过关记录/);assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').classList.contains('unverified'),true);
     row.querySelector('[data-overview-attempt]').click();await settle();assert.equal(app.$('replay-run').value,'new-recording');assert.equal(app.$('run-id').textContent,'new-recording');
+    app.$('level-1').click();
     app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
     replay={...replay,levels:replay.levels.map((level,i)=>i?level:{...level,frames:[...level.frames,{id:'f3',grid:[[14]],state:'NOT_FINISHED'}]})};
     app.tick();await settle();assert.equal(app.$('frame-counter').textContent,'2 / 4');assert.equal(app.$('replay-follow').hidden,false);
@@ -2947,6 +2948,54 @@ function levelReplayOverview(records) {
 
 const settleReplay=async()=>{await settle();await settle();await settle();};
 
+test('initial page opening selects saved progress once even when the embedded game is already selected',async()=>{
+  for (const completed of [8,2]) {
+    const config={token:'test-token',replay_loading:'level-manifest/v1',games:[{game_id:'ar25-catalog',alias:'AR25',win_levels:8,baseline_actions:Array(8).fill(1)}]};
+    const data=levelReplayFixture('ar25-catalog','boot-saved');
+    data.record.run.win_levels=8;data.record.run.completed_level_count=completed;
+    data.record.levels=Array.from({length:8},(_,index)=>({...data.record.levels[0],level:index+1,status:index<completed?'successful':'not-run',
+      frames:index<completed?data.record.levels[0].frames.map(frame=>({...frame,id:`boot-l${index+1}-${frame.id}`})):[],actions:index<completed?data.record.levels[0].actions:[]}));
+    data.manifest.levels=data.record.levels.map(level=>({level:level.level,status:level.status,frame_count:level.frames.length,
+      action_count:level.actions.length,has_cognition:level.frames.length>0}));
+    const overview=overviewFixture(config);overview.games[0]={...overview.games[0],status:completed===8?'completed':'partial',
+      completed_levels:completed,best_run_id:'boot-saved',runs:[{...catalogRun('boot-saved'),completed_levels:completed}]};
+    let releaseOverview;
+    const preview={schema:data.record.schema,run:{...data.record.run,run_id:null,status:'preview',completed_level_count:0,
+      primitive_action_count:0,target_level:3,replay_verified:false,sealed_trace:false},
+      levels:[{level:3,status:'preview',frames:[{id:'boot-preview',grid:[[9]],state:'NOT_FINISHED',levels_completed:2}],
+        actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]};
+    const app=launch(data.record,{liveConfig:config,overview:null,fetch:async url=>{
+      if(url==='/api/overview')return releaseOverview?response(overview):new Promise(resolve=>{releaseOverview=resolve;});
+      if(url.endsWith('/manifest'))return response(data.manifest);
+      if(url.includes('/levels/'))return response({...data.record,replay_revision:data.manifest.revision,levels:[data.record.levels[Number(url.match(/\/levels\/(\d+)/)[1])-1]]});
+      if(url.startsWith('/api/preview/'))return response(preview);
+      return response({...view(data.record,'completed'),cleanup_confirmed:true});
+    }});
+    try {
+      await settleReplay();assert.ok(releaseOverview);releaseOverview(response(overview));await settleReplay();
+      assert.equal(app.$('board-kicker').textContent,completed===8?'LEVEL 01':'LEVEL 03');assert.equal(app.$('board-empty').hidden,true);
+      app.$('level-2').click();await settleReplay();
+      [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
+      assert.equal(app.$('board-kicker').textContent,'LEVEL 02');assert.deepEqual(app.errors,[]);
+    } finally {app.dom.window.close();}
+  }
+});
+
+test('an explicit level chosen before the first overview survives initial page opening',async()=>{
+  const data=levelReplayFixture('game0-catalog','boot-user-choice');let releaseOverview;
+  const overview=levelReplayOverview([data]);
+  const app=launch(data.record,{liveConfig:levelReplayConfig,overview:null,fetch:async url=>{
+    if(url==='/api/overview')return releaseOverview?response(overview):new Promise(resolve=>{releaseOverview=resolve;});
+    if(url.endsWith('/manifest'))return response(data.manifest);
+    if(url.includes('/levels/'))return response(data.detail(Number(url.match(/\/levels\/(\d+)/)[1])));
+    return response({...view(data.record,'completed'),cleanup_confirmed:true});
+  }});
+  try {
+    await settleReplay();app.$('level-1').click();releaseOverview(response(overview));await settleReplay();
+    assert.equal(app.$('board-kicker').textContent,'LEVEL 01');assert.equal(app.$('board-empty').hidden,true);assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('explicit game switches use saved progress for full, partial and zero routes in both replay loaders',async()=>{
   for (const progressive of [false,true]) for (const completed of [3,2,0]) {
     const config={...levelReplayConfig,...(!progressive?{replay_loading:undefined}:{})};
@@ -3030,7 +3079,7 @@ test('accepted replay refreshes keep the stage and loader stable while genuine f
     return response(idleView());
   }});
   try {
-    await settleReplay();assert.equal(app.$('board-empty').hidden,true);
+    await settleReplay();app.$('level-2').click();await settleReplay();assert.equal(app.$('board-empty').hidden,true);
     const stageStyle=app.dom.window.getComputedStyle(app.$('board-stage'));
     assert.notEqual(stageStyle.height,'auto');assert.notEqual(stageStyle.height,'');
     assert.equal(app.dom.window.getComputedStyle(app.$('replay-loading-slot')).position,'absolute');
@@ -3118,7 +3167,8 @@ test('per-level replay shows loading, manifest counts, and reads only the chosen
     assert.equal(app.$('run-status').textContent,'读取中');
     assert.equal(app.$('level-progress').textContent,'— / 3');assert.equal(app.$('action-total').textContent,'—');
     assert.match(app.$('run-progress-summary').textContent,/游戏已保存 2 \/ 3 · 正在读取回放/);
-    ready=true;const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
+    app.$('level-2').click();
+    ready=true;app.$('replay-load').click();const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
     assert.ok(releaseDetail);assert.match(app.$('level-1').title,/1 动作 · 3 帧/);assert.match(app.$('level-2').title,/2 动作 · 3 帧/);
     assert.equal(app.$('level-1').querySelector('.level-step-count').textContent,'1 动作');
     assert.equal(app.$('level-2').querySelector('.level-step-count').textContent,'2 动作');
@@ -3244,7 +3294,7 @@ test('fresh loading manifest invalidates an in-flight detail from the same saved
     releaseSaved(response(saved.detail(1)));await settleReplay();
     assert.equal(app.$('board-empty').hidden,false);assert.doesNotMatch(app.$('world-guide').textContent,/revision-saved/);
     assert.equal(app.$('replay-loading').hidden,false);assert.match(app.$('level-1').title,/已保存.*1 动作/);
-    assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);assert.deepEqual(app.errors,[]);
+    assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')&&!request.url.endsWith('/3')),false);assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
 });
 
@@ -3275,7 +3325,7 @@ test('verified sealed partial saved prefixes load history without claiming full-
       assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'partial-active');assert.equal(app.dom.window.__ASTERION_STATE__.run.replay_verified,false);
       assert.equal(saved.record.run.replay_verified,false);assert.equal(saved.record.run.status,'incomplete');
       assert.equal(overviewRow(app).querySelector('.overview-result-badge').textContent,'◐ 部分通关');
-      assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);assert.deepEqual(app.errors,[]);
+      assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')&&!request.url.endsWith('/3')),false);assert.deepEqual(app.errors,[]);
     } finally {app.dom.window.close();}
   }
 });
