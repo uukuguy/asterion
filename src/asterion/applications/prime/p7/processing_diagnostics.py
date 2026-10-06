@@ -23,7 +23,7 @@ _STAGES = frozenset({
 PROCESSING_CODES = frozenset({
     "evidence-write-failed", "evidence-read-failed", "evidence-hash-failed", "observation-validation-failed",
     "derived-projection-failed", "console-publication-failed", "research-read-failed",
-    "research-response-budget-exceeded", "engine-no-reply", "engine-response-invalid",
+    "research-response-budget-exceeded", "engine-no-reply", "engine-response-invalid", "action-not-dispatched",
     "evidence-cancelled", "evidence-deadline-exceeded",
 })
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z")

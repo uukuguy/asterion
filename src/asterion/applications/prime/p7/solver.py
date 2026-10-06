@@ -822,6 +822,8 @@ class Solver:
                     break
                 before_levels = observation["levels_completed"]
                 reply_received = False
+                dispatch_start = getattr(self.broker, "actions_dispatched", None)
+                journal_start = len(self.broker.journal)
                 try:
                     preparation = self._probe_preparation(value, translated, index, reference)
                     if preparation:
@@ -925,6 +927,21 @@ class Solver:
                             "counterexample_sequence": None, "observation_ref": reference,
                         })
                 except Exception:
+                    if (not reply_received and type(dispatch_start) is int
+                            and getattr(self.broker, "actions_dispatched", None) == dispatch_start
+                            and len(self.broker.journal) == journal_start):
+                        # A local adapter rejection must not invent an engine
+                        # call. An unchanged journal alone cannot prove this:
+                        # calls with missing replies are absent from it too.
+                        self._processing_failure(EvidenceProcessingError(
+                            "action-not-dispatched", stage="not-dispatched",
+                            action_sequence=reference["sequence"] + 1,
+                            outcome_known=True,
+                        ))
+                        result["diagnostics"] = self.diagnostics.projection()
+                        stop_reason = "processing-failed"
+                        unexecuted_start = index
+                        break
                     if reply_received:
                         error = EvidenceProcessingError(
                             "derived-projection-failed", stage="derived-failed",

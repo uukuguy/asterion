@@ -1,10 +1,12 @@
 """Current actor probes distinguish preparation from stale prefix replay."""
 
 from pathlib import Path
+from unittest.mock import Mock
 
 from asterion.applications.prime.p7.broker import ArcAction, ArcBroker
 from asterion.applications.prime.p7.game import ArcGameContract
 from asterion.applications.prime.p7.solver import Solver
+from asterion.applications.prime.p7.research_runtime import _EvidenceBroker
 from tests.test_prime_p7_solver import P7SolverFixture
 
 
@@ -69,6 +71,61 @@ class TestProbePreparation(P7SolverFixture):
         self.assertEqual(result["stop_reason"], "matched")
         self.assertEqual(result["applied_count"], 2)
         self.assertEqual(len(self.engine.calls), 4)
+
+    def test_research_wrapper_forwards_preparation_and_records_each_transition(self):
+        trace = Mock()
+        self.solver.broker = _EvidenceBroker(self.broker, trace)
+        result = self.solver.execute_plan(self.click_plan())
+        self.assertEqual(result["stop_reason"], "matched")
+        self.assertEqual(result["applied_count"], 2)
+        self.assertEqual(len(self.engine.calls), 4)
+        recorded = [transition for call in trace._record_transitions.call_args_list
+                    for transition in call.args[0]]
+        self.assertEqual(recorded, list(self.broker.journal[2:]))
+        self.assertEqual(self.solver.diagnostics.projection(), [])
+
+    def test_local_wrapper_failure_is_proven_not_dispatched(self):
+        class BrokenWrapper(_EvidenceBroker):
+            def act_checked(self, plan, *, probe_preparation=None):
+                raise TypeError("private-wrapper-sentinel")
+
+        self.solver.broker = BrokenWrapper(self.broker, Mock())
+        result = self.solver.execute_plan(self.click_plan())
+        self.assertEqual(result["stop_reason"], "processing-failed")
+        self.assertEqual(result["applied_count"], 0)
+        self.assertEqual(len(result["unexecuted_steps"]), 2)
+        self.assertNotIn("uncertain_step", result)
+        self.assertNotIn("private-wrapper-sentinel", str(result))
+        self.assertEqual(len(self.engine.calls), 2)
+        self.assertEqual(self.broker.actions_dispatched, 2)
+        diagnostic = result["diagnostics"][0]
+        self.assertEqual(diagnostic["code"], "action-not-dispatched")
+        self.assertEqual(diagnostic["stage"], "not-dispatched")
+        self.assertTrue(diagnostic["outcome_known"])
+        repeated = self.solver.execute_plan(self.click_plan())
+        self.assertEqual(repeated, result)
+        self.assertEqual(len(self.engine.calls), 2)
+
+    def test_engine_exception_after_dispatch_remains_unknown_without_redispatch(self):
+        def fail_after_dispatch(action, data=None):
+            self.engine.calls.append((action, data))
+            raise RuntimeError("private-engine-sentinel")
+
+        self.engine.step = fail_after_dispatch
+        self.solver.broker = _EvidenceBroker(self.broker, Mock())
+        plan = self.click_plan()
+        result = self.solver.execute_plan(plan)
+        self.assertEqual(result["stop_reason"], "environment-result-unknown")
+        self.assertEqual(result["applied_count"], 0)
+        self.assertEqual(len(self.engine.calls), 3)
+        self.assertEqual(self.broker.actions_dispatched, 3)
+        self.assertEqual(len(self.broker.journal), 2)
+        diagnostic = result["diagnostics"][0]
+        self.assertEqual(diagnostic["stage"], "dispatched-no-reply")
+        self.assertFalse(diagnostic["outcome_known"])
+        self.assertNotIn("private-engine-sentinel", str(result))
+        self.assertEqual(self.solver.execute_plan(plan), result)
+        self.assertEqual(len(self.engine.calls), 3)
 
     def test_advance_or_nondistinguishing_probe_keeps_prefix_guard(self):
         for purpose, change in [("advance", True), ("probe", False)]:

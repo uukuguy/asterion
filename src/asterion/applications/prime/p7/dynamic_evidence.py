@@ -23,7 +23,7 @@ _PAGE_CELLS = 262_144
 _INDEX = struct.Struct('!QQQQ')  # byte offset, byte length, height, width
 _SCHEMA = 'asterion.prime.p7-animation/v1'
 _CODES = frozenset({'evidence-write-failed', 'evidence-read-failed', 'evidence-hash-failed',
-                   'observation-validation-failed', 'engine-no-reply', 'engine-response-invalid',
+                   'observation-validation-failed', 'engine-no-reply', 'engine-response-invalid', 'action-not-dispatched',
                    'derived-projection-failed', 'evidence-cancelled', 'evidence-deadline-exceeded'})
 
 

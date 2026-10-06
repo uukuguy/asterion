@@ -489,6 +489,11 @@ class ArcBroker:
         return tuple(self._journal)
 
     @property
+    def actions_dispatched(self) -> int:
+        """Count engine calls entered, including calls whose outcome is unknown."""
+        return self._actions_dispatched
+
+    @property
     def game(self) -> P7GameSelection | ArcGameContract:
         return self._game
 

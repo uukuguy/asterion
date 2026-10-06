@@ -123,10 +123,10 @@ def compatible_deployed_identities(arc_root: Path, game_id: str) -> tuple[str, .
     Neither these identities nor a cached certificate can mint a new save
     witness or authorize gameplay. Certificate source identities stay exact.
     """
-    from .legacy_verifier_profile import DEPLOYED_0F4FB448, DEPLOYED_D4C6000B
+    from .legacy_verifier_profile import DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298
     game, sdk = game_identity(arc_root, game_id), _sdk_identity()
     return tuple(_digest({'game': game, 'sdk': sdk, 'verifier': profile, 'format': _SCHEMA})
-                 for profile in (DEPLOYED_0F4FB448, DEPLOYED_D4C6000B))
+                 for profile in (DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298))
 
 
 @dataclass(frozen=True, slots=True)

@@ -44,10 +44,10 @@ class _EvidenceBroker:
         except ArcBrokerError:
             return self._broker.terminal_snapshot().status
 
-    def act_checked(self, plan):
+    def act_checked(self, plan, *, probe_preparation: Mapping[str, object] | None = None):
         start = len(self._broker.journal)
         try:
-            result = self._broker.act_checked(plan)
+            result = self._broker.act_checked(plan, probe_preparation=probe_preparation)
         finally:
             self._trace_client._record_transitions(self._broker.journal[start:])
         self._trace_client._count("checked_plans")

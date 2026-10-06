@@ -16,18 +16,30 @@ class TestDeployedCertificates(unittest.TestCase):
         reader = getattr(cert, "compatible_deployed_identities", None)
         self.assertTrue(callable(reader), "exact deployed verifier profiles are required")
         identities = reader(self.arc, self.game)
-        self.assertEqual(len(identities), 2)
+        self.assertEqual(len(identities), 3)
         self.assertEqual(identities[0], cert.compatible_legacy_identity(self.arc, self.game))
-        run = self.save()
-        with patch.object(cert, "capture_verification_identity", return_value=identities[1]):
-            prefix = self.certify(run)
-        root = self.runs / "solution-certificates"
-        before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*.json")}
-        with patch("asterion.applications.prime.p7.solutions._fresh_engine", side_effect=AssertionError("SDK")):
-            self.assertEqual(cert.read_certified_roster(self.arc, self.runs, self.catalog,
-                                                       expected_model_id=self.model), (prefix,))
-        after = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*.json")}
-        self.assertEqual(before, after)
-        with patch.object(cert, "_sdk_identity", return_value={"fixture-sdk": "b" * 64}):
-            with self.assertRaises(cert.SolutionCertificateError):
-                cert.read_certified_roster(self.arc, self.runs, self.catalog, expected_model_id=self.model)
+        for index, identity in enumerate(identities):
+            with self.subTest(profile=index):
+                self.runs = self.root / f"runs-{index}"
+                run = self.save()
+                with patch.object(cert, "capture_verification_identity", return_value=identity):
+                    prefix = self.certify(run)
+                root = self.runs / "solution-certificates"
+                before = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*.json")}
+                with patch("asterion.applications.prime.p7.solutions._fresh_engine", side_effect=AssertionError("SDK")):
+                    self.assertEqual(cert.read_certified_roster(self.arc, self.runs, self.catalog,
+                                                               expected_model_id=self.model), (prefix,))
+                after = {str(p.relative_to(root)): p.read_bytes() for p in root.rglob("*.json")}
+                self.assertEqual(before, after)
+                with patch.object(cert, "_sdk_identity", return_value={"fixture-sdk": "b" * 64}):
+                    with self.assertRaises(cert.SolutionCertificateError):
+                        cert.read_certified_roster(self.arc, self.runs, self.catalog, expected_model_id=self.model)
+
+    def test_latest_deployed_profile_includes_shared_trace_verifier(self):
+        from asterion.applications.prime.p7.legacy_verifier_profile import DEPLOYED_1D803298
+
+        self.assertEqual(set(DEPLOYED_1D803298), set(cert._VERIFIERS) | {"trace.py"})
+        expected = cert._digest({"game": cert.game_identity(self.arc, self.game),
+                                 "sdk": cert._sdk_identity(), "verifier": DEPLOYED_1D803298,
+                                 "format": cert._SCHEMA})
+        self.assertEqual(cert.compatible_deployed_identities(self.arc, self.game)[2], expected)
