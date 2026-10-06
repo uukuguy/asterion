@@ -4087,3 +4087,5 @@
 - 22:34 f0f61b85 records promoted actor repair and retained BP exploration so recovery follows the actual native run.
 - 22:44 BP L6 native PASS43new/0RESET, normal6/193 certificate ready; retained map used; L7 running from193.
 - 22:46 Local overview confirms97.866667/180levels; L6 prepared43actions563frames/cognition ready; L7 live.
+- 22:46 a4365a60 records certified BP L6 and live L7 so recovery retains map corrections and saved authority.
+- 23:03 BP L7 sealed7/246,53new/1RESET; L8 live. RESET boundary repair and immutable legacy certificate compatibility reviewed CLEAR.

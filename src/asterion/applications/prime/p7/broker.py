@@ -19,7 +19,7 @@ from .mechanism_model import (
     history_prefix_digest,
 )
 from .model_search import search_model
-from .experience_induction import EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
+from .experience_induction import ActionEffect, EffectHypothesis, ExperienceInducer, SimState, extract_action_effect
 from .cognition import GameCognitionStore
 from .cognition_session import CognitionPersistenceError, CognitionSession, CognitionSessionError
 from .game_mechanics import GameMechanicsStore, bounded_text
@@ -473,6 +473,10 @@ class ArcBroker:
         # can query this through the broker API to avoid repeating probes.
         self._tried_actions: dict[tuple[int, str, tuple[tuple[str, int], ...] | None], int] = {}
         self._experience_inducer = ExperienceInducer(win_levels=game.win_levels)
+        self._episode_start_sequence = 0
+        # Retained observations are advisory; only the current inducer may
+        # supply support for a new executable mechanism certificate.
+        self._archived_effects: tuple[ActionEffect, ...] = ()
         # Private counters make a live run auditable: learned evidence,
         # hypothesis probes, and planner use are reported separately from
         # primitive action counts.
@@ -739,11 +743,15 @@ class ArcBroker:
 
     def _reset_cognition_runtime(self) -> None:
         """Discard episode-bound model and probe state while keeping semantics."""
+        self._archived_effects = self._observed_effects()[-128:]
+        if self._history:
+            self._episode_start_sequence = self._history[-1].sequence
         self._pending_probe = None
         self._probe_tokens.clear()
         self._transition_model = None
         self._mechanism_certificate = None
         self._mechanism_spec = None
+        self._retrodiction_status = "unavailable"
         self._model_search_cache_key = None
         self._model_search_cache_result = None
         self._tried_actions.clear()
@@ -754,6 +762,20 @@ class ArcBroker:
         self._experience_inducer = ExperienceInducer(win_levels=self._game.win_levels)
         if self._world_model is not None:
             self._world_model = WorldModelStore(self._game.game_id, self._game.seed, self._game.win_levels)
+            self._world_model.refresh_level(self._current.levels_completed)
+            if self._history:
+                latest = self._history[-1]
+                self._world_model.record_visual_candidates(
+                    derive_visual_candidates(latest.frame),
+                    level=latest.levels_completed,
+                    evidence=EvidenceRef(
+                        frame_id=f"frame-{latest.sequence}", source_run=latest.run_id,
+                        summary_hash=latest.after_state_sha256.removeprefix("sha256:"),
+                    ),
+                )
+
+    def _observed_effects(self) -> tuple[ActionEffect, ...]:
+        return (*self._archived_effects, *self._experience_inducer.effects())
 
     def set_observation_listener(self, listener: Callable[[int, str, ArcObservation], None]) -> None:
         """Attach one application-owned advisory sink before any action dispatch."""
@@ -909,7 +931,7 @@ class ArcBroker:
             "motion_complete": effect.motion_complete,
             "state": effect.state,
             "after_frame_sha256": effect.after_frame_sha256,
-        } for effect in self._experience_inducer.effects()]
+        } for effect in self._observed_effects()]
         seen = {item["sequence"] for item in current}
         for fact in self._playbook.effect_summaries:
             value = fact.value
@@ -1270,11 +1292,11 @@ class ArcBroker:
             sequence
             for candidate in candidates
             for sequence in candidate.evidence_sequences
-            if type(sequence) is int and sequence > 0
+            if type(sequence) is int and sequence > self._episode_start_sequence
         }))
         if not evidence:
             return
-        certificate = validate_mechanism(
+        certificate = None if self._episode_start_sequence else validate_mechanism(
             spec, records, entities=self._confirmed_entity_values(),
             world_model_version=world.version,
             prefix_digest=history_prefix_digest(records),
@@ -1765,6 +1787,8 @@ class ArcBroker:
         candidates: set[tuple[str, tuple[tuple[str, int], ...]]] = set()
         click_positions: set[tuple[int, int]] = set()
         for index, record in enumerate(records):
+            if self._episode_start_sequence and record.sequence <= self._episode_start_sequence:
+                continue
             # A transition record is labelled with its successor level, while
             # its action was performed on the preceding level.  Search may
             # reuse generic keyboard names from any history, but click data
@@ -1956,7 +1980,7 @@ class ArcBroker:
             return tuple(merged.values())
 
         effect_facts: list[CheckedFact] = []
-        for effect in self._experience_inducer.effects()[-256:]:
+        for effect in self._observed_effects()[-256:]:
             evidence = effect.after_frame_sha256.removeprefix("sha256:")
             level = min(effect.level, self._game.win_levels - 1)
             effect_key = f"experience.effect.{digest((effect.run_id, effect.sequence, effect.after_frame_sha256)).removeprefix('sha256:')[:32]}"
@@ -2292,7 +2316,7 @@ class ArcBroker:
         certificate = None
         if matches:
             history = self._bound_history()
-            certificate = validate_mechanism(
+            certificate = None if self._episode_start_sequence else validate_mechanism(
                 pending["spec"], history,
                 entities=self._confirmed_entity_values(),
                 world_model_version=self._world_model.version if self._world_model is not None else None,
@@ -2302,7 +2326,8 @@ class ArcBroker:
                 covered = tuple(
                     record.sequence
                     for record in history[1:]
-                    if record.action == pending["action"] and record.data == pending["data"]
+                    if record.sequence > self._episode_start_sequence
+                    and record.action == pending["action"] and record.data == pending["data"]
                 )
                 certificate = validate_mechanism_evidence(
                     pending["spec"], history, covered,
@@ -2327,6 +2352,18 @@ class ArcBroker:
         persistence_failed = False
         try:
             records = self._bound_history()
+            if record.action == "RESET":
+                # A validated RESET is an episode boundary, not an ordinary
+                # mechanic. Keep the canonical transcript and receipts while
+                # invalidating executable support before any induction.
+                self._reset_cognition_runtime()
+                if self._world_model is not None:
+                    self._world_evidence.append(EvidenceRef(
+                        frame_id=f"frame-{record.sequence}", action_id=f"action-{record.sequence}",
+                        source_run=record.run_id,
+                        summary_hash=record.after_state_sha256.removeprefix("sha256:"),
+                    ))
+                return
             if len(records) >= 2:
                 stage = "candidate-extraction"
                 effect = extract_action_effect(records[-2], record)
@@ -2375,7 +2412,8 @@ class ArcBroker:
                             current_frame_sha256=digest(record.frame),
                         )
                 elif certificate is not None and certificate.coverage == "mechanism-evidence":
-                    covered = list(certificate.covered_sequences)
+                    covered = [sequence for sequence in certificate.covered_sequences
+                               if sequence > self._episode_start_sequence]
                     actions = {rule.action for rule in self._mechanism_spec.rules}
                     if record.action in actions and record.sequence not in covered:
                         covered.append(record.sequence)
@@ -2386,7 +2424,7 @@ class ArcBroker:
                         prefix_digest=history_prefix_digest(history),
                     )
                 else:
-                    certificate = validate_mechanism(
+                    certificate = None if self._episode_start_sequence else validate_mechanism(
                         self._mechanism_spec, history,
                         entities=self._confirmed_entity_values(),
                         world_model_version=self._world_model.version,
@@ -2974,7 +3012,6 @@ class ArcBroker:
                 raise ArcBrokerError("cognition-persistence-unavailable") from None
         try:
             if action.name == "RESET":
-                self._reset_cognition_runtime()
                 session.reset_episode()
                 session.start_episode({
                     "frame": after.frame[-1],
@@ -3144,6 +3181,8 @@ class ArcBroker:
                     )
                     self._history.append(record)
                     self._record_world_evidence(record)
+                elif action.name == "RESET":
+                    self._reset_cognition_runtime()
                 self._notify_observation(transition.sequence, transition.after_sha256, after)
                 self._record_semantic_action(action, after)
                 self._record_cognition()

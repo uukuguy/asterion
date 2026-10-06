@@ -139,12 +139,12 @@ def compatible_deployed_identities(arc_root: Path, game_id: str) -> tuple[str, .
     """
     from .legacy_verifier_profile import (
         DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298,
-        DEPLOYED_3108995D, DEPLOYED_0D8F52BC,
+        DEPLOYED_3108995D, DEPLOYED_0D8F52BC, DEPLOYED_B5C24693,
     )
     game, sdk = game_identity(arc_root, game_id), _sdk_identity()
     return tuple(_digest({'game': game, 'sdk': sdk, 'verifier': profile, 'format': _SCHEMA})
                  for profile in (DEPLOYED_0F4FB448, DEPLOYED_D4C6000B, DEPLOYED_1D803298,
-                                 DEPLOYED_3108995D, DEPLOYED_0D8F52BC))
+                                 DEPLOYED_3108995D, DEPLOYED_0D8F52BC, DEPLOYED_B5C24693))
 
 
 @dataclass(frozen=True, slots=True)

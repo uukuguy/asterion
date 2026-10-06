@@ -110,6 +110,34 @@ class _FullGameEngine(_Engine):
         return self.observe()
 
 
+class _EpisodeEngine(_Engine):
+    """Repeatable motion with a failed episode on the second level."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.position = 0
+        self.state = "NOT_FINISHED"
+
+    def observe(self) -> dict[str, object]:
+        value = super().observe()
+        value["frame"] = [[[int(x == self.position) for x in range(8)]]]
+        value["state"] = self.state
+        return value
+
+    def step(self, action: str) -> dict[str, object]:
+        self.calls.append(action)
+        if action == "ACTION2":
+            self.levels_completed += 1
+        elif action == "ACTION1":
+            self.position += 1
+        elif action == "ACTION3":
+            self.state = "GAME_OVER"
+        elif action == "RESET":
+            self.position = 0
+            self.state = "NOT_FINISHED"
+        return self.observe()
+
+
 class _HistoryEngine(_Engine):
     def observe(self) -> dict[str, object]:
         value = super().observe()
@@ -1041,6 +1069,85 @@ class TestNativeP7Broker(unittest.TestCase):
         self.assertEqual(broker.seal().primitive_actions, 4)
         self.assertEqual(broker.seal().levels_completed, 2)
         self.assertEqual([call[0] for call in engine.calls], ["ACTION1", "ACTION1", "RESET", "ACTION1"])
+
+    def test_reset_preserves_observations_and_requires_new_episode_probe_support(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+        from asterion.applications.prime.p7.game_mechanics import GameMechanicsStore
+        from asterion.applications.prime.p7.semantic_cognition import SemanticCognitionStore
+        from asterion.applications.prime.p7.world_model import WorldModelStore
+
+        for semantic_session in (False, True):
+            with self.subTest(semantic_session=semantic_session), tempfile.TemporaryDirectory() as directory:
+                engine = _EpisodeEngine()
+                root = Path(directory)
+                store = GameMechanicsStore(root / "mechanics", engine.game_id, 0, 7)
+                semantic = (SemanticCognitionStore(root / "semantic", engine.game_id, 0, 7, level=0)
+                            if semantic_session else None)
+                broker = ArcBroker(
+                    engine=engine, game=P7GameSelection(engine.game_id, 0, 2),
+                    world_model=WorldModelStore(engine.game_id, 0, 7),
+                    game_mechanics_store=store, semantic_cognition_store=semantic,
+                    semantic_cognition_read_only=False,
+                )
+                broker.bind_history("episode-reset")
+                for action in ("ACTION2", "ACTION1", "ACTION1", "ACTION3"):
+                    broker.act((action,))
+                candidate = next(item for item in broker.mechanism_candidates()
+                                 if item["action"]["name"] == "ACTION1" and item["level"] == 1)
+                mechanism = candidate["compiled_mechanism"]
+                broker.record_hypothesis("mechanics", "motion-probe", {
+                    "mechanism": mechanism,
+                    "probe": {"action": {"name": "ACTION1", "data": {}},
+                              "expect": {"cell": {"x": 3, "y": 0, "value": 1}}},
+                    "dependencies": [],
+                })
+                before_history = tuple(broker._bound_history())
+                before_journal = broker.journal
+                before_replay = tuple(broker._replay_observations)
+                before_memory = broker.playbook_projection()["level_memory"]
+                before_records = store.records()
+
+                broker.act(("RESET",))
+
+                self.assertFalse(any(reason.startswith("history-validation-failed")
+                                     for reason in broker.retrodiction_status()["reasons"]))
+                self.assertIsNone(broker.processing_diagnostic)
+                self.assertEqual(broker.status().levels_completed, 1)
+                self.assertEqual(broker.world_model().current_level, 1)
+                self.assertEqual(tuple(broker._bound_history()[:-1]), before_history)
+                self.assertEqual(broker._bound_history()[-1].action, "RESET")
+                self.assertEqual(broker.journal[:-1], before_journal)
+                self.assertEqual(tuple(broker._replay_observations[:-1]), before_replay)
+                self.assertEqual(broker.playbook_projection()["level_memory"], before_memory)
+                self.assertEqual(store.records(), before_records)
+                self.assertEqual({item["sequence"] for item in broker.action_effects()}, {1, 2, 3, 4})
+                self.assertIsNone(broker._pending_probe)
+                self.assertFalse(broker._probe_tokens)
+                self.assertIsNone(broker._mechanism_certificate)
+                self.assertIsNone(broker._mechanism_spec)
+                self.assertIsNone(broker.transition_model())
+                self.assertFalse(broker._tried_actions)
+                self.assertFalse(broker._no_effect_counts)
+                self.assertFalse(broker._unknown_guard_probes)
+                self.assertEqual(broker.model_search()["reason"], "no-planner-certificate")
+
+                broker.act(("ACTION1",))
+                self.assertIsNotNone(broker.transition_model())
+                self.assertEqual(broker._experience_inducer.candidates()[0].evidence_sequences, (6,))
+                self.assertIsNone(broker._mechanism_certificate)
+                broker.record_hypothesis("mechanics", "motion-probe", {
+                    "mechanism": mechanism,
+                    "probe": {"action": {"name": "ACTION1", "data": {}},
+                              "expect": {"cell": {"x": 2, "y": 0, "value": 1}}},
+                    "dependencies": [],
+                })
+                broker.act(("ACTION1",))
+                self.assertTrue(broker._mechanism_certificate.planner_eligible)
+                self.assertEqual(broker._mechanism_certificate.covered_sequences, (6, 7))
+                self.assertEqual({item.value["sequence"] for item in
+                                  broker.export_playbook(successful=False).effect_summaries},
+                                 {1, 2, 3, 4, 6, 7})
 
     def test_reset_requires_gameplay_in_current_level_and_preserves_progress(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
