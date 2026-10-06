@@ -3913,3 +3913,6 @@
 - 13:00 Full promotion PASS on 0f4fb448: 25 commands, 4117 tests, four skips, zero provider operations.
 - 2026-10-06 13:03 CST — Fresh fourth25 opened15ffcc07; froze109levels/4097actions, paced500steps/min, independent of local solving; user authorized new games.
 - 2026-10-06 13:10 CST — Final0f4 parent923 adopted; SB26/SC25 active, BP6 second sealed unchanged; existing Zen latest33-frame observation verified.
+- 2026-10-06 13:11 CST — 9eb33250 records certified deployment, live two-game observation and fourth-card tracking for reliable continuation.
+- 13:28 Show latest zero-saved attempts by default so recorded cognition remains visible. [c3a49dfd]
+- 2026-10-06 13:32 CST — Zero-saved default fixed; SB ordinary Zen view33frames verified, SC/SK lanes restored with isolated trace-failure quarantine.
