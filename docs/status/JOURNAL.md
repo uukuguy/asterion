@@ -4009,3 +4009,6 @@
 - 2026-10-06 — User reiterated two genuine failures are per round, not permanent; new BP/LF/SK phase authorized alongside WA.
 - 2026-10-06 17:54 CST — New BP/LF/SK round resets scope counts only; AstraCLEAR/10testsPASS; parent49324→4227 adoption released,guest signals0.
 - 2026-10-06 17:54 CST — Actualfourunits running WA30L8/BP35L6/LF52L8/SK48L5,each900seconds; all cumulative history and saved prefixes retained.
+- 1e874dda — Record per-round renewal and four actual guests so future recovery avoids permanent historical limits.
+- 2026-10-06 18:07 CST — Generic deferred-round joining AstraCLEAR/9testsPASS; WA scope renewed, parent4227→9526released/guest signals0.
+- 2026-10-06 18:07 CST — Fouractualunitsactive; WA newrun180432 continuesL8 with23newactions and nativecompute/modelrevisionevents.

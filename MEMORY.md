@@ -31,7 +31,7 @@
 
 ### project — P7 parallel solving and remote sharing
 
-- Latest user authorization is four concurrent local games, with900seconds per level attempt. Each explicit restart starts a fresh two-genuine-failure count per blocked level; previous failures and experience remain intact. This supersedes older two-slot scheduling preferences. Two failures pause a game only within that round; a continued/restarted round must requeue unfinished games with a fresh count, never permanently exclude them using historical totals.
+- Latest user authorization is four concurrent local games, with900seconds per level attempt. Each explicit restart starts a fresh two-genuine-failure count per blocked level; previous failures and experience remain intact. This supersedes older two-slot scheduling preferences. Two failures pause a game only within that round; a continued/restarted round must requeue unfinished games with a fresh count, never permanently exclude them using historical totals. A renewed round must retain requested active games as deferred joins, so their later natural exit does not silently remove a parallel slot.
 - User prioritizes SB26 next after all other games gained at least one saved level. Restart its initial state in a distinct cycle, preserve its old unsealed failure, and never admit the old prefix as a saved route.
 - Vercel shares broad progress and replay with others, so remote updates may be slower. User chose observation/replay only and requires local-to-cloud push, not a cloud connection back into local data. Local console should continue updating normally. Free storage capacity matters; no paid plan upgrade is authorized.
 
