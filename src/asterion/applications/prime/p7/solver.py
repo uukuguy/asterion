@@ -10,6 +10,8 @@ from .research import ResearchWorkspace, copy_json, identifier
 from .score import canonical_bytes, digest
 from .solver_events import build_solver_payload
 from .verified_history import validate_prediction
+from .dynamic_evidence import EvidenceProcessingError
+from .processing_diagnostics import DiagnosticLog
 
 
 class Solver:
@@ -24,6 +26,7 @@ class Solver:
         attempt_id: str,
         event_sink,
         experience=None,
+        diagnostics=None,
     ):
         self.broker, self.kernel, self.control = broker, kernel, control
         self.run_id, self.attempt_id = identifier(run_id), identifier(attempt_id)
@@ -50,9 +53,12 @@ class Solver:
         self._active_task = None
         self._cell_tasks = {}
         self._finished_cells = set()
+        self.diagnostics = diagnostics if diagnostics is not None else DiagnosticLog(workspace_root.parent / "processing-diagnostics.json")
+        self._processing_blocked = False
 
     def _observation(self) -> tuple[dict, dict]:
         full = self.broker.observation_state().to_projection()
+        complete = self.broker.observation_reference()
         observation = {
             key: copy_json(full[key])
             for key in (
@@ -69,12 +75,14 @@ class Solver:
             if isinstance(frame[0][0], list)
             else copy_json(frame)
         )
+        observation["animation_ref"] = copy_json(complete["animation_ref"])
+        observation["animation_paged"] = bool(complete["animation_ref"] and complete["animation_ref"]["frame_count"] > 1)
         for key in ("hud", "timers", "resources", "entities", "relations", "events"):
             if len(canonical_bytes(full[key])) <= 2048:
                 observation[key] = copy_json(full[key])
         if observation != full:
             observation["projection_truncated"] = True
-        sequence = len(self.broker.journal)
+        sequence = complete["sequence"]
         reference = {
             "run_id": self.run_id,
             "attempt_id": self.attempt_id,
@@ -82,7 +90,7 @@ class Solver:
                 observation["levels_completed"] + 1, self.broker.game.win_levels
             ),
             "sequence": sequence,
-            "observation_sha256": digest(full),
+            "observation_sha256": complete["observation_sha256"],
         }
         return observation, reference
 
@@ -102,6 +110,8 @@ class Solver:
                 "needs_revision": self._needs_revision,
                 "revision_reason": self._revision_reason,
                 "environment_result_unknown": self._environment_uncertain,
+                "processing_blocked": self._processing_blocked,
+                "diagnostics": self.diagnostics.projection()[-8:],
                 "checkpoint": self._workspace.checkpoint_manifest(),
             }
             if self._experience is not None:
@@ -263,8 +273,28 @@ class Solver:
         try:
             self._sink(kind, payload)
         except Exception:
-            # A public display failure cannot alter the environment's settlement.
+            # Keep failures visible even when the display sink itself is broken.
+            self.diagnostics.record({
+                "diagnostic_id": f"console-publication-failed:derived-failed:{reference['sequence']}",
+                "code": "console-publication-failed", "severity": "warning",
+                "stage": "derived-failed", "action_sequence": reference["sequence"],
+                "outcome_known": True, "durable": False, "observed": None,
+                "limit": None, "unit": None, "recovery": "read-only-rebuild",
+            })
+
+    def _processing_failure(self, error):
+        self._processing_blocked = True
+        self._environment_uncertain = not error.outcome_known
+        diagnostic = self.diagnostics.record(error.diagnostic)
+        try:
+            self._sink("diagnostic", diagnostic)
+        except Exception:
+            # The independent diagnostic log remains available in context/summary.
             pass
+        request = getattr(self.control, "request", None)
+        if callable(request):
+            request("stop", "processing-unavailable")
+        return diagnostic
 
     def _focus_event(
         self, status: str, *, origin: str, elapsed_ms=None, summary="", task_id=None
@@ -590,6 +620,7 @@ class Solver:
             or self._needs_calibration
             or self._needs_revision
             or self._environment_uncertain
+            or self._processing_blocked
             or getattr(self.kernel, "lost", False)
         ):
             raise ValueError
@@ -713,7 +744,7 @@ class Solver:
             except (ValueError, TypeError, KeyError, AttributeError):
                 return {
                     "status": "rejected",
-                    "reason": "worldmap-revision-required"
+                    "reason": "processing-unavailable" if self._processing_blocked else "worldmap-revision-required"
                     if self._needs_revision
                     else "invalid-actor-plan",
                     "needs_revision": self._needs_revision,
@@ -721,6 +752,7 @@ class Solver:
                     "observation_ref": self._observation()[1],
                     "requires_calibration": self._needs_calibration,
                     "workspace_revision": self._workspace.revision,
+                    "diagnostics": self.diagnostics.projection(),
                 }
             observation, reference = self._observation()
             result = {
@@ -767,8 +799,10 @@ class Solver:
                     stop_reason = self.control.snapshot().get("state", "stopped")
                     break
                 before_levels = observation["levels_completed"]
+                reply_received = False
                 try:
                     dispatched = self.broker.act_checked([native])
+                    reply_received = True
                     count = dispatched["applied_count"]
                     if type(count) is not int or count not in (0, 1):
                         raise ValueError
@@ -837,9 +871,39 @@ class Solver:
                     )
                     if stop_reason == "matched" and not self.control.action_allowed():
                         stop_reason = self.control.snapshot().get("state", "stopped")
+                except EvidenceProcessingError as error:
+                    stop_reason = "processing-failed" if error.outcome_known else "environment-result-unknown"
+                    self._processing_failure(error)
+                    result["diagnostics"] = self.diagnostics.projection()
+                    unexecuted_start = index + 1
+                    if not error.outcome_known:
+                        result["uncertain_step_index"] = index
+                        result["uncertain_step"] = copy_json(value["steps"][index])
+                        result["feedback"].append({
+                            "step_index": index, "mismatch_kind": "unknown",
+                            "expected": copy_json(value["steps"][index]["expect"]),
+                            "actual": None, "differences": [],
+                            "counterexample_sequence": None, "observation_ref": reference,
+                        })
                 except Exception:
+                    if reply_received:
+                        error = EvidenceProcessingError(
+                            "derived-projection-failed", stage="derived-failed",
+                            action_sequence=reference["sequence"], outcome_known=True,
+                            durable=True, recovery="read-only-rebuild",
+                        )
+                        self._processing_failure(error)
+                        result["diagnostics"] = self.diagnostics.projection()
+                        stop_reason = "processing-failed"
+                        unexecuted_start = index + 1
+                        break
                     stop_reason = "environment-result-unknown"
-                    self._environment_uncertain = True
+                    self._processing_failure(EvidenceProcessingError(
+                        "engine-no-reply", stage="dispatched-no-reply",
+                        action_sequence=reference["sequence"] + 1,
+                        outcome_known=False,
+                    ))
+                    result["diagnostics"] = self.diagnostics.projection()
                     result["uncertain_step_index"] = index
                     result["uncertain_step"] = copy_json(value["steps"][index])
                     unexecuted_start = index + 1

@@ -37,7 +37,8 @@ class TestProcessingDiagnostics(unittest.TestCase):
     def test_public_diagnostic_rejects_private_fields_and_text(self):
         validate = self.module().public_diagnostic
         for change in ({"message": "SENTINELSECRET"}, {"code": "/private/SENTINELSECRET"},
-                       {"recovery": "Bearer SENTINELSECRET"}, {"stage": "OPENAI_API_KEY=SENTINELSECRET"}):
+                       {"recovery": "Bearer SENTINELSECRET"}, {"stage": "OPENAI_API_KEY=SENTINELSECRET"},
+                       {"code": "sk-sentinelsecret"}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 validate({**self.diagnostic(), **change})
 

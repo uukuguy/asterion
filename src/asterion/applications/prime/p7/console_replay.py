@@ -151,7 +151,9 @@ def projection_revision(fingerprint: tuple, content_sha256: str | None = None) -
 
 
 def projection_manifest(snapshot: dict, revision: str) -> dict:
-    return {'schema': _SCHEMA, 'state': 'ready', 'run_id': snapshot['run']['run_id'],
+    warnings = {'diagnostics': snapshot['diagnostics']} if 'diagnostics' in snapshot else {}
+    return {'schema': 'asterion.arc-agi3-p7-replay-manifest/v2' if warnings else _SCHEMA,
+            **warnings, 'state': 'ready', 'run_id': snapshot['run']['run_id'],
             'revision': revision, 'run': snapshot['run'], 'warnings': snapshot.get('warnings', []),
             'levels': [{'level': level['level'], 'status': level['status'],
                         'frame_count': len(level.get('frames', [])),

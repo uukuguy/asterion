@@ -13,6 +13,24 @@ from tests.test_prime_p7_console_session import ConsoleSessionFixture, RUN_ID
 
 
 class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
+    def test_prepared_replay_preserves_typed_warning_projection(self):
+        from asterion.applications.prime.p7.processing_diagnostics import DiagnosticLog
+        root, snapshot = self.saved()
+        warning = DiagnosticLog().record({
+            'diagnostic_id': 'diagnostic-1', 'code': 'derived-projection-failed',
+            'severity': 'warning', 'stage': 'derived-failed', 'action_sequence': 1,
+            'outcome_known': True, 'durable': True, 'observed': None, 'limit': None,
+            'unit': None, 'recovery': 'read-only-rebuild',
+        })
+        snapshot.update(schema='asterion.arc-agi3-p7-console/v2', diagnostics=[warning])
+        self.save(root, snapshot)
+        session = self.session(snapshot_reader=lambda _: self.fail('prepared diagnostic was discarded'))
+        manifest = session.replay_manifest(RUN_ID)
+        self.assertEqual(manifest['diagnostics'], [warning])
+        self.assertEqual(manifest['schema'], 'asterion.arc-agi3-p7-replay-manifest/v2')
+        detail = session.replay_level(RUN_ID, 2, manifest['revision'])
+        self.assertEqual(detail['diagnostics'], [warning])
+
     def saved(self, source_id=None):
         root = self.root.resolve() / '.asterion-private' / 'prime-p7-live' / RUN_ID
         root.mkdir(parents=True, exist_ok=True)

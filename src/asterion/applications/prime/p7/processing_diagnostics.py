@@ -6,6 +6,8 @@ It does not authorize execution, recover a game, or own animation storage.
 
 from datetime import datetime, timezone
 import re
+import json
+from pathlib import Path
 from threading import RLock
 
 _FIELDS = frozenset({
@@ -17,7 +19,11 @@ _STAGES = frozenset({
     "not-dispatched", "dispatched-no-reply", "reply-received-invalid",
     "validated-not-durable", "durably-committed", "derived-failed",
 })
-_CODE = re.compile(r"[a-z][a-z0-9-]{0,95}\Z")
+PROCESSING_CODES = frozenset({
+    "evidence-write-failed", "evidence-read-failed", "evidence-hash-failed", "observation-validation-failed",
+    "derived-projection-failed", "console-publication-failed", "research-read-failed",
+    "research-response-budget-exceeded", "engine-no-reply", "engine-response-invalid",
+})
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z")
 _RECOVERY = frozenset({
     "pause-and-rebuild", "read-only-rebuild", "stop-without-redispatch",
@@ -44,7 +50,7 @@ def public_diagnostic(value):
     if type(value) is not dict or not _FIELDS <= value.keys() or value.keys() - (_FIELDS | _AGGREGATE):
         raise ValueError("processing diagnostic unavailable")
     if (type(value["diagnostic_id"]) is not str or not _ID.fullmatch(value["diagnostic_id"])
-            or type(value["code"]) is not str or not _CODE.fullmatch(value["code"])
+            or type(value["code"]) is not str or value["code"] not in PROCESSING_CODES
             or type(value["severity"]) is not str or value["severity"] not in {"info", "warning", "error"}
             or type(value["stage"]) is not str or value["stage"] not in _STAGES
             or type(value["recovery"]) is not str or value["recovery"] not in _RECOVERY
@@ -76,9 +82,34 @@ def public_diagnostic(value):
 class DiagnosticLog:
     """Merge repeated failures while keeping resolved diagnostic history."""
 
-    def __init__(self):
+    def __init__(self, path: Path | None = None):
         self._records = {}
         self._lock = RLock()
+        self._path = path
+
+    def _persist(self):
+        if self._path is None:
+            return
+        from .run_story.storage import write_atomic_file
+        try:
+            if any(part.is_symlink() for part in (self._path, *self._path.parents)):
+                raise OSError
+            self._path.parent.mkdir(parents=True, exist_ok=True)
+            write_atomic_file(self._path, json.dumps(self.projection(), ensure_ascii=True,
+                                                    separators=(',', ':')).encode())
+        except OSError:
+            # Preserve the original warning in memory/summary when its own
+            # derivative file cannot be written. Do not recurse through the sink.
+            sequence = max((value['action_sequence'] for value in self._records.values()), default=0)
+            value = dict(diagnostic_id=f'evidence-write-failed:derived-failed:{sequence}',
+                         code='evidence-write-failed', severity='warning', stage='derived-failed',
+                         action_sequence=sequence, outcome_known=True, durable=False,
+                         observed=None, limit=None, unit=None, recovery='read-only-rebuild')
+            previous = self._records.get(value['diagnostic_id'])
+            now = _timestamp()
+            value.update(first_seen=previous['first_seen'] if previous else now, last_seen=now,
+                         count=previous['count'] + 1 if previous else 1, status='active', recovered_at=None)
+            self._records[value['diagnostic_id']] = value
 
     def record(self, diagnostic, *, timestamp=None):
         value = public_diagnostic(diagnostic)
@@ -97,6 +128,7 @@ class DiagnosticLog:
                 status="active", recovered_at=None,
             )
             self._records[value["diagnostic_id"]] = value
+            self._persist()
             return dict(value)
 
     def resolve(self, diagnostic_id, *, timestamp=None):
@@ -104,6 +136,7 @@ class DiagnosticLog:
         with self._lock:
             record = self._records[diagnostic_id]
             record.update(status="recovered", recovered_at=timestamp)
+            self._persist()
             return dict(record)
 
     def projection(self):

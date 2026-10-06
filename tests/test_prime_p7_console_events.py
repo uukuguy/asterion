@@ -22,6 +22,25 @@ class TestConsoleEvents(unittest.TestCase):
                 'observation_sha256': 'sha256:' + 'a' * 64,
                 'goal': '移到目标旁', 'basis': '已看到位置', 'expected': '观察位置变化'}
 
+    def test_typed_warning_survives_console_projection_without_raw_error_text(self):
+        from asterion.applications.prime.p7.processing_diagnostics import DiagnosticLog
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        log = DiagnosticLog()
+        warning = log.record({
+            'diagnostic_id': 'diagnostic-1', 'code': 'evidence-write-failed',
+            'severity': 'error', 'stage': 'validated-not-durable',
+            'action_sequence': 0, 'outcome_known': True, 'durable': False,
+            'observed': None, 'limit': None, 'unit': None, 'recovery': 'pause-and-rebuild',
+        })
+        self.writer.append('diagnostic', warning)
+        rows = read_console_events(self.root, self.root.name, 'sp80-test')
+        self.assertEqual(rows[0]['schema'], 'asterion.prime.p7-console-event/v3')
+        snapshot = build_console_snapshot(self.root)
+        self.assertEqual(snapshot['diagnostics'], [warning])
+        self.assertEqual(snapshot['schema'], 'asterion.arc-agi3-p7-console/v2')
+        with self.assertRaises(ValueError):
+            self.writer.append('diagnostic', {**warning, 'message': 'SENTINELSECRET'})
+
     def test_identity_sequence_and_partial_tail(self):
         self.writer.append('decision', self.decision())
         self.writer.append('decision', {**self.decision(), 'decision_id': 'decision-2'})
@@ -311,6 +330,10 @@ class TestDecisionSource(unittest.TestCase):
             journal = ()
             def observation_state(self):
                 return SimpleNamespace(to_projection=lambda: {'observation': len(self.journal)})
+            def observation_reference(self):
+                return {'sequence': len(self.journal),
+                        'observation_sha256': digest({'observation': len(self.journal)}),
+                        'animation_ref': None}
             def cognition_projection(self):
                 return {}
         class Recorder:

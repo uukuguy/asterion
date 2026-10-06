@@ -9,9 +9,11 @@ from threading import Lock
 
 from .observation_state import ObservationState
 from .score import digest
+from .processing_diagnostics import public_diagnostic
 
 SCHEMA = 'asterion.prime.p7-console-event/v1'
 SCHEMA_V2 = 'asterion.prime.p7-console-event/v2'
+SCHEMA_V3 = 'asterion.prime.p7-console-event/v3'
 RESEARCH_KINDS = frozenset({'compute_task', 'model_revision', 'plan', 'feedback', 'run_control'})
 _MAX_ROW_BYTES = 1100 * 1024
 _MAX_FILE_BYTES = 32 * 1024 * 1024
@@ -160,6 +162,8 @@ def _payload(kind: str, payload: Mapping[str, object]) -> dict:
     if not isinstance(payload, Mapping):
         raise ValueError('console event unavailable')
     value = dict(payload)
+    if kind == 'diagnostic':
+        return public_diagnostic(value)
     if kind in RESEARCH_KINDS:
         try:
             valid = _research_payload(kind, value)
@@ -235,7 +239,11 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
                     raise ValueError('console identity unavailable')
                 if rows and row['game_id'] != rows[0]['game_id']:
                     raise ValueError('console identity unavailable')
-                if row['schema'] not in {SCHEMA, SCHEMA_V2} or (row['schema'] == SCHEMA and row['kind'] in RESEARCH_KINDS) or not _id(row['game_id']) or type(row['sequence']) is not int or row['sequence'] != len(rows) + 1:
+                if (row['schema'] not in {SCHEMA, SCHEMA_V2, SCHEMA_V3}
+                        or (row['kind'] == 'diagnostic' and row['schema'] != SCHEMA_V3)
+                        or (row['schema'] == SCHEMA and row['kind'] in RESEARCH_KINDS)
+                        or not _id(row['game_id']) or type(row['sequence']) is not int
+                        or row['sequence'] != len(rows) + 1):
                     invalid()
                     break
                 if type(row['payload']) is not dict:
@@ -270,7 +278,7 @@ class ConsoleEventWriter:
     def append(self, kind: str, payload: Mapping[str, object]) -> None:
         safe = _payload(kind, payload)
         with self._lock:
-            row = {'schema': SCHEMA_V2 if kind in RESEARCH_KINDS else SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
+            row = {'schema': SCHEMA_V3 if kind == 'diagnostic' else SCHEMA_V2 if kind in RESEARCH_KINDS else SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
                    'sequence': self._sequence + 1, 'kind': kind, 'payload': safe}
             line = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(',', ':')) + '\n').encode()
             if len(line) > _MAX_ROW_BYTES or self._sequence >= _MAX_ROWS or self._bytes + len(line) > _MAX_FILE_BYTES:

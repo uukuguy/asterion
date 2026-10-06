@@ -20,6 +20,7 @@ import shutil
 from .console_events import _payload, _PRIVATE, public_action_labels
 from .console_replay import projection_manifest, projection_level, projection_revision, replay_fingerprint
 from .run_story.storage import publish_directory, write_atomic_file
+from .processing_diagnostics import public_diagnostic
 
 
 _SCHEMA = 'asterion.arc-agi3-p7-prepared-replay/v1'
@@ -172,9 +173,12 @@ def _public(value, depth=0):
 
 
 def _manifest(value, run_id):
+    fields = {'schema', 'state', 'run_id', 'revision', 'run', 'levels', 'warnings'}
+    if type(value) is dict and value.get('schema') == 'asterion.arc-agi3-p7-replay-manifest/v2':
+        fields.add('diagnostics')
     if (type(value) is not dict
-            or set(value) != {'schema', 'state', 'run_id', 'revision', 'run', 'levels', 'warnings'}
-            or value['schema'] != 'asterion.arc-agi3-p7-replay-manifest/v1'
+            or set(value) != fields
+            or value['schema'] not in {'asterion.arc-agi3-p7-replay-manifest/v1', 'asterion.arc-agi3-p7-replay-manifest/v2'}
             or value['state'] != 'ready' or value['run_id'] != run_id
             or type(value['revision']) is not str or not _HEX.fullmatch(value['revision'])
             or type(value['run']) is not dict or set(value['run']) != _RUN_FIELDS):
@@ -199,6 +203,11 @@ def _manifest(value, run_id):
             raise ValueError('prepared replay unavailable')
     for warning in value['warnings']:
         _prose(warning)
+    if 'diagnostics' in value:
+        if type(value['diagnostics']) is not list:
+            raise ValueError('prepared replay unavailable')
+        for diagnostic in value['diagnostics']:
+            public_diagnostic(diagnostic)
 
 
 def _events(events):
@@ -234,9 +243,12 @@ def _events(events):
 
 
 def _detail(value, manifest, number):
-    if (type(value) is not dict or set(value) != {'schema', 'generated_at', 'run', 'levels',
-            'decisions', 'process_events', 'warnings', 'replay_revision'}
-            or value['schema'] != 'asterion.arc-agi3-p7-console/v1'
+    fields = {'schema', 'generated_at', 'run', 'levels', 'decisions', 'process_events', 'warnings', 'replay_revision'}
+    if type(value) is dict and value.get('schema') == 'asterion.arc-agi3-p7-console/v2':
+        fields.add('diagnostics')
+    if (type(value) is not dict or set(value) != fields
+            or value['schema'] not in {'asterion.arc-agi3-p7-console/v1', 'asterion.arc-agi3-p7-console/v2'}
+            or value.get('diagnostics', []) != manifest.get('diagnostics', [])
             or value['run'] != manifest['run'] or value['warnings'] != manifest['warnings']
             or value['replay_revision'] != manifest['revision']
             or type(value['generated_at']) is not str or type(value['levels']) is not list

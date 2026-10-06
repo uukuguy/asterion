@@ -1370,7 +1370,8 @@ class _P7BrokerClient:
         })
 
     def _console_position(self) -> tuple[int, str]:
-        return len(self._broker.journal), digest(self._broker.observation_state().to_projection())
+        reference = self._broker.observation_reference()
+        return reference['sequence'], reference['observation_sha256']
 
     def _emit_console(self, kind: str, payload: Mapping[str, object]) -> None:
         writer = getattr(self, "_console_writer", None)
@@ -2238,19 +2239,17 @@ class _P7BrokerClient:
 
     @staticmethod
     def _observation_view(observation: ArcObservation) -> dict[str, object]:
-        frame = observation.frame
-        frame_truncated = False
-        # Animated frames are useful for local visual analysis, but the model
-        # bridge has a finite response budget. Preserve the settled frame when
-        # the raw animation would exceed that budget and make the loss
-        # explicit to the model.
-        if len(json.dumps(frame, separators=(",", ":"), ensure_ascii=False).encode("utf-8")) > 48 * 1024:
-            frame = (frame[-1],)
-            frame_truncated = True
+        # A model response is a stable-state view. Complete animation remains
+        # in its owned evidence handle and is read explicitly by page.
+        frames = observation.frame
+        frame = [[list(row) for row in frames[-1]]]
+        reference = getattr(frames, 'reference', None)
         return {
             "available_actions": list(observation.available_actions),
             "frame": frame,
-            "frame_truncated": frame_truncated,
+            "frame_truncated": len(frames) > 1,
+            "animation_paged": len(frames) > 1,
+            "animation_ref": reference() if callable(reference) else None,
             "levels_completed": observation.levels_completed,
             "state": observation.state,
             "win_levels": observation.win_levels,
@@ -4943,6 +4942,15 @@ async def run_live(
             elif isinstance(prediction_client, _P7BrokerClient):
                 diagnostics["route_adoption"] = prediction_client.route_adoption()
             research_host = resources_.host_services.get("prime.ipython") if research_mode else None
+            processing_log = getattr(getattr(research_host, "solver", None), "diagnostics", None)
+            processing_records = processing_log.projection() if processing_log is not None else []
+            broker_processing = getattr(broker_value, "processing_diagnostic", None)
+            if broker_processing is not None and not any(
+                item["diagnostic_id"] == broker_processing["diagnostic_id"] for item in processing_records
+            ):
+                from .processing_diagnostics import public_diagnostic
+                processing_records.append(public_diagnostic(broker_processing))
+            diagnostics["processing_diagnostics"] = processing_records
             diagnostics["worker_cell_count"] = (
                 research_host.cell_count if research_mode else live.worker_cell_count(private)
             )
@@ -4973,6 +4981,7 @@ async def run_live(
                 pi_last_failure=diagnostics.get("pi_last_failure"),
                 bridge_method_failures=diagnostics.get("bridge_method_failures"),
                 cleanup_failed=cleanup_failed,
+                processing_diagnostics=diagnostics.get("processing_diagnostics"),
             )
         finally:
             live.write_summary(
@@ -5045,11 +5054,23 @@ def classify_failure_cause(
     bridge_method_failures: Mapping[str, object] | None,
     cleanup_failed: bool,
     pi_last_failure: object = None,
+    processing_diagnostics: object = None,
 ) -> Mapping[str, object]:
     """Classify one failed live run using only bounded private evidence."""
     status = {} if broker_status is None else dict(broker_status)
     private = {} if pi_private is None else dict(pi_private)
     evidence: dict[str, object] = {}
+    from .processing_diagnostics import public_diagnostic
+    if isinstance(processing_diagnostics, list):
+        for item in reversed(processing_diagnostics):
+            try:
+                record = public_diagnostic(item)
+            except ValueError:
+                continue
+            if record["severity"] == "error" and record.get("status", "active") == "active":
+                return {"category": "evidence_processing_failure", "evidence": {
+                    key: record[key] for key in ("code", "stage", "action_sequence", "outcome_known", "durable")
+                }}
     if failure is None:
         return {"category": "none", "evidence": {}}
     if isinstance(failure, asyncio.CancelledError):

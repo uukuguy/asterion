@@ -141,6 +141,37 @@ class P7SolverFixture(unittest.TestCase):
 
 
 class TestP7Solver(P7SolverFixture):
+    def test_known_local_processing_failure_is_explicit_and_never_redispatched(self):
+        from unittest.mock import patch
+        from asterion.applications.prime.p7.dynamic_evidence import EvidenceProcessingError
+        self.revise()
+        plan = self.plan((1,))
+        failure = EvidenceProcessingError('evidence-write-failed', action_sequence=1,
+                                          outcome_known=True, durable=False)
+        with patch.object(self.broker, 'act_checked', side_effect=failure) as dispatch:
+            result = self.solver.execute_plan(plan)
+            repeated = self.solver.execute_plan(plan)
+        self.assertEqual(dispatch.call_count, 1)
+        self.assertEqual(result['stop_reason'], 'processing-failed')
+        self.assertEqual(repeated['diagnostics'], result['diagnostics'])
+        context = self.solver.current_context()
+        self.assertFalse(context['environment_result_unknown'])
+        self.assertTrue(context['processing_blocked'])
+        self.assertTrue(context['diagnostics'][0]['outcome_known'])
+        self.assertTrue(any(kind == 'diagnostic' for kind, _ in self.events))
+
+    def test_context_reference_keeps_complete_identity_separate_from_stable_pixels(self):
+        from unittest.mock import patch
+        complete = {'sequence': 0, 'observation_sha256': 'sha256:' + 'b' * 64,
+                    'animation_ref': {'schema': 'asterion.prime.p7-animation/v1',
+                                      'sha256': 'sha256:' + 'c' * 64, 'frame_count': 95,
+                                      'cell_count': 389120, 'byte_count': 794000}}
+        with patch.object(self.broker, 'observation_reference', return_value=complete):
+            context = self.solver.current_context()
+        self.assertEqual(context['observation_ref']['observation_sha256'], complete['observation_sha256'])
+        self.assertEqual(context['observation']['animation_ref'], complete['animation_ref'])
+        self.assertEqual(len(context['observation']['frame']), 1)
+
     def test_first_plan_requires_semantic_revision_without_computation(self):
         self.assertEqual(
             self.solver.execute_plan(self.plan((1,)))["status"], "rejected"
@@ -378,7 +409,7 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(len(context["observation"]["frame"]), 1)
         self.assertEqual(
             context["observation_ref"]["observation_sha256"],
-            digest(self.broker.observation_state().to_projection()),
+            self.broker.observation_reference()["observation_sha256"],
         )
         self.assertLess(len(canonical_bytes(context)), 64 * 1024)
 

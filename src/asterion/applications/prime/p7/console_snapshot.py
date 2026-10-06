@@ -20,6 +20,7 @@ from asterion.applications.prime.p7.cognition_narrative import (
 from asterion.applications.prime.p7.console_events import public_action_labels, read_console_events
 from asterion.applications.prime.p7.observation_state import ObservationState
 from asterion.applications.prime.p7.score import digest
+from .processing_diagnostics import public_diagnostic
 from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
 
 
@@ -1058,7 +1059,15 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                        and summary.get("replay_verified") is True)
     successful = receipt is not None and replay_verified and completed >= target
     status = "successful" if successful else "unsuccessful" if previous and previous["state"] == "GAME_OVER" else "incomplete"
-    return {"schema": "asterion.arc-agi3-p7-console/v1", "generated_at": datetime.now(timezone.utc).isoformat(),
+    processing = {}
+    for diagnostic in summary.get('diagnostics', {}).get('processing_diagnostics', []) if isinstance(summary.get('diagnostics'), dict) else []:
+        safe = public_diagnostic(diagnostic)
+        processing[safe['diagnostic_id']] = safe
+    for event in source_events:
+        if event['kind'] == 'diagnostic':
+            safe = public_diagnostic(event['payload'])
+            processing[safe['diagnostic_id']] = safe
+    return {"schema": "asterion.arc-agi3-p7-console/v2", "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {"run_id": root.name, "game_id": game, "status": status, "completed_level_count": completed,
                     "seed": _integer(experiment.get("seed")),
                     "win_levels": wins, "target_level": target, "primitive_action_count": action_count,
@@ -1066,6 +1075,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                     "model": _identifier(experiment.get("model"))},
             "levels": [levels[n] for n in sorted(levels)], "decisions": source_decisions + rounds,
             "process_events": process_events,
+            "diagnostics": list(processing.values()),
             "warnings": [_WARNINGS[code] for code in dict.fromkeys(warn)]}
 
 

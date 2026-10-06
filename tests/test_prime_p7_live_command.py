@@ -152,6 +152,17 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
     def test_failure_classification_is_explicit_and_evidence_backed(self) -> None:
         from asterion.applications.prime.p7.operator import classify_failure_cause
 
+        from asterion.applications.prime.p7.dynamic_evidence import EvidenceProcessingError
+        warning = EvidenceProcessingError("evidence-write-failed", action_sequence=1).diagnostic
+        classification = classify_failure_cause(
+            failure=RuntimeError("sk-sentinel-secret"), broker_status={"actions_remaining": 0},
+            pi_private={}, bridge_method_failures={}, cleanup_failed=False,
+            processing_diagnostics=[warning],
+        )
+        self.assertEqual(classification["category"], "evidence_processing_failure")
+        self.assertTrue(classification["evidence"]["outcome_known"])
+        self.assertNotIn("sentinel", json.dumps(classification))
+
         self.assertEqual(
             classify_failure_cause(
                 failure=RuntimeError("incomplete"),
@@ -1724,7 +1735,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         response_limit = _P7_RESPONSE_BUDGET_BYTES - _P7_RESPONSE_HEADROOM_BYTES
         self.assertLessEqual(_json_bytes(observation), response_limit)
         self.assertLessEqual(_json_bytes(cognition), response_limit)
-        self.assertEqual(observation["frame"], frame)
+        self.assertEqual(observation["frame"], [frame[-1]])
         self.assertTrue(observation["planning_background"]["observation"].get("frame_reused"))
         self.assertLessEqual(_json_bytes(cognition["report"]), _COGNITION_OUTPUT_BYTES)
 

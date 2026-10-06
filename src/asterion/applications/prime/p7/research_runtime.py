@@ -153,7 +153,7 @@ class P7ResearchRuntime:
     def poll(self):
         with self._lock:
             position = len(self._broker.journal)
-            observation_hash = digest(self._broker.observation_state().to_projection())
+            observation_hash = self._broker.observation_reference()["observation_sha256"]
             status = self.control.poll(position, observation_hash)
             signature = (status["state"], status["command_id"], status["request_sequence"])
             if signature != self._last_control:
@@ -174,6 +174,8 @@ class P7ResearchRuntime:
         # The bridge waits at the same boundary while the existing Pi loop owns
         # model generation; counting the whole round would deadlock pause.
         while not self._closed and not signal.cancelled:
+            if self.solver.current_context()["processing_blocked"]:
+                return False
             status = self.poll()
             if status["state"] == "running":
                 return True
