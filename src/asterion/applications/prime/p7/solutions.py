@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .recording_stream import recording_rows
+
 from dataclasses import dataclass, replace
 from decimal import Decimal
 from collections.abc import Mapping
@@ -759,27 +761,37 @@ def recorded_observations(
     if len(paths) != 1:
         raise ValueError
     path = _private_path(run, "recordings", session.name, paths[0].name)
-    rows = [json.loads(line)["data"] for line in path.read_text(encoding="utf-8").splitlines()]
-    # Some historical fixtures/recordings retained action identities only.
-    # They cannot authorize animation equivalence and use strict replay.
-    if not any("frame" in row for row in rows):
-        return None
-    start = 0
-    while start < len(rows) and rows[start]["action_input"]["id"] == "RESET":
-        start += 1
-    if start == 0 or len(rows) - start < len(transitions):
-        raise ValueError
-    selected = rows[start - 1:start + len(transitions)]
-    values = []
-    for index, row in enumerate(selected):
-        if row.get("game_id") != game_id or row.get("win_levels") != win_levels:
-            raise ValueError
-        if index:
-            action = row["action_input"]
-            expected = transitions[index - 1]
-            if action["id"] != expected.action or action["data"] != dict(expected.data):
+    initial, values, started, has_frames, index = None, [], False, False, 0
+    for outer in recording_rows(path):
+        row = outer["data"]
+        has_frames = has_frames or "frame" in row
+        if not started and row["action_input"]["id"] == "RESET":
+            initial = row
+            continue
+        if not started:
+            if initial is None:
                 raise ValueError
-        values.append(_snapshot_observation(row, win_levels=win_levels))
+            started = True
+            if "frame" in initial:
+                if initial.get("game_id") != game_id or initial.get("win_levels") != win_levels:
+                    raise ValueError
+                values.append(_snapshot_observation(initial, win_levels=win_levels))
+            initial = None
+        if index < len(transitions):
+            expected = transitions[index]
+            if (row.get("game_id") != game_id or row.get("win_levels") != win_levels
+                    or row["action_input"]["id"] != expected.action
+                    or row["action_input"]["data"] != dict(expected.data)):
+                raise ValueError
+            if "frame" in row:
+                values.append(_snapshot_observation(row, win_levels=win_levels))
+            index += 1
+    if not has_frames:
+        return None
+    if not transitions and initial is not None:
+        values.append(_snapshot_observation(initial, win_levels=win_levels))
+    if index != len(transitions):
+        raise ValueError
     return authenticate_observations(transitions, tuple(values))
 
 
@@ -795,14 +807,17 @@ def _recording_identity(run: Path, transitions: tuple[ArcTransition, ...]) -> tu
     if len(recordings) != 1 or recordings[0].is_symlink() or not recordings[0].is_file():
         return None
     _private_path(run, "recordings", session.name, recordings[0].name)
-    rows = [json.loads(row) for row in recordings[0].read_text(encoding="utf-8").splitlines()]
-    data = [row.get("data") for row in rows if type(row) is dict and type(row.get("data")) is dict]
-    if not data or type(data[0].get("game_id")) is not str or type(data[0].get("win_levels")) is not int:
-        return None
-    game_id, win_levels = data[0]["game_id"], data[0]["win_levels"]
-    actions = []
-    started = False
-    for item in data:
+    game_id, win_levels, started, index = None, None, False, 0
+    for row in recording_rows(recordings[0], include_frames=False):
+        item = row.get("data")
+        if type(item) is not dict:
+            return None
+        if game_id is None:
+            game_id, win_levels = item.get("game_id"), item.get("win_levels")
+            if type(game_id) is not str or type(win_levels) is not int:
+                return None
+        if item.get("game_id") != game_id or item.get("win_levels") != win_levels:
+            return None
         action = item.get("action_input")
         if type(action) is not dict or type(action.get("id")) is not str or type(action.get("data")) is not dict:
             return None
@@ -812,10 +827,10 @@ def _recording_identity(run: Path, transitions: tuple[ArcTransition, ...]) -> tu
                 return None
             continue
         started = True
-        actions.append((name, action_data))
-    if tuple((item.action, item.data) for item in transitions) != tuple(actions):
-        return None
-    return game_id, win_levels
+        if index >= len(transitions) or (name, action_data) != (transitions[index].action, transitions[index].data):
+            return None
+        index += 1
+    return (game_id, win_levels) if game_id is not None and index == len(transitions) else None
 
 
 def _private_path(run: Path, *parts: str) -> Path:

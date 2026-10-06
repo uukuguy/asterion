@@ -20,6 +20,8 @@ operator module may import it and never the other way round.
 
 from __future__ import annotations
 
+from .dynamic_evidence import AnimationFrames, EvidenceProcessingError
+
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -157,6 +159,7 @@ class ArcadeEngine:
         self.game_id = game.game_id
         self.seed = game.seed
         recordings_dir.mkdir(parents=True, exist_ok=True)
+        self.evidence_root = recordings_dir.parent / "animation-evidence"
         self._logger = logging.getLogger(f"asterion.prime.p7.{id(self)}")
         self._logger.handlers = []
         self._logger.addHandler(logging.NullHandler())
@@ -182,19 +185,32 @@ class ArcadeEngine:
         )
         if self._environment is None:
             raise P7LiveSolveError("ARC environment is unavailable")
-        self._current = self._environment.reset()
+        self._evidence_cancelled, self._evidence_deadline = None, None
+        self._current = self._snapshot(self._environment.reset())
 
     def __repr__(self) -> str:
         return "<ArcadeEngine redacted>"
 
     def observe(self) -> Mapping[str, object]:
-        return self._snapshot(self._current)
+        return self._current
 
     def step(self, action: str, data: Mapping[str, int] | None = None) -> Mapping[str, object]:
         if action not in self._actions:
             raise P7LiveSolveError("ARC action is unavailable")
-        self._current = self._environment.step(self._actions[action], {} if data is None else dict(data))
-        return self._snapshot(self._current)
+        self._current = self._snapshot(self._environment.step(self._actions[action], {} if data is None else dict(data)),
+                                      cancelled=self._evidence_cancelled, deadline=self._evidence_deadline)
+        return self._current
+
+    def evidence_control(self):
+        return {"cancelled": self._evidence_cancelled, "deadline": self._evidence_deadline}
+
+    def set_evidence_control(self, *, cancelled=None, deadline=None):
+        """Use the existing run's cancellation/deadline, never an animation budget."""
+        if cancelled is not None and not callable(cancelled):
+            raise ValueError("evidence control unavailable")
+        if deadline is not None and type(deadline) not in (int, float):
+            raise ValueError("evidence control unavailable")
+        self._evidence_cancelled, self._evidence_deadline = cancelled, deadline
 
     def close(self) -> None:
         close = getattr(self._environment, "close", None)
@@ -212,7 +228,17 @@ class ArcadeEngine:
         return value  # type: ignore[return-value]
 
     @classmethod
-    def _snapshot(cls, value: object) -> Mapping[str, object]:
+    def _snapshot(cls, value: object, *, cancelled=None, deadline=None) -> Mapping[str, object]:
+        try:
+            return cls._reply_snapshot(value, cancelled=cancelled, deadline=deadline)
+        except EvidenceProcessingError:
+            raise
+        except Exception:
+            raise EvidenceProcessingError("engine-response-invalid", stage="reply-received-invalid",
+                                          outcome_known=False) from None
+
+    @classmethod
+    def _reply_snapshot(cls, value: object, *, cancelled=None, deadline=None) -> Mapping[str, object]:
         if value is None:
             raise P7LiveSolveError("ARC observation is unavailable")
         available = getattr(value, "available_actions")
@@ -226,7 +252,7 @@ class ArcadeEngine:
             "available_actions": sorted(
                 int(getattr(item, "value", item)) for item in available
             ),
-            "frame": cls._frame(getattr(value, "frame")),
+            "frame": AnimationFrames.capture(getattr(value, "frame"), cancelled=cancelled, deadline=deadline),
             "levels_completed": int(getattr(value, "levels_completed")),
             "state": state_value,
             "win_levels": int(getattr(value, "win_levels")),

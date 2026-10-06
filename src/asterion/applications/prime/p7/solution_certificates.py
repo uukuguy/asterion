@@ -28,7 +28,8 @@ _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z')
 _MAX_FILE = 64 * 1024 * 1024
 _VERIFIERS = ('solutions.py', 'solution_certificates.py', 'replay.py', 'score.py',
               'broker.py', 'game.py', 'observation_state.py', 'private_trace.py', 'live.py',
-              'route_composition.py', 'animation_replay.py')
+              'route_composition.py', 'animation_replay.py', 'dynamic_evidence.py',
+              'recording_stream.py', 'legacy_verifier_profile.py', 'processing_diagnostics.py')
 
 
 class SolutionCertificateError(ValueError):
@@ -51,13 +52,13 @@ def _safe(path):
 
 def _file_hash(path, maximum=_MAX_FILE):
     _safe(path)
-    if not path.is_file() or path.stat().st_size > maximum:
+    if not path.is_file() or (maximum is not None and path.stat().st_size > maximum):
         raise ValueError('solution certificate unavailable')
     digest, size = sha256(), 0
     with path.open('rb') as source:
         while chunk := source.read(1024 * 1024):
             size += len(chunk)
-            if size > maximum:
+            if maximum is not None and size > maximum:
                 raise ValueError('solution certificate unavailable')
             digest.update(chunk)
     return digest.hexdigest()
@@ -103,6 +104,17 @@ def capture_verification_identity(arc_root: Path, game_id: str) -> str:
     verifier['trace.py'] = _file_hash(Path(trace.__file__))
     return _digest({'game': game_identity(arc_root, game_id),
                     'sdk': _sdk_identity(), 'verifier': verifier, 'format': _SCHEMA})
+
+
+def compatible_legacy_identity(arc_root: Path, game_id: str) -> str:
+    """Exact 0f4fb448 verifier profile with the *current exact* SDK/game identity.
+
+    This only admits already-issued immutable certificates. New witnesses and
+    writes always require capture_verification_identity; no SDK call is made.
+    """
+    from .legacy_verifier_profile import DEPLOYED_0F4FB448
+    return _digest({'game': game_identity(arc_root, game_id), 'sdk': _sdk_identity(),
+                    'verifier': DEPLOYED_0F4FB448, 'format': _SCHEMA})
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,7 +192,11 @@ def _source_identity(run: Path, *, descriptor=False):
         if len(paths) > 256:
             raise ValueError('solution source unavailable')
         for path in sorted(paths):
-            digest = _file_hash(path)
+            # SDK recordings belong to the independent animation area. Hash
+            # every byte with bounded reads; no aggregate evidence quota.
+            animation = path.suffix == '.jsonl' and any(
+                part in {'recordings', 'replay-recordings'} for part in path.relative_to(current).parts)
+            digest = _file_hash(path, maximum=None if animation else _MAX_FILE)
             relative = str(path.relative_to(parent))
             stamps.append((relative, digest))
             stat = path.stat()
@@ -276,7 +292,7 @@ def _inventory(runs, candidates):
     return {prefix.source_run_id: _source_identity(runs / prefix.source_run_id, descriptor=True) for prefix in candidates}
 
 
-def _check_certificate(root, prefix, receipt, source, identity, model):
+def _check_certificate(root, prefix, receipt, source, identity, model, *, compatible_identities=()):
     # The registry chooses a token; certificates cannot select executable paths.
     pointer = _json(_pointer(root, prefix.game_id, model))
     winner = pointer.get('winner', {})
@@ -286,7 +302,10 @@ def _check_certificate(root, prefix, receipt, source, identity, model):
     if type(token) is not str or not re.fullmatch(r'[0-9a-f]{64}', token):
         raise ValueError('solution certificate unavailable')
     record = _json(root / 'revisions' / (token + '.json'))
-    if _digest(record) != token or record != _record(prefix, receipt, source, identity, model):
+    recorded_identity = record.get('verification_identity')
+    if (recorded_identity not in (identity, *compatible_identities)
+            or _digest(record) != token
+            or record != _record(prefix, receipt, source, recorded_identity, model)):
         raise ValueError('solution certificate unavailable')
     return pointer
 
@@ -350,7 +369,8 @@ def _publish(arc_root, run, witness, *, expected_model_id, legacy_inventory):
                         raise ValueError('solution registry winner unavailable')
                     prior, prior_receipt, _ = old_evidence
                     _check_certificate(root, prior, prior_receipt, _source_identity(run.parent / old_source),
-                                       witness.verification_identity, expected_model_id)
+                                       witness.verification_identity, expected_model_id,
+                                       compatible_identities=(compatible_legacy_identity(arc_root, prefix.game_id),))
                     if solutions.prefix_rank(prior, catalog[0]) < solutions.prefix_rank(prefix, catalog[0]):
                         winner = prior
         record = _record(prefix, receipt, before, witness.verification_identity, expected_model_id)
@@ -464,7 +484,8 @@ def _read_certified_roster(arc_root: Path, runs_root: Path, catalog: tuple[dict,
             raise ValueError('solution certified source unavailable')
         prefix, receipt, _ = evidence
         identity = capture_verification_identity(arc_root, game_id)
-        verified_pointer = _check_certificate(root, prefix, receipt, _source_identity(run), identity, expected_model_id)
+        verified_pointer = _check_certificate(root, prefix, receipt, _source_identity(run), identity, expected_model_id,
+            compatible_identities=(compatible_legacy_identity(arc_root, game_id),))
         if (verified_pointer != pointer or pointer != {'schema': _REGISTRY, 'game_id': game_id,
                 'seed': 0, 'model_id': expected_model_id, 'winner': pointer.get('winner'),
                 'eligible_sources': inventory, 'rejected_sources': rejected}

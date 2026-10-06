@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from hashlib import sha256
+from .dynamic_evidence import file_sha256
 import json
 from pathlib import Path
 
@@ -116,7 +116,7 @@ def native_evidence(run: Path) -> tuple:
         str(path.relative_to(run)) for path in (run / "recordings").glob("*/*.jsonl")
     )
     hashes = {
-        name: sha256(_private_path(run, *name.split("/")).read_bytes()).hexdigest()
+        name: file_sha256(_private_path(run, *name.split("/")))
         for name in sorted(paths)
     }
     return summary, transitions, observations, receipt, hashes

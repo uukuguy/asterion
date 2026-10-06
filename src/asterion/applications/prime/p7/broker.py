@@ -25,6 +25,7 @@ from .cognition_session import CognitionPersistenceError, CognitionSession, Cogn
 from .game_mechanics import GameMechanicsStore, bounded_text
 from .semantic_cognition import SemanticCognitionStore
 from .observation_state import ObservationState
+from .dynamic_evidence import AnimationFrames, ArcBrokerError, EvidenceProcessingError, observation_digest
 from .hypothesis_simulator import Subgoal, search_counterfactual
 from .playbook import (LevelCompletion, PlaybookKey, PlaybookSnapshot, CheckedFact, CheckedRoute, append_checked_route, capture_completed_level, branch_playbook)
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
@@ -35,10 +36,6 @@ from .world_model import EvidenceRef, WorldModelSnapshot, WorldModelStore
 from .visual_priors import derive_visual_candidates
 from .tool_registry import P7_APPLICATION_TOOL_NAMES, P7_LEGACY_APPLICATION_TOOL_NAMES
 from asterion.runtime.protocol import ProtocolError
-
-
-class ArcBrokerError(RuntimeError):
-    """Public P7 broker failure; its message contains no engine data."""
 
 
 class _PendingProbe(TypedDict):
@@ -113,7 +110,7 @@ class _ArcEngine(Protocol):
 @dataclass(frozen=True, slots=True)
 class ArcObservation:
     available_actions: tuple[str, ...]
-    frame: tuple[tuple[tuple[int, ...], ...], ...]
+    frame: tuple[tuple[tuple[int, ...], ...], ...] | AnimationFrames
     levels_completed: int
     state: str
     win_levels: int
@@ -252,11 +249,11 @@ def _snapshot_observation(value: object, *, win_levels: int) -> ArcObservation:
         if key in value
     }
     if optional:
-        unified = ObservationState.from_observation({**value, **optional})
+        unified = ObservationState.from_observation({**value, **optional, "frame": [[[0]]]})
         projection = unified.to_projection()
         optional = {key: projection[key] for key in optional}
     return ArcObservation(
-        names, _frame(value["frame"]), value["levels_completed"],
+        names, AnimationFrames.capture(value["frame"]), value["levels_completed"],
         value["state"], value["win_levels"], MappingProxyType(optional),
     )
 
@@ -264,16 +261,107 @@ def _snapshot_observation(value: object, *, win_levels: int) -> ArcObservation:
 def _observation_digest(value: ArcObservation) -> str:
     unified = ObservationState.from_observation({
         "available_actions": list(value.available_actions),
-        "frame": value.frame,
+        "frame": [[[0]]],
         "levels_completed": value.levels_completed,
         "state": value.state,
         "win_levels": value.win_levels,
         **dict(value.metadata),
     })
     projection = unified.to_projection()
-    return digest(
-        projection
-    )
+    return observation_digest(projection, value.frame)
+
+
+def _observation_scope(value):
+    import re
+    if value is None:
+        return None
+    if (type(value) is not dict or set(value) != {"run_id", "game_id", "seed", "sequence"}
+            or any(type(value[key]) is not str or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}", value[key])
+                   for key in ("run_id", "game_id"))
+            or type(value["seed"]) is not int or value["seed"] != 0
+            or type(value["sequence"]) is not int or value["sequence"] < 0):
+        raise ValueError("observation scope unavailable")
+    return dict(value)
+
+
+def persist_observation(value: ArcObservation, root, *, scope=None, cancelled=None, deadline=None) -> dict[str, object]:
+    """Persist a complete evidence binding, independently of display listeners."""
+    from pathlib import Path
+    from .run_story.storage import write_atomic_file
+    from .dynamic_evidence import _safe
+    scope = _observation_scope(scope)
+    frames = AnimationFrames.capture(value.frame)
+    reference = frames.persist(Path(root), cancelled=cancelled, deadline=deadline)
+    projection = ObservationState.from_observation({
+        "available_actions": list(value.available_actions), "frame": [[[0]]],
+        "levels_completed": value.levels_completed, "state": value.state,
+        "win_levels": value.win_levels, **dict(value.metadata),
+    }).to_projection()
+    del projection["frame"]
+    full_hash = _observation_digest(value)
+    body = {"schema": "asterion.prime.p7-observation-evidence/v1",
+            "observation_sha256": full_hash, "animation_ref": reference, "projection": projection,
+            "metadata_keys": sorted(value.metadata), "scope": scope}
+    from .score import canonical_bytes
+    raw = canonical_bytes(body)
+    token = hashlib.sha256(raw).hexdigest()
+    try:
+        directory = _safe(Path(root) / "observations")
+        directory.mkdir(parents=True, exist_ok=True)
+        path = _safe(directory / (token + ".json"))
+        if path.exists():
+            if path.read_bytes() != raw:
+                raise ValueError
+        else:
+            write_atomic_file(path, raw)
+    except (OSError, ValueError):
+        raise EvidenceProcessingError("evidence-write-failed") from None
+    return {key: body[key] for key in ("schema", "observation_sha256", "animation_ref", "scope")} | {"descriptor_sha256": token}
+
+
+def read_observation(root, reference, *, expected_scope=None, expected_sha256=None) -> ArcObservation:
+    """Authenticate a descriptor and complete original animation, without SDK."""
+    from pathlib import Path
+    import re
+    from .dynamic_evidence import _safe
+    try:
+        expected_scope = _observation_scope(expected_scope)
+        token = reference["descriptor_sha256"]
+        if type(token) is not str or not re.fullmatch(r"[0-9a-f]{64}", token):
+            raise ValueError
+        path = _safe(Path(root) / "observations" / (token + ".json"))
+        if path.stat().st_size > 512 * 1024:
+            raise ValueError
+        raw = path.read_bytes()
+        body = json.loads(raw)
+        if (type(body) is not dict
+                or set(body) != {"schema", "observation_sha256", "animation_ref", "projection", "metadata_keys", "scope"}
+                or type(body["projection"]) is not dict
+                or set(body["projection"]) != {"available_actions", "levels_completed", "state", "win_levels",
+                    "input_kind", "hud", "timers", "resources", "entities", "relations", "events"}
+                or hashlib.sha256(raw).hexdigest() != token
+                or body["schema"] != "asterion.prime.p7-observation-evidence/v1"
+                or reference != {key: body[key] for key in ("schema", "observation_sha256", "animation_ref", "scope")} | {"descriptor_sha256": token}):
+            raise ValueError
+        scope = _observation_scope(body["scope"])
+        if expected_scope is not None and scope != expected_scope:
+            raise ValueError
+        if expected_sha256 is not None and body["observation_sha256"] != expected_sha256:
+            raise ValueError
+        keys = body["metadata_keys"]
+        if (type(keys) is not list or keys != sorted(set(keys))
+                or any(key not in {"hud", "timers", "resources", "entities", "relations", "events"} for key in keys)):
+            raise ValueError
+        projection = {key: item for key, item in body["projection"].items()
+                      if key in {"available_actions", "levels_completed", "state", "win_levels", "input_kind", *keys}}
+        value = _snapshot_observation({**projection,
+            "frame": AnimationFrames.open(Path(root), body["animation_ref"], verify_full=False)},
+            win_levels=body["projection"]["win_levels"])
+        if _observation_digest(value) != body["observation_sha256"]:
+            raise ValueError
+        return value
+    except (OSError, ValueError, KeyError, TypeError):
+        raise EvidenceProcessingError("evidence-read-failed") from None
 
 
 def _engine_identity(engine: object, game: P7GameSelection | ArcGameContract) -> tuple[str, int]:
@@ -313,6 +401,11 @@ class ArcBroker:
                 raise ValueError
         except BaseException:
             raise ArcBrokerError("unavailable") from None
+        self._evidence_root = getattr(engine, "evidence_root", None)
+        self._evidence_reference = (None if self._evidence_root is None else
+                                    persist_observation(initial, self._evidence_root, scope={
+                                        "run_id": self._evidence_root.parent.name, "game_id": game.game_id,
+                                        "seed": game.seed, "sequence": 0}))
         self._engine = typed_engine
         self._game = game
         if world_model is not None and (
@@ -360,6 +453,8 @@ class ArcBroker:
         self._journal: list[ArcTransition] = []
         self._replay_observations: list[ArcObservation] = [initial]
         self._terminal_reason = "active"
+        self.processing_diagnostic = None
+        self._processing_blocked = False
         self._actions_dispatched = 0
         self._failed_action: str | None = None
         self._level_gameplay_actions = 0
@@ -665,8 +760,9 @@ class ArcBroker:
             try:
                 self._observation_listener(sequence, observation_hash, observation)
             except Exception:
-                # Display failures cannot change settlement or execution authority.
-                pass
+                self.processing_diagnostic = EvidenceProcessingError(
+                    "derived-projection-failed", stage="derived-failed", action_sequence=sequence,
+                    durable=self._evidence_reference is not None, recovery="read-only-rebuild").diagnostic
 
     def observation_state(self) -> ObservationState:
         """Return the current unified observation for model-side reasoning."""
@@ -674,12 +770,22 @@ class ArcBroker:
         current = self._current
         return ObservationState.from_observation({
             "available_actions": list(current.available_actions),
-            "frame": current.frame,
+            "frame": (current.frame[-1],),
             "levels_completed": current.levels_completed,
             "state": current.state,
             "win_levels": current.win_levels,
             **dict(current.metadata),
         })
+
+    def observation_reference(self) -> dict[str, object]:
+        """Original full evidence identity, separate from the settled model view."""
+        frames = self._current.frame
+        return {
+            "observation_sha256": _observation_digest(self._current),
+            "sequence": len(self._journal),
+            "animation_ref": frames.reference() if isinstance(frames, AnimationFrames) else None,
+            "evidence_ref": self._evidence_reference,
+        }
 
     def game_mechanics_projection(self) -> dict[str, object]:
         """Return persistent game-wide mechanism memory as advisory data."""
@@ -2787,7 +2893,7 @@ class ArcBroker:
         }
 
     def _require_open(self) -> None:
-        if self._terminal_reason not in {"active", "reset-required"}:
+        if self._processing_blocked or self._terminal_reason not in {"active", "reset-required"}:
             raise ArcBrokerError("closed")
 
     @property
@@ -2905,11 +3011,37 @@ class ArcBroker:
             before = self._current
             self._actions_dispatched += 1
             try:
-                after = _snapshot_observation(self._step(action), win_levels=self._game.win_levels)
+                reply = self._step(action)
+            except EvidenceProcessingError as failure:
+                self._failed_action = action.name
+                self._terminal_reason = "evidence-unavailable"
+                error = failure.at_action(self._actions_dispatched)
+                self.processing_diagnostic = error.diagnostic
+                raise error from None
             except BaseException:
                 self._failed_action = action.name
                 self._terminal_reason = "engine-uncertain"
-                raise ArcBrokerError("uncertain") from None
+                error = EvidenceProcessingError("engine-no-reply", stage="dispatched-no-reply",
+                                                action_sequence=self._actions_dispatched, outcome_known=False)
+                self.processing_diagnostic = error.diagnostic
+                raise error from None
+            try:
+                after = _snapshot_observation(reply, win_levels=self._game.win_levels)
+            except EvidenceProcessingError as failure:
+                self._failed_action = action.name
+                self._terminal_reason = "evidence-unavailable"
+                error = failure.at_action(self._actions_dispatched)
+                self.processing_diagnostic = error.diagnostic
+                raise error from None
+            except (ValueError, TypeError):
+                self._failed_action = action.name
+                self._terminal_reason = "engine-invalid"
+                error = EvidenceProcessingError("engine-response-invalid", stage="reply-received-invalid",
+                                                action_sequence=self._actions_dispatched, outcome_known=False)
+                self.processing_diagnostic = error.diagnostic
+                raise error from None
+            finally:
+                del reply
             if (
                 after.win_levels != before.win_levels
                 or (action.name == "RESET" and (after.levels_completed != before.levels_completed or after.state != "NOT_FINISHED"))
@@ -2917,17 +3049,74 @@ class ArcBroker:
             ):
                 self._failed_action = action.name
                 self._terminal_reason = "engine-invalid"
-                raise ArcBrokerError("unavailable")
-            transition = ArcTransition(
-                self._primitive_actions,
-                action.name,
-                _observation_digest(before),
-                _observation_digest(after),
-                after.levels_completed - self._initial.levels_completed,
-                action.data,
-            )
-            if self._history is not None:
-                try:
+                error = EvidenceProcessingError("engine-response-invalid", stage="reply-received-invalid",
+                                                action_sequence=self._actions_dispatched, outcome_known=False)
+                self.processing_diagnostic = error.diagnostic
+                raise error
+            try:
+                evidence_reference = (None if self._evidence_root is None else
+                                      persist_observation(after, self._evidence_root, scope={
+                                          "run_id": self._evidence_root.parent.name, "game_id": self._game.game_id,
+                                          "seed": self._game.seed, "sequence": self._actions_dispatched},
+                                          **(self._engine.evidence_control() if callable(getattr(self._engine, "evidence_control", None)) else {})))
+                transition = ArcTransition(
+                    self._primitive_actions,
+                    action.name,
+                    _observation_digest(before),
+                    _observation_digest(after),
+                    after.levels_completed - self._initial.levels_completed,
+                    action.data,
+                )
+                if self._evidence_root is not None:
+                    from .run_story.storage import write_atomic_file
+                    from .score import canonical_bytes
+                    from .dynamic_evidence import _safe
+                    binding = {"schema": "asterion.prime.p7-action-evidence/v1",
+                               "game_id": self._game.game_id, "seed": self._game.seed,
+                               "run_id": self._evidence_root.parent.name,
+                               "win_levels": self._game.win_levels, "target_level": self._game.target_level,
+                               "sequence": transition.sequence, "action": transition.action,
+                               "data": dict(transition.data), "before_sha256": transition.before_sha256,
+                               "after_sha256": transition.after_sha256, "observation": evidence_reference}
+                    raw = canonical_bytes(binding)
+                    directory = _safe(self._evidence_root / "actions")
+                    directory.mkdir(parents=True, exist_ok=True)
+                    path = _safe(directory / (hashlib.sha256(raw).hexdigest() + ".json"))
+                    if path.exists():
+                        if path.stat().st_size != len(raw) or path.read_bytes() != raw:
+                            raise EvidenceProcessingError("evidence-write-failed")
+                    else:
+                        write_atomic_file(path, raw)
+            except Exception as failure:
+                self._failed_action = action.name
+                self._terminal_reason = "evidence-unavailable"
+                error = (failure.at_action(self._actions_dispatched, stage="validated-not-durable",
+                                           outcome_known=True, durable=False)
+                         if isinstance(failure, EvidenceProcessingError) else
+                         EvidenceProcessingError("evidence-hash-failed", action_sequence=self._actions_dispatched))
+                self.processing_diagnostic = error.diagnostic
+                raise error from None
+            self._journal.append(transition)
+            self._replay_observations.append(after)
+            transitions.append(transition)
+            self._current = after
+            self._evidence_reference = evidence_reference
+            if action.name == "RESET" or after.levels_completed > before.levels_completed:
+                self._level_gameplay_actions = 0
+            else:
+                self._level_gameplay_actions += 1
+            if after.levels_completed == self._game.target_level:
+                self._terminal_reason = (("game-won" if after.state == "WIN" else "game-incomplete")
+                                         if self._game.is_full_game else "level-completed")
+            elif self._primitive_actions == self._game.action_cap:
+                self._terminal_reason = ("human-baseline" if isinstance(self._game, P7GameSelection)
+                    and self._game.action_cap_override is not None else "action-cap")
+            elif after.state == "GAME_OVER":
+                self._terminal_reason = "reset-required" if self._level_gameplay_actions > 0 else "game-over"
+            else:
+                self._terminal_reason = "active"
+            try:
+                if self._history is not None:
                     record = ArcHistoryRecord.following(
                         self._history[-1], action=action,
                         before_state_sha256=transition.before_sha256,
@@ -2935,51 +3124,33 @@ class ArcBroker:
                         frame=after.frame[-1], levels_completed=after.levels_completed,
                         state=after.state,
                     )
-                except ArcPredictionError:
-                    self._failed_action = action.name
-                    self._terminal_reason = "engine-invalid"
-                    raise ArcBrokerError("unavailable") from None
-                self._history.append(record)
-                self._record_world_evidence(record)
-            self._journal.append(transition)
-            self._replay_observations.append(after)
-            transitions.append(transition)
-            self._current = after
-            self._notify_observation(transition.sequence, transition.after_sha256, after)
-            self._record_semantic_action(action, after)
-            self._record_cognition()
-            if action.name == "RESET" or after.levels_completed > before.levels_completed:
-                self._clear_no_effect_level(before.levels_completed)
-                self._level_gameplay_actions = 0
-            else:
-                self._level_gameplay_actions += 1
-                # Retrodict: record every attempted (level, action, position)
-                # tuple, regardless of outcome. The model can query this to
-                # see what it has already tried — both succeeded and not.
-                self._record_tried_action(action, after.levels_completed)
-                if self._no_effect_guard and after.frame[-1] == before.frame[-1]:
-                    self._record_no_effect(action, after.levels_completed)
-            if after.levels_completed == self._game.target_level:
-                self._terminal_reason = (
-                    ("game-won" if after.state == "WIN" else "game-incomplete")
-                    if self._game.is_full_game else "level-completed"
-                )
-                break
-            if self._primitive_actions == self._game.action_cap:
-                self._terminal_reason = (
-                    "human-baseline"
-                    if isinstance(self._game, P7GameSelection)
-                    and self._game.action_cap_override is not None
-                    else "action-cap"
-                )
-                break
-            if after.state == "GAME_OVER":
-                self._terminal_reason = (
-                    "reset-required" if self._level_gameplay_actions > 0 else "game-over"
-                )
-                break
-            self._terminal_reason = "active"
-            if action.name == "RESET" or after.levels_completed > before.levels_completed:
+                    self._history.append(record)
+                    self._record_world_evidence(record)
+                self._notify_observation(transition.sequence, transition.after_sha256, after)
+                self._record_semantic_action(action, after)
+                self._record_cognition()
+                if action.name == "RESET" or after.levels_completed > before.levels_completed:
+                    self._clear_no_effect_level(before.levels_completed)
+                else:
+                    # Retrodict: record every attempted (level, action, position)
+                    # tuple, regardless of outcome. The model can query this to
+                    # see what it has already tried — both succeeded and not.
+                    self._record_tried_action(action, after.levels_completed)
+                    if self._no_effect_guard and after.frame[-1] == before.frame[-1]:
+                        self._record_no_effect(action, after.levels_completed)
+            except Exception as failure:
+                if isinstance(failure, ArcBrokerError) and str(failure) == "cognition-experiment-mismatch":
+                    # Existing model-level experiment rebinding is recoverable;
+                    # it is not an infrastructure/persistence failure.
+                    raise
+                self._processing_blocked = True
+                error = EvidenceProcessingError("derived-projection-failed", stage="derived-failed",
+                    action_sequence=self._actions_dispatched, durable=evidence_reference is not None,
+                    recovery="read-only-rebuild")
+                self.processing_diagnostic = error.diagnostic
+                raise error from None
+            if (self._terminal_reason != "active" or action.name == "RESET"
+                    or after.levels_completed > before.levels_completed):
                 break
         return ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
 
