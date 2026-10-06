@@ -2608,6 +2608,25 @@ test('overview processing warning remains separate from saved progress and solvi
   } finally {app.dom.window.close();}
 });
 
+test('older unsealed attempts do not mark a newer completed route as a new attempt',async()=>{
+  const overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],status:'completed',completed_levels:2,route_actions:467,
+    best_run_id:'newest-completed',latest_run_id:'newest-completed',recording_run_id:'older-unsealed',
+    runs:[catalogRun('newest-completed'),{...catalogRun('older-unsealed','unverified',false),recording:true}]};
+  overview.games[1]={...overview.games[1],status:'completed',completed_levels:3,
+    best_run_id:'saved-completed',latest_run_id:'newest-redo',
+    runs:[catalogRun('saved-completed'),{...catalogRun('newest-redo','unverified',false),recording:true}]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async()=>response(idleView())});
+  try {
+    await settle();const saved=overviewRow(app,0),redo=overviewRow(app,1);
+    assert.equal(saved.querySelector('.overview-result-badge').textContent,'✓ 全部通关');
+    assert.equal(saved.children[4].textContent,'467');
+    assert.equal(saved.querySelector('.overview-activity-badge'),null);
+    assert.equal(redo.querySelector('.overview-activity-badge').textContent,'● 新尝试');
+    assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
 test('static exports keep the local overview hidden and never fetch',()=>{
   const app=launch(fixture());try{assert.equal(app.$('overview').hidden,true);assert.equal(app.requests.length,0);assert.deepEqual(app.errors,[]);}finally{app.dom.window.close();}
 });

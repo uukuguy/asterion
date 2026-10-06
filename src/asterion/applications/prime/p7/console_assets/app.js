@@ -1784,7 +1784,8 @@
       progress.setAttribute('aria-label', `${displayed} / ${game.win_levels} 关卡`);
       row.querySelector('.overview-progress span').textContent = `${displayed} / ${game.win_levels}${game.progress_pending ? ' · 待封存' : ''}`;
       row.children[2].textContent = Number(game.score).toFixed(2);
-      const recording = game.runs.some((run) => run.recording === true);
+      const latestRunId = latestReplayId(game);
+      const recording = game.runs.some((run) => run.run_id === latestRunId && run.recording === true);
       const solving = gameSolving(game);
       const active = solving || game.status === 'running' || recording;
       const external = active && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
