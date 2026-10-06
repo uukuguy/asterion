@@ -805,7 +805,14 @@
     }
     if (!framePageRequests.has(key)) {
       const token=level.frame_page.source_token,runId=source.snapshot.run.run_id,revision=source.snapshot.replay_revision;
-      const pending=request(`/api/replay/${encodeURIComponent(runId)}/levels/${level.level}/${revision}/frames/${token}/${start}/32`).then(page=>{
+      const readPage = source.snapshot.offline_frames === true
+        ? Promise.resolve().then(() => {
+          const entry=$(`console-frame-page-${level.level}-${start}`);
+          if (!entry || entry.type !== 'application/json') throw new Error('invalid-response');
+          return JSON.parse(entry.textContent);
+        })
+        : request(`/api/replay/${encodeURIComponent(runId)}/levels/${level.level}/${revision}/frames/${token}/${start}/32`);
+      const pending=readPage.then(page=>{
         if (!isRecord(page) || page.schema !== 'asterion.arc-agi3-p7-replay-frame-page/v1' || page.run_id !== runId || page.level !== level.level ||
             page.replay_revision !== revision || page.source_token !== token || page.frame_count !== level.frame_count || page.start !== start ||
             !Array.isArray(page.frames) || page.frames.length !== Math.min(32,level.frame_count-start) ||

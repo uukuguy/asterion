@@ -2869,6 +2869,35 @@ test('missing and stale animation pages preserve saved steps, cognition and the 
   } finally {app.dom.window.close();}
 });
 
+test('offline animation pages seek and play without HTTP and reject missing or foreign pages',async()=>{
+  for (const kind of ['valid','missing','foreign']) {
+    const {data,page}=pagedReplayFixture();
+    Object.assign(data.record,{offline_frames:true,replay_revision:data.manifest.revision});
+    const app=launch(data.record);
+    try {
+      for (const start of [32,64]) {
+        if (kind === 'missing' && start === 64) continue;
+        const entry=app.dom.window.document.createElement('script');
+        entry.id=`console-frame-page-1-${start}`;entry.type='application/json';
+        const payload=page(start);
+        if (kind === 'foreign' && start === 64) payload.run_id='another-run';
+        entry.textContent=JSON.stringify(payload);app.dom.window.document.body.append(entry);
+      }
+      app.$('frame-slider').value='80';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));await settleReplay();
+      assert.equal(app.$('frame-counter').textContent,'81 / 95');
+      assert.match(app.$('world-guide').textContent,/精确认知 80/);
+      assert.match(app.$('level-1').title,/1 动作 · 95 帧/);
+      if (kind === 'valid') {
+        assert.match(app.$('frame-caption').textContent,/f000181/);assert.equal(app.$('board-empty').hidden,true);
+        app.$('frame-slider').value='31';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+        app.$('play-toggle').click();app.tick();await settleReplay();
+        assert.equal(app.$('frame-counter').textContent,'33 / 95');assert.equal(app.$('play-toggle').textContent,'暂停');
+      } else assert.match(app.$('board-empty').textContent,/画面读取失败/);
+      assert.deepEqual(app.requests,[]);assert.deepEqual(app.errors,[]);
+    } finally {app.dom.window.close();}
+  }
+});
+
 const levelReplayConfig={token:'test-token',replay_loading:'level-manifest/v1',games:[
   {game_id:'game0-catalog',alias:'first',win_levels:3,baseline_actions:[1,2,3]},
   {game_id:'game1-catalog',alias:'second',win_levels:3,baseline_actions:[1,2,3]}]};

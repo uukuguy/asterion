@@ -3937,3 +3937,11 @@
 - 2026-10-06 14:48 CST — c81a3f01：保留完整观察身份，明确处理错误并避免重派动作；116 focused PASS，动态分页未完。
 
 - 2026-10-06 14:53 CST — 94c81322：回放按页读取保留进度及游标；跨页播放、缺页、迟到响应 targeted PASS；未部署。
+
+- 2026-10-06 14:55 CST — 7390fe3c：更新活动检查点与128关事实；保留后台版本、期限及未完成边界。
+
+- 2026-10-06 15:05 CST — 旧证书后台静态25题核对：21保存来源PASS，130关原步数/来源不变；SDK/model/API/recert=0，最终包身份待核对。
+
+- 2026-10-06 15:06 CST — 42c3a6cb: Streamed animation evidence preserves canonical hashes and old certificates; typed failures prevent unsafe redispatch.
+
+- 2026-10-06 15:12 CST — 4dc8d524：补齐完整校验未完成和取消告警；DOM相关10PASS，避免返回结果误标未知。
