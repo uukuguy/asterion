@@ -31,6 +31,11 @@ class TestRouteComposition(unittest.TestCase):
     def setUp(self):
         from asterion.applications.prime.p7 import solutions
         self.assertTrue(callable(solutions.load_exact_prefix))
+        # These engines are fixture simulators, not the production SDK/game
+        # implementation. Replay admission is tested; certification is pending.
+        self.enterContext(mock.patch(
+            'asterion.applications.prime.p7.solution_certificates.capture_verification_identity',
+            side_effect=ValueError('fixture verifier unavailable')))
         self.enterContext(contextlib.redirect_stderr(io.StringIO()))
 
     def _source(self, root, run_id, target):
@@ -103,7 +108,13 @@ class TestRouteComposition(unittest.TestCase):
                 self.assertEqual(row["route_sources"][1]["source_start_sequence"], 5)
                 # Existing equal-score native source can win the tie; the new
                 # composed candidate must pass all admission checks regardless.
-                self.assertEqual(len(_load_current_roster_prefixes(arc, run.parent, catalog)), 1)
+                from asterion.applications.prime.p7.solutions import collect_roster_candidates
+                from asterion.applications.prime.p7.solution_certificates import SolutionCertificateError
+                candidates = collect_roster_candidates(arc, run.parent, catalog,
+                                                       expected_model_id='gpt-6.1-sol')[catalog[0]['game_id']]
+                self.assertIn(run.name, [item.source_run_id for item in candidates])
+                with self.assertRaises(SolutionCertificateError):
+                    _load_current_roster_prefixes(arc, run.parent, catalog)
                 self.assertFalse((run / "research").exists())
                 self.assertEqual(before, {p: p.read_bytes() for p in before})
                 for mutation in ("segment", "seam", "model", "mode", "source"):

@@ -35,6 +35,11 @@ class TestTerminalWinRecovery(unittest.TestCase):
         # at import time, and must not retain a test engine for later suites.
         from asterion.applications.prime.p7 import solutions
         self.assertTrue(callable(solutions.load_exact_prefix))
+        # These engines are fixture simulators, not the production SDK/game
+        # implementation. Replay admission is tested; certification is pending.
+        self.enterContext(mock.patch(
+            'asterion.applications.prime.p7.solution_certificates.capture_verification_identity',
+            side_effect=ValueError('fixture verifier unavailable')))
         self.enterContext(contextlib.redirect_stderr(io.StringIO()))
 
     def _source(self, root: Path, *, seal: bool = False) -> Path:
@@ -104,8 +109,15 @@ class TestTerminalWinRecovery(unittest.TestCase):
                     from asterion.applications.prime.p7.console_overview import ConsoleOverview
                     catalog = ({"game_id": "ls20-9607627b", "win_levels": 7,
                                 "baseline_actions": [22, 123, 73, 84, 96, 192, 186]},)
-                    admitted = _load_current_roster_prefixes(arc, recovered.parent, catalog)
+                    from asterion.applications.prime.p7.solutions import collect_roster_candidates
+                    from asterion.applications.prime.p7.solution_certificates import SolutionCertificateError
+                    admitted = collect_roster_candidates(arc, recovered.parent, catalog,
+                                                        expected_model_id='gpt-6.1-sol')[catalog[0]['game_id']]
                     self.assertEqual([item.source_run_id for item in admitted], [recovered.name])
+                    # A verified recovery remains usable locally; submission
+                    # additionally requires a portable save-time certificate.
+                    with self.assertRaises(SolutionCertificateError):
+                        _load_current_roster_prefixes(arc, recovered.parent, catalog)
                     row = ConsoleOverview(recovered.parent, catalog)._read_run(recovered, {catalog[0]["game_id"]: catalog[0]})
                     self.assertEqual(row["status"], "completed")
                     self.assertEqual(row["source_runtime_status"], "failed")
@@ -172,7 +184,15 @@ class TestTerminalWinRecovery(unittest.TestCase):
                     self.assertIsNone(source_experiment(recovered, summary))
                     self.assertIsNone(load_resume_worldmap(recovered, scope))
                     with mock.patch("asterion.applications.prime.p7.solutions._fresh_engine") as replay:
-                        self.assertEqual(_load_current_roster_prefixes(arc, recovered.parent, catalog), ())
+                        from asterion.applications.prime.p7.solutions import collect_roster_candidates
+                        from asterion.applications.prime.p7.solution_certificates import SolutionCertificateError
+                        self.assertEqual(collect_roster_candidates(arc, recovered.parent, catalog,
+                                         expected_model_id='gpt-6.1-sol')[catalog[0]['game_id']], [])
+                        try:
+                            admitted = _load_current_roster_prefixes(arc, recovered.parent, catalog)
+                        except SolutionCertificateError:
+                            admitted = ()
+                        self.assertEqual(admitted, ())
                         replay.assert_not_called()
                     recording.write_bytes(original_recording)
                     (source / "trace/prime-trace.seal.json").unlink(missing_ok=True)
