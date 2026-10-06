@@ -52,9 +52,10 @@
     'observation-validation-failed':'观察校验失败', 'derived-projection-failed':'展示数据整理失败',
     'console-publication-failed':'控制台发布失败', 'research-read-failed':'研究记录读取失败',
     'research-response-budget-exceeded':'研究响应容量超限', 'engine-no-reply':'环境未返回结果', 'engine-response-invalid':'环境返回结果无效',
+    'evidence-cancelled':'证据处理已取消', 'evidence-deadline-exceeded':'证据处理达到本轮时限',
   };
   const DIAGNOSTIC_STAGES = {
-    'not-dispatched':'尚未执行', 'dispatched-no-reply':'已执行，未收到结果', 'reply-received-invalid':'收到结果，校验失败',
+    'not-dispatched':'尚未执行', 'dispatched-no-reply':'已执行，未收到结果', 'reply-received-unvalidated':'收到结果，完整校验未完成', 'reply-received-invalid':'收到结果，校验失败',
     'validated-not-durable':'结果有效，保存未完成', 'durably-committed':'结果已保存', 'derived-failed':'展示或研究数据处理失败',
   };
   const DIAGNOSTIC_RECOVERY = {
