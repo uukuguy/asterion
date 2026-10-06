@@ -4125,3 +4125,5 @@
 2026-10-07 00:45 CST — Community materials distinguish iterative repairs from fixed-version solving; verified officialRESET retains failed-action costs.
 
 2026-10-07 00:54 CST — Checked upstream community criteria: no unattended cold-start100 requirement; retain concise protocol provenance, no added evaluation gate.
+
+2026-10-07 00:59 CST — d53ffbe1: Publish local result evidence and practical P7 reproduction docs for community method review.

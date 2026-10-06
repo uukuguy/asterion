@@ -14,9 +14,11 @@ Describe LLM-generated executable WorldMaps in persistent IPython, empirical pro
 
 ## Evidence and release
 
-Existing local canonical result: 25 games,183 levels,100.000000 local score,6781 saved actions, gpt-6.1-sol; producing code snapshot2f258ff3. New authorized official run/card60c10b53 is currently executing online. Its normal closed receipt must be checked before publishing a final official result or opening the upstream submission PR. Preserve all historical claims and certificates. Cloud fix remains separate and independently verified.
+Existing local canonical result: 25 games,183 levels,100.000000 local score,6781 saved actions, gpt-6.1-sol; final execution runtime snapshot2f258ff3; selected routes retain earlier source identities. New authorized official run/card60c10b53 is currently executing online. Its normal closed receipt must be checked before publishing a final official result or opening the upstream submission PR. Preserve all historical claims and certificates. Cloud fix remains separate and independently verified.
 
 Parallel responsibilities: Sol owns README/reproduction guide; independent reviewer owns the community fork's entry and schema checks; root owns public result evidence, integration, release and tracking; Astra observes the official run without intervention. No secrets or large binaries are copied into either submission.
+
+Community eligibility does not require a fixed-version, empty-history, fully automatic 100-score evaluation. Protocol disclosure describes the actual research; it is not an additional release gate.
 
 ## Checks
 
