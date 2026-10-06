@@ -2944,6 +2944,81 @@ function levelReplayOverview(records) {
 
 const settleReplay=async()=>{await settle();await settle();await settle();};
 
+test('explicit game switches use saved progress for full, partial and zero routes in both replay loaders',async()=>{
+  for (const progressive of [false,true]) for (const completed of [3,2,0]) {
+    const config={...levelReplayConfig,...(!progressive?{replay_loading:undefined}:{})};
+    const first=levelReplayFixture('game0-catalog','switch-first');
+    const target=levelReplayFixture('game1-catalog',`switch-target-${completed}`,{sealed:completed!==0,color:14});
+    target.record.run.completed_level_count=completed;
+    if (completed===3) target.record.levels[2]={...target.record.levels[1],level:3};
+    if (completed===0) target.record.levels.forEach(level=>{level.status=level.frames.length?'incomplete':'not-run';});
+    target.manifest.levels=target.record.levels.map(level=>({level:level.level,status:level.status,
+      frame_count:level.frames.length,action_count:level.actions.length,has_cognition:level.cognition.scope==='final'}));
+    const overview=levelReplayOverview([first,target]);
+    overview.games[1]={...overview.games[1],completed_levels:completed,status:completed===3?'completed':completed?'partial':'running',
+      display_completed_levels:completed===2?3:completed,progress_pending:completed===2,
+      runs:[{...overview.games[1].runs[0],completed_levels:completed}]};
+    overview.totals.display_completed_levels=overview.games.reduce((sum,game)=>sum+(game.display_completed_levels??game.completed_levels),0);
+    overview.totals.display_completed_games=overview.games.filter(game=>(game.display_completed_levels??game.completed_levels)===game.win_levels).length;
+    const preview={schema:target.record.schema,run:{...target.record.run,run_id:null,status:'preview',completed_level_count:0,
+      primitive_action_count:0,target_level:3,replay_verified:false,sealed_trace:false},
+      levels:[{level:3,status:'preview',frames:[{id:'initial-three',grid:[[9]],state:'NOT_FINISHED',levels_completed:2}],
+        actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null}],decisions:[],warnings:[]};
+    let releaseManifest;
+    const app=launch(fixture(),{liveConfig:config,overview,fetch:async url=>{
+      if(url.startsWith('/api/preview/'))return response(preview);
+      const data=url.includes(target.record.run.run_id)?target:first;
+      if(url.endsWith('/manifest'))return data===target&&!releaseManifest?new Promise(resolve=>{releaseManifest=resolve;}):response(data.manifest);
+      if(url.includes('/levels/'))return response(data.detail(Number(url.match(/\/levels\/(\d+)/)[1])));
+      if(url.startsWith('/api/replay/'))return response(data.record);
+      return response(idleView());
+    }});
+    try {
+      await settleReplay();
+      if(completed===3) overviewRow(app,1).querySelector('[data-overview-select]').click();
+      else if(completed===2) overviewRow(app,1).querySelector('[data-overview-watch]').click();
+      else changeGame(app,'game1-catalog');
+      await settleReplay();
+      const expected=completed===2?3:1;
+      if(progressive) {
+        assert.ok(releaseManifest);assert.equal(app.$('board-kicker').textContent,`LEVEL 0${expected}`);
+        releaseManifest(response(target.manifest));await settleReplay();
+      }
+      assert.equal(app.$('board-kicker').textContent,`LEVEL 0${expected}`,`progressive=${progressive}, completed=${completed}`);
+      assert.equal(app.$(`level-${expected}`).getAttribute('aria-current'),'true');
+      assert.equal(app.$('board-empty').hidden,true);
+      if(completed===2) assert.ok(app.requests.some(request=>request.url==='/api/preview/game1-catalog/3'));
+      if(progressive && completed!==2) assert.ok(app.requests.some(request=>request.url.includes(`${target.record.run.run_id}/levels/1/`)));
+      assert.deepEqual(app.errors,[]);
+    } finally {app.dom.window.close();}
+  }
+});
+
+test('late game-switch detail and polling retain an explicitly selected historical level and playback',async()=>{
+  const first=levelReplayFixture('game0-catalog','switch-origin');
+  const target=levelReplayFixture('game1-catalog','switch-live',{sealed:false,color:14});
+  const overview=levelReplayOverview([first,target]);overview.games[1].completed_levels=1;
+  let releaseDetail;
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview,fetch:async url=>{
+    const data=url.includes('switch-live')?target:first;
+    if(url.endsWith('/manifest'))return response(data.manifest);
+    if(url.includes('/switch-live/levels/2/'))return new Promise(resolve=>{releaseDetail=resolve;});
+    if(url.includes('/levels/'))return response(data.detail(Number(url.match(/\/levels\/(\d+)/)[1])));
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();changeGame(app,'game1-catalog');await settleReplay();
+    assert.equal(app.$('board-kicker').textContent,'LEVEL 02');assert.ok(releaseDetail);
+    app.$('level-1').click();releaseDetail(response(target.detail(2)));await settleReplay();
+    assert.equal(app.$('board-kicker').textContent,'LEVEL 01');assert.equal(app.$('board-empty').hidden,true);
+    app.$('play-toggle').click();const timer=[...app.timers.values()].find(fn=>fn.intervalMs<1000);assert.ok(timer);
+    [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
+    [...app.timers.values()].find(fn=>fn.intervalMs===2000)();await settleReplay();
+    assert.equal(app.$('board-kicker').textContent,'LEVEL 01');assert.equal(app.$('play-toggle').textContent,'暂停');
+    assert.ok([...app.timers.values()].includes(timer));assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('accepted replay refreshes keep the stage and loader stable while genuine failures retain retry',async()=>{
   const data=levelReplayFixture('game0-catalog','stable-live',{sealed:false});let releaseManifest;
   const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
@@ -3060,8 +3135,10 @@ test('per-level replay shows loading, manifest counts, and reads only the chosen
 
 test('per-level replay retries failures and rejects obsolete games and stale revision replies',async()=>{
   const first=levelReplayFixture('game0-catalog','first-slow'),second=levelReplayFixture('game1-catalog','second-ready',{color:14});
+  second.record.run.completed_level_count=1;second.record.levels[1].status='incomplete';second.manifest.levels[1].status='incomplete';
+  const overview=levelReplayOverview([first,second]);overview.games[1].completed_levels=1;overview.games[1].runs[0].completed_levels=1;
   let releaseFirst,failSecond=true,staleSecond=true;
-  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([first,second]),fetch:async url=>{
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview,fetch:async url=>{
     if(url==='/api/replay/first-slow/manifest')return new Promise(resolve=>{releaseFirst=resolve;});
     if(url==='/api/replay/second-ready/manifest')return failSecond?response({},503):response(second.manifest);
     if(url.includes('/second-ready/levels/')){if(staleSecond){staleSecond=false;return response({error:'replay-stale'},409);}return response(second.detail(2));}
@@ -3073,7 +3150,7 @@ test('per-level replay retries failures and rejects obsolete games and stale rev
     assert.match(app.$('replay-loading-text').textContent,/读取失败/);
     failSecond=false;app.$('replay-retry').click();await settleReplay();
     const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
-    assert.equal(app.$('frame-counter').textContent,'3 / 3');assert.match(app.$('world-guide').textContent,/second-ready/);
+    assert.equal(app.$('frame-counter').textContent,'1 / 3');assert.match(app.$('world-guide').textContent,/second-ready/);
     releaseFirst(response(first.manifest));await settleReplay();assert.equal(app.$('game-title').textContent,'game1-catalog');
     assert.equal(app.requests.some(request=>request.url.includes('/first-slow/levels/')),false);
     assert.ok(app.requests.filter(request=>request.url==='/api/replay/second-ready/manifest').length>=3);
