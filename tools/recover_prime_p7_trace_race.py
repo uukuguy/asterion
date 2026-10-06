@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 from collections.abc import Mapping
 from dataclasses import dataclass
 from hashlib import sha256
@@ -66,6 +67,7 @@ class _Candidate:
     composition: Mapping[str, object] | None = None
     observations: tuple[ArcObservation, ...] | None = None
     source_receipt: Mapping[str, object] | None = None
+    source_identity: str | None = None
 
 
 def _digest_file(path: Path) -> str:
@@ -349,7 +351,7 @@ def _candidate(operator_root: Path, arc_root: Path, source_run_id: str) -> _Cand
 
 
 def _terminal_candidate(operator_root: Path, arc_root: Path, source_run_id: str) -> _Candidate:
-    source = _source_directory(operator_root, source_run_id)
+    source = _source_directory(operator_root, source_run_id).resolve(strict=True)
     summary_path = _inside_file(source, source / "summary.json")
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     if (
@@ -423,16 +425,30 @@ def _terminal_candidate(operator_root: Path, arc_root: Path, source_run_id: str)
     game = resolve_game_selection({GAME_ID_ENV: receipt.game_id, SEED_ENV: str(receipt.seed), TARGET_LEVEL_ENV: str(receipt.levels_completed)}, arc_root)
     if game.win_levels != broker["win_levels"]:
         raise ValueError
+    from asterion.applications.prime.p7.broker import _snapshot_observation
+    from asterion.applications.prime.p7.replay import observations_match
+    from asterion.applications.prime.p7.solutions import recorded_observations
     recordings = [_recording(source, group) for group in ("recordings", "replay-recordings")]
-    if recordings[0][0] != recordings[1][0]:
+    original, replayed = (item[0] for item in recordings)
+    if len(original) != len(replayed) or any(
+        {key: value for key, value in left.items() if key != "frame"}
+        != {key: value for key, value in right.items() if key != "frame"}
+        or not observations_match(
+            _snapshot_observation(left, win_levels=game.win_levels),
+            _snapshot_observation(right, win_levels=game.win_levels),
+        ) for left, right in zip(original, replayed)
+    ):
         raise ValueError
-    if recordings[0][0][-1].get("state") != "WIN" or recordings[0][0][-1].get("levels_completed") != game.win_levels:
+    if original[-1].get("state") != "WIN" or original[-1].get("levels_completed") != game.win_levels:
         raise ValueError
-    if _recorded_actions(recordings[0][0], game.game_id, game.win_levels) != tuple((t.action, t.data) for t in transitions):
+    if _recorded_actions(original, game.game_id, game.win_levels) != tuple((t.action, t.data) for t in transitions):
+        raise ValueError
+    # Bind every original animation pixel to its trace. Admission is static;
+    # materialization and verify_for_save provide two independent fresh passes.
+    observations = recorded_observations(source, transitions, game.game_id, game.win_levels)
+    if observations is None:
         raise ValueError
     hashes["recording_sha256s"] = sorted(item[1] for item in recordings)
-    with tempfile.TemporaryDirectory(prefix="asterion-p7-win-audit-") as directory:
-        replay_arc_run(transitions, receipt, lambda: live.ArcadeEngine(arc_root=arc_root, recordings_dir=Path(directory), game=game), game=game)
     usage = [row["payload"] for row in rows if row["kind"] == "arc.usage.reported"]
     if any(type(item) is not dict or set(item) != {"input_tokens", "output_tokens"}
            or any(type(value) is not int or value < 0 for value in item.values()) for item in usage):
@@ -441,9 +457,10 @@ def _terminal_candidate(operator_root: Path, arc_root: Path, source_run_id: str)
     # explicitly, while its original experiment remains attributable to source.
     experiment = {"game_id": game.game_id, "seed": game.seed, "model": identities["model_id"],
                   "target_level": game.win_levels, "prediction_variant": "offline-replay"}
+    from asterion.applications.prime.p7.solution_certificates import _source_identity
     return _Candidate(source, game, transitions, receipt, hashes,
                       sum(item["input_tokens"] for item in usage), sum(item["output_tokens"] for item in usage),
-                      identities, experiment)
+                      identities, experiment, observations=observations, source_identity=_source_identity(source))
 
 
 def recover_terminal_win(*, operator_root: Path, arc_root: Path, source_run_id: str) -> Path:
@@ -575,6 +592,74 @@ def _recover(*, operator_root: Path, arc_root: Path, source_run_id: str, kind: s
                         kind=kind, candidate=candidate)
 
 
+def _register_terminal_rejection(arc_root: Path, run: Path, candidate: _Candidate, witness: object) -> None:
+    """Account for this immutable non-authoritative source, never other new rows."""
+    from asterion.applications.prime.p7 import solution_certificates as cert, solutions
+    from asterion.applications.prime.p7.game import _read_catalog
+    from asterion.applications.prime.p7.run_story.storage import write_atomic_file
+
+    model = candidate.identities["model_id"]
+    if type(witness) is not cert._ReplayWitness or candidate.source_identity is None:
+        raise ValueError("recovery verification witness unavailable")
+    source = candidate.source
+    if cert._source_identity(source) != candidate.source_identity:
+        raise ValueError("recovery source changed")
+    evidence = solutions._read_one(arc_root, run, candidate.game.game_id, candidate.game.seed,
+                                   None, model, strict_model=True)
+    if evidence is None:
+        raise ValueError("recovery evidence unavailable")
+    prefix, receipt, _ = evidence
+    if (prefix.transitions != witness.transitions or receipt != witness.receipt
+            or prefix.observations != witness.observations
+            or cert.capture_verification_identity(arc_root, prefix.game_id) != witness.verification_identity
+            or solutions.recovery_source(run, cert._json(run / "summary.json"))[0] != source):
+        raise ValueError("recovery verification witness stale")
+    catalog = tuple(game for game in _read_catalog(arc_root) if game["game_id"] == prefix.game_id)
+    registry = cert._safe(run.parent / "solution-certificates")
+    with cert._safe(registry / "registry.lock").open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        path = cert._pointer(registry, prefix.game_id, model)
+        pointer = cert._json(path)
+        if (set(pointer) != {"schema", "game_id", "seed", "model_id", "winner", "eligible_sources", "rejected_sources"}
+                or pointer["schema"] != cert._REGISTRY or pointer["game_id"] != prefix.game_id
+                or pointer["seed"] != prefix.seed or pointer["model_id"] != model
+                or type(pointer["eligible_sources"]) is not dict or type(pointer["rejected_sources"]) is not dict):
+            raise ValueError("recovery registry unavailable")
+        inventory, rejected = pointer["eligible_sources"], pointer["rejected_sources"]
+        potential = set(cert._potential_sources(run.parent, catalog, model)[prefix.game_id])
+        if (source.name in inventory or potential != set(inventory) | set(rejected) | {run.name} | ({source.name} if source.name in potential else set())):
+            raise ValueError("recovery registry has unrelated changes")
+        for descriptor in (*inventory.values(), *rejected.values()):
+            if not cert._metadata_matches(run.parent, descriptor):
+                raise ValueError("recovery registry has changed sources")
+        winner_id = pointer["winner"]["source_run_id"]
+        if winner_id not in inventory:
+            raise ValueError("recovery registry winner unavailable")
+        old_evidence = solutions._read_one(arc_root, run.parent / winner_id, prefix.game_id,
+                                          prefix.seed, None, model, strict_model=True)
+        if old_evidence is None:
+            raise ValueError("recovery registry winner unavailable")
+        old_prefix, old_receipt, _ = old_evidence
+        cert._check_certificate(registry, old_prefix, old_receipt, cert._source_identity(run.parent / winner_id),
+                                witness.verification_identity, model,
+                                compatible_identities=cert.compatible_deployed_identities(arc_root, prefix.game_id))
+        if solutions._read_one(arc_root, source, prefix.game_id, prefix.seed, None, model, strict_model=True) is not None:
+            raise ValueError("original recovery source is authoritative")
+        if source.name not in potential or source.name in rejected:
+            return
+        descriptor = cert._source_identity(source, descriptor=True)
+        if descriptor["source_identity"] != candidate.source_identity:
+            raise ValueError("recovery source changed")
+        updated = {**pointer, "rejected_sources": {**rejected, source.name: descriptor}}
+        encoded = cert._bytes(updated)
+        if len(encoded) > cert._MAX_REGISTRY_BYTES:
+            raise cert.SourceProvenanceCapacityError()
+        if (cert._json(path) != pointer or cert._source_identity(source) != candidate.source_identity
+                or cert.capture_verification_identity(arc_root, prefix.game_id) != witness.verification_identity):
+            raise ValueError("recovery registry changed")
+        write_atomic_file(path, encoded)
+
+
 def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
                  kind: str, candidate: _Candidate) -> Path:
     from asterion.applications.prime.p7.solution_certificates import verify_for_save
@@ -665,10 +750,16 @@ def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
                 "model_call_count": 0,
             },
         )
+        if kind == "terminal-game-win" and verification_witness is not None:
+            _register_terminal_rejection(arc_root, private, candidate, verification_witness)
         _publish_save_certificate(
             arc_root, private, verification_witness,
             expected_model_id=identities["model_id"], eligible=True,
         )
+        if kind == "terminal-game-win" and verification_witness is not None:
+            status = json.loads((private / "solution-certification-status.json").read_text())
+            if status.get("status") != "ready":
+                raise ValueError("recovery certification pending")
         return private
     except Exception:
         if recorder is not None:

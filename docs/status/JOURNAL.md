@@ -4060,3 +4060,9 @@
 
 - 2026-10-06 20:44 CST：BP35 L6 diagnosis complete; old partial executable model reused and screened probes, controlled L6 prior isolation remains discussion-pending. Legal RESET auxiliary extraction error reproduced but not fixed. Wrong best-boundary replay explains action-panel missing labels; generic per-level frontend fix started, not deployed. LF52 L10 actual WIN +62/724, sealed/replayed/cleaned; local23full/175levels, SK203740 continues.
 - 2026-10-06 20:46 CST：Correction to20:44 progress: LF52 L10 actual WIN and native replay/seal/cleanup PASS, but normal certificate publication is pending ValueError; certified local remains22full/174levels/6325actions, displayed observed175. Original9/662certificate preserved. Astra static readonly diagnosis assigned, zero new SDK/model calls.
+- 2026-10-06 20:50 CST：60a91afa records BP35 cognition diagnosis and replay selection defect; distinguishes observed LF52 WIN from pending certification.
+- 2026-10-06 20:50 CST：LF10 cancellation produced game-won fallback marker, not completed authority; existing terminal recovery rejects animation-only rows18/27 and costs three replays. Diagnosis zeroSDK; old9winner preserved. RESET needs broker episode-authority isolation, implementation pending.
+- 2026-10-06 20:52 CST：2a7f4a2e selects evidenced attempts for unfinished levels while preserving saved best scores; six focused DOM regressions and49Python/10cloud tests PASS, independent CLEAR; build/deployment pending.
+- 2026-10-06 20:58 CST：SK48 L5 native PASS +60/181 and certificate ready; local175certified/94.272727. Parent29136 ended under LF10 global repair HOLD. Existing LFquarantine/SKcontinuation CLI preflightPASS, start not yet executed; BP remains discussion-pending.
+
+- 2026-10-06 21:10 CST — Frontend2a deployed local/cloud; HTTP+DOM PASS. LF terminal repair25tests/Sol CLEAR; actual SDK recovery pending.

@@ -190,7 +190,7 @@ def recovery_source(run: Path, summary: Mapping[str, object]) -> tuple[Path, dic
     This grants only source attribution. Actual saved-solution authorization
     still requires the ordinary sealed-trace and SDK replay checks.
     """
-    from asterion.agents.prime.trace import _entry_digest, _plain
+    from asterion.agents.prime.trace import PrimeTraceEntry, _entry_digest, _plain
 
     if isinstance(summary.get("diagnostics"), Mapping) and summary["diagnostics"].get("recovery_kind") == "animation-replay":
         from .animation_replay import recovery_source as animation_source
@@ -221,7 +221,10 @@ def recovery_source(run: Path, summary: Mapping[str, object]) -> tuple[Path, dic
                 or original.get("run_id") != source_id or original.get("cleanup_complete") is not True
                 or original.get("replay_verified") is not True or type(original.get("failure")) is not dict
                 or original.get("receipt") != {} or type(experiment) is not dict
-                or type(broker) is not dict or broker != summary.get("broker")
+                or type(broker) is not dict
+                or set(broker) != {"game_id", "seed", "win_levels", "levels_completed", "primitive_actions", "terminal_reason", "replay_sha256"}
+                or type(summary.get("broker")) is not dict or set(summary["broker"]) != set(broker)
+                or any(value != summary["broker"][key] for key, value in broker.items() if key != "replay_sha256")
                 or broker.get("terminal_reason") != "game-won"
                 or broker.get("levels_completed") != broker.get("win_levels")
                 or experiment.get("game_id") != broker.get("game_id")
@@ -268,7 +271,7 @@ def recovery_source(run: Path, summary: Mapping[str, object]) -> tuple[Path, dic
         if len(markers) != 1 or _plain(markers[0]) != {"source_run_id": source_id, "recovery_kind": "terminal-game-win", **hashes}:
             return None
         previous = None
-        original_actions = []
+        original_entries = []
         for sequence, line in enumerate(trace_path.read_text(encoding="utf-8").splitlines(), 1):
             row = json.loads(line)
             if (set(row) != {"sequence", "kind", "identities", "payload", "previous_sha256", "sha256"}
@@ -277,10 +280,27 @@ def recovery_source(run: Path, summary: Mapping[str, object]) -> tuple[Path, dic
                     or row["sha256"] != _entry_digest(sequence, row["kind"], identities, row["payload"], previous)):
                 return None
             previous = row["sha256"]
-            if row["kind"] == "arc.action":
-                original_actions.append(row["payload"])
-        if not original_actions or original_actions != [dict(entry.payload) for entry in entries if entry.kind == "arc.action"]:
+            original_entries.append(PrimeTraceEntry(**row))
+        original_transitions = _transitions(tuple(original_entries))
+        transitions = _transitions(entries)
+        if (len(transitions) != len(original_transitions) or len(transitions) != broker["primitive_actions"]
+                or replay_sha256(original_transitions, terminal_reason="game-won") != broker["replay_sha256"]
+                or replay_sha256(transitions, terminal_reason="game-won") != summary["broker"]["replay_sha256"]
+                or any((a.sequence, a.action, a.data, a.levels_completed) != (b.sequence, b.action, b.data, b.levels_completed)
+                       for a, b in zip(transitions, original_transitions))):
             return None
+        # Each execution authenticates its own complete animation digests.
+        # Across executions only intermediate pixels may vary under replay's
+        # ordinary settled-state/metadata/dimension contract.
+        old_observations = recorded_observations(source, original_transitions, broker["game_id"], broker["win_levels"])
+        observations = recorded_observations(run, transitions, broker["game_id"], broker["win_levels"])
+        if old_observations is None or observations is None:
+            if transitions != original_transitions or broker != summary["broker"]:
+                return None
+        else:
+            from .replay import observations_match
+            if len(observations) != len(old_observations) or not all(observations_match(a, b) for a, b in zip(observations, old_observations)):
+                return None
         return source, original
     except (OSError, ValueError, TypeError, KeyError):
         return None

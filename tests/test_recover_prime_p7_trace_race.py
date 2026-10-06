@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -312,6 +314,127 @@ class TestRecoverPrimeP7TraceRace(unittest.TestCase):
             )
         )
         return run
+
+
+class TestTerminalRecoveryAnimationAdmission(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(contextlib.redirect_stderr(io.StringIO()))
+
+    def _source(self, root: Path) -> Path:
+        from tests.test_prime_p7_terminal_recovery import TestTerminalWinRecovery, _WinningEngine
+        class AnimatedEngine(_WinningEngine):
+            def _observation(self):
+                value = super()._observation()
+                value['frame'] = [[[91]], *value['frame']]
+                return value
+        with mock.patch('tests.test_prime_p7_terminal_recovery._WinningEngine', AnimatedEngine):
+            source = TestTerminalWinRecovery()._source(root, seal=True)
+        path = next((source / 'replay-recordings').glob('*/*.jsonl'))
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows[3]['data']['frame'][0][0][0] = 92
+        path.write_text(''.join(json.dumps(row) + '\n' for row in rows))
+        return source
+
+    def test_terminal_admission_authenticates_full_original_but_allows_only_intermediate_pixels_without_sdk(self):
+        from tools.recover_prime_p7_trace_race import _terminal_candidate
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            arc = TestRecoverPrimeP7TraceRace._arc_root(root)
+            source = self._source(root)
+            before = {p.relative_to(source): p.read_bytes() for p in source.rglob('*') if p.is_file()}
+            with mock.patch('tools.recover_prime_p7_trace_race.live.ArcadeEngine', side_effect=AssertionError('admission must be static')) as sdk:
+                candidate = _terminal_candidate(root, arc, source.name)
+            sdk.assert_not_called()
+            self.assertEqual(len(candidate.transitions), 14)
+            self.assertEqual(len(candidate.observations), 15)
+            self.assertEqual(candidate.observations[2].frame[0], ((91,),))
+            self.assertEqual(before, {p.relative_to(source): p.read_bytes() for p in source.rglob('*') if p.is_file()})
+
+    def test_terminal_recovery_uses_two_fresh_passes_certifies_new_source_and_only_rejects_original_inventory(self):
+        from asterion.applications.prime.p7 import solution_certificates as cert, solutions
+        from tests.test_prime_p7_solution_certificates import TestP7SolutionCertificates
+        from tests.test_prime_p7_terminal_recovery import _WinningEngine
+        from tools.recover_prime_p7_trace_race import _register_terminal_rejection, _terminal_candidate, recover_terminal_win
+        class NewAnimation(_WinningEngine):
+            def _observation(self):
+                value = super()._observation()
+                value['frame'] = [[[93]], *value['frame']]
+                return value
+        with tempfile.TemporaryDirectory() as directory, mock.patch.object(cert, '_sdk_identity', return_value={'fixture-sdk': 'a' * 64}):
+            root = Path(directory).resolve()
+            arc = TestRecoverPrimeP7TraceRace._arc_root(root)
+            baseline = TestP7SolutionCertificates()
+            baseline.root, baseline.arc, baseline.runs = root, arc, root / '.asterion-private' / 'prime-p7-live'
+            baseline.game, baseline.model = 'ls20-9607627b', 'gpt-6.1-sol'
+            baseline.catalog = ({'game_id': baseline.game, 'win_levels': 7, 'baseline_actions': (22, 123, 73, 84, 96, 192, 186)},)
+            prior = baseline.save('p7-prior')
+            baseline.certify(prior)
+            pointer_path = cert._pointer(baseline.runs / 'solution-certificates', baseline.game, baseline.model)
+            old_pointer = json.loads(pointer_path.read_text())
+            old_certificate = baseline.runs / 'solution-certificates' / 'revisions' / (old_pointer['winner']['certificate'] + '.json')
+            old_bytes = old_certificate.read_bytes()
+            source = self._source(root)
+            before = {p.relative_to(source): p.read_bytes() for p in source.rglob('*') if p.is_file()}
+            with mock.patch('tools.recover_prime_p7_trace_race.live.ArcadeEngine', side_effect=lambda recordings_dir, game, **_: NewAnimation(recordings_dir=recordings_dir, game=game)) as sdk:
+                recovered = recover_terminal_win(operator_root=root, arc_root=arc, source_run_id=source.name)
+            self.assertEqual(sdk.call_count, 2, 'one new-source replay plus one independent save witness')
+            summary = json.loads((recovered / 'summary.json').read_text())
+            self.assertNotEqual(summary['broker']['replay_sha256'], json.loads((source / 'summary.json').read_text())['broker']['replay_sha256'])
+            self.assertIsNotNone(solutions.source_experiment(recovered, summary))
+            self.assertEqual(json.loads((recovered / 'solution-certification-status.json').read_text())['status'], 'ready')
+            pointer = json.loads(pointer_path.read_text())
+            self.assertEqual(pointer['winner']['source_run_id'], recovered.name)
+            self.assertNotIn(source.name, pointer['eligible_sources'])
+            self.assertEqual(set(pointer['rejected_sources']), {source.name})
+            self.assertEqual(old_certificate.read_bytes(), old_bytes)
+            self.assertEqual(before, {p.relative_to(source): p.read_bytes() for p in source.rglob('*') if p.is_file()})
+            with mock.patch.object(solutions, '_fresh_engine', side_effect=AssertionError('static reader cannot execute SDK')):
+                selected = cert.read_certified_roster(arc, recovered.parent, baseline.catalog, expected_model_id=baseline.model)
+            self.assertEqual(selected[0].source_run_id, recovered.name)
+            candidate = _terminal_candidate(root, arc, source.name)
+            prefix, receipt, _ = solutions._read_one(arc, recovered, baseline.game, 0, None, baseline.model, strict_model=True)
+            witness = cert._ReplayWitness(prefix.transitions, receipt, prefix.observations, cert.capture_verification_identity(arc, baseline.game))
+            preserved_pointer = pointer_path.read_bytes()
+            baseline.save('p7-unrelated-new-source')
+            with self.assertRaisesRegex(ValueError, 'unrelated changes'):
+                _register_terminal_rejection(arc, recovered, candidate, witness)
+            self.assertEqual(pointer_path.read_bytes(), preserved_pointer)
+            original_summary = source / 'summary.json'
+            original_summary.write_bytes(original_summary.read_bytes() + b' ')
+            with self.assertRaisesRegex(ValueError, 'source changed'):
+                _register_terminal_rejection(arc, recovered, candidate, witness)
+            self.assertEqual(pointer_path.read_bytes(), preserved_pointer)
+
+    def test_terminal_admission_rejects_changed_settled_state_metadata_dimensions_or_original_digest(self):
+        from tools.recover_prime_p7_trace_race import _terminal_candidate
+        for mutation in ('settled', 'state', 'levels', 'available', 'dimensions', 'action', 'original-digest'):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                arc = TestRecoverPrimeP7TraceRace._arc_root(root)
+                source = self._source(root)
+                group = 'recordings' if mutation == 'original-digest' else 'replay-recordings'
+                path = next((source / group).glob('*/*.jsonl'))
+                rows = [json.loads(line) for line in path.read_text().splitlines()]
+                row = rows[3]['data']
+                if mutation == 'settled':
+                    row['frame'][-1][0][0] += 1
+                elif mutation == 'state':
+                    row['state'] = 'WIN'
+                elif mutation == 'levels':
+                    row['levels_completed'] += 1
+                elif mutation == 'available':
+                    row['available_actions'] = ['ACTION1']
+                elif mutation == 'dimensions':
+                    for frame in row['frame']:
+                        frame[0].append(92)
+                elif mutation == 'action':
+                    row['action_input']['id'] = 'ACTION6'
+                else:
+                    row['frame'][0][0][0] += 1
+                path.write_text(''.join(json.dumps(value) + '\n' for value in rows))
+                with mock.patch('tools.recover_prime_p7_trace_race.live.ArcadeEngine') as sdk, self.assertRaises(ValueError):
+                    _terminal_candidate(root, arc, source.name)
+                sdk.assert_not_called()
 
 
 if __name__ == "__main__":

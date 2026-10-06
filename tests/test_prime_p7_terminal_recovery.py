@@ -223,9 +223,18 @@ class TestTerminalWinRecovery(unittest.TestCase):
                 summary_path.write_text(json.dumps(summary))
                 factory = _RecordingEngine if mutation == "replay" else _WinningEngine
                 with mock.patch("tools.recover_prime_p7_trace_race.live.ArcadeEngine", side_effect=lambda recordings_dir, game, **_: factory(recordings_dir=recordings_dir, game=game)):
-                    with self.assertRaisesRegex(RecoveryError, "source is unavailable"):
+                    message = "materialization failed" if mutation == "replay" else "source is unavailable"
+                    with self.assertRaisesRegex(RecoveryError, message):
                         recover_terminal_win(operator_root=root, arc_root=arc, source_run_id=source.name)
-                self.assertEqual(list(source.parent.iterdir()), [source])
+                if mutation == "replay":
+                    # Static admission no longer executes a third SDK pass.
+                    # A fresh replay failure retains separate, uncertified evidence.
+                    outputs = [run for run in source.parent.iterdir() if run != source]
+                    self.assertEqual(len(outputs), 1)
+                    self.assertFalse((outputs[0] / "summary.json").exists())
+                    self.assertFalse((outputs[0] / "solution-certification-status.json").exists())
+                else:
+                    self.assertEqual(list(source.parent.iterdir()), [source])
 
     def test_live_failure_seals_game_evidence_without_native_receipt(self) -> None:
         from asterion.agents.prime.trace import PrimeTraceRecorder
