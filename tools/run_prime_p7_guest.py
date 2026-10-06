@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import math
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import time
+import uuid
 
 _UNIT = re.compile(r"^asterion-p7-[0-9a-f]{32}\.service$")
 _ENVIRONMENT_FILE = Path(__file__).with_name("p7_guest_environment.txt")
@@ -84,6 +87,10 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     ]
     if seconds is not None:
         args.append(f"--property=RuntimeMaxSec={seconds}s")
+    if mode == "witness":
+        # Both launcher and operator run in the Linux guest clock domain. Never
+        # forward a caller/host timestamp through the shared environment list.
+        args.append(f"--setenv=ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC={time.monotonic()}")
     for name in _environment_names():
         value = os.environ.get(name)
         if value is None:
@@ -101,6 +108,20 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     # Orb session and submit a new service after cleanup has checked absence.
     os.execvp(args[0], [*args, "--", *command])
     return 1  # exec failure raises; retained for static return typing.
+
+
+def witness(command: list[str]) -> int:
+    """The standard CLI preset owns its identity and fixed finite allowance."""
+    if os.environ.get("ASTERION_PRIME_P7_RUN_MODE") != "witness":
+        raise ValueError("invalid witness preset")
+    fields = ("ASTERION_PRIME_P7_ATTEMPT_UNIT", "ASTERION_PRIME_P7_ATTEMPT_SECONDS",
+              "ASTERION_PRIME_P7_CONSOLE_RUN_ID")
+    if not any(name in os.environ for name in fields):
+        os.environ[fields[0]] = f"asterion-p7-{uuid.uuid4().hex}.service"
+        os.environ[fields[1]] = "900"
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+        os.environ[fields[2]] = f"p7-live-{stamp}-{uuid.uuid4().hex[:24]}"
+    return launch(os.environ.get(fields[0], ""), 900, command)
 
 
 def cleanup(unit: str) -> bool:
@@ -132,14 +153,20 @@ def cleanup(unit: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("launch", "cleanup"))
-    parser.add_argument("--unit", required=True)
+    parser.add_argument("mode", choices=("launch", "cleanup", "witness"))
+    parser.add_argument("--unit")
     parser.add_argument("--seconds", type=float)
     argv = sys.argv[1:]
     split = argv.index("--") if "--" in argv else len(argv)
     args = parser.parse_args(argv[:split])
     command = argv[split + 1:]
     try:
+        if args.mode == "witness":
+            if args.unit is not None or args.seconds is not None:
+                raise ValueError("invalid witness preset")
+            return witness(command)
+        if args.unit is None:
+            raise ValueError("missing attempt identity")
         if args.mode == "cleanup":
             return 0 if cleanup(args.unit) else 1
         return launch(args.unit, args.seconds, command)

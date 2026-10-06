@@ -5,8 +5,10 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 import json
+import math
 from pathlib import Path
 import sys
+import time
 from typing import cast
 
 from asterion.agents.prime.session import AsterionPrimeSession
@@ -225,6 +227,7 @@ class PrimeLaunch:
     tool_registry: PrimeApplicationToolRegistry
     compact_events: bool = True
     approved_environment: Mapping[str, str] | None = None
+    witness_deadline_monotonic: float | None = None
 
     def __post_init__(self) -> None:
         lease = self.extension_lease
@@ -245,6 +248,12 @@ class PrimeLaunch:
                 type(self.deadline_seconds) is float and self.deadline_seconds > 0
             ))
             and type(self.compact_events) is bool
+            and (self.witness_deadline_monotonic is None or (
+                type(self.witness_deadline_monotonic) is float
+                and math.isfinite(self.witness_deadline_monotonic)
+                and self.deadline_seconds == 900.0
+                and time.monotonic() < self.witness_deadline_monotonic <= time.monotonic() + 900
+            ))
             and type(self.tool_registry) is PrimeApplicationToolRegistry
             and not lease.closed
         )
@@ -477,6 +486,7 @@ def build_p7_runtime(
         )
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
         unbounded = launch is not None and launch.deadline_seconds is None
+        witness = launch is not None and launch.witness_deadline_monotonic is not None
         declared = None if launch is None else _launch_selection(launch.approved_command)
         expected_options = dict(_RUNTIME_OPTIONS)
         provider = context.options.get("provider")
@@ -488,6 +498,18 @@ def build_p7_runtime(
         ):
             raise RuntimeFactoryError(_ERROR)
         expected_options.update(provider=provider, model=model)
+        if witness:
+            environment = launch.approved_environment or {}
+            if (
+                launch.deadline_seconds != 900.0
+                or not time.monotonic() < launch.witness_deadline_monotonic <= time.monotonic() + 900
+                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "witness"
+                or environment.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") != "900"
+                or (type(ipython) is P7ResearchRuntime
+                    and ipython.control._deadline != launch.witness_deadline_monotonic)
+            ):
+                raise RuntimeFactoryError(_ERROR)
+            expected_options["deadline_ms"] = "900000"
         if unbounded:
             # The operator validates OFFLINE authorization before stripping ARC
             # configuration from the model subprocess environment. This seam
@@ -560,7 +582,10 @@ def build_p7_runtime(
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
-            limits=AsterionPrimeLimits(None, None, None) if unbounded else ASTERION_PRIME_LIMITS,
+            limits=(AsterionPrimeLimits(None, None, None) if unbounded else
+                    AsterionPrimeLimits(ASTERION_PRIME_LIMITS.model_callbacks,
+                                       ASTERION_PRIME_LIMITS.tool_callbacks, 900_000)
+                    if witness else ASTERION_PRIME_LIMITS),
             completion_predicate=lambda: _p7_terminal(broker),
             continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
                                  else lambda round_index: _p7_continuation_prompt(broker, round_index)),

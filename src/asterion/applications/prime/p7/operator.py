@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -14,6 +15,7 @@ import socket
 import sys
 import tempfile
 import threading
+import time
 from types import MappingProxyType
 from typing import cast
 
@@ -3607,6 +3609,41 @@ def _private_experiment(
     }
 
 
+_WITNESS_STARTED_ENV = "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC"
+
+
+def _witness_deadline(environment: Mapping[str, str]) -> float | None:
+    """Consume the guest launcher clock, never a model/provider time budget."""
+    if environment.get("ASTERION_PRIME_P7_RUN_MODE") != "witness":
+        if _WITNESS_STARTED_ENV in environment:
+            raise P7OperatorError("P7 witness deadline is invalid")
+        return None
+    try:
+        started = float(environment[_WITNESS_STARTED_ENV])
+        now = time.monotonic()
+        valid = (
+            math.isfinite(started) and 0 <= started <= now < started + 900
+            and environment.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") == "900"
+            and re.fullmatch(r"asterion-p7-[0-9a-f]{32}\.service", environment.get("ASTERION_PRIME_P7_ATTEMPT_UNIT", ""))
+            and re.fullmatch(r"p7-live-[0-9]{14}-[0-9a-f]{24}", environment.get("ASTERION_PRIME_P7_CONSOLE_RUN_ID", ""))
+            and UNBOUNDED_FIRST_ROUND_ENV not in environment
+        )
+        if valid:
+            return started + 900
+    except (KeyError, TypeError, ValueError):
+        pass
+    raise P7OperatorError("P7 witness deadline is invalid")
+
+
+class _WitnessDeadlineSignal:
+    def __init__(self, parent: object, deadline: float) -> None:
+        self._parent, self._deadline = parent, deadline
+
+    @property
+    def cancelled(self) -> bool:
+        return self._parent.cancelled or time.monotonic() >= self._deadline
+
+
 def build_p7_operator_resources(
     *,
     environment: Mapping[str, str],
@@ -3638,12 +3675,16 @@ def build_p7_operator_resources(
     try:
         variant = _resolve_history_variant(environment, game)
         selection = resolve_p7_runtime(environment, game)
+        witness_deadline = _witness_deadline(environment)
+        deadline_ms = 900_000 if witness_deadline is not None else selection.deadline_ms
+        runtime_options = dict(p7_runtime_options(selection, game))
+        if witness_deadline is not None:
+            runtime_options["deadline_ms"] = "900000"
         evidence_control = getattr(engine, 'set_evidence_control', None)
         if callable(evidence_control):
-            import time
             evidence_control(cancelled=evidence_cancelled,
-                             deadline=None if selection.deadline_ms is None
-                             else time.monotonic() + selection.deadline_ms / 1000)
+                             deadline=witness_deadline if witness_deadline is not None else (
+                                 None if deadline_ms is None else time.monotonic() + deadline_ms / 1000))
         research_mode = variant == "verified" and not cognition_mode
         # The ARC credential belongs only to the SDK session. The Pi model
         # subprocess needs the model host key, never the scorecard key.
@@ -3653,6 +3694,7 @@ def build_p7_operator_resources(
                 "ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE",
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
                 P7_RESUME_RUN_ID_ENV,
+                _WITNESS_STARTED_ENV,
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
@@ -3730,7 +3772,8 @@ def build_p7_operator_resources(
             binding_inherited_fds=binding.inherited_fds,
             binding_environment=dict(binding.environment),
             extension_lease=lease,
-            deadline_seconds=None if selection.deadline_ms is None else selection.deadline_ms / 1000,
+            deadline_seconds=None if deadline_ms is None else deadline_ms / 1000,
+            witness_deadline_monotonic=witness_deadline,
             tool_registry=selected_tools,
             compact_events=True,
             approved_environment=approved_environment,
@@ -3783,7 +3826,8 @@ def build_p7_operator_resources(
             ipython = P7ResearchRuntime(
                 broker=broker, trace_client=prediction_client,
                 run_root=private_trace_root.parent, run_id=history_run_id,
-                deadline_seconds=(selection.deadline_ms or 3_600_000) / 1000,
+                deadline_seconds=(deadline_ms or 3_600_000) / 1000,
+                deadline_monotonic=witness_deadline,
                 event_sink=prediction_client._emit_console,
                 worker=SubprocessPythonWorker() if isinstance(worker, live.SubprocessPythonWorker) else worker,
                 experience=experience,
@@ -3810,7 +3854,7 @@ def build_p7_operator_resources(
                     "prime.arc-run-evidence" if official else "prime.private-trace"
                 ): private_trace,
             },
-            runtime_options=p7_runtime_options(selection, game),
+            runtime_options=MappingProxyType(runtime_options),
             _bridge=bridge,
             _prediction_client=prediction_client,
         )
@@ -4080,6 +4124,11 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
+        # Config files cannot mint the guest's monotonic clock origin.
+        resolved.pop(_WITNESS_STARTED_ENV, None)
+        if _WITNESS_STARTED_ENV in environment:
+            _witness_deadline(environment)
+            resolved[_WITNESS_STARTED_ENV] = environment[_WITNESS_STARTED_ENV]
         resume_run_id = _resolve_resume_run_id(environment)
         # An operator file describes configuration; it cannot select a saved
         # run to execute. The explicit selector stays out of model processes.
@@ -4368,6 +4417,9 @@ async def run_live(
     run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
     if type(getattr(run_signal, "cancelled", None)) is not bool:
         raise P7OperatorError("P7 cancellation signal is unavailable")
+    witness_deadline = _witness_deadline(invocation.environment)
+    if witness_deadline is not None:
+        run_signal = _WitnessDeadlineSignal(run_signal, witness_deadline)
 
     root = invocation.operator_root
     resume_prior = None

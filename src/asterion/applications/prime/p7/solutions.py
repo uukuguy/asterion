@@ -516,6 +516,14 @@ def _read_one(
         game = resolve_game_selection({GAME_ID_ENV: recorded_game_id, SEED_ENV: str(seed), TARGET_LEVEL_ENV: str(levels)}, arc_root)
         if game.win_levels != win_levels:
             return None
+        # Restoring authenticated past actions is distinct from authorizing new
+        # research. A partial-level default of 500 may be smaller than a saved
+        # cumulative prefix; replay exactly that bounded history, retaining the
+        # selected target. Live continuation calculates its own budget later.
+        if len(transitions) > 5000:
+            return None
+        if len(transitions) > game.action_cap:
+            game = replace(game, action_cap_override=len(transitions))
         receipt = ArcRunReceipt(recorded_game_id, seed, len(transitions), levels, terminal, recorded_digest)
         observations = recorded_observations(run, transitions, recorded_game_id, win_levels)
         return (VerifiedPrefix(recorded_game_id, seed, win_levels, levels, transitions, run_id,

@@ -465,6 +465,7 @@ class ArcBroker:
         # It starts empty and accumulates only from the current run.
         self._no_effect_guard = True
         self._no_effect_counts: dict[tuple[int, str], int] = {}
+        self._unknown_guard_probes: set[tuple[int, str, tuple[tuple[str, int], ...], str]] = set()
         self._retrodict_no_effect_hint: dict[str, object] | None = None
         # Retrodict: track every (level, action, position) tuple the model
         # has tried this run, with counts. Position is the (x, y) tuple for
@@ -742,6 +743,7 @@ class ArcBroker:
         self._model_search_cache_result = None
         self._tried_actions.clear()
         self._no_effect_counts.clear()
+        self._unknown_guard_probes.clear()
         self._retrodict_no_effect_hint = None
         self._level_gameplay_actions = 0
         self._experience_inducer = ExperienceInducer(win_levels=self._game.win_levels)
@@ -2671,7 +2673,8 @@ class ArcBroker:
         return sorted(candidates)[:16]
 
     def act_checked(
-        self, plan: object, *, replay_expectations: tuple[ActionExpectation, ...] = ()
+        self, plan: object, *, replay_expectations: tuple[ActionExpectation, ...] = (),
+        probe_preparation: Mapping[str, object] | None = None,
     ) -> dict[str, object]:
         records = self._bound_history()
         self._require_open()
@@ -2771,7 +2774,10 @@ class ArcBroker:
                 stop_reason = "action-unavailable"
                 unavailable_action = name
                 break
-            if witness is None and self._prefix_coordinate_reuse(ArcAction(name, data), expected):
+            prepared_probe = self._current_probe_preparation(probe_preparation, checked)
+            if (witness is None
+                    and self._prefix_coordinate_reuse(ArcAction(name, data), expected)
+                    and not prepared_probe):
                 stop_reason = "prefix-action-reuse"
                 unavailable_action = name
                 mismatch = {
@@ -2786,7 +2792,13 @@ class ArcBroker:
                 }
                 break
             previous_levels = self._current.levels_completed
-            distinguishing = len(plan) == 1 and self._guard_probe_distinguishes(expected)
+            distinguishing = len(plan) == 1 and (
+                self._guard_probe_distinguishes(expected)
+                or self._guard_probe_novel(
+                    ArcAction(name, data), expected,
+                    prepared=prepared_probe,
+                )
+            )
             try:
                 batch = self.act((ArcAction(name, data),), _allow_guard_probe=distinguishing)
             except ArcBrokerError as error:
@@ -2841,7 +2853,8 @@ class ArcBroker:
                 stop_reason = "level-advanced"
                 append_feedback(record, stop_reason)
                 break
-            if self._no_effect_guard and self._settled_grid_unchanged(record):
+            if (self._no_effect_guard and self._settled_grid_unchanged(record)
+                    and not prepared_probe):
                 stop_reason = "observation-no-change"
                 # Retrodict: attach a small no-effect summary so the model can
                 # see, in-band, which (action, position) tuples it has already
@@ -3158,6 +3171,44 @@ class ArcBroker:
     def _settled_grid_unchanged(record: ArcHistoryRecord) -> bool:
         return record.changed_cell_count == 0
 
+    def _guard_probe_novel(
+        self, action: ArcAction, expected: Mapping[str, object], *, prepared: bool = False,
+    ) -> bool:
+        """Permit one grounded, untried click without inventing a visible effect.
+
+        Raw actions keep the aggregate guard. A checked single click can test a
+        new payload when its prediction binds the current frame or clicked cell,
+        or when Solver supplies a current preparatory probe. At most 32 such
+        exceptions are admitted per level; the same payload is never retried
+        through this path at the same level.
+        """
+        level = self._current.levels_completed
+        position = self._position_key(action)
+        if (action.name != "ACTION6" or position is None
+                or self._no_effect_counts.get((level, action.name), 0) < 3
+                or self._tried_actions.get((level, action.name, position), 0)
+                or len(self._unknown_guard_probes) >= 32):
+            return False
+        frame = self._current.frame[-1]
+        frame_hash = digest(frame)
+        grounded = prepared or expected.get("frame_sha256") == frame_hash
+        cell = expected.get("cell")
+        if isinstance(cell, Mapping):
+            coordinates = dict(position)
+            x, y = coordinates["x"], coordinates["y"]
+            grounded = grounded or (
+                cell.get("x") == x and cell.get("y") == y
+                and y < len(frame) and x < len(frame[y])
+                and cell.get("value") == frame[y][x]
+            )
+        if not grounded:
+            return False
+        token = (level, action.name, position, frame_hash)
+        if token in self._unknown_guard_probes:
+            return False
+        self._unknown_guard_probes.add(token)
+        return True
+
     def _guard_probe_distinguishes(self, expected: Mapping[str, object]) -> bool:
         """Allow a guarded probe only when it predicts a changed fact."""
 
@@ -3189,6 +3240,36 @@ class ArcBroker:
         if position not in prior_positions:
             return False
         return not self._visual_probe_distinguishes(expected)
+
+    def _current_probe_preparation(
+        self, grounding: Mapping[str, object] | None, checked: list,
+    ) -> bool:
+        """Admit one current selection preceding a distinguishing actor probe.
+
+        This is an internal Solver handoff, not replay authority. The selection
+        may leave the settled frame unchanged; its following probe must predict
+        a visible change and the handoff expires at the next real action.
+        """
+        if (not isinstance(grounding, Mapping)
+                or set(grounding) != {"run_id", "level", "sequence", "observation_sha256", "next_prediction"}
+                or len(checked) != 1 or checked[0][0] != "ACTION6"):
+            return False
+        reference = self.observation_reference()
+        records = self._bound_history()
+        if (grounding["run_id"] != records[-1].run_id
+                or type(grounding["level"]) is not int
+                or grounding["level"] != self._current.levels_completed + 1
+                or type(grounding["sequence"]) is not int
+                or grounding["sequence"] != reference["sequence"]
+                or grounding["observation_sha256"] != reference["observation_sha256"]):
+            return False
+        try:
+            _, _, expected = validate_prediction(
+                grounding["next_prediction"], current_levels=self._current.levels_completed,
+            )
+        except ArcPredictionError:
+            return False
+        return self._visual_probe_distinguishes(expected)
 
     def _visual_probe_distinguishes(self, expected: Mapping[str, object]) -> bool:
         """Require a cell or frame change prediction for a reused prefix click."""
@@ -3232,6 +3313,7 @@ class ArcBroker:
         # _record_tried_action call in act(); do not double-count here.
 
     def _clear_no_effect_level(self, level: int) -> None:
+        self._unknown_guard_probes = {token for token in self._unknown_guard_probes if token[0] != level}
         for key in tuple(self._no_effect_counts):
             if key[0] == level:
                 del self._no_effect_counts[key]

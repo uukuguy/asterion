@@ -234,12 +234,14 @@ class Solver:
             status = self.broker.status()
         except Exception:
             status = self.broker.terminal_snapshot().status
+        wall_budget = getattr(self.control, 'budget_snapshot', None)
         return {
             "actions_remaining": status.actions_remaining,
             "primitive_actions": status.primitive_actions,
             "terminal_reason": status.terminal_reason,
             "target_level": self.broker.game.target_level,
             "action_cap": self.broker.game.action_cap,
+            **(wall_budget() if callable(wall_budget) else {}),
         }
 
     def artifact(self, export_id: str):
@@ -666,7 +668,16 @@ class Solver:
                     if key in coordinates:
                         raise ValueError
                     coordinates.add(key)
-                native_expect["cell"] = cells[0]
+                # The Broker uses one cell for pre-dispatch grounding. Preserve
+                # a distinguishing prediction wherever it appears; all cells
+                # still receive the full post-action comparison below.
+                frame = context["observation"]["frame"][-1]
+                native_expect["cell"] = next(
+                    (cell for cell in cells if cell["y"] < len(frame)
+                     and cell["x"] < len(frame[cell["y"]])
+                     and frame[cell["y"]][cell["x"]] != cell["value"]),
+                    cells[0],
+                )
             if "levels_completed" in native_expect:
                 level = native_expect["levels_completed"]
                 if (
@@ -725,6 +736,17 @@ class Solver:
                 else "state"
             )
         return kind, differences
+
+    def _probe_preparation(self, plan, translated, index, reference):
+        if (plan["purpose"] != "probe" or index + 1 >= len(translated)
+                or translated[index]["action"]["name"] != "ACTION6"):
+            return None
+        return {
+            "run_id": self.run_id, "level": reference["level"],
+            "sequence": reference["sequence"],
+            "observation_sha256": reference["observation_sha256"],
+            "next_prediction": translated[index + 1],
+        }
 
     def execute_plan(self, plan: Mapping) -> dict:
         with self._lock:
@@ -801,7 +823,11 @@ class Solver:
                 before_levels = observation["levels_completed"]
                 reply_received = False
                 try:
-                    dispatched = self.broker.act_checked([native])
+                    preparation = self._probe_preparation(value, translated, index, reference)
+                    if preparation:
+                        dispatched = self.broker.act_checked([native], probe_preparation=preparation)
+                    else:
+                        dispatched = self.broker.act_checked([native])
                     reply_received = True
                     count = dispatched["applied_count"]
                     if type(count) is not int or count not in (0, 1):

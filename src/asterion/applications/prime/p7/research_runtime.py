@@ -97,6 +97,7 @@ class P7ResearchRuntime:
 
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
                  deadline_seconds: float, event_sink, worker=None,
+                 deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None):
         self._closed = False
         self.cell_count = 0
@@ -107,7 +108,9 @@ class P7ResearchRuntime:
         self._last_control = None
         self._experience = experience
         self._cell_archive = CellArchive(run_root)
-        self.control = SolverControl(run_root, run_id, time.monotonic() + deadline_seconds)
+        self.control = SolverControl(run_root, run_id, time.monotonic() + deadline_seconds
+                                     if deadline_monotonic is None else deadline_monotonic,
+                                     clock=time.monotonic)
         self._read_server = ResearchReadServer(
             context=lambda: self.solver.current_context(),
             history=self._broker.history,

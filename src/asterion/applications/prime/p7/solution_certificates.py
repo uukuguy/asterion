@@ -117,6 +117,18 @@ def compatible_legacy_identity(arc_root: Path, game_id: str) -> str:
                     'verifier': DEPLOYED_0F4FB448, 'format': _SCHEMA})
 
 
+def compatible_deployed_identities(arc_root: Path, game_id: str) -> tuple[str, ...]:
+    """Read only exact historical verifier profiles with today's exact game/SDK.
+
+    Neither these identities nor a cached certificate can mint a new save
+    witness or authorize gameplay. Certificate source identities stay exact.
+    """
+    from .legacy_verifier_profile import DEPLOYED_0F4FB448, DEPLOYED_D4C6000B
+    game, sdk = game_identity(arc_root, game_id), _sdk_identity()
+    return tuple(_digest({'game': game, 'sdk': sdk, 'verifier': profile, 'format': _SCHEMA})
+                 for profile in (DEPLOYED_0F4FB448, DEPLOYED_D4C6000B))
+
+
 @dataclass(frozen=True, slots=True)
 class _ReplayWitness:
     transitions: tuple[ArcTransition, ...]
@@ -370,7 +382,7 @@ def _publish(arc_root, run, witness, *, expected_model_id, legacy_inventory):
                     prior, prior_receipt, _ = old_evidence
                     _check_certificate(root, prior, prior_receipt, _source_identity(run.parent / old_source),
                                        witness.verification_identity, expected_model_id,
-                                       compatible_identities=(compatible_legacy_identity(arc_root, prefix.game_id),))
+                                       compatible_identities=compatible_deployed_identities(arc_root, prefix.game_id))
                     if solutions.prefix_rank(prior, catalog[0]) < solutions.prefix_rank(prefix, catalog[0]):
                         winner = prior
         record = _record(prefix, receipt, before, witness.verification_identity, expected_model_id)
@@ -485,7 +497,7 @@ def _read_certified_roster(arc_root: Path, runs_root: Path, catalog: tuple[dict,
         prefix, receipt, _ = evidence
         identity = capture_verification_identity(arc_root, game_id)
         verified_pointer = _check_certificate(root, prefix, receipt, _source_identity(run), identity, expected_model_id,
-            compatible_identities=(compatible_legacy_identity(arc_root, game_id),))
+            compatible_identities=compatible_deployed_identities(arc_root, game_id))
         if (verified_pointer != pointer or pointer != {'schema': _REGISTRY, 'game_id': game_id,
                 'seed': 0, 'model_id': expected_model_id, 'winner': pointer.get('winner'),
                 'eligible_sources': inventory, 'rejected_sources': rejected}

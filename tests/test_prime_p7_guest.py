@@ -60,6 +60,7 @@ class TestPrimeP7Guest(unittest.TestCase):
             passed = [arg.removeprefix('--setenv=') for arg in args if arg.startswith('--setenv=')]
             names = {arg.partition('=')[0] for arg in passed}
             expected = set(base) - {'MAC_PROXY', 'SECRET_KEY'}
+            expected.add('ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC')
             self.assertEqual(names, expected | (set(proxy) if present else set()))
             self.assertIn('--property=RuntimeMaxSec=900s', args)
             self.assertIn('--unit=' + unit, args)

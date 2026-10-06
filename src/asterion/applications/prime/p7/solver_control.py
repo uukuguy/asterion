@@ -145,6 +145,11 @@ class SolverControl:
         with self._lock:
             return self._snapshot()
 
+    def budget_snapshot(self) -> dict:
+        """Expose wall time separately from the closed lifecycle contract."""
+        with self._lock:
+            return {'wall_time_remaining_seconds': max(0.0, self._deadline - self._clock())}
+
     def request(self, operation: str, command_id: str) -> dict:
         with self._lock:
             if type(operation) is not str or operation not in {'pause', 'resume', 'stop'} or type(command_id) is not str or not _ID.fullmatch(command_id):

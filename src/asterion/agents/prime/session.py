@@ -65,7 +65,16 @@ class AsterionPrimeSession:
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
-            if limits not in (ASTERION_PRIME_LIMITS, AsterionPrimeLimits(None, None, None)):
+            # The host may narrow wall time while preserving the native
+            # callback contract. Application factories authorize exact bounds;
+            # the execution kernel checks transport/request agreement.
+            if type(limits) is not AsterionPrimeLimits or not (
+                limits == AsterionPrimeLimits(None, None, None)
+                or (limits.model_callbacks == ASTERION_PRIME_LIMITS.model_callbacks
+                    and limits.tool_callbacks == ASTERION_PRIME_LIMITS.tool_callbacks
+                    and limits.deadline_ms is not None
+                    and 0 < limits.deadline_ms <= ASTERION_PRIME_LIMITS.deadline_ms)
+            ):
                 raise ProtocolError("Asterion-prime launch material is invalid")
             PrimeExecutionKernel._validate_launch_material(
                 rpc_session,
