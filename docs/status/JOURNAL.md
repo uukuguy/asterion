@@ -3998,3 +3998,10 @@
 - 2026-10-06 — Chrome reconnected but naming the session again timed out; visual browser acceptance remains unverified.
 - 2026-10-06 17:18 CST — Cloud ceeea8e1 actual exact assets/switch helper HTTP PASS; automatic saved progress160/183,18full,83.299856.
 - 2026-10-06 17:18 CST — Four actual units running WA30L7/G50TL6/TN36L6/SB26L5; SB saved first four, inactive BP/LF/SK each at fresh two-failure boundary.
+- 99f4a16d — Record verified cloud deployment and four-game recovery boundaries for durable continuation.
+- 17:28 f5d76bad Refreshed cloud startup progress defaults to open completed games at level one without resetting later cursor choices.
+- 73cc02ed — Initial console opening uses saved-progress defaults once, preserving explicit cursors and later polls.
+- 2026-10-06 — Exact97e715a1 full promotion PASS25/provider0; startupfix73cc02ed51relatedDOMPASS requires final packaged release.
+- 2026-10-06 17:32 CST — Cloudf5d76bad startup release actualHTML/GETs/AR25L1 PASS; all requests settled before DOM close, exit0.
+- 2026-10-06 17:38 CST — Exact73cc02ed fullpromotionPASS25/provider0;558resourcehashes match installed wheel; ownedidleconsole12566→94827PASS at57515.
+- 2026-10-06 17:38 CST — Actual local/cloud HTML and readonly replay GETs loadAR25L1; pending0/exit0; Chrome visual boundary remains unverified.

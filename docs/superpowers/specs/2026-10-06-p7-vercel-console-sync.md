@@ -12,7 +12,7 @@ Bootstrap the25-game catalog/183initialviews, current selected saved game manife
 
 ## Remote behavior
 
-Observe progress and replay using existing compact UI. The user prioritizes sharing major progress and saved replays; remote polling runs every5minutes, while opening a game reads immediately. Explicit game switches openL1 for full saved completion and the first unpassed level otherwise; polling preserves selection. Remote controls are explicitly read-only; POST play/start/pause/stop routes return405 and visible controls remain disabled/labeled. Local controls and solving remain independent. Initial preparation/parsing happens in the local background publisher, never on remote game selection. Metadata and frame pages remain separate; source-bound pages serve at most32frames; the server authorizes private Blob reads.
+Observe progress and replay using existing compact UI. The user prioritizes sharing major progress and saved replays; remote polling runs every5minutes, while opening a game reads immediately. Initial opening and explicit game switches openL1 for full saved completion and the first unpassed level otherwise; polling preserves selection. Remote controls are explicitly read-only; POST play/start/pause/stop routes return405 and visible controls remain disabled/labeled. Local controls and solving remain independent. Initial preparation/parsing happens in the local background publisher, never on remote game selection. Metadata and frame pages remain separate; source-bound pages serve at most32frames; the server authorizes private Blob reads.
 
 ## Boundaries
 

@@ -361,7 +361,7 @@ ARC Competition 的官方说明见 [Competition mode](https://docs.arcprize.org/
 
 ## Vercel 只读控制台
 
-远端地址：[https://asterion-p7-console.vercel.app](https://asterion-p7-console.vercel.app)。展示本地保存成绩、稳定认知与回放；默认打开已验证存档，没有存档时展示预构建初始画面。动作及求解控制仍在本地执行。
+远端地址：[https://asterion-p7-console.vercel.app](https://asterion-p7-console.vercel.app)。展示本地保存成绩、稳定认知与回放；默认打开已验证存档，没有存档时展示预构建初始画面。首次打开和切换游戏时，全部通关定位第一关，其它定位首个未过关；自动刷新保留当前选择。动作及求解控制仍在本地执行。
 
 本地发布器 `tools/p7_console_cloud_sync.py` 从57515端口读取公开投影，主动上传至私有Blob；远端不连接本地网络。普通过程数据每30分钟合并上传，新过关记录优先（至少间隔60秒），远端页面每5分钟检查更新。打开游戏或关卡立即读取。标题显示数据更新时间，不代表无变化时也刷新心跳。
 
