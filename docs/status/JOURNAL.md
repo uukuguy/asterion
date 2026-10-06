@@ -3928,3 +3928,12 @@
 - 2026-10-06 14:02 CST — Reviewed finite followup queued; parent47399 preserves both guests/deadlines and history hashes,4fixturesPASS; SB rejection remains isolated.
 - 2026-10-06 14:03 CST — 004a51d0 records finite remaining-game continuation while preserving active actors and past failure evidence.
 - 2026-10-06 14:32 CST — BP57/G95 SDK replies reproduce digest capacity rejection; user chose dynamic animation arena and persistent typed warnings.
+- 2026-10-06 14:35 CST — d9a58abd records dynamic evidence and explicit diagnostics design to prevent repeated full-animation capacity failures.
+- 2026-10-06 14:39 CST — d9d76766 adds safe processing diagnostics to preserve known outcomes and persistent warning history;3focused testsPASS.
+
+- 2026-10-06 14:43 CST — 286f1aec：紧凑告警保留恢复记录及展开状态；DOM 118 PASS/1 SKIP，未部署。
+- 2026-10-06 14:41 CST — 时间修正：前条 286f1aec 事件实际发生于 14:41，并非 14:43。
+
+- 2026-10-06 14:48 CST — c81a3f01：保留完整观察身份，明确处理错误并避免重派动作；116 focused PASS，动态分页未完。
+
+- 2026-10-06 14:53 CST — 94c81322：回放按页读取保留进度及游标；跨页播放、缺页、迟到响应 targeted PASS；未部署。
