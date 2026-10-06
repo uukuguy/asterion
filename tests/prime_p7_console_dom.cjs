@@ -2738,15 +2738,18 @@ test('replay frame and user level cursors pin the existing event when new revisi
   }finally{app.dom.window.close();}
 });
 
-test('loading another replay clears a previous event cursor and follows its latest frame',async()=>{
+test('switching games clears a previous event cursor and follows the new level only after explicit follow',async()=>{
   const overview=overviewFixture(catalog25);overview.games[0]={...overview.games[0],best_run_id:'first-replay',completed_levels:1,runs:[catalogRun('first-replay')]};overview.games[1]={...overview.games[1],best_run_id:'second-replay',completed_levels:1,runs:[catalogRun('second-replay')]};
   const first={...researchStory(),run:{...fixture().run,game_id:'game0-catalog',run_id:'first-replay',sealed_trace:true}};
-  const second={...fixture(),run:{...fixture().run,game_id:'game1-catalog',run_id:'second-replay',sealed_trace:true},process_events:[{...first.process_events[4],event_sequence:99,frame_id:'f2'}]};
+  const second={...fixture(),run:{...fixture().run,game_id:'game1-catalog',run_id:'second-replay',sealed_trace:true},process_events:[{...first.process_events[4],level:2,event_sequence:99,frame_id:'f2'}]};
+  second.levels[1]={...second.levels[0],level:2};
   const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url==='/api/replay/first-replay'?first:url==='/api/replay/second-replay'?second:idleView())});
   try{
     await settle();overviewRow(app).querySelector('[data-overview-watch]').click();await settle();
     app.$('event-slider').value='1';app.$('event-slider').dispatchEvent(new app.dom.window.Event('input'));
     overviewRow(app,1).querySelector('[data-overview-select]').click();await settle();
+    assert.equal(app.$('board-kicker').textContent,'LEVEL 02');assert.equal(app.$('frame-counter').textContent,'1 / 3');
+    assert.notEqual(app.$('event-counter').textContent,'事件 1');app.$('replay-follow').click();
     assert.equal(app.$('run-id').textContent,'second-replay');assert.equal(app.$('frame-counter').textContent,'3 / 3');assert.equal(app.$('event-counter').textContent,'事件 99');assert.deepEqual(app.errors,[]);
   }finally{app.dom.window.close();}
 });
@@ -3298,7 +3301,7 @@ test('recording-only failed attempts default to their latest recorded cognition 
   } finally {app.dom.window.close();}
 });
 
-test('zero-saved game selection prefers a corroborated solving run then the latest attempt and follows its recorded cursor',async()=>{
+test('zero-saved game selection prefers a corroborated solving run then the latest attempt at level 1',async()=>{
   for (const solving of [false,true]) {
     const data=levelReplayFixture('game1-catalog',solving?'solving-zero':'latest-zero',{sealed:false});
     Object.assign(data.record.run,{completed_level_count:0,status:solving?'running':'failed'});
@@ -3327,6 +3330,8 @@ test('zero-saved game selection prefers a corroborated solving run then the late
     try {
       await settleReplay();overviewRow(app,1).querySelector('[data-overview-select]').click();await settleReplay();
       assert.equal(app.$('run-id').textContent,data.record.run.run_id);
+      assert.equal(app.$('board-kicker').textContent,'LEVEL 01');assert.equal(app.$('frame-counter').textContent,'1 / 3');
+      assert.equal(app.$('replay-follow').hidden,false);app.$('replay-follow').click();
       assert.equal(app.$('frame-counter').textContent,'3 / 3');
       assert.equal(app.$('replay-follow').hidden,true);
       assert.match(app.$('world-guide').textContent,/当前记录认知：ACTION1 推动棋子/);
