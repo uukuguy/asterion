@@ -128,7 +128,7 @@
   const liveConfig = isRecord(consoleConfig) && consoleConfig.readOnly === true ? consoleConfig : null;
   const CLOUD_REFRESH_INTERVAL = 300000;
   function enforceCloudReadOnly() {
-    document.querySelectorAll('#run-start,#run-fresh,#run-pause,#run-resume,#run-stop,#manual-close,#manual-restart,#retry-command,[data-overview-start],[data-overview-fresh]').forEach(button => {button.disabled = true; button.title = '云端只读；请在本地控制求解';});
+    document.querySelectorAll('#run-start,#run-fresh,#run-pause,#run-resume,#run-stop,#manual-close,#manual-restart,#retry-command,[data-overview-start],[data-overview-fresh]').forEach(button => {button.disabled = true; button.hidden = true; button.title = '云端只读；请在本地控制求解';});
     $('game-select').disabled = false;
     $('manual-note').textContent = '云端只读观察与回放；游戏动作和求解控制在本地执行。';
   }
@@ -1840,8 +1840,7 @@
       observeSelectedGame();
       ensureSelectedSource();
       if (state.replayPollTimer !== null && !replayUnsealed(snapshot)) loadReplay();
-      const blocked = { 'guest-unavailable': '执行器暂不可用', 'session-busy': '执行器正在使用', 'model-unavailable': '求解模型尚未就绪', 'model-mismatch': '求解模型配置不匹配' };
-      write('overview-refresh', `本地记录 · 每 5 秒更新${overview.start_ready ? '' : ' · ' + (blocked[overview.start_block_reason] || '启动尚未就绪')}`);
+      write('overview-refresh', '云端只读 · 每 5 分钟检查更新');
     } catch (_) {
       state.overviewFresh = false; renderRail(); renderProgressContext(); renderSessionControls();
       write('overview-refresh', '总览暂不可用 · 保留已显示记录');

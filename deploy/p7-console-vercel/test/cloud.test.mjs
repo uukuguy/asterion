@@ -124,6 +124,12 @@ test('existing console HTML enables readonly queries with no operator token and 
   assert.match(html,/"readOnly":true/); assert.match(html,/if \(command\) throw/); assert.match(html,/cloud-sync-status/);
   assert.doesNotMatch(html,/X-P7-Console-Token/); assert.doesNotMatch(html,/__CONSOLE_/);
   assert.match(html,/\\u003c\/script\\u003e/);
+  assert.match(html,/正在读取云端记录/); assert.doesNotMatch(html,/正在读取本地记录|本地记录 · 每 5 秒更新|求解模型尚未就绪/);
+  assert.match(html,/云端只读 · 每 5 分钟检查更新/);
+  assert.match(html,/id="run-start" hidden/); assert.match(html,/id="run-fresh" hidden/);
+  assert.match(html,/button\.disabled = true; button\.hidden = true;/);
+  assert.match(html,/label\.textContent = ' · 云端只读 · 更新于 ' \+ time;/);
+  assert.match(html,/label\.title = '数据更新 '/);
 });
 test('packaged cloud assets are fresh with five-minute polling and unchanged local source',async()=>{
   const source=new URL('../../../src/asterion/applications/prime/p7/console_assets/app.js',import.meta.url);

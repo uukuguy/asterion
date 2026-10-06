@@ -5,6 +5,9 @@ const target = new URL('./assets/', import.meta.url);
 for (const name of ['index.html', 'styles.css', 'tailwind.css', 'TAILWIND-LICENSE.txt']) {
   await copyFile(new URL(name, source), new URL(name, target));
 }
+const template=await readFile(new URL('index.html',target),'utf8');
+await writeFile(new URL('index.html',target),template.replace('正在读取本地记录','正在读取云端记录')
+  .replace('id="run-start"','id="run-start" hidden').replace('id="run-fresh"','id="run-fresh" hidden'));
 let js = await readFile(new URL('app.js', source), 'utf8');
 function replace(before, after) {
   if (!js.includes(before)) throw new Error('console-source-changed');
@@ -14,7 +17,7 @@ replace("const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.toke
   "const liveConfig = isRecord(consoleConfig) && consoleConfig.readOnly === true ? consoleConfig : null;\n" +
   "  const CLOUD_REFRESH_INTERVAL = 300000;\n" +
   "  function enforceCloudReadOnly() {\n" +
-  "    document.querySelectorAll('#run-start,#run-fresh,#run-pause,#run-resume,#run-stop,#manual-close,#manual-restart,#retry-command,[data-overview-start],[data-overview-fresh]').forEach(button => {button.disabled = true; button.title = '云端只读；请在本地控制求解';});\n" +
+  "    document.querySelectorAll('#run-start,#run-fresh,#run-pause,#run-resume,#run-stop,#manual-close,#manual-restart,#retry-command,[data-overview-start],[data-overview-fresh]').forEach(button => {button.disabled = true; button.hidden = true; button.title = '云端只读；请在本地控制求解';});\n" +
   "    $('game-select').disabled = false;\n" +
   "    $('manual-note').textContent = '云端只读观察与回放；游戏动作和求解控制在本地执行。';\n" +
   "  }\n" +
@@ -26,6 +29,9 @@ replace("write('session-id', manual && state.manualView?.session_id ? `试玩 ${
 replace("row.querySelector('[data-overview-select]').disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;\n    });",
   "row.querySelector('[data-overview-select]').disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;\n    });\n    enforceCloudReadOnly();");
 js = js.replaceAll('正在连接本地服务', '正在读取云端同步记录');
+replace("write('overview-refresh', `本地记录 · 每 5 秒更新${overview.start_ready ? '' : ' · ' + (blocked[overview.start_block_reason] || '启动尚未就绪')}`);",
+  "write('overview-refresh', '云端只读 · 每 5 分钟检查更新');");
+replace("      const blocked = { 'guest-unavailable': '执行器暂不可用', 'session-busy': '执行器正在使用', 'model-unavailable': '求解模型尚未就绪', 'model-mismatch': '求解模型配置不匹配' };\n",'');
 replace('window.setInterval(pollState, 1000)', 'window.setInterval(pollState, CLOUD_REFRESH_INTERVAL)');
 replace('window.setInterval(loadOverview, 5000)', 'window.setInterval(loadOverview, CLOUD_REFRESH_INTERVAL)');
 replace('window.setInterval(() => loadReplay(),2000)', 'window.setInterval(() => loadReplay(), CLOUD_REFRESH_INTERVAL)');

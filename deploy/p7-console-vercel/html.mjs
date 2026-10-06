@@ -9,7 +9,9 @@ const syncJS = `\n(() => {
   async function update() { try {
     const response = await fetch('/api/sync-status', {cache:'no-store',signal:AbortSignal.timeout(10000)});
     if (!response.ok) throw new Error('unavailable'); const data = await response.json();
-    label.textContent = ' · 云端只读 · 数据更新 ' + data.capturedAt + ' · ' + data.ageSeconds + ' 秒前' +
+    const time = new Intl.DateTimeFormat('zh-CN',{hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(data.capturedAt));
+    label.textContent = ' · 云端只读 · 更新于 ' + time;
+    label.title = '数据更新 ' + data.capturedAt + ' · ' + data.ageSeconds + ' 秒前' +
       (data.uploadOperations ? ' · 上传操作 ' + data.uploadOperations.attempts + '/' + data.uploadOperations.limit : '') +
       (data.storage?.warning ? ' · 云端存储接近限额；请检查本地发布器' : '');
   } catch (_) { label.textContent = ' · 云端同步读取失败 · 保留最近画面'; } }
