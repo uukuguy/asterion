@@ -15,7 +15,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | File | Status | Purpose |
 |---|---|---|
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Latest official25 receipt29.83/54officiallevels, ready-only183-level console, native play-time actor action labels and bounded RPC, one newly authorized finite third submission after CD82/RE86, continuing two-game local research and current console deployment/verification boundaries. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Latest official25 receipt29.83/54officiallevels, ready-only183-level console, deployed native play-time actor action labels and bounded RPC (actual generation witness pending), one newly authorized finite third submission after CD82/RE86, continuing two-game local research and current console deployment/verification boundaries. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |

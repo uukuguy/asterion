@@ -1018,7 +1018,7 @@
 
 ## D-2026-10-06-04 — Native actor judgment for controls and bounded RPC aggregates
 
-- Status: 🟢 active; implementation and focused verification complete, deployment witness pending.
+- Status: 🟢 active; implementation, focused/full promotion and exact packaged deployment verified; actual native-label witness pending.
 - Authority: user requires the LLM to judge action purposes during P7 solving; the replay must not infer purposes or call an LLM to fill history.
 - Decision: Extend the existing WorldMap with optional closed `action_labels`: action, actor-written label/purpose, certain/hypothesis/unknown/conflict and bounded current-run evidence sequences. The existing registered workspace revise/publish path saves these conclusions and emits them in the source-bound model revision. Keep old absent fields and hashes unchanged. Entire revisions replace prior WorldMaps; do not union facts across levels or future cursors. Structured fields do not certify mechanics or grant action authority.
 - Display: Render exact actor labels and purposes, including actor-chosen arrows or特殊用途. Remove all prose/pixel semantic classifiers. Historical absent labels display未记录; explicit actor unknown displays未识别. Preserve existing rule prose and visual/action responses as evidence. Native reset/click fallback describes input protocol only. No historical LLM normalization, sidecar or synthetic actor event.

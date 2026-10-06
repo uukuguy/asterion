@@ -30,6 +30,8 @@
 - A trusted acknowledged process interruption may seal failed research without a success receipt. Uncertain environment results and ordinary model errors do not become replayable failures by relabeling.
 - HUMAN play is independent of P7, with one finite SDK worker and per-game/per-level persisted origin/action/observation journals. Selection/restart restores verified poses. Current-level clear/restart replaces only that save; ordinary RESET preserves history. Human actions never enter P7 history or learning.
 
+- Compact Pi RPC separately bounds native raw lines16MiB and retained event lines1MiB; ordinary mode remains1MiB. Repeated native message aggregates can be projected before semantic limits, without dropping needed responses or changing deadlines.
+
 ## Open Problems
 
 - Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.
@@ -57,8 +59,6 @@
 - `src/asterion/applications/prime/p7/console_activity.py` — finite external-campaign liveness hints corroborated by local Make and running guest units.
 - `src/asterion/applications/prime/p7/console_preview.py`, `console_preview_prepared.py` — finite whole-catalog initial-view preparation and source-validated ready-only reading, no solved-state promotion.
 - `src/asterion/applications/prime/p7/console_manual.py`, `console_manual_saves.py`, `console_preferences.py` — independent HUMAN lifecycle, journals and selection metadata.
-
-- Compact Pi RPC separately bounds native raw lines16MiB and retained event lines1MiB; ordinary mode remains1MiB. Repeated native message aggregates can be projected before semantic limits, without dropping needed responses or changing deadlines.
 
 ## Evidence Boundary
 
