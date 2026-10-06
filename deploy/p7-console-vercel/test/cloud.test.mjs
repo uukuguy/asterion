@@ -1,0 +1,102 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
+import { canonicalJSON, decodeObject, INDEX_PATH, readRoute, sha256, validateIndex } from '../cloud.mjs';
+import { packObjects, publishSpool } from '../upload.mjs';
+import { createHandler } from '../api/cloud.js';
+import { renderHTML } from '../html.mjs';
+
+const baseRoutes = {'/api/overview':{games:[]},'/api/games':{games:[{game_id:'ar25-test',win_levels:1}]},'/api/state':{state:'idle',snapshot:null},'/api/runs':{runs:[]}};
+function fixture(values=baseRoutes) {
+  const routes={}; const objects=new Map();
+  for (const [route,value] of Object.entries(values)) {
+    const body=Buffer.from(canonicalJSON(value)); const sha=sha256(body); const gzip=gzipSync(body);
+    routes[route]={sha256:sha,blobPath:`p7-console/objects/${sha}.json.gz`,contentType:'application/json',bytes:body.length,compressedBytes:gzip.length};
+    objects.set(sha,gzip);
+  }
+  return {index:{schema:'asterion.p7.cloud-index/v1',capturedAt:new Date().toISOString(),generation:sha256(canonicalJSON(routes)),routes},objects};
+}
+function memorySDK() {
+  const blobs=new Map(); const writes=[]; const reads=[];
+  return {blobs,writes,reads,
+    get:async(path,options)=>{reads.push({path,options}); const body=blobs.get(path); return body ? {statusCode:200,stream:new Response(body).body,blob:{pathname:path,size:body.length}} : null;},
+    put:async(path,body,options)=>{writes.push({path,options}); blobs.set(path,Buffer.from(body)); return {pathname:path};}};
+}
+async function stage(t, fix) {
+  const spool=await mkdtemp(join(tmpdir(),'p7-cloud-test-')); t.after(()=>rm(spool,{recursive:true,force:true}));
+  await mkdir(join(spool,'objects'));
+  await writeFile(join(spool,'index.json'),canonicalJSON(fix.index));
+  for (const [sha,body] of fix.objects) await writeFile(join(spool,'objects',`${sha}.json.gz`),body);
+  return spool;
+}
+function response() {
+  return {headers:{},setHeader(key,value){this.headers[key]=value;},end(body){this.body=body;}};
+}
+
+test('index rejects arbitrary paths and pack offsets even when its generation is recomputed',()=>{
+  for (const bad of ['/api/../secret','https://local.invalid/api/state','/api/start']) {
+    const {index}=fixture(); index.routes[bad]=index.routes['/api/state']; index.generation=sha256(canonicalJSON(index.routes));
+    assert.throws(()=>validateIndex(index),/binding/);
+  }
+  const fix=fixture(); const packed=packObjects(fix.index,fix.objects); const entry=packed.index.routes['/api/state'];
+  entry.offset=entry.packBytes; packed.index.generation=sha256(canonicalJSON(packed.index.routes));
+  assert.throws(()=>validateIndex(packed.index,{storage:true}),/pack-binding/);
+});
+test('corrupt gzip and replay revision/source mismatch fail closed',()=>{
+  const run='p7-test-run',revision='a'.repeat(64),token='b'.repeat(64);
+  const route=`/api/replay/${run}/levels/1/${revision}/frames/${token}/0/32`;
+  const fix=fixture({...baseRoutes,[route]:{run_id:run,level:1,replay_revision:revision,source_token:token,start:0,frames:[]}});
+  const entry=fix.index.routes[route]; const body=fix.objects.get(entry.sha256);
+  assert.equal(decodeObject(body,entry,route).value.run_id,run);
+  assert.throws(()=>decodeObject(Buffer.alloc(body.length),entry,route));
+  assert.throws(()=>decodeObject(body,entry,route.replace(token,'c'.repeat(64))),/frame-source/);
+  assert.throws(()=>decodeObject(body,entry,route.replace(revision,'d'.repeat(64))),/revision/);
+});
+test('packing preserves exact public bytes and private reads verify pack hashes',async()=>{
+  const fix=fixture(); const packed=packObjects(fix.index,fix.objects); assert.equal(packed.packs.size,1);
+  const sdk=memorySDK(); for (const [sha,body] of packed.packs) sdk.blobs.set(`p7-console/packs/${sha}.bin`,body);
+  assert.deepEqual((await readRoute(sdk.get,packed.index,'/api/games')).value,baseRoutes['/api/games']);
+  assert.equal(sdk.reads[0].options.access,'private');
+  const other=fixture({...baseRoutes,'/api/overview':{games:[],changed:true}}); const corrupt=packObjects(other.index,other.objects);
+  for (const [sha,body] of corrupt.packs) sdk.blobs.set(`p7-console/packs/${sha}.bin`,Buffer.alloc(body.length));
+  await assert.rejects(()=>readRoute(sdk.get,corrupt.index,'/api/overview'),/pack-hash/);
+});
+test('partial upload retains previous pointer; retry and unchanged scan use receipts',async t=>{
+  const fix=fixture({...baseRoutes,'/api/replay/p7-run':{run:{run_id:'p7-run'}}}); const spool=await stage(t,fix); const sdk=memorySDK();
+  const previous=fixture({...baseRoutes,'/api/state':{state:'idle',snapshot:null,previous:true}});
+  const previousPack=packObjects(previous.index,previous.objects);
+  const old=Buffer.from(canonicalJSON(previousPack.index)); sdk.blobs.set(INDEX_PATH,old);
+  for (const [sha,body] of previousPack.packs) sdk.blobs.set(`p7-console/packs/${sha}.bin`,body);
+  let calls=0; const original=sdk.put;
+  sdk.put=async(...args)=>{if (++calls===2) throw new Error('SENTINEL_PRIVATE_BACKEND'); return original(...args);};
+  await assert.rejects(()=>publishSpool({spool,token:'SENTINEL_TOKEN',sdk}));
+  assert.deepEqual(sdk.blobs.get(INDEX_PATH),old); assert.equal(sdk.writes.some(write=>write.path===INDEX_PATH),false);
+  sdk.put=original;
+  const result=await publishSpool({spool,token:'SENTINEL_TOKEN',sdk}); assert.ok(result.packs>=2);
+  assert.equal(sdk.writes.at(-1).path,INDEX_PATH); assert.equal(sdk.writes.at(-1).options.allowOverwrite,true);
+  assert.ok(sdk.writes.slice(0,-1).every(write=>write.options.allowOverwrite===false && write.options.addRandomSuffix===false));
+  const writes=sdk.writes.length,reads=sdk.reads.length;
+  assert.equal((await publishSpool({spool,token:'SENTINEL_TOKEN',sdk})).unchanged,true);
+  assert.equal(sdk.writes.length,writes); assert.equal(sdk.reads.length,reads);
+  const receipt=JSON.parse(await readFile(join(spool,'cloud-upload-state.json'),'utf8')); assert.ok(receipt.uploadAttempts>=3);
+});
+test('quota guard rejects before writes and records no token',async t=>{
+  const spool=await stage(t,fixture()); const sdk=memorySDK();
+  await assert.rejects(()=>publishSpool({spool,token:'SENTINEL_SECRET',sdk,maxUploadOperations:1}),/quota-exceeded/);
+  assert.equal(sdk.writes.length,0);
+});
+test('remote mutation returns405 without storage reads and internal errors redact',async()=>{
+  const sdk=memorySDK(); const handle=createHandler(sdk.get); const res=response();
+  await handle({method:'POST',url:'/api/start'},res); assert.equal(res.statusCode,405); assert.equal(sdk.reads.length,0);
+  const missing=response(); await handle({method:'GET',url:'/api/overview'},missing);
+  assert.equal(missing.statusCode,503); assert.deepEqual(JSON.parse(missing.body),{error:'cloud-view-unavailable',readOnly:true});
+});
+test('existing console HTML enables readonly queries with no operator token and safe inline data',async()=>{
+  const html=await renderHTML({schema:'asterion.arc-agi3-p7-console/v1',run:{run_id:'real-run',game_id:'ar25-test'},levels:[],note:'</script>'},baseRoutes['/api/games'].games);
+  assert.match(html,/"readOnly":true/); assert.match(html,/if \(command\) throw/); assert.match(html,/cloud-sync-status/);
+  assert.doesNotMatch(html,/X-P7-Console-Token/); assert.doesNotMatch(html,/__CONSOLE_/);
+  assert.match(html,/\\u003c\/script\\u003e/);
+});

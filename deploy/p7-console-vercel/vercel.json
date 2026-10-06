@@ -1,0 +1,5 @@
+{
+  "version": 2,
+  "functions": {"api/cloud.js": {"includeFiles": "assets/**", "maxDuration": 30}},
+  "routes": [{"src": "/(.*)", "dest": "/api/cloud.js?route=/$1"}]
+}
