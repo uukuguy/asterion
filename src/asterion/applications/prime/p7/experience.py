@@ -363,9 +363,12 @@ class _Source:
 
 
 class ExperienceBundle:
-    def __init__(self, *, current_run_id: str, sources: list[_Source], rejected: int = 0, truncated: bool = False):
+    def __init__(self, *, current_run_id: str, sources: list[_Source], rejected: int = 0, truncated: bool = False,
+                 fresh_target_policy: dict | None = None):
         self.run_id = current_run_id
         self.sources = {source.run.name: source for source in sources}
+        self._fresh_target_policy = None if fresh_target_policy is None else copy_json(fresh_target_policy)
+        self._quarantined = frozenset(() if fresh_target_policy is None else fresh_target_policy['quarantined_source_run_ids'])
         self._rejected, self._truncated = rejected, truncated
         self._root = None
         self._lock = RLock()
@@ -373,15 +376,27 @@ class ExperienceBundle:
         self._audit = {'run_id': current_run_id, 'loaded': False, 'loaded_source_ids': [],
                        'context_sha256': None, 'reads': [], 'revisions': [], 'omitted_reads': 0, 'omitted_revisions': 0}
 
+    def _metadata(self, source: _Source) -> dict:
+        value = source.metadata()
+        if self._fresh_target_policy is not None:
+            value['positive_cognition_available'] = source.run.name not in self._quarantined
+        return value
+
     def context(self) -> dict:
         sources = list(self.sources.values())
-        latest = sources[0] if sources else None
+        latest = next((source for source in sources if source.run.name not in self._quarantined), None)
         value = {'advisory_only': True, 'requires_current_evidence': True,
                  'available_count': len(sources), 'rejected_count': self._rejected,
-                 'sources': [source.metadata() for source in sources[:12]],
+                 'sources': [self._metadata(source) for source in sources[:12]],
                  'omitted_source_count': max(0, len(sources) - 12), 'truncated': self._truncated or len(sources) > 12,
                  'latest': None,
                  'read_api': 'p7_research.experience(source_run_id, kind, start=0, limit=32, artifact_id=None); kind=index|research|history|frame|artifact|cells; index uses empty source_run_id. Historical evidence is advisory; source code is inert.'}
+        if self._fresh_target_policy is not None:
+            value['fresh_target'] = {'phase_id': self._fresh_target_policy['phase_id'],
+                                     'target_level': self._fresh_target_policy['target_level'],
+                                     'quarantined_source_count': len(self._quarantined),
+                                     'historical_reads': ['history', 'frame', 'animation']}
+            value['read_api'] += ' Fresh-target quarantined sources expose only raw history/frame/animation; research/artifact/cells are unavailable. Sources produced after the fixed snapshot retain ordinary cognition reuse.'
         if latest:
             snapshot = latest.research[0]
             value['latest'] = {**latest.metadata(), 'worldmap': snapshot['worldmap'], 'task': snapshot['task'],
@@ -401,7 +416,7 @@ class ExperienceBundle:
             prior['feedback'] = prior['feedback'][-1:]
             value['sources'] = value['sources'][:4]
             value['omitted_source_count'] = max(0, len(sources) - 4)
-        if len(canonical_bytes(value)) > 16 * 1024:
+        if len(canonical_bytes(value)) > 16 * 1024 and latest:
             value['latest']['feedback'] = []
             value['latest']['exports'] = value['latest']['exports'][:4]
             value['sources'] = value['sources'][:1]
@@ -416,8 +431,10 @@ class ExperienceBundle:
         _safe(self._root)
         self._root.mkdir(exist_ok=True)
         self._sink = event_sink
-        manifest = {'run_id': self.run_id, 'sources': [source.metadata() for source in self.sources.values()],
+        manifest = {'run_id': self.run_id, 'sources': [self._metadata(source) for source in self.sources.values()],
                     'rejected_count': self._rejected, 'truncated': self._truncated}
+        if self._fresh_target_policy is not None:
+            manifest['fresh_target_policy'] = self._fresh_target_policy
         _atomic(self._root / 'experience-manifest.json', manifest)
         self._save()
 
@@ -445,18 +462,20 @@ class ExperienceBundle:
                             f'源码候选 {prior["cell_source_count"]}，缺失 {prior["missing_cell_source_count"]}，'
                             f'导出 {prior["export_count"]}；仅作待复核先验，尚未认定程序复用。')
             else:
-                self._event('历史经验可用来源 0；本轮从当前观察建立研究。')
+                self._event(f'历史经验可用来源 {context["available_count"]}；本轮从当前观察建立研究。')
 
     def read(self, source_run_id: str, kind: str, *, start: int = 0, limit: int = 32, artifact_id: str | None = None) -> dict:
         with self._lock:
             if type(start) is not int or start < 0 or type(limit) is not int or not 1 <= limit <= 32:
                 raise ValueError('experience query invalid')
             if kind == 'index' and source_run_id == '':
-                items = [source.metadata() for source in self.sources.values()]
+                items = [self._metadata(source) for source in self.sources.values()]
                 return copy_json({'items': items[start:start + limit], 'total': len(items), 'advisory_only': True})
             if source_run_id not in self.sources or kind not in {'research', 'history', 'frame', 'animation', 'artifact', 'cells'}:
                 raise ValueError('experience source unavailable')
             source = self.sources[source_run_id]
+            if source_run_id in self._quarantined and kind in {'research', 'artifact', 'cells'}:
+                raise ValueError('experience positive cognition quarantined')
             source.check()
             if kind == 'research':
                 items = source.research
@@ -544,7 +563,8 @@ class ExperienceBundle:
 
 
 def load_experience(runs_root: Path, *, game_id: str, seed: int, win_levels: int,
-                    model_id: str, current_run_id: str, pinned_source_run_id: str | None = None) -> ExperienceBundle:
+                    model_id: str, current_run_id: str, pinned_source_run_id: str | None = None,
+                    fresh_target_policy: dict | None = None) -> ExperienceBundle:
     identifier(game_id)
     identifier(current_run_id)
     trace_identities_for(model_id)
@@ -552,6 +572,14 @@ def load_experience(runs_root: Path, *, game_id: str, seed: int, win_levels: int
         identifier(pinned_source_run_id)
     if type(seed) is not int or type(win_levels) is not int or win_levels < 1:
         raise ValueError('experience scope invalid')
+    if fresh_target_policy is not None:
+        from .operator import P7_FRESH_TARGET_POLICY_ENV, P7_COGNITION_MODE_ENV, _resolve_fresh_target_policy
+        policy = _resolve_fresh_target_policy({
+            P7_COGNITION_MODE_ENV: 'fresh-target', P7_FRESH_TARGET_POLICY_ENV: json.dumps(fresh_target_policy),
+            'ASTERION_PRIME_P7_RUN_MODE': 'witness',
+        }, resume_run_id=fresh_target_policy.get('resume_run_id'))
+        if policy.game_id != game_id or policy.seed != seed or current_run_id in policy.quarantined_source_run_ids:
+            raise ValueError('experience fresh target scope invalid')
     sources, rejected, truncated, total = [], 0, False, 0
     _safe(runs_root)
     if runs_root.is_dir():
@@ -572,4 +600,5 @@ def load_experience(runs_root: Path, *, game_id: str, seed: int, win_levels: int
                 total += source.byte_count
             except (OSError, ValueError, TypeError, KeyError, RecursionError, PrimeTraceError):
                 rejected += 1
-    return ExperienceBundle(current_run_id=current_run_id, sources=sources, rejected=rejected, truncated=truncated)
+    return ExperienceBundle(current_run_id=current_run_id, sources=sources, rejected=rejected, truncated=truncated,
+                            fresh_target_policy=fresh_target_policy)

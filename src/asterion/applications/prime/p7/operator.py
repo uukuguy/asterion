@@ -123,6 +123,8 @@ P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
 P7_STRATEGY_ENV = "ASTERION_PRIME_P7_STRATEGY"
 P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
 P7_RESUME_RUN_ID_ENV = "ASTERION_PRIME_P7_RESUME_RUN_ID"
+P7_COGNITION_MODE_ENV = "ASTERION_PRIME_P7_COGNITION_MODE"
+P7_FRESH_TARGET_POLICY_ENV = "ASTERION_PRIME_P7_FRESH_TARGET_POLICY"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
@@ -3697,6 +3699,7 @@ def build_p7_operator_resources(
                 "ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE",
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
                 P7_RESUME_RUN_ID_ENV,
+                P7_COGNITION_MODE_ENV, P7_FRESH_TARGET_POLICY_ENV,
                 _WITNESS_STARTED_ENV,
             }
         }
@@ -3886,6 +3889,92 @@ def build_p7_operator_resources(
 
 
 @dataclass(frozen=True, slots=True)
+class FreshTargetPolicy:
+    """Operator-owned fixed quarantine; new attempts retain ordinary learning."""
+
+    phase_id: str
+    game_id: str
+    seed: int
+    target_level: int
+    resume_run_id: str
+    prefix_levels_completed: int
+    prefix_action_count: int
+    quarantined_source_run_ids: tuple[str, ...]
+
+    def record(self) -> dict[str, object]:
+        return {
+            "schema": "asterion.prime-p7-fresh-target/v1", "phase_id": self.phase_id,
+            "game_id": self.game_id, "seed": self.seed, "target_level": self.target_level,
+            "resume_run_id": self.resume_run_id, "prefix_levels_completed": self.prefix_levels_completed,
+            "prefix_action_count": self.prefix_action_count,
+            "quarantined_source_run_ids": list(self.quarantined_source_run_ids),
+        }
+
+
+def _resolve_fresh_target_policy(
+    process_environment: Mapping[str, str], *, resume_run_id: str | None,
+) -> FreshTargetPolicy | None:
+    """Only explicit process inputs may select a fresh target cognition round."""
+
+    mode = process_environment.get(P7_COGNITION_MODE_ENV)
+    raw = process_environment.get(P7_FRESH_TARGET_POLICY_ENV)
+    if mode is None and raw is None:
+        return None
+    try:
+        if (
+            mode != "fresh-target" or type(raw) is not str or len(raw.encode("utf-8")) > 1024 * 1024
+            or process_environment.get("ASTERION_PRIME_P7_RUN_MODE") != "witness"
+            or resume_run_id is None
+        ):
+            raise ValueError
+        value = json.loads(raw)
+        fields = {"schema", "phase_id", "game_id", "seed", "target_level", "resume_run_id",
+                  "prefix_levels_completed", "prefix_action_count", "quarantined_source_run_ids"}
+        if type(value) is not dict or set(value) != fields or value["schema"] != "asterion.prime-p7-fresh-target/v1":
+            raise ValueError
+        from .research import identifier
+
+        for key in ("phase_id", "game_id", "resume_run_id"):
+            identifier(value[key])
+        for key in ("seed", "target_level", "prefix_levels_completed", "prefix_action_count"):
+            if type(value[key]) is not int:
+                raise ValueError
+        ids = value["quarantined_source_run_ids"]
+        if (
+            type(ids) is not list or not 1 <= len(ids) <= 4096
+            or any(type(source) is not str for source in ids) or ids != sorted(set(ids))
+            or resume_run_id != value["resume_run_id"] or resume_run_id not in ids
+            or value["seed"] < 0 or value["prefix_levels_completed"] < 1
+            or value["target_level"] != value["prefix_levels_completed"] + 1
+            or value["prefix_action_count"] < 1
+        ):
+            raise ValueError
+        for source in ids:
+            identifier(source)
+        return FreshTargetPolicy(**{key: value[key] for key in fields - {"schema", "quarantined_source_run_ids"}},
+                                 quarantined_source_run_ids=tuple(ids))
+    except (ValueError, TypeError, KeyError, RecursionError):
+        raise P7OperatorError("P7 fresh target policy is unavailable") from None
+
+
+def _validate_fresh_target_prefix(policy: FreshTargetPolicy, game: P7GameSelection, prefix: object) -> None:
+    """Bind cognition renewal to the exact saved next-level recovery route."""
+
+    from .solutions import VerifiedPrefix
+
+    if (
+        type(prefix) is not VerifiedPrefix or prefix.game_id != policy.game_id
+        or game.game_id != policy.game_id or prefix.seed != policy.seed or game.seed != policy.seed
+        or game.target_level != policy.target_level or prefix.win_levels != game.win_levels
+        or prefix.source_run_id != policy.resume_run_id
+        or prefix.levels_completed != policy.prefix_levels_completed
+        or len(prefix.transitions) != policy.prefix_action_count
+        or game.target_level != prefix.levels_completed + 1
+    ):
+        raise P7OperatorError("P7 fresh target policy is unavailable")
+
+
+@dataclass(frozen=True, slots=True)
 class P7Invocation:
     """Every operator-owned value one preset invocation resolves to."""
 
@@ -3897,6 +3986,7 @@ class P7Invocation:
     game: P7GameSelection
     sweep_mode: bool = False
     resume_run_id: str | None = None
+    fresh_target_policy: FreshTargetPolicy | None = None
 
 
 def _resolve_resume_run_id(process_environment: Mapping[str, str]) -> str | None:
@@ -4133,9 +4223,12 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             _witness_deadline(environment)
             resolved[_WITNESS_STARTED_ENV] = environment[_WITNESS_STARTED_ENV]
         resume_run_id = _resolve_resume_run_id(environment)
+        fresh_target_policy = _resolve_fresh_target_policy(environment, resume_run_id=resume_run_id)
         # An operator file describes configuration; it cannot select a saved
         # run to execute. The explicit selector stays out of model processes.
         resolved.pop(P7_RESUME_RUN_ID_ENV, None)
+        resolved.pop(P7_COGNITION_MODE_ENV, None)
+        resolved.pop(P7_FRESH_TARGET_POLICY_ENV, None)
         if P7_STRATEGY_ENV in environment:
             resolved[P7_STRATEGY_ENV] = _resolve_strategy(environment)
         agent_dir = live.resolve_pi_agent_dir(resolved)
@@ -4164,6 +4257,7 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             game=_select_game_for_mode(environment, resolved, arc_root),
             sweep_mode=environment.get("ASTERION_PRIME_P7_RUN_MODE") == "sweep",
             resume_run_id=resume_run_id,
+            fresh_target_policy=fresh_target_policy,
         )
     except (live.P7LiveSolveError, P7GameSelectionError, P7OperatorError) as error:
         raise P7OperatorError(str(error)) from None
@@ -4417,6 +4511,27 @@ async def run_live(
     variant = _resolve_history_variant(invocation.environment, invocation.game)
     cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
     research_mode = variant == "verified" and not cognition_mode
+    fresh_target_policy = invocation.fresh_target_policy
+    if P7_COGNITION_MODE_ENV in invocation.environment or P7_FRESH_TARGET_POLICY_ENV in invocation.environment:
+        selected_policy = _resolve_fresh_target_policy(invocation.environment, resume_run_id=invocation.resume_run_id)
+        if selected_policy != fresh_target_policy:
+            raise P7OperatorError("P7 fresh target policy is unavailable")
+    if fresh_target_policy is not None:
+        if (
+            type(fresh_target_policy) is not FreshTargetPolicy or not research_mode or invocation.sweep_mode
+            or invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") != "witness"
+            or invocation.resume_run_id != fresh_target_policy.resume_run_id
+            or invocation.game.game_id != fresh_target_policy.game_id
+            or invocation.game.seed != fresh_target_policy.seed
+            or invocation.game.target_level != fresh_target_policy.target_level
+            or run_id in fresh_target_policy.quarantined_source_run_ids
+        ):
+            raise P7OperatorError("P7 fresh target policy is unavailable")
+        # Direct application callers receive the same closed-policy validation.
+        _resolve_fresh_target_policy({
+            P7_COGNITION_MODE_ENV: "fresh-target", P7_FRESH_TARGET_POLICY_ENV: json.dumps(fresh_target_policy.record()),
+            "ASTERION_PRIME_P7_RUN_MODE": "witness",
+        }, resume_run_id=invocation.resume_run_id)
     run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
     if type(getattr(run_signal, "cancelled", None)) is not bool:
         raise P7OperatorError("P7 cancellation signal is unavailable")
@@ -4435,11 +4550,28 @@ async def run_live(
         if not research_mode or invocation.sweep_mode:
             raise P7OperatorError("P7 resume source is unavailable")
         runs_root = root / ".asterion-private" / "prime-p7-live"
+        if fresh_target_policy is not None:
+            from .solutions import _read_one
+
+            # Static source admission constrains renewal before any SDK replay.
+            # It grants no recovery authority: the ordinary exact fresh replay
+            # still follows, with a second scope check against its result.
+            admitted = _read_one(
+                invocation.arc_root, runs_root / source_run_id,
+                invocation.game.game_id, invocation.game.seed, None,
+                declared_model_selection(invocation.environment).model, strict_model=True,
+            )
+            _validate_fresh_target_prefix(
+                fresh_target_policy, invocation.game, None if admitted is None else admitted[0],
+            )
         resume_prefix = load_exact_prefix(
             invocation.arc_root, runs_root, source_run_id,
             invocation.game.game_id, invocation.game.seed,
             expected_model_id=declared_model_selection(invocation.environment).model,
         )
+        if fresh_target_policy is not None:
+            # Validate before optional witness clipping can obscure a mismatch.
+            _validate_fresh_target_prefix(fresh_target_policy, invocation.game, resume_prefix)
         resume_prior = load_resume_worldmap(runs_root / source_run_id, resume_prefix)
         if resume_prior is None:
             raise P7OperatorError("P7 resume source is unavailable")
@@ -4579,6 +4711,7 @@ async def run_live(
             model_id=declared_model_selection(invocation.environment).model,
             current_run_id=run_id,
             pinned_source_run_id=invocation.resume_run_id,
+            fresh_target_policy=None if fresh_target_policy is None else fresh_target_policy.record(),
         )
     worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
@@ -4637,6 +4770,8 @@ async def run_live(
     diagnostics["offline_optimization_enabled"] = offline_optimization_enabled
     diagnostics["playbook_loaded"] = playbook_loaded
     diagnostics["playbook_saved"] = False
+    if fresh_target_policy is not None:
+        diagnostics["fresh_target_policy"] = fresh_target_policy.record()
     # A saved prefix may be loaded as prompt/playbook context for level 1;
     # those transitions were not applied to this broker/runtime.
     diagnostics.update(_prefix_action_diagnostics(prefix, applied=False))

@@ -89,6 +89,7 @@ class TestLiveSaveCertificate(unittest.TestCase):
 
     def test_recovery_publishes_its_own_verified_save_after_final_summary(self) -> None:
         from asterion.applications.prime.p7.replay import replay_arc_run
+        from asterion.applications.prime.p7 import solution_certificates
         from tests.test_prime_p7_terminal_recovery import TestTerminalWinRecovery, _WinningEngine
         from tests.test_recover_prime_p7_trace_race import TestRecoverPrimeP7TraceRace
         from tools.recover_prime_p7_trace_race import recover_terminal_win
@@ -115,11 +116,16 @@ class TestLiveSaveCertificate(unittest.TestCase):
                 self.assertEqual(expected_model_id, "gpt-6.1-sol")
                 certified.append(run)
 
-            module = SimpleNamespace(verify_for_save=verify, publish_verified_save=publish)
-            with mock.patch.dict("sys.modules", {
-                "asterion.applications.prime.p7.solution_certificates": module,
-            }), mock.patch("tools.recover_prime_p7_trace_race.live.ArcadeEngine", side_effect=lambda recordings_dir, game, **_: _WinningEngine(recordings_dir=recordings_dir, game=game)):
+            # Keep static source authentication real. This fixture checks
+            # publication ordering; real typed-witness inventory admission has
+            # separate coverage in the terminal animation recovery tests.
+            with mock.patch.object(solution_certificates, "verify_for_save", side_effect=verify), \
+                    mock.patch.object(solution_certificates, "publish_verified_save", side_effect=publish), \
+                    mock.patch("tools.recover_prime_p7_trace_race._register_terminal_rejection") as rejection, \
+                    mock.patch("tools.recover_prime_p7_trace_race.live.ArcadeEngine", side_effect=lambda recordings_dir, game, **_: _WinningEngine(recordings_dir=recordings_dir, game=game)):
                 recovered = recover_terminal_win(operator_root=root, arc_root=arc, source_run_id=source.name)
+                rejection.assert_called_once()
+                self.assertIs(rejection.call_args.args[-1], witness)
             self.assertEqual(certified, [recovered])
             self.assertEqual(len(replayed), 1)
             self.assertEqual((source / "summary.json").read_bytes(), before)
