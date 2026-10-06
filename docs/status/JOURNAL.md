@@ -3916,3 +3916,6 @@
 - 2026-10-06 13:11 CST — 9eb33250 records certified deployment, live two-game observation and fourth-card tracking for reliable continuation.
 - 13:28 Show latest zero-saved attempts by default so recorded cognition remains visible. [c3a49dfd]
 - 2026-10-06 13:32 CST — Zero-saved default fixed; SB ordinary Zen view33frames verified, SC/SK lanes restored with isolated trace-failure quarantine.
+- 2026-10-06 13:33 CST — dffed3c1 records visible attempts and isolated campaign recovery so continuation preserves failure evidence and two lanes.
+- 2026-10-06 13:36 CST — c3a49dfd fullpromotion25PASS/4117tests/provider0; natural SK18/SC23 save certificates independently verified without duplicate SDK/model/API calls.
+- 2026-10-06 13:41 CST — Fourth25 closed-confirmed59.798268/14full109levels4097actions; frozen source/receipt matchPASS, localSC2/SK3 continue independently.

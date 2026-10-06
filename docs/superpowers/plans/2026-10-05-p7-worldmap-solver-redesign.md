@@ -418,13 +418,13 @@ Core183-ready committed98aa1b9b; frozen compact/status snapshot fullpromotionPAS
 - [x] Cover recovery/composition sources through the same certified publisher after their actual independent verification; preserve original source failure/receipt history.
 - [x] Integrate focused unittest checks, independent contract review and packaged-resource promotion. Create a clean wheel with matching installed resources. Run one explicit finite migration over the current official-ranked selected sources, models/API0, then test installed certified preflight with SDK replay forbidden. Never repeat the live third card to test this change.
 - [x] Adopt only the campaign parent/future save path after named checks pass, preserving actual guest versions/deadlines, two slots and historical phase counters. Final0f4 parent adoption is proven; user subsequently authorized fresh games. Record named facts and incomplete boundaries in the existing recovery checkpoint; commit promptly to main.
-- [ ] Verify one naturally saved0f4 run publishes its native submission certificate using the existing save witness; no extra model run or repeated SDK replay for this check.
+- [x] Verify naturally saved0f4 SK48L1 and SC25L1 publish native submission certificates using the existing save witness; isolated installed validation performs zero extra SDK/model/API calls (`natural-save-certificates-0f4fb448-proof.json`).
 
 ### Official evaluation cadence and later community materials (2026-10-06)
 
 执行边界见[设计合同](../specs/2026-10-05-p7-worldmap-solver-redesign.md#official-execution-and-community-publication-boundaries-2026-10-06)与[官方提交指南](../../guides/prime-p7-games-and-official-results.md#6-官方提交与社区展示的策略)。这些工作不阻塞继续解题，也不授权自动新开卡或对外发布。
 
-- [ ] 保存时完成路线校验/认证，日常本地按关继续研究；阶段性评测冻结25题来源后使用一张新卡实际在线执行，正常关闭并核对完整回执再更新官方成绩。恢复待处理、未尝试环境及本地研究结果单独记载，不拼接多张卡或把部分执行称为完整评测。
+- [x] 保存时完成路线校验/认证，日常本地按关继续研究；阶段性评测冻结25题来源后使用一张新卡实际在线执行，正常关闭并核对完整回执再更新官方成绩。2026-10-06卡15ffcc07正常关闭59.798268/14全通/109关/4097动作。恢复待处理、未尝试环境及本地研究结果单独记载，不拼接多张卡或把部分执行称为完整评测。
 - [ ] 如需优化提交墙钟时间，先验证应用级独立环境有界并发：同一卡、每环境一次make、每环境动作顺序、共享SDK身份隔离、全局请求上限、取消收口与唯一最终关闭。官方Swarm示例及600请求/分钟说明支持研究该方向，但尚无本应用Competition并发验收；通用runner保持顺序合同。
 - [ ] 后续整理README中的P7研究/复现段落，链接现有指南并明确本地多轮研究与官方正常关闭成绩的不同口径。用户已暂停当前README扩张，此项保持pending。
 - [ ] 后续准备公开通用系统、版本/模型/成本与探索口径说明，以及符合社区schema的submission.yaml；使用Competition卡片链接，不填写ARC-AGI-3数值成绩。提交前复核社区仓库最新展示规则；当前规则仅展示Verified数字。外发PR与推送尚未执行。

@@ -307,6 +307,8 @@ make asterion-prime-p7-official-live-eval
 
 ## 5. 回执和 scorecard 对照
 
+2026-10-06 最新正常关闭的完整25题提交：[官方卡片](https://arcprize.org/scorecards/15ffcc07-6484-437b-9c66-54d4dccfcf0c)，得分 **59.7982683982684**，25题已执行、0跳过、14题全通、109/183关、4097动作。回执状态为 `closed-confirmed`，保存在 `.asterion-private/prime-p7-official/p7-live-20261006050112-67fb895d89586479d9da2cdf/official-receipt.json`。相比上一张正常卡29.834632，增加7题全通和55关。本批冻结开卡时路线；后续本地新增过关另行保存，不改写本卡成绩。提交过程不调用模型，也不重新离线重放历史候选；在线动作仍按官方要求逐次执行。
+
 以下为2026-09-25历史结果；最新会话成绩以[活动检查点](../status/RESUME-NEXT-SESSION.md)为准。当天已执行两次 `GAME=all` 官方提交。该日最新批量回执是 `.asterion-private/prime-p7-official/p7-live-20260925194924-200e3e5e7a7b26c04ea21d67/official-receipt.json`；[官方卡片](https://arcprize.org/scorecards/403c8b05-ae64-4dd9-b6f6-1d22910a2e24)的总分为 `6.498124098124098`。21 道题重新执行了本地已验证动作前缀，4 道题（G50T、KA59、SK48、TN36）未选并由官方服务记录零动作占位。所选题中 M0R0、VC33 完成到第 3 关，AR25、CN04、DC22、LS20、RE86、TU93 完成到第 2 关，其余完成首关；没有整题通关。逐题官方动作数、关卡数、状态和分数保存在该回执的 `games` 数组，并列于[证据记录](../status/ASTERION-PRIME-P7-EVIDENCE.md)。这次命令正常关闭并直接写出 `closed-confirmed` 回执，无需恢复命令。
 
 上一张 17 题批量卡片仍保留为历史记录：回执 `.asterion-private/prime-p7-official/p7-live-20260925031809-dabd0f7fd2131740a0cbfacc/official-receipt.json`，总分 `2.5044733044733043`，卡片为 [fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d](https://arcprize.org/scorecards/fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d)。

@@ -7,7 +7,7 @@
 - Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most two independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and the two completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
+- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most two independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
 
 ## Current Architecture
 
