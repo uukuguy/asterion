@@ -4417,6 +4417,9 @@ async def run_live(
     run_signal = live.NeverCancelled() if cancellation_signal is None else cancellation_signal
     if type(getattr(run_signal, "cancelled", None)) is not bool:
         raise P7OperatorError("P7 cancellation signal is unavailable")
+    # Preserve process-signal authority independently of any admission wrapper.
+    # A cancelled model task alone must not manufacture an interrupted receipt.
+    process_cancellation = run_signal if type(run_signal) is live.ProcessCancellation else None
     witness_deadline = _witness_deadline(invocation.environment)
     if witness_deadline is not None:
         run_signal = _WitnessDeadlineSignal(run_signal, witness_deadline)
@@ -4845,7 +4848,8 @@ async def run_live(
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
                 if (isinstance(failure, asyncio.CancelledError)
-                        and type(run_signal) is live.ProcessCancellation and run_signal.cancelled):
+                        and ((process_cancellation is not None and process_cancellation.cancelled)
+                             or (witness_deadline is not None and time.monotonic() >= witness_deadline))):
                     try:
                         broker_value.interrupt()
                     except ArcBrokerError:

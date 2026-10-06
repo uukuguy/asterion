@@ -2356,7 +2356,12 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             with self.subTest(outcome=outcome):
                 self._assert_replayed_first_level_failure(outcome)
 
-    def _assert_replayed_first_level_failure(self, outcome: str) -> None:
+    def test_witness_cancellation_seals_acknowledged_journal(self) -> None:
+        for outcome in ("interrupted", "deadline-expired", "untrusted-cancel"):
+            with self.subTest(outcome=outcome):
+                self._assert_replayed_first_level_failure(outcome, witness=True)
+
+    def _assert_replayed_first_level_failure(self, outcome: str, *, witness=False) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.game import DEFAULT_GAME
         from asterion.applications.prime.p7.operator import (
@@ -2378,11 +2383,15 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         class Worker:
             closed = False
 
+        clock = [125.0]
         async def composed(*args: object, **kwargs: object) -> None:
             assert client is not None
             client.act([{"name": "ACTION1", "data": {}}])
             if outcome == "game-over":
                 raise RuntimeError("private model detail")
+            if outcome == "deadline-expired":
+                clock[0] = 1000.0
+                self.assertTrue(kwargs["signal"].cancelled)
             raise asyncio.CancelledError("supervisor interrupt")
 
         with tempfile.TemporaryDirectory() as directory:
@@ -2421,7 +2430,13 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 operator_root=root,
                 arc_root=root,
                 game=DEFAULT_GAME,
-                environment={"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"},
+                environment={"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy", **({
+                    "ASTERION_PRIME_P7_RUN_MODE": "witness",
+                    "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "900",
+                    "ASTERION_PRIME_P7_ATTEMPT_UNIT": "asterion-p7-" + "a" * 32 + ".service",
+                    "ASTERION_PRIME_P7_CONSOLE_RUN_ID": "p7-live-20261005123456-" + "a" * 24,
+                    "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC": "100.0",
+                } if witness else {})},
                 pi_base_command=(),
                 extension_path=root,
             )
@@ -2435,6 +2450,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=application),
                 mock.patch("asterion.applications.prime.p7.operator.run_composed_application", new_callable=mock.AsyncMock, side_effect=composed),
                 mock.patch("asterion.applications.prime.p7.operator.live.worker_cell_count", return_value=0),
+                mock.patch("asterion.applications.prime.p7.operator.time.monotonic", side_effect=lambda: clock[0]),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
                 cancellation = live_module.ProcessCancellation()
@@ -2448,6 +2464,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 self.assertFalse(failure.sealed_trace)
                 self.assertFalse(failure.replay_verified)
                 return
+            outcome = "interrupted" if outcome == "deadline-expired" else outcome
             self.assertEqual(failure.primitive_actions, 1)
             self.assertEqual(failure.terminal_reason, outcome)
             self.assertTrue(failure.replay_verified)
