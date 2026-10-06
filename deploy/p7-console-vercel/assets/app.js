@@ -126,6 +126,7 @@
   let consoleConfig = null;
   try { consoleConfig = JSON.parse($('console-config').textContent); } catch (_) { /* An invalid config never enables requests. */ }
   const liveConfig = isRecord(consoleConfig) && consoleConfig.readOnly === true ? consoleConfig : null;
+  const CLOUD_REFRESH_INTERVAL = 300000;
   function enforceCloudReadOnly() {
     document.querySelectorAll('#run-start,#run-fresh,#run-pause,#run-resume,#run-stop,#manual-close,#manual-restart,#retry-command,[data-overview-start],[data-overview-fresh]').forEach(button => {button.disabled = true; button.title = '云端只读；请在本地控制求解';});
     $('game-select').disabled = false;
@@ -2078,7 +2079,7 @@
       state.replayRun = runId;state.replayFailures = 0;state.replayRetryAt = 0;
       clearReplayLoad(ticket);ensureSelectedSource();
       write('service-status',replayUnsealed(snapshot) ? '只读观察 · 记录未封口 · 每 2 秒更新' : '回放记录 · 按关卡读取 · 只读');
-      if (replayUnsealed(snapshot) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(),2000);
+      if (replayUnsealed(snapshot) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(), CLOUD_REFRESH_INTERVAL);
       else if (!replayUnsealed(snapshot) && state.replayPollTimer !== null) {window.clearInterval(state.replayPollTimer);state.replayPollTimer = null;}
       renderSessionControls();
       if (number(run.completed_level_count)>previousCompleted) loadOverview();
@@ -2158,7 +2159,7 @@
       replaceSnapshot(replay, { follow: state.replayFollow }); state.replayRun = runId; state.replayFailures = 0; state.replayRetryAt = 0;
       ensureSelectedSource();
       write('service-status', replayUnsealed(replay) ? '只读观察 · 记录未封口 · 每 2 秒更新' : '回放记录 · 只读');
-      if (replayUnsealed(replay) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(), 2000);
+      if (replayUnsealed(replay) && state.replayPollTimer === null) state.replayPollTimer = window.setInterval(() => loadReplay(), CLOUD_REFRESH_INTERVAL);
       else if (!replayUnsealed(replay) && state.replayPollTimer !== null) { window.clearInterval(state.replayPollTimer); state.replayPollTimer = null; }
       renderSessionControls();
       if (number(replay.run.completed_level_count) > completedBefore) loadOverview();
@@ -2391,8 +2392,8 @@
     $('replay-follow').addEventListener('click', () => { state.replayFollow = true; state.eventSequence = null; replaceSnapshot(snapshot, { follow: true }); renderSessionControls(); });
     write('service-status', '正在读取云端同步记录');
     $('overview').hidden = false; loadOverview(); initializeSelection().catch(showRequestError);
-    state.pollTimer = window.setInterval(pollState, 1000);
-    state.overviewTimer = window.setInterval(loadOverview, 5000);
+    state.pollTimer = window.setInterval(pollState, CLOUD_REFRESH_INTERVAL);
+    state.overviewTimer = window.setInterval(loadOverview, CLOUD_REFRESH_INTERVAL);
     window.addEventListener('pagehide', () => { stopReplayPolling(); if (state.pollTimer !== null) window.clearInterval(state.pollTimer); if (state.overviewTimer !== null) window.clearInterval(state.overviewTimer); });
   }
 

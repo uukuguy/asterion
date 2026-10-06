@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { spawnSync } from 'node:child_process';
 import { canonicalJSON, decodeObject, INDEX_PATH, readRoute, sha256, validateIndex } from '../cloud.mjs';
 import { packObjects, publishSpool } from '../upload.mjs';
 import { createHandler } from '../api/cloud.js';
@@ -64,6 +65,19 @@ test('packing preserves exact public bytes and private reads verify pack hashes'
   for (const [sha,body] of corrupt.packs) sdk.blobs.set(`p7-console/packs/${sha}.bin`,Buffer.alloc(body.length));
   await assert.rejects(()=>readRoute(sdk.get,corrupt.index,'/api/overview'),/pack-hash/);
 });
+test('concurrent cold reads share one private pack fetch and retain a working cache',async()=>{
+  const fix=fixture({...baseRoutes,'/api/overview':{games:[],concurrentColdRead:true}});
+  const packed=packObjects(fix.index,fix.objects); const sdk=memorySDK();
+  for (const [sha,body] of packed.packs) sdk.blobs.set(`p7-console/packs/${sha}.bin`,body);
+  let release; const gate=new Promise(resolve=>{release=resolve;});
+  const slowGet=async(...args)=>{await gate; return sdk.get(...args);};
+  const first=readRoute(slowGet,packed.index,'/api/overview');
+  const second=readRoute(slowGet,packed.index,'/api/games');
+  release(); const [overview,games]=await Promise.all([first,second]);
+  assert.equal(overview.value.concurrentColdRead,true); assert.deepEqual(games.value,baseRoutes['/api/games']);
+  assert.equal(sdk.reads.length,1);
+  await readRoute(slowGet,packed.index,'/api/state'); assert.equal(sdk.reads.length,1);
+});
 test('partial upload retains previous pointer; retry and unchanged scan use receipts',async t=>{
   const fix=fixture({...baseRoutes,'/api/replay/p7-run':{run:{run_id:'p7-run'}}}); const spool=await stage(t,fix); const sdk=memorySDK();
   const previous=fixture({...baseRoutes,'/api/state':{state:'idle',snapshot:null,previous:true}});
@@ -99,4 +113,18 @@ test('existing console HTML enables readonly queries with no operator token and 
   assert.match(html,/"readOnly":true/); assert.match(html,/if \(command\) throw/); assert.match(html,/cloud-sync-status/);
   assert.doesNotMatch(html,/X-P7-Console-Token/); assert.doesNotMatch(html,/__CONSOLE_/);
   assert.match(html,/\\u003c\/script\\u003e/);
+});
+test('packaged cloud assets are fresh with five-minute polling and unchanged local source',async()=>{
+  const source=new URL('../../../src/asterion/applications/prime/p7/console_assets/app.js',import.meta.url);
+  const asset=new URL('../assets/app.js',import.meta.url);
+  const before=await readFile(asset,'utf8'); const local=await readFile(source,'utf8');
+  const result=spawnSync(process.execPath,[new URL('../refresh-assets.mjs',import.meta.url).pathname],{encoding:'utf8'});
+  assert.equal(result.status,0,result.stderr);
+  const cloud=await readFile(asset,'utf8'); assert.equal(cloud,before); assert.equal(await readFile(source,'utf8'),local);
+  assert.match(cloud,/const CLOUD_REFRESH_INTERVAL = 300000;/);
+  assert.match(cloud,/setInterval\(pollState, CLOUD_REFRESH_INTERVAL\)/);
+  assert.match(cloud,/setInterval\(loadOverview, CLOUD_REFRESH_INTERVAL\)/);
+  assert.equal(cloud.match(/setInterval\(\(\) => loadReplay\(\), CLOUD_REFRESH_INTERVAL\)/g)?.length,2);
+  assert.match(cloud,/loadOverview\(\); initializeSelection\(\)/);
+  assert.match(await readFile(new URL('../html.mjs',import.meta.url),'utf8'),/setInterval\(update,300000\)/);
 });

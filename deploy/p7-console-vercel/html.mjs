@@ -13,7 +13,7 @@ const syncJS = `\n(() => {
       (data.uploadOperations ? ' · 上传操作 ' + data.uploadOperations.attempts + '/' + data.uploadOperations.limit : '') +
       (data.storage?.warning ? ' · 云端存储接近限额；请检查本地发布器' : '');
   } catch (_) { label.textContent = ' · 云端同步读取失败 · 保留最近画面'; } }
-  update(); const timer = setInterval(update,60000); addEventListener('pagehide',()=>clearInterval(timer));
+  update(); const timer = setInterval(update,300000); addEventListener('pagehide',()=>clearInterval(timer));
 })();`;
 export async function renderHTML(snapshot, games) {
   if (!assets) {

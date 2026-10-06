@@ -12,6 +12,7 @@ function replace(before, after) {
 }
 replace("const liveConfig = isRecord(consoleConfig) && typeof consoleConfig.token === 'string' && consoleConfig.token ? consoleConfig : null;",
   "const liveConfig = isRecord(consoleConfig) && consoleConfig.readOnly === true ? consoleConfig : null;\n" +
+  "  const CLOUD_REFRESH_INTERVAL = 300000;\n" +
   "  function enforceCloudReadOnly() {\n" +
   "    document.querySelectorAll('#run-start,#run-fresh,#run-pause,#run-resume,#run-stop,#manual-close,#manual-restart,#retry-command,[data-overview-start],[data-overview-fresh]').forEach(button => {button.disabled = true; button.title = '云端只读；请在本地控制求解';});\n" +
   "    $('game-select').disabled = false;\n" +
@@ -25,4 +26,8 @@ replace("write('session-id', manual && state.manualView?.session_id ? `试玩 ${
 replace("row.querySelector('[data-overview-select]').disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;\n    });",
   "row.querySelector('[data-overview-select]').disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;\n    });\n    enforceCloudReadOnly();");
 js = js.replaceAll('正在连接本地服务', '正在读取云端同步记录');
+replace('window.setInterval(pollState, 1000)', 'window.setInterval(pollState, CLOUD_REFRESH_INTERVAL)');
+replace('window.setInterval(loadOverview, 5000)', 'window.setInterval(loadOverview, CLOUD_REFRESH_INTERVAL)');
+replace('window.setInterval(() => loadReplay(),2000)', 'window.setInterval(() => loadReplay(), CLOUD_REFRESH_INTERVAL)');
+replace('window.setInterval(() => loadReplay(), 2000)', 'window.setInterval(() => loadReplay(), CLOUD_REFRESH_INTERVAL)');
 await writeFile(new URL('app.js', target), js);

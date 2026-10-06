@@ -37,7 +37,7 @@ configuration ceiling of 2,000 (`--max-upload-operations`). Writes stop before
 exceeding 900 MiB of known retained storage; 750 MiB triggers a visible warning.
 The receipt accounts for this application's managed uploads, not unrelated
 objects or activity in the store. Use a dedicated private store. The producer
-coalesces uploads, normally at 300 seconds, with saved-progress priority at a
+coalesces uploads, normally at 1,800 seconds, with saved-progress priority at a
 minimum of 60 seconds. Captures may occur more often without writing remotely.
 Quota exhaustion returns a closed `cloud-upload-quota-exceeded` or
 `cloud-storage-quota-exceeded` diagnostic; raw SDK errors and credentials are
@@ -48,7 +48,9 @@ up to 60 seconds and immutable pack bytes in a bounded 32 MiB process cache.
 Revision-bound detail/frame responses are immutable. `/api/sync-status` exposes
 the last committed data timestamp, generation, upload counter and storage
 footprint. The timestamp measures the last data update, not a heartbeat; an
-unchanged generation needs no write. UI status polls once per minute. Local
+unchanged generation needs no write. Cloud overview, session, unsealed replay
+and sync status poll every five minutes; opening a game or replay reads
+immediately. Local UI polling is unchanged. Local
 publisher diagnostics distinguish a failed capture, failed upload and quota
 guard; the remote page retains the last complete view.
 

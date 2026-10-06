@@ -76,17 +76,30 @@ export function validatePayloadBinding(value, route) {
       (preview[2] && (value.levels?.length !== 1 || value.levels[0].level !== Number(preview[2]))))) throw new Error('cloud-preview-invalid');
 }
 const packCache = new Map(); let cacheBytes = 0;
+const packRequests = new Map();
+async function readPack(get, entry, token) {
+  const cached = packCache.get(entry.packSHA);
+  if (cached) return cached;
+  if (!packRequests.has(entry.packSHA)) {
+    const pending = (async () => {
+      const pack = await readBoundedBlob(get, entry.packPath, { token, maximum: entry.packBytes });
+      if (pack.length !== entry.packBytes || sha256(pack) !== entry.packSHA) throw new Error('cloud-pack-hash-invalid');
+      const previous = packCache.get(entry.packSHA);
+      if (previous) cacheBytes -= previous.length;
+      packCache.set(entry.packSHA,pack); cacheBytes += pack.length;
+      while (cacheBytes > 32 * 1024 * 1024 && packCache.size) {
+        const key = packCache.keys().next().value;
+        cacheBytes -= packCache.get(key).length; packCache.delete(key);
+      }
+      return pack;
+    })().finally(()=>packRequests.delete(entry.packSHA));
+    packRequests.set(entry.packSHA,pending);
+  }
+  return packRequests.get(entry.packSHA);
+}
 export async function readRoute(get, index, route, token) {
   if (!allowedRoute(route) || !Object.hasOwn(index.routes, route)) throw new Error('cloud-route-unavailable');
   const entry = index.routes[route];
-  let pack = packCache.get(entry.packSHA);
-  if (!pack) {
-    pack = await readBoundedBlob(get, entry.packPath, { token, maximum: entry.packBytes });
-    if (pack.length !== entry.packBytes || sha256(pack) !== entry.packSHA) throw new Error('cloud-pack-hash-invalid');
-    packCache.set(entry.packSHA, pack); cacheBytes += pack.length;
-    while (cacheBytes > 32 * 1024 * 1024) {
-      const key = packCache.keys().next().value; cacheBytes -= packCache.get(key).length; packCache.delete(key);
-    }
-  }
+  const pack = await readPack(get,entry,token);
   return decodeObject(pack.subarray(entry.offset, entry.offset + entry.compressedBytes), entry, route);
 }
