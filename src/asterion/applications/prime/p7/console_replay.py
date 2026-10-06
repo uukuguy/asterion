@@ -19,8 +19,7 @@ _REVISION = re.compile(r'[0-9a-f]{64}\Z')
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_PATHS = 8192
 _CACHE_BYTES = 128 * 1024 * 1024
-_PROJECTOR = 'asterion.arc-agi3-p7-replay-projector/v2'
-_LEGACY_PROJECTOR = 'asterion.arc-agi3-p7-replay-projector/v1'
+_PROJECTOR = 'asterion.arc-agi3-p7-replay-projector/v3'
 
 
 def replay_fingerprint(root: Path) -> tuple:
@@ -159,9 +158,8 @@ def _loading(run_id):
             'revision': None, 'run': None, 'levels': [], 'warnings': []}
 
 
-def projection_revision(fingerprint: tuple, content_sha256: str | None = None, *, legacy: bool = False) -> str:
-    projector = _LEGACY_PROJECTOR if legacy else _PROJECTOR
-    return sha256((projector + repr(fingerprint) + (content_sha256 or '')).encode('utf-8')).hexdigest()
+def projection_revision(fingerprint: tuple, content_sha256: str | None = None) -> str:
+    return sha256((_PROJECTOR + repr(fingerprint) + (content_sha256 or '')).encode('utf-8')).hexdigest()
 
 
 def projection_manifest(snapshot: dict, revision: str) -> dict:

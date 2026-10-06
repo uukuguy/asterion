@@ -13,29 +13,44 @@ from tests.test_prime_p7_console_session import ConsoleSessionFixture, RUN_ID
 
 
 class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
-    def test_legacy_v1_stays_readable_but_prior_v2_projector_requires_rebuild(self):
+    def test_old_projectors_require_rebuild_for_both_prepared_formats(self):
         from asterion.applications.prime.p7 import console_prepared as prepared
-        from asterion.applications.prime.p7.console_replay import replay_fingerprint
         root, snapshot = self.saved()
-        legacy = 'asterion.arc-agi3-p7-prepared-replay/v1'
-        with patch('asterion.applications.prime.p7.console_replay._PROJECTOR',
-                   'asterion.arc-agi3-p7-replay-projector/v1'), patch.object(prepared, '_SCHEMA', legacy):
+        source_bytes = (root / 'summary.json').read_bytes()
+        certificates = root.parent / 'solution-certificates' / 'revisions'
+        certificates.mkdir(parents=True)
+        certificate = certificates / ('a' * 64 + '.json')
+        certificate.write_bytes(b'immutable existing certificate')
+        for version in (1, 2):
+            with self.subTest(projector=version):
+                (root / 'console-prepared' / 'current.json').unlink(missing_ok=True)
+                with patch('asterion.applications.prime.p7.console_replay._PROJECTOR',
+                           f'asterion.arc-agi3-p7-replay-projector/v{version}'), patch.object(
+                               prepared, '_SCHEMA', f'asterion.arc-agi3-p7-prepared-replay/v{version}'):
+                    self.save(root, snapshot)
+                fingerprint = replay_fingerprint(root)
+                index = json.loads((root / 'console-prepared' / 'current.json').read_text())
+                self.assertIsNone(prepared.read_prepared_manifest(root, fingerprint))
+                self.assertIsNone(prepared.read_prepared_level(root, fingerprint, 1, index['revision']))
+                repaired = prepared.publish_prepared(root, snapshot, fingerprint)
+                self.assertIsNotNone(repaired)
+                self.assertNotEqual(repaired['revision'], index['revision'])
+                self.assertEqual(prepared.read_prepared_manifest(root, fingerprint), repaired)
+                self.assertIsNotNone(prepared.read_prepared_level(root, fingerprint, 1, repaired['revision']))
+                self.assertEqual((root / 'summary.json').read_bytes(), source_bytes)
+                self.assertEqual(certificate.read_bytes(), b'immutable existing certificate')
+                (root / 'console-prepared' / 'current.json').unlink()
+
+    def test_current_projector_can_read_legacy_full_frame_format(self):
+        from asterion.applications.prime.p7 import console_prepared as prepared
+        root, snapshot = self.saved()
+        with patch.object(prepared, '_SCHEMA', 'asterion.arc-agi3-p7-prepared-replay/v1'):
             self.save(root, snapshot)
         fingerprint = replay_fingerprint(root)
-        old = prepared.read_prepared_manifest(root, fingerprint)
-        self.assertIsNotNone(old)
-        self.assertEqual(old['schema'], 'asterion.arc-agi3-p7-replay-manifest/v1')
-        snapshot.update(schema='asterion.arc-agi3-p7-console/v2', diagnostics=[])
-        (root / 'console-prepared' / 'current.json').unlink()
-        with patch('asterion.applications.prime.p7.console_replay._PROJECTOR',
-                   'asterion.arc-agi3-p7-replay-projector/v1'), patch.object(prepared, '_SCHEMA', legacy):
-            self.save(root, snapshot)
-        self.assertIsNone(prepared.read_prepared_manifest(root, fingerprint))
-        repaired = prepared.publish_prepared(root, snapshot, fingerprint)
-        self.assertIsNotNone(repaired)
-        self.assertEqual(prepared.read_prepared_manifest(root, fingerprint), repaired)
-        index = json.loads((root / 'console-prepared' / 'current.json').read_text())
-        self.assertEqual(index['schema'], 'asterion.arc-agi3-p7-prepared-replay/v2')
+        manifest = prepared.read_prepared_manifest(root, fingerprint)
+        self.assertIsNotNone(manifest)
+        self.assertEqual(manifest['schema'], 'asterion.arc-agi3-p7-replay-manifest/v1')
+        self.assertIsNotNone(prepared.read_prepared_level(root, fingerprint, 1, manifest['revision']))
 
     def test_prepared_animation_pages_bind_revision_and_preserve_metadata_on_missing_page(self):
         from asterion.applications.prime.p7.console_frames import FrameStore, frame_page

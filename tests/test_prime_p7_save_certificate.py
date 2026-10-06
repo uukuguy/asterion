@@ -11,7 +11,7 @@ from unittest import mock
 
 class TestLiveSaveCertificate(unittest.TestCase):
     def test_publication_preserves_summary_and_reports_pending_without_losing_evidence(self) -> None:
-        from asterion.applications.prime.p7 import operator
+        from asterion.applications.prime.p7 import operator, solution_certificates
 
         publish = getattr(operator, "_publish_save_certificate", None)
         self.assertTrue(callable(publish), "finalized save certificate publication is required")
@@ -28,7 +28,10 @@ class TestLiveSaveCertificate(unittest.TestCase):
                 self.assertEqual(expected_model_id, "gpt-6.1-sol")
                 calls.append(source)
 
-            module = SimpleNamespace(publish_verified_save=certify)
+            module = SimpleNamespace(
+                publish_verified_save=certify,
+                SourceProvenanceCapacityError=solution_certificates.SourceProvenanceCapacityError,
+            )
             with mock.patch.dict("sys.modules", {
                 "asterion.applications.prime.p7.solution_certificates": module,
             }):
