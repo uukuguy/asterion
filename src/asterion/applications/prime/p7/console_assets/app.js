@@ -62,6 +62,7 @@
     'fix-request':'修正请求', 'retry-read':'重试读取', 'operator-recovery':'等待恢复处理', 'none':'无需恢复操作',
   };
   const validDiagnostic = value => isRecord(value) && Object.hasOwn(DIAGNOSTIC_LABELS,value.code) &&
+    Object.keys(value).every(key=>['diagnostic_id','code','severity','stage','action_sequence','outcome_known','durable','observed','limit','unit','recovery','first_seen','last_seen','count','status','recovered_at'].includes(key)) &&
     ['info','warning','error'].includes(value.severity) && Object.hasOwn(DIAGNOSTIC_STAGES,value.stage) &&
     Object.hasOwn(DIAGNOSTIC_RECOVERY,value.recovery) && Number.isInteger(value.action_sequence) && value.action_sequence >= 0 &&
     typeof value.outcome_known === 'boolean' && typeof value.durable === 'boolean' && (!value.durable || value.outcome_known) &&
@@ -77,6 +78,7 @@
       value.process_events.some((event, index, events) => !isRecord(event) || !Number.isInteger(event.event_sequence) || event.event_sequence < 1 ||
         (index > 0 && event.event_sequence <= events[index - 1].event_sequence) || !['observation', 'action', 'decision', 'cognition', 'compute_task', 'model_revision', 'plan', 'feedback', 'run_control', 'diagnostic'].includes(event.kind) ||
         typeof event.frame_id !== 'string' || !Number.isInteger(event.level) || !isRecord(event.payload) || !validProvenance(event.provenance) ||
+        (event.kind === 'diagnostic' && !validDiagnostic(event.payload)) ||
         !validActionLabels({ ...event.payload, source_action_sequence: event.source_action_sequence, provenance: event.provenance })))) return false;
     const run = value.run;
     if (run.win_levels != null && (!Number.isInteger(run.win_levels) || run.win_levels < 0 || run.win_levels > 1000)) return false;
@@ -85,6 +87,11 @@
       if (!isRecord(level) || !Number.isInteger(level.level) || level.level < 1 || level.level > 1000 || ids.has(level.level)) return false;
       ids.add(level.level);
       if (!Array.isArray(level.frames) || !Array.isArray(level.actions) || !Array.isArray(level.decisions) || !optionalString(level.status) || !validCognition(level.cognition)) return false;
+      if (level.frame_page !== undefined && (!isRecord(level.frame_page) || !Number.isInteger(level.frame_count) || level.frame_count < 1 ||
+        !Number.isInteger(level.frame_index_offset) || level.frame_index_offset < 0 || !/^[a-f0-9]{64}$/.test(level.frame_page.source_token || '') ||
+        !Number.isInteger(level.frame_page.start) || level.frame_page.start < 0 || level.frame_page.start >= level.frame_count ||
+        !Number.isInteger(level.frame_page.limit) || level.frame_page.limit < 1 || level.frame_page.limit > 32 ||
+        level.frames.length > 32 || level.frames.some((frame,index)=>frame.index !== level.frame_page.start+index || frame.id !== `f${String(level.frame_index_offset+frame.index).padStart(6,'0')}`))) return false;
       const frameIds = new Set(), actionIds = new Set();
       return level.frames.every((frame) => {
         if (!isRecord(frame) || typeof frame.id !== 'string' || !frame.id || frameIds.has(frame.id) || !Array.isArray(frame.grid)) return false;
@@ -130,9 +137,10 @@
   // currently observed attempt or attach its events to another run's frames.
   const savedViews = new Map(), savedRequests = new Map(), previewViews = new Map(), boardSavedViews = new Map();
   const replayManifests = new Map(), manifestRequests = new Map(), replayLevelRequests = new Map(), replayLevelViews = new Map(), replayViewSizes = new WeakMap();
+  const framePages=new Map(),framePageRequests=new Map(),framePageErrors=new Set(),frameIndexMaps=new WeakMap();
   let replayLoad = null, replayLoadTimer = null;
   const primaryLevel = () => levels[state.levelIndex] || emptyLevel;
-  const levelFrameCount = level => level.replay_unloaded ? number(level.frame_count) : array(level.frames).length;
+  const levelFrameCount = level => level.replay_unloaded || level.frame_page ? number(level.frame_count) : array(level.frames).length;
   const levelActionCount = level => level.replay_unloaded ? number(level.action_count) : array(level.actions).length;
   function cachedSavedView() {
     if (state.mode === 'manual') return null;
@@ -158,19 +166,36 @@
   const currentLevel = () => levelSource().level;
   const frames = () => array(currentLevel().frames);
   const actions = () => array(currentLevel().actions);
-  const currentFrame = () => frames()[state.frameIndex];
-  const frameById = (id) => (state.mode === 'manual' && run.status === 'manual' ? levels.flatMap((level) => array(level.frames)) : frames()).find((frame) => frame.id === id);
+  function frameIndexForId(id) {
+    if (currentLevel().frame_page) return /^f\d+$/.test(id || '') ? Number(id.slice(1))-currentLevel().frame_index_offset : -1;
+    const list=frames();
+    let index=frameIndexMaps.get(list);
+    if (!index || index.size !== list.length) {index=new Map(list.map((frame,index)=>[frame.id,index]));frameIndexMaps.set(list,index);}
+    return index.get(id) ?? -1;
+  }
+  const framePageKey = (source,start) => `${source.key}/${source.level.frame_page.source_token}/${start}`;
+  function frameAt(index) {
+    const source=levelSource(),level=source.level;
+    if (!level.frame_page) return array(level.frames)[index];
+    const local=array(level.frames).find(frame=>frame.index===index);
+    if (local) return local;
+    const key=framePageKey(source,Math.floor(index/32)*32),page=framePages.get(key);
+    if (page) {framePages.delete(key);framePages.set(key,page);return page.find(frame=>frame.index===index);}
+    return undefined;
+  }
+  const currentFrame = () => frameAt(state.frameIndex);
+  const frameById = id => state.mode === 'manual' && run.status === 'manual' ? levels.flatMap(level=>array(level.frames)).find(frame=>frame.id===id) : frameAt(frameIndexForId(id));
   const processEvents = () => {
     if (state.mode === 'manual') return [];
     const source = levelSource(), frameIds = new Set(array(source.level.frames).map(frame => frame.id));
-    return array(source.snapshot.process_events).filter(event => event.level === source.level.level && frameIds.has(event.frame_id));
+    return array(source.snapshot.process_events).filter(event => event.level === source.level.level && (source.level.frame_page ? frameIndexForId(event.frame_id)>=0 && frameIndexForId(event.frame_id)<levelFrameCount(source.level) : frameIds.has(event.frame_id)));
   };
   const cursorSequence = (events) => {
     if (state.eventSequence !== null) return state.eventSequence;
     const frameIndexes = new Map(frames().map((frame, index) => [frame.id, index]));
     let cursor = null;
     (events || processEvents()).forEach(event => {
-      if (frameIndexes.get(event.frame_id) <= state.frameIndex) cursor = event.event_sequence;
+      if ((currentLevel().frame_page ? frameIndexForId(event.frame_id) : frameIndexes.get(event.frame_id)) <= state.frameIndex) cursor = event.event_sequence;
     });
     return cursor;
   };
@@ -187,7 +212,7 @@
     !activeSession() && !state.manualBusy && !state.manualPending && !state.commandBusy && !state.pendingCommand && Boolean(currentFrame()) && manualAtCurrent();
   const manualHistoryActive = () => state.mode === 'manual' && run.status === 'manual' && Boolean(state.manualHistory && state.manualView && state.manualHistory.session_id === state.manualView.session_id);
   const manualAtCurrent = () => !manualHistoryActive() || state.manualHistory.index === state.manualHistory.entries.length - 1;
-  const timelineCount = () => manualHistoryActive() ? state.manualHistory.entries.length : frames().length;
+  const timelineCount = () => manualHistoryActive() ? state.manualHistory.entries.length : levelFrameCount(currentLevel());
   const timelinePosition = () => manualHistoryActive() ? state.manualHistory.index : state.frameIndex;
 
   function setManualFrame(index, actionId) {
@@ -499,7 +524,7 @@
     renderProcess();
     renderReceipt();
     renderFrame();
-    write('playback-announcement', currentLevel().level === null ? '没有可验证的关卡记录。' : `已选择关卡 ${currentLevel().level}，${frames().length} 帧。`);
+    write('playback-announcement', currentLevel().level === null ? '没有可验证的关卡记录。' : `已选择关卡 ${currentLevel().level}，${timelineCount()} 帧。`);
     renderSessionControls();
   }
 
@@ -605,14 +630,14 @@
   function renderAvailableActions(frame, action) {
     const hasAvailability = Boolean(frame && Array.isArray(frame.available_actions));
     const available = [...new Set(array(frame && frame.available_actions).filter((name) => typeof name === 'string' && name))];
-    const beforeIndex = action ? frames().findIndex((item) => item.id === action.before_frame) : -1;
-    const afterIndex = action ? frames().findIndex((item) => item.id === action.after_frame) : -1;
+    const beforeIndex = action ? frameIndexForId(action.before_frame) : -1;
+    const afterIndex = action ? frameIndexForId(action.after_frame) : -1;
     const linked = action && frame && (frame.id === action.after_frame || (beforeIndex >= 0 && afterIndex >= beforeIndex && state.frameIndex > beforeIndex && state.frameIndex <= afterIndex));
     const manual = state.mode === 'manual' && run.status === 'manual';
     const cognition = selectedCognition();
     const activeName = manual ? frame ? manualAtCurrent() ? state.manualView?.last_action?.action : action?.name : null : linked ? action.name : null;
     const recordedActions = (name) => actions().filter((entry) => entry.name === name).map((entry) => ({
-      action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
+      action: entry, index: frameIndexForId(entry.after_frame) >= 0 ? frameIndexForId(entry.after_frame) : frameIndexForId(entry.before_frame),
     })).filter((entry) => entry.index >= 0);
     const card = (name, availability, wrapper) => {
       const active = name === activeName;
@@ -700,11 +725,16 @@
     const after = action && frameById(action.after_frame);
     const comparisonRequested = $('compare-toggle').checked;
     const canCompare = Boolean(before && after);
-    $('board-empty').hidden = count > 0;
+    $('board-empty').hidden = Boolean(frame);
     $('board-empty').querySelector('h3').textContent = currentLevel().replay_unloaded || run.status === 'loading' ? '正在读取所选关卡记录' : currentLevel().status === 'preview-unavailable' ? '初始画面暂不可用' : run.status === 'preview' ? '正在读取关卡初始画面' : run.status === 'manual' && state.manualBusy ? '正在打开人工试玩' : run.status === 'manual' && state.manualError ? '人工试玩暂不可用' : '当前关卡没有可回放画面';
     $('board-empty').querySelector('p').textContent = currentLevel().replay_unloaded || run.status === 'loading' ? '读取当前关卡的画面与认知；其他关卡将在选择后加载。' : string(run.status, '').startsWith('preview') ? '尚未启动 P7；可启动求解，或明确切换人工试玩。' : run.status === 'manual' ? (state.manualBusy ? '正在读取所选游戏的初始观察，尚未启动 P7。' : state.manualError ? '试玩操作未确认；可重新选择游戏开启新的试玩。' : '该关卡尚无真实观察记录；人工试玩仅展示当前关卡的真实画面。') : '没有记录帧，无法恢复该关卡的画面。';
-    $('single-board').hidden = count === 0 || (comparisonRequested && canCompare);
-    $('comparison-board').hidden = count === 0 || !comparisonRequested || !canCompare;
+    if (currentLevel().frame_page && !frame) {
+      const failed=framePageErrors.has(framePageKey(levelSource(),Math.floor(position/32)*32));
+      $('board-empty').querySelector('h3').textContent=failed ? '画面读取失败' : `正在读取第 ${position+1} 帧`;
+      $('board-empty').querySelector('p').textContent=failed ? '过关记录和认知已保留；点击下一帧或时间轴重试读取。' : '只读取当前画面页，过关记录和认知保持显示。';
+    }
+    $('single-board').hidden = !frame || (comparisonRequested && canCompare);
+    $('comparison-board').hidden = !frame || !comparisonRequested || !canCompare;
     $('frame-slider').max = String(Math.max(0, count - 1));
     $('frame-slider').setAttribute('aria-label', state.mode === 'manual' ? '选择试玩记录帧' : '选择回放帧');
     $('frame-slider').value = String(position);
@@ -730,7 +760,7 @@
     $('current-action-strip').hidden = !showDecisionLink && evidence.hidden;
     const changed = action && action.changed_cells;
     write('change-caption', action ? `结算变化 ${Number.isFinite(changed) ? changed : array(changed).length} 格${changed === 0 ? ' · 画面未变化' : ''}` : '游戏原始画面');
-    write('comparison-note', comparisonRequested ? (canCompare ? '对照显示所选动作的起始帧与结算帧' : action ? '前后帧缺链，无法对照' : '选择一个有前后帧的动作以对照') : '');
+    write('comparison-note', comparisonRequested ? (canCompare ? '对照显示所选动作的起始帧与结算帧' : action ? currentLevel().frame_page ? '正在读取动作前后画面页；读取失败时可重新定位动作重试。' : '前后帧缺链，无法对照' : '选择一个有前后帧的动作以对照') : '');
     const overlayNotes = [];
     if ($('diff-toggle').checked) overlayNotes.push('黄色方框为回放标记，不属于游戏画面');
     renderPalette(comparisonRequested && canCompare ? [before, after] : [frame]);
@@ -762,22 +792,53 @@
     document.querySelectorAll('[data-decision-id]').forEach((card) => card.classList.toggle('is-selected', Boolean(decision) && card.dataset.decisionId === decision));
   }
 
+  async function ensureFramePage(index,{retry=false}={}) {
+    const source=levelSource(),level=source.level;
+    if (!level.frame_page || index < 0 || index >= level.frame_count || frameAt(index)) return;
+    const start=Math.floor(index/32)*32,key=framePageKey(source,start);
+    if (framePageErrors.has(key) && !retry) return;
+    if (retry) framePageErrors.delete(key);
+    while (!framePageRequests.has(key) && framePageRequests.size >= 2) {
+      await Promise.race([...framePageRequests.values()]);
+      if (levelSource().key !== source.key || currentLevel().frame_page?.source_token !== level.frame_page.source_token) return;
+    }
+    if (!framePageRequests.has(key)) {
+      const token=level.frame_page.source_token,runId=source.snapshot.run.run_id,revision=source.snapshot.replay_revision;
+      const pending=request(`/api/replay/${encodeURIComponent(runId)}/levels/${level.level}/${revision}/frames/${token}/${start}/32`).then(page=>{
+        if (!isRecord(page) || page.schema !== 'asterion.arc-agi3-p7-replay-frame-page/v1' || page.run_id !== runId || page.level !== level.level ||
+            page.replay_revision !== revision || page.source_token !== token || page.frame_count !== level.frame_count || page.start !== start ||
+            !Array.isArray(page.frames) || page.frames.length !== Math.min(32,level.frame_count-start) ||
+            !validSnapshot({schema:'asterion.arc-agi3-p7-console/v2',run:source.snapshot.run,levels:[{...level,frame_page:{...level.frame_page,start},frames:page.frames}]})) throw new Error('invalid-response');
+        framePages.set(key,page.frames);
+        while(framePages.size>4)framePages.delete(framePages.keys().next().value);
+      }).catch(()=>{framePageErrors.add(key);while(framePageErrors.size>16)framePageErrors.delete(framePageErrors.values().next().value);}).finally(()=>framePageRequests.delete(key));
+      framePageRequests.set(key,pending);
+    }
+    await framePageRequests.get(key);
+    if (levelSource().key === source.key && currentLevel().frame_page?.source_token === level.frame_page.source_token &&
+        (state.frameIndex === index || ($('compare-toggle').checked && [selectedAction()?.before_frame,selectedAction()?.after_frame].some(id=>frameIndexForId(id)===index)))) {
+      renderFrame();renderSessionControls();
+    }
+  }
+
   function setFrame(index, actionId) {
     if (manualHistoryActive()) { setManualFrame(index, actionId); return; }
-    if (!frames().length) return;
-    state.frameIndex = Math.max(0, Math.min(frames().length - 1, index));
+    if (!timelineCount()) return;
+    state.frameIndex = Math.max(0, Math.min(timelineCount() - 1, index));
     state.eventSequence = null;
     if (actionId !== undefined) state.actionId = actionId;
     else {
       const linked = actions().filter((action) => {
-        const before = frames().findIndex((frame) => frame.id === action.before_frame);
-        const after = frames().findIndex((frame) => frame.id === action.after_frame);
+        const before = frameIndexForId(action.before_frame);
+        const after = frameIndexForId(action.after_frame);
         return after === state.frameIndex || (before >= 0 && after >= before && state.frameIndex > before && state.frameIndex <= after);
       });
       state.actionId = linked.length ? linked[linked.length - 1].id : null;
     }
     renderFrame();
     renderSessionControls();
+    if (!currentFrame()) ensureFramePage(state.frameIndex,{retry:true});
+    if ($('compare-toggle').checked) [selectedAction()?.before_frame,selectedAction()?.after_frame].forEach(id=>{const position=frameIndexForId(id);if(position>=0 && !frameAt(position))ensureFramePage(position);});
   }
 
   function seekFrame(index, actionId) {
@@ -789,8 +850,8 @@
   function locateAction(action) {
     pause();
     if (manualHistoryActive()) { const index = state.manualHistory.entries.findIndex((entry) => entry.frame.id === action.after_frame); if (index >= 0) setManualFrame(index, action.id); return; }
-    const target = frames().findIndex((frame) => frame.id === action.after_frame);
-    const fallback = frames().findIndex((frame) => frame.id === action.before_frame);
+    const target = frameIndexForId(action.after_frame);
+    const fallback = frameIndexForId(action.before_frame);
     if (target >= 0 || fallback >= 0) seekFrame(target >= 0 ? target : fallback, action.id);
     else { state.actionId = action.id; renderFrame(); }
   }
@@ -802,7 +863,7 @@
       if (selected >= 0) return linked[selected + direction] || null;
       return direction > 0 ? linked.find((item) => item.index > timelinePosition()) || null : linked.filter((item) => item.index < timelinePosition()).at(-1) || null;
     }
-    const linked = actions().map((action) => ({ action, index: frames().findIndex((frame) => frame.id === action.after_frame) })).filter((item) => item.index >= 0);
+    const linked = actions().map((action) => ({ action, index: frameIndexForId(action.after_frame) })).filter((item) => item.index >= 0);
     const position = linked.findIndex((item) => item.action.id === state.actionId);
     if (position >= 0) return linked[position + direction] || null;
     if (direction > 0) return linked.find((item) => item.index > state.frameIndex) || null;
@@ -824,6 +885,7 @@
     $('play-toggle').setAttribute('aria-pressed', 'true');
     // Canvas frames switch immediately, including under prefers-reduced-motion.
     state.timer = window.setInterval(() => {
+      if (!currentFrame()) {ensureFramePage(state.frameIndex);return;}
       if (timelinePosition() >= timelineCount() - 1) { pause(); return; }
       setFrame(timelinePosition() + 1);
       if (timelinePosition() >= timelineCount() - 1) pause();
@@ -833,7 +895,7 @@
   function observationCognition() {
     const timeline = array(currentLevel().cognition_timeline);
     const frameIndexes = new Map(frames().map((frame, index) => [frame.id, index]));
-    return timeline.filter((entry) => entry.scope === 'observation').map((entry) => ({ entry, index: frameIndexes.get(entry.frame_id) ?? -1 }))
+    return timeline.filter((entry) => entry.scope === 'observation').map((entry) => ({ entry, index: currentLevel().frame_page ? frameIndexForId(entry.frame_id) : frameIndexes.get(entry.frame_id) ?? -1 }))
       .filter(({ entry, index }) => index >= 0 && index <= state.frameIndex && (state.eventSequence === null || !Number.isInteger(entry.event_sequence) || entry.event_sequence <= state.eventSequence))
       .sort((a, b) => a.index - b.index || number(a.entry.event_sequence) - number(b.entry.event_sequence)).pop()?.entry || null;
   }
@@ -902,7 +964,7 @@
     if (!event) return;
     pause();
     if (state.mode === 'replay') state.replayFollow = false;
-    const frameIndex = frames().findIndex((frame) => frame.id === event.frame_id);
+    const frameIndex = frameIndexForId(event.frame_id);
     setFrame(frameIndex);
     state.eventSequence = event.event_sequence;
     renderFrame(); renderSessionControls();
@@ -1074,7 +1136,7 @@
         entry.provenance ? `来源运行 ${entry.provenance.run_id} · 原事件 ${entry.provenance.event_sequence}` : null]);
       if (entry.origin === 'actor') card.append(node('p', '模型记录的玩法理解与假说，仅作规划背景，不认证规则或授权动作。', 'process-note'));
       const button = node('button', '定位观察', 'event-link'); button.type = 'button';
-      const index = frames().findIndex((frame) => frame.id === entry.frame_id); button.disabled = index < 0;
+      const index = frameIndexForId(entry.frame_id); button.disabled = index < 0;
       button.addEventListener('click', () => { pause(); setFrame(index, entry.action_id); });
       card.append(button, node('p', string(entry.cognition_narrative_zh, '没有更新说明。'), 'cognition-narrative'));
       const details = node('details'); details.append(node('summary', '查看该观察的稳定认知'), node('p', string(entry.stable_description, '没有稳定描述。'), 'cognition-narrative'));
@@ -1166,6 +1228,7 @@
       renderSessionControls();
     }
     renderFrame();
+    if (id === 'compare-toggle' && $('compare-toggle').checked) [selectedAction()?.before_frame,selectedAction()?.after_frame].forEach(frameId=>{const position=frameIndexForId(frameId);if(position>=0 && !frameAt(position))ensureFramePage(position,{retry:true});});
   }));
   [-1, 1].forEach((direction) => $(direction < 0 ? 'previous-action' : 'next-action').addEventListener('click', () => {
     const target = actionTarget(direction); if (target) locateAction(target.action);
@@ -1224,9 +1287,9 @@
       const preserve = !follow && sameSource;
       const preservePlayback = state.timer !== null && state.mode === 'replay' && sameSource && index === state.levelIndex;
       renderRunHeader(); selectLevel(index, { pausePlayback: !preservePlayback, bindSavedSource:false, retireLoad:false });
-      const historical = preserve ? frames().findIndex((frame) => frame.id === previousFrame) : -1;
+      const historical = preserve ? previousFrame ? frameIndexForId(previousFrame) : currentLevel().frame_page && previous.frameIndex < timelineCount() ? previous.frameIndex : -1 : -1;
       if (manualPosition !== null) setManualFrame(manualPosition);
-      else setFrame(follow ? frames().length - 1 : historical >= 0 ? historical : 0,
+      else setFrame(follow ? timelineCount() - 1 : historical >= 0 ? historical : 0,
         preserve && actions().some((action) => action.id === previousAction) ? previousAction : undefined);
       if (preserve && (previousEvent === 0 || processEvents().some((event) => event.event_sequence === previousEvent &&
         (!levelReplayEnabled || event.kind===previousEventRecord?.kind && event.frame_id===previousEventRecord?.frame_id &&
@@ -1247,7 +1310,7 @@
 
   const sessionLabels = { idle: '就绪 · 尚未启动', starting: '启动中', running: 'P7 运行中', pause_requested: '暂停已请求 · 等待真实边界', paused: '已暂停 · 期限继续计时', resume_requested: '继续已请求 · 等待确认', stopping: '结束中 · 等待清理确认', completed: '运行完成 · 有完成证据', incomplete: '运行未完成', cancelled: '运行已结束', 'timed-out': '运行超时', failed: '运行失败', 'cleanup-unconfirmed': '清理未确认 · 无法启动新运行' };
   const liveAtCurrent = () => state.mode === 'live' && state.eventSequence === null && run.run_id === state.liveView?.run_id &&
-    state.levelIndex === levels.map((level, index) => array(level.frames).length ? index : -1).filter((index) => index >= 0).at(-1) && state.frameIndex === frames().length - 1;
+    state.levelIndex === levels.map((level, index) => array(level.frames).length ? index : -1).filter((index) => index >= 0).at(-1) && state.frameIndex === timelineCount() - 1;
   const activeSession = () => ['starting', 'running', 'pause_requested', 'paused', 'resume_requested', 'stopping', 'cleanup-unconfirmed'].includes(state.liveView?.state);
   const manualUnsaved = () => state.manualView?.state === 'ready' && state.manualView.save_status === 'failed';
   const manualSelectionLocked = () => manualUnsaved() || !liveConfig || !state.liveView || activeSession() || state.manualBusy || Boolean(state.manualPending) || state.commandBusy || Boolean(state.pendingCommand);
@@ -1724,6 +1787,12 @@
       result.title = resultKind === 'unverified' ? '没有已保存过关记录；尝试记录未形成可用过关路线' : `已保存 ${game.completed_levels} / ${game.win_levels} 关`;
       result.setAttribute('aria-label', `${resultLabel} · ${result.title}`);
       const status = row.children[3]; status.className = 'overview-state'; status.replaceChildren(result);
+      if (Number.isInteger(game.diagnostics_count) && game.diagnostics_count > 0 && validDiagnostic(game.latest_diagnostic)) {
+        const warning=node('span',`⚠ ${game.diagnostics_count}`,'overview-processing-warning');
+        warning.title=diagnosticText(game.latest_diagnostic);
+        warning.setAttribute('aria-label',`处理警告 ${game.diagnostics_count} 项：${warning.title}`);
+        status.append(warning);
+      }
       if (active) {
         const running = solving || game.status === 'running';
         const activity = node('span', running ? '● 求解中' : '● 新尝试', 'overview-activity-badge');
@@ -1899,7 +1968,8 @@
             value.run.completed_level_count !== manifest.run.completed_level_count || value.run.primitive_action_count !== manifest.run.primitive_action_count ||
             value.run.replay_verified !== manifest.run.replay_verified || value.run.sealed_trace !== manifest.run.sealed_trace ||
             value.levels.length !== 1 || record.level !== level || record.status !== meta?.status ||
-            record.frames.length !== meta.frame_count || record.actions.length !== meta.action_count) throw new Error('invalid-response');
+            levelFrameCount(record) !== meta.frame_count || record.actions.length !== meta.action_count ||
+            (record.frame_page && (record.frame_page.start !== 0 || record.frames.length !== Math.min(32,record.frame_count)))) throw new Error('invalid-response');
         assertReplayRevision(manifest);
         const bytes=estimateReplayBytes(value);
         if (bytes <= 32*1024*1024) {

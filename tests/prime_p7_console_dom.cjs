@@ -2580,6 +2580,21 @@ test('overview subtly marks confirmed solving and never treats old recording fil
   } finally {app.dom.window.close();}
 });
 
+test('overview processing warning remains separate from saved progress and solving status',async()=>{
+  const overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,diagnostics_count:1,
+    latest_diagnostic:{diagnostic_id:'fault-1',code:'evidence-write-failed',severity:'error',stage:'validated-not-durable',
+      action_sequence:97,outcome_known:true,durable:false,observed:null,limit:null,unit:null,recovery:'stop-without-redispatch'}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async()=>response(idleView())});
+  try {
+    await settle();const row=overviewRow(app,0),warning=row.querySelector('.overview-processing-warning');
+    assert.equal(warning.textContent,'⚠ 1');assert.match(warning.title,/证据保存失败.*结果已知/);
+    assert.match(row.querySelector('.overview-result-badge').textContent,/部分通关/);
+    assert.equal(row.querySelector('progress').value,1);assert.equal(row.classList.contains('is-solving'),false);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('static exports keep the local overview hidden and never fetch',()=>{
   const app=launch(fixture());try{assert.equal(app.$('overview').hidden,true);assert.equal(app.requests.length,0);assert.deepEqual(app.errors,[]);}finally{app.dom.window.close();}
 });
@@ -2793,6 +2808,67 @@ function levelReplayFixture(gameId, runId, {sealed=true, color=12}={}) {
     levels:record.levels.map(level=>({level:level.level,status:level.status,frame_count:level.frames.length,action_count:level.actions.length,has_cognition:level.cognition.scope==='final'})),warnings:[]};
   return {record,manifest,detail:level=>({...record,replay_revision:revision,levels:[record.levels[level-1]]})};
 }
+function pagedReplayFixture() {
+  const data=levelReplayFixture('game0-catalog','paged-run'),token='c'.repeat(64),offset=101,total=95;
+  const frame=index=>({id:`f${String(offset+index).padStart(6,'0')}`,index,grid:[[index%16]],state:'NOT_FINISHED',levels_completed:0,available_actions:['ACTION1']});
+  const level=data.record.levels[0];
+  Object.assign(level,{frame_count:total,frame_index_offset:offset,frame_page:{start:0,limit:32,source_token:token},
+    frames:Array.from({length:32},(_,index)=>frame(index)),
+    actions:[{id:'a1',name:'ACTION1',before_frame:frame(0).id,after_frame:frame(94).id,before_frame_index:0,after_frame_index:94}],
+    cognition_timeline:[0,80].map(index=>({scope:'observation',frame_id:frame(index).id,frame_index:index,stable_description:`精确认知 ${index}`}))});
+  data.record.schema='asterion.arc-agi3-p7-console/v2';data.manifest.schema='asterion.arc-agi3-p7-replay-manifest/v2';
+  data.manifest.levels[0].frame_count=total;
+  const page=start=>({schema:'asterion.arc-agi3-p7-replay-frame-page/v1',run_id:'paged-run',level:1,replay_revision:data.manifest.revision,
+    source_token:token,frame_count:total,start,frames:Array.from({length:Math.min(32,total-start)},(_,index)=>frame(start+index))});
+  return {data,page};
+}
+test('paged animation seeks and plays across pages with complete counts and exact cognition',async()=>{
+  const {data,page}=pagedReplayFixture();
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
+    if(url.endsWith('/manifest'))return response(data.manifest);
+    if(url.includes('/frames/'))return response(page(Number(url.split('/').at(-2))));
+    if(url.includes('/levels/'))return response(data.detail(Number(url.match(/\/levels\/(\d+)/)[1])));
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();app.$('level-1').click();await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'1 / 95');assert.match(app.$('level-1').title,/95 帧/);
+    app.$('frame-slider').value='80';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'81 / 95');assert.match(app.$('frame-caption').textContent,/f000181/);
+    assert.match(app.$('world-guide').textContent,/精确认知 80/);
+    app.$('frame-slider').value='31';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    app.$('play-toggle').click();app.tick();await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'33 / 95');assert.equal(app.$('play-toggle').textContent,'暂停');
+    app.tick();await settleReplay();assert.equal(app.$('frame-counter').textContent,'34 / 95');
+    assert.equal(app.$('board-empty').hidden,true);assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('missing and stale animation pages preserve saved steps, cognition and the selected level',async()=>{
+  const {data,page}=pagedReplayFixture();let fail=true,releasePage;
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
+    if(url.endsWith('/manifest'))return response(data.manifest);
+    if(url.includes('/frames/')) {
+      if(fail)return response({error:'replay-frame-unavailable'},503);
+      return new Promise(resolve=>{releasePage=()=>resolve(response(page(Number(url.split('/').at(-2)))));});
+    }
+    if(url.includes('/levels/'))return response(data.detail(Number(url.match(/\/levels\/(\d+)/)[1])));
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();app.$('level-1').click();await settleReplay();
+    app.$('frame-slider').value='80';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));await settleReplay();
+    assert.match(app.$('board-empty').textContent,/画面读取失败/);assert.match(app.$('world-guide').textContent,/精确认知 80/);
+    assert.match(app.$('level-1').title,/1 动作 · 95 帧/);assert.equal(app.$('level-progress').textContent,'2 / 3');
+    fail=false;app.$('next-frame').click();await settleReplay();assert.ok(releasePage);
+    app.$('level-2').click();await settleReplay();const caption=app.$('frame-caption').textContent;
+    releasePage();await settleReplay();
+    assert.equal(app.$('level-2').getAttribute('aria-current'),'true');assert.equal(app.$('frame-caption').textContent,caption);
+    assert.match(app.$('world-guide').textContent,/第2关的真实认知/);assert.equal(app.$('board-empty').hidden,true);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 const levelReplayConfig={token:'test-token',replay_loading:'level-manifest/v1',games:[
   {game_id:'game0-catalog',alias:'first',win_levels:3,baseline_actions:[1,2,3]},
   {game_id:'game1-catalog',alias:'second',win_levels:3,baseline_actions:[1,2,3]}]};
