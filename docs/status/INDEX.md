@@ -17,6 +17,8 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Latest normal official25 receipt59.80/14full/109officiallevels; local112 saved levels, ready-only183-level console, verified native play-time actor labels, bounded RPC, replay-render freeze fix, third official recovery boundary (distinct API/human cards), save-time route certification and cross-platform no-SDK reads, restored two-slot partial-game completion with separate solve/cleanup deadlines; current deployment/verification boundaries are explicit. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
+| `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
+| `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
 | `PRIME-PARITY-LEDGER.md` | 🟡 decision-history | Pinned Prime-Gateway parity baseline and evidence; historical after native detachment (2026-09-14); `asterion.native` rows remain Missing. |

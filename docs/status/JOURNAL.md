@@ -3945,3 +3945,17 @@
 - 2026-10-06 15:06 CST — 42c3a6cb: Streamed animation evidence preserves canonical hashes and old certificates; typed failures prevent unsafe redispatch.
 
 - 2026-10-06 15:12 CST — 4dc8d524：补齐完整校验未完成和取消告警；DOM相关10PASS，避免返回结果误标未知。
+
+- 2026-10-06 15:13 CST — 102c5086：离线动画按页解析，跨页播放及缺页身份校验PASS；保留单HTML回放。
+
+- 2026-10-06 15:16 CST — 708cfb60待核对：真实离线95帧HTML末帧seek PASS；122DOM PASS/1SKIP，SDK/model/API0。
+
+- 2026-10-06 15:16 CST — 更正前条提交号为f44f8367：实际HTML末帧校验通过；未部署。
+
+- 2026-10-06 15:20 CST — 1d0c5e6b：完整证据分页接入控制台/研究/经验；处理故障保留已提交动作，336 focused PASS。
+
+- 2026-10-06 15:29 CST — 4bb89296：修正说明用词以通过既有native边界检查；单项PASS，整包重新核对。
+- 2026-10-06 15:29 CST — BP35唯一静态不合格历史候选登记rejected；原winner5/150和证书字节不变，SDK/model/recert0。
+- 2026-10-06 15:29 CST — 1d0安装包旧21证书及完整当前roster静态PASS；Darwin/Linux资源558一致；后续说明修正包待核对。
+
+- 2026-10-06 15:40 CST: final frozen4bb clean promotion PASS25/provider_operations0/full_datasetno; exact558resources Darwin/Linux PASS. Installed certificate audit21frozen sources unchanged/current23selected138levels,54.06sec,SDK/model/API/recert0. Parent-only adoption released47399→48414 preserving TU93L5/WA30L3 oldguestPID/deadlines and original failure history; guest signals0. Once-only BP35L6/G50TL3 capacity trials queued900+180 each; not yet launched. Proof launches/capacity-adoption-4bb89296-1791272310321358000-proof.json. Console newbackend/v2activation remains pending.
