@@ -4055,3 +4055,8 @@
 - 2026-10-06 20:25 CST — Actual LF52L9second attempt200852 passed105new/662total withseal/replay/cleanuptrue andemptydiagnostics; localoverview174/183,22full,93.717172,6325savedactions. BP200840deadlineinterrupted12new,5/9remains,cleanevidence. NativeLFnewcertificate/currentwinner is separate from precompletion all25audit/stage; originals preserved. SK202222running, parent29136harvests naturally.
 - 20:26 `842e4346` records deployed provenance repair and same-winner console recovery, preserving scores and concurrent research.
 - 20:27 New LF9 HTTPmanifest ready0.109sec; LF10/SK5 solve markers confirmed. BP secondattempt readonly diagnosis assigned, not blindly restarted.
+- 20:28 `83ee4ee3` checkpoints LF9 success and active LF10/SK5 research so resume preserves current work.
+- 20:30 User proposes BP35L6 fresh cognition if repeated retries polluted hypotheses; await current diagnosis and discuss, no reset authorized yet.
+
+- 2026-10-06 20:44 CST：BP35 L6 diagnosis complete; old partial executable model reused and screened probes, controlled L6 prior isolation remains discussion-pending. Legal RESET auxiliary extraction error reproduced but not fixed. Wrong best-boundary replay explains action-panel missing labels; generic per-level frontend fix started, not deployed. LF52 L10 actual WIN +62/724, sealed/replayed/cleaned; local23full/175levels, SK203740 continues.
+- 2026-10-06 20:46 CST：Correction to20:44 progress: LF52 L10 actual WIN and native replay/seal/cleanup PASS, but normal certificate publication is pending ValueError; certified local remains22full/174levels/6325actions, displayed observed175. Original9/662certificate preserved. Astra static readonly diagnosis assigned, zero new SDK/model calls.
