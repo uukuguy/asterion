@@ -31,20 +31,20 @@ const actorLabel = (action, label, purpose, confidence = 'certain', evidence_seq
 
 test('original level rail emphasizes passed steps and separates attempts from unloaded or unplayed levels', () => {
   for (const [status, count, unloaded, expected] of [
-    ['successful', 13, false, '13 步'], ['incomplete', 2, false, '2 步'],
-    ['successful', 13, true, '13 步'], ['not_run', 0, false, '—'],
-    ['loading', 0, true, '—'],
+    ['successful', 13, false, '13 动作'], ['incomplete', 2, false, '2 动作'],
+    ['successful', 13, true, '13 动作'], ['incomplete', 0, false, '无动作记录'],
+    ['not_run', 0, false, null], ['preview', 0, false, null], ['loading', 0, true, null],
   ]) {
     const snapshot = fixture(), level = snapshot.levels[0];
     level.status = status;
     level.actions = unloaded ? [] : Array.from({length: count}, (_, i) => ({...level.actions[0], id: `a${i}`}));
     if (unloaded) Object.assign(level, {replay_unloaded: true, action_count: count, frame_count: count ? 15 : 0, frames: []});
-    else if (!count) level.frames = [];
+    else if (!count) level.frames = level.frames.slice(0, 1);
     const app = launch(snapshot, {replayConfig: {games: [{game_id: 'sp80-test', alias: 'SP80', win_levels: 3, baseline_actions: [20, 21, 22]}]}});
     try {
       const row = app.$('level-1');
-      assert.equal(row.querySelector('.level-step-count').textContent, expected);
-      assert.equal(row.querySelectorAll('.level-item-detail').length, 1);
+      assert.equal(row.querySelector('.level-step-count')?.textContent ?? null, expected);
+      assert.equal(row.querySelectorAll('.level-item-detail').length, expected ? 1 : 0);
       assert.doesNotMatch(row.textContent, /已保存|按需读取|基准|关卡效率/);
       assert.match(row.title, /基准 20/);
       if (status === 'successful') {
@@ -55,11 +55,15 @@ test('original level rail emphasizes passed steps and separates attempts from un
       } else assert.doesNotMatch(row.textContent, /已过关/);
       assert.equal(row.querySelector('.level-number').textContent, '01');
       assert.equal(row.querySelector('.level-item-heading strong').textContent, '关卡 1');
-      assert.equal(row.querySelector('.level-step-count').parentElement.className, 'level-item-detail');
-      assert.equal(row.querySelector('.level-step-count').tagName, count ? 'STRONG' : 'SPAN');
-      assert.equal(app.dom.window.getComputedStyle(row).minHeight, '72px');
-      assert.equal(app.dom.window.getComputedStyle(row.querySelector('.level-item-detail')).fontSize, '10px');
-      if (status === 'incomplete') assert.match(row.querySelector('.level-item-detail').textContent, /尝试 2 步/);
+      if (expected) {
+        assert.equal(row.querySelector('.level-step-count').parentElement.className, 'level-item-detail');
+        assert.equal(row.querySelector('.level-step-count').tagName, count ? 'STRONG' : 'SPAN');
+        assert.equal(app.dom.window.getComputedStyle(row.querySelector('.level-item-detail')).fontSize, '10px');
+      }
+      assert.equal(app.dom.window.getComputedStyle(row).minHeight, '0');
+      assert.equal(app.dom.window.getComputedStyle(row).paddingTop, '8px');
+      assert.doesNotMatch(row.textContent, /—|无动作记录 · 1 帧/);
+      if (status === 'incomplete' && count) assert.match(row.querySelector('.level-item-detail').textContent, /尝试 2 动作/);
       assert.deepEqual(app.errors, []);
     } finally { app.dom.window.close(); }
   }
@@ -2301,7 +2305,7 @@ test('saved level sources survive improved routes, continuation, game changes an
     return response(idleView());
   }});
   const refresh=()=>[...app.timers.values()].find(fn=>fn.intervalMs===5000)();
-  const assertSaved=counts=>counts.forEach((count,index)=>assert.equal(app.$(`level-${index+1}`).querySelector('.level-step-count').textContent,`${count} 步`));
+  const assertSaved=counts=>counts.forEach((count,index)=>assert.equal(app.$(`level-${index+1}`).querySelector('.level-step-count').textContent,`${count} 动作`));
   try {
     await settle(); assertSaved([19,49,34,25]);
     app.$('level-2').click();await settle();
@@ -2868,8 +2872,8 @@ test('per-level replay shows loading, manifest counts, and reads only the chosen
     assert.match(app.$('run-progress-summary').textContent,/游戏已保存 2 \/ 3 · 正在读取回放/);
     ready=true;const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
     assert.ok(releaseDetail);assert.match(app.$('level-1').title,/1 动作 · 3 帧/);assert.match(app.$('level-2').title,/2 动作 · 3 帧/);
-    assert.equal(app.$('level-1').querySelector('.level-step-count').textContent,'1 步');
-    assert.equal(app.$('level-2').querySelector('.level-step-count').textContent,'2 步');
+    assert.equal(app.$('level-1').querySelector('.level-step-count').textContent,'1 动作');
+    assert.equal(app.$('level-2').querySelector('.level-step-count').textContent,'2 动作');
     assert.match(app.$('replay-loading-text').textContent,/正在加载第 2 关/);assert.equal(app.$('replay-loading').hidden,false);
     assert.equal(app.requests.some(request=>request.url==='/api/replay/level-first'),false);
     assert.equal(app.requests.some(request=>request.url.includes('/levels/1/')),false);

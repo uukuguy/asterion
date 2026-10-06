@@ -407,7 +407,7 @@
         : displayed.status === 'loading' ? '读取中' : displayed.status === 'preview-unavailable' ? '预览不可用'
           : ['preview', 'not_run', 'not-run', 'unobserved'].includes(displayed.status) ? '未开始'
             : currentRunLevelLabel(displayed) === '本轮进行中' ? '进行中' : '未过关';
-      const stepText = savedStepsPending ? '步数待读取' : passed || count ? `${count} 步` : '—';
+      const stepText = savedStepsPending ? '步数待读取' : passed || count ? `${count} 动作` : '无动作记录';
       const details = `${label}${verified ? ' · 已有过关记录' : ''} · ${count} 动作 · ${levelFrameCount(displayed)} 帧${displayed.replay_unloaded ? ' · 按需读取' : ''}${displayed.receipt ? ' · 回执' : ''}${manual ? '' : ` · ${levelEfficiency(displayed).text}`}`;
       button.title = details;
       button.setAttribute('aria-label', `关卡 ${level.level}，${conciseStatus}，${savedStepsPending ? '已保存过关步数待读取' : passed ? `过关 ${count} 步` : count ? `本次${manual ? '试玩' : '尝试'} ${count} 步` : '尚无动作记录'}，${details}`);
@@ -421,8 +421,9 @@
       const meta = node('p', undefined, 'level-item-detail');
       if (!savedStepsPending && !passed && count) meta.append(document.createTextNode(`${manual ? '试玩' : '尝试'} `));
       meta.append(node(!savedStepsPending && (passed || count) ? 'strong' : 'span', stepText, 'level-step-count'));
-      if (levelFrameCount(displayed)) meta.append(document.createTextNode(` · ${levelFrameCount(displayed)} 帧`));
-      content.append(heading, node('p', conciseStatus, 'level-item-status'), meta);
+      if (count && levelFrameCount(displayed)) meta.append(document.createTextNode(` · ${levelFrameCount(displayed)} 帧`));
+      content.append(heading, node('p', conciseStatus, 'level-item-status'));
+      if (savedStepsPending || passed || count || !['未开始', '读取中', '预览不可用'].includes(conciseStatus)) content.append(meta);
       button.append(content);
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') {

@@ -3886,3 +3886,5 @@
 - 2026-10-06 11:00 CST — RE86L2 retained actor rule explicitly defines five controls; legacy missing action_labels is a presentation gap, not unknown mechanics.
 - 2026-10-06 11:01 CST — Final47a wheel23surfaces/preflight and parent-only adoption PASS;17HTML refreshed/raw0; actualHTML1PASS; native generation witness pending.
 - 2026-10-06 11:01 CST — 4a62f0eb records final47 package adoption, preserved guests and pending third submission so recovery cannot overclaim completion.
+- 2026-10-06 11:30 CST — 06e1b779 bounds replay event/frame scans, removing RE86 browser freezes; original sidebar retained with bold steps.
+- 2026-10-06 11:34 CST — Third25 source proof uses UTC03:18/local11:18; preflight completed; no official receipt yet. Historical-prefix scans cause avoidable delay.
