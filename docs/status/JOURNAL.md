@@ -4076,3 +4076,5 @@
 - 2026-10-06 21:52 CST — Fifth25 launched once after independentCLEAR; native service221599 active, finite7200+180, precard certified selection underway.
 - 2026-10-06 21:52 CST — 9335b885 records LF52 sealing, SK48 completion and the once-only fifth submission for recovery.
 - 2026-10-06 21:55 CST — Correction: fifth launch rejected locally before card/API; user cancelled further submission. BP L6 second attempt continues.
+- 2026-10-06 21:55 CST — e65406f4 records submission cancellation so recovery cannot launch a replacement without a new user request.
+- 2026-10-06 22:09 CST — BP L6 second sealed37new withoutpass; diagnosis identifies repeated actor context. Compact delivery implementation underway, no restart.
