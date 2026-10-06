@@ -3902,3 +3902,6 @@
 - 2026-10-06 12:24 CST — LF52L8/G50TL3 two slots restored under47a actor plus exact9bb launcher policy; BP35 queued after sealed audit.
 - 2026-10-06 12:24 CST — Migration17games/18offline replays; Darwin/Linux certified reads26.60s/28.55s, SDK/model/API0; final promotion pending.
 - 12:24 Recovery tests separate local admission from certification so missing witnesses cannot grant submission authority. [35495ef3]
+- 2026-10-06 12:27 CST — 3c313a04 records restored parallel solving and official certification boundaries; README remains deferred.
+- 2026-10-06 12:29 CST — User authorized one fresh fourth full25 batch alongside two solvers; separate claim/card, no old-card retry.
+- 2026-10-06 12:34 CST — Full354 gate4117 failed:22 observer-environment failures resolved by clean harness; one recovery-order error remains under diagnosis.
