@@ -18,7 +18,7 @@ import secrets
 import shutil
 
 from .console_events import _payload, _PRIVATE, public_action_labels
-from .console_replay import projection_manifest, projection_level, projection_revision, replay_fingerprint
+from .console_replay import _paged_frame_member, projection_manifest, projection_level, projection_revision, replay_fingerprint
 from .run_story.storage import publish_directory, write_atomic_file
 from .processing_diagnostics import public_diagnostic
 
@@ -368,7 +368,8 @@ def _detail(value, manifest, number):
             if (type(index) is not int or not 0 <= index < bucket['frame_count']
                     or entry.get('frame_id') != f"f{index + bucket['frame_index_offset']:06d}"):
                 raise ValueError('prepared replay unavailable')
-    if any(event.get('level') != number and event.get('frame_id') not in frames for event in value['process_events']):
+    if any(event.get('level') != number and event.get('frame_id') not in frames
+           and not _paged_frame_member(bucket, event.get('frame_id')) for event in value['process_events']):
         raise ValueError('prepared replay unavailable')
     _public(value)
     if metadata['has_cognition'] != (bucket['cognition'].get('scope') != 'unavailable' and bool(bucket['cognition'])):

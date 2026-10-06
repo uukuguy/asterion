@@ -279,6 +279,38 @@ class TestPrimeP7ConsoleReplay(ConsoleSessionFixture):
             else:
                 self.fail('oversized projection was not rejected')
 
+    def test_long_source_chain_shared_dag_and_cycle_preserve_dependency_fences(self):
+        from asterion.applications.prime.p7.console_replay import replay_fingerprint
+        ids = [f'p7-live-20261003123456-{number:024x}' for number in range(12)]
+        roots = [self.run_root(run_id, **({'source_run_id': ids[index + 1]} if index + 1 < len(ids) else {}))
+                 for index, run_id in enumerate(ids)]
+        # The later branch shares an already visited ancestor of the main chain.
+        self.run_root(ids[0], source_run_id=ids[1], recovered_from=ids[5])
+        before = replay_fingerprint(roots[0].resolve())
+        self.assertEqual(before, replay_fingerprint(roots[0].resolve()))
+        summary_paths = {str(root.resolve() / 'summary.json') for root in roots}
+        self.assertTrue(summary_paths <= dict(before).keys())
+        (roots[-1] / 'console-events.jsonl').write_text('{}\n')
+        self.assertNotEqual(before, replay_fingerprint(roots[0].resolve()))
+        with patch('asterion.applications.prime.p7.console_replay._MAX_PATHS', 2):
+            with self.assertRaisesRegex(ValueError, 'replay unavailable'):
+                replay_fingerprint(roots[0].resolve())
+        self.run_root(ids[-1], source_run_id=ids[0])
+        with self.assertRaisesRegex(ValueError, 'replay unavailable'):
+            replay_fingerprint(roots[0].resolve())
+
+    def test_paged_level_keeps_cross_level_events_on_unloaded_frames(self):
+        from asterion.applications.prime.p7.console_replay import projection_level
+        snapshot = projection()
+        snapshot['levels'][1].update(frame_page={}, frame_count=95, frame_index_offset=1,
+                                     frames=[{'id': 'f000001', 'grid': [[1]]}])
+        event = {'level': 1, 'frame_id': 'f000095', 'kind': 'model_revision',
+                 'payload': {'action_labels': [{'id': 'label-1'}]}}
+        foreign = {**event, 'frame_id': 'f000096'}
+        snapshot['process_events'] = [event, foreign]
+        detail = projection_level(snapshot, 2, 'revision')
+        self.assertEqual(detail['process_events'], [event])
+
     def test_trace_source_after_large_row_and_without_newline_invalidates_cache(self):
         from asterion.applications.prime.p7.console_replay import replay_fingerprint
         root = self.run_root()

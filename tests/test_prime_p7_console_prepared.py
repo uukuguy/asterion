@@ -37,6 +37,17 @@ class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
         detail = session.replay_level(RUN_ID, 2, manifest['revision'])
         self.assertEqual(len(detail['levels'][0]['frames']), 32)
         from asterion.applications.prime.p7.console_prepared import _detail
+        crossed = deepcopy(detail)
+        crossed_event = deepcopy(crossed['process_events'][0])
+        crossed_event.update(level=1, frame_id='f000095', event_sequence=10000)
+        crossed['process_events'].append(crossed_event)
+        _detail(crossed, manifest, 2)
+        crossed_event['frame_id'] = 'f000096'
+        with self.assertRaises(ValueError):
+            _detail(crossed, manifest, 2)
+        crossed_event['frame_id'] = 'f0000095'
+        with self.assertRaises(ValueError):
+            _detail(crossed, manifest, 2)
         for index in (True, 95, 1):
             with self.subTest(invalid_frame_index=index):
                 invalid = deepcopy(detail)

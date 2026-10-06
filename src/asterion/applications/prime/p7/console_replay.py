@@ -83,11 +83,7 @@ def replay_fingerprint(root: Path) -> tuple:
             raise ValueError('replay unavailable')
         links.add(value)
 
-    def visit(run, ancestors):
-        if run.name in ancestors or len(ancestors) >= 8:
-            raise ValueError('replay unavailable')
-        if run.name in complete:
-            return
+    def dependencies(run):
         stamp(run)
         summary = metadata(run / 'summary.json')
         diagnostics = summary.get('diagnostics', {})
@@ -133,11 +129,27 @@ def replay_fingerprint(root: Path) -> tuple:
         launch = metadata(run.parent / 'launches' / (run.name + '.json'))
         if not summary:
             link(launch.get('source_run_id'), links)
-        for source in sorted(links):
-            visit(run.parent / source, (*ancestors, run.name))
-        complete.add(run.name)
+        return iter(sorted(links))
 
-    visit(root, ())
+    # Source resumptions can outlive a fixed number of levels. Walk one edge
+    # at a time, using the existing path budget and the active DFS path for
+    # exact cycle detection; shared completed branches are visited once.
+    visiting = {root.name}
+    pending = [(root, dependencies(root))]
+    while pending:
+        run, children = pending[-1]
+        source = next(children, None)
+        if source is None:
+            pending.pop()
+            visiting.remove(run.name)
+            complete.add(run.name)
+            continue
+        if source in visiting:
+            raise ValueError('replay unavailable')
+        if source not in complete:
+            child = run.parent / source
+            visiting.add(source)
+            pending.append((child, dependencies(child)))
     return tuple(sorted(stamps.items()))
 
 
@@ -163,6 +175,18 @@ def projection_manifest(snapshot: dict, revision: str) -> dict:
                        for level in snapshot['levels']]}
 
 
+def _paged_frame_member(bucket: dict, frame_id: object) -> bool:
+    if 'frame_page' not in bucket or type(frame_id) is not str or not 7 <= len(frame_id) <= 160:
+        return False
+    if frame_id[0] != 'f' or not frame_id[1:].isascii() or not frame_id[1:].isdigit():
+        return False
+    offset, count = bucket.get('frame_index_offset'), bucket.get('frame_count')
+    if type(offset) is not int or type(count) is not int or offset < 1 or count < 0:
+        return False
+    number = int(frame_id[1:])
+    return offset <= number < offset + count and frame_id == f'f{number:06d}'
+
+
 def projection_level(snapshot: dict, number: int, revision: str) -> dict:
     bucket = next((level for level in snapshot['levels'] if level['level'] == number), None)
     if bucket is None:
@@ -174,7 +198,8 @@ def projection_level(snapshot: dict, number: int, revision: str) -> dict:
             'decisions': [decision for decision in snapshot.get('decisions', [])
                           if decision['id'] in selected or 'round_index' in decision],
             'process_events': [event for event in snapshot.get('process_events', [])
-                               if event.get('level') == number or event.get('frame_id') in frames]}
+                               if event.get('level') == number or event.get('frame_id') in frames
+                               or _paged_frame_member(bucket, event.get('frame_id'))]}
 
 
 def _weight(snapshot):
