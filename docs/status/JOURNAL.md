@@ -3888,3 +3888,6 @@
 - 2026-10-06 11:01 CST — 4a62f0eb records final47 package adoption, preserved guests and pending third submission so recovery cannot overclaim completion.
 - 2026-10-06 11:30 CST — 06e1b779 bounds replay event/frame scans, removing RE86 browser freezes; original sidebar retained with bold steps.
 - 2026-10-06 11:34 CST — Third25 source proof uses UTC03:18/local11:18; preflight completed; no official receipt yet. Historical-prefix scans cause avoidable delay.
+- 2026-10-06 11:36 CST — 68b32c86 restores original compact level rows and records partial-only campaign, native witness and UTC submission boundary.
+- 2026-10-06 11:41 CST — Restored visible per-level baseline and two-decimal efficiency; duplicate action counts stay removed; focused4PASS.
+- 2026-10-06 11:41 CST — 507504f4 restores visible baseline and efficiency so compact rows retain user-critical level data.

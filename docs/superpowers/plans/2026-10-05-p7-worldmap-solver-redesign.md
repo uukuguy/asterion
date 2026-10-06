@@ -404,3 +404,17 @@ User requires all25games/183levels ready before switching. Implement application
 Implementation frozen: all183 actual initial observations ready; fresh-session/HTTP183PASS with SDK worker forbidden; backend166PASS, final DOM108PASS/one conditional skip, compact status overlay/evidence details reviewed. Full new promotion and exact package adoption are the remaining integration checks, recorded in the live checkpoint.
 
 Core183-ready committed98aa1b9b; frozen compact/status snapshot fullpromotionPASS25/provider0. Later action/running-marker increment: finalDOM110PASS/one conditional skip, relatedPython70PASS, actualservedHTTP/DOM PASS, Astra changed-code review clear. Final incremental package/adoption proof remains recorded in the active checkpoint.
+
+
+### Task 7: Save-time certification and bounded official selection (2026-10-06)
+
+**Goal:** Reuse the independent replay performed when a sealed prefix is saved; submitting25games must not replay every historical candidate offline.
+
+**Ownership:** Backend worker owns `solution_certificates.py`, `solutions.py`, `official_operator.py` and dedicated certificate/selection tests. Astra owns `operator.py` actual-witness lifecycle and save tests, plus recovery/composition wiring by explicit agreement. Root owns integration, finite legacy migration, current-package adoption and state. No worker modifies the currently running submission/watcher/card claim. Workers coordinate API before parallel edits; no other worker's edits are reverted.
+
+- [ ] Separate unchanged static sealed-route admission from SDK replay in `solutions.py`; certificate reuse skips only the latter. Cover modified trace/seal/summary/recording, wrong game/seed/model and changed SDK/game content with rejection.
+- [ ] Save the actual successful replay witness through cleanup/final summary; publish its bound private immutable certificate without a second SDK run. Cover failed replay/cleanup, changed final evidence and successful normal/partial save. Certificate publication failure remains explicit pending, never ready.
+- [ ] Publish and validate an exact per-game winner registry under coordination. Official selection preserves existing progress/RHAE/actions/source ranking, detects eligible unregistered evidence, and rejects stale/missing proof before opening a card. Test certified submission with SDK engine construction forbidden, and verify the exact25 roster is frozen while later saves occur.
+- [ ] Cover recovery/composition sources through the same certified publisher after their actual independent verification; preserve original source failure/receipt history.
+- [ ] Integrate focused unittest checks, independent contract review and packaged-resource promotion. Create a clean wheel with matching installed resources. Run one explicit finite migration over the current official-ranked selected sources, models/API0, then test installed certified preflight with SDK replay forbidden. Never repeat the live third card to test this change.
+- [ ] Adopt only the campaign parent/future save path after named checks pass, preserving actual guest versions/deadlines, two slots and partial-only phase. Record named facts and incomplete boundaries in the existing recovery checkpoint; commit promptly to main.
