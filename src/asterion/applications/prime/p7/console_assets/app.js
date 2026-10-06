@@ -1575,6 +1575,7 @@
       choice.setAttribute('aria-label', `选择游戏 ${string(game.alias, game.game_id)}`);
       const displayed = game.display_completed_levels ?? game.completed_levels;
       const progress = row.querySelector('progress'); progress.max = game.win_levels; progress.value = displayed;
+      row.querySelector('.overview-progress').classList.toggle('completed', game.win_levels > 0 && game.completed_levels === game.win_levels);
       progress.setAttribute('aria-label', `${displayed} / ${game.win_levels} 关卡`);
       row.querySelector('.overview-progress span').textContent = `${displayed} / ${game.win_levels}${game.progress_pending ? ' · 待封存' : ''}`;
       row.children[2].textContent = Number(game.score).toFixed(2);

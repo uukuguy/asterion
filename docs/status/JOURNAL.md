@@ -3838,3 +3838,6 @@
 - 07:52 8e7f0164: Record verified LF52 recovery, active two-game research and in-progress single official card for reliable continuation.
 - 07:53 Second authorized official25 card749fd876 closed-confirmed29.834632:25played/0skipped,7full,54levels,1883actions; exact submission-start local score matches.
 - 07:53 Packaged promotion fullPASS25commands/provider0; actual25row console/defaultAR25/compactscore and real portable AR25 export verified.
+- 07:54 a20108a8: Record confirmed second official card and verified console boundaries so newer local wins retain separate authority.
+- 07:54 Actual7a two-game continuation verified: coordinator19801/19805, LF52L3 guest164745, LP85L5 guest164866; each900seconds, nohold.
+- 08:05 Explicitly style WebKit/Firefox progress fill green and verified full-game counts green; native accent alone was insufficient.
