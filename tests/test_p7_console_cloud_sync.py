@@ -121,8 +121,8 @@ class TestConsoleCloudSync(unittest.TestCase):
         self.assertFalse(schedule.due(59, 'saved2'))
         self.assertTrue(schedule.due(60, 'saved2'))
         schedule.attempted(60, 'saved2')
-        self.assertFalse(schedule.due(359, 'saved2'))
-        self.assertTrue(schedule.due(360, 'saved2'))
+        self.assertFalse(schedule.due(1859, 'saved2'))
+        self.assertTrue(schedule.due(1860, 'saved2'))
         schedule.paused = True
         self.assertFalse(schedule.due(10000, 'saved3'))
 
@@ -135,6 +135,23 @@ class TestConsoleCloudSync(unittest.TestCase):
             routes['/api/overview']['generated_at'] = 'second'
             second = capture.once()
             self.assertEqual(first['generation'], second['generation'])
+
+    def test_resume_history_is_not_captured_and_active_churn_is_not_saved_change(self):
+        routes = self.fixture()
+        game = routes['/api/overview']['games'][0]
+        game['resume_run_id'] = 'p7-live-old-resume'
+        overview_calls = 0
+        def fetch(route):
+            nonlocal overview_calls
+            if route == '/api/overview':
+                overview_calls += 1
+                if overview_calls > 1:
+                    return {'games': [{**game, 'active_run_id': 'p7-live-new-current'}]}
+            self.assertNotIn('old-resume', route)
+            return routes[route]
+        with tempfile.TemporaryDirectory() as directory:
+            result = Capture(Path(directory), fetch).once()
+            self.assertEqual(result['stats']['readyRuns'], 1)
 
     def test_canonical_unicode(self):
         self.assertEqual(canonical({'b': 1, 'a': '图'}), '{"a":"图","b":1}'.encode())

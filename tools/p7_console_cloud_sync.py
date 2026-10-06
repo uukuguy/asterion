@@ -26,6 +26,9 @@ import urllib.request
 
 class SyncError(Exception):
     """Closed public error code; underlying responses and paths are not logged."""
+    def __init__(self, code, run_id=None):
+        super().__init__(code)
+        self.run_id = run_id
 
 
 def canonical(value):
@@ -136,7 +139,10 @@ class Capture:
     def selected(overview):
         result = {}
         for game in overview['games']:
-            for key in ('best_run_id', 'resume_run_id', 'active_run_id', 'solving_run_id', 'recording_run_id'):
+            keys = ('best_run_id', 'active_run_id', 'solving_run_id')
+            if not game.get('best_run_id'):
+                keys += ('latest_run_id',)
+            for key in keys:
                 run = game.get(key)
                 if run:
                     if not re.fullmatch(r'[A-Za-z0-9_-]+', run):
@@ -208,6 +214,7 @@ class Capture:
         return manifest['run']
 
     def once(self):
+        captured_at = now()
         # Revision-bound URLs remain valid for browsers holding an older manifest.
         routes = {path: entry for path, entry in (self.cache or {}).get('routes', {}).items()
                   if re.fullmatch(r'/api/replay/[A-Za-z0-9_-]+/levels/[1-9][0-9]*/[0-9a-f]{64}(?:/frames/[0-9a-f]{64}/[0-9]+/32)?', path)}
@@ -232,7 +239,7 @@ class Capture:
                     routes[f'/api/preview/{game_id}'] = routes[path]
         self.previews = (games, {path: entry for path, entry in routes.items() if path.startswith('/api/preview/')})
         runs, unavailable = [], []
-        required = {game.get(key) for game in overview['games'] for key in ('best_run_id', 'resume_run_id')}
+        required = {game.get('best_run_id') for game in overview['games']}
         selected = self.selected(overview)
         for run_id, game_id in sorted(selected.items()):
             try:
@@ -240,7 +247,7 @@ class Capture:
                 if run is None:
                     unavailable.append(run_id)
                     if run_id in required:
-                        raise SyncError('saved-replay-not-ready')
+                        raise SyncError('saved-replay-not-ready', run_id)
             except SyncError:
                 if run_id in required:
                     raise
@@ -255,11 +262,14 @@ class Capture:
                 run = None
             if run:
                 runs.append({key: run[key] for key in ('run_id', 'game_id', 'status')})
-        if self.selected(self.fetch('/api/overview')) != selected:
+        def saved_sources(value):
+            return {game['game_id']: (game.get('best_run_id'), game.get('resume_run_id'))
+                    for game in value['games']}
+        if saved_sources(self.fetch('/api/overview')) != saved_sources(overview):
             raise SyncError('source-changed')
         # Same public three-field list, scoped to the captured saved/current runs.
         self.put(routes, '/api/runs', {'runs': runs})
-        result = dict(schema='asterion.p7.cloud-index/v1', capturedAt=now(),
+        result = dict(schema='asterion.p7.cloud-index/v1', capturedAt=captured_at,
                       generation=hashlib.sha256(canonical(routes)).hexdigest(), routes=routes,
                       stats=dict(games=len(games['games']), previews=sum(g['win_levels'] for g in games['games']),
                                  readyRuns=len(runs), unavailableCurrentRuns=sorted(set(unavailable)), framePages=sum('/frames/' in path for path in routes),
@@ -272,7 +282,7 @@ class Capture:
 
 class UploadSchedule:
     """Coalesce captures; completions get priority without per-action writes."""
-    def __init__(self, interval=300, minimum=60):
+    def __init__(self, interval=1800, minimum=60):
         self.interval, self.minimum = interval, minimum
         self.last_attempt = None
         self.saved_progress = None
@@ -315,10 +325,10 @@ def main():
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--once', action='store_true')
     mode.add_argument('--watch', action='store_true')
-    parser.add_argument('--interval', type=float, default=5)
+    parser.add_argument('--interval', type=float, default=30)
     parser.add_argument('--timeout', type=float, default=20)
     parser.add_argument('--uploader-script', type=Path)
-    parser.add_argument('--upload-interval', type=float, default=300)
+    parser.add_argument('--upload-interval', type=float, default=1800)
     args = parser.parse_args()
     if args.interval < 1 or not 0 < args.timeout <= 20 or args.upload_interval < 60:
         parser.error('interval >=1, timeout in (0,20], upload interval >=60 required')
@@ -341,7 +351,7 @@ def main():
                         result = capture.once()
                         break
                     except SyncError as error:
-                        if str(error) != 'source-changed' or attempt == 2:
+                        if str(error) not in {'source-changed', 'saved-replay-not-ready'} or attempt == 2:
                             raise
                 status['capture'] = 'ready'
                 status['generation'] = result['generation']
@@ -359,6 +369,8 @@ def main():
                 status.update(status='ready', observedAt=now(), **result['stats'])
             except SyncError as error:
                 status['code'] = str(error)
+                if error.run_id:
+                    status['run_id'] = error.run_id
                 if str(error) == 'upload-quota-exceeded':
                     schedule.paused = True
                     status['upload'] = 'quota-paused'
