@@ -2332,7 +2332,7 @@ test('external unsealed replay polling preserves chosen history, switches runs w
     return response(idleView());
   }});
   try {
-    await settle(); const row=overviewRow(app); assert.match(row.textContent,/外部只读/);
+    await settle(); const row=overviewRow(app); assert.equal(row.querySelector('.overview-result-badge').textContent,'尚未通关'); assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 求解中'); assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/); assert.doesNotMatch(row.textContent,/外部只读/);
     assert.equal(row.querySelector('[data-overview-start]').disabled,true);
     row.querySelector('[data-overview-watch]').click();await settle();
     assert.equal(app.$('run-pause').disabled,true);assert.equal(app.$('run-stop').disabled,true);
@@ -2373,10 +2373,15 @@ test('unresumable saved progress and stale overview disable default start withou
 test('recording overview watches the unsealed external attempt before best saved route and preserves frame history',async()=>{
   const overview=overviewFixture(catalog25);overview.guest_busy=true;overview.start_ready=false;overview.start_block_reason='session-busy';
   overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,best_run_id:'old-best',resume_run_id:'old-best',runs:[catalogRun('old-best'),{...catalogRun('new-recording','unverified',false),recording:true,sealed_trace:false}]};
+  overview.games[1]={...overview.games[1],status:'completed',completed_levels:3,best_run_id:'full-best',runs:[catalogRun('full-best'),{...catalogRun('full-redo','unverified',false),recording:true}]};
+  overview.games[3]={...overview.games[3],status:'unverified',runs:[catalogRun('pending-verification','unverified',false)]};
   let replay={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'new-recording',win_levels:2,sealed_trace:false}};
   const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(url.startsWith('/api/replay/')?replay:idleView())});
   try {
-    await settle();const row=overviewRow(app);assert.match(row.textContent,/记录中 · 外部只读/);assert.match(row.querySelector('.overview-progress').textContent,/1 \/ 2/);
+    await settle();const row=overviewRow(app);assert.equal(row.querySelector('.overview-result-badge').textContent,'◐ 部分通关');assert.equal(row.querySelector('.overview-result-badge').classList.contains('partial'),true);assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 新尝试');assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/);assert.match(row.querySelector('.overview-activity-badge').getAttribute('aria-label'),/外部只读/);assert.doesNotMatch(row.textContent,/外部只读/);assert.match(row.querySelector('.overview-progress').textContent,/1 \/ 2/);
+    const full=overviewRow(app,1);assert.equal(full.querySelector('.overview-result-badge').textContent,'✓ 全部通关');assert.equal(full.querySelector('.overview-result-badge').classList.contains('completed'),true);assert.equal(full.querySelector('.overview-progress').classList.contains('completed'),true);assert.equal(full.querySelector('.overview-activity-badge').textContent,'● 新尝试');
+    assert.equal(overviewRow(app,2).querySelector('.overview-result-badge').textContent,'尚未开始');assert.equal(overviewRow(app,2).querySelector('.overview-activity-badge'),null);
+    assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').textContent,'待验证');assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').classList.contains('unverified'),true);
     row.querySelector('[data-overview-watch]').click();await settle();assert.equal(app.$('replay-run').value,'new-recording');assert.equal(app.$('run-id').textContent,'new-recording');
     app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
     replay={...replay,levels:replay.levels.map((level,i)=>i?level:{...level,frames:[...level.frames,{id:'f3',grid:[[14]],state:'NOT_FINISHED'}]})};
@@ -2474,7 +2479,7 @@ test('stale unsealed recording does not veto a ready guest and backend readiness
   let overview=overviewFixture(catalog25);overview.games[0]={...overview.games[0],runs:[{...catalogRun('stale-recording','unverified',false),recording:true}]};
   const app=launch(fixture(),{liveConfig:catalog25,overview:()=>overview,fetch:async url=>url==='/api/manual/open'?response({},503):response(idleView())});
   try{
-    await settle();assert.equal(app.$('run-start').disabled,false);assert.match(overviewRow(app).textContent,/记录中 · 外部只读/);
+    await settle();assert.equal(app.$('run-start').disabled,false);assert.equal(overviewRow(app).querySelector('.overview-activity-badge').textContent,'● 新尝试');assert.match(overviewRow(app).querySelector('.overview-activity-badge').title,/外部只读/);
     overview={...overview,guest_busy:true,start_ready:false,start_block_reason:'session-busy'};app.tick();await settle();assert.equal(app.$('run-start').disabled,true);assert.equal(app.$('run-fresh').disabled,true);
     app.$('run-start').click();assert.equal(app.requests.some(request=>request.url==='/api/start'),false);assert.deepEqual(app.errors,[]);
   }finally{app.dom.window.close();}

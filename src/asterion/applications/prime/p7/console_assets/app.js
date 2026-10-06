@@ -1580,8 +1580,21 @@
       row.querySelector('.overview-progress span').textContent = `${displayed} / ${game.win_levels}${game.progress_pending ? ' · 待封存' : ''}`;
       row.children[2].textContent = Number(game.score).toFixed(2);
       const recording = game.runs.some((run) => run.recording === true);
-      const external = (game.status === 'running' || recording) && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
-      row.children[3].textContent = (recording ? '记录中' : overviewLabels[game.status]) + (external ? ' · 外部只读' : ''); row.children[3].className = 'overview-state ' + (recording ? 'running' : game.status);
+      const active = game.status === 'running' || recording;
+      const external = active && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
+      const completed = game.win_levels > 0 && game.completed_levels === game.win_levels;
+      const resultKind = completed ? 'completed' : game.completed_levels > 0 ? 'partial' : !active && game.status === 'unverified' ? 'unverified' : 'unplayed';
+      const resultLabel = completed ? '✓ 全部通关' : game.completed_levels > 0 ? '◐ 部分通关' : resultKind === 'unverified' ? '待验证' : active ? '尚未通关' : '尚未开始';
+      const result = node('span', resultLabel, 'overview-result-badge ' + resultKind);
+      result.title = `已保存 ${game.completed_levels} / ${game.win_levels} 关`;
+      result.setAttribute('aria-label', `${resultLabel} · ${result.title}`);
+      const status = row.children[3]; status.className = 'overview-state'; status.replaceChildren(result);
+      if (active) {
+        const running = game.status === 'running';
+        const activity = node('span', running ? '● 求解中' : '● 新尝试', 'overview-activity-badge');
+        activity.title = (running ? '求解中' : '最新尝试记录尚未封存') + (external ? ' · 外部只读' : ' · 当前会话');
+        activity.setAttribute('aria-label', activity.title); status.append(activity);
+      }
       row.children[4].textContent = String(game.route_actions);
       const start = row.querySelector('[data-overview-start]');
       start.textContent = game.resume_run_id ? '继续' : game.completed_levels > 0 ? '待恢复' : '启动';

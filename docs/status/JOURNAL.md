@@ -3844,3 +3844,5 @@
 - 08:05 4fc6b9ae: Explicitly color progress fills and full-game counts green across browser implementations.
 - 08:12 User clarified color states: complete green, partial/recording blue, unverified amber, unplayed gray; native accent cause remains unverified.
 - 08:12 Full promotion4fc PASS25; latest status palette PASS2DOM/servedHTTP/exact wheel resources; quick gate lacked npm preparation.
+- 08:12 55e190d7: Distinguish complete, partial, recording and unverified colors so game progress and status convey the same state.
+- 08:20 Separate saved-result and orange attempt badges; missing-summary recording evidence never proves a live solver. DOM99/HTTP/wheel resources PASS.
