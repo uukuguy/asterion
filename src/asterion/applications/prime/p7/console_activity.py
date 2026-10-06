@@ -12,6 +12,7 @@ import subprocess
 _RUN = re.compile(r'p7-live-[0-9]{14}-[0-9a-f]{24}\Z')
 _UNIT = re.compile(r'asterion-p7-[0-9a-f]{32}\.service\Z')
 _MAX_BYTES = 64 * 1024
+_MAX_ACTIVE_GUESTS = 4
 
 
 def _safe(path):
@@ -24,7 +25,7 @@ def _pid(value):
 
 def live_make_processes(pids: tuple[int, ...]) -> dict:
     """One bounded local process query, never a shell or a global process scan."""
-    if not pids or len(pids) > 2 or any(not _pid(pid) for pid in pids):
+    if not pids or len(pids) > _MAX_ACTIVE_GUESTS or any(not _pid(pid) for pid in pids):
         return {}
     try:
         result = subprocess.run(['ps', '-p', ','.join(str(pid) for pid in pids),
@@ -65,7 +66,7 @@ def campaign_solving(runs_root: Path, games: set[str], live_units: frozenset[str
             return {}
         state = json.loads(raw)
         if (type(state) is not dict or state.get('stop') is True
-                or type(state.get('active')) is not list or len(state['active']) > 2):
+                or type(state.get('active')) is not list or len(state['active']) > _MAX_ACTIVE_GUESTS):
             return {}
         candidates = []
         for entry in state['active']:

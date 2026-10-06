@@ -80,3 +80,32 @@ class TestConsoleCampaignActivity(ConsoleSessionFixture):
             missing = session.overview()['games'][1]
         self.assertIs(missing['solving'], False)
         self.assertIsNone(missing['solving_run_id'])
+
+    def test_three_and_four_running_games_are_visible_but_five_fail_closed(self):
+        from asterion.applications.prime.p7.console_activity import campaign_solving
+        runs, path, active, processes = self.campaign()
+        for index in range(2, 5):
+            run_id = f'p7-live-20261006101010-{index:024x}'
+            unit = f'asterion-p7-{index:032x}.service'
+            game = f'test-{index + 1}'
+            (runs / run_id).mkdir()
+            args = ['make', 'asterion-prime-p7-level-witness', f'GAME={game}',
+                    'LEVEL=1', f'ASTERION_PRIME_P7_ATTEMPT_UNIT={unit}']
+            pid = 100 + index
+            active.append(dict(game=game, run_id=run_id, unit=unit,
+                               host_make_pid=pid, host_make_pgid=pid, args=args))
+            processes[pid] = {'pgid': pid, 'command': '/usr/bin/' + ' '.join(args)}
+        for count in (3, 4, 5):
+            with self.subTest(count=count):
+                selected = active[:count]
+                path.write_text(json.dumps({'active': selected, 'stop': False,
+                                            'max_active_guests': count}))
+                output = '\n'.join(f"{pid} {value['pgid']} {value['command']}"
+                                   for pid, value in processes.items() if pid < 100 + count)
+                with patch('asterion.applications.prime.p7.console_activity.subprocess.run',
+                           return_value=SimpleNamespace(returncode=0, stdout=output)) as query:
+                    actual = campaign_solving(runs, {entry['game'] for entry in selected},
+                                              frozenset(entry['unit'] for entry in selected))
+                expected = {entry['game']: entry['run_id'] for entry in selected} if count <= 4 else {}
+                self.assertEqual(actual, expected)
+                self.assertEqual(query.call_count, 1 if count <= 4 else 0)
