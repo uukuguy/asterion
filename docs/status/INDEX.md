@@ -15,7 +15,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | File | Status | Purpose |
 |---|---|---|
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Latest official25 receipt29.83/54officiallevels, ready-only183-level console, verified native play-time actor labels, bounded RPC, replay-render freeze fix, one claimed third official submission (UTC run IDs), and two-slot partial-game completion phase; current deployment/verification boundaries are explicit. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Latest official25 receipt29.83/54officiallevels, ready-only183-level console, verified native play-time actor labels, bounded RPC, replay-render freeze fix, third official recovery boundary (distinct API/human cards), save-time route certification and cross-platform no-SDK reads, restored two-slot partial-game completion with separate solve/cleanup deadlines; current deployment/verification boundaries are explicit. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
@@ -26,7 +26,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, level results, world-model diagnosis, breadth recovery and realtime console process evidence and independent playable selection, direct human levels, remembered selection, reliable action feedback, manual history, per-level HUMAN save/resume and current-level clear/restart. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目、实时自主控制台、离线单 HTML 回放与官方结果操作指南。 |
-| `DECISIONS.md` | 🟢 active | Native decisions: durable prepared replay/initial views, compact loading feedback, actor-sourced action meanings, partial cognition, generic Prime computation/P7 WorldMap ownership, semantic plan admission and independent HUMAN play/save behavior. |
+| `DECISIONS.md` | 🟢 active | Native decisions: durable prepared replay/initial views, compact loading feedback, actor-sourced action meanings, partial cognition, generic Prime computation/P7 WorldMap ownership, save-time route certification, semantic plan admission and independent HUMAN play/save behavior. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | Retained legacy cognition contract; the approved WorldMap/Prime redesign is authoritative for the default solver. |
 | `../reviews/2026-10-05-p7-worldmap-solving-design-review.md` | 🟢 active | Pinned Tycho/Retrodict code comparison supporting the approved design; static research, not capability PASS. |
 | `../reviews/2026-10-05-p7-worldmap-implementation-review.md` | 🟢 active | Implementation review, corrected integration boundaries, background console verification and packaged live evidence. |

@@ -3895,3 +3895,10 @@
 - 2026-10-06 11:49 CST — 03b13505 moves route certification to saving so official selection avoids replaying historical candidates.
 - 2026-10-06 11:59 CST — Third25 ended recovery-required atRE86;14instances/11unattempted; existing-cardGET404 is inconclusive, no retry.
 - 2026-10-06 11:59 CST — S5I5L8 passed36actions; local14full/109levels/4097actions; LF52/BP35 guests preserved during coordinator trace-error HOLD.
+- 2026-10-06 12:01 CST — 25647d85 certifies saved P7 routes once, avoiding historical SDK replay during official preflight;139focused testsPASS.
+- 12:07 Fixed witness cleanup grace preserves replay/seal after unchanged 900s solve deadline; 13 tests, one environment skip. [9bbdcd28]
+- 2026-10-06 12:13 CST — a5d690fa records bounded official action progress and failure reasons so interrupted submissions remain diagnosable;41testsPASS.
+- 2026-10-06 12:13 CST — Frozen256 promotion failed11SDK-environment tests; gate remains non-PASS pending recovery-hook repair, no deployment claim.
+- 2026-10-06 12:24 CST — LF52L8/G50TL3 two slots restored under47a actor plus exact9bb launcher policy; BP35 queued after sealed audit.
+- 2026-10-06 12:24 CST — Migration17games/18offline replays; Darwin/Linux certified reads26.60s/28.55s, SDK/model/API0; final promotion pending.
+- 12:24 Recovery tests separate local admission from certification so missing witnesses cannot grant submission authority. [35495ef3]

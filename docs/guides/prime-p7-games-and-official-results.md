@@ -80,7 +80,7 @@ ASTERION_PRIME_P7_STRATEGY=explore make asterion-prime-p7-solve GAME=ls20 LEVEL=
 
 探索候选必须经过离线 fresh replay、身份和终态校验后才能复用；策略变量不会传给模型后端。
 
-每次调用都会创建独立的 UTC 时间戳 `run_id` 目录，不会覆盖之前的尝试。一个经过验证的运行包含封存 trace、动作前后状态摘要、动作哈希链和 summary；清单只读这些记录，不运行题目源码。续解或官方提交前会再用新本地游戏严格重放校验。
+每次调用都会创建独立的 UTC 时间戳 `run_id` 目录，不会覆盖之前的尝试。一个经过验证的运行包含封存 trace、动作前后状态摘要、动作哈希链和 summary；清单只读这些记录，不运行题目源码。续解恢复新本地游戏仍严格重放；官方提交读取保存时产生的 SDK 认证证书，只静态核对选中路线和当前游戏/验证器身份，不在提交时重放全部历史候选。
 
 如果整题尝试在后面的关卡失败，只要前面关卡的动作能够独立重放并通过校验，已完成关卡仍会作为可复用前缀保留；失败关卡的动作不会被当作已解答案。每个关卡的边界从同一条逐动作记录中截取，不覆盖原始记录。
 
@@ -285,15 +285,15 @@ ARC_API_KEY=...
 make asterion-prime-p7-official-submit GAME=ls20
 ```
 
-提交所有本地已有验证前缀的题目：
+提交完整公开目录（当前25题；已有认证路线的题目执行动作，其他题目建立零进度实例）：
 
 ```bash
 make asterion-prime-p7-official-submit GAME=all
 ```
 
-这个入口不启动 Pi，也不调用模型。它会先读取并重新验证本地动作前缀，然后创建一张新的官方 Competition scorecard；对每个选定题目只调用一次官方 `make`，从官方返回的初始状态开始逐动作执行，并检查每次动作后的状态。远端初始状态或中间状态和本地证据不一致时立即停止，不重试不确定动作，也不伪造成功回执。
+这个入口不启动 Pi，也不调用模型。它先读取保存时的认证证书并静态核对所选路线，再创建一张新的官方 Competition scorecard；对每个选定题目只调用一次官方 `make`，从官方返回的初始状态开始逐动作执行，并检查每次动作后的状态。远端初始状态或中间状态和本地证据不一致时立即停止，不重试不确定动作，也不伪造成功回执。
 
-本地动作不会被上传。官方端实际发生的是一组新的动作执行，因此官方 receipt 的动作数、关卡状态和分数以 ARC 服务返回值为准。Competition 关闭 scorecard 时，官方 SDK 会为未选题目建立零动作、零分的 `NOT_FINISHED` 占位 run；这些占位不表示 Asterion 执行过该题。回执分别报告实际执行的 `played_runs` 和未选题目的 `skipped_count`。
+不上传本地成绩或动作文件；程序通过API逐动作执行。官方端实际发生的是一组新的动作执行，因此官方 receipt 的动作数、关卡状态和分数以 ARC 服务返回值为准。Competition 关闭 scorecard 时，官方 SDK 会为未选题目建立零动作、零分的 `NOT_FINISHED` 占位 run；这些占位不表示 Asterion 执行过该题。回执分别报告实际执行的 `played_runs` 和未选题目的 `skipped_count`。
 
 旧的全目录模型评估入口改名为：
 
@@ -305,7 +305,7 @@ make asterion-prime-p7-official-live-eval
 
 ## 5. 回执和 scorecard 对照
 
-2026-09-25 已执行两次 `GAME=all` 官方提交。最新批量回执是 `.asterion-private/prime-p7-official/p7-live-20260925194924-200e3e5e7a7b26c04ea21d67/official-receipt.json`；[官方卡片](https://arcprize.org/scorecards/403c8b05-ae64-4dd9-b6f6-1d22910a2e24)的总分为 `6.498124098124098`。21 道题重新执行了本地已验证动作前缀，4 道题（G50T、KA59、SK48、TN36）未选并由官方服务记录零动作占位。所选题中 M0R0、VC33 完成到第 3 关，AR25、CN04、DC22、LS20、RE86、TU93 完成到第 2 关，其余完成首关；没有整题通关。逐题官方动作数、关卡数、状态和分数保存在该回执的 `games` 数组，并列于[证据记录](../status/ASTERION-PRIME-P7-EVIDENCE.md)。这次命令正常关闭并直接写出 `closed-confirmed` 回执，无需恢复命令。
+以下为2026-09-25历史结果；最新会话成绩以[活动检查点](../status/RESUME-NEXT-SESSION.md)为准。当天已执行两次 `GAME=all` 官方提交。该日最新批量回执是 `.asterion-private/prime-p7-official/p7-live-20260925194924-200e3e5e7a7b26c04ea21d67/official-receipt.json`；[官方卡片](https://arcprize.org/scorecards/403c8b05-ae64-4dd9-b6f6-1d22910a2e24)的总分为 `6.498124098124098`。21 道题重新执行了本地已验证动作前缀，4 道题（G50T、KA59、SK48、TN36）未选并由官方服务记录零动作占位。所选题中 M0R0、VC33 完成到第 3 关，AR25、CN04、DC22、LS20、RE86、TU93 完成到第 2 关，其余完成首关；没有整题通关。逐题官方动作数、关卡数、状态和分数保存在该回执的 `games` 数组，并列于[证据记录](../status/ASTERION-PRIME-P7-EVIDENCE.md)。这次命令正常关闭并直接写出 `closed-confirmed` 回执，无需恢复命令。
 
 上一张 17 题批量卡片仍保留为历史记录：回执 `.asterion-private/prime-p7-official/p7-live-20260925031809-dabd0f7fd2131740a0cbfacc/official-receipt.json`，总分 `2.5044733044733043`，卡片为 [fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d](https://arcprize.org/scorecards/fb3e52a2-2bfe-473e-9e5c-30bcf7f2355d)。
 
@@ -340,3 +340,16 @@ make asterion-prime-p7-official-recover RUN=<run_id>
 此命令只对 `https://arcprize.org/api/v3/scorecards/<card_id>` 发起一次不带密钥的 GET，不建新卡、不重放动作。它要求私有恢复记录确认正常关闭，并逐项核对卡号、完整题目目录、已选题目的运行 ID 及未选题目的零动作占位；校验通过才在同一目录创建 `official-receipt.json`，不会覆盖已有回执。只有 `recovery-required` 或 GET 不可用时，不能把公开页面或本地记录单独当作有效回执。
 
 ARC Competition 的官方说明见 [Competition mode](https://docs.arcprize.org/toolkit/competition_mode) 和 [methodology](https://docs.arcprize.org/methodology)。社区排行榜与 Kaggle 提交是后续独立流程，当前命令不会自动发布排行榜。
+
+
+## 6. 官方提交与社区展示的策略
+
+保存成功与官方结果是两个状态：本地路线在封存、独立重放和收口完成后发布认证；认证缺失或失效时明确待准备，并在开卡前拒绝提交。提交过程另写 `submission-progress.json`，立即记录实际卡号、已完成路线及中断动作序号；该进度文件不能代替关闭后的服务端回执。
+
+研究阶段按关保存、校验和准备网页数据。完整官方提交在阶段性进展后执行：同一张新卡覆盖全部25题，从初始局面在线执行已保存动作；关闭卡后保留服务端最终回执。保存时的认证消除重复离线验证，不能消除官方在线动作，也不能把多张旧卡合成一张新卡。单题通道检查与完整25题总分使用不同覆盖范围，不能混报。[Competition Mode](https://docs.arcprize.org/toolkit/competition_mode)规定每卡每环境只能创建一次实例，分数按全部可用游戏计算，运行中不可读取得分。
+
+`Open Scorecard` 的0/0不是一次已完成评测。先比对卡号：浏览器手动卡与后台API卡可不同，`human`只是标签。完成后由程序调用关闭成绩卡，取得最终结果；不要为了检查进度而关闭正在执行的卡。官方自动关闭的15分钟指无活动时间。[Scorecards](https://docs.arcprize.org/scorecards)、[Close Scorecard](https://docs.arcprize.org/toolkit/close-scorecard)
+
+社区展示另走GitHub流程：公开可复现的通用求解系统，在官方社区仓库建立 `submissions/<id>/submission.yaml`，填写方法、作者、模型版本、公开 `code_url` 与 Competition Mode 的 `scorecard_url`，向 `main` 提交PR。ARC-AGI-3条目不能手填数值成绩；审核合并后展示方法。当前README说明只有ARC Prize Verified成绩显示数字，社区接收条目不等于官方验证。[提交说明](https://github.com/arcprize/ARC-AGI-Community-Leaderboard/blob/main/CONTRIBUTING.md)、[社区资格](https://github.com/arcprize/ARC-AGI-Community-Leaderboard/blob/main/README.md)
+
+发布应包含P7的WorldMap推理、Prime工作区与经验复用代码，说明预先探索和保存路线复放的评估口径。仅发布逐题答案表不符合社区的通用系统要求；已有路线复放证明执行与提交通道，不单独证明首次陌生游戏的泛化能力。当前尚未发布社区PR。
