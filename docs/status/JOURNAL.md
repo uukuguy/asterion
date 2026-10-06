@@ -3891,3 +3891,7 @@
 - 2026-10-06 11:36 CST — 68b32c86 restores original compact level rows and records partial-only campaign, native witness and UTC submission boundary.
 - 2026-10-06 11:41 CST — Restored visible per-level baseline and two-decimal efficiency; duplicate action counts stay removed; focused4PASS.
 - 2026-10-06 11:41 CST — 507504f4 restores visible baseline and efficiency so compact rows retain user-critical level data.
+- 2026-10-06 11:49 CST — Save-time certificate design committed; current official submission remains pinned and independent, with no duplicate card.
+- 2026-10-06 11:49 CST — 03b13505 moves route certification to saving so official selection avoids replaying historical candidates.
+- 2026-10-06 11:59 CST — Third25 ended recovery-required atRE86;14instances/11unattempted; existing-cardGET404 is inconclusive, no retry.
+- 2026-10-06 11:59 CST — S5I5L8 passed36actions; local14full/109levels/4097actions; LF52/BP35 guests preserved during coordinator trace-error HOLD.

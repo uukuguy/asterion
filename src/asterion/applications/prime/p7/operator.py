@@ -12,6 +12,7 @@ import re
 import signal as signal_module
 import socket
 import sys
+import tempfile
 import threading
 from types import MappingProxyType
 from typing import cast
@@ -79,7 +80,6 @@ from asterion.applications.prime.p7.playbook import (
     load_playbook,
     save_playbook,
 )
-from asterion.applications.prime.p7.replay import replay_arc_run
 from asterion.applications.prime.p7.score import digest, replay_sha256
 from asterion.applications.prime.p7.optimizer import (
     ActionExpectation,
@@ -3190,6 +3190,8 @@ def _seal_verified_partial_run(
     evidence: P7PrivateTraceReceipt,
     arc_root: Path,
     private: Path,
+    *,
+    verification_witnesses: list[object] | None = None,
 ) -> dict[str, object] | None:
     """Retain completed levels when a later solve step fails."""
 
@@ -3226,17 +3228,18 @@ def _seal_verified_partial_run(
             "level-completed",
             replay_sha256(prefix, terminal_reason="level-completed"),
         )
-        replay_arc_run(
-            prefix,
-            receipt,
+        from .solution_certificates import verify_for_save
+
+        verified_receipt, witness = verify_for_save(
+            arc_root, game, prefix, receipt, broker.replay_observations[:stop + 1],
             lambda: live.ArcadeEngine(
                 arc_root=arc_root,
                 recordings_dir=private / "prefix-replay-recordings",
                 game=game,
             ),
-            game=game,
-            observations=broker.replay_observations[:stop + 1],
         )
+        if verified_receipt != receipt:
+            return None
         payload = {
             "game_id": receipt.game_id,
             "seed": receipt.seed,
@@ -3252,9 +3255,52 @@ def _seal_verified_partial_run(
             payload,
         )
         evidence.runtime_recorder.seal()
+        if verification_witnesses is not None:
+            verification_witnesses[:] = [] if witness is None else [witness]
         return payload
     except Exception:
         return None
+
+
+def _publish_save_certificate(
+    arc_root: Path, private: Path, witness: object | None, *,
+    expected_model_id: str, eligible: bool,
+) -> None:
+    """Publish after cleanup/summary; failed certification retains raw evidence."""
+    if not eligible:
+        return
+    status = {"schema": "asterion.prime.p7-solution-certification-status/v1",
+              "status": "pending"}
+    try:
+        if witness is not None:
+            from .solution_certificates import publish_verified_save
+
+            publish_verified_save(arc_root, private, witness, expected_model_id=expected_model_id)
+            status["status"] = "ready"
+    except Exception as error:
+        status["error_type"] = type(error).__name__
+    # This derivative is deliberately separate: modifying summary.json here
+    # would invalidate the exact evidence that the certificate just bound.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=private,
+                                         prefix=".solution-certification-", delete=False) as stream:
+            temporary = Path(stream.name)
+            json.dump(status, stream, sort_keys=True)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, private / "solution-certification-status.json")
+    except OSError:
+        print("[p7-save] solution certification status unavailable", file=sys.stderr, flush=True)
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+    if status["status"] != "ready":
+        print("[p7-save] solution certification pending", file=sys.stderr, flush=True)
 
 
 def _seal_verified_game_win(
@@ -4284,6 +4330,7 @@ async def run_live(
     """
 
     from .solutions import load_best_prefix, load_exact_prefix, load_resume_worldmap, load_verified_attempt
+    from .solution_certificates import verify_for_save
 
     variant = _resolve_history_variant(invocation.environment, invocation.game)
     cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
@@ -4484,6 +4531,7 @@ async def run_live(
     receipt: Mapping[str, object] = {}
     broker_receipt: ArcRunReceipt | None = None
     replay_verified = False
+    verification_witnesses: list[object] = []
     sealed_trace = False
     cleanup_complete = False
     comparison_report: Path | None = None
@@ -4651,13 +4699,16 @@ async def run_live(
             raise live.P7LiveSolveError("P7 broker is unavailable")
         broker_receipt = broker.seal()
         if not cognition_mode:
-            broker.replay(
+            _, witness = verify_for_save(
+                invocation.arc_root, broker.game, broker.journal, broker_receipt, broker.replay_observations,
                 lambda: live.ArcadeEngine(
                     arc_root=invocation.arc_root,
                     recordings_dir=private / "replay-recordings",
                     game=invocation.game,
                 )
             )
+            if witness is not None:
+                verification_witnesses[:] = [witness]
             replay_verified = True
         analyze_trace(live.read_trace_entries(trace_root))
         sealed_trace = True
@@ -4780,13 +4831,17 @@ async def run_live(
                         pass
                 if broker_receipt is not None and not replay_verified and not cognition_mode:
                     try:
-                        broker_value.replay(
+                        _, witness = verify_for_save(
+                            invocation.arc_root, broker_value.game, broker_value.journal,
+                            broker_receipt, broker_value.replay_observations,
                             lambda: live.ArcadeEngine(
                                 arc_root=invocation.arc_root,
                                 recordings_dir=private / "replay-recordings",
                                 game=invocation.game,
                             )
                         )
+                        if witness is not None:
+                            verification_witnesses[:] = [witness]
                         replay_verified = True
                     except Exception:
                         pass
@@ -4797,7 +4852,8 @@ async def run_live(
                     and type(evidence_value) is P7PrivateTraceReceipt
                 ):
                     completed_prefix = _seal_verified_partial_run(
-                        broker_value, evidence_value, invocation.arc_root, private
+                        broker_value, evidence_value, invocation.arc_root, private,
+                        verification_witnesses=verification_witnesses,
                     )
                     if completed_prefix is not None:
                         replay_verified = True
@@ -4940,6 +4996,15 @@ async def run_live(
                     if isinstance(resources_, P7OperatorResources)
                     and resources_._prediction_client is not None
                     else None
+                ),
+            )
+            _publish_save_certificate(
+                invocation.arc_root, private,
+                verification_witnesses[-1] if verification_witnesses else None,
+                expected_model_id=declared_model_selection(invocation.environment).model,
+                eligible=replay_verified and sealed_trace and cleanup_complete and (
+                    completed_prefix is not None
+                    or (broker_receipt is not None and broker_receipt.levels_completed > 0)
                 ),
             )
     if failure is not None:

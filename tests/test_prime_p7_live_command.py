@@ -2559,7 +2559,29 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             )
             application = SimpleNamespace(assemblies=[assembly], implementations=())
             invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, (), root, game)
+            from asterion.applications.prime.p7.replay import replay_arc_run
+            certification_witness = object()
+            certified = []
+            replayed = []
+
+            def verify_save(arc_root, selected_game, transitions, receipt, observations, engine_factory):
+                actual = replay_arc_run(transitions, receipt, engine_factory, game=selected_game, observations=observations)
+                replayed.append(actual)
+                return actual, certification_witness
+
+            def publish_save(arc_root, source, witness, *, expected_model_id):
+                finalized = json.loads((source / "summary.json").read_text())
+                self.assertTrue(finalized["cleanup_complete"])
+                self.assertTrue(finalized["sealed_trace"])
+                self.assertTrue(worker.closed)
+                self.assertIs(witness, certification_witness)
+                self.assertEqual(finalized["completed_prefix"]["primitive_actions"], 2)
+                certified.append(source)
+
             with (
+                mock.patch.dict("sys.modules", {"asterion.applications.prime.p7.solution_certificates": SimpleNamespace(
+                    verify_for_save=verify_save, publish_verified_save=publish_save,
+                )}),
                 mock.patch("asterion.applications.prime.p7.operator.live.SubprocessPythonWorker", return_value=worker),
                 mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: Engine()),
                 mock.patch("asterion.applications.prime.p7.operator.build_p7_operator_resources", side_effect=build_resources),
@@ -2576,6 +2598,8 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
             self.assertTrue(failure.sealed_trace)
             self.assertTrue(failure.cleanup_complete)
             run = root / ".asterion-private/prime-p7-live/p7-live-partial"
+            self.assertEqual(certified, [run.resolve()])
+            self.assertEqual(len(replayed), 1)
             summary = json.loads((run / "summary.json").read_text())
             self.assertEqual(summary["completed_prefix"]["levels_completed"], 1)
             self.assertEqual(summary["completed_prefix"]["primitive_actions"], 2)

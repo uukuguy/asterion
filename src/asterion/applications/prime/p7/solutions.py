@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from decimal import Decimal
 from collections.abc import Mapping
 import json
 from hashlib import sha256
@@ -403,6 +404,25 @@ def list_verified_prefixes(
 
 
 def _load_one(
+    arc_root: Path, run: Path, expected_game_id: str, seed: int,
+    max_level: int | None, expected_model_id: str | None = None, *, strict_model: bool = False,
+) -> VerifiedPrefix | None:
+    evidence = _read_one(arc_root, run, expected_game_id, seed, max_level,
+                         expected_model_id, strict_model=strict_model)
+    if evidence is None:
+        return None
+    prefix, receipt, game = evidence
+    try:
+        with tempfile.TemporaryDirectory(prefix="asterion-p7-prefix-") as directory:
+            replay_arc_run(prefix.transitions, receipt,
+                           lambda: _fresh_engine(arc_root, game, Path(directory)),
+                           game=game, observations=prefix.observations)
+        return prefix
+    except Exception:
+        return None
+
+
+def _read_one(
     arc_root: Path,
     run: Path,
     expected_game_id: str,
@@ -411,7 +431,8 @@ def _load_one(
     expected_model_id: str | None = None,
     *,
     strict_model: bool = False,
-) -> VerifiedPrefix | None:
+) -> tuple[VerifiedPrefix, ArcRunReceipt, P7GameSelection] | None:
+    """Read static admitted evidence; this alone grants no replay certification."""
     try:
         summary_path = _private_path(run, "summary.json")
         trace_root = _private_path(run, "trace")
@@ -495,11 +516,63 @@ def _load_one(
             return None
         receipt = ArcRunReceipt(recorded_game_id, seed, len(transitions), levels, terminal, recorded_digest)
         observations = recorded_observations(run, transitions, recorded_game_id, win_levels)
-        with tempfile.TemporaryDirectory(prefix="asterion-p7-prefix-") as directory:
-            replay_arc_run(transitions, receipt, lambda: _fresh_engine(arc_root, game, Path(directory)), game=game, observations=observations)
-        return VerifiedPrefix(recorded_game_id, seed, win_levels, levels, transitions, run_id, recorded_digest, observations)
+        return (VerifiedPrefix(recorded_game_id, seed, win_levels, levels, transitions, run_id,
+                               recorded_digest, observations), receipt, game)
     except Exception:
         return None
+
+
+def prefix_rank(prefix: VerifiedPrefix, metadata: dict) -> tuple:
+    """Keep official level/RHAE/action/source ordering independent of replay."""
+    from .score import partial_game_score
+    counts, previous = [], 0
+    for level in range(1, prefix.levels_completed + 1):
+        end = next(item.sequence for item in prefix.transitions if item.levels_completed == level)
+        counts.append(end - previous)
+        previous = end
+    selection = P7GameSelection(prefix.game_id, prefix.seed, prefix.levels_completed,
+                                tuple(metadata['baseline_actions']), metadata['win_levels'])
+    return (-prefix.levels_completed, -Decimal(partial_game_score(tuple(counts), selection)),
+            len(prefix.transitions), prefix.source_run_id)
+
+
+def collect_roster_candidates(arc_root: Path, runs_root: Path, catalog: tuple[dict, ...],
+                              *, expected_model_id: str) -> dict[str, list[VerifiedPrefix]]:
+    """Bounded static native-WorldMap admission, with no SDK execution."""
+    if runs_root.is_symlink() or not runs_root.is_dir():
+        raise ValueError('solution registry unavailable')
+    children = sorted(runs_root.iterdir(), key=lambda path: path.name)
+    if len(children) > 4096:
+        raise ValueError('solution registry unavailable')
+    metadata = {game['game_id']: game for game in catalog}
+    candidates = {game: [] for game in metadata}
+    for run in children:
+        try:
+            path = run / 'summary.json'
+            if (run.is_symlink() or not run.is_dir() or path.is_symlink()
+                    or not path.is_file() or path.stat().st_size > 1024 * 1024):
+                continue
+            summary = json.loads(path.read_text())
+            experiment = source_experiment(run, summary) if type(summary) is dict else None
+            if (type(experiment) is not dict or summary.get('run_id') != run.name
+                    or experiment.get('model') != expected_model_id
+                    or type(experiment.get('seed')) is not int or experiment['seed'] != 0
+                    or experiment.get('prediction_variant') != 'verified'):
+                continue
+            game_id = experiment.get('game_id')
+            if type(game_id) is not str or game_id not in metadata:
+                continue
+            scope = VerifiedPrefix(game_id, 0, metadata[game_id]['win_levels'], 0, (), run.name, '')
+            if load_resume_worldmap(run, scope) is None:
+                continue
+            evidence = _read_one(arc_root, run, game_id, 0, None, expected_model_id, strict_model=True)
+            if evidence is not None:
+                candidates[game_id].append(evidence[0])
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    for game_id, values in candidates.items():
+        values.sort(key=lambda prefix: prefix_rank(prefix, metadata[game_id]))
+    return candidates
 
 
 def _load_attempt_one(

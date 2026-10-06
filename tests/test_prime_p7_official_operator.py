@@ -5,7 +5,7 @@ from __future__ import annotations
 import unittest
 import asyncio
 import json
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, redirect_stderr
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -55,7 +55,7 @@ class TestOfficialOperator(unittest.TestCase):
             "asterion.applications.prime.p7.official_operator._resolve_gameplay_application",
             side_effect=AssertionError("model launched"),
         ):
-            result = _submit_saved(session, Path(directory), (SimpleNamespace(game_id=roster[0]),), catalog_ids=roster)
+                result = _submit_saved(session, Path(directory), (SimpleNamespace(game_id=roster[0], transitions=()),), catalog_ids=roster)
         self.assertEqual(result["selected_count"], 25)
         self.assertEqual(result["skipped_count"], 0)
         self.assertEqual(result["games"][0]["levels_completed"], 1)
@@ -105,6 +105,38 @@ class TestOfficialOperator(unittest.TestCase):
             self.assertEqual(invocation.prefixes, ())
             load.assert_called_once_with(root, root / ".asterion-private" / "prime-p7-live", catalog)
 
+    def test_saved_certification_pending_is_safe_and_rejects_before_card(self) -> None:
+        from asterion.applications.prime.p7 import live
+        from asterion.applications.prime.p7.game import GAME_ID_ENV
+        from asterion.applications.prime.p7.official_operator import main
+        from asterion.applications.prime.p7.solution_certificates import SolutionCertificateError
+
+        with TemporaryDirectory() as directory:
+            root = (Path(directory) / 'operator').resolve()
+            root.mkdir()
+            package = Path(directory) / 'site-packages' / 'asterion' / '__init__.py'
+            package.parent.mkdir(parents=True)
+            package.touch()
+            output, errors = StringIO(), StringIO()
+            with (
+                mock.patch.dict('os.environ', {live.OPERATOR_ROOT_ENV: str(root), GAME_ID_ENV: 'all',
+                                'ASTERION_PRIME_P7_OFFICIAL_MODE': 'saved-submit'}, clear=True),
+                mock.patch('asterion.__file__', str(package)),
+                mock.patch.object(live, '_dotenv_values', return_value={'ARC_API_KEY': 'PRIVATE-KEY',
+                                  'ASTERION_PRIME_MODEL': 'gpt-6.1-sol'}),
+                mock.patch.object(live, 'resolve_arc_root', return_value=root),
+                mock.patch('asterion.applications.prime.p7.official_operator._read_catalog',
+                           return_value=({'game_id': 'ab12-12345678'},)),
+                mock.patch('asterion.applications.prime.p7.official_operator._load_current_roster_prefixes',
+                           side_effect=SolutionCertificateError('/private/SENTINEL-SECRET')),
+                mock.patch('asterion.applications.prime.p7.official_operator.prepare_session') as prepare,
+                redirect_stdout(output), redirect_stderr(errors),
+            ):
+                self.assertEqual(main([]), 2)
+            prepare.assert_not_called()
+            self.assertIn('saved certification pending', errors.getvalue())
+            self.assertNotIn('SENTINEL-SECRET', output.getvalue() + errors.getvalue())
+
     def test_saved_all_main_selects_catalog_instead_of_only_saved_games(self) -> None:
         from asterion.applications.prime.p7.official_operator import SavedInvocation, main
 
@@ -146,17 +178,16 @@ class TestOfficialOperator(unittest.TestCase):
                 api_key="PRIVATE-KEY", evidence_root=Path(directory), model_host_ready=True,
                 sdk_factory=lambda **kwargs: sdk, selected_game_ids=roster,
             ) as session:
-                _submit_saved(session, Path(directory), (SimpleNamespace(game_id=roster[0]),), catalog_ids=roster)
+                _submit_saved(session, Path(directory), (SimpleNamespace(game_id=roster[0], transitions=()),), catalog_ids=roster)
         self.assertEqual(sdk.calls.count("create-scorecard"), 1)
         self.assertEqual(sdk.calls.count(("close-scorecard", "card-123")), 1)
         self.assertEqual(len([row for row in sdk.calls if isinstance(row, tuple) and row[0] == "make"]), 1)
         replay.assert_called_once()
 
-    def test_current_roster_filters_legacy_worldmap_before_exact_replay_and_ranks_rhae(self) -> None:
+    def test_migration_static_candidates_filter_legacy_worldmap_and_rank_rhae(self) -> None:
         from asterion.applications.prime.p7.broker import ArcTransition
-        from asterion.applications.prime.p7.official_operator import _load_current_roster_prefixes
         from asterion.applications.prime.p7.score import digest
-        from asterion.applications.prime.p7.solutions import VerifiedPrefix
+        from asterion.applications.prime.p7.solutions import VerifiedPrefix, collect_roster_candidates
 
         game_id = "aa00-00000000"
         catalog = ({"game_id": game_id, "win_levels": 2, "baseline_actions": (1, 100)},)
@@ -182,19 +213,21 @@ class TestOfficialOperator(unittest.TestCase):
                     (research / "current.json").write_text(json.dumps({"scope": scope, "revision": revision}))
                     (research / "revisions" / (revision[7:] + ".json")).write_text(json.dumps(snapshot))
 
-            def exact(arc, root, name, selected_game_id, seed, *, expected_model_id):
+            def exact(arc, run, selected_game_id, seed, max_level, expected_model_id, *, strict_model):
                 self.assertEqual(expected_model_id, "gpt-6.1-sol")
                 self.assertEqual((selected_game_id, seed), (game_id, 0))
+                self.assertTrue(strict_model)
+                name = run.name
                 counts = (1, 100) if name == "long-good-rhae" else (2, 2)
                 transitions = tuple(ArcTransition(index, "ACTION1", "sha256:" + "a" * 64,
                     "sha256:" + "b" * 64, int(index >= counts[0]) + int(index == sum(counts)))
                     for index in range(1, sum(counts) + 1))
-                return VerifiedPrefix(game_id, 0, 2, 2, transitions, name, "sha256:" + "c" * 64)
+                return VerifiedPrefix(game_id, 0, 2, 2, transitions, name, "sha256:" + "c" * 64), None, None
 
-            with mock.patch("asterion.applications.prime.p7.solutions.load_exact_prefix", side_effect=exact) as load:
-                prefixes = _load_current_roster_prefixes(Path(directory), runs, catalog)
-            self.assertEqual(tuple(prefix.source_run_id for prefix in prefixes), ("long-good-rhae",))
-            self.assertEqual({call.args[2] for call in load.call_args_list}, {"long-good-rhae", "short-poor-rhae"})
+            with mock.patch("asterion.applications.prime.p7.solutions._read_one", side_effect=exact) as load:
+                candidates = collect_roster_candidates(Path(directory), runs, catalog, expected_model_id='gpt-6.1-sol')
+            self.assertEqual(candidates[game_id][0].source_run_id, "long-good-rhae")
+            self.assertEqual({call.args[1].name for call in load.call_args_list}, {"long-good-rhae", "short-poor-rhae"})
 
     def test_official_rejects_legacy_history_variant(self) -> None:
         from asterion.applications.prime.p7.operator import (

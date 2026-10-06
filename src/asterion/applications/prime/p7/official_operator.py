@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from decimal import Decimal
 import json
 import os
 from pathlib import Path
@@ -23,7 +22,7 @@ from asterion.runner.composed import run_composed_application
 from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 
-from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, P7GameSelection, _read_catalog, resolve_game_selection
+from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, _read_catalog, resolve_game_selection
 from . import live
 from .model_selection import declared_model_selection
 from .official import CompetitionEngine, CompetitionSession, OfficialError, prepare_session
@@ -164,60 +163,15 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
 def _load_current_roster_prefixes(
     arc_root: Path, runs_root: Path, catalog: tuple[dict[str, object], ...],
 ) -> tuple[object, ...]:
-    """Verify current WorldMap sources directly; display caches grant no authority."""
-    from .score import partial_game_score
-    from .solutions import VerifiedPrefix, load_exact_prefix, load_resume_worldmap, source_experiment
-
-    if runs_root.is_symlink() or not runs_root.is_dir():
-        return ()
-    games = {row["game_id"]: row for row in catalog}
-    best: dict[str, tuple[tuple[object, ...], VerifiedPrefix]] = {}
-    for run in sorted(runs_root.iterdir(), key=lambda path: path.name):
-        try:
-            summary_path = run / "summary.json"
-            if (run.is_symlink() or not run.is_dir() or summary_path.is_symlink()
-                    or not summary_path.is_file() or summary_path.stat().st_size > 1024 * 1024):
-                continue
-            summary = json.loads(summary_path.read_text(encoding="utf-8"))
-            experiment = source_experiment(run, summary) if type(summary) is dict else None
-            if (type(experiment) is not dict
-                    or summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
-                    or summary.get("run_id") != run.name
-                    or experiment.get("model") != _FULL_ROSTER_MODEL_ID
-                    or type(experiment.get("seed")) is not int or experiment["seed"] != 0
-                    or experiment.get("prediction_variant") != "verified"):
-                continue
-            game_id = experiment.get("game_id")
-            if type(game_id) is not str or game_id not in games:
-                continue
-            game = games[game_id]
-            scope = VerifiedPrefix(game_id, 0, game["win_levels"], 0, (), run.name, "")
-            if load_resume_worldmap(run, scope) is None:
-                continue
-            prefix = load_exact_prefix(arc_root, runs_root, run.name, game_id, 0,
-                                       expected_model_id=_FULL_ROSTER_MODEL_ID)
-            if prefix is None:
-                continue
-            counts, previous = [], 0
-            for level in range(1, prefix.levels_completed + 1):
-                end = next(item.sequence for item in prefix.transitions if item.levels_completed == level)
-                counts.append(end - previous)
-                previous = end
-            selection = P7GameSelection(game_id, 0, prefix.levels_completed,
-                                        tuple(game["baseline_actions"]), game["win_levels"])
-            key = (-prefix.levels_completed, -Decimal(partial_game_score(tuple(counts), selection)),
-                   len(prefix.transitions), prefix.source_run_id)
-            if game_id not in best or key < best[game_id][0]:
-                best[game_id] = (key, prefix)
-        except (OSError, UnicodeError, ValueError, TypeError, KeyError, StopIteration):
-            continue
-    return tuple(best[game_id][1] for game_id in sorted(best))
+    """Read save-time authority; neither historical grids nor SDK replay run here."""
+    from .solution_certificates import read_certified_roster
+    return read_certified_roster(arc_root, runs_root, catalog, expected_model_id=_FULL_ROSTER_MODEL_ID)
 
 
 def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
     """Verify local actions and ARC credentials before any scorecard operation."""
     import asterion
-    from .solutions import load_best_prefix
+    from .solution_certificates import read_certified_roster, SolutionCertificateError
 
     try:
         root = Path(process_environment[live.OPERATOR_ROOT_ENV]).resolve(strict=True)
@@ -247,17 +201,14 @@ def _preflight_saved(process_environment: Mapping[str, str]) -> SavedInvocation:
             game = resolve_game_selection(
                 {GAME_ID_ENV: requested, SEED_ENV: "0"}, arc_root
             )
-            prefix = load_best_prefix(
-                arc_root,
-                runs_root,
-                game.game_id,
-                0,
-                expected_model_id=expected_model_id,
-            )
-            prefixes = () if prefix is None else (prefix,)
+            catalog = tuple(row for row in _read_catalog(arc_root) if row['game_id'] == game.game_id)
+            prefixes = read_certified_roster(arc_root, runs_root, catalog, expected_model_id=expected_model_id)
         if not prefixes:
             raise ValueError
         return SavedInvocation(root, arc_root, api_key, tuple(prefixes))
+    except SolutionCertificateError:
+        print('[p7-official] saved certification pending', file=sys.stderr, flush=True)
+        raise OfficialError('saved solution certification pending or stale') from None
     except Exception:
         raise OfficialError("official saved preflight unavailable") from None
 
@@ -389,8 +340,13 @@ def _submit_saved(
     else:
         selected = prefix_ids
     by_game = dict(zip(prefix_ids, prefixes))
+    print(f'[p7-official] certified routes ready; games={len(selected)}', file=sys.stderr, flush=True)
     session.open()
+    print('[p7-official] scorecard opened', file=sys.stderr, flush=True)
     for game_id in selected:
+        prefix = by_game.get(game_id)
+        actions = 0 if prefix is None else len(prefix.transitions)
+        print(f'[p7-official] playing {game_id}; saved actions={actions}', file=sys.stderr, flush=True)
         engine = session.make(game_id)
         try:
             prefix = by_game.get(game_id)
@@ -402,7 +358,9 @@ def _submit_saved(
                     raise OfficialError("official initial observation unavailable")
         finally:
             engine.close()
+        print(f'[p7-official] finished {game_id}; saved actions={actions}', file=sys.stderr, flush=True)
     session.close()
+    print('[p7-official] scorecard closed; checking receipt', file=sys.stderr, flush=True)
     receipt = validate_closed_scorecard(session)
     write_official_receipt(receipt, evidence_root)
     return receipt.to_dict()
@@ -420,6 +378,8 @@ def main(argv: list[str] | None = None) -> int:
     session: CompetitionSession | None = None
     evidence_root: Path | None = None
     try:
+        if mode == 'saved-submit':
+            print('[p7-official] checking saved certification', file=sys.stderr, flush=True)
         invocation = (
             _preflight_catalog(os.environ) if mode == "preflight" else
             _preflight_saved(os.environ) if mode == "saved-submit" else

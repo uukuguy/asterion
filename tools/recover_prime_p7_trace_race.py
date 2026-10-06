@@ -577,6 +577,9 @@ def _recover(*, operator_root: Path, arc_root: Path, source_run_id: str, kind: s
 
 def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
                  kind: str, candidate: _Candidate) -> Path:
+    from asterion.applications.prime.p7.solution_certificates import verify_for_save
+    from asterion.applications.prime.p7.operator import _publish_save_certificate
+
     run_id = live.safe_run_id()
     private = live.private_root(operator_root, run_id)
     trace_root = private / "trace"
@@ -616,7 +619,8 @@ def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
         if candidate.observations is not None and any(getattr(broker_receipt, key) != getattr(candidate.receipt, key)
                 for key in ("game_id", "seed", "primitive_actions", "levels_completed", "terminal_reason")):
             raise ValueError
-        broker.replay(
+        _, verification_witness = verify_for_save(
+            arc_root, candidate.game, broker.journal, broker_receipt, broker.replay_observations,
             lambda: live.ArcadeEngine(
                 arc_root=arc_root,
                 recordings_dir=private / "replay-recordings",
@@ -660,6 +664,10 @@ def _materialize(*, operator_root: Path, arc_root: Path, source_run_id: str,
                 "worker_cell_count": 0,
                 "model_call_count": 0,
             },
+        )
+        _publish_save_certificate(
+            arc_root, private, verification_witness,
+            expected_model_id=identities["model_id"], eligible=True,
         )
         return private
     except Exception:
