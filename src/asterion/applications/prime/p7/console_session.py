@@ -17,7 +17,7 @@ import time
 from .console_snapshot import build_console_snapshot
 from .console_replay import ReplayProjectionCache
 from .console_export import export_console
-from .console_preview import build_preview_snapshot
+from .console_preview_prepared import read_prepared_preview
 from .solver_control import read_control_ack, write_control_request
 from .console_preferences import read_selection, valid_selection, write_selection
 from .game import _read_catalog, public_game_catalog
@@ -94,7 +94,7 @@ class ConsoleSession:
         guest_activity_reader: Callable[[], bool] | None = None,
         operator_environment_reader: Callable[[Path], Mapping[str, str]] = load_operator_environment,
         snapshot_reader: Callable = build_console_snapshot,
-        preview_reader: Callable = build_preview_snapshot,
+        preview_reader: Callable | None = None,
         manual_controller: object | None = None,
         manual_save_root: Path | None = None,
         run_id_factory: Callable[[], str] = safe_run_id,
@@ -176,8 +176,8 @@ class ConsoleSession:
     def preview(self, game_id: str, level: int = 1) -> dict:
         if type(game_id) is not str or game_id not in self._games or self._closed:
             raise ConsoleSessionError('preview-unavailable')
-        # At most one short-lived engine is constructed at a time, and at most
-        # one result per explicit catalog game/level (including unavailable).
+        # Production reads already-prepared views only. Explicitly injected
+        # readers retain the bounded fixture cache and its prior semantics.
         game = next(game for game in self.games() if game['game_id'] == game_id)
         if type(level) is not int or not 1 <= level <= game['win_levels']:
             raise ConsoleSessionError('preview-unavailable')
@@ -185,6 +185,14 @@ class ConsoleSession:
         with self._preview_lock:
             if self._closed:
                 raise ConsoleSessionError('preview-unavailable')
+            if self._preview_reader is None:
+                try:
+                    value = read_prepared_preview(self._root, self._arc_root, game, level)
+                except Exception:
+                    raise ConsoleSessionError('preview-unavailable') from None
+                if self._closed:
+                    raise ConsoleSessionError('preview-unavailable')
+                return value
             if key not in self._previews:
                 try:
                     self._previews[key] = self._preview_reader(self._arc_root, game, level)
