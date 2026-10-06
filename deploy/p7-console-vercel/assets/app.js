@@ -140,6 +140,7 @@
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
   let attemptReplayRun = null;
+  let attemptLevelSource = null;
   let initialGameLevelPending = Boolean(liveConfig);
   const gamePreviews = new Map();
   // Auxiliary views retain their own run authority. Never merge them into the
@@ -164,10 +165,20 @@
   const savedLevel = (level) => array(savedView()?.levels).find(entry => entry.level === level && entry.status === 'successful') || null;
   const retainedSavedLevel = (level) => savedView() ? null : array(cachedSavedView()?.levels).find(entry => entry.level === level && entry.status === 'successful') || null;
   function levelSource(level = primaryLevel()) {
-    if (state.mode === 'manual' || levelFrameCount(level) > 0) return {scope: string(run.status, '').startsWith('preview') ? 'preview' : 'current', snapshot, level, key:`${run.game_id}/${run.run_id || 'preview'}/${snapshot.replay_revision || ''}/${level.level}/${level.replay_unloaded ? 'unloaded' : 'loaded'}`};
+    if (state.mode === 'manual') return {scope: string(run.status, '').startsWith('preview') ? 'preview' : 'current', snapshot, level, key:`${run.game_id}/${run.run_id || 'preview'}/${snapshot.replay_revision || ''}/${level.level}/${level.replay_unloaded ? 'unloaded' : 'loaded'}`};
     const view = boardSavedViews.get(`${run.game_id}/${level.level}`);
     const saved = state.mode !== 'manual' && view && view.run.seed === run.seed && view.run.win_levels === run.win_levels ?
       array(view.levels).find(entry => entry.level === level.level && entry.status === 'successful') : null;
+    const defaultPassed = levelReplayEnabled && !attemptReplayRun && verifiedSavedGame()?.completed_levels >= level.level;
+    if (defaultPassed && saved && levelFrameCount(saved) > 0) return {scope:'saved',snapshot:view,level:saved,key:`${run.game_id}/${view.run.run_id}/${view.replay_revision || ''}/${level.level}/${saved.replay_unloaded ? 'unloaded' : 'loaded'}`};
+    const attempt = attemptLevelSource;
+    if (!attemptReplayRun && attempt?.game_id === run.game_id && attempt.level === level.level &&
+        level.level > (overviewGame(run.game_id)?.completed_levels ?? 0) &&
+        levelAttemptIds(overviewGame(run.game_id)).includes(attempt.run_id)) {
+      const selected = attempt.view.levels.find(entry => entry.level === level.level);
+      return {scope:'attempt',snapshot:attempt.view,level:selected,key:`${run.game_id}/${attempt.run_id}/${attempt.view.replay_revision}/${level.level}/loaded`};
+    }
+    if (levelFrameCount(level) > 0) return {scope: string(run.status, '').startsWith('preview') ? 'preview' : 'current', snapshot, level, key:`${run.game_id}/${run.run_id || 'preview'}/${snapshot.replay_revision || ''}/${level.level}/${level.replay_unloaded ? 'unloaded' : 'loaded'}`};
     if (saved && levelFrameCount(saved) > 0) return {scope:'saved',snapshot:view,level:saved,key:`${run.game_id}/${view.run.run_id}/${view.replay_revision || ''}/${level.level}/${saved.replay_unloaded ? 'unloaded' : 'loaded'}`};
     const preview = previewViews.get(`${run.game_id}/${level.level}`);
     return preview ? {scope:'preview',snapshot:preview,level:preview.levels[0],key:`${run.game_id}/preview/${level.level}`} : {scope:'current',snapshot,level,key:`${run.game_id}/${run.run_id}/${snapshot.replay_revision || ''}/${level.level}/${level.replay_unloaded ? 'unloaded' : 'loaded'}`};
@@ -517,6 +528,7 @@
     if (pausePlayback) pause();
     if (retireLoad && replayLoad && replayLoad.level !== levels[index]?.level) clearReplayLoad();
     state.levelIndex = index;
+    if (attemptLevelSource && (attemptLevelSource.game_id !== run.game_id || attemptLevelSource.level !== primaryLevel().level)) attemptLevelSource = null;
     state.eventSequence = null;
     state.frameIndex = 0;
     state.actionId = null;
@@ -686,7 +698,7 @@
       const identified = short.confidence === 'certain' && Boolean(short.label || short.purpose);
       const meaning = short.label || (short.confidence === null ? '未记录' : '未识别');
       const status = short.native ? '固定含义' : identified ? '已识别' : short.confidence === 'hypothesis' ? '推测'
-        : short.confidence === 'conflict' ? '有冲突' : !manual && !actionCount ? '本关未使用' : '';
+        : short.confidence === 'conflict' ? '有冲突' : !manual && !actionCount ? '本回放未记录' : '';
       const explanation = short.purpose || (short.confidence === null ? '未记录动作含义' : '未识别');
       item.querySelector('.action-key-label').textContent = name;
       item.querySelector('.action-key-meaning').textContent = meaning;
@@ -756,7 +768,7 @@
     const offline = ['offline', 'offline-replay'].includes(source.snapshot.run.execution_mode || sourceRun?.execution_mode);
     $('single-board').dataset.sourceScope = source.scope;
     $('single-board').dataset.sourceRunId = source.snapshot.run.run_id || '';
-    write('frame-caption', source.scope === 'preview' && frame ? '关卡初始预览 · 尚未开始 · 只读' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${source.scope === 'saved' ? `已保存 · ${source.snapshot.run.run_id} · ` : offline ? '' : replayUnsealed(source.snapshot) ? '本次记录 · LIVE · ' : '本次记录 · '}${offline ? '离线 SDK 路线验证 · ' : ''}${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
+    write('frame-caption', source.scope === 'preview' && frame ? '关卡初始预览 · 尚未开始 · 只读' : run.status === 'manual' && frame ? `${manualAtCurrent() ? '人工试玩当前观察' : '人工试玩历史观察'}${manualEntry ? ` · 观察 ${manualEntry.version} · 回合 ${manualEntry.episode_id}` : ''} · 尚未启动 P7` : frame ? `${source.scope === 'saved' ? `已保存 · ${source.snapshot.run.run_id} · ` : source.scope === 'attempt' ? `最近尝试 · ${source.snapshot.run.run_id}${replayUnsealed(source.snapshot) ? ' · LIVE' : ''} · ` : offline ? '' : replayUnsealed(source.snapshot) ? '本次记录 · LIVE · ' : '本次记录 · '}${offline ? '离线 SDK 路线验证 · ' : ''}${string(frame.id)}${frame.timestamp ? ` · ${frame.timestamp}` : ''}` : '当前关卡无帧记录');
     $('board-canvas').style.cursor = state.mode === 'manual' && state.pointerAction === 'ACTION6' ? 'crosshair' : '';
     const decision = action && action.decision_id;
     const showDecisionLink = Boolean(action && run.status !== 'manual');
@@ -1873,6 +1885,7 @@
 
   function stopReplayPolling() {
     clearReplayLoad();
+    attemptLevelSource = null;
     state.replayGeneration += 1; state.replayRun = null; state.replayPollBusy = false; state.replayFailures = 0; state.replayRetryAt = 0;
     if (state.replayPollTimer !== null) window.clearInterval(state.replayPollTimer);
     state.replayPollTimer = null;
@@ -2140,9 +2153,10 @@
       renderRail();renderLevelEfficiency();
       const meta = manifest.levels.find(level => level.level===selectedLevel);
       let detail=null;
-      // A selected level already present in the current attempt needs no saved grids.
-      if (levelFrameCount(primaryLevel()) > 0 && (currentRun !== bestId || !primaryLevel().replay_unloaded)) return;
-      if (meta?.frame_count > 0 && (!array(primaryLevel().frames).length || currentRun === bestId)) {
+      // Default passed levels keep their saved grids; explicitly selected attempts retain their own observations.
+      if (levelFrameCount(primaryLevel()) > 0 && (currentRun !== bestId || !primaryLevel().replay_unloaded) &&
+          (attemptReplayRun || selectedLevel > game.completed_levels)) return;
+      if (meta?.frame_count > 0 && (!array(primaryLevel().frames).length || currentRun === bestId || (!attemptReplayRun && selectedLevel <= game.completed_levels))) {
         if (selected()) ticket=beginReplayLoad(game,bestId,selectedLevel,`正在加载已保存第 ${selectedLevel} 关`,retry);
         detail=await readReplayLevel(manifest,selectedLevel);
       }
@@ -2203,6 +2217,58 @@
     const explicit = game.runs.some(entry => entry.run_id === game.latest_run_id) ? game.latest_run_id : null;
     const recording = game.runs.some(entry => entry.run_id === game.recording_run_id) ? game.recording_run_id : null;
     return explicit || recording || activeReplayId(game) || [...game.runs].sort((a, b) => b.run_id.localeCompare(a.run_id))[0].run_id;
+  }
+
+  function levelAttemptIds(game) {
+    const solving = game?.solving === true && array(game.runs).some(entry => entry.run_id === game.solving_run_id)
+      ? game.solving_run_id : null;
+    const active = game?.solving === false ? null : activeReplayId(game);
+    return [...new Set([solving,active,latestReplayId(game)].filter(Boolean))];
+  }
+
+  function hasLevelAttempt(view, number) {
+    const level = view.levels.find(entry => entry.level === number);
+    if (!level || levelFrameCount(level) === 0 || (Number.isInteger(view.run.target_level) && view.run.target_level < number)) return false;
+    const actor = entry => entry.origin === 'actor' && (!entry.provenance || entry.provenance.run_id === view.run.run_id);
+    return levelActionCount(level) > 0 || array(level.cognition_timeline).some(actor) || actor(object(level.cognition));
+  }
+
+  async function loadAttemptLevelView(game) {
+    if (!levelReplayEnabled || attemptReplayRun || primaryLevel().level <= game.completed_levels) return;
+    const level = primaryLevel().level, generation = state.replayGeneration, currentRun = run.run_id;
+    const candidates = levelAttemptIds(game);
+    const isCurrent = () => state.mode === 'replay' && !attemptReplayRun && state.replayGeneration === generation &&
+      run.run_id === currentRun && run.game_id === game.game_id && $('game-select').value === game.game_id &&
+      primaryLevel().level === level && level > (overviewGame(game.game_id)?.completed_levels ?? 0) &&
+      JSON.stringify(levelAttemptIds(overviewGame(game.game_id))) === JSON.stringify(candidates);
+    for (const runId of candidates) {
+      if (runId === game.best_run_id) continue;
+      if (runId === currentRun && hasLevelAttempt(snapshot, level)) {
+        const previous = levelSource().key;
+        attemptLevelSource = null;
+        refreshLevelSource(previous);
+        return;
+      }
+      try {
+        const manifest = await readReplayManifest(game, runId);
+        if (!isCurrent()) return;
+        if (manifest.state !== 'ready') continue;
+        const meta = manifest.levels.find(entry => entry.level === level);
+        if (!meta?.frame_count || (Number.isInteger(manifest.run.target_level) && manifest.run.target_level < level)) continue;
+        const detail = await readReplayLevel(manifest, level);
+        if (!isCurrent()) return;
+        assertReplayRevision(manifest);
+        if (!hasLevelAttempt(detail, level)) continue;
+        const previous = levelSource(), view = replayManifestView(manifest, detail);
+        attemptLevelSource = {game_id:game.game_id,level,run_id:runId,view};
+        if (previous.scope === 'attempt' && previous.snapshot.run.run_id === runId) {
+          // Revisions can grow while a user reads an earlier frame or event.
+          state.frameIndex = Math.min(state.frameIndex, levelFrameCount(currentLevel()) - 1);
+          renderRail();renderProgressContext();renderLevelEfficiency();renderWorld();renderProcess();renderReceipt();renderFrame();renderSessionControls();
+        } else refreshLevelSource(previous.key);
+        return;
+      } catch (_) { if (!isCurrent()) return; }
+    }
   }
 
   function preferredReplayId(game) {
@@ -2287,6 +2353,9 @@
     await loadSavedView(game);
     if (state.mode === 'manual' || state.replayGeneration !== generation || run.run_id !== currentRun ||
       run.game_id !== game.game_id || primaryLevel().level !== selectedLevel) return;
+    await loadAttemptLevelView(game);
+    if (state.mode === 'manual' || state.replayGeneration !== generation || run.run_id !== currentRun ||
+      run.game_id !== game.game_id || primaryLevel().level !== selectedLevel) return;
     if (levelReplayEnabled && (levelFrameCount(primaryLevel()) > 0 || levelFrameCount(savedLevel(selectedLevel) || emptyLevel) > 0 ||
       (verifiedSavedGame()?.completed_levels >= selectedLevel && !frames().length))) return;
     if (!array(levelSource().level.frames).length) loadGamePreview(game, selectedLevel);
@@ -2344,6 +2413,7 @@
     if (runId) {
       $('replay-run').value = runId;
       if (state.replayRun !== runId || (run.run_id !== runId && !state.replayPollBusy && Date.now() >= state.replayRetryAt)) loadReplay({ initial: true, preserveSelection:run.game_id === game.game_id && !state.replayFollow });
+      else ensureSelectedSource();
     } else if (game) {
       if (run.game_id !== game.game_id || run.run_id !== null) {
         stopReplayPolling(); state.eventSequence = null;

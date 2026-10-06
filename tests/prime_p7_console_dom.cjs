@@ -320,7 +320,7 @@ test('read-only action panel follows frame availability and preserves final mean
   assert.equal(highlighted().length, 0);
   assert.match($('available-actions').textContent, /ACTION1↑已识别/);
   assert.match($('available-actions').textContent, /ACTION4右移推测/);
-  assert.match($('available-actions').textContent, /ACTION5未记录本关未使用/);
+  assert.match($('available-actions').textContent, /ACTION5未记录本回放未记录/);
   assert.equal($('available-actions').querySelectorAll('button').length, 3);
   assert.equal($('available-actions').querySelector('p, details'), null);
   assert.equal($('available-actions').querySelector('[data-available-action="ACTION1"]').disabled, true);
@@ -457,7 +457,7 @@ test('action labels distinguish unused keys from used unknown effects and explai
   level.actions[0].visual_observations=['蓝色（9）像素整体向右4格；形状和数量不变。'];
   const app=launch(snapshot),key=name=>app.$('available-actions').querySelector(`[data-available-action="${name}"]`);
   try {
-    assert.equal(key('ACTION7').querySelector('.action-key-meaning').textContent,'未记录');assert.equal(key('ACTION7').querySelector('.action-key-status').textContent,'本关未使用');
+    assert.equal(key('ACTION7').querySelector('.action-key-meaning').textContent,'未记录');assert.equal(key('ACTION7').querySelector('.action-key-status').textContent,'本回放未记录');
     assert.equal(key('ACTION5').querySelector('.action-key-meaning').textContent,'特殊用途');assert.equal(key('ACTION5').querySelector('.action-key-status').textContent,'已识别');
     assert.match(key('ACTION5').title,/ACTION5将可控对象旋转90度/);
     assert.match(key('ACTION7').title,/未记录动作含义/);
@@ -932,7 +932,7 @@ test('manual feedback distinguishes pending from acknowledged action and reports
   try {
     await enterManual(app);
     const button = app.$('available-actions').querySelector('[data-available-action="ACTION1"]');
-    assert.doesNotMatch(app.$('available-actions').textContent,/本关未使用/);assert.match(button.textContent,/未记录/);
+    assert.doesNotMatch(app.$('available-actions').textContent,/本回放未记录/);assert.match(button.textContent,/未记录/);
     assert.doesNotMatch(button.title,/本关已记录/);
     button.click(); button.click(); await settle();
     assert.equal(app.requests.filter((entry) => entry.url === '/api/manual/action').length, 1);
@@ -3291,6 +3291,7 @@ test('per-level saved fallback uses the exact improved best and retires a loadin
     if(url.includes('/active-retry/levels/'))return response(live.detail(url.includes('/levels/1/')?1:2));
     if(url.includes('/saved-old/manifest'))return response(old.manifest);
     if(url.includes('/saved-improved/manifest'))return response(improved.manifest);
+    if(url.includes('/saved-old/levels/2/'))return response(old.detail(2));
     if(url.includes('/saved-old/levels/3/'))return new Promise(resolve=>{releaseOld=resolve;});
     if(url.includes('/saved-improved/levels/3/'))return new Promise(resolve=>{releaseImproved=resolve;});
     return response(idleView());
@@ -3305,7 +3306,7 @@ test('per-level saved fallback uses the exact improved best and retires a loadin
     assert.equal(app.$('single-board').dataset.sourceRunId,'saved-improved');
     // A new uncached revision for the selected saved level must not own another level's spinner.
     best=old;setBest();[...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
-    app.$('level-2').click();await settleReplay();assert.equal(app.$('replay-loading').hidden,true);assert.match(app.$('world-guide').textContent,/active-retry/);
+    app.$('level-2').click();await settleReplay();assert.equal(app.$('replay-loading').hidden,true);assert.match(app.$('world-guide').textContent,/saved-old/);
     releaseOld(response(old.detail(3)));await settleReplay();assert.equal(app.$('replay-loading').hidden,true);assert.equal(app.$('level-2').getAttribute('aria-current'),'true');
     assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
@@ -3446,4 +3447,136 @@ test('external solving metadata keeps verified saved progress as the default rep
     assert.equal(app.requests.some(request=>request.url==='/api/replay/external-solving'),false);
     assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
+});
+
+function unsolvedAttemptFixture({candidate='latest-six',target=6,evidence=true,solving=false}={}) {
+  const config={token:'test-token',replay_loading:'level-manifest/v1',games:[
+    {game_id:'partial-game',alias:'partial',win_levels:7,baseline_actions:[10,20,30,40,50,60,70]},
+    {game_id:'other-game',alias:'other',win_levels:7,baseline_actions:Array(7).fill(10)}]};
+  const make=(id,attempt)=>{
+    const record={schema:'asterion.arc-agi3-p7-console/v1',generated_at:null,
+      run:{game_id:'partial-game',run_id:id,seed:0,win_levels:7,status:'incomplete',completed_level_count:5,
+        primitive_action_count:attempt?162:150,target_level:attempt?target:5,replay_verified:!attempt,sealed_trace:true},
+      levels:Array.from({length:7},(_,i)=>{const n=i+1,playing=n===6&&attempt&&evidence;
+        const frames=n<=6?[0,...(playing?[1,2]:[])].map(j=>({id:`${id}-l${n}-f${j}`,grid:[[attempt?9:n]],state:'NOT_FINISHED',levels_completed:n-1,available_actions:['ACTION3','ACTION4','ACTION7']})):[];
+        return {level:n,status:n<=5?'successful':n===6?'incomplete':'not-run',frames,
+          actions:n<=5?Array.from({length:n*10},(_,j)=>({id:`${id}-l${n}-a${j}`,name:'ACTION4',data:{},before_frame:frames[0].id,after_frame:frames[0].id})):
+            playing?Array.from({length:12},(_,j)=>({id:`${id}-l6-a${j}`,name:['ACTION3','ACTION4','ACTION7'][j%3],data:{},before_frame:frames[0].id,after_frame:frames[2].id})):[],
+          decisions:playing?[{id:'same-decision',source:'p7_decision',goal:'最新尝试决策',basis:'实际观察',expected:'检查动作',action_ids:[],source_action_sequence:150,event_sequence:2,observation_sha256:'a'.repeat(64)}]:[],
+          cognition:n<=5?{scope:'final',stable_description:`游戏规则：${id} 已保存认知 ${n}`}:{scope:'unavailable'},
+          ...(playing?{cognition_timeline:[{scope:'observation',origin:'actor',frame_id:frames[0].id,event_sequence:2,cognition_revision:2,source_action_sequence:150,
+            provenance:{run_id:id,event_sequence:2},stable_description:'最新第六关认知',action_labels:[actorLabel('ACTION3','左移 ←','实际记录','hypothesis',[150]),actorLabel('ACTION4','右移 →','实际记录','certain',[150]),actorLabel('ACTION7','撤销','实际记录','certain',[150])]}]}:{})};}),
+      decisions:attempt?[]:[{id:'same-decision',source:'p7_decision',goal:'旧存档同名决策',basis:'旧观察',expected:'旧动作',action_ids:[],source_action_sequence:0,event_sequence:1,observation_sha256:'b'.repeat(64)}],process_events:[],warnings:[]};
+    const revision=(attempt?'b':'a').repeat(64),manifest={schema:'asterion.arc-agi3-p7-replay-manifest/v1',state:'ready',run_id:id,revision,run:record.run,
+      levels:record.levels.map(l=>({level:l.level,status:l.status,frame_count:l.frames.length,action_count:l.actions.length,has_cognition:l.cognition.scope==='final'||Boolean(l.cognition_timeline?.length)})),warnings:[]};
+    return {record,manifest,detail:n=>({...record,replay_revision:revision,levels:[record.levels[n-1]],decisions:n===6&&attempt?record.levels[5].decisions:record.decisions})};
+  };
+  const best=make('saved-five',false),latest=make(candidate,true),overview=overviewFixture(config);
+  overview.games[0]={...overview.games[0],status:'partial',completed_levels:5,score:'59.523810',route_actions:150,best_run_id:'saved-five',resume_run_id:'saved-five',latest_run_id:candidate,
+    solving,solving_run_id:solving?candidate:null,runs:[{...catalogRun('saved-five'),completed_levels:5}, {...catalogRun(candidate,'unverified',false),completed_levels:0}]};
+  return {config,best,latest,overview,fetch:async url=>{const data=url.includes(candidate)?latest:best;
+    if(url.endsWith('/manifest'))return response(data.manifest);
+    if(url.includes('/levels/'))return response(data.detail(Number(url.match(/\/levels\/(\d+)/)[1])));
+    return response(idleView());}};
+}
+
+test('unsolved level uses latest attempt labels while passed levels retain the exact best source and score',async()=>{
+  const data=unsolvedAttemptFixture();const app=launch(fixture(),{liveConfig:data.config,overview:data.overview,fetch:data.fetch});
+  try{
+    await settleReplay();await settleReplay();assert.equal(app.$('board-kicker').textContent,'LEVEL 06');
+    assert.equal(app.$('run-id').textContent,'saved-five');assert.equal(app.$('level-progress').textContent,'5 / 7');
+    assert.match(app.$('frame-caption').textContent,/latest-six/,JSON.stringify(app.requests.map(r=>r.url)));assert.equal(app.$('actions-count').textContent,'12');
+    assert.match(app.$('world-guide').textContent,/最新第六关认知/);
+    assert.match(app.$('available-actions').querySelector('[data-available-action="ACTION3"]').textContent,/左移.*推测/);
+    assert.match(app.$('available-actions').querySelector('[data-available-action="ACTION7"]').textContent,/撤销.*已识别/);
+    assert.doesNotMatch(app.$('panel-decisions').textContent,/旧存档同名决策/);assert.match(app.$('panel-decisions').textContent,/最新尝试决策/);
+    app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
+    assert.equal(app.$('frame-counter').textContent,'2 / 3');
+    for(let n=1;n<=5;n++){
+      app.$(`level-${n}`).click();await settleReplay();
+      assert.match(app.$('frame-caption').textContent,/saved-five/);assert.equal(app.$('actions-count').textContent,String(n*10));
+      assert.match(app.$('world-guide').textContent,new RegExp(`saved-five 已保存认知 ${n}`));
+      assert.equal(app.$(`level-${n}`).dataset.savedSourceRunId,'saved-five');
+    }
+    app.$('level-6').click();await settleReplay();assert.match(app.$('frame-caption').textContent,/latest-six/);
+    assert.match(app.$('overview-game-list').querySelector('[data-game-id="partial-game"]').textContent,/59\.52/);assert.deepEqual(app.errors,[]);
+    assert.equal(app.requests.some(r=>r.url==='/api/replay/latest-six'),false);
+  }finally{app.dom.window.close();}
+});
+
+test('unsolved initialized-only or lower-target latest attempts preserve the best boundary preview',async()=>{
+  for(const options of [{evidence:false},{target:2}]){
+    const data=unsolvedAttemptFixture(options),app=launch(fixture(),{liveConfig:data.config,overview:data.overview,fetch:data.fetch});
+    try{await settleReplay();await settleReplay();assert.equal(app.$('board-kicker').textContent,'LEVEL 06');assert.equal(app.$('actions-count').textContent,'0');
+      assert.doesNotMatch(app.$('frame-caption').textContent,/latest-six/);
+      assert.equal(app.$('available-actions').querySelector('[data-available-action="ACTION3"] .action-key-status').textContent,'本回放未记录');
+      assert.deepEqual(app.errors,[]);
+    }finally{app.dom.window.close();}
+  }
+});
+
+test('corroborated solving attempt outranks a later recording and delayed attempt detail cannot refill another level',async()=>{
+  const data=unsolvedAttemptFixture({candidate:'active-six',solving:true});
+  data.overview.games[0].latest_run_id='later-recording';data.overview.games[0].runs.push({...catalogRun('later-recording','unverified',false),completed_levels:0});
+  let release;
+  const app=launch(fixture(),{liveConfig:data.config,overview:data.overview,fetch:async url=>url.includes('/active-six/levels/6/')?new Promise(resolve=>{release=resolve;}):data.fetch(url)});
+  try{
+    await settleReplay();assert.ok(release,'the actual solving attempt is selected');
+    const refresh=[...app.timers.values()].find(fn=>fn.intervalMs===5000);refresh();refresh();refresh();await settleReplay();
+    assert.equal(app.requests.filter(r=>r.url.includes('/active-six/levels/6/')).length,1,'overlapping polls reuse the existing in-flight level request');
+    app.$('level-3').click();await settleReplay();release(response(data.latest.detail(6)));await settleReplay();
+    assert.equal(app.$('board-kicker').textContent,'LEVEL 03');assert.match(app.$('world-guide').textContent,/saved-five 已保存认知 3/);
+    assert.doesNotMatch(app.$('frame-caption').textContent,/active-six/);
+    app.$('level-6').click();await settleReplay();assert.match(app.$('frame-caption').textContent,/active-six/);
+    assert.equal(app.requests.some(r=>r.url.includes('/later-recording/')),false);assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+
+test('active main replay still uses best passed-level grids and cognition',async()=>{
+  const data=unsolvedAttemptFixture({candidate:'active-six',solving:true});
+  data.overview.games[0].active_run_id='active-six';
+  const app=launch(fixture(),{liveConfig:data.config,overview:data.overview,fetch:data.fetch});
+  try{
+    await settleReplay();await settleReplay();app.$('level-3').click();await settleReplay();
+    assert.match(app.$('frame-caption').textContent,/saved-five/);assert.equal(app.$('actions-count').textContent,'30');
+    assert.match(app.$('world-guide').textContent,/saved-five 已保存认知 3/);assert.equal(app.$('board-empty').hidden,true);
+    assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+test('initialized solving source falls through to evidenced latest and an old game reply cannot refill it',async()=>{
+  const data=unsolvedAttemptFixture(),empty=unsolvedAttemptFixture({candidate:'active-empty',solving:true,evidence:false});
+  Object.assign(data.overview.games[0],{solving:true,solving_run_id:'active-empty'});
+  data.overview.games[0].runs.push({...catalogRun('active-empty','unverified',false),completed_levels:0});
+  let release;
+  const app=launch(fixture(),{liveConfig:data.config,overview:data.overview,fetch:async url=>{
+    if(url.includes('/active-empty/'))return empty.fetch(url);
+    if(url.includes('/latest-six/levels/6/'))return new Promise(resolve=>{release=resolve;});
+    return data.fetch(url);
+  }});
+  try{
+    await settleReplay();await settleReplay();assert.ok(release,'initialized active record does not hide actual latest evidence');
+    changeGame(app,'other-game');await settleReplay();release(response(data.latest.detail(6)));await settleReplay();
+    assert.equal(app.$('game-select').value,'other-game');assert.doesNotMatch(app.$('frame-caption').textContent,/latest-six/);
+    assert.doesNotMatch(app.$('world-guide').textContent,/最新第六关认知/);assert.deepEqual(app.errors,[]);
+  }finally{app.dom.window.close();}
+});
+
+
+test('an actor-only latest level is eligible while inherited prefix cognition grants no attempt authority',async()=>{
+  for(const original of ['latest-six','saved-five']){
+    const data=unsolvedAttemptFixture(),level=data.latest.record.levels[5];
+    level.frames=level.frames.slice(0,1);level.actions=[];level.decisions=[];data.latest.record.run.primitive_action_count=150;
+    level.cognition_timeline[0].provenance.run_id=original;
+    Object.assign(data.latest.manifest.levels[5],{frame_count:1,action_count:0});
+    const app=launch(fixture(),{liveConfig:data.config,overview:data.overview,fetch:data.fetch});
+    try{
+      await settleReplay();await settleReplay();
+      assert.equal(app.$('single-board').dataset.sourceRunId,original==='latest-six'?'latest-six':'saved-five');
+      assert.equal(app.$('actions-count').textContent,'0');assert.equal(app.$('level-progress').textContent,'5 / 7');
+      assert.deepEqual(app.errors,[]);
+    }finally{app.dom.window.close();}
+  }
 });
