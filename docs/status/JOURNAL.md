@@ -4145,3 +4145,11 @@
 2026-10-07 01:14 CST — Community7b3e5ad: Expand reasoning and experience loop, recording closed official receipt; keep final draft unpublished.
 
 2026-10-07 01:18 CST — User requests public README official score; promote checked100/25/183/6781 to bilingual lead and publish Asterion main only.
+
+2026-10-07 01:18 CST — 765424b0: Lead bilingual README with checked official100 score and scorecard to make public results visible.
+
+2026-10-07 01:19 CST — GitHubmain765424b0 verified byte-identical EN/ZH READMEs and resultJSON; official100 visible first; communityfork and upstreamPR unchanged.
+
+2026-10-07 01:27 CST — Community59a04dc: Complete author profiles, software citation and result metadata; disclose unsupported USD totals and keep final entry local.
+
+2026-10-07 01:55 CST — Token cost audit: selected25 subtotal undercovers research; Oct6 228 P7 traces total723793948input/3382772output; assumed97%cache Standard147.46–158.32USD, not actual/fullstudy cost.
