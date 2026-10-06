@@ -11,6 +11,19 @@ GAME = {'game_id': 'vc33-test', 'alias': 'vc33', 'win_levels': 2, 'baseline_acti
 
 
 class TestConsolePreview(unittest.TestCase):
+    def test_preview_projects_real_readonly_animation_handle_to_last_frame(self):
+        from asterion.applications.prime.p7.dynamic_evidence import AnimationFrames
+        handle = AnimationFrames.capture(([[i % 10]] for i in range(95)))
+        class Worker:
+            def __init__(self, *args): pass
+            def observe(self):
+                return dict(game_id=GAME['game_id'], win_levels=2, levels_completed=0,
+                            current_level=1, state='NOT_FINISHED', available_actions=[1], frame=handle)
+            def close(self): pass
+        snapshot = build_preview_snapshot(Path('/tmp'), GAME, worker_factory=Worker)
+        self.assertEqual(snapshot['levels'][0]['frames'][0]['grid'], [[4]])
+        self.assertEqual(len(handle), 95)
+
     def test_initial_projection_has_no_attempt_history_and_always_closes_worker(self):
         for selected, invalid in ((1, None), (2, None), (2, 'identity'), (2, 'level'), (2, 'progress')):
             with self.subTest(level=selected, invalid=invalid), tempfile.TemporaryDirectory() as directory:

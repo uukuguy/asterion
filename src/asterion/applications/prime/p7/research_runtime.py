@@ -19,7 +19,6 @@ from asterion.agents.prime.tools import PrimeToolResult
 from .broker import ArcBrokerError
 from .experience import CellArchive
 from .research_bridge import ResearchReadServer
-from .score import digest
 from .solver import Solver
 from .solver_control import SolverControl
 
@@ -117,6 +116,8 @@ class P7ResearchRuntime:
             experience=(lambda source, kind, start, limit, artifact_id:
                         experience.read(source, kind, start=start, limit=limit, artifact_id=artifact_id))
                        if experience is not None else None,
+            animation=self._animation,
+            diagnostic_sink=self._read_diagnostic,
         )
         try:
             module_source = self._read_server.start()
@@ -130,6 +131,7 @@ class P7ResearchRuntime:
                 broker=self._broker, kernel=_KernelHandle(self), control=self.control,
                 workspace_root=run_root / "research", run_id=run_id,
                 attempt_id=run_id, event_sink=event_sink, experience=experience,
+                diagnostics=getattr(trace_client, 'processing_diagnostics', None),
             )
             if experience is not None:
                 experience.bind(run_root, self.solver.experience_event)
@@ -144,6 +146,36 @@ class P7ResearchRuntime:
             limits=self._limits,
             observer=self._kernel_event,
         )
+
+    def _read_diagnostic(self, value):
+        if hasattr(self, 'solver'):
+            diagnostic = self.solver.diagnostics.record(value)
+            try:
+                self._sink('diagnostic', diagnostic)
+            except Exception:
+                pass  # Independent private log/context/summary retain the fault.
+
+    def _animation(self, reference, start, limit):
+        if (type(reference) is not dict or set(reference) != {'run_id', 'attempt_id', 'level', 'sequence', 'observation_sha256'}
+                or reference['run_id'] != self.solver.run_id or reference['attempt_id'] != self.solver.attempt_id
+                or type(reference['sequence']) is not int or reference['sequence'] < 0
+                or type(reference['level']) is not int or reference['level'] < 1):
+            raise ValueError('animation reference unavailable')
+        sequence = reference['sequence']
+        observations = self._broker.replay_observations
+        if sequence >= len(observations):
+            raise ValueError('animation reference unavailable')
+        expected_hash = (self._broker.journal[sequence - 1].after_sha256 if sequence
+                         else self._broker.journal[0].before_sha256 if self._broker.journal
+                         else self._broker.observation_reference()['observation_sha256'])
+        observation = observations[sequence]
+        if (reference['observation_sha256'] != expected_hash
+                or reference['level'] != min(observation.levels_completed + 1, self._broker.game.win_levels)):
+            raise ValueError('animation reference unavailable')
+        from .dynamic_evidence import AnimationFrames
+        frames = AnimationFrames.capture(observation.frame)
+        return {'observation_ref': reference, 'animation_ref': frames.reference(), 'start': start,
+                'frames': [[list(row) for row in grid] for grid in frames.page(start, limit)]}
 
     def _kernel_event(self, kind, payload):
         if kind == "cell_started":

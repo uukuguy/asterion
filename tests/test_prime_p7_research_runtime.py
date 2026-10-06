@@ -37,6 +37,16 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_animation_read_is_bound_to_exact_current_run_observation(self):
+        reference = self.host.current_context()['observation_ref']
+        result = self.host._read_server.dispatch({'method': 'animation', 'args': [reference, 0, 1]})
+        self.assertEqual(result['status'], 'ok')
+        self.assertEqual(result['value']['frames'], [[[0, 1]]])
+        other = {**reference, 'run_id': 'other-attempt'}
+        denied = self.host._read_server.dispatch({'method': 'animation', 'args': [other, 0, 1]})
+        self.assertEqual(denied['status'], 'rejected')
+        self.assertEqual(self.engine.calls, [])
+
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

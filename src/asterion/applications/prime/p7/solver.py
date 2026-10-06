@@ -284,7 +284,7 @@ class Solver:
 
     def _processing_failure(self, error):
         self._processing_blocked = True
-        self._environment_uncertain = not error.outcome_known
+        self._environment_uncertain = error.stage == "dispatched-no-reply"
         diagnostic = self.diagnostics.record(error.diagnostic)
         try:
             self._sink("diagnostic", diagnostic)
@@ -872,11 +872,24 @@ class Solver:
                     if stop_reason == "matched" and not self.control.action_allowed():
                         stop_reason = self.control.snapshot().get("state", "stopped")
                 except EvidenceProcessingError as error:
-                    stop_reason = "processing-failed" if error.outcome_known else "environment-result-unknown"
+                    # Derived work can fail after the broker durably committed
+                    # its transition. Reconcile that one exact committed action;
+                    # a received but uncommitted reply never acquires this count.
+                    if error.outcome_known and error.durable and not reply_received:
+                        journal = self.broker.journal
+                        if (len(journal) == reference['sequence'] + 1
+                                and journal[-1].sequence == error.diagnostic['action_sequence']
+                                and journal[-1].action == native['action']['name']):
+                            result['applied_count'] += 1
+                            try:
+                                observation, reference = self._observation()
+                            except EvidenceProcessingError:
+                                pass  # Keep the prior pixels, with the explicit processing fault.
+                    stop_reason = "environment-result-unknown" if error.stage == "dispatched-no-reply" else "processing-failed"
                     self._processing_failure(error)
                     result["diagnostics"] = self.diagnostics.projection()
                     unexecuted_start = index + 1
-                    if not error.outcome_known:
+                    if error.stage == "dispatched-no-reply":
                         result["uncertain_step_index"] = index
                         result["uncertain_step"] = copy_json(value["steps"][index])
                         result["feedback"].append({

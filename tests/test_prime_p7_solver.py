@@ -160,6 +160,21 @@ class TestP7Solver(P7SolverFixture):
         self.assertTrue(context['diagnostics'][0]['outcome_known'])
         self.assertTrue(any(kind == 'diagnostic' for kind, _ in self.events))
 
+    def test_derived_failure_after_commit_keeps_applied_action_and_full_reference(self):
+        from asterion.applications.prime.p7.dynamic_evidence import EvidenceProcessingError
+        self.revise()
+        original = self.broker.act_checked
+        def failed_after_commit(plan):
+            original(plan)
+            raise EvidenceProcessingError('derived-projection-failed', stage='derived-failed',
+                                          action_sequence=1, outcome_known=True, durable=True)
+        self.broker.act_checked = failed_after_commit
+        result = self.solver.execute_plan(self.plan())
+        self.assertEqual(result['applied_count'], 1)
+        self.assertEqual(result['observation_ref']['sequence'], 1)
+        self.assertEqual(result['stop_reason'], 'processing-failed')
+        self.assertEqual(len(self.engine.calls), 1)
+
     def test_context_reference_keeps_complete_identity_separate_from_stable_pixels(self):
         from unittest.mock import patch
         complete = {'sequence': 0, 'observation_sha256': 'sha256:' + 'b' * 64,

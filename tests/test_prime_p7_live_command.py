@@ -2117,6 +2117,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 )
 
         engine = object.__new__(ArcadeEngine)
+        engine.set_evidence_control()
         environment = Environment()
         engine._actions = {"ACTION6": "sdk-click", "RESET": "sdk-reset"}
         engine._environment = environment

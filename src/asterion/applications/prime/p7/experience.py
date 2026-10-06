@@ -15,6 +15,7 @@ from .console_events import read_console_events
 from .private_trace import trace_identities_for
 from .research import _atomic, copy_json, export_hash, identifier, task, worldmap
 from .score import canonical_bytes, digest
+from .dynamic_evidence import AnimationFrames
 
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_ROWS = 16384
@@ -224,14 +225,15 @@ class _Source:
                     self._artifact(research, checkpoint[key], 'json')
             self._pin(checkpoint_path)
         self.frames = {}
+        self.animations = {}
         self.feedback = []
         console = run / 'console-events.jsonl'
         if console.exists():
             _safe(console)
-            if console.stat().st_size <= _MAX_FILE:
+            if console.is_file():
                 warnings = []
                 events = read_console_events(run, run.name, game_id, warnings=warnings)
-                self._pin(console, console.stat().st_size)
+                self._pin(console, console.stat().st_size, animation=True)
                 hashes = {item['sequence']: item['after_sha256'] for item in self.history}
                 if self.history:
                     hashes[0] = self.history[0]['before_sha256']
@@ -240,7 +242,20 @@ class _Source:
                     seq = payload.get('source_action_sequence')
                     anchored = type(seq) is int and hashes.get(seq) == payload.get('observation_sha256')
                     if anchored and event['kind'] == 'observation':
-                        self.frames[seq] = copy_json(payload)
+                        from .broker import read_observation
+                        if payload.get('evidence_ref') is not None:
+                            observation = read_observation(run / 'animation-evidence', payload['evidence_ref'],
+                                expected_scope={'run_id': run.name, 'game_id': game_id, 'seed': seed, 'sequence': seq},
+                                expected_sha256=hashes[seq])
+                            frames = observation.frame
+                        else:
+                            frames = AnimationFrames.capture(payload['observation']['frame'])
+                        self.animations[seq] = frames
+                        safe = {**payload, 'observation': {**payload['observation'],
+                            'frame': [[list(row) for row in frames[-1]]]}}
+                        safe['animation_ref'] = frames.reference()
+                        safe['animation_paged'] = len(frames) > 1
+                        self.frames[seq] = copy_json(safe)
                     elif anchored and event['kind'] == 'feedback':
                         self.feedback.append(copy_json(payload))
         self.cells = []
@@ -285,13 +300,23 @@ class _Source:
         if type(self.worker_cells) is not int or self.worker_cells < 0:
             self.worker_cells = 0
 
-    def _pin(self, path: Path, length: int | None = None) -> None:
-        raw = _bytes(path, _MAX_FILE)
+    def _pin(self, path: Path, length: int | None = None, *, animation=False) -> None:
+        _safe(path)
         prefix = length is not None
-        if prefix:
-            raw = raw[:length]
-        self.files.append((path, len(raw), sha256(raw).hexdigest(), prefix))
-        self.byte_count += len(raw)
+        size = path.stat().st_size if length is None else length
+        hasher, consumed = sha256(), 0
+        with path.open('rb') as stream:
+            while consumed < size:
+                data = stream.read(min(65536, size - consumed))
+                if not data:
+                    raise ValueError('experience source changed')
+                hasher.update(data)
+                consumed += len(data)
+        self.files.append((path, size, hasher.hexdigest(), prefix))
+        # Legacy console bodies carry animation bytes. Their original hash is
+        # pinned in full, but animation volume is outside research metadata quotas.
+        if not animation:
+            self.byte_count += size
         if self.byte_count > _MAX_TOTAL:
             raise ValueError('experience source exceeds total limit')
 
@@ -313,10 +338,18 @@ class _Source:
 
     def check(self) -> None:
         for path, length, expected, prefix in self.files:
-            raw = _bytes(path, _MAX_FILE)
-            if prefix:
-                raw = raw[:length]
-            if len(raw) != length or sha256(raw).hexdigest() != expected:
+            _safe(path)
+            if not prefix and path.stat().st_size != length:
+                raise ValueError('experience source changed')
+            hasher, consumed = sha256(), 0
+            with path.open('rb') as stream:
+                while consumed < length:
+                    data = stream.read(min(65536, length - consumed))
+                    if not data:
+                        raise ValueError('experience source changed')
+                    hasher.update(data)
+                    consumed += len(data)
+            if hasher.hexdigest() != expected:
                 raise ValueError('experience source changed')
 
     def metadata(self) -> dict:
@@ -421,7 +454,7 @@ class ExperienceBundle:
             if kind == 'index' and source_run_id == '':
                 items = [source.metadata() for source in self.sources.values()]
                 return copy_json({'items': items[start:start + limit], 'total': len(items), 'advisory_only': True})
-            if source_run_id not in self.sources or kind not in {'research', 'history', 'frame', 'artifact', 'cells'}:
+            if source_run_id not in self.sources or kind not in {'research', 'history', 'frame', 'animation', 'artifact', 'cells'}:
                 raise ValueError('experience source unavailable')
             source = self.sources[source_run_id]
             source.check()
@@ -433,6 +466,18 @@ class ExperienceBundle:
                          for item in source.history]
             elif kind == 'frame':
                 items = [source.frames[start]] if start in source.frames else []
+            elif kind == 'animation':
+                # The artifact anchor is the exact original observation hash;
+                # it selects only an already authenticated historical observation.
+                matches = [sequence for sequence, value in source.frames.items()
+                           if value['observation_sha256'] == artifact_id]
+                if len(matches) != 1:
+                    raise ValueError('experience animation unavailable')
+                sequence = matches[0]
+                frames = source.animations[sequence]
+                items = [{'source_action_sequence': sequence, 'observation_sha256': artifact_id,
+                          'animation_ref': frames.reference(), 'start': start,
+                          'frames': [[list(row) for row in grid] for grid in frames.page(start, limit)]}]
             elif kind == 'cells':
                 items = source.cells
             else:
@@ -443,7 +488,7 @@ class ExperienceBundle:
                     items = [source.artifacts[artifact_id]]
                 else:
                     raise ValueError('experience export unavailable')
-            selected = items if kind == 'frame' or artifact_id is not None else items[start:start + limit]
+            selected = items if kind in {'frame', 'animation'} or artifact_id is not None else items[start:start + limit]
             response = {'source_run_id': source_run_id, 'source_revision': source.revision,
                         **source.trust, 'advisory_only': True, 'inert': True, 'items': selected,
                         'total': len(items), 'truncated': len(selected) < len(items)}

@@ -80,6 +80,37 @@ class TestPrimeP7Console(unittest.TestCase):
         self.assertEqual(self.recording.read_bytes(), before)
         self.assertEqual(state["run"]["status"], "incomplete")
 
+    def test_long_animation_is_paged_without_losing_action_or_final_frame(self):
+        from asterion.applications.prime.p7.console_frames import frame_page
+        before, after = self.observation(), self.observation("ACTION5", color=4, layers=95)
+        self.write_recording([before, after])
+        self.write_trace([("arc.action", self.action_payload(before, after))])
+        state = build_console_snapshot(self.root)
+        bucket = state["levels"][0]
+        self.assertEqual(bucket["frame_count"], 96)
+        self.assertEqual(len(bucket["frames"]), 32)
+        self.assertEqual(bucket["actions"][0]["after_frame_index"], 95)
+        self.assertEqual(state["run"]["primitive_action_count"], 1)
+        page = frame_page(self.root, 1, "a" * 64, bucket["frame_page"]["source_token"], 95, 1)
+        self.assertEqual(page["frames"][0]["index"], 95)
+        self.assertEqual(page["frames"][0]["grid"][0][0], 4)
+        with self.assertRaises(ValueError):
+            frame_page(self.root, 2, "a" * 64, bucket["frame_page"]["source_token"], 95, 1)
+
+    def test_animation_derivative_write_failure_keeps_action_metadata_and_warns(self):
+        before, after = self.observation(), self.observation('ACTION5', color=4, layers=95)
+        self.write_recording([before, after])
+        self.write_trace([('arc.action', self.action_payload(before, after))])
+        with patch('asterion.applications.prime.p7.console_frames.write_atomic_file', side_effect=OSError('sk-sentinel-secret')):
+            state = build_console_snapshot(self.root)
+        bucket = state['levels'][0]
+        self.assertEqual(bucket['frame_count'], 96)
+        self.assertEqual(bucket['frames'], [])
+        self.assertEqual(len(bucket['actions']), 1)
+        self.assertEqual(state['run']['primitive_action_count'], 1)
+        self.assertEqual(state['diagnostics'][0]['stage'], 'derived-failed')
+        self.assertNotIn('sentinel', json.dumps(state))
+
     def test_level_advance_and_layers_keep_actual_metadata(self):
         initial = self.observation()
         advanced = self.observation("ACTION4", 1, completed=1, layers=2)
@@ -241,11 +272,11 @@ class TestPrimeP7Console(unittest.TestCase):
         self.write_recording([row])
         self.assertEqual(build_console_snapshot(self.root)["levels"][0]["frames"], [])
 
-    def test_size_bound_reports_missing_evidence(self):
+    def test_metadata_size_bound_does_not_limit_independent_animation(self):
         self.write_recording([self.observation()])
         with patch("asterion.applications.prime.p7.console_snapshot._MAX_FILE", 16):
             state = build_console_snapshot(self.root)
-        self.assertEqual(state["levels"][0]["frames"], [])
+        self.assertEqual(len(state["levels"][0]["frames"]), 1)
         self.assertTrue(any("大小限制" in warning for warning in state["warnings"]))
 
     def test_symlink_recording_is_not_followed(self):

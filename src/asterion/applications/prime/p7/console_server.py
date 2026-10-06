@@ -119,6 +119,11 @@ class _Handler(BaseHTTPRequestHandler):
                 elif (len(parts) == 4 and parts[1] == 'levels' and parts[2].isascii()
                       and parts[2].isdigit() and str(int(parts[2])) == parts[2]):
                     self._send(200, session.replay_level(parts[0], int(parts[2]), parts[3]))
+                elif (len(parts) == 8 and parts[1] == 'levels' and parts[4] == 'frames'
+                      and all(part.isascii() and part.isdigit() and str(int(part)) == part
+                              for part in (parts[2], parts[6], parts[7]))):
+                    self._send(200, session.replay_frames(parts[0], int(parts[2]), parts[3],
+                                                         parts[5], int(parts[6]), int(parts[7])))
                 elif len(parts) == 1:
                     self._send(200, session.replay(parts[0]))
                 else:
@@ -137,8 +142,8 @@ class _Handler(BaseHTTPRequestHandler):
             elif self.path.startswith('/api/preview/'):
                 self._error(503, 'preview-unavailable')
             elif self.path.startswith('/api/replay/') and '/' in self.path.removeprefix('/api/replay/'):
-                self._error(409 if str(error) == 'replay-stale' else 503,
-                            'replay-stale' if str(error) == 'replay-stale' else 'replay-unavailable')
+                code = str(error) if str(error) in {'replay-stale', 'replay-frame-unavailable'} else 'replay-unavailable'
+                self._error(409 if code == 'replay-stale' else 503, code)
             else:
                 self._error(404, "run-unavailable")
         except Exception:

@@ -16,6 +16,28 @@ from asterion.applications.prime.p7.console_export import export_console, main, 
 
 
 class TestConsoleExport(unittest.TestCase):
+    def test_single_html_contains_bound_inert_pages_for_complete_long_animation(self):
+        from tests.test_prime_p7_console import TestPrimeP7Console
+        fixture = TestPrimeP7Console()
+        fixture.setUp()
+        self.addCleanup(fixture.temporary.cleanup)
+        fixture.write_recording([fixture.observation(), fixture.observation('ACTION5', color=4, layers=95)])
+        output = export_console(fixture.root)
+        html = output.read_text()
+        snapshot = json.loads(re.search(r'<script id="console-data" type="application/json">(.*?)</script>', html, re.S)[1])
+        self.assertTrue(snapshot['offline_frames'])
+        self.assertRegex(snapshot['replay_revision'], r'^[0-9a-f]{64}$')
+        pages = [json.loads(value) for value in re.findall(r'<script type="application/json" id="console-frame-page-1-\d+">(.*?)</script>', html, re.S)]
+        self.assertEqual([page['start'] for page in pages], [0, 32, 64])
+        self.assertEqual(sum(len(page['frames']) for page in pages), 96)
+        self.assertEqual(pages[-1]['frames'][-1]['index'], 95)
+        self.assertEqual(pages[-1]['frames'][-1]['grid'][0][0], 4)
+        for page in pages:
+            self.assertEqual(page['replay_revision'], snapshot['replay_revision'])
+            self.assertEqual(page['source_token'], snapshot['levels'][0]['frame_page']['source_token'])
+            self.assertLessEqual(len(page['frames']), 32)
+        self.assertIn("connect-src 'none'", html)
+
     def test_replay_catalog_embeds_baselines_without_network_authority(self):
         config = {"games": [{"game_id": "vc33-test", "alias": "vc33", "win_levels": 1,
                               "baseline_actions": [7]}]}

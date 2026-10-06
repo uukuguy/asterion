@@ -35,6 +35,7 @@ class ManualConsoleError(ValueError):
 
 
 def _observation(value: object, game_id: str, win_levels: int) -> dict:
+    from .dynamic_evidence import AnimationFrames
     try:
         if (type(value) is not dict
                 or set(value) != {'game_id', 'win_levels', 'levels_completed', 'current_level',
@@ -48,20 +49,21 @@ def _observation(value: object, game_id: str, win_levels: int) -> dict:
         actions, frame = value['available_actions'], value['frame']
         if (type(actions) is not list or len(actions) > 7
                 or any(type(a) is not int or not 1 <= a <= 7 for a in actions)
-                or actions != sorted(set(actions)) or type(frame) is not list or not frame
-                or type(frame[0]) is not list or not frame[0]):
+                or actions != sorted(set(actions)) or not isinstance(frame, (list, tuple, AnimationFrames)) or not frame
+                or not isinstance(frame[0], (list, tuple)) or not frame[0]):
             raise ValueError
-        layers = frame if type(frame[0][0]) is list else [frame]
-        if len(layers) > 64:
-            raise ValueError
-        for grid in layers:
-            if type(grid) is not list or not 1 <= len(grid) <= 64 or type(grid[0]) is not list:
+        layers = frame if isinstance(frame[0][0], (list, tuple)) else [frame]
+        # A validated arena owns the complete animation; preview/manual display
+        # needs only its final frame and never serializes the full handle.
+        for grid in ([layers[-1]] if isinstance(frame, AnimationFrames) else layers):
+            if not isinstance(grid, (list, tuple)) or not 1 <= len(grid) <= 64 or not isinstance(grid[0], (list, tuple)):
                 raise ValueError
             width = len(grid[0])
-            if not 1 <= width <= 64 or any(type(row) is not list or len(row) != width
+            if not 1 <= width <= 64 or any(not isinstance(row, (list, tuple)) or len(row) != width
                     or any(type(c) is not int or not 0 <= c <= 15 for c in row) for row in grid):
                 raise ValueError
-        return {**deepcopy(value), 'frame': deepcopy(layers[-1])}
+        return {**deepcopy({key: item for key, item in value.items() if key != 'frame'}),
+                'frame': [list(row) for row in layers[-1]]}
     except (ValueError, TypeError, KeyError, IndexError, RecursionError):
         raise ManualConsoleError('manual-unavailable') from None
 
@@ -120,7 +122,12 @@ class _ManualEngine:
         self._latest['frame'] = self._game.camera.render(self._game.current_level.get_sprites()).tolist()
 
     def observe(self) -> dict:
-        return {'game_id': self._engine.game_id, **deepcopy(self._latest),
+        from .dynamic_evidence import AnimationFrames
+        frame = self._latest['frame']
+        if isinstance(frame, AnimationFrames):
+            frame = [list(row) for row in frame[-1]]
+        return {'game_id': self._engine.game_id,
+                **deepcopy({key: value for key, value in self._latest.items() if key != 'frame'}), 'frame': frame,
                 'current_level': self._game.level_index + 1}
 
     def step(self, action: str, data: dict) -> dict:

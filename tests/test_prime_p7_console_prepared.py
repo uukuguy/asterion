@@ -13,6 +13,48 @@ from tests.test_prime_p7_console_session import ConsoleSessionFixture, RUN_ID
 
 
 class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
+    def test_prepared_animation_pages_bind_revision_and_preserve_metadata_on_missing_page(self):
+        from asterion.applications.prime.p7.console_frames import FrameStore, frame_page
+        root, snapshot = self.saved()
+        snapshot.update(schema='asterion.arc-agi3-p7-console/v2', diagnostics=[])
+        metadata = dict(timestamp='', available_actions=['ACTION1'], event_sequence=1,
+                        state='NOT_FINISHED', levels_completed=0)
+        store = FrameStore(root, 2)
+        store.append_animation(([[i % 10]] for i in range(95)), metadata, 1)
+        token = store.finish()
+        page = frame_page(root, 2, None, token, 0, 32)
+        bucket = snapshot['levels'][1]
+        bucket.update(frames=page['frames'], frame_count=95, frame_index_offset=1,
+                      frame_page=dict(start=0, limit=32, source_token=token))
+        bucket['actions'][0].update(before_frame='f000001', after_frame='f000095',
+                                    before_frame_index=0, after_frame_index=94)
+        for event in snapshot['process_events']:
+            event['frame_id'] = 'f000001'
+        self.save(root, snapshot)
+        session = self.session(snapshot_reader=lambda _: self.fail('paged projection rebuilt'))
+        manifest = session.replay_manifest(RUN_ID)
+        self.assertEqual(manifest['levels'][1]['frame_count'], 95)
+        detail = session.replay_level(RUN_ID, 2, manifest['revision'])
+        self.assertEqual(len(detail['levels'][0]['frames']), 32)
+        from asterion.applications.prime.p7.console_prepared import _detail
+        for index in (True, 95, 1):
+            with self.subTest(invalid_frame_index=index):
+                invalid = deepcopy(detail)
+                invalid['levels'][0]['cognition_timeline'].append(
+                    dict(scope='observation', frame_id='f000001', frame_index=index))
+                with self.assertRaises(ValueError):
+                    _detail(invalid, manifest, 2)
+        last = session.replay_frames(RUN_ID, 2, manifest['revision'], token, 94, 1)
+        self.assertEqual(last['frames'][0]['index'], 94)
+        with self.assertRaises(ConsoleSessionError) as stale:
+            session.replay_frames(RUN_ID, 2, '0' * 64, token, 94, 1)
+        self.assertEqual(str(stale.exception), 'replay-stale')
+        (root / 'console-frame-evidence' / (token + '.json')).unlink()
+        with self.assertRaises(ConsoleSessionError) as missing:
+            session.replay_frames(RUN_ID, 2, manifest['revision'], token, 94, 1)
+        self.assertEqual(str(missing.exception), 'replay-frame-unavailable')
+        self.assertEqual(session.replay_level(RUN_ID, 2, manifest['revision'])['levels'][0]['actions'], bucket['actions'])
+
     def test_prepared_replay_preserves_typed_warning_projection(self):
         from asterion.applications.prime.p7.processing_diagnostics import DiagnosticLog
         root, snapshot = self.saved()

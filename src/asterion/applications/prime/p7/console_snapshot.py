@@ -19,14 +19,15 @@ from asterion.applications.prime.p7.cognition_narrative import (
 )
 from asterion.applications.prime.p7.console_events import public_action_labels, read_console_events
 from asterion.applications.prime.p7.observation_state import ObservationState
-from asterion.applications.prime.p7.score import digest
 from .processing_diagnostics import public_diagnostic
+from .dynamic_evidence import AnimationFrames, EvidenceProcessingError, observation_digest
+from .recording_stream import recording_rows
+from .console_frames import FrameStore, frame_page
 from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceipt
 
 
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_ROWS = 4096
-_MAX_FRAMES = 8192
 _KINDS = {"game_type", "object_role", "control", "rule", "success_condition", "strategy"}
 _STATUSES = {"certain", "falsified", "undetermined"}
 _ACTIONS = {"RESET", *(f"ACTION{i}" for i in range(1, 8))}
@@ -175,15 +176,15 @@ def _observation(row: dict | None) -> dict | None:
         or type(timestamp) is not str or len(timestamp) > 64
         or type(available) is not list or any(type(a) is not int or not 1 <= a <= 7 for a in available)
         or available != sorted(set(available))
-        or type(layers) is not list or not 1 <= len(layers) <= 64):
+        or not isinstance(layers, (list, AnimationFrames)) or len(layers) < 1):
         return None
     try:
         datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
     except ValueError:
         return None
     for grid in layers:
-        if (type(grid) is not list or len(grid) != 64
-            or any(type(r) is not list or len(r) != 64
+        if (not isinstance(grid, (list, tuple)) or len(grid) != 64
+            or any(not isinstance(r, (list, tuple)) or len(r) != 64
                    or any(type(c) is not int or not 0 <= c <= 255 for c in r) for r in grid)):
             return None
     coordinates = action["data"]
@@ -195,19 +196,21 @@ def _observation(row: dict | None) -> dict | None:
         coordinates = {}
     legacy = {"available_actions": [f"ACTION{i}" for i in available], "frame": layers,
               "levels_completed": levels, "state": state, "win_levels": wins}
-    hashes = {digest(legacy)}
+    handle = AnimationFrames.capture(layers)
+    legacy_hash = observation_digest(legacy, handle)
+    hashes = {legacy_hash}
     try:
-        unified = ObservationState.from_observation({**legacy, **{k: data[k] for k in
+        unified = ObservationState.from_observation({**legacy, 'frame': [[[0]]], **{k: data[k] for k in
             ("hud", "timers", "resources", "entities", "relations", "events") if k in data}})
-        hashes.add(digest(unified.to_projection()))
+        hashes.add(observation_digest(unified.to_projection(), handle))
     except (TypeError, ValueError):
         pass
     return {
         "game_id": game_id, "guid": guid, "wins": wins, "levels": levels,
-        "state": state, "timestamp": timestamp, "layers": layers,
+        "state": state, "timestamp": timestamp, "layers": handle,
         "available_actions": [f"ACTION{i}" for i in available],
         "action": action["id"], "data": coordinates,
-        "hash": digest(legacy), "hashes": hashes,
+        "hash": legacy_hash, "hashes": hashes,
     }
 
 
@@ -433,7 +436,7 @@ def _completion_proof(summary: dict, trace: list[dict], game: str | None,
                ("game_id", "seed", "win_levels", "levels_completed", "primitive_actions", "replay_sha256", "terminal_reason"))
 
 
-def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict], list[dict]]:
+def _source_observations(events: list[dict], warn: list[str], root: Path | None = None) -> tuple[list[dict], list[dict]]:
     """Use the source's own settled observations, never SDK row positions.
 
     A completed action/observation pair extends the prefix once. Later repeated
@@ -451,6 +454,24 @@ def _source_observations(events: list[dict], warn: list[str]) -> tuple[list[dict
             pending = payload
         elif event['kind'] == 'observation':
             sequence, raw = payload['source_action_sequence'], payload['observation']
+            if payload.get('evidence_ref') is not None:
+                from .broker import read_observation
+                try:
+                    if root is None:
+                        raise ValueError
+                    complete = read_observation(root / 'animation-evidence', payload['evidence_ref'],
+                                                expected_scope={'run_id': root.name, 'game_id': event['game_id'],
+                                                                'seed': 0, 'sequence': sequence},
+                                                expected_sha256=payload['observation_sha256'])
+                    if (complete.levels_completed != raw['levels_completed'] or complete.state != raw['state']
+                            or complete.win_levels != raw['win_levels']
+                            or list(complete.available_actions) != raw['available_actions']
+                            or tuple(tuple(row) for row in complete.frame[-1]) != tuple(tuple(row) for row in raw['frame'][-1])):
+                        raise ValueError
+                    raw = {**raw, 'frame': complete.frame}
+                except (ValueError, EvidenceProcessingError):
+                    warn.append('console-events-invalid')
+                    break
             if sequence != len(observations):
                 warn.append('console-events-invalid')
                 break
@@ -542,7 +563,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
             raise ValueError('replayed cognition unavailable')
         warnings: list[str] = []
         if recorded_positions is None:
-            observations, _ = _source_observations(current_events, warnings)
+            observations, _ = _source_observations(current_events, warnings, root)
             recorded_positions = dict(enumerate(observations))
         if recorded_witnesses is None and recorded_positions:
             first = next(iter(recorded_positions.values()))
@@ -555,7 +576,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
             if recovery_kind == 'terminal-game-win' and not sealed:
                 warnings = [warning for warning in warnings if warning != 'trace-unsealed']
             events = read_console_events(source, source.name, prior['experiment']['game_id'], warnings=warnings)
-            observations, events = _source_observations(events, warnings)
+            observations, events = _source_observations(events, warnings, source)
             keys = ('sequence', 'action', 'data', 'before_sha256', 'after_sha256', 'levels_completed')
             def actions(rows, kind):
                 return [{key: row['payload'].get(key, {} if key == 'data' else None) for key in keys}
@@ -625,7 +646,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
     actual_prefix, expected_prefix = prefix(trace), prefix(prior_trace)
     if not sealed or actual_prefix != prefix(current_events, 'action'):
         raise ValueError('restored cognition unavailable')
-    current_observations, _ = _source_observations(current_events, warnings)
+    current_observations, _ = _source_observations(current_events, warnings, root)
     actual_witnesses = _recorded_animation_witnesses(root, trace, game, current_observations[0]['wins'], restored) if current_observations else None
     expected_witnesses = _recorded_animation_witnesses(source, prior_trace, game, current_observations[0]['wins'], restored) if current_observations else None
     if actual_prefix != expected_prefix:
@@ -641,7 +662,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         # Offline replay sources have recordings and authenticated lineage, not
         # actor console events. The current exact replay already proved these
         # prefix actions; use its real observations to align the source beliefs.
-        observations, _ = _source_observations(current_events, warnings)
+        observations, _ = _source_observations(current_events, warnings, root)
         if warnings or len(observations) <= restored:
             raise ValueError('restored cognition unavailable')
         inherited = _restored_cognition_events(
@@ -652,7 +673,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         )
         return [event for event in inherited if event['payload']['source_action_sequence'] <= restored]
     events = read_console_events(source, source_id, game, warnings=warnings)
-    observations, events = _source_observations(events, warnings)
+    observations, events = _source_observations(events, warnings, source)
     if warnings or len(observations) <= restored or prefix(events, 'action') != prefix(prior_trace):
         raise ValueError('restored cognition unavailable')
     inherited = _restored_cognition_events(source, prior, prior_trace, events, (*seen, root.name))
@@ -755,7 +776,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
     source_mode = any(event["kind"] == "observation" for event in source_events)
     source_observations = []
     if source_mode:
-        source_observations, source_events = _source_observations(source_events, warn)
+        source_observations, source_events = _source_observations(source_events, warn, root)
     directory = root / "recordings"
     recordings = sorted(directory.glob("*/*.jsonl")) if directory.is_dir() and not directory.is_symlink() else []
     if len(recordings) > 1:
@@ -766,8 +787,13 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         # Validated source observations own their exact positions. SDK grids
         # are a legacy fallback and would be discarded in this mode; avoid
         # decoding and hashing the entire second copy of every animation.
-        rows = _rows(recordings[0], warn, "recording-missing", "recording-invalid")
-        observations = [_observation(row) for row in rows]
+        try:
+            if not _regular(recordings[0]):
+                raise ValueError
+            for row in recording_rows(recordings[0], recover_invalid=True):
+                observations.append(_observation(row))
+        except (ValueError, OSError, UnicodeError, EvidenceProcessingError):
+            warn.append('recording-invalid')
         valid = [o for o in observations if o]
         identities = {(o["game_id"], o["guid"], o["wins"]) for o in valid}
         if len(identities) > 1 or (valid and game is not None and valid[0]["game_id"] != game):
@@ -817,7 +843,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         source_events = [{**event, 'sequence': index,
                           'provenance': event.get('provenance', {'run_id': root.name, 'event_sequence': event['sequence']})}
                          for index, event in enumerate(source_events, 1)]
-        observations, source_events = _source_observations(source_events, warn)
+        observations, source_events = _source_observations(source_events, warn, root)
     trace_actions = [e for e in trace if e["kind"] == "arc.action"]
     trace_actions_by_sequence: dict[int, list[dict]] = {}
     for entry in trace_actions:
@@ -828,7 +854,7 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
 
     def level(number: int) -> dict:
         if number not in levels:
-            levels[number] = {"level": number, "status": "not-run", "frames": [], "actions": [], "decisions": [],
+            levels[number] = {"level": number, "status": "not-run", "frames": FrameStore(root, number), "actions": [], "decisions": [],
                               "research_timeline": [], "cognition_timeline": [], "cognition": {"stable_description": "当前关卡没有可验证的稳定认知。", "scope": "unavailable", "updates": [], "world_map_facts": {}}, "receipt": None}
         return levels[number]
 
@@ -852,20 +878,16 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
                 for action in source_actions)
             if not reset_recorded:
                 continue
-        if frame_count + len(observation["layers"]) > _MAX_FRAMES:
-            warn.append("evidence-bounded")
-            break
         action_level = previous["levels"] + 1 if previous else observation["levels"] + 1
         action_level = min(action_level, wins or 100)
         bucket = level(action_level)
-        new_frames = []
-        for grid in observation["layers"]:
-            frame_count += 1
-            new_frames.append({"id": f"f{frame_count:06d}", "grid": grid, "timestamp": observation["timestamp"],
-                               "available_actions": observation["available_actions"],
-                               "event_sequence": observation.get("event_sequence"),
-                               "state": observation["state"], "levels_completed": observation["levels"]})
-        bucket["frames"].extend(new_frames)
+        metadata = {"timestamp": observation["timestamp"], "available_actions": observation["available_actions"],
+                    "event_sequence": observation.get("event_sequence"), "state": observation["state"],
+                    "levels_completed": observation["levels"]}
+        bucket["frames"].append_animation(observation["layers"], metadata, frame_count + 1)
+        frame_count += len(observation["layers"])
+        new_frames = [{**metadata, "id": f"f{frame_count:06d}",
+                       "grid": [list(row) for row in observation["layers"][-1]]}]
         if previous:
             action_count += 1
             if source_mode:
@@ -1067,6 +1089,35 @@ def build_console_snapshot(run_root: Path) -> dict[str, object]:
         if event['kind'] == 'diagnostic':
             safe = public_diagnostic(event['payload'])
             processing[safe['diagnostic_id']] = safe
+    for bucket in levels.values():
+        store = bucket['frames']
+        if not len(store):
+            bucket['frames'] = []
+            continue
+        token = store.finish()
+        try:
+            page = frame_page(root, bucket['level'], None, token, 0, 32)
+        except (OSError, ValueError, EvidenceProcessingError) as error:
+            store.failure(error)
+            page = {'frames': []}
+        for diagnostic in store.diagnostics:
+            processing[diagnostic['diagnostic_id']] = diagnostic
+        if len(store) <= 32 and len(page['frames']) == len(store):
+            bucket['frames'] = [{k: v for k, v in frame.items() if k != 'index'} for frame in page['frames']]
+            continue
+        offset = store.spans[0]['first_id']
+        bucket.update(frames=page['frames'], frame_count=len(store), frame_index_offset=offset,
+                      frame_page=dict(start=0, limit=32, source_token=token))
+        def index(frame_id):
+            return int(frame_id[1:]) - offset
+        for action in bucket['actions']:
+            action.update(before_frame_index=index(action['before_frame']), after_frame_index=index(action['after_frame']))
+        for entry in [*bucket['cognition_timeline'], *bucket['research_timeline']]:
+            if entry.get('frame_id'):
+                entry['frame_index'] = index(entry['frame_id'])
+        for entry in process_events:
+            if entry['level'] == bucket['level']:
+                entry['frame_index'] = index(entry['frame_id'])
     return {"schema": "asterion.arc-agi3-p7-console/v2", "generated_at": datetime.now(timezone.utc).isoformat(),
             "run": {"run_id": root.name, "game_id": game, "status": status, "completed_level_count": completed,
                     "seed": _integer(experiment.get("seed")),

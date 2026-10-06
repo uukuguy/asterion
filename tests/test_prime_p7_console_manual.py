@@ -191,7 +191,8 @@ class TestPrimeP7ConsoleManual(unittest.TestCase):
         observation = self.workers[0].observe()
         observation['frame'] = [[[0, 1], [2, 3]]] * 63 + [[[4, 5], [6, 7]]]
         self.assertEqual(_observation(observation, 'test-1', 2)['frame'], [[4, 5], [6, 7]])
-        for change in ({'frame': observation['frame'] * 2}, {'secret': 'SENTINELSECRET'},
+        self.assertEqual(_observation({**observation, 'frame': observation['frame'] * 2}, 'test-1', 2)['frame'], [[4, 5], [6, 7]])
+        for change in ({'secret': 'SENTINELSECRET'},
                        {'state': 'SENTINELSECRET'}, {'win_levels': True},
                        {'current_level': 0}, {'current_level': 3}, {'current_level': True}):
             with self.subTest(change=tuple(change)), self.assertRaisesRegex(ManualConsoleError, '^manual-unavailable$'):

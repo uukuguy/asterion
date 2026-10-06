@@ -745,6 +745,16 @@ class ConsoleSession:
             code = 'replay-stale' if str(error) == 'replay stale' else 'replay-unavailable'
             raise ConsoleSessionError(code) from None
 
+    def replay_frames(self, run_id: str, level: int, revision: str, token: str, start: int, limit: int) -> dict:
+        try:
+            path = self._run_path(run_id)
+            if self._closed or not path.is_dir():
+                raise ValueError
+            return self._replay_cache.frames(path, level, revision, token, start, limit)
+        except (OSError, ValueError, TypeError, RuntimeError) as error:
+            code = 'replay-stale' if str(error) == 'replay stale' else 'replay-frame-unavailable'
+            raise ConsoleSessionError(code) from None
+
     def close(self) -> None:
         with self._lock:
             self._closed = True

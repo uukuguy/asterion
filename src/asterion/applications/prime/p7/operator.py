@@ -1313,7 +1313,7 @@ def _log_cognition_display(projection: object, *, phase: str) -> None:
 class _P7BrokerClient:
     """Worker-facing mapping adapter over the native ARC broker."""
 
-    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence", "_console_writer", "_console_decision_sequence", "_pending_console_decision", "_active_console_decision", "_console_cognition_revision", "_console_cognition_signature", "_console_observation_attached")
+    __slots__ = ("_broker", "_recorder", "_identities", "_variant", "_counts", "_route_adoption", "_cognition_mode", "_cognition_update_sequence", "_console_writer", "_console_decision_sequence", "_pending_console_decision", "_active_console_decision", "_console_cognition_revision", "_console_cognition_signature", "_console_observation_attached", "processing_diagnostics")
 
     def __init__(
         self,
@@ -1333,6 +1333,9 @@ class _P7BrokerClient:
         self._cognition_mode = cognition_mode
         self._cognition_update_sequence = 0
         self._console_writer = console_writer
+        from .processing_diagnostics import DiagnosticLog
+        self.processing_diagnostics = DiagnosticLog(
+            console_writer.evidence_root.parent / 'processing-diagnostics.json' if console_writer is not None else None)
         self._console_decision_sequence = 0
         self._pending_console_decision = None
         self._active_console_decision = None
@@ -1344,7 +1347,7 @@ class _P7BrokerClient:
                 broker.set_observation_listener(self._capture_console_observation)
                 self._console_observation_attached = True
             except Exception:
-                pass
+                self._console_failure(0)
         self._route_adoption = RouteAdoptionTracker()
         self._counts = {
             "history_queries": 0, "history_records_returned": 0, "frame_queries": 0,
@@ -1361,10 +1364,22 @@ class _P7BrokerClient:
                 return
             self._emit_console("action", {**self._transition_view(transition),
                                "decision_id": getattr(self, "_active_console_decision", None)})
+        from .broker import persist_observation
+        try:
+            reference = persist_observation(observation, self._console_writer.evidence_root, scope={
+                'run_id': self._console_writer.run_id, 'game_id': self._broker.game.game_id,
+                'seed': self._broker.game.seed, 'sequence': sequence,
+            })
+        except Exception:
+            self._console_failure(sequence)
+            return
+        if reference['observation_sha256'] != observation_hash:
+            raise P7OperatorError('P7 observation identity is unavailable')
         self._emit_console("observation", {
             "source_action_sequence": sequence, "observation_sha256": observation_hash,
+            "evidence_ref": reference,
             "observation": {"available_actions": list(observation.available_actions),
-                            "frame": [[list(row) for row in grid] for grid in observation.frame],
+                            "frame": [[list(row) for row in observation.frame[-1]]],
                             "levels_completed": observation.levels_completed, "state": observation.state,
                             "win_levels": observation.win_levels},
         })
@@ -1379,8 +1394,17 @@ class _P7BrokerClient:
             try:
                 writer.append(kind, payload)
             except Exception:
-                # Display evidence must never alter game authority or settlement.
-                pass
+                self._console_failure(payload.get('source_action_sequence', payload.get('sequence', 0)))
+
+    def _console_failure(self, sequence):
+        log = getattr(self, 'processing_diagnostics', None)
+        if log is None:
+            return  # Legacy test facades may omit an optional display writer.
+        sequence = sequence if type(sequence) is int and sequence >= 0 else 0
+        log.record(dict(diagnostic_id=f'console-publication-failed:derived-failed:{sequence}',
+                        code='console-publication-failed', severity='warning', stage='derived-failed',
+                        action_sequence=sequence, outcome_known=True, durable=False, observed=None,
+                        limit=None, unit=None, recovery='read-only-rebuild'))
 
     def decision(self, payload: Mapping[str, object]) -> Mapping[str, object]:
         if (not isinstance(payload, Mapping) or set(payload) != {"goal", "basis", "expected"}
@@ -3599,6 +3623,7 @@ def build_p7_operator_resources(
     semantic_cognition_read_only: bool = False,
     cognition_mode: bool = False,
     experience: object | None = None,
+    evidence_cancelled=None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -3613,6 +3638,12 @@ def build_p7_operator_resources(
     try:
         variant = _resolve_history_variant(environment, game)
         selection = resolve_p7_runtime(environment, game)
+        evidence_control = getattr(engine, 'set_evidence_control', None)
+        if callable(evidence_control):
+            import time
+            evidence_control(cancelled=evidence_cancelled,
+                             deadline=None if selection.deadline_ms is None
+                             else time.monotonic() + selection.deadline_ms / 1000)
         research_mode = variant == "verified" and not cognition_mode
         # The ARC credential belongs only to the SDK session. The Pi model
         # subprocess needs the model host key, never the scorecard key.
@@ -4519,6 +4550,7 @@ async def run_live(
         semantic_cognition_read_only=False,
         cognition_mode=cognition_mode,
         experience=experience,
+        evidence_cancelled=lambda: run_signal.cancelled,
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if not research_mode and isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
@@ -4943,6 +4975,8 @@ async def run_live(
                 diagnostics["route_adoption"] = prediction_client.route_adoption()
             research_host = resources_.host_services.get("prime.ipython") if research_mode else None
             processing_log = getattr(getattr(research_host, "solver", None), "diagnostics", None)
+            if processing_log is None:
+                processing_log = getattr(prediction_client, 'processing_diagnostics', None)
             processing_records = processing_log.projection() if processing_log is not None else []
             broker_processing = getattr(broker_value, "processing_diagnostic", None)
             if broker_processing is not None and not any(

@@ -1,3 +1,5 @@
+import json
+
 from asterion.applications.prime.p7.research_bridge import ResearchReadServer
 from asterion.applications.prime.p7.solver import Solver
 from asterion.applications.prime.p7.score import canonical_bytes
@@ -267,6 +269,7 @@ class TestP7Research(P7SolverFixture):
         result["value"][0][0] = 9
         self.assertEqual(self.broker.frame_at(0)[0][0], 0)
         self.assertEqual(self.engine.calls, [])
+
         self.assertEqual(
             server.dispatch({"method": "frame", "args": [999]})["status"], "rejected"
         )
@@ -277,6 +280,14 @@ class TestP7Research(P7SolverFixture):
         with self.assertRaises(ValueError):
             module["_read"]("act_checked", [{}])
         self.assertEqual(self.engine.calls, [])
+
+    def test_read_wire_caps_complete_response_and_surfaces_safe_diagnostic(self):
+        server = ResearchReadServer(context=lambda: {'body': 'x' * (1024 * 1024)},
+                                    history=lambda *a: [], frame=lambda *a: [], artifact=lambda *a: {})
+        result = server.dispatch({'method': 'context', 'args': []})
+        self.assertEqual(result['status'], 'rejected')
+        self.assertEqual(result['diagnostic']['code'], 'research-response-budget-exceeded')
+        self.assertLessEqual(len(json.dumps(result).encode()) + 1, 1024 * 1024)
 
     def test_program_reports_compare_two_real_transitions_and_find_first_counterexample(
         self,

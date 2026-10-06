@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.private_trace import trace_identities_for
@@ -12,6 +13,44 @@ from tests.test_prime_p7_solver import _Kernel, draft
 
 
 class TestExperience(unittest.TestCase):
+    def test_legacy_animation_bypasses_metadata_totals_and_reads_only_requested_page(self):
+        from asterion.agents.prime.trace import _entry_digest
+        from asterion.applications.prime.p7.console_events import SCHEMA
+        from asterion.applications.prime.p7.observation_state import ObservationState
+        run, _ = self.source()
+        before = dict(frame=[[[0] * 64 for _ in range(64)]], available_actions=['ACTION1'],
+                      levels_completed=0, win_levels=2, state='NOT_FINISHED')
+        after = {**before, 'frame': [[[1] * 64 for _ in range(64)] for _ in range(95)]}
+        before_hash = digest(ObservationState.from_observation(before).to_projection())
+        from asterion.applications.prime.p7.broker import _snapshot_observation, _observation_digest
+        after_hash = _observation_digest(_snapshot_observation(after, win_levels=2))
+        payload = dict(sequence=1, action='ACTION1', before_sha256=before_hash, after_sha256=after_hash,
+                       levels_completed=0, data={})
+        trace = run / 'trace' / 'prime-trace.jsonl'
+        previous = json.loads(trace.read_text().splitlines()[-1])
+        identities = trace_identities_for('gpt-6.1-sol')
+        row = dict(sequence=2, kind='arc.action', identities=dict(identities), payload=payload,
+                   previous_sha256=previous['sha256'])
+        row['sha256'] = _entry_digest(2, 'arc.action', identities, payload, previous['sha256'])
+        with trace.open('a') as stream:
+            stream.write(json.dumps(row) + '\n')
+        events = [('observation', dict(source_action_sequence=0, observation_sha256=before_hash, observation=before)),
+                  ('action', {**payload, 'decision_id': None}),
+                  ('observation', dict(source_action_sequence=1, observation_sha256=after_hash, observation=after))]
+        path = run / 'console-events.jsonl'
+        path.write_text(''.join(json.dumps(dict(schema=SCHEMA, run_id=run.name, game_id='test-1',
+                       sequence=i, kind=kind, payload=value)) + '\n' for i, (kind, value) in enumerate(events, 1)))
+        with patch('asterion.applications.prime.p7.experience._MAX_FILE', 4096), patch('asterion.applications.prime.p7.experience._MAX_TOTAL', 32768):
+            bundle = self.load()
+        self.assertEqual(bundle.context()['available_count'], 1)
+        stable = bundle.read(run.name, 'frame', start=1)['items'][0]
+        self.assertEqual(len(stable['observation']['frame']), 1)
+        self.assertEqual(stable['animation_ref']['frame_count'], 95)
+        page = bundle.read(run.name, 'animation', artifact_id=after_hash, start=94, limit=1)['items'][0]
+        self.assertEqual(page['start'], 94)
+        self.assertEqual(len(page['frames']), 1)
+        self.assertEqual(page['frames'][0][0][0], 1)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

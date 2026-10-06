@@ -156,7 +156,7 @@ def projection_manifest(snapshot: dict, revision: str) -> dict:
             **warnings, 'state': 'ready', 'run_id': snapshot['run']['run_id'],
             'revision': revision, 'run': snapshot['run'], 'warnings': snapshot.get('warnings', []),
             'levels': [{'level': level['level'], 'status': level['status'],
-                        'frame_count': len(level.get('frames', [])),
+                        'frame_count': level.get('frame_count', len(level.get('frames', []))),
                         'action_count': len(level.get('actions', [])),
                         'has_cognition': level.get('cognition', {}).get('scope') != 'unavailable'
                                         and bool(level.get('cognition'))}
@@ -320,6 +320,16 @@ class ReplayProjectionCache:
         # Entries are immutable after publication; copy only the requested
         # projection outside the scheduling lock.
         return deepcopy(projection_level(snapshot, number, revision))
+
+    def frames(self, path: Path, number: int, revision: str, token: str, start: int, limit: int) -> dict:
+        # First authenticate the selected revision and its level binding. A
+        # token supplied alone must never select arbitrary evidence in the arena.
+        detail = self.level(path, number, revision)
+        bucket = detail['levels'][0]
+        if bucket.get('frame_page', {}).get('source_token') != token:
+            raise ValueError('replay stale')
+        from .console_frames import frame_page
+        return frame_page(path, number, revision, token, start, limit)
 
     def _run(self):
         while True:

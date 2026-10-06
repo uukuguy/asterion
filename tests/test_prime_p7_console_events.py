@@ -479,7 +479,8 @@ class TestDecisionSource(unittest.TestCase):
             client = _P7BrokerClient(broker, trace, console_writer=ConsoleEventWriter(root, root.name, game.game_id))
             client.act([{'name': 'ACTION1', 'data': {}}])
             rows = read_console_events(root, root.name, game.game_id)
-            self.assertFalse(any(row['kind'] == 'observation' for row in rows))
+            self.assertEqual(len([row for row in rows if row['kind'] == 'observation']), 2)
+            self.assertTrue(all('evidence_ref' in row['payload'] for row in rows if row['kind'] == 'observation'))
             self.assertNotIn('SENTINELSECRET', (root / 'console-events.jsonl').read_text())
             self.assertEqual(len(broker.journal), 1)
 

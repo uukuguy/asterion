@@ -18,11 +18,13 @@ _AGGREGATE = frozenset({"first_seen", "last_seen", "count", "status", "recovered
 _STAGES = frozenset({
     "not-dispatched", "dispatched-no-reply", "reply-received-invalid",
     "validated-not-durable", "durably-committed", "derived-failed",
+    "reply-received-unvalidated",
 })
 PROCESSING_CODES = frozenset({
     "evidence-write-failed", "evidence-read-failed", "evidence-hash-failed", "observation-validation-failed",
     "derived-projection-failed", "console-publication-failed", "research-read-failed",
     "research-response-budget-exceeded", "engine-no-reply", "engine-response-invalid",
+    "evidence-cancelled", "evidence-deadline-exceeded",
 })
 _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z")
 _RECOVERY = frozenset({
@@ -85,7 +87,7 @@ class DiagnosticLog:
     def __init__(self, path: Path | None = None):
         self._records = {}
         self._lock = RLock()
-        self._path = path
+        self._path = path.parent.resolve() / path.name if path is not None else None
 
     def _persist(self):
         if self._path is None:

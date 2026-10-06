@@ -40,7 +40,7 @@ _DECISION_FIELDS = {'id', 'source', 'goal', 'basis', 'expected', 'source_action_
                     'action_ids', 'event_sequence', 'round_index', 'trace_sequence', 'prompt_signals', 'output_signals'}
 _COGNITION_FIELDS = {'stable_description', 'scope', 'updates', 'world_map_facts', 'action_meanings',
     'frame_id', 'action_id', 'source_action_sequence', 'observation_sha256', 'cognition_revision',
-    'event_sequence', 'cognition_narrative_zh', 'origin', 'provenance', 'session', 'action_labels'}
+    'event_sequence', 'cognition_narrative_zh', 'origin', 'provenance', 'session', 'action_labels', 'frame_index'}
 _PRIVATE_FIELDS = {'prompt', 'answer', 'credentials', 'provider_payload', 'raw_output', 'path',
                    'environment', 'token', 'secret', 'api_key', 'password', 'authorization'}
 
@@ -198,7 +198,7 @@ def _manifest(value, run_id):
         if (type(level) is not dict or set(level) != {'level', 'status', 'frame_count', 'action_count', 'has_cognition'}
                 or type(level['level']) is not int or level['level'] != index
                 or level['status'] not in {'successful', 'unsuccessful', 'incomplete', 'not-run'}
-                or not _count(level['frame_count'], 8192) or not _count(level['action_count'], 4096)
+                or type(level['frame_count']) is not int or level['frame_count'] < 0 or not _count(level['action_count'], 4096)
                 or type(level['has_cognition']) is not bool):
             raise ValueError('prepared replay unavailable')
     for warning in value['warnings']:
@@ -216,7 +216,7 @@ def _events(events):
     previous = 0
     required = {'event_sequence', 'kind', 'source_action_sequence', 'frame_id', 'level', 'payload'}
     for event in events:
-        if (type(event) is not dict or not required <= set(event) or set(event) - (required | {'provenance'})
+        if (type(event) is not dict or not required <= set(event) or set(event) - (required | {'provenance', 'frame_index'})
                 or type(event['payload']) is not dict or not _count(event['event_sequence'])
                 or event['event_sequence'] <= previous or not _count(event['source_action_sequence'])
                 or not _identifier(event['frame_id']) or not _count(event['level'], 100) or event['level'] < 1):
@@ -255,18 +255,31 @@ def _detail(value, manifest, number):
             or len(value['levels']) != 1 or type(value['levels'][0]) is not dict):
         raise ValueError('prepared replay unavailable')
     bucket, metadata = value['levels'][0], manifest['levels'][number - 1]
-    if (set(bucket) != _LEVEL_FIELDS or type(bucket['level']) is not int or bucket['level'] != number
+    paged = 'frame_page' in bucket
+    if (set(bucket) != _LEVEL_FIELDS | ({'frame_count', 'frame_index_offset', 'frame_page'} if paged else set())
+            or type(bucket['level']) is not int or bucket['level'] != number
             or bucket['status'] != metadata['status'] or type(bucket['frames']) is not list
-            or type(bucket['actions']) is not list or len(bucket['frames']) != metadata['frame_count']
+            or type(bucket['actions']) is not list or bucket.get('frame_count', len(bucket['frames'])) != metadata['frame_count']
             or len(bucket['actions']) != metadata['action_count']):
         raise ValueError('prepared replay unavailable')
+    if paged:
+        page = bucket['frame_page']
+        if (type(page) is not dict or set(page) != {'start', 'limit', 'source_token'}
+                or page['start'] != 0 or page['limit'] != 32
+                or type(page['source_token']) is not str or not _HEX.fullmatch(page['source_token'])
+                or len(bucket['frames']) not in {0, min(32, bucket['frame_count'])}
+                or type(bucket['frame_index_offset']) is not int or bucket['frame_index_offset'] < 1):
+            raise ValueError('prepared replay unavailable')
     frames = set()
     for frame in bucket['frames']:
-        if (type(frame) is not dict or set(frame) != _FRAME_FIELDS
+        if (type(frame) is not dict or set(frame) != _FRAME_FIELDS | ({'index'} if paged else set())
                 or type(frame['id']) is not str or frame['id'] in frames or not _ID.fullmatch(frame['id'])
                 or type(frame['grid']) is not list or not 1 <= len(frame['grid']) <= 64):
             raise ValueError('prepared replay unavailable')
         frames.add(frame['id'])
+        if paged and (type(frame['index']) is not int or not 0 <= frame['index'] < bucket['frame_count']
+                      or frame['id'] != f"f{frame['index'] + bucket['frame_index_offset']:06d}"):
+            raise ValueError('prepared replay unavailable')
         actions = frame['available_actions']
         if (type(frame['timestamp']) is not str or len(frame['timestamp']) > 64
                 or type(actions) is not list or len(actions) > 7
@@ -281,15 +294,21 @@ def _detail(value, manifest, number):
                 or any(not _count(cell, 255) for cell in row) for row in frame['grid']):
             raise ValueError('prepared replay unavailable')
     for action in bucket['actions']:
-        if (type(action) is not dict or set(action) != _ACTION_FIELDS
+        if (type(action) is not dict or set(action) != _ACTION_FIELDS | ({'before_frame_index', 'after_frame_index'} if paged else set())
                 or not _identifier(action['id']) or not _identifier(action['before_frame'])
-                or action['after_frame'] not in frames or action['name'] not in {'RESET', *(f'ACTION{i}' for i in range(1, 8))}
+                or (not paged and action['after_frame'] not in frames) or action['name'] not in {'RESET', *(f'ACTION{i}' for i in range(1, 8))}
                 or type(action['data']) is not dict or not _count(action['levels_completed'], 100)
                 or not _count(action['changed_cells'], 4096)
                 or any(action[key] is not None and not _count(action[key]) for key in ('trace_sequence', 'source_action_sequence'))
                 or action['decision_id'] is not None and not _identifier(action['decision_id'])
                 or type(action['visual_observations']) is not list):
             raise ValueError('prepared replay unavailable')
+        if paged:
+            for kind in ('before', 'after'):
+                index = action[f'{kind}_frame_index']
+                if (type(index) is not int or not 0 <= index < bucket['frame_count']
+                        or action[f'{kind}_frame'] != f"f{index + bucket['frame_index_offset']:06d}"):
+                    raise ValueError('prepared replay unavailable')
         if ((action['name'] == 'ACTION6' and (set(action['data']) != {'x', 'y'}
                 or any(not _count(item, 63) for item in action['data'].values())))
                 or (action['name'] != 'ACTION6' and action['data'] != {})):
@@ -339,6 +358,16 @@ def _detail(value, manifest, number):
             raise ValueError('prepared replay unavailable')
     _events(value['process_events'])
     _events(bucket['research_timeline'])
+    if paged:
+        entries = [bucket['cognition'], *revisions, *bucket['research_timeline'],
+                   *(event for event in value['process_events'] if event['level'] == number)]
+        for entry in entries:
+            if 'frame_index' not in entry:
+                continue
+            index = entry['frame_index']
+            if (type(index) is not int or not 0 <= index < bucket['frame_count']
+                    or entry.get('frame_id') != f"f{index + bucket['frame_index_offset']:06d}"):
+                raise ValueError('prepared replay unavailable')
     if any(event.get('level') != number and event.get('frame_id') not in frames for event in value['process_events']):
         raise ValueError('prepared replay unavailable')
     _public(value)

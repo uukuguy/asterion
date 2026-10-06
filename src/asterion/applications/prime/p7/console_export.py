@@ -8,16 +8,18 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 from importlib.resources import files
 import json
+import os
 from pathlib import Path
 import re
 import sys
+import tempfile
 from typing import TextIO
 import webbrowser
 
 from .console_snapshot import build_console_snapshot
-from .console_replay import replay_fingerprint
+from .console_replay import replay_fingerprint, projection_revision
 from .console_prepared import publish_prepared
-from .run_story.storage import write_atomic_file
+from .console_frames import frame_page
 
 
 _RUN_NAME = re.compile(r"p7-live-[0-9]{14}-[0-9a-f]{24}\Z")
@@ -110,7 +112,17 @@ def _fixed_projection(path: Path) -> dict:
         raise ValueError("console output must be a regular HTML file")
     if not path.is_file():
         return {}
-    html = path.read_text(encoding="utf-8")
+    # Current exports put metadata before all inert animation pages. Stop
+    # after the configuration instead of loading the complete HTML arena.
+    parts = []
+    with path.open(encoding='utf-8') as stream:
+        while chunk := stream.read(65536):
+            parts.append(chunk)
+            if 'id="console-config"' in chunk or len(parts) > 1 and 'id="console-config"' in parts[-2] + chunk:
+                tail = ''.join(parts[-2:])
+                if re.search(r'id="console-config"[^>]*>.*?</script>', tail, re.S):
+                    break
+    html = ''.join(parts)
     data = re.search(r'<script id="console-data" type="application/json">(.*?)</script>',
                      html, re.S)
     config = re.search(r'<script id="console-config" type="application/json">(.*?)</script>',
@@ -222,7 +234,36 @@ def _fixed_rank(snapshot: dict, summary: dict, config: object, mtime: int, parti
             -route_actions, mtime)
 
 
-def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes,
+def _write_stream(path, parts):
+    if path.is_symlink() or any(parent.is_symlink() for parent in path.parents):
+        raise ValueError('console output must be a regular HTML file')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary = tempfile.mkstemp(prefix='.' + path.name, dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o640)
+        with os.fdopen(descriptor, 'wb') as stream:
+            descriptor = -1
+            for part in parts:
+                stream.write(part.encode('utf-8') if type(part) is str else part)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _copy_public_html(source, destination):
+    def parts():
+        with source.open('rb') as stream:
+            while part := stream.read(65536):
+                yield part
+    _write_stream(destination, parts())
+
+
+def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: Path,
                            replay_config: dict[str, object] | None = None) -> None:
     """Keep stable viewing files, without replacing a better saved progression."""
     run = snapshot.get("run", {})
@@ -270,12 +311,12 @@ def _publish_fixed_replays(run_root: Path, snapshot: dict, payload: bytes,
                            previous_summary, previous_game.get("config"), previous_mtime, previous_partial)
     same_game_source = run["run_id"] == previous_run.get("run_id")
     if candidate_rank > old_rank or same_game_source:
-        write_atomic_file(game_path, payload)
+        _copy_public_html(payload, game_path)
     latest_run = previous_latest.get("snapshot", {}).get("run", {})
     latest_run_id = latest_run.get("run_id") if isinstance(latest_run, dict) else None
     _, latest_mtime = _source_summary(root, latest_run_id)
     if summary_path.stat().st_mtime_ns > latest_mtime or run["run_id"] == latest_run_id:
-        write_atomic_file(latest_path, payload)
+        _copy_public_html(payload, latest_path)
 
 
 def export_console(run_root: Path, output: Path | None = None, *,
@@ -292,12 +333,32 @@ def export_console(run_root: Path, output: Path | None = None, *,
     snapshot = build_console_snapshot(Path(run_root))
     if fingerprint is not None:
         publish_prepared(root, snapshot, fingerprint)
-    payload = render_console(snapshot, replay_config=replay_config).encode("utf-8")
+    paged = any('frame_page' in level for level in snapshot['levels'])
+    display = ({**snapshot, 'offline_frames': True,
+                'replay_revision': projection_revision(fingerprint or ())} if paged else snapshot)
+    html = render_console(display, replay_config=replay_config)
+    def parts():
+        if not paged:
+            yield html
+            return
+        position = html.index('<script>')
+        yield html[:position]
+        for bucket in snapshot['levels']:
+            if 'frame_page' not in bucket:
+                continue
+            for start in range(0, bucket['frame_count'], 32):
+                page = frame_page(root, bucket['level'], display['replay_revision'],
+                                  bucket['frame_page']['source_token'], start, 32)
+                yield f'<script type="application/json" id="console-frame-page-{bucket["level"]}-{start}">'
+                yield _inline_json(page)
+                yield '</script>\n'
+        yield html[position:]
     # Resolve operator-selected parents (macOS /tmp and /var are aliases),
     # while refusing to replace a symbolic-link output file above.
-    write_atomic_file(destination.parent.resolve() / destination.name, payload)
+    actual = destination.parent.resolve() / destination.name
+    _write_stream(actual, parts())
     if output is None:
-        _publish_fixed_replays(Path(run_root), snapshot, payload, replay_config)
+        _publish_fixed_replays(Path(run_root), snapshot, actual, replay_config)
     return destination
 
 

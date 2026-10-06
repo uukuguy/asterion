@@ -18,6 +18,7 @@ from .game import P7GameSelection
 from .live import read_trace_entries
 from .private_trace import trace_identities_for
 from .score import digest, partial_game_score, replay_sha256
+from .processing_diagnostics import public_diagnostic
 from .solutions import (VerifiedPrefix, _partial_summary_matches, _prefix_values,
                         _summary_matches, _transitions, _truncate, load_resume_worldmap, source_experiment)
 
@@ -45,7 +46,7 @@ def _count(value: object) -> int:
 
 
 def _fingerprint(run: Path) -> tuple:
-    paths = [run / 'summary.json', run / 'trace' / 'prime-trace.jsonl',
+    paths = [run / 'summary.json', run / 'processing-diagnostics.json', run / 'trace' / 'prime-trace.jsonl',
              run / 'trace' / 'prime-trace.seal.json']
     research = run / 'research'
     if _safe(research) and research.is_dir():
@@ -348,6 +349,24 @@ class ConsoleOverview:
                     self._cache[run.name] = cached
                 if cached[1] is not None:
                     item = deepcopy(cached[1])
+                    records = []
+                    try:
+                        summary = _json(run / 'summary.json')
+                        candidates = summary.get('diagnostics', {}).get('processing_diagnostics', [])
+                        if type(candidates) is list:
+                            for value in candidates:
+                                records.append(public_diagnostic(value))
+                    except (OSError, ValueError, TypeError, AttributeError):
+                        pass
+                    try:
+                        path = run / 'processing-diagnostics.json'
+                        if _safe(path) and path.is_file() and path.stat().st_size <= 1024 * 1024:
+                            candidates = json.loads(path.read_bytes())
+                            if type(candidates) is list:
+                                records = [public_diagnostic(value) for value in candidates]
+                    except (OSError, ValueError, TypeError):
+                        pass
+                    item.update(diagnostics_count=len(records), latest_diagnostic=records[-1] if records else None)
                     if item['run_id'] == active_run_id:
                         item['status'] = 'running'
                     grouped[item.pop('game_id')].append(item)
@@ -375,6 +394,7 @@ class ConsoleOverview:
                     updated = 0
                 return updated, item['run_id']
             latest = max(attempts, key=display_recency)['run_id'] if attempts else None
+            last_diagnostics = next((item for item in attempts if item['run_id'] == latest), {})
             saved_levels = best['completed_levels'] if best else 0
             displayed_levels = max(saved_levels, *(item.get('observed_completed_levels', 0) for item in attempts), 0)
             output.append({'game_id': game['game_id'], 'alias': game['alias'], 'win_levels': game['win_levels'],
@@ -386,6 +406,8 @@ class ConsoleOverview:
                            'resume_run_id': eligible['run_id'] if eligible else None,
                            'active_run_id': active, 'recording_run_id': recording,
                            'latest_run_id': latest,
+                           'diagnostics_count': last_diagnostics.get('diagnostics_count', 0),
+                           'latest_diagnostic': last_diagnostics.get('latest_diagnostic'),
                            'route_actions': best['route_actions'] if best else 0,
                            'runs': attempts})
         total_score = sum((Decimal(game['score']) for game in output), Decimal(0)) / max(1, len(output))

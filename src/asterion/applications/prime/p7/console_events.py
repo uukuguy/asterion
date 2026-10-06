@@ -8,8 +8,9 @@ from pathlib import Path
 from threading import Lock
 
 from .observation_state import ObservationState
-from .score import digest
 from .processing_diagnostics import public_diagnostic
+from .dynamic_evidence import AnimationFrames, observation_digest
+from .recording_stream import recording_rows
 
 SCHEMA = 'asterion.prime.p7-console-event/v1'
 SCHEMA_V2 = 'asterion.prime.p7-console-event/v2'
@@ -61,17 +62,17 @@ def _observation(value: object) -> bool:
     actions, layers = value['available_actions'], value['frame']
     if (type(actions) is not list or len(actions) > 7
         or any(type(a) is not str or a not in {f'ACTION{i}' for i in range(1, 8)} for a in actions)
-        or actions != sorted(set(actions)) or type(layers) is not list or not 1 <= len(layers) <= 64):
+        or actions != sorted(set(actions)) or not isinstance(layers, (list, AnimationFrames)) or len(layers) < 1):
         return False
     shape = None
     for grid in layers:
-        if type(grid) is not list or not 1 <= len(grid) <= 64:
+        if not isinstance(grid, (list, tuple)) or not 1 <= len(grid) <= 64:
             return False
-        width = len(grid[0]) if type(grid[0]) is list else 0
+        width = len(grid[0]) if isinstance(grid[0], (list, tuple)) else 0
         if not 1 <= width <= 64 or (shape is not None and shape != (len(grid), width)):
             return False
         shape = (len(grid), width)
-        if any(type(row) is not list or len(row) != width
+        if any(not isinstance(row, (list, tuple)) or len(row) != width
                or any(type(c) is not int or not 0 <= c <= 255 for c in row) for row in grid):
             return False
     return True
@@ -177,10 +178,31 @@ def _payload(kind: str, payload: Mapping[str, object]) -> dict:
             prose = value.get(key)
             valid = valid and type(prose) is str and bool(prose.strip()) and len(prose) <= 600 and public_text(prose) == prose
     elif kind == 'observation':
-        valid = (set(value) == {'source_action_sequence', 'observation_sha256', 'observation'}
+        ref = value.get('evidence_ref')
+        valid = (set(value) == {'source_action_sequence', 'observation_sha256', 'observation'} | ({'evidence_ref'} if ref is not None else set())
                  and _int(value.get('source_action_sequence')) and _hash(value.get('observation_sha256'))
-                 and _observation(value.get('observation'))
-                 and digest(ObservationState.from_observation(value['observation']).to_projection()) == value['observation_sha256'])
+                 and _observation(value.get('observation')))
+        if valid and ref is not None:
+            valid = (type(ref) is dict and set(ref) == {'schema', 'observation_sha256', 'animation_ref', 'descriptor_sha256', 'scope'}
+                     and ref['schema'] == 'asterion.prime.p7-observation-evidence/v1'
+                     and ref['observation_sha256'] == value['observation_sha256']
+                     and type(ref['descriptor_sha256']) is str and re.fullmatch(r'[0-9a-f]{64}', ref['descriptor_sha256']) is not None
+                     and type(ref['animation_ref']) is dict
+                     and all(type(key) is str and re.fullmatch(r'[a-z][a-z0-9_]*', key) and
+                             (type(item) is int and item >= 0 or type(item) is str and
+                              (item == 'asterion.prime.p7-animation/v1' or _hash(item)
+                               or re.fullmatch(r'[0-9a-f]{64}', item)))
+                             for key, item in ref['animation_ref'].items())
+                     and len(value['observation']['frame']) == 1)
+            scope = ref.get('scope') if type(ref) is dict else None
+            valid = valid and (type(scope) is dict and set(scope) == {'run_id', 'game_id', 'seed', 'sequence'}
+                               and _id(scope['run_id']) and _id(scope['game_id'])
+                               and type(scope['seed']) is int and scope['seed'] == 0
+                               and scope['sequence'] == value['source_action_sequence'])
+        elif valid:
+            observation = value['observation']
+            unified = ObservationState.from_observation({**observation, 'frame': [[[0]]]}).to_projection()
+            valid = observation_digest(unified, AnimationFrames.capture(observation['frame'])) == value['observation_sha256']
     elif kind == 'action':
         valid = (set(value) <= {'action', 'sequence', 'before_sha256', 'after_sha256', 'levels_completed', 'data', 'decision_id'}
                  and {'action', 'sequence', 'before_sha256', 'after_sha256', 'levels_completed', 'decision_id'} <= set(value)
@@ -220,18 +242,12 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
         if warnings is not None:
             warnings.append('console-events-invalid')
 
-    total_bytes = 0
-    with path.open('rb') as stream:
-        for _ in range(_MAX_ROWS):
-            line = stream.readline(_MAX_ROW_BYTES + 1)
-            total_bytes += len(line)
-            if len(line) > _MAX_ROW_BYTES or total_bytes > _MAX_FILE_BYTES:
+    try:
+        for row in recording_rows(path):
+            if len(rows) >= _MAX_ROWS:
                 invalid()
                 break
-            if not line or not line.endswith(b'\n'):
-                break
             try:
-                row = json.loads(line)
                 if type(row) is not dict or set(row) != {'schema', 'run_id', 'game_id', 'sequence', 'kind', 'payload'}:
                     invalid()
                     break
@@ -241,6 +257,7 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
                     raise ValueError('console identity unavailable')
                 if (row['schema'] not in {SCHEMA, SCHEMA_V2, SCHEMA_V3}
                         or (row['kind'] == 'diagnostic' and row['schema'] != SCHEMA_V3)
+                        or ('evidence_ref' in row['payload'] and row['schema'] != SCHEMA_V3)
                         or (row['schema'] == SCHEMA and row['kind'] in RESEARCH_KINDS)
                         or not _id(row['game_id']) or type(row['sequence']) is not int
                         or row['sequence'] != len(rows) + 1):
@@ -250,6 +267,11 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
                     invalid()
                     break
                 row['payload'] = _payload(row['kind'], row['payload'])
+                observation = row['payload'].get('observation')
+                if isinstance(observation, dict):
+                    frames = observation.get('frame')
+                    if isinstance(frames, AnimationFrames) and len(frames) <= 32:
+                        observation['frame'] = [[list(values) for values in grid] for grid in frames.page(0, len(frames))]
             except (TypeError, KeyError, UnicodeError, RecursionError, json.JSONDecodeError):
                 invalid()
                 break
@@ -259,6 +281,10 @@ def read_console_events(run_root: Path, run_id: str, game_id: str | None, *, war
                 invalid()
                 break
             rows.append(row)
+    except (OSError, ValueError, RuntimeError) as error:
+        if str(error) == 'console identity unavailable':
+            raise
+        invalid()
     return rows
 
 
@@ -275,10 +301,18 @@ class ConsoleEventWriter:
         self._sequence = 0
         self._bytes = 0
 
+    @property
+    def evidence_root(self):
+        return self._root / 'animation-evidence'
+
+    @property
+    def run_id(self):
+        return self._run_id
+
     def append(self, kind: str, payload: Mapping[str, object]) -> None:
         safe = _payload(kind, payload)
         with self._lock:
-            row = {'schema': SCHEMA_V3 if kind == 'diagnostic' else SCHEMA_V2 if kind in RESEARCH_KINDS else SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
+            row = {'schema': SCHEMA_V3 if kind == 'diagnostic' or 'evidence_ref' in safe else SCHEMA_V2 if kind in RESEARCH_KINDS else SCHEMA, 'run_id': self._run_id, 'game_id': self._game_id,
                    'sequence': self._sequence + 1, 'kind': kind, 'payload': safe}
             line = (json.dumps(row, ensure_ascii=False, allow_nan=False, separators=(',', ':')) + '\n').encode()
             if len(line) > _MAX_ROW_BYTES or self._sequence >= _MAX_ROWS or self._bytes + len(line) > _MAX_FILE_BYTES:
