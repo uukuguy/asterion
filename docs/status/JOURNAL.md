@@ -3878,3 +3878,7 @@
 - 2026-10-06 10:34 CST — User requires LLM action judgment; numbered-rule patch rejected before implementation; structured actor conclusions under design.
 - 2026-10-06 10:43 CST — Native actor labels implemented;114DOM113PASS, actor/projection/RPC focused gates PASS; independent review clear; promotion running.
 - 2026-10-06 10:43 CST — RE86 sealed6/271 resumes freshL7; S5I5L2 parallel; third25 watcher23760 waiting/unclaimed after preserved infrastructure failure.
+- 2026-10-06 10:44 CST — d88735fd saves LLM control judgments during play and separates raw/projected RPC limits to prevent aggregate false failures.
+- 2026-10-06 10:52 CST — Persist newly learned control meanings even after matching probes; avoid stale initial unknowns without per-step revisions.
+
+- 2026-10-06 10:53 CST — Native actor/RPC promotion25PASS; third25 watcher32318 pinned compatible d887 wheel, waiting/unclaimed; prompt follow-up33PASS.
