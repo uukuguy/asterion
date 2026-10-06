@@ -587,7 +587,7 @@ test('evidence remains text and keyboard shortcuts leave form controls alone', (
   dom.window.close();
 });
 
-test('exported real HTML loads with zero external resource requests', { skip: !process.env.P7_CONSOLE_HTML }, () => {
+test('exported real HTML loads with zero external resource requests', { skip: !process.env.P7_CONSOLE_HTML }, async () => {
   const requests = [], errors = [];
   const vc = new VirtualConsole(); vc.on('jsdomError', (error) => errors.push(error));
   class NoNetwork extends ResourceLoader { fetch(url) { requests.push(url); return null; } }
@@ -595,12 +595,25 @@ test('exported real HTML loads with zero external resource requests', { skip: !p
     runScripts: 'dangerously', resources: new NoNetwork(), virtualConsole: vc,
     beforeParse(window) {
       window.HTMLCanvasElement.prototype.getContext = () => ({ fillRect() {}, strokeRect() {}, beginPath() {}, arc() {}, stroke() {} });
+      window.fetch = async (url) => { requests.push(url); throw new Error('unexpected network'); };
     },
   });
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, []);
-  assert.equal(dom.window.__ASTERION_STATE__.schema, 'asterion.arc-agi3-p7-console/v1');
+  const snapshot=dom.window.__ASTERION_STATE__;
+  assert.ok(['asterion.arc-agi3-p7-console/v1','asterion.arc-agi3-p7-console/v2'].includes(snapshot.schema));
   assert.match(dom.window.document.getElementById('frame-counter').textContent, /\d+ \/ \d+/);
+  const paged=snapshot.levels.find(level=>level.frame_page && level.frame_count>32);
+  if (paged) {
+    assert.equal(snapshot.offline_frames,true);
+    const $=id=>dom.window.document.getElementById(id),last=paged.frame_count-1,start=Math.floor(last/32)*32;
+    $(`level-${paged.level}`).click();$('frame-slider').value=String(last);
+    $('frame-slider').dispatchEvent(new dom.window.Event('input'));await settleReplay();
+    const page=JSON.parse($(`console-frame-page-${paged.level}-${start}`).textContent);
+    assert.equal($('frame-counter').textContent,`${paged.frame_count} / ${paged.frame_count}`);
+    assert.match($('frame-caption').textContent,new RegExp(page.frames.find(frame=>frame.index===last).id));
+    assert.equal($('board-empty').hidden,true);assert.deepEqual(requests,[]);assert.deepEqual(errors,[]);
+  }
   dom.window.close();
 });
 
