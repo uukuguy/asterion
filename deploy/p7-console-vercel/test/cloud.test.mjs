@@ -152,4 +152,16 @@ test('packaged cloud assets are fresh with five-minute polling and unchanged loc
   assert.equal(preferred({best_run_id:null,completed_levels:0,solving_run_id:'current',solving:true,
     runs:[{run_id:'current',verified:false,completed_levels:0}]}),null);
   assert.match(local,/return activeReplayId\(game\) \|\| best\?\.run_id \|\| attempt;/);
+  const switchPattern=/function selectSwitchedGameLevel\(game\) \{[\s\S]*?\n  \}/;
+  const switchText=cloud.match(switchPattern)?.[0]; assert.ok(switchText);
+  assert.equal(switchText,local.match(switchPattern)?.[0]);
+  assert.match(cloud,/selectSwitchedGameLevel\(overviewGame\(gameId\)\)/);
+  assert.match(cloud,/selectSwitchedGameLevel\(overviewGame\(\$\('game-select'\)\.value\)\)/);
+  const selected=[]; const switchState={replayFollow:true,eventSequence:1};
+  const switchLevel=new Function('run','state','replaceSnapshot','emptyGamePreview','selectLevel',switchText+'; return selectSwitchedGameLevel;')(
+    {game_id:'old'},switchState,()=>{},game=>({game_id:game.game_id}),(index,options)=>selected.push({index,options}));
+  switchLevel({game_id:'new',win_levels:8,completed_levels:8});
+  switchLevel({game_id:'partial',win_levels:8,completed_levels:3});
+  switchLevel({game_id:'old',win_levels:8,completed_levels:3});
+  assert.deepEqual(selected,[{index:0,options:{bindSavedSource:false}},{index:3,options:{bindSavedSource:false}}]);
 });

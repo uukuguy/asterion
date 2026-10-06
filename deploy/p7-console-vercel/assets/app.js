@@ -1863,7 +1863,7 @@
     pause(); stopReplayPolling(); $('game-select').value = gameId; renderRunChoices();
     attemptReplayRun = attempt ? latestReplayId(overviewGame(gameId)) : null;
     if (!replay && state.mode === 'manual' && !activeSession()) openManual(1);
-    else { invalidateManual(); state.manualPending = null; state.mode = 'replay'; observeSelectedGame(); }
+    else { invalidateManual(); state.manualPending = null; state.mode = 'replay'; selectSwitchedGameLevel(overviewGame(gameId)); observeSelectedGame(); }
     renderSessionControls(); return true;
   }
 
@@ -2198,6 +2198,16 @@
         frames:[],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null})),decisions:[],warnings:[]};
   }
 
+  function selectSwitchedGameLevel(game) {
+    if (!game || run.game_id === game.game_id) return;
+    // Saved contiguous progress owns the switch default, even when a newer
+    // attempt has fewer passed levels or unsealed progress appears in the UI.
+    const target = game.win_levels > 0 && game.completed_levels === game.win_levels ? 1 : game.completed_levels + 1;
+    state.replayFollow = false; state.eventSequence = null;
+    replaceSnapshot(emptyGamePreview(game), {follow:false});
+    selectLevel(target - 1, {bindSavedSource:false});
+  }
+
   function validGamePreview(value, game, selectedLevel) {
     if (!validSnapshot(value)) return false;
     const record = value.run, level = value.levels[0];
@@ -2364,7 +2374,7 @@
     games.filter((game) => isRecord(game) && typeof game.game_id === 'string').forEach((game) => {
       const option = node('option', `${string(game.alias, game.game_id)} · ${game.game_id}`); option.value = game.game_id; $('game-select').append(option);
     });
-    $('game-select').addEventListener('change', () => { state.gameSelectionTouched = true; attemptReplayRun = null; stopReplayPolling(); renderRunChoices(); if (state.mode === 'manual') openManual(1); else observeSelectedGame(); renderSessionControls(); });
+    $('game-select').addEventListener('change', () => { state.gameSelectionTouched = true; attemptReplayRun = null; stopReplayPolling(); renderRunChoices(); if (state.mode === 'manual') openManual(1); else { selectSwitchedGameLevel(overviewGame($('game-select').value)); observeSelectedGame(); } renderSessionControls(); });
     $('run-start').addEventListener('click', () => startGame($('game-select').value));
     $('run-fresh').addEventListener('click', () => startGame($('game-select').value, true));
     ['pause', 'resume'].forEach((operation) => $('run-' + operation).addEventListener('click', () => sendCommand({ path: '/api/' + operation, body: { session_id: state.liveView.session_id, command_id: window.crypto.randomUUID() } })));
