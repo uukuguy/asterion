@@ -29,6 +29,42 @@ function fixture() {
 const actorLabel = (action, label, purpose, confidence = 'certain', evidence_sequences = [0]) =>
   ({ action, label, purpose, confidence, evidence_sequences });
 
+test('original level rail emphasizes passed steps and separates attempts from unloaded or unplayed levels', () => {
+  for (const [status, count, unloaded, expected] of [
+    ['successful', 13, false, '13 步'], ['incomplete', 2, false, '2 步'],
+    ['successful', 13, true, '13 步'], ['not_run', 0, false, '—'],
+    ['loading', 0, true, '—'],
+  ]) {
+    const snapshot = fixture(), level = snapshot.levels[0];
+    level.status = status;
+    level.actions = unloaded ? [] : Array.from({length: count}, (_, i) => ({...level.actions[0], id: `a${i}`}));
+    if (unloaded) Object.assign(level, {replay_unloaded: true, action_count: count, frame_count: count ? 15 : 0, frames: []});
+    else if (!count) level.frames = [];
+    const app = launch(snapshot, {replayConfig: {games: [{game_id: 'sp80-test', alias: 'SP80', win_levels: 3, baseline_actions: [20, 21, 22]}]}});
+    try {
+      const row = app.$('level-1');
+      assert.equal(row.querySelector('.level-step-count').textContent, expected);
+      assert.equal(row.querySelectorAll('.level-item-detail').length, 1);
+      assert.doesNotMatch(row.textContent, /已保存|按需读取|基准|关卡效率/);
+      assert.match(row.title, /基准 20/);
+      if (status === 'successful') {
+        assert.match(row.title, /已过关/);
+        assert.equal(row.textContent.match(/已过关/g).length, 1);
+        assert.match(row.title, /13 动作.*关卡效率 115.00 分/);
+        assert.match(app.$('level-efficiency').textContent, /115.00 分/);
+      } else assert.doesNotMatch(row.textContent, /已过关/);
+      assert.equal(row.querySelector('.level-number').textContent, '01');
+      assert.equal(row.querySelector('.level-item-heading strong').textContent, '关卡 1');
+      assert.equal(row.querySelector('.level-step-count').parentElement.className, 'level-item-detail');
+      assert.equal(row.querySelector('.level-step-count').tagName, count ? 'STRONG' : 'SPAN');
+      assert.equal(app.dom.window.getComputedStyle(row).minHeight, '72px');
+      assert.equal(app.dom.window.getComputedStyle(row.querySelector('.level-item-detail')).fontSize, '10px');
+      if (status === 'incomplete') assert.match(row.querySelector('.level-item-detail').textContent, /尝试 2 步/);
+      assert.deepEqual(app.errors, []);
+    } finally { app.dom.window.close(); }
+  }
+});
+
 test('structured actor labels display verbatim at the selected cognition cursor without parsing rules or responses', () => {
   const snapshot = fixture(), level = snapshot.levels[0];
   level.frames.forEach(frame => { frame.available_actions = ['ACTION1', 'ACTION5', 'ACTION6', 'ACTION7']; });
@@ -80,8 +116,9 @@ function overviewFixture(config) {
       total_levels: games.reduce((sum, game) => sum + game.win_levels, 0), primitive_actions: 0, restoration_actions: 0, new_solver_actions: 0 }, games };
 }
 
-function launch(snapshot = fixture(), { liveConfig = null, replayConfig = null, fetch = null, overview = undefined } = {}) {
+function launch(snapshot = fixture(), { liveConfig = null, replayConfig = null, fetch = null, overview = undefined, countFrameLookups = false } = {}) {
   const errors = [], requests = [], paints = [], outlines = [], pointers = [], timers = new Map();
+  const frameLookups = { visits: 0 };
   const substitutions = {
     __CONSOLE_CSP__: '', __CONSOLE_CSS__: fs.readFileSync(path.join(assets, 'styles.css'), 'utf8'),
     __CONSOLE_DATA__: JSON.stringify(snapshot).replace(/</g, '\\u003c'),
@@ -95,6 +132,16 @@ function launch(snapshot = fixture(), { liveConfig = null, replayConfig = null, 
   class NoNetwork extends ResourceLoader { fetch(url) { requests.push(url); return null; } }
   const dom = new JSDOM(html, { url: 'http://localhost:8765/', runScripts: 'dangerously', resources: new NoNetwork(), virtualConsole: vc,
     beforeParse(window) {
+      if (countFrameLookups) ['findIndex', 'some'].forEach(name => {
+        const original = window.Array.prototype[name];
+        window.Array.prototype[name] = function (predicate, ...rest) {
+          const frames = this.length >= 300 && Array.isArray(this[0]?.grid);
+          return original.call(this, function (...args) {
+            if (frames) frameLookups.visits += 1;
+            return predicate.apply(this, args);
+          }, ...rest);
+        };
+      });
       window.HTMLCanvasElement.prototype.getContext = function () {
         return { fillRect() { paints.push(this.fillStyle); }, strokeRect() { outlines.push(this.strokeStyle); }, beginPath() {}, arc() { pointers.push(this.strokeStyle); }, stroke() {} };
       };
@@ -105,8 +152,32 @@ function launch(snapshot = fixture(), { liveConfig = null, replayConfig = null, 
       window.clearInterval = (id) => timers.delete(id);
     } });
   const $ = (id) => dom.window.document.getElementById(id);
-  return { dom, $, errors, requests, paints, outlines, pointers, tick: () => [...timers.values()].forEach((fn) => fn()), timers };
+  return { dom, $, errors, requests, paints, outlines, pointers, frameLookups, tick: () => [...timers.values()].forEach((fn) => fn()), timers };
 }
+
+test('dense replay event selection remains bounded and preserves exact frame and cognition cursors', () => {
+  const snapshot = fixture(), level = snapshot.levels[0];
+  level.frames = Array.from({length: 362}, (_, i) => ({id: `dense-${i}`, grid: [[i % 16]], available_actions: ['ACTION1', 'ACTION5']}));
+  level.actions = [{id: 'last-action', name: 'ACTION5', before_frame: 'dense-360', after_frame: 'dense-361'}];
+  snapshot.process_events = level.frames.map((frame, i) => ({kind: 'compute_task', level: 1, frame_id: frame.id,
+    event_sequence: i + 1, payload: {status: 'completed', summary: `记录 ${i}`}}));
+  level.cognition_timeline = [0, 180, 361].map(i => ({scope: 'observation', frame_id: `dense-${i}`, event_sequence: i + 1,
+    source_action_sequence: i, stable_description: `精确认知 ${i}`, action_labels: [actorLabel('ACTION1', `认知${i}`, `来自观察 ${i}`, 'certain', [i])]}));
+  const app = launch(snapshot, {countFrameLookups: true});
+  try {
+    assert.match(app.$('world-guide').textContent, /精确认知 0/);
+    app.$('frame-slider').value = '361';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
+    assert.equal(app.$('event-counter').textContent, '事件 362');
+    assert.match(app.$('world-guide').textContent, /精确认知 361/);
+    assert.equal(app.$('available-actions').querySelector('.action-key-meaning').textContent, '认知361');
+    app.$('event-slider').value = '180';app.$('event-slider').dispatchEvent(new app.dom.window.Event('input'));
+    assert.equal(app.$('event-counter').textContent, '事件 181');
+    assert.match(app.$('world-guide').textContent, /精确认知 180/);
+    assert.equal(app.$('frame-counter').textContent, '181 / 362');
+    assert.ok(app.frameLookups.visits < 1000000, `frame lookup visits: ${app.frameLookups.visits}`);
+    assert.deepEqual(app.errors, []);
+  } finally {app.dom.window.close();}
+});
 
 test('per-level efficiency uses exact baseline actions and remains separate from game aggregate', () => {
   for (const [actual, baseline, status, expected] of [
@@ -125,7 +196,7 @@ test('per-level efficiency uses exact baseline actions and remains separate from
     if (baseline !== null) game.baseline_actions = [baseline, 11, 12];
     const app = launch(snapshot, {replayConfig: {games: [game]}});
     assert.match(app.$('level-efficiency').textContent, new RegExp(expected));
-    assert.match(app.$('level-1').textContent, new RegExp(expected));
+    assert.match(app.$('level-1').title, new RegExp(expected));
     assert.match(app.$('level-efficiency').textContent, new RegExp(`基准 ${baseline ?? '未知'} / ${actual} 动作`));
     assert.match(app.$('receipt-content').textContent, /游戏综合分（局部）：100.00/);
     assert.equal(app.$('level-efficiency').classList.contains('efficiency-low'), status === 'successful' && baseline === 7 && actual === 11);
@@ -460,7 +531,7 @@ test('real assets: slider, animation/action link, tabs, compare, level switch, p
   assert.deepEqual(errors, []);
   assert.deepEqual(requests, []);
   assert.equal(dom.window.document.querySelectorAll('.level-button').length, 3);
-  assert.match($('level-2').textContent, /本轮未记录/);
+  assert.match($('level-2').textContent, /未开始/);
   assert.match($('world-guide').textContent, /网格移动游戏/);
   assert.match($('cognition-scope').textContent, /最终/);
   assert.equal($('frame-counter').textContent, '1 / 3');
@@ -2176,8 +2247,8 @@ test('a redo preserves saved level counts and uses saved frames only where its o
   }});
   try {
     await settle();
-    assert.match(app.$('level-2').textContent,/已保存.*12 动作/, JSON.stringify(app.requests.map(entry=>entry.url)) + String(app.errors));
-    assert.match(app.$('level-3').textContent,/已保存.*7 动作/);
+    assert.match(app.$('level-2').title,/已保存.*12 动作/, JSON.stringify(app.requests.map(entry=>entry.url)) + String(app.errors));
+    assert.match(app.$('level-3').title,/已保存.*7 动作/);
     app.$('level-2').click(); await settle();
     assert.equal(app.paints.at(-1),'#1E93FF');
     assert.match(app.$('level-efficiency').textContent,/已保存.*12 动作/);
@@ -2188,7 +2259,7 @@ test('a redo preserves saved level counts and uses saved frames only where its o
     assert.match(app.$('world-guide').textContent,/保存关卡 3 的认知/);
     app.tick(); await settle();
     assert.equal(app.$('level-3').getAttribute('aria-current'),'true');
-    assert.match(app.$('level-3').textContent,/已保存.*7 动作/);
+    assert.match(app.$('level-3').title,/已保存.*7 动作/);
     assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'redo-attempt');
     assert.equal(app.dom.window.__ASTERION_STATE__.run.completed_level_count,1);
     assert.equal(app.dom.window.__ASTERION_STATE__.levels.length,2);
@@ -2230,13 +2301,13 @@ test('saved level sources survive improved routes, continuation, game changes an
     return response(idleView());
   }});
   const refresh=()=>[...app.timers.values()].find(fn=>fn.intervalMs===5000)();
-  const assertSaved=counts=>counts.forEach((count,index)=>assert.match(app.$(`level-${index+1}`).textContent,new RegExp(`已保存.*${count} 动作`)));
+  const assertSaved=counts=>counts.forEach((count,index)=>assert.equal(app.$(`level-${index+1}`).querySelector('.level-step-count').textContent,`${count} 步`));
   try {
     await settle(); assertSaved([19,49,34,25]);
     app.$('level-2').click();await settle();
     assert.match(app.$('level-efficiency').textContent,/已保存.*49 动作.*本次 18 动作/);
     best=improved;updateOverview();refresh();await settle();assert.ok(releaseImproved);
-    assert.match(app.$('level-2').textContent,/历史已保存.*最佳路线刷新中.*49 动作/);
+    assert.match(app.$('level-2').title,/历史已保存.*最佳路线刷新中.*49 动作/);
     assert.equal(app.$('level-2').dataset.savedSourceRunId,'original-four');
     assert.equal(app.$('level-2').dataset.savedCurrentBest,'false');
     assert.match(app.$('level-efficiency').textContent,/历史已保存.*最佳路线刷新中.*49 动作.*本次 18 动作/);
@@ -2246,7 +2317,7 @@ test('saved level sources survive improved routes, continuation, game changes an
     app.$('level-3').click();await settle();assertSaved([19,40,34,25]);
     assert.equal(app.$('level-2').dataset.savedSourceRunId,'improved-four');
     assert.equal(app.$('level-2').dataset.savedCurrentBest,'true');
-    assert.doesNotMatch(app.$('level-2').textContent,/49 动作|刷新中/);
+    assert.doesNotMatch(app.$('level-2').title,/49 动作|刷新中/);
     assert.match(app.$('world-guide').textContent,/improved-four 第 3 关认知/);
     assert.match(app.$('frame-caption').textContent,/已保存.*improved-four.*离线 SDK 路线验证/);
     app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
@@ -2289,7 +2360,7 @@ test('saved route is the default after an attempt ends and latest attempt is an 
     overview.games[0].runs[1].status='cancelled';
     const refresh = [...app.timers.values()].find(fn=>fn.intervalMs===5000);
     refresh(); await settle(); assert.equal(app.$('run-id').textContent,'a-saved-full');
-    assert.match(app.$('level-1').textContent,/3 动作/);
+    assert.match(app.$('level-1').title,/3 动作/);
     app.$('overview-game-list').querySelector('[data-overview-attempt]').click(); await settle();
     assert.equal(app.$('run-id').textContent,'z-new-attempt');
     refresh(); await settle(); assert.equal(app.$('run-id').textContent,'z-new-attempt');
@@ -2325,10 +2396,11 @@ test('verified saved completion stays separate from a fresh attempt and its curr
       await settle();
       assert.match(app.$('run-progress-summary').textContent, /游戏已保存 7 \/ 7 · 本轮 1 \/ 7/);
       for (let level = 2; level <= 7; level++) {
-        assert.match(app.$(`level-${level}`).textContent, /已有过关记录/);
+        assert.match(app.$(`level-${level}`).title, /已有过关记录/);
+        assert.equal(app.$(`level-${level}`).querySelector('.level-step-count').textContent, '步数待读取');
         if (level !== 2 || !observedSecondLevel) {
-          assert.match(app.$(`level-${level}`).textContent, /本轮未运行/);
-          assert.match(app.$(`level-${level}`).textContent, /0 动作/);
+          assert.match(app.$(`level-${level}`).title, /本轮未运行/);
+          assert.doesNotMatch(app.$(`level-${level}`).textContent, /0步/);
         }
       }
       app.$('level-2').click();
@@ -2344,7 +2416,7 @@ test('verified saved completion stays separate from a fresh attempt and its curr
     } finally { app.dom.window.close(); }
   }
   const staticApp = launch(fixture());
-  assert.match(staticApp.$('level-2').textContent, /本轮未记录/);
+  assert.match(staticApp.$('level-2').textContent, /未开始/);
   assert.equal(staticApp.$('level-2').querySelector('.level-verified-badge'), null);
   staticApp.dom.window.close();
 });
@@ -2362,7 +2434,7 @@ test('live game aggregate 100 does not replace completed level efficiency 40.50'
     await settle();
     assert.equal(app.$('overview-game-list').firstElementChild.children[2].textContent, '100.00');
     assert.match(app.$('level-efficiency').textContent, /基准 7 \/ 11 动作 \/ 关卡效率 40.50 分/);
-    assert.match(app.$('level-1').textContent, /关卡效率 40.50 分/);
+    assert.match(app.$('level-1').title, /关卡效率 40.50 分/);
     app.$('level-2').click();
     await settle();
     assert.match(app.$('level-efficiency').textContent, /基准 11 \/ 0 动作 \/ 关卡效率待完成/);
@@ -2791,8 +2863,13 @@ test('per-level replay shows loading, manifest counts, and reads only the chosen
     const stageHeight=app.dom.window.getComputedStyle(app.$('board-stage')).height;
     assert.equal(app.$('palette-legend').hidden,true);
     assert.match(app.$('replay-loading-text').textContent,/正在整理回放/);assert.equal(app.$('board-empty').hidden,false);
+    assert.equal(app.$('run-status').textContent,'读取中');
+    assert.equal(app.$('level-progress').textContent,'— / 3');assert.equal(app.$('action-total').textContent,'—');
+    assert.match(app.$('run-progress-summary').textContent,/游戏已保存 2 \/ 3 · 正在读取回放/);
     ready=true;const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
-    assert.ok(releaseDetail);assert.match(app.$('level-1').textContent,/1 动作 · 3 帧/);assert.match(app.$('level-2').textContent,/2 动作 · 3 帧/);
+    assert.ok(releaseDetail);assert.match(app.$('level-1').title,/1 动作 · 3 帧/);assert.match(app.$('level-2').title,/2 动作 · 3 帧/);
+    assert.equal(app.$('level-1').querySelector('.level-step-count').textContent,'1 步');
+    assert.equal(app.$('level-2').querySelector('.level-step-count').textContent,'2 步');
     assert.match(app.$('replay-loading-text').textContent,/正在加载第 2 关/);assert.equal(app.$('replay-loading').hidden,false);
     assert.equal(app.requests.some(request=>request.url==='/api/replay/level-first'),false);
     assert.equal(app.requests.some(request=>request.url.includes('/levels/1/')),false);
@@ -2876,7 +2953,7 @@ test('per-level saved fallback uses the exact improved best and retires a loadin
   try {
     await settleReplay();assert.match(app.$('world-guide').textContent,/active-retry/);
     app.$('level-3').click();await settleReplay();assert.ok(releaseOld);assert.equal(app.$('replay-loading').hidden,false);
-    assert.match(app.$('level-3').textContent,/已保存.*3 动作/);assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);
+    assert.match(app.$('level-3').title,/已保存.*3 动作/);assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);
     best=improved;setBest();[...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();assert.ok(releaseImproved);
     releaseImproved(response(improved.detail(3)));await settleReplay();assert.match(app.$('world-guide').textContent,/saved-improved/);
     releaseOld(response(old.detail(3)));await settleReplay();assert.match(app.$('world-guide').textContent,/saved-improved/);
@@ -2912,7 +2989,7 @@ test('fresh loading manifest invalidates an in-flight detail from the same saved
     [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();
     releaseSaved(response(saved.detail(1)));await settleReplay();
     assert.equal(app.$('board-empty').hidden,false);assert.doesNotMatch(app.$('world-guide').textContent,/revision-saved/);
-    assert.equal(app.$('replay-loading').hidden,false);assert.match(app.$('level-1').textContent,/已保存.*1 动作/);
+    assert.equal(app.$('replay-loading').hidden,false);assert.match(app.$('level-1').title,/已保存.*1 动作/);
     assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/')),false);assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
 });
@@ -2940,7 +3017,7 @@ test('verified sealed partial saved prefixes load history without claiming full-
       await settleReplay();app.$('level-1').click();await settleReplay();
       assert.equal(app.$('single-board').dataset.sourceRunId,'verified-partial');assert.equal(app.$('single-board').dataset.sourceScope,'saved');
       assert.equal(app.$('frame-counter').textContent,'1 / 3');assert.match(app.$('world-guide').textContent,/verified-partial 第1关/);
-      assert.match(app.$('level-1').textContent,/已保存.*1 动作/);assert.match(app.$('run-progress-summary').textContent,/已保存 2 \/ 3/);
+      assert.match(app.$('level-1').title,/已保存.*1 动作/);assert.match(app.$('run-progress-summary').textContent,/已保存 2 \/ 3/);
       assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'partial-active');assert.equal(app.dom.window.__ASTERION_STATE__.run.replay_verified,false);
       assert.equal(saved.record.run.replay_verified,false);assert.equal(saved.record.run.status,'incomplete');
       assert.equal(overviewRow(app).querySelector('.overview-result-badge').textContent,'◐ 部分通关');

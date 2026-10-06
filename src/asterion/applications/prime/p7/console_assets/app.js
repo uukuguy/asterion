@@ -137,9 +137,24 @@
   const actions = () => array(currentLevel().actions);
   const currentFrame = () => frames()[state.frameIndex];
   const frameById = (id) => (state.mode === 'manual' && run.status === 'manual' ? levels.flatMap((level) => array(level.frames)) : frames()).find((frame) => frame.id === id);
-  const processEvents = () => state.mode === 'manual' ? [] : array(levelSource().snapshot.process_events).filter((event) => event.level === currentLevel().level && frames().some((frame) => frame.id === event.frame_id));
-  const cursorSequence = () => state.eventSequence ?? processEvents().filter((event) => frames().findIndex((frame) => frame.id === event.frame_id) <= state.frameIndex).at(-1)?.event_sequence ?? null;
-  const researchEvents = () => processEvents().filter((event) => event.event_sequence <= cursorSequence() && ['compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind));
+  const processEvents = () => {
+    if (state.mode === 'manual') return [];
+    const source = levelSource(), frameIds = new Set(array(source.level.frames).map(frame => frame.id));
+    return array(source.snapshot.process_events).filter(event => event.level === source.level.level && frameIds.has(event.frame_id));
+  };
+  const cursorSequence = (events) => {
+    if (state.eventSequence !== null) return state.eventSequence;
+    const frameIndexes = new Map(frames().map((frame, index) => [frame.id, index]));
+    let cursor = null;
+    (events || processEvents()).forEach(event => {
+      if (frameIndexes.get(event.frame_id) <= state.frameIndex) cursor = event.event_sequence;
+    });
+    return cursor;
+  };
+  const researchEvents = () => {
+    const events = processEvents(), cursor = cursorSequence(events);
+    return events.filter(event => event.event_sequence <= cursor && ['compute_task', 'model_revision', 'plan', 'feedback', 'run_control'].includes(event.kind));
+  };
   const selectedAction = () => actions().find((action) => action.id === state.actionId) || null;
   const manualPlayable = () => state.mode === 'manual' && run.status === 'manual' && state.manualView?.state === 'ready' &&
     state.manualView.game_id === run.game_id && manualLevel(state.manualView) === currentLevel().level && !state.manualBusy && !state.manualPending && !state.manualError &&
@@ -265,7 +280,7 @@
 
   const statuses = {
     completed: ['已过关', 'success'], successful: ['已成功', 'success'], success: ['已成功', 'success'], won: ['已过关', 'success'],
-    running: ['运行中', 'active'], active: ['可继续', 'active'], in_progress: ['进行中', 'active'],
+    running: ['运行中', 'active'], active: ['可继续', 'active'], in_progress: ['进行中', 'active'], loading: ['读取中', 'active'],
     incomplete: ['未完成', 'warning'], interrupted: ['已中断', 'warning'], waiting: ['等待', 'warning'], unknown: ['信息不足', 'warning'],
     unsuccessful: ['未成功', 'failed'], failed: ['失败', 'failed'], game_over: ['游戏结束', 'failed'],
     manual: ['人工试玩', 'neutral'], 'not-run': ['未运行', 'neutral'], not_run: ['未运行', 'neutral'], unobserved: ['未运行', 'neutral'], unavailable: ['无证据', 'neutral'],
@@ -294,8 +309,8 @@
   function renderRunHeader() {
     write('game-title', string(run.game_id, '未识别游戏'));
     write('run-id', ['manual', 'preview', 'preview-unavailable'].includes(run.status) ? '尚未启动 P7' : string(run.run_id));
-    write('level-progress', `${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`);
-    write('action-total', number(run.primitive_action_count));
+    write('level-progress', `${run.status === 'loading' ? '—' : number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`);
+    write('action-total', run.status === 'loading' ? '—' : number(run.primitive_action_count));
     write('level-total', levelCount ? `${levelCount} 个关卡` : '总数未知');
     renderProgressContext();
     setStatus($('run-status'), run.status);
@@ -355,7 +370,7 @@
 
   function renderProgressContext() {
     const manual = state.mode === 'manual', game = verifiedSavedGame();
-    const current = `本轮 ${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`;
+    const current = run.status === 'loading' ? '正在读取回放' : `本轮 ${number(run.completed_level_count)} / ${number(run.win_levels) || '未知'}`;
     $('run-progress-summary').hidden = manual;
     write('run-progress-summary', string(run.status, '').startsWith('preview') ? '关卡初始预览 · 尚未开始' : game ? `游戏已保存 ${game.completed_levels} / ${game.win_levels} · ${current}` : current);
     setStatus($('level-status'), currentLevel().status === 'successful' ? 'completed' : currentLevel().status);
@@ -386,7 +401,16 @@
       button.disabled = manual && manualSelectionLocked();
       const saved = manual && state.manualView?.game_id === run.game_id && array(state.manualView.saved_levels).includes(level.level);
       const verified = savedGame && level.status !== 'successful' && level.level <= savedGame.completed_levels;
-      button.setAttribute('aria-label', `关卡 ${level.level}，${label}${saved ? '，已保存，可继续' : ''}${verified ? '，已有过关记录' : ''}，${levelActionCount(displayed)} 个动作`);
+      const count = levelActionCount(displayed), passed = displayed.status === 'successful';
+      const savedStepsPending = verified && !authority && !retained && !passed;
+      const conciseStatus = manual ? statusLabel : retained ? '已过关 · 更新中' : passed || verified ? '已过关'
+        : displayed.status === 'loading' ? '读取中' : displayed.status === 'preview-unavailable' ? '预览不可用'
+          : ['preview', 'not_run', 'not-run', 'unobserved'].includes(displayed.status) ? '未开始'
+            : currentRunLevelLabel(displayed) === '本轮进行中' ? '进行中' : '未过关';
+      const stepText = savedStepsPending ? '步数待读取' : passed || count ? `${count} 步` : '—';
+      const details = `${label}${verified ? ' · 已有过关记录' : ''} · ${count} 动作 · ${levelFrameCount(displayed)} 帧${displayed.replay_unloaded ? ' · 按需读取' : ''}${displayed.receipt ? ' · 回执' : ''}${manual ? '' : ` · ${levelEfficiency(displayed).text}`}`;
+      button.title = details;
+      button.setAttribute('aria-label', `关卡 ${level.level}，${conciseStatus}，${savedStepsPending ? '已保存过关步数待读取' : passed ? `过关 ${count} 步` : count ? `本次${manual ? '试玩' : '尝试'} ${count} 步` : '尚无动作记录'}，${details}`);
       button.append(node('span', String(level.level).padStart(2, '0'), 'level-number'));
       const content = node('div', undefined, 'level-item-content');
       const heading = node('div', undefined, 'level-item-heading');
@@ -394,13 +418,11 @@
       dot.setAttribute('aria-hidden', 'true');
       heading.append(node('strong', `关卡 ${level.level}`), dot);
       if (saved) heading.append(node('span', '已保存', 'level-saved-badge'));
-      if (verified) heading.append(node('span', '已有过关记录', 'level-verified-badge'));
-      content.append(heading, node('p', label, 'level-item-status'));
-      content.append(node('p', `${authority ? '已保存 · ' : retained ? '历史已保存 · ' : ''}${levelActionCount(displayed)} 动作 · ${levelFrameCount(displayed) ? `${levelFrameCount(displayed)} 帧${displayed.replay_unloaded ? ' · 按需读取' : ''}` : '无画面'}${displayed.receipt ? ' · 回执' : ''}`, 'level-item-detail'));
-      if (!manual) {
-        const efficiency = levelEfficiency(displayed);
-        content.append(node('p', efficiency.text, `level-item-detail${efficiency.low ? ' efficiency-low' : ''}`));
-      }
+      const meta = node('p', undefined, 'level-item-detail');
+      if (!savedStepsPending && !passed && count) meta.append(document.createTextNode(`${manual ? '试玩' : '尝试'} `));
+      meta.append(node(!savedStepsPending && (passed || count) ? 'strong' : 'span', stepText, 'level-step-count'));
+      if (levelFrameCount(displayed)) meta.append(document.createTextNode(` · ${levelFrameCount(displayed)} 帧`));
+      content.append(heading, node('p', conciseStatus, 'level-item-status'), meta);
       button.append(content);
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') {
@@ -531,8 +553,7 @@
   // Preserve historical prose as evidence in the cognition panel, without
   // interpreting it as a control label.
   const meaningEntries = entries => array(entries).filter(entry => entry && ['certain', 'undetermined', 'falsified'].includes(entry.status) && typeof entry.claim === 'string' && entry.claim);
-  function recordedActionMeaning(name) {
-    const cognition = selectedCognition();
+  function recordedActionMeaning(name, cognition = selectedCognition()) {
     const label = ['final', 'observation', 'planning'].includes(cognition.scope) && validActionLabels(cognition)
       ? array(cognition.action_labels).find(entry => entry.action === name) : null;
     if (label) return { ...label, background: cognition.scope !== 'observation', provenance: cognition.provenance };
@@ -548,6 +569,7 @@
     const afterIndex = action ? frames().findIndex((item) => item.id === action.after_frame) : -1;
     const linked = action && frame && (frame.id === action.after_frame || (beforeIndex >= 0 && afterIndex >= beforeIndex && state.frameIndex > beforeIndex && state.frameIndex <= afterIndex));
     const manual = state.mode === 'manual' && run.status === 'manual';
+    const cognition = selectedCognition();
     const activeName = manual ? frame ? manualAtCurrent() ? state.manualView?.last_action?.action : action?.name : null : linked ? action.name : null;
     const recordedActions = (name) => actions().filter((entry) => entry.name === name).map((entry) => ({
       action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
@@ -583,7 +605,7 @@
       if (active) item.setAttribute('aria-current', 'true'); else item.removeAttribute('aria-current');
       if (manual && name === 'ACTION6') item.setAttribute('aria-pressed', String(armed)); else item.removeAttribute('aria-pressed');
       if (pending) item.setAttribute('aria-busy', 'true'); else item.removeAttribute('aria-busy');
-      const short = recordedActionMeaning(name);
+      const short = recordedActionMeaning(name, cognition);
       // Manual snapshots can omit actions while retaining a played journal.
       // Their empty action array is not evidence that a key was unused.
       const actionCount = manual ? null : actions().filter(entry => entry.name === name).length;
@@ -770,14 +792,15 @@
 
   function observationCognition() {
     const timeline = array(currentLevel().cognition_timeline);
-    return timeline.filter((entry) => entry.scope === 'observation').map((entry) => ({ entry, index: frames().findIndex((frame) => frame.id === entry.frame_id) }))
+    const frameIndexes = new Map(frames().map((frame, index) => [frame.id, index]));
+    return timeline.filter((entry) => entry.scope === 'observation').map((entry) => ({ entry, index: frameIndexes.get(entry.frame_id) ?? -1 }))
       .filter(({ entry, index }) => index >= 0 && index <= state.frameIndex && (state.eventSequence === null || !Number.isInteger(entry.event_sequence) || entry.event_sequence <= state.eventSequence))
       .sort((a, b) => a.index - b.index || number(a.entry.event_sequence) - number(b.entry.event_sequence)).pop()?.entry || null;
   }
 
   function selectedCognition() {
     const timeline = array(currentLevel().cognition_timeline);
-    const revision = researchEvents().filter((event) => event.kind === 'model_revision').at(-1);
+    const revision = timeline.length ? null : researchEvents().filter((event) => event.kind === 'model_revision').at(-1);
     const aligned = timeline.length ? observationCognition() : revision ? { scope: 'observation', frame_id: revision.frame_id,
       source_action_sequence: revision.source_action_sequence, cognition_revision: revision.event_sequence, event_sequence: revision.event_sequence,
       stable_description: revision.payload.description_zh, cognition_narrative_zh: revision.payload.correction_summary, origin: 'actor', provenance: revision.provenance,
