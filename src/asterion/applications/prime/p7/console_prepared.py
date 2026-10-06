@@ -23,7 +23,8 @@ from .run_story.storage import publish_directory, write_atomic_file
 from .processing_diagnostics import public_diagnostic
 
 
-_SCHEMA = 'asterion.arc-agi3-p7-prepared-replay/v1'
+_SCHEMA = 'asterion.arc-agi3-p7-prepared-replay/v2'
+_LEGACY_SCHEMA = 'asterion.arc-agi3-p7-prepared-replay/v1'
 _HEX = re.compile(r'[0-9a-f]{64}\Z')
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z')
 _MAX_META = 1024 * 1024
@@ -256,6 +257,8 @@ def _detail(value, manifest, number):
         raise ValueError('prepared replay unavailable')
     bucket, metadata = value['levels'][0], manifest['levels'][number - 1]
     paged = 'frame_page' in bucket
+    if paged and value['schema'] != 'asterion.arc-agi3-p7-console/v2':
+        raise ValueError('prepared replay unavailable')
     if (set(bucket) != _LEVEL_FIELDS | ({'frame_count', 'frame_index_offset', 'frame_page'} if paged else set())
             or type(bucket['level']) is not int or bucket['level'] != number
             or bucket['status'] != metadata['status'] or type(bucket['frames']) is not list
@@ -394,17 +397,23 @@ def _checked(path, descriptor, maximum):
 def _load(root, fingerprint):
     base = root / 'console-prepared'
     index = _json(_read(base / 'current.json', _MAX_META))
+    legacy = type(index) is dict and index.get('schema') == _LEGACY_SCHEMA
     if (type(index) is not dict or set(index) != {'schema', 'run_id', 'source_revision', 'generation_sha256',
-            'revision', 'manifest', 'levels', 'verification_kind'} or index['schema'] != _SCHEMA
-            or index['run_id'] != root.name or index['source_revision'] != projection_revision(fingerprint)
+            'revision', 'manifest', 'levels', 'verification_kind'} or index['schema'] not in {_SCHEMA, _LEGACY_SCHEMA}
+            or index['run_id'] != root.name or index['source_revision'] != projection_revision(fingerprint, legacy=legacy)
             or type(index['generation_sha256']) is not str or not _HEX.fullmatch(index['generation_sha256'])
-            or index['revision'] != projection_revision(fingerprint, index['generation_sha256'])
+            or index['revision'] != projection_revision(fingerprint, index['generation_sha256'], legacy=legacy)
             or index['verification_kind'] not in {'full-replay', 'verified-prefix'}
             or type(index['levels']) is not list or not 1 <= len(index['levels']) <= 100):
         raise ValueError('prepared replay unavailable')
     directory = base / index['revision']
     manifest = _checked(directory / 'manifest.json', index['manifest'], _MAX_META)
     _manifest(manifest, root.name)
+    # Earlier paged generations filtered boundary events through only their
+    # first page. Preserve admitted full-frame v1 caches, but never reuse that
+    # old v2 projection as a generation produced by the corrected projector.
+    if legacy and manifest['schema'] != 'asterion.arc-agi3-p7-replay-manifest/v1':
+        raise ValueError('prepared replay unavailable')
     if manifest['revision'] != index['revision'] or len(index['levels']) != len(manifest['levels']):
         raise ValueError('prepared replay unavailable')
     total = 0

@@ -13,6 +13,30 @@ from tests.test_prime_p7_console_session import ConsoleSessionFixture, RUN_ID
 
 
 class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
+    def test_legacy_v1_stays_readable_but_prior_v2_projector_requires_rebuild(self):
+        from asterion.applications.prime.p7 import console_prepared as prepared
+        from asterion.applications.prime.p7.console_replay import replay_fingerprint
+        root, snapshot = self.saved()
+        legacy = 'asterion.arc-agi3-p7-prepared-replay/v1'
+        with patch('asterion.applications.prime.p7.console_replay._PROJECTOR',
+                   'asterion.arc-agi3-p7-replay-projector/v1'), patch.object(prepared, '_SCHEMA', legacy):
+            self.save(root, snapshot)
+        fingerprint = replay_fingerprint(root)
+        old = prepared.read_prepared_manifest(root, fingerprint)
+        self.assertIsNotNone(old)
+        self.assertEqual(old['schema'], 'asterion.arc-agi3-p7-replay-manifest/v1')
+        snapshot.update(schema='asterion.arc-agi3-p7-console/v2', diagnostics=[])
+        (root / 'console-prepared' / 'current.json').unlink()
+        with patch('asterion.applications.prime.p7.console_replay._PROJECTOR',
+                   'asterion.arc-agi3-p7-replay-projector/v1'), patch.object(prepared, '_SCHEMA', legacy):
+            self.save(root, snapshot)
+        self.assertIsNone(prepared.read_prepared_manifest(root, fingerprint))
+        repaired = prepared.publish_prepared(root, snapshot, fingerprint)
+        self.assertIsNotNone(repaired)
+        self.assertEqual(prepared.read_prepared_manifest(root, fingerprint), repaired)
+        index = json.loads((root / 'console-prepared' / 'current.json').read_text())
+        self.assertEqual(index['schema'], 'asterion.arc-agi3-p7-prepared-replay/v2')
+
     def test_prepared_animation_pages_bind_revision_and_preserve_metadata_on_missing_page(self):
         from asterion.applications.prime.p7.console_frames import FrameStore, frame_page
         root, snapshot = self.saved()
@@ -37,6 +61,14 @@ class TestPrimeP7ConsolePrepared(ConsoleSessionFixture):
         detail = session.replay_level(RUN_ID, 2, manifest['revision'])
         self.assertEqual(len(detail['levels'][0]['frames']), 32)
         from asterion.applications.prime.p7.console_prepared import _detail
+        disguised = deepcopy(detail)
+        disguised['schema'] = 'asterion.arc-agi3-p7-console/v1'
+        disguised.pop('diagnostics')
+        disguised_manifest = deepcopy(manifest)
+        disguised_manifest['schema'] = 'asterion.arc-agi3-p7-replay-manifest/v1'
+        disguised_manifest.pop('diagnostics')
+        with self.assertRaises(ValueError):
+            _detail(disguised, disguised_manifest, 2)
         crossed = deepcopy(detail)
         crossed_event = deepcopy(crossed['process_events'][0])
         crossed_event.update(level=1, frame_id='f000095', event_sequence=10000)

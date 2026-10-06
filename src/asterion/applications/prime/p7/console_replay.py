@@ -19,7 +19,8 @@ _REVISION = re.compile(r'[0-9a-f]{64}\Z')
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_PATHS = 8192
 _CACHE_BYTES = 128 * 1024 * 1024
-_PROJECTOR = 'asterion.arc-agi3-p7-replay-projector/v1'
+_PROJECTOR = 'asterion.arc-agi3-p7-replay-projector/v2'
+_LEGACY_PROJECTOR = 'asterion.arc-agi3-p7-replay-projector/v1'
 
 
 def replay_fingerprint(root: Path) -> tuple:
@@ -158,12 +159,15 @@ def _loading(run_id):
             'revision': None, 'run': None, 'levels': [], 'warnings': []}
 
 
-def projection_revision(fingerprint: tuple, content_sha256: str | None = None) -> str:
-    return sha256((_PROJECTOR + repr(fingerprint) + (content_sha256 or '')).encode('utf-8')).hexdigest()
+def projection_revision(fingerprint: tuple, content_sha256: str | None = None, *, legacy: bool = False) -> str:
+    projector = _LEGACY_PROJECTOR if legacy else _PROJECTOR
+    return sha256((projector + repr(fingerprint) + (content_sha256 or '')).encode('utf-8')).hexdigest()
 
 
 def projection_manifest(snapshot: dict, revision: str) -> dict:
-    warnings = {'diagnostics': snapshot['diagnostics']} if 'diagnostics' in snapshot else {}
+    paged = any('frame_page' in level for level in snapshot['levels'])
+    v2 = 'diagnostics' in snapshot or snapshot.get('schema') == 'asterion.arc-agi3-p7-console/v2' or paged
+    warnings = {'diagnostics': snapshot.get('diagnostics', [])} if v2 else {}
     return {'schema': 'asterion.arc-agi3-p7-replay-manifest/v2' if warnings else _SCHEMA,
             **warnings, 'state': 'ready', 'run_id': snapshot['run']['run_id'],
             'revision': revision, 'run': snapshot['run'], 'warnings': snapshot.get('warnings', []),
