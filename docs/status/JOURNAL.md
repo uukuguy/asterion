@@ -4114,3 +4114,14 @@
 2026-10-07 00:35 CST — Cloud补传PASS25/183/100; BP L9 cognition/lastframeparityPASS; fixed prematureuploadACK diagnosis; official3/25backgroundongoing.
 
 2026-10-07 00:38 CST — Cloudsyncfix13tests/CLEAR; publisher95390resumed, no official/console signals; userauthorizescommunityPR preparation and README overhaul.
+
+2026-10-07 00:38 CST — 9d1f898c: Retry failed cloud uploads and retain errors to prevent stale published progress.
+2026-10-07 00:38 CST — 247c02f8: Define community submission evidence and reproducibility scope before documentation publication.
+
+- 2026-10-07 00:41 CST — Community fork submission records honest warm-start/replay scope; upstream validation passed; awaiting final card/root review [07ca121].
+
+- 2026-10-07 00:42 CST — Community submission discloses midcampaign repairs and operator retries/resets to preserve evaluation provenance [d594c5f].
+
+2026-10-07 00:45 CST — Community materials distinguish iterative repairs from fixed-version solving; verified officialRESET retains failed-action costs.
+
+2026-10-07 00:54 CST — Checked upstream community criteria: no unattended cold-start100 requirement; retain concise protocol provenance, no added evaluation gate.

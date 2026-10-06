@@ -1,0 +1,413 @@
+{
+  "method": "Asterion Prime P7",
+  "benchmark": "ARC-AGI-3",
+  "set": "public",
+  "research_date": "2026-10-07",
+  "model": "gpt-6.1-sol",
+  "seed": 0,
+  "wheel_sha256": "88deab20a7c0f6da8fd8a091b759f32a3e366cea2627c683407934c061372d59",
+  "evaluation_protocol": "Iterative local research with persisted experience; Competition Mode replay of certified saved action routes. This is not a cold-start evaluation.",
+  "local_result": {
+    "score": 100.0,
+    "games_completed": 25,
+    "games_total": 25,
+    "levels_completed": 183,
+    "levels_total": 183,
+    "saved_route_actions": 6781
+  },
+  "official_result": {
+    "status": "in-progress",
+    "scorecard_url": "https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a"
+  },
+  "cost_usd": null,
+  "cost_note": "Complete exploration cost was not audited; no monetary estimate is reported.",
+  "generalization_note": "These results concern the 25 public games; no private-set or unseen-game result is claimed.",
+  "games": [
+    {
+      "game_id": "ar25-0c556536",
+      "win_levels": 8,
+      "levels_completed": 8,
+      "actions": 258,
+      "level_action_counts": [
+        17,
+        13,
+        40,
+        22,
+        29,
+        53,
+        37,
+        47
+      ]
+    },
+    {
+      "game_id": "bp35-0a0ad940",
+      "win_levels": 9,
+      "levels_completed": 9,
+      "actions": 362,
+      "level_action_counts": [
+        19,
+        40,
+        34,
+        25,
+        32,
+        43,
+        53,
+        46,
+        70
+      ]
+    },
+    {
+      "game_id": "cd82-fb555c5d",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 85,
+      "level_action_counts": [
+        19,
+        6,
+        17,
+        14,
+        13,
+        16
+      ]
+    },
+    {
+      "game_id": "cn04-2fe56bfb",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 186,
+      "level_action_counts": [
+        14,
+        30,
+        23,
+        32,
+        48,
+        39
+      ]
+    },
+    {
+      "game_id": "dc22-fdcac232",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 474,
+      "level_action_counts": [
+        34,
+        45,
+        46,
+        66,
+        124,
+        159
+      ]
+    },
+    {
+      "game_id": "ft09-0d8bbf25",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 75,
+      "level_action_counts": [
+        4,
+        7,
+        14,
+        16,
+        21,
+        13
+      ]
+    },
+    {
+      "game_id": "g50t-5849a774",
+      "win_levels": 7,
+      "levels_completed": 7,
+      "actions": 302,
+      "level_action_counts": [
+        32,
+        31,
+        64,
+        31,
+        52,
+        49,
+        43
+      ]
+    },
+    {
+      "game_id": "ka59-38d34dbb",
+      "win_levels": 7,
+      "levels_completed": 7,
+      "actions": 350,
+      "level_action_counts": [
+        23,
+        48,
+        36,
+        38,
+        27,
+        70,
+        108
+      ]
+    },
+    {
+      "game_id": "lf52-271a04aa",
+      "win_levels": 10,
+      "levels_completed": 10,
+      "actions": 724,
+      "level_action_counts": [
+        8,
+        56,
+        46,
+        52,
+        91,
+        92,
+        144,
+        68,
+        105,
+        62
+      ]
+    },
+    {
+      "game_id": "lp85-305b61c3",
+      "win_levels": 8,
+      "levels_completed": 8,
+      "actions": 93,
+      "level_action_counts": [
+        8,
+        10,
+        16,
+        13,
+        11,
+        20,
+        6,
+        9
+      ]
+    },
+    {
+      "game_id": "ls20-9607627b",
+      "win_levels": 7,
+      "levels_completed": 7,
+      "actions": 467,
+      "level_action_counts": [
+        16,
+        99,
+        49,
+        54,
+        70,
+        86,
+        93
+      ]
+    },
+    {
+      "game_id": "m0r0-492f87ba",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 218,
+      "level_action_counts": [
+        15,
+        23,
+        65,
+        11,
+        43,
+        61
+      ]
+    },
+    {
+      "game_id": "r11l-495a7899",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 75,
+      "level_action_counts": [
+        4,
+        10,
+        14,
+        14,
+        18,
+        15
+      ]
+    },
+    {
+      "game_id": "re86-8af5384d",
+      "win_levels": 8,
+      "levels_completed": 8,
+      "actions": 551,
+      "level_action_counts": [
+        20,
+        36,
+        47,
+        44,
+        63,
+        61,
+        118,
+        162
+      ]
+    },
+    {
+      "game_id": "s5i5-18d95033",
+      "win_levels": 8,
+      "levels_completed": 8,
+      "actions": 244,
+      "level_action_counts": [
+        13,
+        26,
+        37,
+        30,
+        28,
+        25,
+        49,
+        36
+      ]
+    },
+    {
+      "game_id": "sb26-7fbdac44",
+      "win_levels": 8,
+      "levels_completed": 8,
+      "actions": 124,
+      "level_action_counts": [
+        9,
+        15,
+        15,
+        15,
+        17,
+        19,
+        17,
+        17
+      ]
+    },
+    {
+      "game_id": "sc25-635fd71a",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 175,
+      "level_action_counts": [
+        23,
+        5,
+        27,
+        25,
+        59,
+        36
+      ]
+    },
+    {
+      "game_id": "sk48-d8078629",
+      "win_levels": 8,
+      "levels_completed": 8,
+      "actions": 303,
+      "level_action_counts": [
+        18,
+        30,
+        39,
+        34,
+        60,
+        57,
+        31,
+        34
+      ]
+    },
+    {
+      "game_id": "sp80-589a99af",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 143,
+      "level_action_counts": [
+        7,
+        9,
+        14,
+        37,
+        28,
+        48
+      ]
+    },
+    {
+      "game_id": "su15-1944f8ab",
+      "win_levels": 9,
+      "levels_completed": 9,
+      "actions": 122,
+      "level_action_counts": [
+        9,
+        13,
+        14,
+        12,
+        6,
+        22,
+        5,
+        26,
+        15
+      ]
+    },
+    {
+      "game_id": "tn36-ef4dde99",
+      "win_levels": 7,
+      "levels_completed": 7,
+      "actions": 215,
+      "level_action_counts": [
+        15,
+        60,
+        12,
+        17,
+        23,
+        43,
+        45
+      ]
+    },
+    {
+      "game_id": "tr87-cd924810",
+      "win_levels": 6,
+      "levels_completed": 6,
+      "actions": 161,
+      "level_action_counts": [
+        25,
+        31,
+        27,
+        26,
+        21,
+        31
+      ]
+    },
+    {
+      "game_id": "tu93-0768757b",
+      "win_levels": 9,
+      "levels_completed": 9,
+      "actions": 193,
+      "level_action_counts": [
+        18,
+        15,
+        19,
+        18,
+        29,
+        28,
+        14,
+        23,
+        29
+      ]
+    },
+    {
+      "game_id": "vc33-5430563c",
+      "win_levels": 7,
+      "levels_completed": 7,
+      "actions": 176,
+      "level_action_counts": [
+        3,
+        8,
+        23,
+        21,
+        46,
+        22,
+        53
+      ]
+    },
+    {
+      "game_id": "wa30-ee6fef47",
+      "win_levels": 9,
+      "levels_completed": 9,
+      "actions": 705,
+      "level_action_counts": [
+        36,
+        52,
+        74,
+        50,
+        116,
+        52,
+        77,
+        115,
+        133
+      ]
+    }
+  ],
+  "final_runtime_source_commit": "2f258ff3e74478805f63e08daa437acf9ca53a21",
+  "software_provenance_note": "The campaign produced routes across successive software revisions, including generic infrastructure repairs between attempts. This identifies the final runtime, not a fixed-version cold-start run.",
+  "reset_accounting_note": "Within a Competition scorecard, a level RESET is itself an action and does not discard previous attempted actions. Local research in separate runs precedes the scored saved-route replay."
+}

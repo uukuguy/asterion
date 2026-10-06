@@ -2,203 +2,121 @@
 
 # Asterion
 
-**A composable, multi-runtime agent application framework.**
+**A composable, multi-runtime agent application framework for sustained, evidence-driven research.**
 
-Asterion turns agent capabilities into exact, executable applications without giving models ownership of credentials, authority, or infrastructure. It provides versioned contracts for capabilities and runtimes, deterministic application assembly, controlled execution, and evidence that can be inspected independently of model output.
+Asterion Prime P7 studies interactive ARC-AGI-3 games by writing programs, testing hypotheses against real observations, and carrying useful experience into later attempts. Its producing system is public: the LLM, persistent IPython workspace, versioned WorldMap, checked action broker, experience store, and certification/submission code are in this repository.
 
-The repository contains the authoritative Python framework in `src/asterion/`, shared TypeScript contracts and Node integration, a Rust controlled executor, built-in application providers, schemas, conformance fixtures, and operator documentation.
+## ARC-AGI-3: current result
 
-## Why Asterion
+The accumulated public-game research record reached **25/25 games and 183/183 levels**, with **6,781 actions in the selected saved routes** and a **100.000000 local aggregate score**, on 7 October 2026 (UTC+8). The selected routes record `gpt-6.1-sol`, seed `0`; the final execution snapshot is [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21). Earlier saved routes retain their original code identities and certificates.
 
-Agent applications need more than a prompt and a tool loop. Their behavior depends on which capability implementation was selected, which runtime executed it, which host services were authorized, and what evidence survived the run. Asterion makes those decisions explicit:
+| Evidence | Status and meaning |
+|---|---|
+| Local saved routes | 25 games completed; 183 levels; 6,781 selected-route actions; local aggregate 100.000000 |
+| Official full-catalog submission | [Competition scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) confirmation **pending**; a final server score requires a checked, normally closed receipt |
+| Evaluation scope | Accumulated research on the 25 public games, seed 0 |
 
-- **Composable capabilities** — applications are assembled from exact, versioned packages rather than hidden source discovery.
-- **Multiple runtimes** — application contracts stay stable while Pi, Claude Code, or application-owned runtimes translate native events into one public protocol.
-- **Deterministic assembly** — missing edges, duplicate identities, ambiguous implementations, and dependency cycles fail closed before execution.
-- **Host-owned authority** — credentials, execution policy, datasets, cancellation, and provider configuration remain outside portable manifests and are injected explicitly.
-- **Verifiable operation** — validated event streams, immutable artifacts, receipts, sealed traces, and replay checks separate environment facts from model claims.
+Read the [public result record](docs/results/arc-agi-3/README.md) and [machine-readable evidence](docs/results/arc-agi-3/p7-public-2026-10-07.json). Browse saved progress and replay in the [read-only console](https://asterion-p7-console.vercel.app); synchronized data may lag local research.
 
-## Architecture
+This is a warm-start, iterative public-game research result, with retained experience, retries, verified prefix reuse, operator scheduling, and application repairs during the campaign. P7 generated research programs, WorldMaps, and action choices. The 6,781 actions describe selected routes, not all exploration or total research cost. Official saved-route submission checks those routes in new online games without model inference; it is distinct from a fresh LLM solve. No private-set result, ARC Prize Verified status, or monetary total is claimed.
+
+## How P7 works
 
 ```mermaid
 flowchart LR
-    H[CLI / host] --> P[Selected provider]
-    P --> A[Exact application assembly]
-    A --> C[Capability catalog + composer]
-    C --> I[Exact implementation bindings]
-    I --> R[Sequential runner]
-    R --> RT[Selected runtime]
-    R --> S[Injected host services]
-    RT --> E[Validated events + artifacts]
-    S --> E
+    O[Settled observation] --> L[LLM: revise hypotheses]
+    L --> W[Versioned WorldMap]
+    L --> P[Persistent IPython: model and search]
+    W --> A[Short plan with predictions]
+    P --> A
+    A --> B[Broker: check and execute]
+    B --> O
+    B --> E[History and counterexamples]
+    E --> L
 ```
 
-The dependency direction is deliberate:
+1. **Observe and describe.** The application supplies the actual settled frame, observation reference, current budget, and workspace revision. The LLM maintains a WorldMap with its scene description, candidate rules, goals, unknowns, competing hypotheses, and evidence-backed action labels. Partial models are allowed.
+2. **Build executable hypotheses.** A persistent IPython namespace holds Python state projections, transition functions, goal candidates, and searches across model turns. The read-only `p7_research` interface exposes recorded observations and history. The model compares alternatives without importing the game engine to search hidden state.
+3. **Check the model against history.** Reports can predict previously observed cells, frame hashes, states, or completed levels. Host-side comparison records matches and counterexamples. This retrodiction checks a stated claim against observed evidence; it does not certify every rule, the goal, or route optimality.
+4. **Act with explicit predictions.** A short plan binds to the current observation and workspace version. The broker validates it, dispatches sequentially, and stops at the first mismatch, level boundary, RESET, or terminal condition. Unexecuted suffixes stay unexecuted; uncertain results do not authorize a retry.
+5. **Learn from failure.** Later attempts can read same-game research, counterexamples, artifacts, and selected historical cells. Old programs are inert material to revise, not a script to replay wholesale. Prior evidence cannot authorize current actions. Independently checked completed prefixes can be restored in a new local game before work on its next level.
+
+The current model-facing tool surface is exactly **`ipython`, `p7_workspace`, and `p7_execute_plan`**. These are registered application tools, not prompt-only names. Research and real action dispatch have separate interfaces. Board delivery uses a lossless palette/row dictionary when smaller, with raw-frame fallback and an exact raw research reader; this changes presentation, not game semantics or recorded evidence.
+
+**RESET starts a new environment episode.** P7 preserves raw history, completed prefixes, and durable learned observations while clearing pending probes and executable planner authority. Current-episode support must be gathered again; pre-RESET evidence cannot silently become permission to execute a new plan.
+
+The optional `fresh-target` quarantine policy is an **operator-selected intervention** that excludes explicitly identified prior target-level material while retaining a bound earlier-level prefix. It is not an automatic P7 decision.
+
+### Inspect the producing code
+
+| Surface | Public source |
+|---|---|
+| LLM guidance and registered tools | [Prompt](src/asterion/applications/prime/p7/prompt.py), [tool registry](src/asterion/applications/prime/p7/tool_registry.py), [TypeScript extension](packages/typescript/asterion-prime-extension) |
+| Persistent programmatic research | [IPython host](src/asterion/applications/prime/p7/ipython_host.py), [research runtime](src/asterion/applications/prime/p7/research_runtime.py), [research bridge](src/asterion/applications/prime/p7/research_bridge.py) |
+| WorldMap, checks, and actions | [Research workspace](src/asterion/applications/prime/p7/research.py), [world model](src/asterion/applications/prime/p7/world_model.py), [broker](src/asterion/applications/prime/p7/broker.py) |
+| Retained experience and delivery | [Experience loader](src/asterion/applications/prime/p7/experience.py), [induction](src/asterion/applications/prime/p7/experience_induction.py), [actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
+| Save-time authority and official replay | [Certificates](src/asterion/applications/prime/p7/solution_certificates.py), [official operator](src/asterion/applications/prime/p7/official_operator.py), [online replay](src/asterion/applications/prime/p7/official_replay.py) |
+
+## Reproduce and inspect
+
+Start with the [community reproduction guide](docs/guides/prime-p7-community-reproduction.md) for external prerequisites, exact model selection, the current OrbStack launcher, and local/official commands.
+
+Framework inspection requires Python 3.10+ and `uv`, with no model credentials:
+
+```bash
+uv sync --frozen
+uv run asterion list
+uv run asterion describe --provider dci-agent-lite
+```
+
+After preparing your own Pi runtime/profile, ARC game assets and SDK wheels, operator credentials, and guest paths, run one bounded local research attempt:
+
+```bash
+make asterion-prime-p7-sync-games
+make asterion-prime-p7-games
+make asterion-prime-p7-level-witness GAME=ls20 LEVEL=1
+make p7-controller
+```
+
+Catalog synchronization uses network GETs, without a scorecard or model. The level witness invokes the model and the OFFLINE game. `LEVEL=N` means completing levels 1 through N in order. The console serves at `http://127.0.0.1:57515/`; viewing it does not start a solve, while its explicit controls can start game work. New operators build their own research records and certified routes.
+
+Only after preparing your own certified routes and deciding to perform an official submission:
+
+```bash
+make asterion-prime-p7-official-preflight
+make asterion-prime-p7-official-submit GAME=all
+```
+
+The latter creates a new Competition scorecard and executes real online actions. Local files are not uploaded as scores. A final result comes from the closed server scorecard and checked receipt. See the [detailed operator guide](docs/guides/prime-p7-games-and-official-results.md) for single-game submission and recovery.
+
+## The framework underneath
+
+The authoritative distribution is the Python wheel defined by [pyproject.toml](pyproject.toml) and implemented in `src/asterion/`. Python owns orchestration, composition, assembly, and execution; TypeScript validates shared contracts and Node integration; Rust owns controlled execution.
 
 ```text
 CLI / host → selected provider → assembly → catalog / composer
            → exact implementations → runner → runtime / host services
 ```
 
-Framework modules under `runtime/`, `packages/`, `assembly/`, `runner/`, and `services/` remain domain-neutral. Products and applications depend on the framework; generic framework code does not import DCI, ARC-AGI-3, tests, or adjacent source trees.
+Capabilities and applications use exact versioned identities. Composition rejects missing edges, ambiguity, and cycles. Framework modules remain domain-neutral; products depend on them. DCI is a reference product, not a dependency that generic framework modules assume.
 
-Language ownership is equally explicit: **Python** owns orchestration, composition, assembly, and execution flow; **TypeScript** validates shared contracts and Node integration; **Rust** owns controlled command execution. The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output limits, and cancellation—it is not an operating-system sandbox.
+The closed contracts are `asterion.agent-runtime/v1`, `asterion.capability/v1`, `asterion.capability-package/v1`, and `asterion.application-assembly/v1`. Schemas, Python/TypeScript validators, and conformance fixtures agree. Manifests express compatibility; they contain no prompts, credentials, commands, executable paths, provider settings, or mutable state.
 
-## Core building blocks
-
-| Building block | Responsibility |
+| Implementation / application | Role |
 |---|---|
-| Runtime Protocol | One run identity, contiguous events, matched tool calls/results, cancellation, and exactly one terminal event |
-| Capability package | Versioned behavior, compatibility edges, declared artifacts, policies, and exact implementation bindings |
-| Application assembly | Exact capability references, runtime compatibility, and required host-service edges |
-| Provider | Publishes installed applications and loads only the entry point selected by exact identity |
-| Composer | Resolves a deterministic execution plan and rejects ambiguity, missing dependencies, or cycles |
-| Runner | Executes the resolved plan sequentially; it does not discover, authorize, retry, persist, schedule, or select runtimes |
-| Host service | Injects narrow operator-owned facilities only after host preflight |
-| Evidence | Public-safe events, immutable artifacts, receipts, digests, sealed traces, and replay verification |
+| Asterion Prime (`asterion.prime`) | Source-independent Prime-style agent over Pi transport and programmatic state; P1–P7 are its applications |
+| Asterion Native (`asterion.native`) | Peer control-plane provider; currently not an `AgentRuntime` adapter |
+| P1–P6 | Persistent computation, programmatic long context, recursive work, bounded autonomy, and continual execution |
+| DCI | Reference research/evaluation/benchmark/analysis/export product |
+| Controlled code | Capability execution through explicitly injected host authority |
 
-The closed v1 contracts are:
+Native Asterion Prime does not import or require external Prime Agent source or SDK code. Pi is an external transport/runtime dependency. Historical Prime Gateway comparison surfaces and mixed-repository parity results are documented separately and do not establish native capability parity.
 
-- `asterion.agent-runtime/v1`
-- `asterion.capability/v1`
-- `asterion.capability-package/v1`
-- `asterion.application-assembly/v1`
+## Safety, development, and documentation
 
-Their JSON schemas, Python validators, TypeScript validators, and conformance fixtures must agree. Manifests describe compatibility, not authority: they never contain prompts, credentials, commands, executable paths, environment values, provider configuration, or mutable state.
+The host owns credentials, policy, cancellation, data, and execution authority. Runners execute resolved plans sequentially; they do not discover, authorize, retry, persist, schedule, or choose runtimes. The Rust executor enforces trusted command policy, clean environments, deadlines, output caps, and cancellation; it is not an OS sandbox. Retained evidence and configuration never grant execution authority.
 
-## Agent implementations
-
-| Implementation | Current role |
-|---|---|
-| **Asterion Prime** (`asterion.prime`) | Source-independent Prime-style agent implementation over Asterion's Pi transport, persistent programmatic state, bounded execution, and evidence capture |
-| **Asterion Native** (`asterion.native`) | Peer native control-plane implementation sharing the same Asterion framework contracts; currently a control provider, not an `AgentRuntime` adapter |
-
-P1 through P7 are applications built on Asterion Prime capabilities. They are not the implementation of the Prime foundation itself. Native Asterion Prime does not import, load, launch, inspect, or require prime-agent source or SDK code.
-
-## Applications
-
-Asterion is a framework; concrete behavior lives in applications assembled from its capabilities.
-
-| Application surface | What it exercises |
-|---|---|
-| P1–P6 | Persistent IPython work, programmatic long context, recursive workflow, inference scaling, continual execution, and related Prime-style application patterns |
-| P7 / ARC-AGI-3 | Stateful visual interaction, online experiments, bounded actions, environment feedback, and replayable solve evidence |
-| DCI | A complete reference product for research, evaluation, benchmarking, analysis, and export |
-| Controlled code | Capability composition and execution through explicitly injected controlled host services |
-
-### ARC-AGI-3 interactive reasoning
-
-On 9 September 2026, Asterion Prime completed **Level 1 of game `ls20-9607627b`** in one sealed run using Pi and `deepseek-v4-flash`. This demonstrates one Asterion application; it is not a claim that the complete ARC-AGI-3 benchmark was solved or that another agent was matched.
-
-<p align="center">
-  <img src="docs/assets/arc-agi-3/solve-replay.gif" alt="Replay of Asterion Prime completing ARC-AGI-3 game ls20-9607627b Level 1" width="360">
-</p>
-
-| Actions | Frames | Reasoning cells | Partial score | Result | Evidence |
-|---:|---:|---:|---:|---|---|
-| 23 | 30 | 43 | `3.267621` | 1 level completed | sealed trace; replay verified |
-
-ARC-AGI-3 hides the objective and object semantics inside a stateful environment. The agent must learn through small falsifiable actions, retain what changed, revise contradicted hypotheses, and make the environment report success. In this level, controlled experiments revealed fixed two-state row and column bands; comparison and reversible probes isolated the remaining mismatches before completion. Token usage and elapsed time were not recorded by this early run and are not estimated.
-
-`Asterion Prime → Pi → model → persistent IPython → ARC broker → environment → sealed trace → replay verification`
-
-<p align="center">
-  <img src="docs/assets/arc-agi-3/solve-report.png" alt="Asterion ARC-AGI-3 report with replay, evidence-backed narration, and post-solve understanding" width="460">
-</p>
-
-The report keeps normalized facts, versioned post-run analysis, versioned rendering, and standalone export separate. Its narration cites stored action/frame evidence; it is not hidden chain-of-thought. A retained sealed run can be rebuilt and exported as one distributable HTML file:
-
-```bash
-uv run asterion arc-story compile /absolute/path/to/sealed-run
-uv run asterion arc-story analyze GAME_ID RUN_ID
-uv run asterion arc-story render GAME_ID RUN_ID --analysis ANALYSIS_ID
-uv run asterion arc-story export GAME_ID RUN_ID --render RENDER_ID
-uv run asterion arc-story serve
-```
-
-`analyze` is the model-backed stage; compile, render, export, and serving operate on retained evidence. Local research artifacts use the stable `artifacts/arc-agi-3/` hierarchy and remain outside the package distribution.
-
-### P7 控制台与回放
-
-实时控制台汇总本地游戏；单次运行也可导出为自包含 HTML。未过关和中断的运行同样可看。
-
-```bash
-# 打开实时控制台：http://127.0.0.1:57515/
-make p7-controller
-# make p7-console 是同一入口；再次调用会复用已有控制台
-
-# 打开 SP80 固定回放；省略 GAME 则看最近已验证回放
-make p7-replay GAME=sp80
-# 导出指定历史运行：
-make asterion-prime-p7-console RUN=.asterion-private/prime-p7-live/<run-id>
-```
-
-控制台显示全部本地游戏、保存进度、RHAE 本地分数和各次回放。网页“继续”使用明确的已验证存档；“从头开始”单独选择。外部后台运行可只读观察，网页自身启动的运行可暂停、继续和停止。
-
-控制台默认固定使用 `http://127.0.0.1:57515/`，重复调用会打开该地址并复用已运行的服务。需要另选固定端口时使用 `make p7-controller P7_CONSOLE_PORT=57516`；如果端口被其他服务占用，命令会报错，不会自动换端口。显式 `RUN` 或 `OUTPUT` 仍走历史 HTML 导出流程。
-
-默认导出保留运行目录内的 `p7-console.html`，并将已封存、回放验证且清理完成的结果更新到固定入口 `.asterion-private/prime-p7-live/replays/sp80.html`（其他游戏同名规则）和 `.asterion-private/prime-p7-live/p7-console.html`。旧运行导出不会覆盖更高的同游戏进度。单文件回放无需网络、npm 构建或本地服务。
-中央显示关卡画面，滑块和播放按钮回放动作，侧栏显示游戏认知，过程区展示 P7 回合信号、动作结果和认知记录。
-离线文件保存导出时的快照，每份文件对应一次运行、一个游戏的多个关卡。在线控制台按游戏选择回放，并可持续观察未结束的后台运行。
-
-旧记录未保存的规划文字显示“未记录”。无法精确关联动作的模型回合单独展示。
-只保存最终认知时，页面明确标为最终快照，不把结束时知识当作早期决策依据。
-页面嵌入实际 [Tailwind CSS](https://v3.tailwindcss.com/docs/installation) 样式和原生 JS，不调用模型或执行新游戏动作。
-
-## Install and inspect
-
-Python 3.10 or newer and [`uv`](https://docs.astral.sh/uv/) are required. Node.js 22.x plus npm are needed for Pi and TypeScript integration; Rust is needed for controlled-executor checks.
-
-```bash
-uv sync --frozen
-uv run asterion list
-uv run asterion describe --provider dci-agent-lite
-uv run asterion verify --provider dci-agent-lite --level acceptance
-```
-
-`list`, `describe`, and `acceptance` inspect installed metadata, exact assemblies, and implementation reachability without constructing a model runtime or making a provider request.
-
-Capability packages may be built in, installed through a distribution entry point, or selected from an explicit local directory. All forms follow the same contract. Source resolution has no hidden precedence: multiple candidates for one exact identity remain ambiguous until the host supplies an exact source lock.
-
-## External runtimes and resources
-
-Prepare the locked external Pi checkout and small DCI resource profile from a fresh clone:
-
-```bash
-make setup
-cp .env.template .env
-# authenticate Pi and the independent Judge with operator-owned credentials
-make doctor
-```
-
-Pi remains external and is pinned by `pi-revision.txt`; a global `pi` executable is not runtime authority. Authentication belongs to the operator-managed Pi agent directory or environment. Corpora, datasets, credentials, private evidence, and generated output remain outside the Asterion distribution.
-
-Setup and preflight may inspect network, disk, and external readiness, but perform zero Agent and zero Judge operations. Provider-backed `basic` and `complete` presets are separately bounded. Full datasets, paper reproduction, and publication runs require separate operator authorization.
-
-DCI's provider-free catalog and plan surfaces can be inspected without loading a model:
-
-```bash
-uv run asterion-dci benchmark instances --json
-uv run asterion-dci benchmark lock \
-  --instance dci.local-fixture@1.0.0 \
-  --output "$OPERATOR_SELECTED_SOURCE_LOCK"
-uv run asterion-dci benchmark plan \
-  --instance dci.local-fixture@1.0.0 \
-  --capability-source-lock "$OPERATOR_SELECTED_SOURCE_LOCK"
-```
-
-See the [documentation hub](docs/README.md), [DCI operator guide](docs/OPERATOR-GUIDE.md), and [capability usage guide](docs/guides/asterion-capability-usage.md).
-
-## Security and execution boundaries
-
-- Trust-boundary failures fail closed before execution.
-- Public surfaces redact prompts, answers, credentials, provider payloads, corpus text, raw output, host-service values, and private paths.
-- Runtime streams require one run ID, contiguous sequences, paired tool calls/results, and one terminal event.
-- Runners receive resolved plans, exact implementations, a cancellation signal, and read-only host services.
-- `executor.controlled` does not authorize commands; the operator-owned host injects authority after preflight.
-- Configuration, caches, prior plans, and retained evidence never grant execution authority.
-
-## Development and promotion
+Public evidence excludes credentials, provider payloads, private prompts, raw research output, and private host paths. Public replay presents an application-approved projection. Runtime streams require one run identity, contiguous events, matched calls/results, and one terminal event.
 
 ```bash
 make test
@@ -207,17 +125,9 @@ make docs-check
 make check
 ```
 
-Use `make promotion-check` after changing packaged resources, entry points, schemas, or distribution assumptions. It copies the standalone tree to a temporary directory and reruns provider-free distribution gates; it neither publishes a package nor invokes a model provider.
+`make promotion-check` verifies packaged resources and distribution boundaries without publishing or calling a model provider. These checks establish their named software boundaries, not ARC benchmark performance.
 
-Architecture references:
-
-- [Agent application framework](docs/architecture/agent-framework.md)
-- [Runtime and provider boundaries](docs/architecture/runtime-provider-boundaries.md)
-- [Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md)
-- [Security boundaries](docs/security.md)
-
-## Compatibility and history
-
-The repository retains **Prime Gateway** compatibility and historical parity surfaces for controlled comparison with external Prime Agent source. They are not native Asterion Prime and cannot establish native capability parity. The native `asterion.prime` path remains source-independent and completely detached from Prime Agent source and SDK code.
-
-The historical `538/538` delegated-selector matrix is mixed-repository DCI integration evidence, not a current standalone acceptance result. Current claims are tied to named verification commands and explicit evidence boundaries rather than inherited snapshots.
+- [Documentation hub](docs/README.md) and [DCI operator guide](docs/OPERATOR-GUIDE.md)
+- [Framework architecture](docs/architecture/agent-framework.md) and [runtime/provider boundaries](docs/architecture/runtime-provider-boundaries.md)
+- [Capability usage](docs/guides/asterion-capability-usage.md), [Agent Control Protocol](docs/architecture/AGENT-CONTROL-PROTOCOL.md), and [security](docs/security.md)
+- [Research history and evidence](docs/status/ASTERION-PRIME-P7-EVIDENCE.md), including the September 2026 single-level LS20 demonstration
