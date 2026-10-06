@@ -3034,7 +3034,7 @@ test('verified sealed partial saved prefixes load history without claiming full-
   }
 });
 
-test('recording-only failed attempts default to real initial preview and remain explicitly selectable',async()=>{
+test('recording-only failed attempts default to their latest recorded cognition without claiming saved progress',async()=>{
   const config={token:'test-token',games:[{game_id:'game0-catalog',alias:'preview',win_levels:3}]};
   const overview=overviewFixture(config);overview.games[0]={...overview.games[0],status:'unverified',recording_run_id:'stopped-recording',latest_run_id:'stopped-recording',
     runs:[{...catalogRun('stopped-recording','unverified',false),completed_levels:0,recording:true}]};
@@ -3044,12 +3044,67 @@ test('recording-only failed attempts default to real initial preview and remain 
   const attempt={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'stopped-recording',seed:0,sealed_trace:false}};
   const app=launch(fixture(),{liveConfig:config,overview,fetch:async url=>response(url==='/api/preview/game0-catalog'?initial:url==='/api/replay/stopped-recording'?attempt:idleView())});
   try {
-    await settleReplay();assert.equal(app.$('board-empty').hidden,true);assert.match(app.$('frame-caption').textContent,/初始预览/);
-    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,null);assert.equal(app.$('level-progress').textContent,'0 / 3');
-    assert.equal(app.requests.some(request=>request.url==='/api/replay/stopped-recording'),false);
-    overviewRow(app).querySelector('[data-overview-attempt]').click();await settleReplay();assert.equal(app.$('run-id').textContent,'stopped-recording');
+    await settleReplay();assert.equal(app.$('board-empty').hidden,true);assert.equal(app.$('run-id').textContent,'stopped-recording');
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'stopped-recording');assert.equal(app.$('level-progress').textContent,'0 / 3');
+    assert.equal(app.requests.some(request=>request.url==='/api/replay/stopped-recording'),true);
+    assert.equal(app.requests.some(request=>request.url==='/api/preview/game0-catalog'),false);
+    assert.match(app.$('world-guide').textContent,/ACTION4 使物件向右移动/);
     [...app.timers.values()].find(fn=>fn.intervalMs===5000)();await settleReplay();assert.equal(app.$('run-id').textContent,'stopped-recording');
-    overviewRow(app).querySelector('[data-overview-watch]').click();await settleReplay();assert.match(app.$('frame-caption').textContent,/初始预览/);
-    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,null);assert.deepEqual(app.errors,[]);
+    overviewRow(app).querySelector('[data-overview-watch]').click();await settleReplay();assert.equal(app.$('run-id').textContent,'stopped-recording');
+    assert.equal(app.dom.window.__ASTERION_STATE__.run.run_id,'stopped-recording');assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('zero-saved game selection prefers a corroborated solving run then the latest attempt and follows its recorded cursor',async()=>{
+  for (const solving of [false,true]) {
+    const data=levelReplayFixture('game1-catalog',solving?'solving-zero':'latest-zero',{sealed:false});
+    Object.assign(data.record.run,{completed_level_count:0,status:solving?'running':'failed'});
+    data.record.levels.forEach((level,index)=>{
+      level.status=index===0?'incomplete':'not-run';
+      if (index>0) Object.assign(level,{frames:[],actions:[],cognition:{scope:'unavailable'}});
+    });
+    const level=data.record.levels[0],frame=level.frames.at(-1);
+    level.cognition={scope:'unavailable'};
+    level.cognition_timeline=[{scope:'observation',frame_id:frame.id,event_sequence:3,source_action_sequence:1,
+      stable_description:'当前记录认知：ACTION1 推动棋子。'}];
+    data.record.process_events=[{kind:'compute_task',level:1,frame_id:frame.id,event_sequence:3,
+      payload:{status:'completed',summary:'已检查当前棋盘'}}];
+    data.manifest.levels=data.record.levels.map(item=>({level:item.level,status:item.status,frame_count:item.frames.length,
+      action_count:item.actions.length,has_cognition:item.level===1}));
+    const overview=overviewFixture(levelReplayConfig);
+    overview.games[1]={...overview.games[1],status:'unverified',latest_run_id:solving?'stale-zero':'latest-zero',
+      solving,solving_run_id:solving?'solving-zero':null,runs:[
+        {...catalogRun('stale-zero','unverified',false),completed_levels:0,recording:true},
+        {...catalogRun(data.record.run.run_id,'unverified',false),completed_levels:0,recording:true}]};
+    const app=launch(fixture(),{liveConfig:levelReplayConfig,overview,fetch:async url=>{
+      if(url===`/api/replay/${data.record.run.run_id}/manifest`)return response(data.manifest);
+      if(url.includes(`/api/replay/${data.record.run.run_id}/levels/1/`))return response(data.detail(1));
+      return response(idleView());
+    }});
+    try {
+      await settleReplay();overviewRow(app,1).querySelector('[data-overview-select]').click();await settleReplay();
+      assert.equal(app.$('run-id').textContent,data.record.run.run_id);
+      assert.equal(app.$('frame-counter').textContent,'3 / 3');
+      assert.equal(app.$('replay-follow').hidden,true);
+      assert.match(app.$('world-guide').textContent,/当前记录认知：ACTION1 推动棋子/);
+      assert.equal(app.$('event-counter').textContent,'事件 3');
+      assert.equal(app.$('level-progress').textContent,'0 / 3');
+      assert.equal(app.requests.some(request=>request.url.startsWith('/api/preview/game1-catalog')),false);
+      assert.deepEqual(app.errors,[]);
+    } finally {app.dom.window.close();}
+  }
+});
+
+test('external solving metadata keeps verified saved progress as the default replay',async()=>{
+  const overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],status:'partial',completed_levels:1,best_run_id:'saved-best',
+    latest_run_id:'external-solving',solving:true,solving_run_id:'external-solving',runs:[catalogRun('saved-best'),
+      {...catalogRun('external-solving','unverified',false),recording:true}]};
+  const saved={...fixture(),run:{...fixture().run,game_id:'game0-catalog',run_id:'saved-best',sealed_trace:true}};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async url=>response(url==='/api/replay/saved-best'?saved:idleView())});
+  try {
+    await settleReplay();assert.equal(app.$('run-id').textContent,'saved-best');
+    assert.equal(app.requests.some(request=>request.url==='/api/replay/external-solving'),false);
+    assert.deepEqual(app.errors,[]);
   } finally {app.dom.window.close();}
 });
