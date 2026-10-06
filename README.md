@@ -13,7 +13,7 @@ The accumulated public-game research record reached **25/25 games and 183/183 le
 | Evidence | Status and meaning |
 |---|---|
 | Local saved routes | 25 games completed; 183 levels; 6,781 selected-route actions; local aggregate 100.000000 |
-| Official full-catalog submission | [Competition scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) confirmation **pending**; a final server score requires a checked, normally closed receipt |
+| Official full-catalog submission | [Competition scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) **100.00**; 25/25 games, 183/183 levels, 6,781 actions; normally closed receipt checked |
 | Evaluation scope | Accumulated research on the 25 public games, seed 0 |
 
 Read the [public result record](docs/results/arc-agi-3/README.md) and [machine-readable evidence](docs/results/arc-agi-3/p7-public-2026-10-07.json). Browse saved progress and replay in the [read-only console](https://asterion-p7-console.vercel.app); synchronized data may lag local research.
@@ -35,9 +35,9 @@ flowchart LR
     E --> L
 ```
 
-1. **Observe and describe.** The application supplies the actual settled frame, observation reference, current budget, and workspace revision. The LLM maintains a WorldMap with its scene description, candidate rules, goals, unknowns, competing hypotheses, and evidence-backed action labels. Partial models are allowed.
+1. **Observe and describe.** The application supplies the actual settled frame, observation reference, current budget, and workspace revision. The LLM maintains a WorldMap with its scene description, candidate rules, goals, unknowns, competing hypotheses, and evidence-backed action labels. It uses unresolved questions to choose the next useful computation or discriminating experiment. Partial models are allowed.
 2. **Build executable hypotheses.** A persistent IPython namespace holds Python state projections, transition functions, goal candidates, and searches across model turns. The read-only `p7_research` interface exposes recorded observations and history. The model compares alternatives without importing the game engine to search hidden state.
-3. **Check the model against history.** Reports can predict previously observed cells, frame hashes, states, or completed levels. Host-side comparison records matches and counterexamples. This retrodiction checks a stated claim against observed evidence; it does not certify every rule, the goal, or route optimality.
+3. **Check the model against history.** Reports can predict previously observed cells, frame hashes, states, or completed levels. Host-side comparison records matches and counterexamples. When a historical check or real action contradicts a prediction, the LLM revises its WorldMap or program and recomputes the next plan. This retrodiction checks a stated claim against observed evidence; it does not certify every rule, the goal, or route optimality.
 4. **Act with explicit predictions.** A short plan binds to the current observation and workspace version. The broker validates it, dispatches sequentially, and stops at the first mismatch, level boundary, RESET, or terminal condition. Unexecuted suffixes stay unexecuted; uncertain results do not authorize a retry.
 5. **Learn from failure.** Later attempts can read same-game research, counterexamples, artifacts, and selected historical cells. Old programs are inert material to revise, not a script to replay wholesale. Prior evidence cannot authorize current actions. Independently checked completed prefixes can be restored in a new local game before work on its next level.
 

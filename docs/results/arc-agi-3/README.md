@@ -2,7 +2,7 @@
 
 The 2026-10-07 research snapshot solves all 25 public ARC-AGI-3 games, 183/183 levels, with 6781 saved route actions using `gpt-6.1-sol` and seed 0. The local saved-route score is 100.00. The [machine-readable result](p7-public-2026-10-07.json) lists per-game and per-level action counts and the final runtime code snapshot.
 
-The new [Competition Mode scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) is still being replayed online. Its final official score is pending; local completion is not a substitute for a closed server receipt.
+The new [Competition Mode scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) has normally closed with an official score of **100.00**, 25/25 games, 183/183 levels, and 6781 actions. The closed receipt matches every selected game route; all 25 source certificates, winner pointers and source metadata remain unchanged.
 
 This result followed iterative local research, failed attempts, generic infrastructure repairs between attempts, operator-controlled retries and selected cognition resets, and accumulated experience. The LLM inside P7 generated game hypotheses, executable models and candidate plans. Final software changes include [compact actor context delivery](https://github.com/uukuguy/asterion/commit/b5c2469303bec10a99dfe87e2bd473efd683e278) and [RESET episode isolation](https://github.com/uukuguy/asterion/commit/2f258ff3e74478805f63e08daa437acf9ca53a21); these change generic research machinery. The published final commit does not imply all routes were produced by that one fixed version.
 

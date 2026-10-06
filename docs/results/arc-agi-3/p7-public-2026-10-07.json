@@ -16,8 +16,18 @@
     "saved_route_actions": 6781
   },
   "official_result": {
-    "status": "in-progress",
-    "scorecard_url": "https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a"
+    "status": "closed-confirmed",
+    "mode": "Competition",
+    "scorecard_url": "https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a",
+    "score": 100.0,
+    "games_completed": 25,
+    "games_total": 25,
+    "levels_completed": 183,
+    "levels_total": 183,
+    "actions": 6781,
+    "closure_digest": "4bf6e592a4007105c074faed6c32c0a5c1faa616281ce1ae81f466644e95f7f7",
+    "receipt_sha256": "a3e678bfae72a680d85cef62ea66b8896eba50ff44b57a4ad5196d015bd139c5",
+    "verified_at": "2026-10-07 01:13 CST"
   },
   "cost_usd": null,
   "cost_note": "Complete exploration cost was not audited; no monetary estimate is reported.",

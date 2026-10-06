@@ -4127,3 +4127,15 @@
 2026-10-07 00:54 CST — Checked upstream community criteria: no unattended cold-start100 requirement; retain concise protocol provenance, no added evaluation gate.
 
 2026-10-07 00:59 CST — d53ffbe1: Publish local result evidence and practical P7 reproduction docs for community method review.
+
+2026-10-07 00:57 CST — 25d55a1e: Align submission design with upstream criteria to avoid an invented autonomous-evaluation prerequisite.
+
+- 2026-10-07 00:56 CST — Community entry emphasizes P7 producing method and keeps concise evaluation provenance, matching upstream requirements [4b8b097].
+
+2026-10-07 01:02 CST — Main25d55a1e and community4b8b0972 branches publicly pushed; cloud25/183/100 confirmed; official17/25 replay still pending close.
+
+2026-10-07 01:09 CST — User flags premature draft push; freeze further publication and complete local method content before upstream PR.
+
+2026-10-07 01:06 CST — Prior publication-freeze entry used an approximate timestamp; actual correction and checkpoint now follow host clock.
+
+2026-10-07 01:13 CST — Official60c10b53 normalclosed100.00/25/183/6781; sourcepreservationPASS25; local method and final-result drafts complete, publication remains frozen.
