@@ -3905,3 +3905,11 @@
 - 2026-10-06 12:27 CST — 3c313a04 records restored parallel solving and official certification boundaries; README remains deferred.
 - 2026-10-06 12:29 CST — User authorized one fresh fourth full25 batch alongside two solvers; separate claim/card, no old-card retry.
 - 2026-10-06 12:34 CST — Full354 gate4117 failed:22 observer-environment failures resolved by clean harness; one recovery-order error remains under diagnosis.
+- 2026-10-06 12:36 CST — 57de9160 records one newly authorized full25 batch while preserving ambiguous old-card history and parallel solving.
+- 2026-10-06 12:36 CST — Correction: preceding fresh-batch authorization commit is0ffbce5e;57de9160 was an incorrect reference.
+- 2026-10-06 12:39 CST — LF8 corrected cleanup sealed/replayed17newactions without progression; BP6/LF8 second attempt active; G50 two-attempt boundary retained.
+- 2026-10-06 12:45 CST — Recovery100repeats and3929preceding-order targetPASS; no rootcause established; clean full354 gate rerunning before new official launch.
+- 2026-10-06 12:52 CST — 0f4fb448 pins legacy recovery fixture model under empty Make exports; production rejection unchanged;6hostile-environment testsPASS.
+- 13:00 Full promotion PASS on 0f4fb448: 25 commands, 4117 tests, four skips, zero provider operations.
+- 2026-10-06 13:03 CST — Fresh fourth25 opened15ffcc07; froze109levels/4097actions, paced500steps/min, independent of local solving; user authorized new games.
+- 2026-10-06 13:10 CST — Final0f4 parent923 adopted; SB26/SC25 active, BP6 second sealed unchanged; existing Zen latest33-frame observation verified.
