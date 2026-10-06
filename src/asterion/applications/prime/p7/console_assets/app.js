@@ -1581,7 +1581,7 @@
       row.children[2].textContent = Number(game.score).toFixed(2);
       const recording = game.runs.some((run) => run.recording === true);
       const external = (game.status === 'running' || recording) && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
-      row.children[3].textContent = (recording ? '记录中' : overviewLabels[game.status]) + (external ? ' · 外部只读' : ''); row.children[3].className = 'overview-state ' + game.status;
+      row.children[3].textContent = (recording ? '记录中' : overviewLabels[game.status]) + (external ? ' · 外部只读' : ''); row.children[3].className = 'overview-state ' + (recording ? 'running' : game.status);
       row.children[4].textContent = String(game.route_actions);
       const start = row.querySelector('[data-overview-start]');
       start.textContent = game.resume_run_id ? '继续' : game.completed_levels > 0 ? '待恢复' : '启动';

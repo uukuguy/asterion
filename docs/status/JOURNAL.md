@@ -3841,3 +3841,6 @@
 - 07:54 a20108a8: Record confirmed second official card and verified console boundaries so newer local wins retain separate authority.
 - 07:54 Actual7a two-game continuation verified: coordinator19801/19805, LF52L3 guest164745, LP85L5 guest164866; each900seconds, nohold.
 - 08:05 Explicitly style WebKit/Firefox progress fill green and verified full-game counts green; native accent alone was insufficient.
+- 08:05 4fc6b9ae: Explicitly color progress fills and full-game counts green across browser implementations.
+- 08:12 User clarified color states: complete green, partial/recording blue, unverified amber, unplayed gray; native accent cause remains unverified.
+- 08:12 Full promotion4fc PASS25; latest status palette PASS2DOM/servedHTTP/exact wheel resources; quick gate lacked npm preparation.
