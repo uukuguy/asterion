@@ -66,7 +66,11 @@ class TestOfficialSavedReplay(unittest.TestCase):
     def test_dispatches_verified_action6_once_without_reset(self) -> None:
         engine = _Engine()
 
-        self.assertIsNone(execute_saved_prefix(engine, self._prefix()))
+        checkpoints = []
+        self.assertIsNone(execute_saved_prefix(engine, self._prefix(), progress=checkpoints.append))
+        self.assertEqual(checkpoints[-1]['phase'], 'replay-completed')
+        self.assertEqual(checkpoints[-1]['confirmed_actions'], 2)
+        self.assertEqual(checkpoints[-1]['levels_completed'], 1)
 
         self.assertEqual(engine.actions, [("ACTION6", {"x": 12, "y": 34}), ("ACTION1", None)])
         self.assertEqual(engine.reset_calls, 0)
@@ -107,6 +111,37 @@ class TestOfficialSavedReplay(unittest.TestCase):
             execute_saved_prefix(engine, bad_prefix)
 
         self.assertEqual(len(engine.actions), 1)
+
+    def test_failure_checkpoints_report_safe_sequence_and_confirmed_counts(self) -> None:
+        prefix = self._prefix()
+        altered = _Engine(initial={'available_actions': ['ACTION6'], 'frame': [[[9]]],
+                          'levels_completed': 0, 'state': 'NOT_FINISHED', 'win_levels': 2})
+        for engine, reason, attempted in ((altered, 'before-mismatch', 0),
+                                           (_Engine(fail_action=True), 'sdk-action-failed', 1)):
+            with self.subTest(reason=reason):
+                checkpoints = []
+                with self.assertRaises(OfficialReplayError) as error:
+                    execute_saved_prefix(engine, prefix, progress=checkpoints.append)
+                self.assertEqual(error.exception.reason, reason)
+                self.assertEqual(error.exception.action_sequence, 1)
+                self.assertEqual(error.exception.confirmed_actions, 0)
+                self.assertEqual(error.exception.attempted_actions, attempted)
+                self.assertEqual(checkpoints[-1]['phase'], 'replay-failed')
+                self.assertEqual(checkpoints[-1]['reason'], reason)
+                self.assertNotIn('transport-private-detail', str(error.exception) + str(checkpoints))
+                self.assertFalse(any('frame' in item or 'data' in item for item in checkpoints))
+
+    def test_failed_pre_dispatch_checkpoint_never_dispatches_the_action(self) -> None:
+        engine = _Engine()
+        def progress(checkpoint):
+            if checkpoint['phase'] == 'action-pending':
+                raise OSError('SENTINEL-private-path')
+        with self.assertRaises(OfficialReplayError) as error:
+            execute_saved_prefix(engine, self._prefix(), progress=progress)
+        self.assertEqual(engine.actions, [])
+        self.assertEqual(error.exception.reason, 'progress-unavailable')
+        self.assertEqual(error.exception.attempted_actions, 0)
+        self.assertNotIn('SENTINEL', str(error.exception))
 
     def test_replays_level_retry_reset_after_an_ordinary_action(self) -> None:
         from asterion.applications.prime.p7.solutions import VerifiedPrefix

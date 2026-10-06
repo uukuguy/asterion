@@ -7,6 +7,7 @@ from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 import json
 import os
+import re
 from pathlib import Path
 import sys
 from typing import Any
@@ -32,7 +33,8 @@ from .official_result import (
     write_recovery_record,
 )
 from .operator import build_p7_operator_resources
-from .official_replay import execute_saved_prefix
+from .official_replay import execute_saved_prefix, OfficialReplayError
+from .run_story.storage import write_atomic_file
 from .prompt import P7_SOLVE_PROMPT
 
 
@@ -317,6 +319,66 @@ async def _submit(
     return receipt.to_dict()
 
 
+_PROGRESS_REASONS = frozenset({
+    'unknown', 'invalid-prefix', 'initial-observation', 'initial-state', 'transition-invalid',
+    'action-invalid', 'before-mismatch', 'sdk-action-failed', 'after-observation',
+    'after-mismatch', 'levels-mismatch', 'reset-mismatch', 'terminal-mismatch',
+    'identity-mismatch', 'observation-invalid', 'levels-regressed', 'scorecard-open-failed',
+    'scorecard-close-failed', 'game-make-failed', 'receipt-invalid', 'interrupted', 'progress-unavailable'})
+
+
+def _submission_progress(session, evidence_root, phase, *, game_id=None, checkpoint=None,
+                         reason=None, route_finished=False):
+    """Overwrite one bounded safe checkpoint; remote scoring remains authoritative.
+
+    route_finished_game_ids records dispatched routes, including partial and
+    zero-action rows. It never means a game WIN or grants a normal receipt.
+    """
+    value = getattr(session, '_saved_submission_progress', None)
+    if type(value) is not dict:
+        value = {'schema': 'asterion.prime.p7-official-progress/v1', 'current_game_id': None,
+                 'route_finished_game_ids': [], 'games': [], 'action_sequence': 0, 'attempted_actions': 0,
+                 'confirmed_actions': 0, 'levels_completed': None, 'state': None, 'reason': None}
+    if game_id is not None:
+        if type(game_id) is not str or re.fullmatch(r'[A-Za-z0-9]+-[A-Za-z0-9]+', game_id) is None:
+            raise OfficialError('official progress unavailable')
+        value.update(current_game_id=game_id, action_sequence=0, attempted_actions=0,
+                     confirmed_actions=0, levels_completed=None, state=None, reason=None)
+    if checkpoint is not None:
+        for key in ('action_sequence', 'attempted_actions', 'confirmed_actions', 'levels_completed'):
+            number = checkpoint.get(key)
+            value[key] = number if type(number) is int and 0 <= number <= 10**9 else None
+        state = checkpoint.get('state')
+        value['state'] = state if state in ('NOT_FINISHED', 'GAME_OVER', 'WIN') else None
+        reason = checkpoint.get('reason')
+    if reason is not None:
+        value['reason'] = reason if reason in _PROGRESS_REASONS else 'unknown'
+    if route_finished and value['current_game_id'] not in value['route_finished_game_ids']:
+        if len(value['route_finished_game_ids']) >= 25:
+            raise OfficialError('official progress unavailable')
+        value['route_finished_game_ids'].append(value['current_game_id'])
+        value['games'].append({key: value[key] for key in
+                              ('current_game_id', 'confirmed_actions', 'levels_completed', 'state')})
+    value['total_confirmed_actions'] = sum(item['confirmed_actions'] or 0 for item in value['games'])
+    if value['current_game_id'] not in value['route_finished_game_ids']:
+        value['total_confirmed_actions'] += value['confirmed_actions'] or 0
+    card = getattr(session, 'card_id', None)
+    value.update(phase=phase, card_id=card if type(card) is str and re.fullmatch(
+        r'[A-Za-z0-9][A-Za-z0-9_-]{0,199}', card) else None,
+        normal_close_confirmed=getattr(session, 'normal_close_confirmed', False) is True,
+        abort_close_confirmed=getattr(session, 'abort_close_confirmed', False) is True)
+    session._saved_submission_progress = value
+    write_atomic_file(evidence_root.resolve(strict=True) / 'submission-progress.json',
+                      json.dumps(value, allow_nan=False, sort_keys=True).encode())
+
+
+def _saved_failure_reason(error):
+    if isinstance(error, (OfficialError, OfficialReplayError)):
+        reason = getattr(error, 'reason', 'unknown')
+        return reason if reason in _PROGRESS_REASONS else 'unknown'
+    return 'unknown'
+
+
 def _submit_saved(
     session: CompetitionSession,
     evidence_root: Path,
@@ -341,29 +403,51 @@ def _submit_saved(
         selected = prefix_ids
     by_game = dict(zip(prefix_ids, prefixes))
     print(f'[p7-official] certified routes ready; games={len(selected)}', file=sys.stderr, flush=True)
-    session.open()
-    print('[p7-official] scorecard opened', file=sys.stderr, flush=True)
-    for game_id in selected:
-        prefix = by_game.get(game_id)
-        actions = 0 if prefix is None else len(prefix.transitions)
-        print(f'[p7-official] playing {game_id}; saved actions={actions}', file=sys.stderr, flush=True)
-        engine = session.make(game_id)
-        try:
+    _submission_progress(session, evidence_root, 'catalog-ready')
+    try:
+        session.open()
+        _submission_progress(session, evidence_root, 'card-opened')
+        print('[p7-official] scorecard opened', file=sys.stderr, flush=True)
+        for game_id in selected:
             prefix = by_game.get(game_id)
-            if prefix is not None:
-                execute_saved_prefix(engine, prefix)
-            else:
-                initial = engine.observe()
-                if initial.get("levels_completed") != 0 or initial.get("state") != "NOT_FINISHED":
-                    raise OfficialError("official initial observation unavailable")
-        finally:
-            engine.close()
-        print(f'[p7-official] finished {game_id}; saved actions={actions}', file=sys.stderr, flush=True)
-    session.close()
-    print('[p7-official] scorecard closed; checking receipt', file=sys.stderr, flush=True)
-    receipt = validate_closed_scorecard(session)
-    write_official_receipt(receipt, evidence_root)
-    return receipt.to_dict()
+            actions = 0 if prefix is None else len(prefix.transitions)
+            _submission_progress(session, evidence_root, 'game-started', game_id=game_id)
+            print(f'[p7-official] playing {game_id}; saved actions={actions}', file=sys.stderr, flush=True)
+            engine = session.make(game_id)
+            try:
+                if prefix is not None:
+                    execute_saved_prefix(engine, prefix, progress=lambda checkpoint: _submission_progress(
+                        session, evidence_root, checkpoint['phase'], checkpoint=checkpoint))
+                else:
+                    initial = engine.observe()
+                    if initial.get('levels_completed') != 0 or initial.get('state') != 'NOT_FINISHED':
+                        raise OfficialError('official initial observation unavailable', reason='initial-state')
+                    _submission_progress(session, evidence_root, 'initial-observed', checkpoint={
+                        'action_sequence': 0, 'attempted_actions': 0, 'confirmed_actions': 0,
+                        'levels_completed': 0, 'state': 'NOT_FINISHED', 'reason': None})
+            finally:
+                engine.close()
+            _submission_progress(session, evidence_root, 'route-finished', route_finished=True)
+            print(f'[p7-official] finished {game_id}; saved actions={actions}', file=sys.stderr, flush=True)
+        _submission_progress(session, evidence_root, 'normal-close-pending')
+        session.close()
+        _submission_progress(session, evidence_root, 'normal-closed')
+        print('[p7-official] scorecard closed; checking receipt', file=sys.stderr, flush=True)
+        try:
+            receipt = validate_closed_scorecard(session)
+        except Exception:
+            _submission_progress(session, evidence_root, 'receipt-failed', reason='receipt-invalid')
+            raise
+        write_official_receipt(receipt, evidence_root)
+        _submission_progress(session, evidence_root, 'receipt-confirmed')
+        return receipt.to_dict()
+    except Exception as error:
+        value = session._saved_submission_progress
+        reason = value['reason'] or _saved_failure_reason(error)
+        _submission_progress(session, evidence_root, 'failed', reason=reason)
+        print(f"[p7-official] saved failure; game={value['current_game_id']}; "
+              f"sequence={value['action_sequence']}; reason={reason}", file=sys.stderr, flush=True)
+        raise
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -424,7 +508,7 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(value, allow_nan=False, separators=(",", ":"), sort_keys=True))
         return 0
     except KeyboardInterrupt:
-        _retain_recovery(session, evidence_root)
+        _retain_recovery(session, evidence_root, reason='interrupted')
         print('{"status":"recovery-required"}')
         return 130
     except Exception:
@@ -439,7 +523,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _retain_recovery(
-    session: CompetitionSession | None, evidence_root: Path | None
+    session: CompetitionSession | None, evidence_root: Path | None, *, reason=None
 ) -> None:
     if session is None or evidence_root is None:
         return
@@ -447,6 +531,11 @@ def _retain_recovery(
         write_recovery_record(session, evidence_root)
     except OfficialError:
         pass
+    if type(getattr(session, '_saved_submission_progress', None)) is dict:
+        try:
+            _submission_progress(session, evidence_root, 'recovery-required', reason=reason)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

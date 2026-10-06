@@ -23,6 +23,13 @@ _GAME_ID = re.compile(r"[A-Za-z0-9]+-[A-Za-z0-9]+", re.ASCII)
 class OfficialError(RuntimeError):
     """Fixed public-safe official operation failure."""
 
+    def __init__(self, message, *, reason='unknown'):
+        super().__init__(message)
+        self.reason = reason if reason in {
+            'unknown', 'initial-state', 'identity-mismatch', 'observation-invalid', 'action-invalid',
+            'sdk-action-failed', 'levels-regressed', 'scorecard-open-failed',
+            'scorecard-close-failed', 'game-make-failed'} else 'unknown'
+
 
 @dataclass(frozen=True, slots=True)
 class OfficialGamePolicy:
@@ -232,6 +239,11 @@ class CompetitionSession:
         return self.closure_result is not None and not self._aborted
 
     @property
+    def abort_close_confirmed(self) -> bool:
+        """Abort response matched this card; this never grants a normal receipt."""
+        return self.abort_result is not None and self._aborted
+
+    @property
     def guids(self) -> Mapping[str, str]:
         from types import MappingProxyType
         return MappingProxyType(dict(self._guids))
@@ -255,7 +267,7 @@ class CompetitionSession:
         except Exception:
             if self._open_attempted and self.card_id is None:
                 self.recovery_required = True
-            raise OfficialError("official scorecard unavailable") from None
+            raise OfficialError("official scorecard unavailable", reason="scorecard-open-failed") from None
 
     def make(self, game_id: str) -> CompetitionEngine:
         try:
@@ -277,7 +289,7 @@ class CompetitionSession:
                 # value was lost or failed identity validation.  It cannot be
                 # retried safely and must remain recovery-only.
                 self.recovery_required = True
-            raise OfficialError("official game unavailable") from None
+            raise OfficialError("official game unavailable", reason="game-make-failed") from None
 
     def close(self) -> Any:
         """Close an ordinary attempt only after every selected game was attempted."""
@@ -306,7 +318,7 @@ class CompetitionSession:
             return result
         except Exception:
             self.recovery_required = True
-            raise OfficialError("official scorecard recovery required") from None
+            raise OfficialError("official scorecard recovery required", reason="scorecard-close-failed") from None
 
     def dispose(self) -> None:
         if self._disposed:
@@ -381,26 +393,34 @@ class CompetitionEngine:
         return snapshot
 
     def observe(self) -> dict[str, object]:
+        reason = 'identity-mismatch'
         try:
             self._validate_identity(self._current)
+            reason = 'observation-invalid'
             return self._snapshot(self._current)
         except Exception:
-            raise OfficialError("official observation unavailable") from None
+            raise OfficialError('official observation unavailable', reason=reason) from None
 
     def step(self, action: str, data: Mapping[str, int] | None = None) -> dict[str, object]:
+        reason = 'identity-mismatch'
         try:
             self._validate_identity(self._current)
+            reason = 'action-invalid'
             action_value = _canonical_action(ArcAction(action, tuple(sorted((data or {}).items()))))
-            actions = getattr(self._session._sdk, "_asterion_actions", {})
+            actions = getattr(self._session._sdk, '_asterion_actions', {})
+            reason = 'sdk-action-failed'
             result = self._environment.step(actions.get(action, action), dict(action_value.data))
+            reason = 'identity-mismatch'
             self._validate_identity(result)
+            reason = 'observation-invalid'
             snapshot = self._snapshot(result)
-            if snapshot["levels_completed"] < self._current.levels_completed:
+            reason = 'levels-regressed'
+            if snapshot['levels_completed'] < self._current.levels_completed:
                 raise ValueError
             self._current = result
             return snapshot
         except Exception:
-            raise OfficialError("official action unavailable") from None
+            raise OfficialError('official action unavailable', reason=reason) from None
 
     def close(self) -> None:
         """The session owns the remote environment and scorecard lifetime."""

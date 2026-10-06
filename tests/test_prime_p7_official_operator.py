@@ -42,7 +42,7 @@ class TestOfficialOperator(unittest.TestCase):
 
         sdk = SDK()
 
-        def saved_action(engine, prefix):
+        def saved_action(engine, prefix, **_kwargs):
             engine.step("ACTION1")
             sdk.environments[prefix.game_id].observation_space.levels_completed = 1
 
@@ -183,6 +183,70 @@ class TestOfficialOperator(unittest.TestCase):
         self.assertEqual(sdk.calls.count(("close-scorecard", "card-123")), 1)
         self.assertEqual(len([row for row in sdk.calls if isinstance(row, tuple) and row[0] == "make"]), 1)
         replay.assert_called_once()
+
+    def test_saved_action_progress_survives_failure_and_records_abort_separately(self) -> None:
+        from asterion.applications.prime.p7.official import prepare_session
+        from asterion.applications.prime.p7.official_operator import _submit_saved, _retain_recovery
+        from asterion.applications.prime.p7.official_replay import OfficialReplayError
+        from tests.test_prime_p7_official_pipeline import FakeCompetitionSDK
+
+        sdk = FakeCompetitionSDK()
+        roster = tuple(row.game_id for row in sdk.games)
+        def fail(engine, prefix, *, progress):
+            path = Path(directory) / 'submission-progress.json'
+            opened = json.loads(path.read_text())
+            self.assertEqual(opened['card_id'], 'card-123')
+            self.assertEqual(opened['current_game_id'], roster[0])
+            progress({'phase': 'action-pending', 'reason': None, 'action_sequence': 2,
+                      'attempted_actions': 2, 'confirmed_actions': 1,
+                      'levels_completed': 0, 'state': 'NOT_FINISHED'})
+            progress({'phase': 'replay-failed', 'reason': 'sdk-action-failed', 'action_sequence': 2,
+                      'attempted_actions': 2, 'confirmed_actions': 1,
+                      'levels_completed': 0, 'state': 'NOT_FINISHED'})
+            raise OfficialReplayError('SENTINEL-private-native-error', reason='sdk-action-failed')
+        with TemporaryDirectory() as directory, mock.patch(
+            'asterion.applications.prime.p7.official_operator.execute_saved_prefix', side_effect=fail):
+            with self.assertRaises(OfficialReplayError), prepare_session(
+                api_key='PRIVATE-KEY', evidence_root=Path(directory), model_host_ready=True,
+                sdk_factory=lambda **kwargs: sdk, selected_game_ids=roster) as session:
+                _submit_saved(session, Path(directory), (SimpleNamespace(game_id=roster[0], transitions=()),),
+                              catalog_ids=roster)
+            _retain_recovery(session, Path(directory))
+            raw = (Path(directory) / 'submission-progress.json').read_text()
+            value = json.loads(raw)
+            self.assertEqual(value['phase'], 'recovery-required')
+            self.assertEqual(value['reason'], 'sdk-action-failed')
+            self.assertEqual(value['action_sequence'], 2)
+            self.assertEqual(value['confirmed_actions'], 1)
+            self.assertEqual(value['total_confirmed_actions'], 1)
+            self.assertFalse(value['normal_close_confirmed'])
+            self.assertTrue(value['abort_close_confirmed'])
+            self.assertNotIn('SENTINEL', raw)
+            self.assertNotIn('PRIVATE-KEY', raw)
+        self.assertEqual(sdk.calls.count('create-scorecard'), 1)
+        self.assertEqual(len([row for row in sdk.calls if isinstance(row, tuple) and row[0] == 'make']), 1)
+
+    def test_zero_route_noninitial_observation_keeps_initial_state_failure(self) -> None:
+        from asterion.applications.prime.p7.official import prepare_session, OfficialError
+        from asterion.applications.prime.p7.official_operator import _submit_saved
+        from tests.test_prime_p7_official_pipeline import FakeCompetitionSDK
+        class SDK(FakeCompetitionSDK):
+            def make(self, game_id, **kwargs):
+                environment = super().make(game_id, **kwargs)
+                environment.observation_space.levels_completed = 1
+                return environment
+        sdk = SDK()
+        roster = tuple(row.game_id for row in sdk.games)
+        with TemporaryDirectory() as directory:
+            with self.assertRaises(OfficialError) as error, prepare_session(
+                api_key='PRIVATE-KEY', evidence_root=Path(directory), model_host_ready=True,
+                sdk_factory=lambda **kwargs: sdk, selected_game_ids=roster) as session:
+                _submit_saved(session, Path(directory), (), catalog_ids=roster)
+            self.assertEqual(error.exception.reason, 'initial-state')
+            value = json.loads((Path(directory) / 'submission-progress.json').read_text())
+            self.assertEqual(value['reason'], 'initial-state')
+            self.assertEqual(value['confirmed_actions'], 0)
+        self.assertEqual(len([row for row in sdk.calls if isinstance(row, tuple) and row[0] == 'make']), 1)
 
     def test_migration_static_candidates_filter_legacy_worldmap_and_rank_rhae(self) -> None:
         from asterion.applications.prime.p7.broker import ArcTransition

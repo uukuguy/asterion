@@ -157,6 +157,23 @@ class TestOfficialPipeline(unittest.TestCase):
         self.assertTrue(all(environment.reset_calls == 0 for environment in self.sdk.environments.values()))
         self.assertEqual(session.guids, {game_id: f"guid-{game_id}" for game_id in session.preflight.game_ids})
 
+    def test_adapter_distinguishes_sdk_dispatch_failure_from_returned_identity(self) -> None:
+        for failure, reason in (('transport', 'sdk-action-failed'), ('identity', 'identity-mismatch')):
+            with self.subTest(failure=failure), self._session() as session:
+                session.open()
+                engine = session.make(session.preflight.game_ids[0])
+                environment = self.sdk.environments[engine.game_id]
+                if failure == 'transport':
+                    side_effect = RuntimeError('SENTINEL-private-transport')
+                else:
+                    def side_effect(*_args):
+                        return NS(guid='wrong', game_id=engine.game_id)
+                with mock.patch.object(environment, 'step', side_effect=side_effect):
+                    with self.assertRaises(OfficialError) as error:
+                        engine.step('ACTION1')
+                self.assertEqual(error.exception.reason, reason)
+                self.assertNotIn('SENTINEL', str(error.exception))
+
     def test_saved_submission_attempts_only_selected_prefix_without_model(self) -> None:
         from asterion.applications.prime.p7.official_operator import _submit_saved
 
@@ -168,7 +185,7 @@ class TestOfficialPipeline(unittest.TestCase):
             mock.patch("asterion.applications.prime.p7.official_operator._resolve_gameplay_application", side_effect=AssertionError("model launched")),
         ):
             selected = session.preflight.game_ids[0]
-            prefix = NS(game_id=selected, levels_completed=1)
+            prefix = NS(game_id=selected, levels_completed=1, transitions=())
             result = _submit_saved(session, evidence_root, (prefix,))
         assert self.sdk is not None
         self.assertEqual(result["selected_count"], 1)
