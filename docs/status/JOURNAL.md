@@ -4093,3 +4093,6 @@
 
 - 23:18 2f full promotion PASS25/provider0; current25 and frozen21 certificate audit PASS,181 levels, old certificate bytes unchanged.
 - 23:18 BP L8 first sealed49new withoutpass; nine ball-ladder predictions matched; same-round second attempt started, explored map retained.
+- 23:20 23a1b19c records retained L8 exploration and released RESET repair so recovery preserves finite continuation and saved authority.
+- 23:22 RESET2f parent61777 adoption released, guest signals0, new rounds0; same b5 L8 guest57837/deadline/history retained.
+- 23:22 Correction: L8 ladder first8 full matches; ninth red-position mismatch while role/support matched; subsequent293-295 all matched.
