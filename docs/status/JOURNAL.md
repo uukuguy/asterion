@@ -4080,3 +4080,7 @@
 - 2026-10-06 22:09 CST — BP L6 second sealed37new withoutpass; diagnosis identifies repeated actor context. Compact delivery implementation underway, no restart.
 - 2026-10-06 22:11 CST — 86983531 records fresh BP outcomes and context inflation evidence so followup addresses a diagnosed delivery defect.
 - 2026-10-06 22:19 CST — Actor compact delivery173Python/npm35PASS, independentCLEAR; raw evidence/certificates unchanged. Packaged deployment gate next.
+- 2026-10-06 22:19 CST — b5c24693 compacts actor acknowledgements and boards to reduce repeated context while preserving raw evidence and feedback.
+
+- 22:28 b5c24693 full promotion PASS; 25 current/21 frozen certificates unchanged. BP final cognition found unverified 28-step candidate.
+- 22:34 Exact b5 native BP L6 started; final explored map loaded; prefix5/150 preserved; no official operations.
