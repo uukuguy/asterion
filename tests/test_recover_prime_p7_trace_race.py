@@ -76,7 +76,16 @@ class TestRecoverPrimeP7TraceRace(unittest.TestCase):
                 for path in source.rglob("*")
                 if path.is_file()
             }
+            source_model = json.loads(
+                (source / "trace" / "prime-trace.jsonl").read_text().splitlines()[0]
+            )["identities"]["model_id"]
             with (
+                # Clean Make exports unset operator settings as empty strings.
+                # This fixture supplies the valid selection its source used.
+                mock.patch.dict("os.environ", {
+                    "ASTERION_PRIME_PROVIDER": "openai-codex",
+                    "ASTERION_PRIME_MODEL": source_model,
+                }),
                 mock.patch(
                     "tools.recover_prime_p7_trace_race.live.safe_run_id",
                     return_value="p7-live-20260925080000-0123456789abcdef01234567",
