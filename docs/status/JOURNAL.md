@@ -4099,3 +4099,7 @@
 - 23:24 2e34315e records parent-only RESET deployment and actual map reuse so recovery retains the running finite attempt.
 - 23:34 BP L8 certified46new/0RESET/1UNDO,8/292; local99.20/182/6711. L9 native2f actually launched from292.
 - 23:34 Console68369 exact2f fixed57515 PASS; owned expired zero-action session safe; guest/publisher untouched; overview saved authority intact.
+- 23:35 55a9498f records certified L8, native L9 and upgraded console so recovery preserves the last remaining level.
+- 23:37 Native2f RESET298 matched initial L9 frame, preserved8levels; subsequent actions continued, console diagnostics0; authority filtering remains unit-verified.
+- 23:46 L9 first sealed63new/2RESET withoutpass; normalcertready8/292 unchanged; RESET extraction errors absent, final upper map retained.
+- 23:48 Same-phase secondL9 actually started234741 on2f; prior8/292authority retained, first upper-map experience admitted.
