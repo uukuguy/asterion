@@ -614,6 +614,35 @@ class TestOfflineReplayCognition(unittest.TestCase):
                 rejected = build_console_snapshot(current)
             self.assertFalse(any(level['cognition_timeline'] for level in rejected['levels']))
 
+    def test_long_resume_chain_from_composition_retains_each_original_level_source(self):
+        rows = [self.observation(), self.observation('ACTION1', 1, completed=1),
+                self.observation('ACTION1', 2, completed=2)]
+        first = self._source('long-native-prefix', rows[:2], {0: '第一关原始规则'})
+        last = self._source('long-native-suffix', rows, {2: '第三关原始规则'})
+        composed, summary = self._source('long-composed', rows, {})
+        (composed / 'console-events.jsonl').unlink()
+        summary['diagnostics'] = {'recovery_kind': 'saved-route-composition'}
+        (composed / 'summary.json').write_text(json.dumps(summary))
+        segments = (({'source_start_sequence': 1, 'source_end_sequence': 1, 'destination_start_sequence': 1}, *first),
+                    ({'source_start_sequence': 2, 'source_end_sequence': 2, 'destination_start_sequence': 2}, *last))
+        previous = composed
+        for index in range(12):
+            current, own = self._source(f'long-composition-resumed-{index}', rows, {})
+            own['diagnostics'] = {'execution_mode': 'resumed', 'source_run_id': previous.name,
+                                  'restoration_actions': 2}
+            (current / 'summary.json').write_text(json.dumps(own))
+            previous = current
+        with patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=segments):
+            snapshot = build_console_snapshot(current)
+        timeline = [item for level in snapshot['levels'] for item in level['cognition_timeline']]
+        self.assertEqual([item['stable_description'] for item in timeline], ['第一关原始规则', '第三关原始规则'])
+        self.assertEqual([item['provenance']['run_id'] for item in timeline], [first[0].name, last[0].name])
+        self.assertFalse(any('恢复来源的认知证据不匹配' in warning for warning in snapshot['warnings']))
+        with patch('asterion.applications.prime.p7.route_composition.composition_sources', return_value=None):
+            rejected = build_console_snapshot(current)
+        self.assertFalse(any(level['cognition_timeline'] for level in rejected['levels']))
+        self.assertTrue(any('恢复来源的认知证据不匹配' in warning for warning in rejected['warnings']))
+
     def test_terminal_recovery_rejects_missing_lineage_and_recording_gap(self):
         rows = [self.observation(), self.observation('ACTION1', 1), self.observation('ACTION1', 2)]
         source = self._source('terminal-source', rows, {0: '初始规则', 2: '后续规则'})

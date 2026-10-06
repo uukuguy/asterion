@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.prime.p7.console_events import ConsoleEventWriter, read_console_events
 from tests import test_prime_p7_console as fixtures
@@ -745,6 +746,35 @@ class TestRestoredResearchProjection(unittest.TestCase):
             'diagnostics': {'execution_mode': 'resumed', 'source_run_id': source,
                             'restoration_actions': restored} if source else {}}))
         return root
+
+    def test_long_resume_chain_keeps_original_cognition_and_rejects_cycle_or_corruption(self):
+        from asterion.applications.prime.p7.console_snapshot import build_console_snapshot
+        original = current = self.publish('lineage-original', 1, {0: '原始可验证规则'})
+        roots = [original]
+        for index in range(12):
+            current = self.publish(f'lineage-{index}', 1, {}, current.name, 1)
+            roots.append(current)
+        snapshot = build_console_snapshot(current)
+        inherited = snapshot['levels'][0]['cognition_timeline']
+        self.assertEqual([item['stable_description'] for item in inherited], ['原始可验证规则'])
+        self.assertEqual(inherited[0]['provenance']['run_id'], original.name)
+        with patch('asterion.applications.prime.p7.console_snapshot._MAX_SOURCE_REQUESTS', 2):
+            limited = build_console_snapshot(current)
+        self.assertEqual(limited['levels'][0]['cognition_timeline'], [])
+        self.assertTrue(any('恢复来源的认知证据不匹配' in warning for warning in limited['warnings']))
+        path = original / 'summary.json'
+        original_summary = path.read_bytes()
+        summary = json.loads(original_summary)
+        summary['diagnostics'] = {'execution_mode': 'resumed', 'source_run_id': current.name, 'restoration_actions': 1}
+        path.write_text(json.dumps(summary))
+        cyclic = build_console_snapshot(current)
+        self.assertEqual(cyclic['levels'][0]['cognition_timeline'], [])
+        self.assertTrue(any('恢复来源的认知证据不匹配' in warning for warning in cyclic['warnings']))
+        path.write_bytes(original_summary)
+        (original / 'console-events.jsonl').write_text('{}\n')
+        corrupted = build_console_snapshot(current)
+        self.assertEqual(corrupted['levels'][0]['cognition_timeline'], [])
+        self.assertTrue(any('恢复来源的认知证据不匹配' in warning for warning in corrupted['warnings']))
 
     def launch(self, current, source, game):
         launches = self.runs / 'launches'

@@ -28,6 +28,7 @@ from asterion.capabilities.prime_arc_agi_3_solver import PrimeArcAgi3SolveReceip
 
 _MAX_FILE = 32 * 1024 * 1024
 _MAX_ROWS = 4096
+_MAX_SOURCE_REQUESTS = 4096
 _KINDS = {"game_type", "object_role", "control", "rule", "success_condition", "strategy"}
 _STATUSES = {"certain", "falsified", "undetermined"}
 _ACTIONS = {"RESET", *(f"ACTION{i}" for i in range(1, 8))}
@@ -544,11 +545,39 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
                                seen: tuple[str, ...] = (), *,
                                recorded_positions: dict[int, dict] | None = None,
                                recorded_witnesses: tuple | None = None) -> list[dict]:
+    """Evaluate authenticated inheritance with a finite explicit call stack."""
+    tasks = [_restored_cognition_task(root, summary, trace, current_events, seen,
+                                      recorded_positions=recorded_positions,
+                                      recorded_witnesses=recorded_witnesses)]
+    requests, result = 1, None
+    try:
+        while tasks:
+            try:
+                arguments, options = tasks[-1].send(result)
+            except StopIteration as complete:
+                tasks.pop()
+                result = complete.value
+                continue
+            result = None
+            requests += 1
+            if requests > _MAX_SOURCE_REQUESTS:
+                raise ValueError('restored cognition unavailable')
+            tasks.append(_restored_cognition_task(*arguments, **options))
+        return result
+    finally:
+        for task in tasks:
+            task.close()
+
+
+def _restored_cognition_task(root: Path, summary: dict, trace: list[dict], current_events: list[dict],
+                             seen: tuple[str, ...] = (), *,
+                             recorded_positions: dict[int, dict] | None = None,
+                             recorded_witnesses: tuple | None = None):
     """Read only explicitly linked, authenticated historical actor beliefs."""
     diagnostics = summary.get('diagnostics', {})
     recovery_kind = diagnostics.get('recovery_kind') if isinstance(diagnostics, dict) else None
     if recovery_kind in {'saved-route-composition', 'terminal-game-win', 'animation-replay'}:
-        if root.name in seen or len(seen) >= 8:
+        if root.name in seen:
             raise ValueError('replayed cognition unavailable')
         if recovery_kind == 'saved-route-composition':
             from .route_composition import composition_sources
@@ -584,7 +613,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
             if (warnings or (not sealed and recovery_kind != 'terminal-game-win')
                     or actions(events, 'action') != actions(source_trace, 'arc.action')):
                 raise ValueError('replayed cognition unavailable')
-            inherited = _restored_cognition_events(source, prior, source_trace, events, (*seen, root.name))
+            inherited = yield ((source, prior, source_trace, events, (*seen, root.name)), {})
             _alias_restored_observations(inherited, dict(enumerate(observations)))
             expected_witnesses = _recorded_animation_witnesses(
                 source, source_trace, prior['experiment']['game_id'], observations[0]['wins']) if observations else None
@@ -617,7 +646,7 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         return []
     source_id = _identifier(diagnostics.get('source_run_id'))
     restored = _integer(diagnostics.get('restoration_actions'), _MAX_ROWS)
-    if not source_id or not restored or source_id in (*seen, root.name) or len(seen) >= 8:
+    if not source_id or not restored or source_id in (*seen, root.name):
         raise ValueError('restored cognition unavailable')
     source = root.parent / source_id
     if source.is_symlink() or not source.is_dir():
@@ -665,18 +694,16 @@ def _restored_cognition_events(root: Path, summary: dict, trace: list[dict], cur
         observations, _ = _source_observations(current_events, warnings, root)
         if warnings or len(observations) <= restored:
             raise ValueError('restored cognition unavailable')
-        inherited = _restored_cognition_events(
-            source, prior, prior_trace, [], (*seen, root.name),
-            recorded_positions={index: observation for index, observation in enumerate(observations)
-                                if index <= restored},
-            recorded_witnesses=actual_witnesses,
-        )
+        inherited = yield ((source, prior, prior_trace, [], (*seen, root.name)),
+                           {'recorded_positions': {index: observation for index, observation in enumerate(observations)
+                                                   if index <= restored},
+                            'recorded_witnesses': actual_witnesses})
         return [event for event in inherited if event['payload']['source_action_sequence'] <= restored]
     events = read_console_events(source, source_id, game, warnings=warnings)
     observations, events = _source_observations(events, warnings, source)
     if warnings or len(observations) <= restored or prefix(events, 'action') != prefix(prior_trace):
         raise ValueError('restored cognition unavailable')
-    inherited = _restored_cognition_events(source, prior, prior_trace, events, (*seen, root.name))
+    inherited = yield ((source, prior, prior_trace, events, (*seen, root.name)), {})
     _alias_restored_observations(inherited, dict(enumerate(observations)))
     retained = []
     for event in (*inherited, *events):
