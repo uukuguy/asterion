@@ -4005,3 +4005,7 @@
 - 2026-10-06 17:32 CST — Cloudf5d76bad startup release actualHTML/GETs/AR25L1 PASS; all requests settled before DOM close, exit0.
 - 2026-10-06 17:38 CST — Exact73cc02ed fullpromotionPASS25/provider0;558resourcehashes match installed wheel; ownedidleconsole12566→94827PASS at57515.
 - 2026-10-06 17:38 CST — Actual local/cloud HTML and readonly replay GETs loadAR25L1; pending0/exit0; Chrome visual boundary remains unverified.
+- 71f0014d — Record verified initial-level releases and actual local/cloud startup evidence for reliable recovery.
+- 2026-10-06 — User reiterated two genuine failures are per round, not permanent; new BP/LF/SK phase authorized alongside WA.
+- 2026-10-06 17:54 CST — New BP/LF/SK round resets scope counts only; AstraCLEAR/10testsPASS; parent49324→4227 adoption released,guest signals0.
+- 2026-10-06 17:54 CST — Actualfourunits running WA30L8/BP35L6/LF52L8/SK48L5,each900seconds; all cumulative history and saved prefixes retained.
