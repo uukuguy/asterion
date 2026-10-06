@@ -18,6 +18,7 @@ from .console_snapshot import build_console_snapshot
 from .console_replay import ReplayProjectionCache
 from .console_export import export_console
 from .console_preview_prepared import read_prepared_preview
+from .console_activity import campaign_solving
 from .solver_control import read_control_ack, write_control_request
 from .console_preferences import read_selection, valid_selection, write_selection
 from .game import _read_catalog, public_game_catalog
@@ -92,6 +93,7 @@ class ConsoleSession:
         process_stopper: Callable = _stop_process,
         guest_cleanup: Callable[[str], bool] | None = None,
         guest_activity_reader: Callable[[], bool] | None = None,
+        guest_unit_reader: Callable[[], dict[str, bool]] | None = None,
         operator_environment_reader: Callable[[Path], Mapping[str, str]] = load_operator_environment,
         snapshot_reader: Callable = build_console_snapshot,
         preview_reader: Callable | None = None,
@@ -136,8 +138,11 @@ class ConsoleSession:
         self._process_stopper = process_stopper
         self._guest_cleanup = guest_cleanup or self._cleanup_guest
         self._guest_activity_reader = guest_activity_reader or self._query_guest_activity
+        self._guest_unit_reader = guest_unit_reader or self._query_guest_units
         self._operator_environment_reader = operator_environment_reader
         self._activity_cache: tuple[float, bool | None] | None = None
+        self._activity_units: frozenset[str] | None = None
+        self._active_guest_unit: str | None = None
         self._activity_lock = threading.Lock()
         self._snapshot_reader = snapshot_reader
         self._replay_cache = ReplayProjectionCache(snapshot_reader, self._games)
@@ -224,6 +229,19 @@ class ConsoleSession:
         value = reader.build(active_run_id=active)
         self._prewarm_overview(value, active)
         busy = self._read_guest_activity()
+        with self._activity_lock:
+            live_units = self._activity_units if busy is True else None
+        solving = campaign_solving(self._runs, self._games, live_units)
+        with self._lock:
+            if (self._view['state'] == 'running' and live_units is not None
+                    and self._active_guest_unit in live_units and self._view['run_id'] == active):
+                run = self._runs / active
+                if not (run / 'summary.json').exists() and not (run / 'summary.json').is_symlink():
+                    solving[self._view['game_id']] = active
+        for game in value['games']:
+            run_id = solving.get(game['game_id'])
+            known = any(run.get('run_id') == run_id for run in game.get('runs', [])) if run_id else False
+            game.update(solving=known, solving_run_id=run_id if known else None)
         block = "guest-unavailable" if busy is None else "session-busy" if busy else None
         try:
             self._validate_model()
@@ -277,7 +295,7 @@ class ConsoleSession:
                 # Display warming cannot change score or solver readiness.
                 continue
 
-    def _query_guest_activity(self) -> bool:
+    def _query_guest_units(self) -> dict[str, bool]:
         result = subprocess.run(
             ["orb", "-m", self._guest, "-u", "root", "-w", "/tmp", "systemctl", "list-units",
              "--all", "--no-legend", "--plain", "--state=active,activating,deactivating",
@@ -285,7 +303,7 @@ class ConsoleSession:
         )
         if result.returncode != 0 or len(result.stdout) > 4096:
             raise ConsoleSessionError("guest-unavailable")
-        units = []
+        units = {}
         for line in result.stdout.splitlines():
             fields = line.split()
             if not fields:
@@ -293,7 +311,18 @@ class ConsoleSession:
             if (len(fields) < 4 or re.fullmatch(r"asterion-p7-[0-9a-f]{32}\.service", fields[0]) is None
                     or fields[2] not in {"active", "activating", "deactivating"}):
                 raise ConsoleSessionError("guest-unavailable")
-            units.append(fields[0])
+            if fields[0] in units:
+                raise ConsoleSessionError('guest-unavailable')
+            units[fields[0]] = fields[2] == 'active' and fields[3] == 'running'
+        return units
+
+    def _query_guest_activity(self) -> bool:
+        units = self._guest_unit_reader()
+        if (type(units) is not dict or len(units) > 32
+                or any(type(unit) is not str or re.fullmatch(r'asterion-p7-[0-9a-f]{32}\.service', unit) is None
+                       or type(running) is not bool for unit, running in units.items())):
+            raise ConsoleSessionError('guest-unavailable')
+        self._activity_units = frozenset(unit for unit, running in units.items() if running)
         return bool(units)
 
     def _read_guest_activity(self, *, force: bool = False) -> bool | None:
@@ -302,11 +331,14 @@ class ConsoleSession:
             if not force and self._activity_cache is not None and now - self._activity_cache[0] < 5:
                 return self._activity_cache[1]
             try:
+                self._activity_units = None
                 busy = self._guest_activity_reader()
                 if type(busy) is not bool:
                     busy = None
             except Exception:
                 busy = None
+            if busy is None:
+                self._activity_units = None
             self._activity_cache = (now, busy)
             return busy
 
@@ -484,6 +516,7 @@ class ConsoleSession:
             raise ConsoleSessionError("session-busy")
         self._validate_model()
         unit = "asterion-p7-" + secrets.token_hex(16) + ".service"
+        self._active_guest_unit = unit
         self._stop = threading.Event()
         self._snapshot_key = None
         self._control_sequence = 0

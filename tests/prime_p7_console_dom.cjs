@@ -192,7 +192,7 @@ test('read-only action panel follows frame availability and preserves final mean
   const highlighted = () => dom.window.document.querySelectorAll('.available-action[aria-current="true"]');
   assert.deepEqual(availableNames(), ['ACTION1', 'ACTION4', 'ACTION5']);
   assert.equal(highlighted().length, 0);
-  assert.match($('available-actions').textContent, /ACTION1上移已识别/);
+  assert.match($('available-actions').textContent, /ACTION1 ↑上移已识别/);
   assert.match($('available-actions').textContent, /ACTION4右移推测/);
   assert.match($('available-actions').textContent, /ACTION5未识别\?/);
   assert.equal($('available-actions').querySelectorAll('button').length, 3);
@@ -253,7 +253,7 @@ test('compact keys leave full original and conflicting claims in the cognition t
   snapshot.levels[0].cognition.action_meanings = { ACTION4: entries };
   const app = launch(snapshot);
   const card = app.$('available-actions').querySelector('[data-available-action="ACTION4"]');
-  assert.equal(card.textContent, 'ACTION4右移已识别');
+  assert.equal(card.textContent, 'ACTION4 →右移已识别');
   assert.equal(card.querySelector('p, details'), null);
   const details = app.$('panel-cognition').querySelector('[data-meaning-action="ACTION4"] details');
   assert.equal(details.open, false);
@@ -280,7 +280,7 @@ test('compact action keys seek recorded actions, wrap, pause, and keep unsupport
   };
   const app = launch(snapshot); const { dom, $ } = app;
   const key = (name) => $('available-actions').querySelector(`[data-available-action="${name}"]`);
-  ['ACTION5', 'ACTION6', 'ACTION7'].forEach((name) => {
+  ['ACTION5', 'ACTION7'].forEach((name) => {
     assert.equal(key(name).textContent, `${name}未识别?`);
     assert.equal(key(name).disabled, true);
   });
@@ -304,10 +304,35 @@ test('compact directional labels support Chinese neighbors and explicit movement
     snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
     snapshot.levels[0].cognition.action_meanings = { ACTION4: [{ status: 'certain', claim }] };
     const app = launch(snapshot);
-    assert.equal(app.$('available-actions').querySelector('button').textContent, `ACTION4${expected}`, claim);
+    assert.equal(app.$('available-actions').querySelector('button').textContent, `ACTION4${expected === "右移已识别" ? " →" : ""}${expected}`, claim);
     assert.deepEqual(app.errors, []);
     app.dom.window.close();
   }
+});
+
+test('action headings use same-level learned movements as labeled background, keep unknown keys and define native clicks and RESET',()=>{
+  const snapshot=fixture(),level=snapshot.levels[0];
+  level.frames.forEach(frame=>{frame.available_actions=['ACTION1','ACTION2','ACTION6','RESET'];});
+  level.cognition_timeline=[{scope:'observation',frame_id:'f0',stable_description:'已记录的本关观察。'}];
+  level.actions=[
+    {id:'left',name:'ACTION1',before_frame:'f0',after_frame:'f1',data:{},visual_observations:['蓝色（9）像素整体向左4格；形状和数量不变。']},
+    {id:'point',name:'ACTION6',before_frame:'f1',after_frame:'f2',data:{x:2,y:3},visual_observations:[]},
+  ];
+  const app=launch(snapshot),key=name=>app.$('available-actions').querySelector(`[data-available-action="${name}"]`);
+  try {
+    assert.equal(key('ACTION1').querySelector('strong').textContent,'ACTION1 ←');assert.match(key('ACTION1').title,/规划背景，不表示当前帧当时已知/);
+    assert.equal(key('ACTION2').querySelector('strong').textContent,'ACTION2');
+    assert.equal(key('RESET').querySelector('strong').textContent,'RESET 重置');
+    assert.equal(key('RESET').querySelector('.action-key-status').textContent,'协议');
+    app.$('next-frame').click();assert.equal(key('ACTION1').querySelector('strong').textContent,'ACTION1 ←');
+    assert.equal(key('ACTION6').querySelector('strong').textContent,'ACTION6 点击');assert.equal(key('ACTION6').querySelector('.action-key-status').textContent,'协议');
+    app.$('next-frame').click();assert.equal(key('ACTION6').querySelector('strong').textContent,'ACTION6 点击');
+    assert.match(key('ACTION6').title,/协议定义：点击/);
+    app.$('previous-frame').click();app.$('previous-frame').click();
+    assert.equal(key('ACTION1').querySelector('strong').textContent,'ACTION1 ←');assert.match(key('ACTION1').title,/规划背景，不表示当前帧当时已知/);
+    assert.equal(key('ACTION6').querySelector('strong').textContent,'ACTION6 点击');assert.equal(key('ACTION6').querySelector('.action-key-status').textContent,'协议');
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
 });
 
 test('explicit directional denials constrain compact meanings without reversing falsified negatives', () => {
@@ -322,7 +347,7 @@ test('explicit directional denials constrain compact meanings without reversing 
     snapshot.levels[0].frames[0].available_actions = ['ACTION4'];
     snapshot.levels[0].cognition.action_meanings = { ACTION4: entries };
     const app = launch(snapshot);
-    assert.equal(app.$('available-actions').querySelector('button').textContent, `ACTION4${expected}`, JSON.stringify(entries));
+    assert.equal(app.$('available-actions').querySelector('button').textContent, `ACTION4${expected === "右移已识别" ? " →" : ""}${expected}`, JSON.stringify(entries));
     assert.deepEqual(app.errors, []);
     app.dom.window.close();
   }
@@ -2354,6 +2379,23 @@ test('external unsealed replay polling preserves chosen history, switches runs w
   } finally { app.dom.window.close(); }
 });
 
+test('overview subtly marks confirmed solving and never treats old recording files as alive',async()=>{
+  const overview=overviewFixture(catalog25);
+  overview.games[0]={...overview.games[0],status:'unverified',solving:false,solving_run_id:null,
+    runs:[{...catalogRun('stale-recording','unverified',false),completed_levels:0,recording:true}]};
+  overview.games[1]={...overview.games[1],status:'unverified',solving:true,solving_run_id:'actual-research',
+    runs:[{...catalogRun('actual-research','unverified',false),completed_levels:0,recording:true}]};
+  const app=launch(fixture(),{liveConfig:catalog25,overview,fetch:async()=>response(idleView())});
+  try {
+    await settle();assert.equal(overviewRow(app,0).classList.contains('is-solving'),false);
+    assert.equal(overviewRow(app,1).classList.contains('is-solving'),true);
+    assert.equal(overviewRow(app,0).querySelector('.overview-activity-badge').textContent,'● 新尝试');
+    assert.equal(overviewRow(app,1).querySelector('.overview-activity-badge').textContent,'● 求解中');
+    assert.equal(overviewRow(app,2).classList.contains('is-solving'),false);
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('static exports keep the local overview hidden and never fetch',()=>{
   const app=launch(fixture());try{assert.equal(app.$('overview').hidden,true);assert.equal(app.requests.length,0);assert.deepEqual(app.errors,[]);}finally{app.dom.window.close();}
 });
@@ -2384,7 +2426,7 @@ test('recording overview keeps saved route by default and explicitly watches an 
     await settle();assert.equal(app.$('run-id').textContent,'old-best');const row=overviewRow(app);assert.equal(row.querySelector('.overview-result-badge').textContent,'◐ 部分通关');assert.equal(row.querySelector('.overview-result-badge').classList.contains('partial'),true);assert.equal(row.querySelector('.overview-activity-badge').textContent,'● 新尝试');assert.match(row.querySelector('.overview-activity-badge').title,/外部只读/);assert.match(row.querySelector('.overview-activity-badge').getAttribute('aria-label'),/外部只读/);assert.doesNotMatch(row.textContent,/外部只读/);assert.match(row.querySelector('.overview-progress').textContent,/1 \/ 2/);
     const full=overviewRow(app,1);assert.equal(full.querySelector('.overview-result-badge').textContent,'✓ 全部通关');assert.equal(full.querySelector('.overview-result-badge').classList.contains('completed'),true);assert.equal(full.querySelector('.overview-progress').classList.contains('completed'),true);assert.equal(full.querySelector('.overview-activity-badge').textContent,'● 新尝试');
     assert.equal(overviewRow(app,2).querySelector('.overview-result-badge').textContent,'尚未开始');assert.equal(overviewRow(app,2).querySelector('.overview-activity-badge'),null);
-    assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').textContent,'待验证');assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').classList.contains('unverified'),true);
+    assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').textContent,'未通关');assert.match(overviewRow(app,3).querySelector('.overview-result-badge').title,/没有已保存过关记录/);assert.equal(overviewRow(app,3).querySelector('.overview-result-badge').classList.contains('unverified'),true);
     row.querySelector('[data-overview-attempt]').click();await settle();assert.equal(app.$('replay-run').value,'new-recording');assert.equal(app.$('run-id').textContent,'new-recording');
     app.$('frame-slider').value='1';app.$('frame-slider').dispatchEvent(new app.dom.window.Event('input'));
     replay={...replay,levels:replay.levels.map((level,i)=>i?level:{...level,frames:[...level.frames,{id:'f3',grid:[[14]],state:'NOT_FINISHED'}]})};
@@ -2581,6 +2623,57 @@ function levelReplayOverview(records) {
 
 const settleReplay=async()=>{await settle();await settle();await settle();};
 
+test('accepted replay refreshes keep the stage and loader stable while genuine failures retain retry',async()=>{
+  const data=levelReplayFixture('game0-catalog','stable-live',{sealed:false});let releaseManifest;
+  const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
+    if(url.endsWith('/manifest'))return releaseManifest===null?new Promise(resolve=>{releaseManifest=resolve;}):response(data.manifest);
+    if(url.includes('/levels/2/'))return response(data.detail(2));
+    return response(idleView());
+  }});
+  try {
+    await settleReplay();assert.equal(app.$('board-empty').hidden,true);
+    const stageStyle=app.dom.window.getComputedStyle(app.$('board-stage'));
+    assert.notEqual(stageStyle.height,'auto');assert.notEqual(stageStyle.height,'');
+    assert.equal(app.dom.window.getComputedStyle(app.$('replay-loading-slot')).position,'absolute');
+    assert.ok(app.$('replay-loading-slot').closest('.run-status-column'));
+    const frame=app.$('frame-counter').textContent, canvas=app.$('board-canvas');
+    const mutations=[];const observer=new app.dom.window.MutationObserver(entries=>mutations.push(...entries));
+    observer.observe(canvas,{attributes:true});
+    releaseManifest=null;[...app.timers.values()].find(fn=>fn.intervalMs===2000)();await settleReplay();
+    assert.ok(releaseManifest);assert.equal(app.$('replay-loading').hidden,true);
+    [...app.timers.values()].find(fn=>fn.intervalMs===1000)();await settleReplay();
+    assert.equal(app.$('replay-loading').hidden,true);assert.equal(app.$('frame-counter').textContent,frame);
+    releaseManifest(response(data.manifest));await settleReplay();
+    assert.equal(app.$('replay-loading').hidden,true);assert.equal(mutations.length,0);
+    for(let tick=0;tick<5;tick++) {
+      [...app.timers.values()].find(fn=>fn.intervalMs===2000)();
+      assert.equal(app.$('replay-loading').hidden,true);await settleReplay();
+      assert.equal(app.$('replay-loading').hidden,true);
+    }
+    assert.equal(mutations.length,0);
+    releaseManifest=null;[...app.timers.values()].find(fn=>fn.intervalMs===2000)();await settleReplay();
+    releaseManifest(response({},503));await settleReplay();
+    assert.equal(app.$('replay-loading').hidden,false);assert.equal(app.$('replay-retry').hidden,false);
+    assert.equal(app.$('board-empty').hidden,true);assert.equal(app.$('frame-counter').textContent,frame);
+    observer.disconnect();assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
+test('real evidence warnings remain accessible as compact status details without a full-width row',()=>{
+  const record=fixture();record.warnings=['部分关卡已保存，尚无整题回执。','真实回放边界说明。'];
+  const app=launch(record);
+  try {
+    const details=app.$('evidence-details'),summary=app.$('evidence-summary');
+    assert.equal(details.hidden,false);assert.equal(details.open,false);
+    assert.ok(details.closest('.run-status-column'));assert.equal(summary.textContent,'说明 2');
+    assert.match(summary.title,/部分关卡已保存/);assert.match(summary.getAttribute('aria-label'),/真实回放边界说明/);
+    details.open=true;assert.match(app.$('evidence-warning').textContent,/尚无整题回执/);
+    assert.equal(app.dom.window.getComputedStyle(app.$('evidence-warning')).position,'absolute');
+    assert.equal(app.dom.window.getComputedStyle(app.$('board-title').parentElement.parentElement).height,'');
+    assert.deepEqual(app.errors,[]);
+  } finally {app.dom.window.close();}
+});
+
 test('per-level replay shows loading, manifest counts, and reads only the chosen level with shared saved cache',async()=>{
   const data=levelReplayFixture('game0-catalog','level-first');let ready=false,releaseDetail;
   const app=launch(fixture(),{liveConfig:levelReplayConfig,overview:levelReplayOverview([data]),fetch:async url=>{
@@ -2591,6 +2684,8 @@ test('per-level replay shows loading, manifest counts, and reads only the chosen
   }});
   try {
     await settleReplay();assert.equal(app.$('game-title').textContent,'game0-catalog');assert.equal(app.$('replay-loading').hidden,false);
+    const stageHeight=app.dom.window.getComputedStyle(app.$('board-stage')).height;
+    assert.equal(app.$('palette-legend').hidden,true);
     assert.match(app.$('replay-loading-text').textContent,/正在整理回放/);assert.equal(app.$('board-empty').hidden,false);
     ready=true;const clock=app.dom.window.Date.now;app.dom.window.Date.now=()=>clock()+2200;app.tick();await settleReplay();
     assert.ok(releaseDetail);assert.match(app.$('level-1').textContent,/1 动作 · 3 帧/);assert.match(app.$('level-2').textContent,/2 动作 · 3 帧/);
@@ -2598,6 +2693,8 @@ test('per-level replay shows loading, manifest counts, and reads only the chosen
     assert.equal(app.requests.some(request=>request.url==='/api/replay/level-first'),false);
     assert.equal(app.requests.some(request=>request.url.includes('/levels/1/')),false);
     releaseDetail(response(data.detail(2)));await settleReplay();
+    assert.equal(app.dom.window.getComputedStyle(app.$('board-stage')).height,stageHeight);
+    assert.equal(app.$('palette-legend').hidden,false);
     assert.equal(app.$('frame-counter').textContent,'3 / 3');assert.match(app.$('world-guide').textContent,/第2关/);assert.equal(app.$('replay-loading').hidden,true);
     assert.equal(app.requests.filter(request=>request.url.includes('/levels/2/')).length,1);
     app.$('level-1').click();await settleReplay();assert.equal(app.$('frame-counter').textContent,'1 / 3');assert.match(app.$('world-guide').textContent,/第1关/);

@@ -3855,3 +3855,14 @@
 - 2026-10-06 09:28 CST — 41f02b61 prepares saved replay files and fences per-level loading to prevent slow switches and mixed saved records.
 - 2026-10-06 09:32 CST — Prepared core full promotion PASS25/provider0; actual14 saved games/78 levels HTTP counts/cognition PASS; stopped LS20/LF52 now select saved sources146/175ms.
 - 2026-10-06 09:33 CST — Default saved-source/preview selection and stable loading slot passed106 DOM checks; explicit latest attempts remain separately pinned.
+- 2026-10-06 09:34 CST — 180a437b defaults to verified saved views and reserves loading space to prevent empty screens and layout jumps.
+- 2026-10-06 09:37 CST — Final180a wheel/14 resource hashes and parent-only adoption PASS;14 fixed HTML refreshed without raw parse; local8full/81saved, M0 L6+R11 L4 active.
+- 2026-10-06 09:40 CST — User expands ready-only switching to entire25/183 roster; implement durable initial previews and stable whole-stage rendering.
+
+- 2026-10-06 09:53 CST — All183 SDK initial views prepared; fresh-session/HTTP183PASS, zero workers/actions/providers; compact status DOM108PASS.
+- 2026-10-06 09:56 CST — Actual saved manifest/detail HTTP15games/85levels PASS; next fresh S5I5L1 announced; two guests continue.
+- 2026-10-06 10:00 CST — CD82 has two genuine L1 timeouts/zero saved levels; pending-verification display rejected; action semantics follow-up underway.
+- 2026-10-06 10:02 CST — 98aa1b9b prepares all initial views before selection; production reads ready files without SDK engines.
+- 2026-10-06 10:02 CST — CD82 explicit one-shot priority launched with RE86L3; two slots and prior failure history/deadlines preserved.
+- 2026-10-06 — Full promotion PASS25/provider0 for frozen183-ready and compact-status snapshot; later action/activity increments checked separately.
+- 2026-10-06 10:04 CST — Action/status increment DOM110PASS, relatedPython70PASS; actual served arrows/compact layout/corroborated live-row markers PASS.

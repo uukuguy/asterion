@@ -395,3 +395,12 @@ Promotion is 4010 tests, 13 failures / 4 errors / 4 skips, NON-PASS; Sol is inve
 ### 2026-10-06 live-console follow-up closure
 
 Local main now includes completed WorldMap/experience/console work, generic live/finalized per-level cognition provenance (`b074b5f4`/`ebc4542c`), and refresh-safe playback (`002f37a0`). Final full promotion PASS25 commands, related Python205 PASS, DOM86 PASS/one existing skip, actual served-HTML cognition21 checkpoints PASS. Chrome visual acceptance remains external-limited. DC22 is sealed/replayed4/6 (197 actual/191 completed-prefix actions); L5 attempt2 is active. Keep the two-unfinished-attempt rule and the one official25-task submission gate after finite DC22/VC33. The recovery checkpoint owns current processes, attempts and evidence limits; earlier pending-main/held-launch addenda are historical.
+
+
+### 2026-10-06 complete preparation extension (integration)
+
+User requires all25games/183levels ready before switching. Implement application-owned normalized initial-preview preparation/store and ready-only production reader, retaining injected fixture readers. Prepare all183 real SDK initial observations with no model calls/game actions and bounded one-worker lifecycle; verify every selected-level HTTP response after owned console restart, plus current saved-source manifests and records. Fix stable board/placeholder geometry and same-source loading-banner churn. Preserve two independent solving guests and their original deadlines. Freeze, review the changed application contracts, run focused tests and packaged-resource promotion, commit promptly to main, then adopt only the campaign parent/export package. Named current evidence belongs in the live checkpoint; earlier palette/core gates retain their original boundary.
+
+Implementation frozen: all183 actual initial observations ready; fresh-session/HTTP183PASS with SDK worker forbidden; backend166PASS, final DOM108PASS/one conditional skip, compact status overlay/evidence details reviewed. Full new promotion and exact package adoption are the remaining integration checks, recorded in the live checkpoint.
+
+Core183-ready committed98aa1b9b; frozen compact/status snapshot fullpromotionPASS25/provider0. Later action/running-marker increment: finalDOM110PASS/one conditional skip, relatedPython70PASS, actualservedHTTP/DOM PASS, Astra changed-code review clear. Final incremental package/adoption proof remains recorded in the active checkpoint.

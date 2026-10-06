@@ -68,8 +68,7 @@
     snapshot = JSON.parse($('console-data').textContent);
     if (!validSnapshot(snapshot)) throw new Error('schema');
   } catch (_) {
-    write('evidence-warning', '控制台快照无法读取，或数据版本不受支持。');
-    $('evidence-warning').hidden = false;
+    renderEvidenceWarnings(['控制台快照无法读取，或数据版本不受支持。']);
     document.querySelectorAll('button, input, select').forEach((element) => { element.disabled = true; });
     return;
   }
@@ -289,9 +288,17 @@
     setStatus($('run-status'), run.status);
     write('snapshot-date', `快照时间 ${string(snapshot.generated_at)}`);
     write('verification-note', run.status === 'manual' ? '独立人工试玩；启动 P7 会重置游戏并开始新的运行。' : string(run.status, '').startsWith('preview') ? '只读初始画面；尚未启动 P7，没有求解或试玩动作记录。' : `${run.replay_verified === true ? '回放已验证。' : '回放验证未确认。'}${run.sealed_trace === true ? '具有封存轨迹。' : '无封存成功证明。'}`);
-    const warnings = array(snapshot.warnings).filter((warning) => typeof warning === 'string');
-    $('evidence-warning').hidden = !warnings.length;
-    write('evidence-warning', warnings.length ? `证据提示 · ${warnings.join('；')}` : '');
+    renderEvidenceWarnings(array(snapshot.warnings).filter((warning) => typeof warning === 'string'));
+  }
+
+  function renderEvidenceWarnings(warnings) {
+    const details = $('evidence-details'), text = warnings.join('；');
+    if ($('evidence-warning').textContent !== text) details.open = false;
+    details.hidden = !warnings.length;
+    write('evidence-warning', text);
+    write('evidence-summary', `说明 ${warnings.length}`);
+    $('evidence-summary').title = text;
+    $('evidence-summary').setAttribute('aria-label', `证据说明，${warnings.length} 项：${text}`);
   }
 
   function levelEfficiency(level) {
@@ -531,6 +538,30 @@
     return { meaning: directions[found[0]], status: supported.some((entry) => entry.status === 'certain') ? '已识别' : '推测' };
   }
 
+  function recordedActionMeaning(name) {
+    if (name === 'RESET') return {meaning:'重置',status:'协议'};
+    if (name === 'ACTION6') return {meaning:'点击',status:'协议'};
+    const meanings = array(currentLevel().cognition_timeline).length
+      ? object(observationCognition()?.action_meanings) : actionMeanings();
+    const claims = meaningEntries(meanings[name]);
+    if (claims.length) return {...shortActionMeaning(name, claims),background:!array(currentLevel().cognition_timeline).length};
+    const observed = actions().filter(action => {
+      const index = frames().findIndex(frame => frame.id === action.after_frame);
+      return action.name === name && index >= 0 && frameById(action.before_frame);
+    });
+    // Saved effects from this same level are planning background when viewed
+    // before their source actions. Never infer a direction from an ACTION ID.
+    const directions = new Set(observed.flatMap(action => array(action.visual_observations).flatMap(text => {
+      const match = typeof text === 'string' && text.match(/^.+像素整体向([上下左右])\d+格；形状和数量不变。$/);
+      return match ? [match[1]] : [];
+    })));
+    if (directions.size === 1) {
+      const background=observed.some(action=>frames().findIndex(frame=>frame.id===action.after_frame)>state.frameIndex);
+      return {meaning:{上:'上移',下:'下移',左:'左移',右:'右移'}[[...directions][0]],status:background?'记录':'实测',background};
+    }
+    return {meaning:'未识别',status:'?'};
+  }
+
   function renderAvailableActions(frame, action) {
     const hasAvailability = Boolean(frame && Array.isArray(frame.available_actions));
     const available = [...new Set(array(frame && frame.available_actions).filter((name) => typeof name === 'string' && name))];
@@ -539,7 +570,6 @@
     const linked = action && frame && (frame.id === action.after_frame || (beforeIndex >= 0 && afterIndex >= beforeIndex && state.frameIndex > beforeIndex && state.frameIndex <= afterIndex));
     const manual = state.mode === 'manual' && run.status === 'manual';
     const activeName = manual ? frame ? manualAtCurrent() ? state.manualView?.last_action?.action : action?.name : null : linked ? action.name : null;
-    const meanings = actionMeanings();
     const recordedActions = (name) => actions().filter((entry) => entry.name === name).map((entry) => ({
       action: entry, index: frames().findIndex((frame) => frame.id === entry.after_frame || (!frameById(entry.after_frame) && frame.id === entry.before_frame)),
     })).filter((entry) => entry.index >= 0);
@@ -574,10 +604,14 @@
       if (active) item.setAttribute('aria-current', 'true'); else item.removeAttribute('aria-current');
       if (manual && name === 'ACTION6') item.setAttribute('aria-pressed', String(armed)); else item.removeAttribute('aria-pressed');
       if (pending) item.setAttribute('aria-busy', 'true'); else item.removeAttribute('aria-busy');
-      const short = shortActionMeaning(name, meaningEntries(meanings[name]));
+      const short = recordedActionMeaning(name);
+      const symbol = ['已识别','实测','记录','协议'].includes(short.status)
+        ? ({上移:'↑',下移:'↓',左移:'←',右移:'→',点击:'点击',重置:'重置',交互:'交互'}[short.meaning] || '') : '';
+      item.querySelector('.action-key-label').textContent = `${name}${symbol ? ' '+symbol : ''}`;
       item.querySelector('.action-key-meaning').textContent = short.meaning;
       item.querySelector('.action-key-status').textContent = short.status;
-      item.setAttribute('aria-label', `${name}，${short.meaning}，${short.status === '?' ? '含义未知' : short.status}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
+      if (symbol) item.title += `；${short.status === '协议' ? '协议定义' : `来源 ${levelSource().snapshot.run.run_id || '当前观察'} · 第 ${currentLevel().level} 关`}：${short.meaning}（${short.status}）${short.background ? ' · 本关已保存记录，仅作规划背景，不表示当前帧当时已知' : ''}`;
+      item.setAttribute('aria-label', `${name}，${short.meaning}，${short.status === '?' ? '含义未知' : short.status}${short.background ? '，本关已保存记录，仅作规划背景' : ''}，${manual ? '人工试玩动作' : '定位已录动作'}${active ? `，${availability || '当前动作'}` : ''}${armed ? '，等待点击目标格' : ''}${pending ? '，等待响应' : ''}`);
       return wrapper;
     };
     const reconcile = (list, names, availability) => {
@@ -1175,7 +1209,7 @@
     $('replay-transport').hidden = state.mode !== 'replay' && !manual;
     $('header-mode').textContent = liveConfig ? (manual ? '人工试玩' : live ? 'P7 实时运行' : '回放记录') : '离线回放';
     write('actions-mode', manual ? '人工试玩动作' : live ? '运行观察' : '只读回放');
-    write('actions-note', manual ? !manualAtCurrent() ? '历史画面只读；返回当前画面后可操作' : state.pointerAction === 'ACTION6' ? '点击画面目标格执行 ACTION6' : '执行可用动作；按键含义尚未识别' : live ? '动作由 P7 执行，此处只观察' : '点击定位已录动作');
+    write('actions-note', manual ? !manualAtCurrent() ? '历史画面只读；返回当前画面后可操作' : state.pointerAction === 'ACTION6' ? '点击画面目标格执行 ACTION6' : '执行可用动作；含义见按键标注' : live ? '动作由 P7 执行，此处只观察' : '点击定位已录动作');
     renderManualFeedback();
     const saveStatus = state.manualView?.save_status;
     $('manual-save-status').hidden = !manual || !saveStatus || saveStatus === 'disabled';
@@ -1526,6 +1560,10 @@
         typeof run.status === 'string' && typeof run.verified === 'boolean' &&
         ['completed_levels', 'primitive_actions', 'restoration_actions', 'new_solver_actions'].every((key) => count(run[key])) &&
         (run.observed_completed_levels === undefined || count(run.observed_completed_levels) && run.observed_completed_levels <= game.win_levels))) return false;
+      if (game.solving !== undefined || game.solving_run_id !== undefined) {
+        if (typeof game.solving !== 'boolean' || !id(game.solving_run_id) ||
+            (game.solving ? game.solving_run_id === null || !runs.has(game.solving_run_id) : game.solving_run_id !== null)) return false;
+      }
       return [game.best_run_id, game.resume_run_id, game.latest_run_id ?? null].every((runId) => runId === null || (id(runId) && runs.has(runId)));
     })) return false;
     return value.games.length === array(liveConfig?.games).length && totals.total_levels === value.games.reduce((sum, game) => sum + game.win_levels, 0) &&
@@ -1555,6 +1593,7 @@
     [...$('overview-game-list').children].forEach((row) => {
       const game = overviewGame(row.dataset.gameId);
       row.classList.toggle('is-selected', row.dataset.gameId === $('game-select').value);
+      row.classList.toggle('is-solving', gameSolving(game));
       row.querySelector('[data-overview-start]').disabled = locked || game.status === 'completed' || game.status === 'running' || (game.completed_levels > 0 && !game.resume_run_id);
       row.querySelector('[data-overview-start]').hidden = game.status === 'completed';
       row.querySelector('[data-overview-fresh]').disabled = locked || game.status === 'running';
@@ -1564,6 +1603,11 @@
       attempt.disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;
       row.querySelector('[data-overview-select]').disabled = manualUnsaved() || Boolean(state.manualPending) || state.commandBusy;
     });
+  }
+
+  function gameSolving(game) {
+    return game.solving === true || (state.liveView?.state === 'running' && activeSession() &&
+      state.liveView.game_id === game.game_id && game.runs.some(entry=>entry.run_id===state.liveView.run_id));
   }
 
   function renderOverview() {
@@ -1608,17 +1652,18 @@
       row.querySelector('.overview-progress span').textContent = `${displayed} / ${game.win_levels}${game.progress_pending ? ' · 待封存' : ''}`;
       row.children[2].textContent = Number(game.score).toFixed(2);
       const recording = game.runs.some((run) => run.recording === true);
-      const active = game.status === 'running' || recording;
+      const solving = gameSolving(game);
+      const active = solving || game.status === 'running' || recording;
       const external = active && !game.runs.some((run) => run.run_id === state.liveView?.run_id && activeSession());
       const completed = game.win_levels > 0 && game.completed_levels === game.win_levels;
       const resultKind = completed ? 'completed' : game.completed_levels > 0 ? 'partial' : !active && game.status === 'unverified' ? 'unverified' : 'unplayed';
-      const resultLabel = completed ? '✓ 全部通关' : game.completed_levels > 0 ? '◐ 部分通关' : resultKind === 'unverified' ? '待验证' : active ? '尚未通关' : '尚未开始';
+      const resultLabel = completed ? '✓ 全部通关' : game.completed_levels > 0 ? '◐ 部分通关' : resultKind === 'unverified' ? '未通关' : active ? '尚未通关' : '尚未开始';
       const result = node('span', resultLabel, 'overview-result-badge ' + resultKind);
-      result.title = `已保存 ${game.completed_levels} / ${game.win_levels} 关`;
+      result.title = resultKind === 'unverified' ? '没有已保存过关记录；尝试记录未形成可用过关路线' : `已保存 ${game.completed_levels} / ${game.win_levels} 关`;
       result.setAttribute('aria-label', `${resultLabel} · ${result.title}`);
       const status = row.children[3]; status.className = 'overview-state'; status.replaceChildren(result);
       if (active) {
-        const running = game.status === 'running';
+        const running = solving || game.status === 'running';
         const activity = node('span', running ? '● 求解中' : '● 新尝试', 'overview-activity-badge');
         activity.title = (running ? '求解中' : '最新尝试记录尚未封存') + (external ? ' · 外部只读' : ' · 当前会话');
         activity.setAttribute('aria-label', activity.title); status.append(activity);
@@ -1696,19 +1741,23 @@
     if (replayLoadTimer !== null) window.clearInterval(replayLoadTimer);
     replayLoadTimer = null;
     $('replay-loading').hidden = true; $('replay-retry').hidden = true;
+    $('replay-loading').setAttribute('aria-busy', 'false');
   }
 
   function beginReplayLoad(game, runId, level, phase, retry) {
     const key = `${state.replayGeneration}/${game.game_id}/${runId}/${level}`;
     if (replayLoad?.key !== key) {
       clearReplayLoad();
-      replayLoad = {key, started:Date.now(), gameId:game.game_id, runId, level};
+      replayLoad = {key, started:Date.now(), gameId:game.game_id, runId, level, visible:false};
     }
     const ticket = replayLoad;
     Object.assign(ticket, {phase, retry, failed:false, waiting:false});
+    // Keep accepted, identity-matched frames visible during background refresh.
+    // A cold selection still reports its real wait immediately.
+    ticket.visible ||= !frames().length;
     const update = () => {
       if (replayLoad !== ticket) return;
-      $('replay-loading').hidden = false;
+      $('replay-loading').hidden = !ticket.visible;
       $('replay-loading').classList.toggle('load-failed', ticket.failed);
       $('replay-loading').setAttribute('aria-busy', String(!ticket.failed));
       const elapsed = Math.floor((Date.now() - ticket.started) / 1000);
@@ -1718,6 +1767,7 @@
         ticket.waiting = false; ticket.retry();
       }
     };
+    ticket.render = update;
     update();
     if (replayLoadTimer === null) replayLoadTimer = window.setInterval(update, 1000);
     return ticket;
@@ -1730,10 +1780,8 @@
 
   function failReplayLoad(ticket) {
     if (replayLoad !== ticket) return;
-    ticket.phase = '读取失败，请重新加载'; ticket.failed = true; ticket.waiting = false;
-    $('replay-loading').classList.add('load-failed'); $('replay-loading').setAttribute('aria-busy','false');
-    write('replay-loading-text', `${ticket.gameId} · 读取失败，请重新加载`);
-    $('replay-retry').hidden = false;
+    ticket.phase = '读取失败，请重新加载'; ticket.failed = true; ticket.waiting = false; ticket.visible = true;
+    ticket.render();
   }
 
   function validReplayManifest(value, game, runId) {
@@ -1866,13 +1914,16 @@
       let detail=null;
       if (level.frame_count > 0) {
         ticket.phase = `正在加载第 ${target} 关`; ticket.level = target;
-        write('replay-loading-text',`${string(game.alias,game.game_id)} · ${ticket.phase} · 已等待 ${Math.floor((Date.now()-ticket.started)/1000)} 秒`);
+        ticket.visible ||= !frames().length; ticket.render();
         detail=await readReplayLevel(manifest,target);
         if (!isCurrent() || primaryLevel().level !== target) return;
       }
       assertReplayRevision(manifest);
       const previousCompleted = number(run.completed_level_count);
-      replaceSnapshot(replayManifestView(manifest,detail),{follow:state.replayFollow});
+      // The revision covers the whole immutable public snapshot. Repainting an
+      // unchanged selected detail resets canvas attributes and rebuilds cards.
+      if (initial || target !== currentSelected || snapshot.replay_revision !== manifest.revision || primaryLevel().replay_unloaded)
+        replaceSnapshot(replayManifestView(manifest,detail),{follow:state.replayFollow});
       state.replayRun = runId;state.replayFailures = 0;state.replayRetryAt = 0;
       clearReplayLoad(ticket);ensureSelectedSource();
       write('service-status',replayUnsealed(snapshot) ? '只读观察 · 记录未封口 · 每 2 秒更新' : '回放记录 · 按关卡读取 · 只读');
