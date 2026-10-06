@@ -140,6 +140,7 @@
   const emptyLevel = { level: null, status: 'not-run', frames: [], actions: [], decisions: [], cognition: { scope: 'unavailable' }, receipt: null };
   const retiredManualSessions = new Set();
   let attemptReplayRun = null;
+  let initialGameLevelPending = Boolean(liveConfig);
   const gamePreviews = new Map();
   // Auxiliary views retain their own run authority. Never merge them into the
   // currently observed attempt or attach its events to another run's frames.
@@ -2198,8 +2199,8 @@
         frames:[],actions:[],decisions:[],cognition:{scope:'unavailable'},receipt:null})),decisions:[],warnings:[]};
   }
 
-  function selectSwitchedGameLevel(game) {
-    if (!game || run.game_id === game.game_id) return;
+  function selectSwitchedGameLevel(game, {force = false} = {}) {
+    if (!game || (!force && run.game_id === game.game_id)) return;
     // Saved contiguous progress owns the switch default, even when a newer
     // attempt has fewer passed levels or unsealed progress appears in the UI.
     const target = game.win_levels > 0 && game.completed_levels === game.win_levels ? 1 : game.completed_levels + 1;
@@ -2312,6 +2313,12 @@
     if (state.mode === 'live' && activeSession()) return;
     state.mode = 'replay';
     const game = overviewGame($('game-select').value);
+    if (game && initialGameLevelPending) {
+      initialGameLevelPending = false;
+      // Apply authoritative startup progress once. Explicit cursor choices
+      // already disable following and must survive a delayed first overview.
+      if (state.replayFollow) selectSwitchedGameLevel(game, {force:true});
+    }
     const runId = array(game?.runs).some(entry => entry.run_id === attemptReplayRun) ? attemptReplayRun : preferredReplayId(game);
     renderRunChoices();
     if (runId) {
