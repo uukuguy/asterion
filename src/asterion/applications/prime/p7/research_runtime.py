@@ -17,6 +17,7 @@ from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
 from asterion.agents.prime.tools import PrimeToolResult
 
 from .broker import ArcBrokerError
+from .actor_projection import ACTOR_FRAME_INSTRUCTION, project_actor_context, project_actor_result
 from .experience import CellArchive
 from .research_bridge import ResearchReadServer
 from .solver import Solver
@@ -295,10 +296,13 @@ class P7ResearchRuntime:
             if self.poll()["state"] not in {"pause_requested", "paused"}:
                 break
             time.sleep(0.05)
-        return result
+        return project_actor_result(method, params, result)
 
     def current_context(self):
         return self.solver.current_context()
+
+    def actor_context(self):
+        return project_actor_context(self.current_context())
 
     def mark_experience_loaded(self):
         """Called by the operator after adding the prior to the actor prompt."""
@@ -309,8 +313,9 @@ class P7ResearchRuntime:
         return (
             f"Continue research round {round_index} from the retained Prime workspace. "
             "Use the current WorldMap and evidence to compute progress or a useful probe. "
-            "Submit real actions only with p7_execute_plan.\n"
-            + json.dumps(self.current_context(), ensure_ascii=False, separators=(",", ":"))
+            "Submit real actions only with p7_execute_plan. "
+            + ACTOR_FRAME_INSTRUCTION + "\n"
+            + json.dumps(self.actor_context(), ensure_ascii=False, separators=(",", ":"))
         )
 
     def request_stop(self):

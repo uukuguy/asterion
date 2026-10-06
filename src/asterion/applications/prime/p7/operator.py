@@ -4860,7 +4860,7 @@ async def run_live(
                     )
         if research_mode:
             prompt += "\n\nInitial research context (authoritative observation):\n" + json.dumps(
-                resources_.host_services["prime.ipython"].current_context(),
+                resources_.host_services["prime.ipython"].actor_context(),
                 ensure_ascii=False, separators=(",", ":"),
             )
             resources_.host_services["prime.ipython"].mark_experience_loaded()

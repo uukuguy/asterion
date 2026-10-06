@@ -277,7 +277,7 @@ async def _run_game(
             runtime=runtime,
             run_id=run_id,
             input_text=P7_SOLVE_PROMPT + "\n\nInitial research context:\n" + json.dumps(
-                resources.host_services["prime.ipython"].current_context(),
+                resources.host_services["prime.ipython"].actor_context(),
                 ensure_ascii=False, separators=(",", ":"),
             ),
             host_services=resources.host_services,

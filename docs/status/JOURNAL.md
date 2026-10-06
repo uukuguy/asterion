@@ -4078,3 +4078,5 @@
 - 2026-10-06 21:55 CST — Correction: fifth launch rejected locally before card/API; user cancelled further submission. BP L6 second attempt continues.
 - 2026-10-06 21:55 CST — e65406f4 records submission cancellation so recovery cannot launch a replacement without a new user request.
 - 2026-10-06 22:09 CST — BP L6 second sealed37new withoutpass; diagnosis identifies repeated actor context. Compact delivery implementation underway, no restart.
+- 2026-10-06 22:11 CST — 86983531 records fresh BP outcomes and context inflation evidence so followup addresses a diagnosed delivery defect.
+- 2026-10-06 22:19 CST — Actor compact delivery173Python/npm35PASS, independentCLEAR; raw evidence/certificates unchanged. Packaged deployment gate next.

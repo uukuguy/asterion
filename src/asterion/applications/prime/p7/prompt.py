@@ -1,5 +1,7 @@
 """Game-agnostic P7 guidance adapted from Prime Intellect's companion run."""
 
+from .actor_projection import ACTOR_FRAME_INSTRUCTION
+
 
 # Behavioral reference: PrimeIntellect-ai/arc-agi-3-prime-agent AGENTS.md and
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
@@ -46,7 +48,9 @@ RESET 也只通过 step {action:{name:'RESET',data:{}},expect:明确预期} 提�
 p7_workspace({op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}) 只保存已显式接纳的源码和 JSON，不保存任意进程对象或重播真实动作 cells。kernel 丢失时未保存的 frontier 丢失；恢复后重新读取当前真实观察、校准 state 并发布包含当前 evidence_sequence 的新 revision 后再行动。新关卡也应重新估计布局/资源/局部状态，复用规则与程序，不复用精确动作路线。绝对运行期限与动作上限由应用固定预设控制，暂停不延长期限。
 """
 
-P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。以通关和减少真实动作共同为目标，参考当前 level_baseline；先用已有证据和自己的程序比较路线，避免重复探针与不必要的 RESET。needs_revision=true 时先用 p7_workspace op revise 直接更新语义 WorldMap/task，并引用当前 base_revision 和证据序号；无需先写程序。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。正确匹配的计划可复用原修订。"""
+P7_SOLVE_PROMPT += "\n" + ACTOR_FRAME_INSTRUCTION + "\n"
+
+P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。以通关和减少真实动作共同为目标，参考当前 level_baseline；先用已有证据和自己的程序比较路线，避免重复探针与不必要的 RESET。needs_revision=true 时先用 p7_workspace op revise 直接更新语义 WorldMap/task，并引用当前 base_revision 和证据序号；无需先写程序。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。正确匹配的计划可复用原修订。""" + "\n" + ACTOR_FRAME_INSTRUCTION
 
 
 P7_EXPLORE_APPENDIX = """\n\nExploration strategy is explicitly enabled for this run. A replay-verified

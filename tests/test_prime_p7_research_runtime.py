@@ -37,6 +37,41 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_actor_revision_ack_does_not_repeat_context_and_read_stays_complete(self):
+        value = draft()
+        before = self.host.current_context()
+        revised = self.host.method_call('workspace', {
+            'op': 'revise', 'base_revision': before['workspace_revision'],
+            **{key: value[key] for key in ('worldmap', 'task', 'evidence_sequences', 'correction')},
+        }, _Signal())
+        self.assertEqual(revised['status'], 'revised')
+        for key in ('worldmap', 'model', 'task', 'reports', 'observation', 'experience'):
+            self.assertNotIn(key, revised)
+        self.assertEqual(revised['observation_ref'], before['observation_ref'])
+        self.assertFalse(revised['needs_revision'])
+        self.assertEqual(revised['correction'], value['correction'])
+        current = self.host.current_context()
+        read = self.host.method_call('workspace', {'op': 'read'}, _Signal())
+        self.assertEqual(read['worldmap'], current['worldmap'])
+        self.assertEqual(read['observation']['frame'], current['observation']['frame'])
+        self.assertEqual(read['observation']['frame_delivery']['encoding'], 'raw')
+
+    async def test_actor_context_and_continuation_keep_private_research_raw(self):
+        self.assertTrue(callable(getattr(self.host, 'actor_context', None)))
+        actor = self.host.actor_context()
+        current = self.host.current_context()
+        self.assertEqual(actor['observation_ref'], current['observation_ref'])
+        self.assertIn('frame_delivery', actor['observation'])
+        self.assertNotIn('frame_delivery', current['observation'])
+        private = self.host._read_server.dispatch({'method': 'context', 'args': []})
+        self.assertEqual(private['value']['observation'], current['observation'])
+        self.assertNotIn('frame_delivery', private['value']['observation'])
+        continuation = self.host.continuation_prompt(1)
+        self.assertIn('p7_research.frame(sequence)', continuation)
+        delivered = json.loads(continuation[continuation.index('\n') + 1:])
+        self.assertEqual(delivered['observation'], actor['observation'])
+        self.assertEqual(delivered['observation_ref'], actor['observation_ref'])
+
     async def test_animation_read_is_bound_to_exact_current_run_observation(self):
         reference = self.host.current_context()['observation_ref']
         result = self.host._read_server.dispatch({'method': 'animation', 'args': [reference, 0, 1]})
