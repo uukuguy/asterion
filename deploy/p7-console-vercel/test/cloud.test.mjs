@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { spawnSync } from 'node:child_process';
 import { canonicalJSON, decodeObject, INDEX_PATH, readRoute, sha256, validateIndex } from '../cloud.mjs';
-import { packObjects, publishSpool } from '../upload.mjs';
+import { configureUploadProxy, packObjects, publishSpool } from '../upload.mjs';
 import { createHandler } from '../api/cloud.js';
 import { renderHTML } from '../html.mjs';
 
@@ -101,6 +101,17 @@ test('quota guard rejects before writes and records no token',async t=>{
   const spool=await stage(t,fixture()); const sdk=memorySDK();
   await assert.rejects(()=>publishSpool({spool,token:'SENTINEL_SECRET',sdk,maxUploadOperations:1}),/quota-exceeded/);
   assert.equal(sdk.writes.length,0);
+});
+test('uploader proxy honors explicit operator environment without cloud-side initialization',async()=>{
+  const calls=[]; const agent={}; const createAgent=options=>{calls.push(options);return agent;};
+  const setDispatcher=value=>calls.push(value);
+  assert.equal(configureUploadProxy({env:{},createAgent,setDispatcher}),null); assert.equal(calls.length,0);
+  assert.equal(configureUploadProxy({env:{HTTP_PROXY:'http://proxy.invalid:8080',HTTPS_PROXY:'http://secure-proxy.invalid:8081',NO_PROXY:'localhost'},createAgent,setDispatcher}),agent);
+  assert.deepEqual(calls[0],{httpProxy:'http://proxy.invalid:8080',httpsProxy:'http://secure-proxy.invalid:8081',noProxy:'localhost'});
+  assert.equal(calls[1],agent); calls.length=0;
+  configureUploadProxy({env:{http_proxy:'http://lower.invalid:8082',HTTP_PROXY:'http://ignored.invalid:8080',no_proxy:'*'},createAgent,setDispatcher});
+  assert.deepEqual(calls[0],{httpProxy:'http://lower.invalid:8082',httpsProxy:'',noProxy:'*'});
+  assert.doesNotMatch(await readFile(new URL('../api/cloud.js',import.meta.url),'utf8'),/configureUploadProxy|EnvHttpProxyAgent|setGlobalDispatcher/);
 });
 test('remote mutation returns405 without storage reads and internal errors redact',async()=>{
   const sdk=memorySDK(); const handle=createHandler(sdk.get); const res=response();

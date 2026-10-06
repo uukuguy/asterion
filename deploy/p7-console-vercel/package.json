@@ -1,6 +1,6 @@
 {
   "name": "asterion-p7-console", "private": true, "type": "module",
   "scripts": {"test": "node --test test/*.test.mjs", "refresh-assets": "node refresh-assets.mjs"},
-  "dependencies": {"@vercel/blob": "2.8.0"},
+  "dependencies": {"@vercel/blob": "2.8.0", "undici": "6.29.0"},
   "engines": {"node": "24.x"}
 }

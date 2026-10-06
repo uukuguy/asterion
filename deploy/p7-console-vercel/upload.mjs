@@ -2,11 +2,21 @@ import { readFile, writeFile, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { get, put } from '@vercel/blob';
+import { EnvHttpProxyAgent, setGlobalDispatcher } from 'undici';
 import { INDEX_PATH, MAX_BYTES, canonicalJSON, decodeObject, readBoundedBlob, readIndex, sha256, validateIndex } from './cloud.mjs';
 
 const PACK_TARGET = 1024 * 1024;
 const STORAGE_GUARD_BYTES = 900 * 1024 * 1024;
 const STORAGE_WARNING_BYTES = 750 * 1024 * 1024;
+export function configureUploadProxy({ env=process.env, createAgent=options=>new EnvHttpProxyAgent(options),
+  setDispatcher=setGlobalDispatcher } = {}) {
+  const httpProxy=env.http_proxy ?? env.HTTP_PROXY;
+  const httpsProxy=env.https_proxy ?? env.HTTPS_PROXY;
+  if (!httpProxy && !httpsProxy) return null;
+  const agent=createAgent({httpProxy:httpProxy??'',httpsProxy:httpsProxy??'',noProxy:env.no_proxy??env.NO_PROXY??''});
+  setDispatcher(agent);
+  return agent;
+}
 export function packObjects(index, objects) {
   const groups = new Map();
   for (const route of Object.keys(index.routes).sort()) {
@@ -120,8 +130,12 @@ async function main() {
   }
   if (!options['--spool']) throw new Error('cloud-spool-required');
   const token=options['--token-file'] ? (await readFile(options['--token-file'],'utf8')).trim() : process.env.BLOB_READ_WRITE_TOKEN;
-  console.log(JSON.stringify(await publishSpool({spool:options['--spool'],token,
-    ...(options['--max-upload-operations'] ? {maxUploadOperations:Number(options['--max-upload-operations'])} : {})})));
+  // This process-local dispatcher is installed only by the uploader CLI, never the cloud Function.
+  const proxy=configureUploadProxy();
+  try {
+    console.log(JSON.stringify(await publishSpool({spool:options['--spool'],token,
+      ...(options['--max-upload-operations'] ? {maxUploadOperations:Number(options['--max-upload-operations'])} : {})})));
+  } finally { if (proxy) await proxy.close(); }
 }
 if (process.argv[1] && import.meta.url===pathToFileURL(resolve(process.argv[1])).href) {
   main().catch(error=>{ const code=['cloud-upload-quota-exceeded','cloud-storage-quota-exceeded'].includes(error.message) ? error.message : 'cloud-upload-failed';

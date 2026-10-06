@@ -61,3 +61,9 @@ SDK behavior was checked against the official
 `useCache: false` for the mutable pointer. The runtime token is injected through
 `BLOB_READ_WRITE_TOKEN`; local upload uses only an explicit environment value or
 token file. Environment files, tokens and Vercel linkage are excluded from git.
+
+The local uploader honors operator-provided `HTTP_PROXY`, `HTTPS_PROXY` and
+`NO_PROXY`, including lowercase variants, through the official Undici
+`EnvHttpProxyAgent` and process-local dispatcher. Undici is explicitly pinned
+to 6.29.0, matching the Blob SDK dependency. Proxy configuration is neither
+printed nor uploaded, and the cloud Function does not initialize a proxy.
