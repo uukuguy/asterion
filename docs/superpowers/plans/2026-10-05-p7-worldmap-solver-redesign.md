@@ -428,3 +428,7 @@ Core183-ready committed98aa1b9b; frozen compact/status snapshot fullpromotionPAS
 - [ ] 如需优化提交墙钟时间，先验证应用级独立环境有界并发：同一卡、每环境一次make、每环境动作顺序、共享SDK身份隔离、全局请求上限、取消收口与唯一最终关闭。官方Swarm示例及600请求/分钟说明支持研究该方向，但尚无本应用Competition并发验收；通用runner保持顺序合同。
 - [ ] 后续整理README中的P7研究/复现段落，链接现有指南并明确本地多轮研究与官方正常关闭成绩的不同口径。用户已暂停当前README扩张，此项保持pending。
 - [ ] 后续准备公开通用系统、版本/模型/成本与探索口径说明，以及符合社区schema的submission.yaml；使用Competition卡片链接，不填写ARC-AGI-3数值成绩。提交前复核社区仓库最新展示规则；当前规则仅展示Verified数字。外发PR与推送尚未执行。
+
+### Task 8: Dynamic evidence capacity and explicit failures (2026-10-06)
+
+用户确定独立动态动画区、无通用总長上限、必要持久化后释放、底层错误明确告警。[设计合同](../specs/2026-10-06-p7-dynamic-evidence-capacity.md)与[实施分工](2026-10-06-p7-dynamic-evidence-capacity.md)覆盖SDK、完整哈希、稳定视图、恢复分类、经验、网页准备和证书兼容。BP57帧/G95帧已用原录制无SDK复现容量拒绝；LF52保持独立机制问题。当前设计/纯数据诊断已完成，实现及新部署尚未验证。两路存活guest和原官方卡不变。

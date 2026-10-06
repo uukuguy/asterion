@@ -3926,3 +3926,5 @@
 - 2026-10-06 14:04 CST — SC25L5 saved59newactions; local118/183 and4357routeactions, two lanes continue SC6/SK5 without altering official receipt.
 - 2026-10-06 14:02 CST — Prior checkpoint timestamp14:04 was estimated; actual clock confirms14:02 for the118-level snapshot.
 - 2026-10-06 14:02 CST — Reviewed finite followup queued; parent47399 preserves both guests/deadlines and history hashes,4fixturesPASS; SB rejection remains isolated.
+- 2026-10-06 14:03 CST — 004a51d0 records finite remaining-game continuation while preserving active actors and past failure evidence.
+- 2026-10-06 14:32 CST — BP57/G95 SDK replies reproduce digest capacity rejection; user chose dynamic animation arena and persistent typed warnings.

@@ -35,6 +35,7 @@
 
 ## Open Problems
 
+- Full animation and small observation projections currently share aggregate limits. Existing BP57/G95-frame SDK replies reproduce local digest rejection; broad execution catch then loses known-result semantics. Dynamic animation evidence, streaming v1 identity and typed persistent diagnostics are designed; implementation/deployment remain pending. See `docs/superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md`.
 - Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.
 - Failure-experience reuse delivers bounded historical evidence, inert source code and explicit provenance. Loading/reading historical research is observed; improved success probability is not established.
 - Model runtime settlement and game outcome are separate evidence boundaries. Post-WIN runtime failure keeps its original failure/empty model receipt; a separately audited full SDK replay may create a new sealed game record with immutable source lineage. This does not certify the original native execution.
