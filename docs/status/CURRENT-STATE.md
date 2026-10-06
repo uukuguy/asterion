@@ -38,7 +38,7 @@
 
 - Compact Pi RPC separately bounds native raw lines16MiB and retained event lines1MiB; ordinary mode remains1MiB. Repeated native message aggregates can be projected before semantic limits, without dropping needed responses or changing deadlines.
 
-- The readonly sharing console lives in `deploy/p7-console-vercel/`. The operator-owned `tools/p7_console_cloud_sync.py` captures only existing public local projections and pushes compressed content-addressed packs to private Vercel Blob; cloud reads have no local-network dependency. Normal uploads coalesce30minutes, saved-progress changes have priority, cloud pages check updates5minutes. Local control/solver remain independent.
+- The readonly sharing console lives in `deploy/p7-console-vercel/`. The operator-owned `tools/p7_console_cloud_sync.py` captures only existing public local projections and pushes compressed content-addressed packs to private Vercel Blob; cloud reads have no local-network dependency. Normal uploads coalesce30minutes, saved-progress changes have priority, cloud pages check updates5minutes. Local control/solver remain independent. Upload attempts do not acknowledge saved progress; only successful publication does. Failed/timeout uploads remain visibly pending during captures and retry after at least60seconds; quota failures retain a visible paused state. Actual complete25 cloud publication and BP L9 cognition/last-page parity are HTTP verified; no Chrome visual acceptance is claimed.
 
 ## Open Problems
 

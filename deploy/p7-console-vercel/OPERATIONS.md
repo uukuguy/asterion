@@ -39,6 +39,10 @@ The receipt accounts for this application's managed uploads, not unrelated
 objects or activity in the store. Use a dedicated private store. The producer
 coalesces uploads, normally at 1,800 seconds, with saved-progress priority at a
 minimum of 60 seconds. Captures may occur more often without writing remotely.
+Saved progress is acknowledged only after a successful upload. A failed or timed-out
+upload remains pending and retries after the same 60-second minimum; its error
+remains visible during later captures until success. The upload subprocess stays
+bounded to 180 seconds, and quota exhaustion pauses further writes.
 Quota exhaustion returns a closed `cloud-upload-quota-exceeded` or
 `cloud-storage-quota-exceeded` diagnostic; raw SDK errors and credentials are
 never printed. This finite guard does not imply unlimited free hosting.

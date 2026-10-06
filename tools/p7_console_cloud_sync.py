@@ -292,6 +292,8 @@ class UploadSchedule:
         self.interval, self.minimum = interval, minimum
         self.last_attempt = None
         self.saved_progress = None
+        self.pending = False
+        self.upload_error = None
         self.paused = False
 
     def due(self, clock, progress):
@@ -300,10 +302,16 @@ class UploadSchedule:
         if self.last_attempt is None:
             return True
         elapsed = clock - self.last_attempt
-        return elapsed >= self.interval or (elapsed >= self.minimum and progress != self.saved_progress)
+        return elapsed >= self.interval or (elapsed >= self.minimum
+                                            and (self.pending or progress != self.saved_progress))
 
-    def attempted(self, clock, progress):
-        self.last_attempt, self.saved_progress = clock, progress
+    def attempted(self, clock):
+        self.last_attempt, self.pending = clock, True
+
+    def succeeded(self, progress):
+        """Only a completed upload acknowledges saved progress."""
+        self.saved_progress = progress
+        self.pending, self.upload_error = False, None
 
 
 def upload(script, spool):
@@ -350,6 +358,9 @@ def main():
         while True:
             started = time.monotonic()
             status = dict(status='failed', capture='failed', upload='not-attempted', observedAt=now())
+            if schedule.upload_error:
+                status.update(code=schedule.upload_error,
+                              upload='quota-paused' if schedule.paused else 'retry-pending')
             atomic(args.spool / 'sync-status.json', canonical({**status, 'status': 'capturing', 'capture': 'running'}))
             try:
                 for attempt in range(3):
@@ -366,15 +377,23 @@ def main():
                     progress = canonical([(g['game_id'], g.get('completed_levels'), g.get('best_run_id'))
                                           for g in overview['games']])
                     if schedule.due(time.monotonic(), progress):
-                        schedule.attempted(time.monotonic(), progress)
+                        schedule.attempted(time.monotonic())
                         status['upload'] = 'failed'
                         status['uploadReceipt'] = upload(args.uploader_script, args.spool)
+                        schedule.succeeded(progress)
+                        status.pop('code', None)
                         status['upload'] = 'ready'
                     else:
-                        status['upload'] = 'quota-paused' if schedule.paused else 'coalesced'
-                status.update(status='ready', observedAt=now(), **result['stats'])
+                        status['upload'] = ('quota-paused' if schedule.paused else
+                                            'retry-pending' if schedule.upload_error else 'coalesced')
+                    if schedule.upload_error:
+                        status['code'] = schedule.upload_error
+                status.update(status='failed' if schedule.upload_error else 'ready',
+                              observedAt=now(), **result['stats'])
             except SyncError as error:
                 status['code'] = str(error)
+                if status['upload'] == 'failed':
+                    schedule.upload_error = str(error)
                 if error.run_id:
                     status['run_id'] = error.run_id
                 if str(error) == 'upload-quota-exceeded':
@@ -383,8 +402,11 @@ def main():
             except subprocess.TimeoutExpired:
                 status['code'] = 'upload-timeout'
                 status['upload'] = 'failed'
+                schedule.upload_error = status['code']
             except (OSError, ValueError, KeyError, TypeError):
-                status['code'] = 'capture-failed'
+                status['code'] = 'upload-failed' if status['upload'] == 'failed' else 'capture-failed'
+                if status['upload'] == 'failed':
+                    schedule.upload_error = status['code']
             atomic(args.spool / 'sync-status.json', canonical(status))
             print(json.dumps(status, separators=(',', ':')), flush=True)
             if not args.watch:

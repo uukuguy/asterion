@@ -4107,3 +4107,10 @@
 
 - 2026-10-07 00:02 BP L9 native70new/0RESET/0UNDO PASS; normal9/362certificate ready; local25/25,183/183,100.00,6781savedactions.
 - 2026-10-07 00:02 User explicitly authorizes one new full25 official submission and final score confirmation; prior fifth cancellation/history retained.
+- 2026-10-07 00:04 0e45e984 records all 25 wins and renewed official authorization so recovery submits the correct completed roster once.
+
+2026-10-07 00:28 CST — Authorized complete25 card60c10b53 opened; exact2f,183/6781frozen, staticauditPASS; nativeonline replay ongoing, finalscorepending.
+
+2026-10-07 00:35 CST — Cloud补传PASS25/183/100; BP L9 cognition/lastframeparityPASS; fixed prematureuploadACK diagnosis; official3/25backgroundongoing.
+
+2026-10-07 00:38 CST — Cloudsyncfix13tests/CLEAR; publisher95390resumed, no official/console signals; userauthorizescommunityPR preparation and README overhaul.

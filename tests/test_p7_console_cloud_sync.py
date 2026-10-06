@@ -4,8 +4,9 @@ import hashlib
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
-from tools.p7_console_cloud_sync import Capture, HTTPSource, UploadSchedule, SyncError, canonical
+from tools.p7_console_cloud_sync import Capture, HTTPSource, UploadSchedule, SyncError, atomic, canonical, main
 
 
 class TestConsoleCloudSync(unittest.TestCase):
@@ -116,14 +117,69 @@ class TestConsoleCloudSync(unittest.TestCase):
     def test_upload_coalesces_and_completion_obeys_minimum(self):
         schedule = UploadSchedule()
         self.assertTrue(schedule.due(0, 'saved1'))
-        schedule.attempted(0, 'saved1')
+        schedule.attempted(0)
+        schedule.succeeded('saved1')
         self.assertFalse(schedule.due(59, 'saved2'))
         self.assertTrue(schedule.due(60, 'saved2'))
-        schedule.attempted(60, 'saved2')
+        schedule.attempted(60)
+        schedule.succeeded('saved2')
         self.assertFalse(schedule.due(1859, 'saved2'))
         self.assertTrue(schedule.due(1860, 'saved2'))
         schedule.paused = True
         self.assertFalse(schedule.due(10000, 'saved3'))
+
+    def test_failed_upload_retries_same_progress_after_minimum(self):
+        schedule = UploadSchedule()
+        schedule.attempted(0)
+        self.assertFalse(schedule.due(59, 'all25'))
+        self.assertTrue(schedule.due(60, 'all25'))
+        schedule.succeeded('all25')
+        schedule.attempted(1800)
+        self.assertEqual(schedule.saved_progress, 'all25')
+        self.assertFalse(schedule.due(1859, 'all25'))
+        self.assertTrue(schedule.due(1860, 'all25'))
+
+    def test_watch_retains_upload_timeout_until_success(self):
+        import json
+        import subprocess
+        routes = self.fixture()
+        clock, statuses, uploads, capturing = [0], [], [], []
+        def write(path, raw):
+            if path.name == 'sync-status.json':
+                value = json.loads(raw)
+                if value.get('capture') == 'running':
+                    capturing.append(value)
+            atomic(path, raw)
+        def publish(*args):
+            uploads.append(clock[0])
+            if len(uploads) == 1:
+                raise subprocess.TimeoutExpired('node', 180)
+            return {'uploaded': 1}
+        def sleep(seconds):
+            clock[0] += seconds
+            if clock[0] >= 120:
+                raise RuntimeError('watch-test-finished')
+        with tempfile.TemporaryDirectory() as directory, \
+                patch('sys.argv', ['sync', '--spool', directory, '--watch',
+                                   '--uploader-script', 'upload.mjs']), \
+                patch('tools.p7_console_cloud_sync.HTTPSource', return_value=routes.__getitem__), \
+                patch('tools.p7_console_cloud_sync.upload', side_effect=publish), \
+                patch('tools.p7_console_cloud_sync.atomic', side_effect=write), \
+                patch('tools.p7_console_cloud_sync.time.monotonic', side_effect=lambda: clock[0]), \
+                patch('tools.p7_console_cloud_sync.time.sleep', side_effect=sleep), \
+                patch('builtins.print', side_effect=lambda value, **kwargs: statuses.append(json.loads(value))):
+            with self.assertRaisesRegex(RuntimeError, 'watch-test-finished'):
+                main()
+        self.assertEqual(uploads, [0, 60])
+        self.assertEqual([s['status'] for s in statuses], ['failed', 'failed', 'ready', 'ready'])
+        self.assertEqual(statuses[1]['capture'], 'ready')
+        self.assertEqual(statuses[1]['upload'], 'retry-pending')
+        self.assertEqual(statuses[1]['code'], 'upload-timeout')
+        self.assertEqual(capturing[1].get('code'), 'upload-timeout')
+        self.assertEqual(capturing[1]['upload'], 'retry-pending')
+        self.assertEqual(statuses[2]['upload'], 'ready')
+        self.assertNotIn('code', statuses[2])
+        self.assertEqual(statuses[3]['upload'], 'coalesced')
 
     def test_generated_timestamp_only_does_not_change_generation(self):
         routes = self.fixture()
