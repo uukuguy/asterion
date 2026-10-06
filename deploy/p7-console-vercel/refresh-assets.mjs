@@ -32,6 +32,11 @@ js = js.replaceAll('正在连接本地服务', '正在读取云端同步记录')
 replace("write('overview-refresh', `本地记录 · 每 5 秒更新${overview.start_ready ? '' : ' · ' + (blocked[overview.start_block_reason] || '启动尚未就绪')}`);",
   "write('overview-refresh', '云端只读 · 每 5 分钟检查更新');");
 replace("      const blocked = { 'guest-unavailable': '执行器暂不可用', 'session-busy': '执行器正在使用', 'model-unavailable': '求解模型尚未就绪', 'model-mismatch': '求解模型配置不匹配' };\n",'');
+replace("    const attempt = game?.completed_levels === 0 && game.best_run_id === null\n" +
+  "      ? game.solving === true && game.runs.some(entry => entry.run_id === game.solving_run_id)\n" +
+  "        ? game.solving_run_id : latestReplayId(game)\n" +
+  "      : null;\n" +
+  "    return activeReplayId(game) || best?.run_id || attempt;", "    return best?.run_id || null;");
 replace('window.setInterval(pollState, 1000)', 'window.setInterval(pollState, CLOUD_REFRESH_INTERVAL)');
 replace('window.setInterval(loadOverview, 5000)', 'window.setInterval(loadOverview, CLOUD_REFRESH_INTERVAL)');
 replace('window.setInterval(() => loadReplay(),2000)', 'window.setInterval(() => loadReplay(), CLOUD_REFRESH_INTERVAL)');

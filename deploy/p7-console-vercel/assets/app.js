@@ -2187,11 +2187,7 @@
   function preferredReplayId(game) {
     const best = array(game?.runs).find(entry => entry.run_id === game.best_run_id && entry.verified === true &&
       entry.completed_levels === game.completed_levels && entry.completed_levels > 0);
-    const attempt = game?.completed_levels === 0 && game.best_run_id === null
-      ? game.solving === true && game.runs.some(entry => entry.run_id === game.solving_run_id)
-        ? game.solving_run_id : latestReplayId(game)
-      : null;
-    return activeReplayId(game) || best?.run_id || attempt;
+    return best?.run_id || null;
   }
 
   function emptyGamePreview(game, status = 'preview') {

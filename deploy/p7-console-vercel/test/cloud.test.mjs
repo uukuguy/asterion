@@ -130,6 +130,7 @@ test('existing console HTML enables readonly queries with no operator token and 
   assert.match(html,/button\.disabled = true; button\.hidden = true;/);
   assert.match(html,/label\.textContent = ' · 云端只读 · 更新于 ' \+ time;/);
   assert.match(html,/label\.title = '数据更新 '/);
+  assert.match(html,/return best\?\.run_id \|\| null;/);
 });
 test('packaged cloud assets are fresh with five-minute polling and unchanged local source',async()=>{
   const source=new URL('../../../src/asterion/applications/prime/p7/console_assets/app.js',import.meta.url);
@@ -144,4 +145,11 @@ test('packaged cloud assets are fresh with five-minute polling and unchanged loc
   assert.equal(cloud.match(/setInterval\(\(\) => loadReplay\(\), CLOUD_REFRESH_INTERVAL\)/g)?.length,2);
   assert.match(cloud,/loadOverview\(\); initializeSelection\(\)/);
   assert.match(await readFile(new URL('../html.mjs',import.meta.url),'utf8'),/setInterval\(update,300000\)/);
+  const functionText=cloud.match(/function preferredReplayId\(game\) \{[\s\S]*?\n  \}/)?.[0];
+  assert.ok(functionText); const preferred=new Function('array',functionText+'; return preferredReplayId;')(value=>Array.isArray(value)?value:[]);
+  assert.equal(preferred({best_run_id:'saved',completed_levels:2,solving_run_id:'current',solving:true,
+    runs:[{run_id:'current',verified:false,completed_levels:0},{run_id:'saved',verified:true,completed_levels:2}]}),'saved');
+  assert.equal(preferred({best_run_id:null,completed_levels:0,solving_run_id:'current',solving:true,
+    runs:[{run_id:'current',verified:false,completed_levels:0}]}),null);
+  assert.match(local,/return activeReplayId\(game\) \|\| best\?\.run_id \|\| attempt;/);
 });
