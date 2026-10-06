@@ -4084,3 +4084,6 @@
 
 - 22:28 b5c24693 full promotion PASS; 25 current/21 frozen certificates unchanged. BP final cognition found unverified 28-step candidate.
 - 22:34 Exact b5 native BP L6 started; final explored map loaded; prefix5/150 preserved; no official operations.
+- 22:34 f0f61b85 records promoted actor repair and retained BP exploration so recovery follows the actual native run.
+- 22:44 BP L6 native PASS43new/0RESET, normal6/193 certificate ready; retained map used; L7 running from193.
+- 22:46 Local overview confirms97.866667/180levels; L6 prepared43actions563frames/cognition ready; L7 live.
