@@ -16,7 +16,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 |---|---|---|
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Active four-slot/SB priority campaign, exact prepared replay deployment, readonly Vercel synchronization and official receipt boundaries. |
-| `CURRENT-STATE.md` | 🟢 active | Structural snapshot. |
+| `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
 | `../superpowers/specs/2026-10-06-p7-vercel-console-sync.md` | 🟢 active | User-authorized local-to-cloud readonly console synchronization boundary. |
@@ -30,7 +30,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟢 active | Native P7 evidence, official partial card, level results, world-model diagnosis, breadth recovery and realtime console process evidence and independent playable selection, direct human levels, remembered selection, reliable action feedback, manual history, per-level HUMAN save/resume and current-level clear/restart. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `../guides/prime-p7-games-and-official-results.md` | 🟢 active | P7 本地题目、实时自主控制台、离线单 HTML 回放与官方结果操作指南。 |
-| `DECISIONS.md` | 🟢 active | Native decisions: durable prepared replay/initial views, compact loading feedback, actor-sourced action meanings, partial cognition, generic Prime computation/P7 WorldMap ownership, save-time route certification, semantic plan admission and independent HUMAN play/save behavior. |
+| `DECISIONS.md` | 🟢 active | Native decisions: durable replay, actor-sourced cognition, generic Prime/P7 ownership, save-time certification and HUMAN isolation; D-2026-10-06-08 records complete deterministic source ancestry, explicit capacity errors and links the private known-issues reconciliation. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | Retained legacy cognition contract; the approved WorldMap/Prime redesign is authoritative for the default solver. |
 | `../reviews/2026-10-05-p7-worldmap-solving-design-review.md` | 🟢 active | Pinned Tycho/Retrodict code comparison supporting the approved design; static research, not capability PASS. |
 | `../reviews/2026-10-05-p7-worldmap-implementation-review.md` | 🟢 active | Implementation review, corrected integration boundaries, background console verification and packaged live evidence. |

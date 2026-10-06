@@ -4017,3 +4017,14 @@
 - Witness cancellation review blocked eda6a5d6 release; preserve original process authority so acknowledged failure evidence remains sealable.
 - 1d803298 — Preserve trusted cancellation authority under witness deadlines so failure journals, replay receipts and experience remain valid.
 - 2026-10-06 18:48 CST — Final1d fullpromotionPASS25/provider0 and installedcertificateauditPASS21frozen/all25; diagnosedrestart51967 resumesfouractualunits, preservesLF/WA8, console52543at57515.
+
+- 2026-10-06 19:00 CST — 2fe22b71 recorded repaired deployment and live task boundaries for reliable recovery.
+- 2026-10-06 19:04 CST — WA30 L9 passed133new;22games173levels saved. BP/LF wrapper keyword failed beforeSDK; repair underway.
+- 2026-10-06 19:10 CST — 992f2841 added corroborated target-level activity and bounded metadata parsing for clear progress.
+- 2026-10-06 19:11 CST — 3108995d forwarded native probe preparation, distinguished unsent failures, and preserved prior certificate identities.
+- 2026-10-06 19:15 CST — 3108995d fullpromotion25PASS; console81719fixed57515 and VercelUI deployed. Actorrelease waits LF registryrepair.
+- 2026-10-06 19:29 CST — e22a95ed preserved deep certificate ancestry and exposed finite provenance capacity failures.
+
+- 19:31 Removed console ancestry depth caps; authenticated long-chain cognition passes independent review and 58 tests. [bd2bfe18]
+
+- 19:33 Distinguished console ancestry capacity failures from corrupt evidence to prevent silent diagnosis ambiguity. [16dc6926]
