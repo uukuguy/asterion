@@ -1,8 +1,12 @@
 # Live Session Checkpoint
 
-Updated2026-10-06 23:48 CST. Active session, not handoff. Main; local http://127.0.0.1:57515/; readonly cloud https://asterion-p7-console.vercel.app. Canonical24full,182/183,6711savedactions; localHTTP99.200000 verified after BP L8 sealed8/292 (46new/0RESET/1UNDO). Only BP L9 remains; native2f secondL9 run234741-3ca0 started23:47:41 from292 on existing finitephase. Explored L8 map actually reused and verified into completion. RESET2f fullpromotion/allcertauditPASS, parent61777/liveconsole68369 bothexact2f; cloudpublisher46549 retained. README deferred. Official submission cancelled by user; no new card/API/submission authorized.
+Updated2026-10-07 00:02 CST. Active session, not handoff. Main; local http://127.0.0.1:57515/; readonly cloud https://asterion-p7-console.vercel.app. FINAL canonical25full,183/183,6781savedactions; localHTTP100.000000 verified after BP L9 sealed9/362 (70new/0RESET/0UNDO). All25actuallypassed and normalcertready. NEW explicit user authorization00:02: “好，做完就提交官网确认。” One newcomplete25 officialsubmission/finalscore confirmation is now authorized. Priorfailedfifthcancel/history/claim retained; newonceboundedhelper beingprepared byAstra andreviewedbySol, no newcardyet. READMEdeferred. Exact2f deployedparent61777/console68369, publisher46549retained.
 
 ## Current verified facts
+
+- FINAL BP native source `p7-live-20261006234741-3ca0d104941b4f9b8ff541ac`,9/362, newL9=70/0RESET/0UNDO; summarygame-won/seal/replay/cleanuptrue, modelruntimefailureNone, normalcertready. LocalGET0.336sec verifies25games/183levels/100.000000/6781savedactions, BP100.0/362/solvingfalse. `bp35-all25-final-local-proof.json` records current25canonicalwinners/normalcertificate and rawsummaryhash; no extraSDK/model/officialoperations yet. FinaltwoACT4s connectactual color7targetat15,69 afterleftshaftdescent.
+- NEW submission authority supersedes ONLY old no-official immediate boundary: ONE new complete current25 run; no oldfifthclaim deletion/retry. Root will execute reviewed newfinitehelper onexact2f, using normalstaticcert selection beforecard, trackonlineactions/cardclose/scorefinal. Oldfourth59.7982683982684card15ffcc07 stayshistorical. Do not publiclysubmitcommunity/README absentfurtherintent.
+- Newreadonlydiagnosis `bp35-l9-prefix-coordinate-diagnosis-20261007.md`: guard overblocks grounded same-screen clicks when chosen role/ball anchorsremain equal; interiorpixelclicked sameballchanges973pixels. Solver picks nativecell against wholeplan-startframe evenlatersteps, losing changedcell evidence. No fixyet; actorwinningworkaround preserved. Prefer future perdispatch grounding andexplicitno-changeprobe; zero-dispatch feedback incorrectly says observation differs thoughnocounterexample. No need newsolver trials afterall25success.
 
 - CURRENT secondL9 `p7-live-20261006234741-3ca0d104941b4f9b8ff541ac`, parent61777/Make74019/unitb7d9fc4e7294418d96c74af9fb2797de, exact2f; started23:47:41/fromsaved292/900s/163newcap, samephase second attempt (first233037 sealed63new). No phase/counter renewal. Rootreadonlyobserver88932 from23:39:40 correctedplan-eventselector, bounded2200s; earlier39849 completednormally. First-attempt discoveredtopmap must remainavailable; future source reading/consumptionverify asneeded.
 
@@ -103,7 +107,7 @@ Updated2026-10-06 23:48 CST. Active session, not handoff. Main; local http://127
 | Game | Saved levels/actions | Authoritative source |
 |---|---|---|
 | AR25 | 8/8, 258 | `p7-live-20261006043256-6964b205e0594ec58af4fb24` |
-| BP35 | 8/9, 292 | `p7-live-20261006231657-e1b2460bd56c4b0bacb7fb80` |
+| BP35 | 9/9, 362 | `p7-live-20261006234741-3ca0d104941b4f9b8ff541ac` |
 | CD82 | 6/6, 85 | `p7-live-20261006102822-58854bcea8df4b56ada54bc1` |
 | CN04 | 6/6, 186 | `p7-live-20261006060831-921fdc8fc1b140b1b19fde00` |
 | DC22 | 6/6, 474 | `p7-live-20261005190338-478eb1c2a4011d0600897097` |

@@ -42,6 +42,8 @@
 
 ## Open Problems
 
+- Click grounding can overblock current-observation clicks whose selected pixel assertions remain unchanged; batch prediction lowering selects against the plan-start frame. Valid actor interior-pixel probes have worked around it. Per-dispatch grounding and honest no-change probes remain unresolved; active evidence is in the live checkpoint.
+
 - Historical downstream animation-total limits are repaired (`42c3a6cb`, exact `4bb89296` package): scope-bound authenticated storage, streaming identities, settled model views and bounded pages retain large observations and known-result stages. Real long-animation durability/hash evidence exists. SDK-native reply materialization can still incur an upstream peak-memory cost; that boundary is unresolved. See `docs/superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` and the known-issues reconciliation linked in `DECISIONS.md`.
 - Terminal-WIN recovery preserves the original failed runtime evidence and separately authenticates full animation chains using settled observation equivalence. Fresh materialization and independent verification must publish a normal current-verifier certificate; exact historical verifier profiles permit old certificate reads only. Active deployment and actual recovery evidence belong to the live checkpoint.
 - Semantic revisions and actual IPython computation now participate in the deployed action path. The provider composite-ID defect is fixed; earlier zero-cell runs cannot establish voluntary avoidance of computation.

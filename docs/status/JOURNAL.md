@@ -4103,3 +4103,7 @@
 - 23:37 Native2f RESET298 matched initial L9 frame, preserved8levels; subsequent actions continued, console diagnostics0; authority filtering remains unit-verified.
 - 23:46 L9 first sealed63new/2RESET withoutpass; normalcertready8/292 unchanged; RESET extraction errors absent, final upper map retained.
 - 23:48 Same-phase secondL9 actually started234741 on2f; prior8/292authority retained, first upper-map experience admitted.
+- 23:48 35e9f605 records RESET native verification and second L9 so recovery retains discovered maps and unchanged saved scores.
+
+- 2026-10-07 00:02 BP L9 native70new/0RESET/0UNDO PASS; normal9/362certificate ready; local25/25,183/183,100.00,6781savedactions.
+- 2026-10-07 00:02 User explicitly authorizes one new full25 official submission and final score confirmation; prior fifth cancellation/history retained.
