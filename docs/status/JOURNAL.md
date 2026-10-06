@@ -4028,3 +4028,28 @@
 - 19:31 Removed console ancestry depth caps; authenticated long-chain cognition passes independent review and 58 tests. [bd2bfe18]
 
 - 19:33 Distinguished console ancestry capacity failures from corrupt evidence to prevent silent diagnosis ambiguity. [16dc6926]
+
+- 19:36 Recorded provenance repair, prior-defect reconciliation and pending release boundaries for durable recovery. [37274f11]
+
+- 19:40 Full16dc promotion found one outdated mocked certificate-module fixture; corrected typed-error stub passes14 focused tests, release withheld.
+
+- 19:40 Bound both prepared formats to current cognition semantics; reject stale generations and preserve evidence. [0d8f52bc]
+
+- 19:46 Reviewed final25 replay staging and stopped-console activation; six provider-free guard tests passed, no execution yet.
+
+- 19:47 Exact0d8f52bc full promotion passed25 checks/provider0;558 wheel/source/installed resources match, release gate satisfied.
+
+- 19:48 LF52 final-package normal certification passed one557-action replay;45.321s, old source/certificate/winner bytes unchanged.
+
+- 19:51 Final static audit passed21 frozen certificates/all25 winners;SDK/model/API/recertification0, old certificates preserved.
+
+- 19:53 Resumed parent12151 with three exact0d native900-second actors;preserved rounds/history, excluded completedWA, guest signals0.
+
+- 19:54 Started exact25 offline derived replay staging;old current pointers retained,first/next/last pages and cognition bound before activation.
+
+- 2026-10-06 20:07 CST — Exact0d projectorv3 offline stage PASS25/25 in473.155sec; saved source/certificate/winner bytes unchanged, zeroSDK/model/API. First console switch stopped before activation: idle81719 TERM cleanup exceeded private updater20sec then naturally exited (sample: join p7-console-replay), no forced kill/no guests/no pointer change; preserve FAILED proof and recover from bound plan after absent-PID/free-port checks.
+- 2026-10-06 20:11 CST — Three final0d native attempts naturally deadline_expired: BP+25/SK+38/LF+63, allsealed/replayed/cleanedtrue, diagnostics empty; saved5/4/8 unchanged. Parent12151 naturally started second BP200840/LF200852 without reset; SK paused after2genuine. Reusable diagnosis0d8f52bc-three-attempt-diagnosis-20261006.md confirms SK publishedcode/statealigned and38matched, candidate21steps unexecuted while repeatedsearchusedremaining130s; LF620feedback/lastdraft newerthanpublished618current. Nextmodels mustreadlatestfeedback, preserveexecute+feedbacktime.
+- 2026-10-06 20:14 CST — Recovery prepare rejected before writes: BP/LF/SK registry bytes changed from newly sealed attempts; all3 selectedwinner certificate/source IDs remainexactly unchanged. Original failed plan/proof/stage retained. Freshselection rebind mustauthenticate immutable chosen cert/source/projection separately from mutable additional registry membership; do not recertify/replay or force stale whole-registry bindings.
+- 2026-10-06 20:20 CST — Exactfinal post-attempt fullstatic certificate audit PASS25current/21frozen in101.256sec; SDK/model/API/recertification0. Newproof provenance-0d8f52bc-post-attempt-certificates-proof.json retains original earlieraudit/proofs, selectedsource/certificateIDs unchanged; distinct from console-only semantic rebind and any freshgameplay authorization.
+- 2026-10-06 20:23 CST — Console-only samewinner rebind independently CLEAR/6purePASS, preserves all originalproofs/candidatebytes/25selectedcerts/sources. All25 fullanimation/cognition/projection activationPASS34.96sec; exactFINAL service29042 fixed57515/PASS558resources/SDK0/guestops0. LF/DC/VC HTTPready0.561/0.020/0.083sec; no browseracceptance claimed. SK diagnosedboundedround released12151→29136, guest_signals0 with BP/LFidentities/deadlines preserved, oldSKhistory retained; newSK202222 native900s, independent9tests/AstraCLEAR.
+- 2026-10-06 20:25 CST — Actual LF52L9second attempt200852 passed105new/662total withseal/replay/cleanuptrue andemptydiagnostics; localoverview174/183,22full,93.717172,6325savedactions. BP200840deadlineinterrupted12new,5/9remains,cleanevidence. NativeLFnewcertificate/currentwinner is separate from precompletion all25audit/stage; originals preserved. SK202222running, parent29136harvests naturally.
