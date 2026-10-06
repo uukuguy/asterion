@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from tools.p7_console_cloud_sync import Capture, HTTPSource, SyncError, canonical
+from tools.p7_console_cloud_sync import Capture, HTTPSource, UploadSchedule, SyncError, canonical
 
 
 class TestConsoleCloudSync(unittest.TestCase):
@@ -113,6 +113,28 @@ class TestConsoleCloudSync(unittest.TestCase):
             self.assertEqual(result['stats']['readyRuns'], 1)
             self.assertEqual(result['stats']['unavailableCurrentRuns'], ['p7-live-current'])
             self.assertNotIn('/api/replay/p7-live-current/manifest', result['routes'])
+
+    def test_upload_coalesces_and_completion_obeys_minimum(self):
+        schedule = UploadSchedule()
+        self.assertTrue(schedule.due(0, 'saved1'))
+        schedule.attempted(0, 'saved1')
+        self.assertFalse(schedule.due(59, 'saved2'))
+        self.assertTrue(schedule.due(60, 'saved2'))
+        schedule.attempted(60, 'saved2')
+        self.assertFalse(schedule.due(359, 'saved2'))
+        self.assertTrue(schedule.due(360, 'saved2'))
+        schedule.paused = True
+        self.assertFalse(schedule.due(10000, 'saved3'))
+
+    def test_generated_timestamp_only_does_not_change_generation(self):
+        routes = self.fixture()
+        routes['/api/overview']['generated_at'] = 'first'
+        with tempfile.TemporaryDirectory() as directory:
+            capture = Capture(Path(directory), routes.__getitem__)
+            first = capture.once()
+            routes['/api/overview']['generated_at'] = 'second'
+            second = capture.once()
+            self.assertEqual(first['generation'], second['generation'])
 
     def test_canonical_unicode(self):
         self.assertEqual(canonical({'b': 1, 'a': '图'}), '{"a":"图","b":1}'.encode())

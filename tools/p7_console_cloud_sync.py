@@ -33,6 +33,16 @@ def canonical(value):
                       ensure_ascii=False, allow_nan=False).encode('utf-8')
 
 
+def meaningful(value):
+    """Presentation timestamps alone do not make a new cloud data generation."""
+    if not isinstance(value, dict):
+        return value
+    result = {key: item for key, item in value.items() if key != 'generated_at'}
+    if isinstance(result.get('snapshot'), dict):
+        result['snapshot'] = meaningful(result['snapshot'])
+    return result
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -116,7 +126,11 @@ class Capture:
         return value
 
     def get(self, routes, route):
-        return self.put(routes, route, self.fetch(route))
+        value = self.fetch(route)
+        previous = self.read_cached(route)
+        if previous is not None and meaningful(previous) == meaningful(value):
+            value = previous
+        return self.put(routes, route, value)
 
     @staticmethod
     def selected(overview):
@@ -144,7 +158,7 @@ class Capture:
         previous_routes = (self.cache or {}).get('routes', {})
         if run_id in self.completed:
             previous, previous_routes = self.completed[run_id]
-        if previous == manifest:
+        if previous is not None and meaningful(previous) == meaningful(manifest):
             for key, value in previous_routes.items():
                 if key.startswith(prefix + '/levels/'):
                     if not (self.spool / 'objects' / (value['sha256'] + '.json.gz')).is_file():
@@ -187,7 +201,7 @@ class Capture:
                             raise SyncError('source-changed')
                         self.put(routes, page_path, page)
         after = self.fetch(route)
-        if after != manifest:
+        if meaningful(after) != meaningful(manifest):
             raise SyncError('source-changed')
         self.completed[run_id] = (manifest, {key: value for key, value in routes.items()
                                              if key.startswith(prefix + '/')})
@@ -256,6 +270,44 @@ class Capture:
         return result
 
 
+class UploadSchedule:
+    """Coalesce captures; completions get priority without per-action writes."""
+    def __init__(self, interval=300, minimum=60):
+        self.interval, self.minimum = interval, minimum
+        self.last_attempt = None
+        self.saved_progress = None
+        self.paused = False
+
+    def due(self, clock, progress):
+        if self.paused:
+            return False
+        if self.last_attempt is None:
+            return True
+        elapsed = clock - self.last_attempt
+        return elapsed >= self.interval or (elapsed >= self.minimum and progress != self.saved_progress)
+
+    def attempted(self, clock, progress):
+        self.last_attempt, self.saved_progress = clock, progress
+
+
+def upload(script, spool):
+    completed = subprocess.run(['node', str(script), '--spool', str(spool)],
+                               capture_output=True, check=False, timeout=180)
+    if completed.returncode:
+        try:
+            code = json.loads(completed.stderr).get('error')
+        except (ValueError, TypeError):
+            code = None
+        raise SyncError('upload-quota-exceeded' if code == 'cloud-upload-quota-exceeded' else 'upload-failed')
+    try:
+        result = json.loads(completed.stdout)
+    except (ValueError, TypeError):
+        raise SyncError('upload-response-invalid') from None
+    keys = {'uploaded', 'reused', 'packs', 'uploadAttempts', 'maxUploadOperations',
+            'currentCompressedBytes', 'retainedCloudBytes'}
+    return {key: value for key, value in result.items() if key in keys and type(value) in {bool, int}}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--source', default='http://127.0.0.1:57515')
@@ -266,9 +318,10 @@ def main():
     parser.add_argument('--interval', type=float, default=5)
     parser.add_argument('--timeout', type=float, default=20)
     parser.add_argument('--uploader-script', type=Path)
+    parser.add_argument('--upload-interval', type=float, default=300)
     args = parser.parse_args()
-    if args.interval < 1 or not 0 < args.timeout <= 20:
-        parser.error('interval must be >=1 and timeout must be in (0,20]')
+    if args.interval < 1 or not 0 < args.timeout <= 20 or args.upload_interval < 60:
+        parser.error('interval >=1, timeout in (0,20], upload interval >=60 required')
     args.spool.mkdir(parents=True, exist_ok=True)
     with (args.spool / '.sync.lock').open('a') as lock:
         try:
@@ -277,6 +330,7 @@ def main():
             print('{"status":"failed","code":"publisher-already-running"}', flush=True)
             return 1
         capture = Capture(args.spool, HTTPSource(args.source, args.timeout))
+        schedule = UploadSchedule(args.upload_interval)
         while True:
             started = time.monotonic()
             status = dict(status='failed', capture='failed', upload='not-attempted', observedAt=now())
@@ -292,14 +346,25 @@ def main():
                 status['capture'] = 'ready'
                 status['generation'] = result['generation']
                 if args.uploader_script:
-                    completed = subprocess.run(['node', str(args.uploader_script), '--spool', str(args.spool)],
-                                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
-                    status['upload'] = 'failed' if completed.returncode else 'ready'
-                    if completed.returncode:
-                        raise SyncError('upload-failed')
+                    overview = capture.read_cached('/api/overview')
+                    progress = canonical([(g['game_id'], g.get('completed_levels'), g.get('best_run_id'))
+                                          for g in overview['games']])
+                    if schedule.due(time.monotonic(), progress):
+                        schedule.attempted(time.monotonic(), progress)
+                        status['upload'] = 'failed'
+                        status['uploadReceipt'] = upload(args.uploader_script, args.spool)
+                        status['upload'] = 'ready'
+                    else:
+                        status['upload'] = 'quota-paused' if schedule.paused else 'coalesced'
                 status.update(status='ready', observedAt=now(), **result['stats'])
             except SyncError as error:
                 status['code'] = str(error)
+                if str(error) == 'upload-quota-exceeded':
+                    schedule.paused = True
+                    status['upload'] = 'quota-paused'
+            except subprocess.TimeoutExpired:
+                status['code'] = 'upload-timeout'
+                status['upload'] = 'failed'
             except (OSError, ValueError, KeyError, TypeError):
                 status['code'] = 'capture-failed'
             atomic(args.spool / 'sync-status.json', canonical(status))
