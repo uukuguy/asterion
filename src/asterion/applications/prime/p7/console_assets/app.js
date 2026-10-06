@@ -337,6 +337,7 @@
     const completed = level.status === 'successful';
     const score = completed && known && actual > 0 ? Math.min(115, 100 * (baseline / actual) ** 2) : null;
     return {text: `基准 ${known ? baseline : '未知'} / ${actual} 动作 / 关卡效率${completed ? score === null ? '未知' : ` ${score.toFixed(2)} 分` : '待完成'}`,
+      railText: `基准 ${known ? baseline : '未知'} · ${completed ? score === null ? '分数未知' : `${score.toFixed(2)} 分` : '待完成'}`,
       low: score !== null && score < 100};
   }
 
@@ -424,6 +425,10 @@
       if (count && levelFrameCount(displayed)) meta.append(document.createTextNode(` · ${levelFrameCount(displayed)} 帧`));
       content.append(heading, node('p', conciseStatus, 'level-item-status'));
       if (savedStepsPending || passed || count || !['未开始', '读取中', '预览不可用'].includes(conciseStatus)) content.append(meta);
+      if (!manual) {
+        const efficiency = levelEfficiency(displayed);
+        content.append(node('p', efficiency.railText, `level-item-detail level-item-efficiency${efficiency.low ? ' efficiency-low' : ''}`));
+      }
       button.append(content);
       button.addEventListener('click', () => {
         if (state.mode !== 'manual') {

@@ -44,8 +44,9 @@ test('original level rail emphasizes passed steps and separates attempts from un
     try {
       const row = app.$('level-1');
       assert.equal(row.querySelector('.level-step-count')?.textContent ?? null, expected);
-      assert.equal(row.querySelectorAll('.level-item-detail').length, expected ? 1 : 0);
-      assert.doesNotMatch(row.textContent, /已保存|按需读取|基准|关卡效率/);
+      assert.equal(row.querySelectorAll('.level-item-detail').length, expected ? 2 : 1);
+      assert.doesNotMatch(row.textContent, /已保存|按需读取|关卡效率/);
+      assert.equal(row.querySelector('.level-item-efficiency').textContent, status === 'successful' ? '基准 20 · 115.00 分' : '基准 20 · 待完成');
       assert.match(row.title, /基准 20/);
       if (status === 'successful') {
         assert.match(row.title, /已过关/);
@@ -204,6 +205,9 @@ test('per-level efficiency uses exact baseline actions and remains separate from
     assert.match(app.$('level-efficiency').textContent, new RegExp(`基准 ${baseline ?? '未知'} / ${actual} 动作`));
     assert.match(app.$('receipt-content').textContent, /游戏综合分（局部）：100.00/);
     assert.equal(app.$('level-efficiency').classList.contains('efficiency-low'), status === 'successful' && baseline === 7 && actual === 11);
+    assert.equal(app.$('level-1').querySelector('.level-item-efficiency').textContent,
+      `基准 ${baseline ?? '未知'} · ${status === 'successful' ? baseline === null ? '分数未知' : expected.replace('关卡效率 ', '') : '待完成'}`);
+    assert.equal(app.$('level-1').querySelector('.level-item-efficiency').classList.contains('efficiency-low'), status === 'successful' && baseline === 7 && actual === 11);
     assert.deepEqual(app.requests, []);
     assert.deepEqual(app.errors, []);
     app.dom.window.close();
