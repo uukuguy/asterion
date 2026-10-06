@@ -160,6 +160,8 @@ class Capture:
                 or manifest.get('run', {}).get('game_id') != game_id
                 or not re.fullmatch('[0-9a-f]{64}', manifest.get('revision', ''))):
             raise SyncError('source-manifest-invalid')
+        if manifest['run'].get('completed_level_count', 0) > 0 and not manifest.get('levels'):
+            raise SyncError('saved-replay-progress-mismatch', run_id)
         previous = self.read_cached(route)
         previous_routes = (self.cache or {}).get('routes', {})
         if run_id in self.completed:
@@ -239,11 +241,15 @@ class Capture:
                     routes[f'/api/preview/{game_id}'] = routes[path]
         self.previews = (games, {path: entry for path, entry in routes.items() if path.startswith('/api/preview/')})
         runs, unavailable = [], []
-        required = {game.get('best_run_id') for game in overview['games']}
+        required_progress = {game['best_run_id']: game.get('completed_levels', 0)
+                             for game in overview['games'] if game.get('best_run_id')}
+        required = set(required_progress)
         selected = self.selected(overview)
         for run_id, game_id in sorted(selected.items()):
             try:
                 run = self.replay(routes, run_id, game_id)
+                if run is not None and run_id in required and run.get('completed_level_count') != required_progress[run_id]:
+                    raise SyncError('saved-replay-progress-mismatch', run_id)
                 if run is None:
                     unavailable.append(run_id)
                     if run_id in required:

@@ -12,12 +12,12 @@ from tools.p7_console_cloud_sync import Capture, HTTPSource, UploadSchedule, Syn
 class TestConsoleCloudSync(unittest.TestCase):
     def fixture(self, count=65):
         revision, token, run = 'a' * 64, 'b' * 64, 'p7-live-test'
-        summary = {'run_id': run, 'game_id': 'ab01-test', 'status': 'successful'}
+        summary = {'run_id': run, 'game_id': 'ab01-test', 'status': 'successful', 'completed_level_count': 1}
         manifest = {'state': 'ready', 'run_id': run, 'revision': revision,
                     'run': summary, 'levels': [{'level': 1, 'frame_count': count,
                                                'action_count': 0}]}
         routes = {'/api/games': {'games': [{'game_id': 'ab01-test', 'win_levels': 1}]},
-                  '/api/overview': {'games': [{'game_id': 'ab01-test', 'best_run_id': run}]},
+                  '/api/overview': {'games': [{'game_id': 'ab01-test', 'best_run_id': run, 'completed_levels': 1}]},
                   '/api/state': {'snapshot': None},
                   '/api/preview/ab01-test': {'preview': True},
                   '/api/preview/ab01-test/1': {'preview': True},
@@ -152,6 +152,14 @@ class TestConsoleCloudSync(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             result = Capture(Path(directory), fetch).once()
             self.assertEqual(result['stats']['readyRuns'], 1)
+
+    def test_saved_positive_progress_requires_manifest_levels(self):
+        routes = self.fixture()
+        routes['/api/replay/p7-live-test/manifest']['levels'] = []
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(SyncError):
+                Capture(Path(directory), routes.__getitem__).once()
+            self.assertFalse((Path(directory) / 'index.json').exists())
 
     def test_canonical_unicode(self):
         self.assertEqual(canonical({'b': 1, 'a': '图'}), '{"a":"图","b":1}'.encode())
