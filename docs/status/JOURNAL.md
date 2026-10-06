@@ -4089,3 +4089,7 @@
 - 22:46 Local overview confirms97.866667/180levels; L6 prepared43actions563frames/cognition ready; L7 live.
 - 22:46 a4365a60 records certified BP L6 and live L7 so recovery retains map corrections and saved authority.
 - 23:03 BP L7 sealed7/246,53new/1RESET; L8 live. RESET boundary repair and immutable legacy certificate compatibility reviewed CLEAR.
+- 23:05 2f258ff3 makes RESET an episode boundary and preserves deployed certificate reads, preventing stale support and false induction failures.
+
+- 23:18 2f full promotion PASS25/provider0; current25 and frozen21 certificate audit PASS,181 levels, old certificate bytes unchanged.
+- 23:18 BP L8 first sealed49new withoutpass; nine ball-ladder predictions matched; same-round second attempt started, explored map retained.
