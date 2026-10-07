@@ -57,6 +57,18 @@ The optional `fresh-target` quarantine policy is an **operator-selected interven
 | Retained experience and delivery | [Experience loader](src/asterion/applications/prime/p7/experience.py), [induction](src/asterion/applications/prime/p7/experience_induction.py), [actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
 | Save-time authority and official replay | [Certificates](src/asterion/applications/prime/p7/solution_certificates.py), [official operator](src/asterion/applications/prime/p7/official_operator.py), [online replay](src/asterion/applications/prime/p7/official_replay.py) |
 
+## Console and replay
+
+The [read-only console](https://asterion-p7-console.vercel.app) shows saved research progress and route replay; synchronized data may lag local research. Click either screenshot to view it at full size.
+
+[![P7 console overview: local saved-route score 100, 25 completed games and 183 completed levels](docs/assets/arc-agi-3/p7-console-overview.png)](docs/assets/arc-agi-3/p7-console-overview.png)
+
+Local saved-route progress: **100**, 25 games and 183 levels completed.
+
+[![AR25 console view with game scene, WorldMap and replay timeline](docs/assets/arc-agi-3/p7-console-game.png)](docs/assets/arc-agi-3/p7-console-game.png)
+
+AR25 game scene, WorldMap and replay timeline from local research. Official results are documented by the scorecard above.
+
 ## Reproduce and inspect
 
 Start with the [community reproduction guide](docs/guides/prime-p7-community-reproduction.md) for external prerequisites, exact model selection, the current OrbStack launcher, and local/official commands.

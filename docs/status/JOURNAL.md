@@ -4159,3 +4159,7 @@
 2026-10-07 01:56 CST — Community7ce4d19: Document overlapping inventories and cache assumptions for transparent cost comparison; keep preparation local.
 
 2026-10-07 02:02 CST — Communityc4ce7d5: Distinguish Codex access, actual spend and scoped API estimates; validated submission remains local.
+
+2026-10-07 02:03 CST — 5ee2caf6: Disclose scoped API-equivalent costs and assumed cache rates in bilingual results without claiming actual payment.
+
+2026-10-07 14:00 CST — README console figures and original PNG parity verified; official screenshot pending unavailable browser transport; scorecard link retained.

@@ -57,6 +57,18 @@ flowchart LR
 | 经验与观察交付 | [经验加载](src/asterion/applications/prime/p7/experience.py)、[归纳](src/asterion/applications/prime/p7/experience_induction.py)、[Actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
 | 保存认证与官方重放 | [认证](src/asterion/applications/prime/p7/solution_certificates.py)、[官方操作入口](src/asterion/applications/prime/p7/official_operator.py)、[在线重放](src/asterion/applications/prime/p7/official_replay.py) |
 
+## 控制台与回放
+
+[只读控制台](https://asterion-p7-console.vercel.app)展示保存的研究进度与路线回放；同步数据可能落后于本地研究。点击截图可查看原图。
+
+[![P7 控制台总览：本地保存路线 100 分，完成 25 题、183 关](docs/assets/arc-agi-3/p7-console-overview.png)](docs/assets/arc-agi-3/p7-console-overview.png)
+
+本地保存路线进度：**100 分**，完成 25 题、183 关。
+
+[![AR25 控制台：游戏场景、WorldMap 与回放时间线](docs/assets/arc-agi-3/p7-console-game.png)](docs/assets/arc-agi-3/p7-console-game.png)
+
+AR25 本地研究的游戏场景、WorldMap 与回放时间线；官方结果以本页上方的成绩卡为证。
+
 ## 复现与检查
 
 先阅读[社区复现指南](docs/guides/prime-p7-community-reproduction.md)，其中列明外部资源、准确模型选择、当前 OrbStack 启动入口，以及本地／官方运行命令。
