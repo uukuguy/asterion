@@ -1104,3 +1104,12 @@
 - Analysis scope: the user means outer Codex reading stalled P7 reasoning, diagnosing model coverage/validation/feedback/research pace and choosing interventions. Git timestamps locate their implementation. This task prepares conclusions only; no P7 code changes are authorized.
 - Unfinished boundary: no L7–L9 trial, official card, tool/runtime refactor or unseen-game evaluation occurred. Different starting histories, prediction granularity and budgets prevent a controlled superiority claim. The located P7 L5 success sample does not establish the duration or full diagnostic chain of prior peripheral effort.
 - Evidence: [Initial trial and BP35 comparison](../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md), [BP35 L5/L6 trial and outer reasoning analysis](../reviews/2026-10-07-arc-skill-bp35-l5-l6-trial.md); full operator/native logs, source hashes and timing/cleanup receipts remain private.
+
+## D-2026-10-07-04 — Bounded reusable autonomous research, ARC adapter and cold comparison
+
+- Status: authorized implementation and evaluation; not yet a demonstrated solving capability.
+- Authority: user explicitly requests P7 optimization, one BP35 L1–L6 comparison and reusable autonomous reasoning infrastructure with ARC-specific layers. This supersedes the completed analysis task's no-code restriction without authorizing L7–L9 or an official card.
+- Decision: reuse the Prime kernel and opt into its reusable Pi lifecycle; a generic continuation budget and research guidance leave research decisions with the actor. P7 owns observation/state, retained domain research, RESET, action grounding and scoring. Completion is distinct from a failed receipt or recoverable game death.
+- Budget: one offline fresh run, total5400 seconds from operator preparation origin, at most six natural rounds/1000 primitive actions/1024 model callbacks/4096 tool callbacks. Default3600 and witness900 presets retain their meaning. The absolute cancellation/control/guest cutoff bounds a separate fixed Pi transport-duration ceiling; no layer renews authority on pause/continue/RESET.
+- Evidence limits: freeze source/package/tool identities before real run; no old solutions or outer game reasoning, no midrun repairs. Tests and implementation do not prove L1–L6 completion; a measured result is required. Existing arc-skill staged271-action evidence is not a controlled causal A/B.
+- Plan: [Prime autonomous research implementation](../superpowers/plans/2026-10-07-prime-autonomous-research.md).

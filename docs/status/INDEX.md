@@ -14,6 +14,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | Purpose |
 |---|---|---|
+| `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟢 active | Current layered autonomy implementation and fixed cold BP35 L1–L6 trial; default/witness compatibility and evidence limits. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Final official100 result, community PR59, private archive verification, stopped processes and concrete resume commands. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |

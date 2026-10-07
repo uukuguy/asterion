@@ -4281,3 +4281,8 @@
 2026-10-07 20:33 CST — ae10561d records author L6 reset and54-step successful episode; distinguishes scorecard73-action total.
 
 2026-10-07 20:53 CST — Deliver selfcontained BP35 HTML: embeddedTailwind4.3.3, interactivecounts/ledger/diagnosis/budget; 11DOMchecksPASS, contentreviewPASS, visualbrowser unavailable.
+
+2026-10-07 20:53 CST — f6c6738d delivers offline interactive BP35 report; makes trial, outer diagnosis and improvement limits selfcontained.
+
+- 2026-10-07 21:16 CST — Authorized layered autonomy implementation and cold BP35 L1–L6; plan5400s/six rounds, no trial started.
+- 2026-10-07 21:27 CST — Found P7 did not enable reusable Pi lifecycle; per-step grounding regression reproduced and repaired.

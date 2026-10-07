@@ -6,8 +6,8 @@
 - Current branch: `main`.
 - Theme-level focus: LLM autonomous reasoning and harness effectiveness; concrete arc-skill/Prime comparison.
 - Project route: managed.
-- Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: BP35 autonomy comparison and standalone interactive report delivered; no active trial. The blank original-skill/gpt-6.1-sol BP35 run reached6of9/271actions; r11l reachedWIN/6of6 after generic continuation. External research help or solver repairs are excluded from autonomous-completion claims. The prior P7 campaign is settled; no P7 implementation change or additional benchmark is authorized by this analysis task.
+- Canonical worklist: `docs/superpowers/plans/2026-10-07-prime-autonomous-research.md`; previous WorldMap campaign is historical implementation context.
+- Active work package: user now authorizes layered autonomous-research implementation and one fresh P7 BP35 L1–L6 comparison. Plan fixes5400s/six natural rounds/1000 actions with finite1024 model/4096 tool callbacks. No new run has started; implementation and packaged verification precede the trial. Original arc-skill6of9/271actions remains the baseline; prior analysis-only restriction applies to that completed task, not this new authorization.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture

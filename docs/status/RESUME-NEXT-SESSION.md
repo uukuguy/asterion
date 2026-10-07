@@ -2,13 +2,22 @@
 
 > Updated: 2026-10-07 20:53 CST. **Session remains active — not a final handoff.**
 
+## 当前执行：通用自主研究与P7冷启动验证
+
+- 用户新增授权：核实arc-skill截止机制，实施分层自主研究改进，再用P7 cold BP35 L1–L6验证。上一分析任务“不改P7”已结束，不能误当本任务禁令。
+- 原版arc-skill没有整场/每关固定deadline；RPC/start/search局部限时与online约15min闲置租约分开。旧900秒是P7 witness研发预设；原版实验5400秒为外加总预算。
+- 正式方案[prime-autonomous-research](../superpowers/plans/2026-10-07-prime-autonomous-research.md)：复用Prime自然续轮，通用有限预算/研究指引；P7状态与逐步grounding留应用层。
+- 冻结验证配置：总5400秒、六自然回合、1000总动作、1024 model/4096 tool callbacks，gpt-6.1-sol/high，offline fresh目标六关；不隐性扩大、不热修、不读旧解法、不执行L7或官方卡。
+- 尚未启动新评估。已定位solving completion用seal误把reset-required当终局；当前多cell native grounding选择仍用计划初始帧。实现/测试/打包和独立复审后才启动冻结版本。
+
 ## 已交付：单文件BP35交互解释
 
 - 用户要求将本次arc-skill实测、P7 L5/L6困难因素与改进思路做成单个自包含HTML，Tailwind CSS+JS滑块/动画，无构建步骤。
 - 文件[2026-10-07-bp35-autonomy-explainer.html](../reviews/2026-10-07-bp35-autonomy-explainer.html)：真正Tailwind4.3.3生成CSS、SVG/JS/data全部内嵌，无外部资源请求；file://直接打开。没有改P7或启动新游戏评估。
 - 四组交互：L6事件动画/slider（201失配、228RESET、271过关）、L5/L6与总数/成功一轮切换、五项外脑诊断切换、预算截止线示意。总数视图P7累计成本未知，成功视图才显示32/43样本；预算slider不是反事实成功预测。
 - Astra内容复审无阻断；root JSDOM11项功能/资源/脚本检查PASS，包括播放暂停停止、计数/节点、所有诊断、减少动态效果。私有验证`.asterion-private/bp35-html-checks/verification.json`。真实浏览器连接超时，Orca runtime未运行，未宣称真实viewport视觉验收；没有另开profile。
-- 现有专项Markdown/INDEX已指向HTML。当前无活跃实验、新P7修改或后续benchmark授权；迁移方案仍是分析候选。
+- HTML与索引/恢复记录已提交`f6c6738d`，未push；docs-check284Markdown/125本地链接、diff-check通过。提交后仅journal/checkpoint元数据追加。
+- 现有专项Markdown/INDEX已指向HTML。该HTML交付时无新运行授权；后续用户授权实现与冷启动对比，以顶部当前任务为准。
 
 ## 已完成：BP35 L5/L6 实测与外围推理分析
 
