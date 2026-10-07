@@ -4335,3 +4335,5 @@
 - 2026-10-08 07:30 CST — Independent witness audit confirms hashes/trace/notes/cuts/cleanup; docs289files143links and diff pass; no BP35 rerun or extra trial.
 - 2026-10-08 07:31 CST — f9ee5ee6 records verified layered NOTES deployment and its BP35 evidence boundary; implementation and bounded validation are complete.
 - 2026-10-08 07:39 CST — User continues into one frozen NOTES BP35 L1–L6 comparison;5400s/six rounds, fresh isolated root, no hot repairs.
+- 2026-10-08 07:44 CST — 5a5a8280 scopes one frozen NOTES BP35 comparison; cold isolation verified, full private projection-log capture precedes launch.
+- 2026-10-08 07:46 CST — Reviewed frozen NOTES BP35 starts07:45:31,target6;09:15:31absolute deadline, coldzero state, full private context-cut capture, no steering.
