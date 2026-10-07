@@ -43,6 +43,10 @@ Stage2有9次`arc python`（8次网格/几何查询、1次事件统计）和10�
 
 这段轨迹直接支持“模型自己吸收反馈、保存探索所得、选择重试并执行”，不支持它已经证明完整地图覆盖、完成step历史回测，或主动诊断过上下文放大。原版具有可选rules replay，实测没有使用；不能把工具目录替代研究能力证据。
 
+### 作者scorecard的L6计数核对
+
+2026-10-07重新GET[官方公开scorecard接口](https://arcprize.org/api/v3/scorecards/24ddb219-987e-464f-9050-6398a29cf5ac)：BP35记录9关/482动作/4RESET，`level_actions[5] = 73`。再核[作者公开BP35账本/记录](https://arc-skill.vercel.app/data/transcripts/bp35.json)：L6入口event167，RESET为event186，event240过关，因此本关是**18步探索 + 1次RESET + 54步成功一轮 = 73动作**。成功一轮确定为54步；官方逐关73包含前次探索及RESET，不能把两种口径混用。与本次Sol的58+1+43=102分开统计。
+
 ## 3. P7：Git时间戳、真实过关时点与冻结版本
 
 时间为2026-10-06 CST，前夜另标。提交通过parents/ancestor和changed paths核对，运行版本以实际冻结身份为准。用户所述总体外围投入保留；不能用最终成功样本覆盖此前的分析、工具修订和调度成本。

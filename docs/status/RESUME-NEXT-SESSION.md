@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 20:27 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 20:35 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务：BP35 L5/L6 实测已结束，合并外围推理分析
 
@@ -16,6 +16,9 @@
 - P7外脑职责已由Astra只读定位：部分模型无路撤回实验→外围选择79源隔离；checked历史表不等于step回测；区分零派发/真实反例并修工具；重复上下文挤占研究窗口→compact delivery；actor先补屏外图→外围保留并确认后继消费。局部actor自主成果与整体外脑依赖同时成立。
 - 私有对照 `.asterion-private/arc-skill-bp35-comparison/outer-reasoning-interventions.md` 与p7-l5-evidence、p7-l5-summary、p7-l5-l7-git-timeline保留22launch/29commit。正式L5前逐条外围诊断链未完整定位，不用最终425秒成功轮否定用户长期投入，也不用L6链冒充L5链。
 - [专项报告](../reviews/2026-10-07-arc-skill-bp35-l5-l6-trial.md)与CURRENT/DECISIONS/INDEX/MEMORY已同步。Sol终局独立审计通过；Astra将实际研究行为与外脑职责逐项对照，已收紧claim计数/归因并明确P7已有partial。可确认ARC自己做局部实验、更新笔记、选择RESET并利用探索结果；不能声称它自主完成等效79源隔离、step回测或上下文诊断。P7旧900秒与ARC L6剩余3134秒不同，不作同条件优劣排名。迁移候选未实现；本次无P7修改，无新运行授权。
+
+- 用户追加核查作者scorecard：公开官方API确认BP35 L6为73动作；作者原账本event167→186RESET→240过关，18探索+1RESET+54成功一轮。已补专项报告；私有author-l6-scorecard-counts.json保存计数来源。不混作本次Sol58+1+43。
+- 本轮分析/实验记录已提交`30e2e409`，未push。最终docs-check284Markdown/123本地链接与diff-check通过，独立审计/复审无阻断。提交后仅JOURNAL与本live checkpoint元数据追加；无未跟踪研究文件、无活跃实验或新执行授权。
 
 ## 已完成：r11l 实测与初步差异调查
 

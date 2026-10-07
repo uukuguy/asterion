@@ -4271,3 +4271,7 @@
 2026-10-07 20:22 CST — OriginalBP35 reaches6of9/271actions: L5=45/L6=102; fournaturalturns, unchanged15hash, ownedcleanup, noL7 or gamehints.
 
 2026-10-07 20:27 CST — SolterminalauditPASS; Astra contrasts actualnotes/probes/reset with outerP7 judgment. Preserve900vs3134budget and partial-model boundaries.
+
+2026-10-07 20:29 CST — 30e2e409 documents autonomous BP35 six-level completion and outer P7 reasoning interventions; preserves actual behavior and comparison limits.
+
+2026-10-07 20:35 CST — Author scorecard confirms BP35 L6 73actions: ledger18 exploration +1RESET +54successful moves; keep episode/total separate.
