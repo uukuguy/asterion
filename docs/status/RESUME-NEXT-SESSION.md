@@ -1,8 +1,16 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 20:35 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 20:53 CST. **Session remains active — not a final handoff.**
 
-## 当前任务：BP35 L5/L6 实测已结束，合并外围推理分析
+## 已交付：单文件BP35交互解释
+
+- 用户要求将本次arc-skill实测、P7 L5/L6困难因素与改进思路做成单个自包含HTML，Tailwind CSS+JS滑块/动画，无构建步骤。
+- 文件[2026-10-07-bp35-autonomy-explainer.html](../reviews/2026-10-07-bp35-autonomy-explainer.html)：真正Tailwind4.3.3生成CSS、SVG/JS/data全部内嵌，无外部资源请求；file://直接打开。没有改P7或启动新游戏评估。
+- 四组交互：L6事件动画/slider（201失配、228RESET、271过关）、L5/L6与总数/成功一轮切换、五项外脑诊断切换、预算截止线示意。总数视图P7累计成本未知，成功视图才显示32/43样本；预算slider不是反事实成功预测。
+- Astra内容复审无阻断；root JSDOM11项功能/资源/脚本检查PASS，包括播放暂停停止、计数/节点、所有诊断、减少动态效果。私有验证`.asterion-private/bp35-html-checks/verification.json`。真实浏览器连接超时，Orca runtime未运行，未宣称真实viewport视觉验收；没有另开profile。
+- 现有专项Markdown/INDEX已指向HTML。当前无活跃实验、新P7修改或后续benchmark授权；迁移方案仍是分析候选。
+
+## 已完成：BP35 L5/L6 实测与外围推理分析
 
 - 用户所指“分析”是卡关时外围Codex阅读P7推理、判断卡点并选择干预；Git时间戳帮助定位判断落地。当前只分析，不改P7代码，不再询问实施范围。
 - 原版arc-skill固定dba53c3799eab600a512dd73ed037d7ab6958c66，actual gpt-6.1-sol/high。新空白local bp35/seed0从L1推进，不带P7/r11l/作者答案；actor由独立目录与sandbox隔离。没有官方卡或源码修订。
@@ -17,7 +25,7 @@
 - 私有对照 `.asterion-private/arc-skill-bp35-comparison/outer-reasoning-interventions.md` 与p7-l5-evidence、p7-l5-summary、p7-l5-l7-git-timeline保留22launch/29commit。正式L5前逐条外围诊断链未完整定位，不用最终425秒成功轮否定用户长期投入，也不用L6链冒充L5链。
 - [专项报告](../reviews/2026-10-07-arc-skill-bp35-l5-l6-trial.md)与CURRENT/DECISIONS/INDEX/MEMORY已同步。Sol终局独立审计通过；Astra将实际研究行为与外脑职责逐项对照，已收紧claim计数/归因并明确P7已有partial。可确认ARC自己做局部实验、更新笔记、选择RESET并利用探索结果；不能声称它自主完成等效79源隔离、step回测或上下文诊断。P7旧900秒与ARC L6剩余3134秒不同，不作同条件优劣排名。迁移候选未实现；本次无P7修改，无新运行授权。
 
-- 用户追加核查作者scorecard：公开官方API确认BP35 L6为73动作；作者原账本event167→186RESET→240过关，18探索+1RESET+54成功一轮。已补专项报告；私有author-l6-scorecard-counts.json保存计数来源。不混作本次Sol58+1+43。
+- 用户追加核查作者scorecard：公开官方API确认BP35 L6为73动作；作者原账本event167→186RESET→240过关，18探索+1RESET+54成功一轮。已补专项报告并提交ae10561d，docs-check/diff-check通过；私有author-l6-scorecard-counts.json保存计数来源。不混作本次Sol58+1+43。
 - 本轮分析/实验记录已提交`30e2e409`，未push。最终docs-check284Markdown/123本地链接与diff-check通过，独立审计/复审无阻断。提交后仅JOURNAL与本live checkpoint元数据追加；无未跟踪研究文件、无活跃实验或新执行授权。
 
 ## 已完成：r11l 实测与初步差异调查

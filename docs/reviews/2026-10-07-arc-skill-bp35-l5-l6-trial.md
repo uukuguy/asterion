@@ -2,6 +2,8 @@
 
 > 2026-10-07。原版 arc-skill + gpt-6.1-sol/high 从空白运行完成 BP35 前六关，累计271动作。L5用45动作，L6用102动作。外围只提供通用续跑、目标更新与宿主恢复，没有解题分析或skill/harness修订；按用户口径达到本次自主完成目标。比较核心是外围分析P7推理、判断卡点和干预的行为，Git修订链用于定位这些判断如何落地。本次未修改P7实现。
 
+[单文件交互说明](2026-10-07-bp35-autonomy-explainer.html)内嵌Tailwind、数据和JS，无需联网或构建；展示研究进程、计数切换、外围诊断与改进候选，不包含游戏路线。
+
 ## 1. 实验条件与自主完成口径
 
 - 固定原版 [dba53c3799eab600a512dd73ed037d7ab6958c66](https://github.com/pbshgthm/arc-skill/tree/dba53c3799eab600a512dd73ed037d7ab6958c66)，actual native model `gpt-6.1-sol/high`，local `bp35-0a0ad940`、seed 0。
