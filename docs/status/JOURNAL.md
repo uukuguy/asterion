@@ -4245,3 +4245,29 @@
 2026-10-07 19:03 CST — Independent continuation audit passes history/model/prompt/hash/timing/cleanup; natural turn ends671.8s, original15files unchanged, owned processes/auth removed.
 
 2026-10-07 19:05 CST — Actor handles2new prediction misses/1reset, updates own notes, completesr11l without outer help; docs-check283/119 and diff-check pass.
+
+2026-10-07 19:05 CST — Record verified arc-skill r11l automatic completion to replace the earlier partial-result boundary [25a04d93].
+
+2026-10-07 19:17 CST — User identifiesBP35L5 itself as assisted sprint blocker; authorizes original arc-skill throughL5 and concrete P7L5 mechanism comparison.
+
+2026-10-07 19:22 CST — Blank original BP35actor starts19:21:08, gpt-6.1-sol/high; targetfirst5levels, deadline20:21:08, no prior research or game hints.
+
+2026-10-07 19:37 CST — BP35 actor independently completesfirst4levels at19:36:26/129actions; enters formalL5, same turn, no added hints.
+
+2026-10-07 19:41 CST — CorrectL5 entry from ledger:event124/19:35:34; earlier129sample included5L5moves. Visible opening matches P7 archivedseq118 pixel-exactly.
+
+2026-10-07 19:46 CST — BP35 round1 naturally ends4of5/GAME_OVER/137actions; generic round2 continuation starts without budget extension, hints or source changes.
+
+2026-10-07 19:50 CST — Original broker recovery preserves137-action GAME_OVER ledger; host loss means idle interval cannot all be attributed to model reasoning.
+
+2026-10-07 19:52 CST — User extendsBP35 goal throughL6; same run, pure target update, total5400s/max6turns deadline20:51:08, original skill unchanged.
+
+2026-10-07 20:04 CST — VerifyL5 pass at19:53:41:45paid/1miss/1actorRESET, three natural rounds, original15hash; stage1process/auth cleanup complete.
+
+2026-10-07 20:04 CST — Stage2sameledger resumes at19:58:54 with puregoal6 update; deadline20:51:08/max3remaining, P7Git timeline22launch/29commit preserved.
+
+2026-10-07 20:22 CST — Userclarifies analysis means outer diagnosis of stalledP7 reasoning; noP7changes. Preserve cognition/validation/feedback/pace interventions.
+
+2026-10-07 20:22 CST — OriginalBP35 reaches6of9/271actions: L5=45/L6=102; fournaturalturns, unchanged15hash, ownedcleanup, noL7 or gamehints.
+
+2026-10-07 20:27 CST — SolterminalauditPASS; Astra contrasts actualnotes/probes/reset with outerP7 judgment. Preserve900vs3134budget and partial-model boundaries.

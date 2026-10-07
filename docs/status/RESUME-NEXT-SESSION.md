@@ -1,8 +1,23 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 19:03 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 20:27 CST. **Session remains active — not a final handoff.**
 
-## 当前任务：具体自主性实验与差异调查
+## 当前任务：BP35 L5/L6 实测已结束，合并外围推理分析
+
+- 用户所指“分析”是卡关时外围Codex阅读P7推理、判断卡点并选择干预；Git时间戳帮助定位判断落地。当前只分析，不改P7代码，不再询问实施范围。
+- 原版arc-skill固定dba53c3799eab600a512dd73ed037d7ab6958c66，actual gpt-6.1-sol/high。新空白local bp35/seed0从L1推进，不带P7/r11l/作者答案；actor由独立目录与sandbox隔离。没有官方卡或源码修订。
+- 用户授权先L5后扩至L6；总5400秒/max6轮、20:51:08截止。实际19:21:08启动，20:17:16达6of9/271actions，20:17:42自然回合完成；总UTC3393.950秒。四个回合全部turn.completed，仅初始任务、两次通用继续及一次目标更新，没有定向研究建议。未付费执行L7，授权目标已完成，不自动继续更高关。
+- 前四关124动作。L5实际event124/19:35:34进入，event169/19:53:41通过：45paid=13首次至GAME_OVER+1actorRESET+31成功，43hit/1miss；入口至过关1086.491秒。开场64×64 settled帧与P7旧0fe seq118逐像素一致，只证明可见起点。
+- L5宿主障碍：round2为0paid且有owner/cache/token错误；一次operator原start纯重放3.548秒，events SHA不变137paid/4关/GAME_OVER，没有operatorRESET。actor也曾主动stop_broker，原PID具体死亡时点未建立对应，不能把停顿都归LLM思考或都归自发故障。
+- Stage1按旧goal5自然完成并清理，Stage2于19:58:54原start恢复170事件/169动作/5关字节不变、resume同native会话，仅更新目标6。L6 event169→271新增102paid：100hit/1miss/1actorRESET；失配201后actor继续研究、reset228。Stage2单回合1127.976秒，启动至过关约18m22s；L6入口至过关23m35s含约5m13s阶段间隔。
+- 两阶段原版15文件hash不变。Stage2目标后暂停broker以防L7，actor仍自然完成。owned actor/operator/broker/caffeinate与临时认证已清理，Stage2 cleanup2.215秒、Sleep/Wake=0；保留原有操作者P7控制台，不重启或停止它。
+- 证据 `.asterion-private/arc-skill-bp35-l5-trial-20261007T111904Z/evidence/`；终局在`stage2-target6/`的result、behavior-category-summary、observed-model-identity、goal-reached、cleanup-after；scope-change-user-directed和stage1-summary覆盖初始旧goal5/3600授权。研究日志只留私有，不向actor反馈外围分析。
+- L5研究为grid/geometry/history/NOTES/拟动作，无function/class/BFS/A*/rules证据；43singlecell+1level，5次cell命中是前后不变。全程rules未使用。不能将可选replay工具包装为本次实际机制，也不能直接比较单cell与P7多cell命中率。
+- P7外脑职责已由Astra只读定位：部分模型无路撤回实验→外围选择79源隔离；checked历史表不等于step回测；区分零派发/真实反例并修工具；重复上下文挤占研究窗口→compact delivery；actor先补屏外图→外围保留并确认后继消费。局部actor自主成果与整体外脑依赖同时成立。
+- 私有对照 `.asterion-private/arc-skill-bp35-comparison/outer-reasoning-interventions.md` 与p7-l5-evidence、p7-l5-summary、p7-l5-l7-git-timeline保留22launch/29commit。正式L5前逐条外围诊断链未完整定位，不用最终425秒成功轮否定用户长期投入，也不用L6链冒充L5链。
+- [专项报告](../reviews/2026-10-07-arc-skill-bp35-l5-l6-trial.md)与CURRENT/DECISIONS/INDEX/MEMORY已同步。Sol终局独立审计通过；Astra将实际研究行为与外脑职责逐项对照，已收紧claim计数/归因并明确P7已有partial。可确认ARC自己做局部实验、更新笔记、选择RESET并利用探索结果；不能声称它自主完成等效79源隔离、step回测或上下文诊断。P7旧900秒与ARC L6剩余3134秒不同，不作同条件优劣排名。迁移候选未实现；本次无P7修改，无新运行授权。
+
+## 已完成：r11l 实测与初步差异调查
 
 - 用户要求用我们的 `gpt-6.1-sol` 实测原版 arc-skill 是否能自主过关，并查清 BP 后5–9关相比 P7 的机制差异。准确游戏ID为 `r11l-495a7899`、`bp35-0a0ad940`。
 - 原版源码固定 `dba53c3799eab600a512dd73ed037d7ab6958c66`，local模式、无Competition卡；模型实际gpt-6.1-sol/high，空白起点不读P7历史/游戏源码。操作者只做恢复、配置注入、有限监控与通用继续，不提供关卡判断/解法/代码修复；模型自写研究脚本允许。
@@ -10,11 +25,11 @@
 - 用户允许通用续跑计自动完成并授权新增1800秒/max3turns。原版broker恢复验证events字节不变，随后18:49:42 native resume原模型会话；19:00:15返回WIN/6of6，累计108动作/新增59，109连续事件保留原49动作前缀。只用一次通用继续、一个续跑回合。
 - 自然模型回合完成及记录结束约11m12s（UTC671.801秒/单调671.788秒），远早于19:19:42 deadline；caffeinate防睡眠。终局清理2.191秒，owned进程和临时认证全部清理；已知operator17639/broker17650/actor17653/caffeinate17640均不存在，既有P7控制台保留。
 - 独立审计通过：账本恢复/前缀/WIN、actual模型、仅一条通用提示、原15文件哈希、自然turn.completed、期限与清理。按用户标准本次r11l可计自动完整通关；不外推BP35同条件能力或未知游戏。新证据 `.asterion-private/arc-skill-original-trial/evidence/continuation-20261007T104941Z/`。
-- 用户进一步强调BP35 L5之后是外围Codex分析与持续修正P7才过关。证据确认工具/bridge修复、外部认知隔离判断、compact delivery部署和重试监督；也保留actor自行发现屏外对象与重建路线的局部事实。整体不得称独立自主完成。
-- 结果和五项具体差异已写入 [比较报告](../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md)，D-2026-10-07-03记录验收边界。没有改框架/solver代码，也没有新BP35模型运行。
-- 初始比较记录已提交ed8758d5；实际续跑成功是后续新结果。最终docs-check283/119与diff-check通过，源码/运行证据独立复审无阻断；未push。
+- 用户进一步强调BP35 L5本身及之后是外围Codex分析与持续修正P7才过关。初步证据确认工具/bridge修复、外部认知隔离判断、compact delivery部署和重试监督；也保留actor自行发现屏外对象与重建路线的局部事实。整体不得称独立自主完成，L5专项证据由新任务补齐。
+- 结果和五项具体差异已写入 [比较报告](../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md)，D-2026-10-07-03记录验收边界。当时没有改框架/solver代码；随后新增BP35运行以顶部任务块为准。
+- 初始比较记录已提交ed8758d5，续跑完整成功记录已提交25a04d93。最终docs-check283/119与diff-check通过，源码/运行证据独立复审无阻断；未push。提交后的journal/checkpoint保留活动会话元数据。
 - 续跑研究摘要：模型自行分析/规划、11次NOTES写入、python3/commit10/status2；新动作56hit/2miss/1paidRESET，无rules阶梯。预测失误未要求外围修代码；新sleep证据无Sleep/Wake。完整统计在新evidence/research-summary.json。
-- 下一动作以已验证r11l与BP35具体差异为依据，检验P7能否自己承担外围研究判断。此轮模型运行授权已用完并结束，不自动启动BP35、新r11l或官方卡；社区PR跟进仍为后续事项。
+- r11l这一轮授权已完成；随后用户新增BP35到L5、再到L6的授权，以顶部已完成任务块为准，不自动继续L7–9或官方卡；社区PR跟进仍为后续事项。
 
 ## 本次恢复
 
@@ -87,7 +102,7 @@
 
 ## 下一动作
 
-1. The authorized r11l continuation is complete: WIN/6of6/108actions with one generic continuation and original code. Use this evidence and the concrete BP35 comparison to assess P7's ability to replace outer research interventions. Do not automatically launch further solving; PR59 follow-up remains separate and later.
+1. Complete the extended original arc-skill BP35 trial through L6 within5400s/max6turns (20:51:08), same run and no cognitive help. Compare L5/L6 behavior with P7 Git/recording/frozen-source evidence, stop at target, verify cleanup and record concrete mechanisms. PR59 follow-up remains separate and later.
 2. Keep the already-running console at56659; do not launch another server. Restart publisher only upon an explicit update request. Private token stays in environment, never in argv/output. Historical launch metadata is under `launches/vercel-cloud-sync-daemon.json`; use it for arguments, not liveness.
 3. If the user chooses a second private backup location, copy the complete immutable snapshot there and verify it. Do not recreate the historical research or overwrite its certificates just to back it up.
 
