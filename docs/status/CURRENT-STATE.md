@@ -55,6 +55,8 @@
 
 ## Key Files
 
+- `tools/p7_research_archive.py`, `docs/guides/prime-p7-private-research-archive.md` — offline private snapshots with file hashes, source bundles and verification; stored outside Git.
+
 - `AGENTS.md`, `MEMORY.md` — repository and collaboration instructions.
 - `docs/status/INDEX.md`, `JOURNAL.md`, `RESUME-NEXT-SESSION.md`, `DECISIONS.md` — discovery, events, active recovery and decisions.
 - `docs/superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` — approved overall design and evidence-driven semantic supplement.

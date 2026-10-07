@@ -62,6 +62,7 @@ P7_CONSOLE_PORT ?= 57515
 .PHONY: asterion-prime-p7-official-submit
 .PHONY: asterion-prime-p7-official-recover
 .PHONY: asterion-prime-p7-official-live-eval
+.PHONY: p7-archive p7-archive-verify
 
 # Operator-owned values for the Prime presets. The P7 research assets live
 # beside this checkout; the operator preflight rejects missing assets.
@@ -79,6 +80,8 @@ endif
 export ASTERION_PRIME_PROVIDER ASTERION_PRIME_MODEL
 ASTERION_PRIME_P2_CORPUS ?= $(CURDIR)/tests/fixtures/prime_p2/small_corpus.json
 ASTERION_PRIME_ARC_ROOT := $(abspath $(CURDIR)/../external-prime/arc-agi-3)
+P7_ARCHIVE_DEST ?= $(abspath $(CURDIR)/../asterion-research-archive/arc-agi-3)
+P7_ARCHIVE_ARC_ROOT ?= $(ASTERION_PRIME_ARC_ROOT)
 ASTERION_PRIME_P4_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-witness
 ASTERION_PRIME_P4_LIVE_ROOT ?= $(CURDIR)/.asterion-private/prime-p4-live
 ASTERION_PRIME_P3_PRIVATE_ROOT ?= $(CURDIR)/.asterion-private/prime-p3-witness
@@ -149,6 +152,7 @@ help:
 	@echo "Asterion Prime submit saved verified actions: asterion-prime-p7-official-submit GAME=<alias-or-all>"
 	@echo "Asterion Prime read-only closed-card recovery: asterion-prime-p7-official-recover RUN=<run-id>"
 	@echo "Asterion Prime full-catalog model evaluation: asterion-prime-p7-official-live-eval"
+	@echo "P7 private offline research snapshots: p7-archive [DEST=<directory>] p7-archive-verify [SNAPSHOT=<directory>]"
 	@echo "Asterion Prime deterministic diagnostics: asterion-prime-p3-witness p4-witness p5-witness p6-witness"
 	@echo "Cost boundary: full execution requires separate authorization"
 	@echo "Arguments: ASTERION_ARGS='...' or DCI_ARGS='...'"
@@ -353,6 +357,20 @@ p7-console: export ASTERION_CONSOLE_OPEN = 1
 p7-console: asterion-prime-p7-console
 
 .PHONY: p7-controller p7-replay
+p7-archive p7-archive-verify: export ASTERION_P7_ARCHIVE_REPO := $(CURDIR)
+p7-archive p7-archive-verify: export ASTERION_P7_ARCHIVE_OPERATOR_ROOT := $(ASTERION_PRIME_OPERATOR_ROOT)
+p7-archive p7-archive-verify: export ASTERION_P7_ARCHIVE_DEST := $(if $(DEST),$(DEST),$(P7_ARCHIVE_DEST))
+p7-archive: export ASTERION_P7_ARCHIVE_ARC_ROOT := $(P7_ARCHIVE_ARC_ROOT)
+p7-archive-verify: export ASTERION_P7_ARCHIVE_SNAPSHOT := $(SNAPSHOT)
+p7-archive:
+	@set -- python3 tools/p7_research_archive.py archive --repo "$$ASTERION_P7_ARCHIVE_REPO" --operator-root "$$ASTERION_P7_ARCHIVE_OPERATOR_ROOT" --dest "$$ASTERION_P7_ARCHIVE_DEST"; \
+	if [ -n "$$ASTERION_P7_ARCHIVE_ARC_ROOT" ]; then set -- "$$@" --arc-root "$$ASTERION_P7_ARCHIVE_ARC_ROOT"; fi; \
+	exec "$$@"
+p7-archive-verify:
+	@set -- python3 tools/p7_research_archive.py verify --repo "$$ASTERION_P7_ARCHIVE_REPO" --dest "$$ASTERION_P7_ARCHIVE_DEST"; \
+	if [ -n "$$ASTERION_P7_ARCHIVE_SNAPSHOT" ]; then set -- "$$@" --snapshot "$$ASTERION_P7_ARCHIVE_SNAPSHOT"; fi; \
+	exec "$$@"
+
 p7-controller: p7-console
 
 p7-replay: export ASTERION_CONSOLE_GAME = $(GAME)

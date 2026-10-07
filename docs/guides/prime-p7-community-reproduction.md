@@ -2,6 +2,9 @@
 
 This guide separates inspecting the public system, running new local research, and submitting your own certified routes. The [result record](../results/arc-agi-3/README.md) describes an accumulated public-game experiment; a new checkout does not contain its private attempt history or saved route certificates.
 
+For preserving your own complete attempt history, recordings and certificates,
+see the [private research archive guide](prime-p7-private-research-archive.md).
+
 ## 1. Inspect without calling a model
 
 From a checkout with Python 3.10+ and `uv`:

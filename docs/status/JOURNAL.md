@@ -4175,3 +4175,9 @@
 2026-10-07 14:23 CST — Authorized origin/main push765424b0..df9367d0 succeeded; both READMEs and four images match GitHub bytes. Community fork unpushed.
 
 2026-10-07 14:32 CST — Replace sparse official summary image with Zen-original100-score/25-game table screenshot1675x1970; docs-check281/112PASS. README text unchanged.
+
+2026-10-07 14:32 CST — bb005c5b: Replace sparse official hero with complete25-game screenshot for useful README evidence; pushedmain, remote image parityPASS.
+
+2026-10-07 14:49 CST — Community04fcc1b: Complete concise P7 entry with tagged source and estimated158.32USD; upstreamvalidatorPASS, independentCLEAR; no communitypush/PR.
+
+2026-10-07 14:49 CST — User requested tag; P7-2026-10-07 published atbb005c5b with remotepeeled identityverified. Private replay archive requested next.
