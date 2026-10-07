@@ -4,12 +4,11 @@
 
 - Project: Asterion composable multi-runtime agent framework; native Prime / P7 research application.
 - Current branch: `main`.
-- Theme-level focus: WorldMap-driven P7 reasoning through the generic Prime persistent workspace, with cross-attempt research reuse.
+- Theme-level focus: Prime/P7 public-result preservation, private research archives and community submission.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: P7 WorldMap solver and local 25-game console. Default WorldMap reasoning, inert failure-experience reuse, saved-prefix continuation, exact cognition provenance and fixed-port playback are integrated on `main`. Local solving is authorized for the25-game catalog under at most four independent guests; each level attempt has a900-second bound. Current saved-route integration, named verification and completed finite25-game official submissions belong to `RESUME-NEXT-SESSION.md`. This authorization does not permit repeated or open-ended live benchmarks.
-
-- Remaining-game research requires evidence-based diagnosis and a concrete intervention after two round-local failures. Immutable saved-prefix authority takes precedence over stale campaign progress; restoring authenticated past actions never enlarges the new research budget. Current release evidence belongs to the live checkpoint.
+- Active work package: Result preservation and community entry. The public-game research campaign is settled; no solver or official evaluation is active. The original redesign worklist remains the implementation reference, not authority to restart benchmarks.
+- Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture
 
@@ -23,7 +22,7 @@
 - Plans bind exact observation and workspace revision. Mismatch, RESET, level change, pause and unknown environment results stop the remaining steps. Matched plans can retain their model. Unknown actions are never automatically replayed.
 - Kernel recovery restores only explicit source and JSON, then requires current-observation calibration. It does not reconstruct arbitrary process objects or replay action cells.
 - `SolverControl` uses the existing shared run directory for bounded pause/resume acknowledgments. The current bounded cell/action settles before pause; its tool response is held so Pi cannot request another model turn. Resume retains the absolute deadline; stop uses actual process cleanup.
-- Console research events share the action/event timeline, including multiple revisions at one frame. Historical cursors select the matching model, prediction and feedback; the live stop control remains independent of history. HTTP/DOM/export checks validate the projection; the user also requests verification in existing Chrome. Browser transport currently times out, so actual Chrome acceptance is not claimed.
+- Console research events share the action/event timeline, including multiple revisions at one frame. Historical cursors select the matching model, prediction and feedback; the live stop control remains independent of history. HTTP/DOM/export checks validate the projection. Browser interaction reuses the existing authenticated session; Zen provided native result screenshots. No Chrome functional acceptance is claimed.
 - Explicit legacy/cognition modes retain `WorldModelStore`, `SemanticCognitionStore`, `CognitionSession`, `GameMechanicsStore` and certificate-gated DSL search. These are not the new default solver or a prerequisite for general Python research.
 - Efficiency tasks persist once per game/seed/level when actual actions >= baseline and per-level score <115. Explicit target witnesses clip an SDK-verified source before that level; only improved results replace saved routes. Scheduling accepts a native partial suffix at the current saved highest level; prioritize a pending efficiency task when that game is free.
 - Saved routes, current attempts and offline previews are separate console scopes. Live observed completions update overview immediately, while saved-route score/action authority remains sealed. Saved-route progress/actions use one selected verified route per game; attempt diagnostics retain failed/repeated execution. Offline route composition replays existing actions with pinned source evidence and a checked settled seam, without launching the model.
@@ -79,11 +78,13 @@
 - Implemented, provider-free verified, deployed and real solving are distinct claims. Sealed actual trace plus replay and cleanup support a live outcome; fixture success does not.
 - Local saved-route results, per-level counts, exact run IDs and currently owned processes are recorded in the live checkpoint, with restoration and new actions separated. Local warm replay is not a fresh full benchmark.
 - Experience reuse does not carry historical plans or execution authority. Original failed attempts and independent replay recoveries remain distinguishable.
-- The first official25-game submission is complete. On2026-10-06 the user explicitly authorized one additional complete25-game saved-route submission, now closed-confirmed29.834632 (7full/54levels/1883actions; card749fd876-37e4-42aa-9dc8-fdb9511b0f4a); one third complete25-game saved-route submission is now authorized after current CD82/RE86 rounds complete or reach a genuine finite unfinished boundary, while two local games continue; DC22 L6 already passed and must not be re-solved merely to refresh the console. Never infer official performance from local RHAE; official receipt/result and any source selection limitation must be retained.
+- The closed final Competition card confirms 100.00, 25/25 public games, 183/183 levels and 6,781 selected online actions. Source identities, official receipt and raw history remain separate from presentation data. Exact result and archive proofs are in the handoff and result record; do not infer new evaluation authority from saved evidence.
+- Community metadata links the Competition card; ARC-AGI-3 score is fetched from that card rather than a YAML numeric score. The estimated cost field is a scoped API-price equivalent with explicit assumptions, not actual payment or full campaign expense.
+- Complete private snapshots live outside Git, include file hashes and committed-source bundles, and retain success/failure research without replacing original certificates. Same-disk snapshots do not provide a second-storage backup.
 
 ## Resume Instructions
 
 1. Read this snapshot, `RESUME-NEXT-SESSION.md`, recent JOURNAL entries and AGENTS.md.
 2. Check Git status/recent commits and any recorded process/unit before starting another run.
 3. Follow the canonical worklist, preserving active work and known non-PASS boundaries.
-4. Continue on `main`, inspect actual active guest units, and preserve exact source/campaign/official-submission boundaries. Latest named verification and official-submission gate are in `RESUME-NEXT-SESSION.md`.
+4. Continue on `main`, inspect actual active guest units, and preserve exact source/campaign/official-submission boundaries. Latest verification, stopped-service status and community-review boundary are in `RESUME-NEXT-SESSION.md`.
