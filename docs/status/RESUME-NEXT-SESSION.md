@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 22:22 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 22:42 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：通用自主研究与P7冷启动验证
 
@@ -15,6 +15,8 @@
 - actual Landlock wrapper协议、numpy、持续2cells/2workers恢复、repo/旧arc/game/auth/proc读取拒绝均PASS。worker factory在kernel重建保留，无不受限fallback；只是明确文件权限边界，不声称完整OS sandbox。
 - root22:16授权后正式UTC14:17:18.698119/CST22:17:18启动；UTC15:47:18.697877/CST23:47:18截止。owned guestunit`asterion-p7-012720cc4c7c462b9d33112abd76602b.service`，operator/orb/caffeinate PID43432/43435/43434，run`p7-live-20261007141718-ec11793657c33f54592b3b4a`。总5400秒从guestlauncher单调origin计、不续期；最多6自然轮/1000动作/目标6；180秒清理另计，不授予新动作。
 - 新报告/launch recovery记录提交`31a7ccc3`；仅文档改动，frozen production仍b696496d。docs-check286Markdown/129本地链接及diff-check通过。
+- 当前进展receipt UTC2026-10-07T14:42:11.531295+00:00：2/6、79paid、round1，仍存活。L1/L2已通过；模型自行GAME_OVER后RESET，无operator解题/恢复。终局逐关边界待审计。
+- 后续静态工具摩擦审计：initial/miss/RESET/level edge/kernel校准仍须先结构revise再plan；action_labels提示要求与optional schema不一致，NOT_FINISHED单独预测校验歧义。不能归因live耗时；不热修。私有tool-friction-audit.md，公开新报告补充；HTML预算交互13DOM checks PASS，Native/视觉viewport未验收。
 - 正式运行期间只监控元数据，不进行外围关卡分析/定向提示/热修/扩预算；不执行L7或官方卡。保留操作者console PID52024/56659。下一动作：读trial agent进展与终局收据，待终局独立审计，再更新报告/HTML/状态并提交。
 
 ## 已交付：单文件BP35交互解释

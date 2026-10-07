@@ -4302,3 +4302,7 @@
 - 2026-10-07 22:19 CST — Cold BP35 starts22:17:18 from zero; deadline23:47:18, retained Pi, frozen source and six-level scope.
 - 2026-10-07 22:22 CST — 31a7ccc3 records cold launch and separated budgets; frozen production remains b696496d while trial runs.
 - 2026-10-07 22:29 CST — Layered deadline HTML adds nonrenewing continuation demo;13DOM checks PASS, Astra corrections applied, live result remains pending.
+- 2026-10-07 22:29 CST — 82e587a5 updates offline budget/architecture explanation; retains pending cold result and correct cleanup replay boundary.
+- 2026-10-07 22:30 CST — Frozen cold P7 passes L1 around13minutes/31paid, first natural round continues without outside hints.
+- 2026-10-07 22:34 CST — Cold actor handles recoverable GAME_OVER with paid RESET itself;same natural round/deadline, no outside intervention.
+- 2026-10-07 22:42 CST — Cold P7 passes L2;static audit records remaining revise/plan ceremony without live attribution or hot repair.
