@@ -13,6 +13,7 @@
 ## Current Architecture
 
 - User-stated direction: the LLM owns research reasoning and strategy; Asterion supplies strong domain-neutral harness, tools, execution constraints and recovery. Minimal public tool contracts support that reasoning. The bounded reusable-research profile is implemented and packaged; existing WorldMap storage is reused. The frozen trial verifies autonomous cold progress through L5; L6 did not complete within5400 seconds, so six-level solving capability is not established.
+- Research-memory direction: current effective knowledge should replace obsolete model-visible work, while raw execution remains retrievable. P7 updates external WorldMap but has no corresponding model-history selection/replacement wiring. ARC L6 NOTES uses10 whole-file snapshots of511–915bytes; P7 single WorldMap max1873bytes. These memory sizes are distinct from provider context tokens; no new context mechanism is implemented.
 - Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.
 - Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
 - P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.

@@ -1,9 +1,12 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 00:15 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 00:34 CST. **Session remains active — not a final handoff.**
 
-## 当前执行：通用自主研究与P7冷启动验证
+## 当前执行：上下文研究记忆审计（原冷启动已结束）
 
+- 最新用户判断：历史应帮助推理，进入L5无需常驻L1–L4完整过关轨迹；要求理解arc-skill NOTES并反思P7。只读审计已明确：外部WorldMap更新不替换Pi旧消息。NOTES十版整体覆盖511–915bytes，L5final666bytes/9行，L6final779bytes/9行；P7单WorldMap max1873bytes/median1485bytes。NOTES不是ARC全部context，ARC Stage2peak220388tokens。
+- 精确校正：execute_plan只交付最终观察/逐步反馈/未执行后缀，不含完整workspace；IPython无自动fullcontext。b5 ACK/boardcodec仍在。context-witness未P7接线；compact_events只缩Python收到的事件。usage127峰255820紧接128降41315，均在seq167/L6首动作前，不能把L6全程迟缓归25.6万input。
+- 当前方向：模型维护有效事实/假设/反例/当前问题，harness同步模型视图，完整原始执行按引用查询；换关仅迁移仍适用认识。格式由LLM选择，不新增刚性必填表。未实现、未开新模型/游戏。报告及HTML已补规模/机制/边界；私有context-design-audit.md、context-volume-audit.md、arc-notes-memory-audit.md位于既有preparation目录。
 - 用户新增授权：核实arc-skill截止机制，实施分层自主研究改进，再用P7 cold BP35 L1–L6验证。上一分析任务“不改P7”已结束，不能误当本任务禁令。
 - 原版arc-skill没有整场/每关固定deadline；RPC/start/search局部限时与online约15min闲置租约分开。旧900秒是P7 witness研发预设；原版实验5400秒为外加总预算。
 - 正式方案[prime-autonomous-research](../superpowers/plans/2026-10-07-prime-autonomous-research.md)：复用Prime自然续轮，通用有限预算/研究指引；P7状态与逐步grounding留应用层。
@@ -22,7 +25,7 @@
 - 已知静态门槛：initial/miss/RESET/level edge/kernel校准仍须先结构revise再plan。实际50次model_revision中强制与主动分别核算，不能把全部归罪流程；L6 15rev、16plans、14cells/1checkpoint、15撤销、9真实miss，研究未收敛，29硬门槛/21主动。L6=9硬/6主动；9miss中1状态误读/8显式阴性机制试验，没有L6零派发阻塞。Native未测。
 - L5 visible frame独立核实：新P7 seq137、旧seq118与ARC event124最终64×64帧全等；ARC十六进制palette转整数消除原raw编码差异，canonical SHA6dc1bdb2…afdd5。未换event，不证明隐藏状态/上下文等价。
 - 已完成实际过程审计：P7 L5自主补图/校准/候选30步通过；L6晚验关键假设、15undo及串行陰性实验未收敛。ARC局部观察/10NOTES/9短Python、保留学习后RESET，再43步通过，无BFS/rules使用。P7强制档案门槛放大反馈事务，但不解释全部壁钟。58cells1.391s，input峰255820；无请求级时钟/cache拆分，不能断言网络/纯思考或计算费用倍率。
-- 当前分析请求已完成：报告与自包含HTML新增真实过程对照；Astra最终复审无阻断，13既有+6新增DOM/static checks通过，docs-check286files/131links及diff-check通过，无真实浏览器视觉验收。只改文档，无源码/模型/游戏新运行。后续候选为通用有界研究段/计量，应用轻量反例与原子revision+plan，ARC观察helper；尚未实施，无新模型/游戏授权，不把失败改成能力PASS。
+- 当前分析交付提交3019ebce（未push）；会话保持active。当前分析请求已完成：报告与自包含HTML新增真实过程对照；Astra最终复审无阻断，13既有+6新增DOM/static checks通过，docs-check286files/131links及diff-check通过，无真实浏览器视觉验收。只改文档，无源码/模型/游戏新运行。后续候选为通用有界研究段/计量，应用轻量反例与原子revision+plan，ARC观察helper；尚未实施，无新模型/游戏授权，不把失败改成能力PASS。
 
 ## 已交付：单文件BP35交互解释
 

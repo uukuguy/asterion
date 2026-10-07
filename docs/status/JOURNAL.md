@@ -4319,3 +4319,7 @@
 - 2026-10-08 00:12 CST — Normalized ARC hex palette verifies same L5 visible opening;no hidden-state equivalence. First natural P7 round never ended.
 - 2026-10-08 00:12 CST — Cells total1.391s,input peak255820;request clocks/cache split missing. Layered next candidates remain unimplemented.
 - 2026-10-08 00:15 CST — ARC/P7 actual-process HTML and report final review clear;19DOM/static checks,docs286files/131links,diff PASS;docs-only,no new trial.
+- 2026-10-08 00:17 CST — 3019ebce records failed cold P7 and actual ARC process comparison to ground next layered improvements.
+- 2026-10-08 00:34 CST — Context audit: NOTES511–915bytes,WorldMapmax1873bytes;external memory updates do not replace Pi history;no code/trial.
+- 2026-10-08 00:34 CST — Input peak255820 precedes L6firstaction,then41315;ARCpeak220388 prevents comparing notesbytes with whole-contexttokens.
+- 2026-10-08 00:36 CST — Memory audit independently reviewed;13DOM checks,docs286files/135links,diff PASS;notes/WorldMap bytes distinguished from provider tokens.
