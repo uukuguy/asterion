@@ -81,9 +81,20 @@ const published = await call('p7_workspace', {
 });
 if (published.status !== 'published' || published.workspace_revision === current.workspace_revision)
   throw Error('real workspace rejected publication');
+if (!published.needs_revision)
+  throw Error('program publication bypassed current NOTES admission');
+const noted = await call('p7_workspace', {
+  op: 'notes', base_revision: published.workspace_revision,
+  observation_ref: published.observation_ref,
+  text: 'Initial count is zero. ACTION1 may increment it; use the exported candidate program and check actual feedback.'
+});
+if (noted.status !== 'noted' || noted.needs_revision || noted.requires_calibration ||
+    noted.workspace_revision === published.workspace_revision ||
+    !/^sha256:[0-9a-f]{64}$/.test(noted.notes_revision))
+  throw Error('current observation NOTES were not accepted');
 const result = await call('p7_execute_plan', {
-  plan_id: 'installed-plan', start: published.observation_ref,
-  workspace_revision: published.workspace_revision, goal: '检验候选模型', purpose: 'advance', assumptions: [],
+  plan_id: 'installed-plan', start: noted.observation_ref,
+  workspace_revision: noted.workspace_revision, goal: '检验候选模型', purpose: 'advance', assumptions: [],
   steps: Array.from({length: 13}, (_, index) => ({action: {name: 'ACTION1', data: {}},
     expect: {cells: [{x: 0, y: 0, value: index + 1}]}}))
 });
@@ -229,6 +240,13 @@ _RUNNER = textwrap.dedent(
         assert revision["parent_revision"] is not None
         assert len(revision["model"]["source_export_ids"]) == 1
         assert revision["model"]["state_export_id"].startswith("sha256:")
+        note_revision = revision["notes_revision"]
+        note = json.loads((current_paths[0].parent / "memory" / "revisions" / (note_revision[7:] + ".json")).read_text())
+        assert note["scope"] == revision["scope"]
+        assert note["parent_revision"] is None
+        assert note["text"] == "Initial count is zero. ACTION1 may increment it; use the exported candidate program and check actual feedback."
+        assert note["evidence_refs"][0]["observation_ref"]["sequence"] == 0
+        assert note["evidence_refs"][0]["observation_ref"]["level"] == 1
         exports = list((run_root / "research-kernel" / "exports").glob("*.json"))
         print(json.dumps({
             "actions": engine.actions,
@@ -239,6 +257,7 @@ _RUNNER = textwrap.dedent(
             "tool_calls": json.loads((root / "installed-tool-calls.json").read_text()),
             "export_count": len(exports),
             "workspace_revision": model["revision"],
+            "notes_revision": note_revision,
         }, sort_keys=True))
 
     asyncio.run(main())
@@ -323,10 +342,11 @@ class TestPrimeP7OfficialInstalled(unittest.TestCase):
             self.assertTrue(evidence["sealed"])
             self.assertGreaterEqual(evidence["trace_entries"], 2)
             self.assertEqual(evidence["tool_calls"], [
-                "p7_workspace", "ipython", "ipython", "p7_workspace", "p7_execute_plan",
+                "p7_workspace", "ipython", "ipython", "p7_workspace", "p7_workspace", "p7_execute_plan",
             ])
             self.assertEqual(evidence["export_count"], 3)
             self.assertRegex(evidence["workspace_revision"], r"^sha256:[0-9a-f]{64}$")
+            self.assertRegex(evidence["notes_revision"], r"^sha256:[0-9a-f]{64}$")
 
 
 if __name__ == "__main__":
