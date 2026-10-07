@@ -4300,3 +4300,5 @@
 
 - 2026-10-07 22:18 CST — Final promotion25 commands PASS; frozen cold BP35 target6 launch authorized, unchanged limits and no game steering.
 - 2026-10-07 22:19 CST — Cold BP35 starts22:17:18 from zero; deadline23:47:18, retained Pi, frozen source and six-level scope.
+- 2026-10-07 22:22 CST — 31a7ccc3 records cold launch and separated budgets; frozen production remains b696496d while trial runs.
+- 2026-10-07 22:29 CST — Layered deadline HTML adds nonrenewing continuation demo;13DOM checks PASS, Astra corrections applied, live result remains pending.
