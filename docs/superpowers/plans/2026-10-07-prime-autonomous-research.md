@@ -77,11 +77,11 @@ cell = next((c for c in cells if c["y"] < len(frame) and c["x"] < len(frame[c["y
 
 **Ownership:** Root integration/status; trial agent private launch/evidence; Astra final review.
 
-- [ ] Review integrated diff and resolve important findings; run TypeScript extension tests, affected Python tests, `make promotion-check` and docs/diff checks. Commit complete implementation and plan/status before the trial.
-- [ ] Freeze source/wheel/extension hashes and actual `gpt-6.1-sol`/high argv. Use a new external operator root and dedicated provider profile; exclude old solutions, reports and game source from the research worker with an explicit supported filesystem boundary. Tool allowlists alone do not prove that boundary.
+- [x] Review integrated diff and resolve important findings; run TypeScript extension tests, affected Python tests, `make promotion-check` and docs/diff checks. Commit complete implementation and plan/status before the trial.
+- [x] Freeze source/wheel/extension hashes and actual `gpt-6.1-sol`/high argv. Use a new external operator root and dedicated provider profile; exclude old solutions, reports and game source from the research worker with an explicit supported filesystem boundary. Tool allowlists alone do not prove that boundary.
 - [ ] Real packaged deployment verification uses the authorized cold profile itself; record the required witness-equivalent package identities and explicit difference from the900-second level-witness command. Do not spend an unrecorded additional model trial.
 - [ ] Run once from zero completed levels and zero restored actions; host supplies only the initial generic task and preauthorized natural continuations. Stop at six or the first finite cap. Do not hot-modify code, notes or plans.
-- [ ] Preserve the trusted research-worker factory on kernel recreation; verify the actual worker protocol under the operator-owned Landlock wrapper before live startup. No unrestricted fallback.
+- [x] Preserve the trusted research-worker factory on kernel recreation; verify the actual worker protocol under the operator-owned Landlock wrapper before live startup. No unrestricted fallback.
 - [ ] Collect all actions/RESET, per-level edges, natural rounds/model/tool callbacks, real misses versus zero-dispatch rejects, wall time/host gaps, recoveries, stopping reason and cleanup. Preserve failed evidence without promoting partial progress to success.
 - [ ] Compare measured results with the prior arc-skill271-action trajectory and historic P7 successful32/43-action suffixes, explicitly retaining the old total-R&D-cost gap and noncontrolled budget differences. Update the existing standalone HTML and report if useful; synchronize CURRENT/RESUME/DECISIONS/INDEX/JOURNAL and commit.
 

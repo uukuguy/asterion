@@ -7,12 +7,12 @@
 - Theme-level focus: LLM autonomous reasoning and harness effectiveness; concrete arc-skill/Prime comparison.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-07-prime-autonomous-research.md`; previous WorldMap campaign is historical implementation context.
-- Active work package: user now authorizes layered autonomous-research implementation and one fresh P7 BP35 L1–L6 comparison. Plan fixes5400s/six natural rounds/1000 actions with finite1024 model/4096 tool callbacks. No new run has started; core implementation/independent review and focused generic90/application229/grounding106 tests are complete; promotion and frozen worker/launch verification precede the trial. Original arc-skill6of9/271actions remains the baseline; prior analysis-only restriction applies to that completed task, not this new authorization.
+- Active work package: user now authorizes layered autonomous-research implementation and one fresh P7 BP35 L1–L6 comparison. Plan fixes5400s/six natural rounds/1000 actions with finite1024 model/4096 tool callbacks. Implementation and independent review are complete; generic90/application229/grounding106 tests, packaged promotion25 commands, and real restricted-worker protocol pass. Root has authorized the single frozen cold trial; launch/progress receipts belong to the live checkpoint. Original arc-skill6of9/271actions remains the baseline; prior analysis-only restriction applies to that completed task, not this new authorization.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture
 
-- User-stated direction: the LLM owns research reasoning and strategy; Asterion supplies strong domain-neutral harness, tools, execution constraints and recovery. Minimal public tool contracts support that reasoning. The bounded reusable-research plan is now being implemented; existing WorldMap storage is reused rather than replaced. No new solving capability has yet been measured.
+- User-stated direction: the LLM owns research reasoning and strategy; Asterion supplies strong domain-neutral harness, tools, execution constraints and recovery. Minimal public tool contracts support that reasoning. The bounded reusable-research profile is implemented and packaged; existing WorldMap storage is reused. Its cold solving capability awaits the active trial.
 - Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.
 - Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
 - P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.
@@ -42,7 +42,7 @@
 
 ## Open Problems
 
-- Click grounding can overblock current-observation clicks whose selected pixel assertions remain unchanged; batch prediction lowering selects against the plan-start frame. Valid actor interior-pixel probes have worked around it. Per-dispatch grounding and honest no-change probes remain unresolved; active evidence is in the live checkpoint.
+- Per-dispatch grounding and bounded current-observation no-change probes are implemented and covered by focused tests. Their contribution to cold autonomous solving awaits the frozen trial; tests alone do not prove solving capability.
 
 - Historical downstream animation-total limits are repaired (`42c3a6cb`, exact `4bb89296` package): scope-bound authenticated storage, streaming identities, settled model views and bounded pages retain large observations and known-result stages. Real long-animation durability/hash evidence exists. SDK-native reply materialization can still incur an upstream peak-memory cost; that boundary is unresolved. See `docs/superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` and the known-issues reconciliation linked in `DECISIONS.md`.
 - Terminal-WIN recovery preserves the original failed runtime evidence and separately authenticates full animation chains using settled observation equivalence. Fresh materialization and independent verification must publish a normal current-verifier certificate; exact historical verifier profiles permit old certificate reads only. Active deployment and actual recovery evidence belong to the live checkpoint.

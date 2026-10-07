@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 22:04 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 22:19 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：通用自主研究与P7冷启动验证
 
@@ -8,10 +8,13 @@
 - 原版arc-skill没有整场/每关固定deadline；RPC/start/search局部限时与online约15min闲置租约分开。旧900秒是P7 witness研发预设；原版实验5400秒为外加总预算。
 - 正式方案[prime-autonomous-research](../superpowers/plans/2026-10-07-prime-autonomous-research.md)：复用Prime自然续轮，通用有限预算/研究指引；P7状态与逐步grounding留应用层。
 - 冻结验证配置：总5400秒、六自然回合、1000总动作、1024 model/4096 tool callbacks，gpt-6.1-sol/high，offline fresh目标六关；不隐性扩大、不热修、不读旧解法、不执行L7或官方卡。
-- 方案与授权边界已提交fadef21d。尚未启动评估；两Sol分别实现generic/app，root逐步grounding已复现红测并修复，Astra复审进行中。新发现P7未启用Prime reusable Pi接口，autonomy将明确启用；旧同会话续跑说明需收紧。实现/测试/打包和独立复审后才启动冻结版本。
-
-- 当前源码证据：generic新finite profile/controller与reusable_session opt-in已实现，86项聚焦测试PASS；root逐步grounding/有界当前不变点击/正确action-cap标签的106项测试PASS，Astra Task3复审无阻断。TypeScript35PASS/6外部Pi机制skip；非全量PASS。P7 preset接线完成，227项应用测试PASS/1既有opt-in skip；startup修复后generic90PASS，Astra集成复审无阻断。Landlock worker文件白名单与可信注入/真实worker协议负测正在完成；autonomy要求显式trusted Python wrapper。root发现kernel重建可能回落不受限worker，Sol正在用保留factory修复；冻结前须通过。未运行真实模型。
-- 首次promotion全量4262 tests/335s有17fail：已独立确认15为既有README改版后的旧断言，README与f6c基线字节不变，测试已按当前指南入口/执行边界修正；local全量4262/550.8s确认16fail=同15旧README断言+新generic module未登记core allowlist；allowlist已补，isolated wheel/core/README四项70.785s PASS，Astra复审无阻断。第一次17与本地16存在先后源码快照差别，须最终promotion确认，不假定PASS。准备冻结代码再跑最终gate；formal prep证据根`.asterion-private/p7-cold-bp35-run-20261007T134540Z`，尚无游戏/模型。
+- 冻结实现b696496dae4cfbfc378d0628c7889b76c337899d；dff39038只补已验证worker恢复测试，production code未变。P7旧版本未启用已有Prime reusable Pi接口，新autonomy启用同一Pi会话；旧“同会话续跑”说法须按此边界阅读。
+- 已验证：generic90、application229（1既有opt-in skip）、grounding106测试；TypeScript35PASS/6外部Pi兼容skip。Astra集成及gate修复复审无阻断。最终`make promotion-check` PASS25commands/provider_operations=0/full_dataset=no，日志`.asterion-private/p7-cold-bp35-preparation-20261007/promotion-final.log`。
+- 保留失败：首次promotion4262tests/17fail；local recapture16fail，15既有README旧断言+新module未登记allowlist。最终按当前指南/执行隐私边界更新断言并登记通用module后才PASS；此前失败不改成成功。
+- Frozen readiness：证据根`.asterion-private/p7-cold-bp35-run-20261007T134540Z`；wheel sha32b74433ff9f1343c605a8180749809df40b8db8ddece367e244bee8f864f743，12项源码/资源/guest副本一致。installed provider-free预检准确模型/目标/cap/三工具；fresh root零历史/零关/零动作。
+- actual Landlock wrapper协议、numpy、持续2cells/2workers恢复、repo/旧arc/game/auth/proc读取拒绝均PASS。worker factory在kernel重建保留，无不受限fallback；只是明确文件权限边界，不声称完整OS sandbox。
+- root22:16授权后正式UTC14:17:18.698119/CST22:17:18启动；UTC15:47:18.697877/CST23:47:18截止。owned guestunit`asterion-p7-012720cc4c7c462b9d33112abd76602b.service`，operator/orb/caffeinate PID43432/43435/43434，run`p7-live-20261007141718-ec11793657c33f54592b3b4a`。总5400秒从guestlauncher单调origin计、不续期；最多6自然轮/1000动作/目标6；180秒清理另计，不授予新动作。
+- 正式运行期间只监控元数据，不进行外围关卡分析/定向提示/热修/扩预算；不执行L7或官方卡。保留操作者console PID52024/56659。下一动作：读trial agent进展与终局收据，待终局独立审计，再更新报告/HTML/状态并提交。
 
 ## 已交付：单文件BP35交互解释
 

@@ -4294,3 +4294,9 @@
 - 2026-10-07 21:44 CST — Trusted worker recovery validated;229 application tests pass; real Landlock protocol probe passes, final frozen configuration pending.
 - 2026-10-07 21:58 CST — Promotion4262 fails17;15 are pre-existing stale README assertions, corrected; remaining failures being captured before freeze.
 - 2026-10-07 22:04 CST — Core allowlist and stale README checks repaired;isolated wheel/four checks pass;final promotion required before live startup.
+- 2026-10-07 22:04 CST — b696496d implements bounded retained-session autonomy and current grounding;freeze precedes cold BP35 verification.
+- 2026-10-07 22:07 CST — dff39038 commits verified worker-recovery regression test;frozen b696496d production code unchanged.
+- 2026-10-07 22:10 CST — Frozen wheel/resource identities and real restricted worker protocol pass;empty cold root awaits final promotion before launch.
+
+- 2026-10-07 22:18 CST — Final promotion25 commands PASS; frozen cold BP35 target6 launch authorized, unchanged limits and no game steering.
+- 2026-10-07 22:19 CST — Cold BP35 starts22:17:18 from zero; deadline23:47:18, retained Pi, frozen source and six-level scope.
