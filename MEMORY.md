@@ -8,6 +8,7 @@
 
 | Type | Status | Entry |
 |---|---|---|
+| feedback | ✅ verified-active | Let the LLM own reasoning; Asterion supplies strong harness, tools and execution constraints |
 | feedback | ✅ verified-active | `handoff` means a fast, complete cross-session closeout |
 | feedback | ✅ verified-active | P7 learning must be visible during play and evaluated through improving game understanding |
 | feedback | ✅ verified-active | Remaining-game failures require diagnosis and a concrete intervention before another round |
@@ -29,6 +30,11 @@
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
 
 ## ✅ Verified Active
+
+### feedback — autonomous reasoning with strong infrastructure
+
+- User steering 2026-10-07: prefer the LLM to fully exercise autonomous reasoning, with Asterion providing a strong harness, tools and constraints. Do not interpret the arc-skill comparison as a request to reduce Asterion to scripts or abandon the framework.
+- Use this preference when designing and reviewing later work. The responsibility boundary and rationale are in `docs/status/DECISIONS.md` (D-2026-10-07-02); specific implementation changes have not been requested or evaluated.
 
 ### project — P7 completed campaign and private sharing
 

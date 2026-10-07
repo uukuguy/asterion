@@ -1,6 +1,21 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 16:45 CST. Cleanup complete; active checkpoint supersedes the prior handoff.
+> Updated: 2026-10-07 17:42 CST. **Session remains active — not a final handoff.**
+
+## 本次恢复
+
+- 上轮维护结束时仅留下 live checkpoint，未完成最终 handoff。JOURNAL 在 16:46 追加了 `a49c45ba`，比原恢复文件晚；本检查点纳入该提交，保留下面的结果、归档、维护和未完成边界。
+- 当前 `main` HEAD 为 `a49c45ba`；恢复前工作区仅有 JOURNAL 的上述追加记录。`657c4865` 记录维护证据，`a49c45ba` 保存维护恢复点；本次 resume 不开始实现、求解、提交官方卡或重启服务。
+- 本次只读检查确认 Python PID52024 仍监听 `127.0.0.1:56659`，首页 HTTP200；旧控制台68369和发布器95390已不存在。保留操作者当前控制台。下文 Ubuntu 无 guest unit 是上轮检查事实，本次未重新检查 guest。
+- 下一动作保持为跟进 PR59 的 review/comments/checks；下文 OPEN/MERGEABLE 和云发布结果是上轮证据，本次未访问远端或重新验收。仅恢复请求不自动进入 managed 工作包执行。
+
+## 当前架构方向（用户已明确）
+
+- 文档检查 `make docs-check`（282 Markdown/115 本地链接）和 diff-check 通过，独立复审无阻断；仅文档记录，不构成实现或能力验收。
+
+- 用户更倾向 LLM 充分发挥自主推理能力，由 Asterion 提供强大的 harness、工具与约束。D-2026-10-07-02 记录责任边界；MEMORY 与结构快照已同步。框架继续承担可靠执行和恢复，模型负责研究策略。
+- arc-skill 已做固定提交的静态源码比较，官方公开数据确认 100 分/25 游戏/183 关/7,645 动作；本地求解后在线回放，与未知题能力及同条件架构对比不同。
+- 本轮仅记录方向，未审计或修改 runtime、工具、WorldMap 或求解策略。后续设计和复审按该方向判断各机制的作用；现有 canonical worklist 与社区提交边界保留，不从讨论推断自动重构或新评估授权。
 
 ## 本轮磁盘整理（已验证）
 

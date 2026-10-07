@@ -33,7 +33,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../guides/prime-p7-community-reproduction.md` | 🟢 active | Producing-system setup, finite witness and certificate-bound official replay; no private roster bundled. |
 | `../guides/prime-p7-private-research-archive.md` | 🟢 active | Offline private snapshots, exclusions, hashes, retention and isolated restoration. |
 | `../results/arc-agi-3/README.md` | 🟢 active | Final official100 result, producing versions and scoped API-equivalent cost assumptions. |
-| `DECISIONS.md` | 🟢 active | Native decisions: durable replay, actor-sourced cognition, generic Prime/P7 ownership, save-time certification and HUMAN isolation; D-2026-10-06-08 records complete source ancestry and known-issue reconciliation; D-2026-10-07-01 records private archives and truthful result/cost scope. |
+| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-07-02 records LLM-owned reasoning with strong Asterion harness, tools and constraints. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | Retained legacy cognition contract; the approved WorldMap/Prime redesign is authoritative for the default solver. |
 | `../reviews/2026-10-05-p7-worldmap-solving-design-review.md` | 🟢 active | Pinned Tycho/Retrodict code comparison supporting the approved design; static research, not capability PASS. |
 | `../reviews/2026-10-05-p7-worldmap-implementation-review.md` | 🟢 active | Implementation review, corrected integration boundaries, background console verification and packaged live evidence. |

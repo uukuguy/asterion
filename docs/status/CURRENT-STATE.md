@@ -12,6 +12,7 @@
 
 ## Current Architecture
 
+- User-stated direction: the LLM owns research reasoning and strategy; Asterion supplies strong domain-neutral harness, tools, execution constraints and recovery. Minimal public tool contracts support that reasoning. Specific changes to existing WorldMap or other contracts remain undesigned; this direction does not establish new capability evidence.
 - Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.
 - Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
 - P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.
