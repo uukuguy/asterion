@@ -1134,3 +1134,5 @@
 - Operator captures actual invariant instructions before adding the initial board. Accepted note receipts replace earlier model-visible context with current instructions/notes/state; method refreshes do not advance the cut. Missing or unsafe boundaries preserve history.
 - Text is freeform with a16KiB UTF-8 safety limit, not a target length. Full evidence remains queryable. Unit tests/installed-Pi probes verify software boundaries; BP35 improvements require another measured evaluation. One finite r11l L1 deployment witness is the current verification scope.
 - Contract and plan: [design](../superpowers/specs/2026-10-08-prime-research-notes-design.md), [implementation](../superpowers/plans/2026-10-08-prime-research-notes.md).
+
+- Deployment verified:ebcefec9 + test-only44091934,full promotion25PASS; packaged r11l L1 passed7actions/0RESET with7accepted notes and17native cut outcomes. This closes the software deployment boundary, not BP35 efficiency. See [NOTES evidence](../reviews/2026-10-08-prime-research-notes.md).

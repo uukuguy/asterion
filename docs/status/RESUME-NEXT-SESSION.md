@@ -1,16 +1,18 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 07:09 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 07:29 CST. **Session remains active — not a final handoff.**
 
-## 当前执行：实现通用研究记忆与P7 NOTES
+## 已完成：通用研究记忆与P7 NOTES实现和有限部署验证
 
-- 用户已明确说“P7的NOTES具体如何设计实现，请继续”，随后再次要求通用/P7分层；此前只读分析限制已由本次实施授权替代。
-- 当前分支feat/prime-research-notes，实施计划docs/superpowers/plans/2026-10-08-prime-research-notes.md；spec同日prime-research-notes-design.md。
-- 已定合同：generic immutable memory无active pointer，现有ResearchWorkspace current pointer唯一commit；notes op精确base_revision/observation_ref/text，16KiB UTF8有限自由文本；现代operator选notes，旧Solver构造/legacy保留。
-- TS通过Pi native context hook投影modelview，trusted context_memory私有envelope含version/revision/content/commit；真实callback id作anchor，完整工具组边界后才cut，rawsession不改。首次实际prompt在追加board前经set_memory_instructions注入，防止删任务说明或保留旧初始board。
-- 分工notes_python owns memory/research/solver/runtime/projection/experience/tests；notes_extension owns TS/schema/bundle/tests；root owns operator/prompt/Pythonmetadata/coreallowlist/docs；Astra notes_contract最终复审。全部在同一共享工作区，禁止互相回滚。
-- 当前代码已落地：最终Python整合228 PASS，TS43PASS/6skip；真实installed-Pi无provider探针raw14→model6，任务/system/tools/完整siblings/后续用户消息/rawarchive保留。正在promotion，之后冻结提交并运行一次witness。Astra静态复审无阻断，正式记录待收。
-- 下一动作：完成实现与集成，TS→Python→promotion顺序检查；一次隔离r11l LEVEL1≤900s真实witness验证包/扩展/notes，不跑BP35全套/官方card。原控制台保留。仅测试不能证明六关能力。
+- 用户要求继续实现NOTES并明确通用/P7分层。本任务已完成代码、复审、相关测试、promotion和一次有限真实部署验证；没有新BP35评估或官方卡。
+- 分支feat/prime-research-notes。生产冻结ebcefec9；44091934仅修正installed official旧测试，使其显式提交当前NOTES后行动。两次早期promotion因同一旧fixture失败；修正后最终make promotion-check25commands PASS。
+- 通用Python memory只存不可变自由文本/opaque scope/evidence；无第二active pointer。通用TS模型视图投影保留完整工具组和后续消息，rawsession不动。P7负责精确parent/observation、换关/RESET/内核/失配校准；现代operator选notes，可选WorldMap不能绕过note校准。
+- TS43PASS/6既有skip；相关Python228PASS，加真实installed官方路径1PASS；installedPi1.0.0无provider探针14raw→6model；Astra实现及fixture复审无阻断。完整报告docs/reviews/2026-10-08-prime-research-notes.md。
+- 真实r11l L1：run p7-live-20261007232229-db3aa154958447f9ac48e501，gpt6.1sol/high，900s预设。1关/7paid/0RESET，failure=null，replay_verified/sealed_trace/cleanup_complete均true；含打包启动收尾266.997s，退出0。未进入L2行动。
+- 7个接纳笔记684–1159bytes；真实Pi stderr未截断，17条cut记录，最后移除41条旧消息并保留2条当前工具组消息。22usage input6115–10625,last7747,total187827/output8610；只是一关短验证，不比较BP35效果或成本。
+- wheel423Python/MJS逐文件匹配，578冻结源/资源hash不变。本次unit inactive/dead/MainPID0，临时.env已删除；保留原console PID52024/56659。没有运行中的本次实验，不再开新试跑。
+- 私有证据.asterion-private/p7-notes-preparation-20261008/：witness-location.json定位独立root，witness-process-receipt.json、witness-audit.json、promotion-final.log、independent-review.md；源wheel也保存。原始游戏/笔记内容不得公开。
+- 未完成边界：BP35 L1–L6的新性能未重测；模型输入没有因16KiB笔记上限自动变成硬token上限。下一项研究候选是同条件冻结对比，评估笔记质量、context增长、模型等待时间、动作数和完整L6能力；本次部署证据不能替代它。
 
 ## 已完成：上下文研究记忆审计
 

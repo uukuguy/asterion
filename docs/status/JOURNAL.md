@@ -4327,3 +4327,9 @@
 - 2026-10-08 07:01 CST — User authorizes generic/P7 NOTES implementation; selected native model-view projection, immutable memory and one bounded deployment witness.
 - 2026-10-08 07:04 CST — a0238d65 defines generic memory/P7 adaptation contract; implementation proceeds on feat/prime-research-notes with independent boundary review.
 - 2026-10-08 07:09 CST — Integrated Python227 PASS; installed-Pi provider-free projection14→6 preserves instructions/tools/rawhistory; packaged promotion and finite witness pending.
+- 2026-10-08 07:11 CST — ebcefec9 implements layered NOTES and model-view replacement; focused tests/review pass, deployment verification pending.
+- 2026-10-08 07:14 CST — Promotion4278 finds one obsolete installed-official actor fixture: publish alone cannot satisfy NOTES calibration; fixture repair pending.
+- 2026-10-08 07:15 CST — 44091934 updates installed official actor to NOTES admission; real computation/publication/archive/13action closure test passes, production unchanged.
+- 2026-10-08 07:22 CST — Final promotion25 commands PASS; frozen ebcefec9 starts isolated gpt6.1sol/high r11l L1 witness,900second preset.
+- 2026-10-08 07:29 CST — Frozen NOTES witness passesr11lL1/7actions/0RESET;7notes,17nativecuts,peak10625input; source/package/cleanup verified, BP35 unmeasured.
+- 2026-10-08 07:30 CST — Independent witness audit confirms hashes/trace/notes/cuts/cleanup; docs289files143links and diff pass; no BP35 rerun or extra trial.

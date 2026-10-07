@@ -48,6 +48,8 @@
 - [x] Select notes learner for modern P7 solve/witness/autonomy; set actual memory instructions before appending initial context. Prompt encourages short editable notes, evidence lookup and optional computation without forced phases.
 - [x] Keep Python/TS metadata and packaged allowlist synchronized; register generic module in core boundary checks.
 - [x] Inspect combined diff for instructions/control preservation, atomic adoption, protocol compatibility and raw-history retention. Resolve Astra findings.
-- [ ] Run extension tests → affected Python tests → `make promotion-check`; preserve logs and differentiate skips/failures.
-- [ ] Freeze package identity and run one isolated r11l L1 witness≤900s. Verify actual note use/context projection if observed, cleanup and tool/resource identities. No official card or BP35 full rerun.
-- [ ] Record implemented/verified/not-observed boundaries, update state/index/journal and commit all substantive changes.
+- [x] Run extension tests → affected Python tests → `make promotion-check`; preserve logs and differentiate skips/failures.
+- [x] Freeze package identity and run one isolated r11l L1 witness≤900s. Verify actual note use/context projection if observed, cleanup and tool/resource identities. No official card or BP35 full rerun.
+- [x] Record implemented/verified/not-observed boundaries, update state/index/journal and commit all substantive changes.
+
+Completion evidence: [implementation and bounded witness](../../reviews/2026-10-08-prime-research-notes.md). Production ebcefec9; installed fixture44091934. BP35 performance remains unmeasured.
