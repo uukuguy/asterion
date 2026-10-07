@@ -38,6 +38,16 @@ The older mature P7 sample has118 actions through L4,32 for its located L5 succe
 
 Previous P7 had171 usage events, normalized input19179445/output134227, peak255820. That peak occurs after L5 passes and before the first L6 action; the next input drops41315 and later grows138388. ARC's tiny L6 NOTES511–915bytes coexist with a Stage2 input peak220388; its note size is not its whole model context. Neither dataset provides a controlled single-variable causal comparison.
 
+## Interim observations — not the final result
+
+L1 passed at paid sequence44, SDK response2026-10-08 07:56:12.344639 CST,641.305seconds after launcher start. This is an exact pass edge, not a sampled post-pass action count. The run continues into L2; final per-level timings will use initial observation/pass clocks consistently.
+
+Independent read-only inspection found a concrete application usability issue. `p7_research` is registered as an importable worker module, while only `prime_workspace` is injected as a global. The prompt lists reader methods without an explicit import example. In the first26 cells, the actor makes19 namespace inspections and2 bare-name calls, with no import attempt, then records the module as unavailable. This supports import/discoverability friction, not a missing-runtime-module claim.
+
+The actor later manually transcribes compressed frame rows and indices into two Python cells of2392/2519characters. The codec itself is lossless; the manually copied arrays differ from recorded observations in4/1 background pixels, with no demonstrated actionable consequence. More materially, accepted sequence2 NOTES says an action had no frame effect despite36 recorded pixel changes. Correct observation references do not establish the truth of free-text conclusions. Later notes autonomously correct substantial geometry/mechanism errors.
+
+The actual ARC L1 log instead shows a row-numbered full grid, short queries using prebound `grid`/`np`, and worded geometry transitions. These affordances reduce the work needed to inspect evidence. They do not establish that encoding or NOTES alone caused the observed performance difference. No finding was fed to the actor; no live repair was made. Final analysis must also inspect later successful reads, corrections and outcomes.
+
 ## Evidence status
 
 Preflight and exact packaged identity are verified. The active run is `p7-live-20261007234531-87e38f105ea518bdba94623a`. Result, post-run audit and cleanup remain pending.

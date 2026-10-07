@@ -4337,3 +4337,6 @@
 - 2026-10-08 07:39 CST — User continues into one frozen NOTES BP35 L1–L6 comparison;5400s/six rounds, fresh isolated root, no hot repairs.
 - 2026-10-08 07:44 CST — 5a5a8280 scopes one frozen NOTES BP35 comparison; cold isolation verified, full private projection-log capture precedes launch.
 - 2026-10-08 07:46 CST — Reviewed frozen NOTES BP35 starts07:45:31,target6;09:15:31absolute deadline, coldzero state, full private context-cut capture, no steering.
+- 2026-10-08 07:46 CST — e5259227 records frozen BP35 launch and six-level ARC baseline; running evidence remains pending, production unchanged.
+- 2026-10-08 07:56 CST — Frozen NOTES passes L1: exact44paid,641.305s from launch;73actual cuts,peak20592input; same naturalround,no intervention.
+- 2026-10-08 07:59 CST — Read-only review confirms import discoverability and false-note friction; ARC actual array/grid affordances differ; frozen run continues unchanged.

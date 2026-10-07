@@ -1,15 +1,17 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 07:46 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 07:59 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：冻结NOTES版BP35 L1–L6对比
 
 - 用户在NOTES完成答复后说“继续”，本轮推进下一项有限BP35比较；沿用5400s总预算/max6自然轮/1000动作/1024model/4096tool、gpt6.1sol/high、offline seed0、目标6。不是900s每关，不续期，不自动跑L7或官方卡。
-- Production ebcefec9，当前HEAD f9ee5ee6只包含后续测试/文档。用已验证wheel7a599c0139e35c043329179f3d8badea8cee7a95f2767480a6944337cc0250a3；不重复未变更的promotion。
+- Production ebcefec9，后续提交仅测试/文档；最新启动记录e5259227。用已验证wheel7a599c0139e35c043329179f3d8badea8cee7a95f2767480a6944337cc0250a3；不重复未变更的promotion。
 - notes_bp35_trial负责.asterion-private/p7-notes-bp35-20261008/和唯一新外部root的私有launcher/隔离/监控/cleanup。独立预检含stderr完整捕获通过，root已GO；本次已启动且运行中。保留原console PID52024/56659。
 - baseline-audit.md已准备：旧cold5/213/5400s、ARC6/271与旧成熟32/43分别比较；notesbytes不等于providerinput。游戏正在运行时不向actor提供外围诊断/答案或改代码。
 - 当前运行：2026-10-08 CST07:45:31启动，09:15:31固定截止，另180s仅清理。run p7-live-20261007234531-87e38f105ea518bdba94623a，unit asterion-p7-f68acec0bb5e488fbe2d7a1880d30aba.service，operator96888/orb96891/caffeinate96890。
 - 下一动作：监控至目标或有限终局，按真实账本/笔记/投影/时钟核结论并清理本次owned进程/auth。private readiness/launch/progress/最终receipt均在.asterion-private/p7-notes-bp35-20261008/；完整Pi stderr在新外部root/runtime/pi-stderr-full.log，模型不可读取。初态0关0动作0notes。
+
+- 中途已核：L1真实边界44paid，07:56:12.344639过关，launch+641.305s；不是采样猜测。模型继续L2。独立私有interim-representation-friction.md确认p7_research需import但actor只查globals，提示未示例导入；有手抄编码帧及错误事实笔记，后来自行纠正。不能将context裁剪成功等同解题高效，不向actor反馈、不热修。
 
 ## 已完成：通用研究记忆与P7 NOTES实现和有限部署验证
 
