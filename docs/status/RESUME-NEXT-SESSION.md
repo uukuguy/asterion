@@ -90,5 +90,5 @@ subprocess.run([
 ], env=env, check=True)
 ```
 
-Closeout validation: docs-check282files/115links and diff-check PASS; core files/index coverage PASS; local57515 closed and both owned processes absent. The final handoff commit leaves both worktrees clean. User's repository handoff
+Closeout boundary commit4140411d; its journal entry is included in the final bookkeeping commit. Closeout validation: docs-check282files/115links and diff-check PASS; core files/index coverage PASS; local57515 closed and both owned processes absent. The final handoff commit leaves both worktrees clean. User's repository handoff
 contract authorizes direct saving/committing without a draft confirmation round.
