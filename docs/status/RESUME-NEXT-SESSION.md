@@ -1,20 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 18:42 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 19:03 CST. **Session remains active — not a final handoff.**
 
 ## 当前任务：具体自主性实验与差异调查
 
 - 用户要求用我们的 `gpt-6.1-sol` 实测原版 arc-skill 是否能自主过关，并查清 BP 后5–9关相比 P7 的机制差异。准确游戏ID为 `r11l-495a7899`、`bp35-0a0ad940`。
-- r11l 一次空白local运行，原版源码固定 `dba53c3799eab600a512dd73ed037d7ab6958c66`；预设900秒、清理180秒。操作者只负责宿主/依赖/配置注入与监控，不提供游戏策略、不读旧路线、不修改对方skill/求解代码；不创建Competition卡。
-- 独立源码/历史研究只读取BP35公开和P7私有证据，不向r11l actor传递解法。静态机制、实际观察、归因推断须分别报告。原版 `arc start` 只启动游戏；自动循环由读取skill的coding agent执行。
-- 最初18:00:52启动在2.083秒内宿主SIGABRT，0模型事件/0动作，相关进程已清理。provider-free对照定位为读写拒绝sandbox下继承了被拒绝目录的日志句柄；实时日志改到外部operator目录即修复，源码/skill未改。原失败receipt保留。
-- 唯一有效actor已结束：gpt-6.1-sol/high完成4/6关、49动作、50连续事件，NOT_FINISHED。操作者deadline guard截断待完成回合；无自然turn.completed、无最终actor报告。18:17:53宿主睡眠、18:27:19唤醒后发SIGTERM，UTC起止1444.705秒与单调耗时879.746秒不同，严格900秒墙钟未验证；全部游戏动作在预设18:18:16前。不能据此声称模型最终无解。
-- 原版15文件哈希相同；cleanup2.259秒、owned进程全退出、临时认证删除；既有控制台保留。有效运行完整证据在 `.asterion-private/arc-skill-original-trial/evidence/valid-run/`，校正语义在validated-result.json。
+- 原版源码固定 `dba53c3799eab600a512dd73ed037d7ab6958c66`，local模式、无Competition卡；模型实际gpt-6.1-sol/high，空白起点不读P7历史/游戏源码。操作者只做恢复、配置注入、有限监控与通用继续，不提供关卡判断/解法/代码修复；模型自写研究脚本允许。
+- 首次试跑4/6关、49动作后由deadline guard截断，无自然turn.completed；宿主睡眠导致UTC1444.705秒/单调879.746秒，严格900秒墙钟未验证。更早宿主SIGABRT为零事件启动故障，修复外部日志句柄未改skill。完整旧证据在 `.asterion-private/arc-skill-original-trial/evidence/valid-run/`，不要用新结果抹掉旧边界。
+- 用户允许通用续跑计自动完成并授权新增1800秒/max3turns。原版broker恢复验证events字节不变，随后18:49:42 native resume原模型会话；19:00:15返回WIN/6of6，累计108动作/新增59，109连续事件保留原49动作前缀。只用一次通用继续、一个续跑回合。
+- 自然模型回合完成及记录结束约11m12s（UTC671.801秒/单调671.788秒），远早于19:19:42 deadline；caffeinate防睡眠。终局清理2.191秒，owned进程和临时认证全部清理；已知operator17639/broker17650/actor17653/caffeinate17640均不存在，既有P7控制台保留。
+- 独立审计通过：账本恢复/前缀/WIN、actual模型、仅一条通用提示、原15文件哈希、自然turn.completed、期限与清理。按用户标准本次r11l可计自动完整通关；不外推BP35同条件能力或未知游戏。新证据 `.asterion-private/arc-skill-original-trial/evidence/continuation-20261007T104941Z/`。
 - 用户进一步强调BP35 L5之后是外围Codex分析与持续修正P7才过关。证据确认工具/bridge修复、外部认知隔离判断、compact delivery部署和重试监督；也保留actor自行发现屏外对象与重建路线的局部事实。整体不得称独立自主完成。
 - 结果和五项具体差异已写入 [比较报告](../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md)，D-2026-10-07-03记录验收边界。没有改框架/solver代码，也没有新BP35模型运行。
-- 文档验证：make docs-check通过（283 Markdown/119本地链接）、git diff --check通过；独立源码/证据复审无阻断。验证仅涵盖记录一致性，未将续跑能力提升为实测PASS。
-- 用户询问4/6续跑。源码确认同目录start可重连/动作重放并核对，status+NOTES+历史+自写脚本恢复研究上下文；skill本身不重启LLM。此次run/缓存/账本/笔记/分析脚本仍保留，尚未实测恢复。因actor隔离cache，若获后续运行指令，由trusted operator先恢复broker，再给模型同目录status并注入认证；不把游戏源码开放给actor。
-- 下一动作以具体阻碍自主纠错的机制为中心：合法不变像素点击、按每步起点保留预测、可执行模型实际生成回放、搜索失败后的地图覆盖检验。当前没有额外续跑、runtime重构或官方提交授权；社区PR跟进为后续事项。
+- 初始比较记录已提交ed8758d5；实际续跑成功是后续新结果。最终docs-check283/119与diff-check通过，源码/运行证据独立复审无阻断；未push。
+- 续跑研究摘要：模型自行分析/规划、11次NOTES写入、python3/commit10/status2；新动作56hit/2miss/1paidRESET，无rules阶梯。预测失误未要求外围修代码；新sleep证据无Sleep/Wake。完整统计在新evidence/research-summary.json。
+- 下一动作以已验证r11l与BP35具体差异为依据，检验P7能否自己承担外围研究判断。此轮模型运行授权已用完并结束，不自动启动BP35、新r11l或官方卡；社区PR跟进仍为后续事项。
 
 ## 本次恢复
 
@@ -87,7 +87,7 @@
 
 ## 下一动作
 
-1. The finite arc-skill trial and BP35 comparison are recorded. Evaluate concrete changes against removal of outer research interventions, starting with the comparison report; do not automatically launch another model/game run. PR59 follow-up remains separate and later: address relevant requested changes in the same submission branch, without duplicate PR or scorecard.
+1. The authorized r11l continuation is complete: WIN/6of6/108actions with one generic continuation and original code. Use this evidence and the concrete BP35 comparison to assess P7's ability to replace outer research interventions. Do not automatically launch further solving; PR59 follow-up remains separate and later.
 2. Keep the already-running console at56659; do not launch another server. Restart publisher only upon an explicit update request. Private token stays in environment, never in argv/output. Historical launch metadata is under `launches/vercel-cloud-sync-daemon.json`; use it for arguments, not liveness.
 3. If the user chooses a second private backup location, copy the complete immutable snapshot there and verify it. Do not recreate the historical research or overwrite its certificates just to back it up.
 

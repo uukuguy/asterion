@@ -36,6 +36,7 @@
 - User steering 2026-10-07: prefer the LLM to fully exercise autonomous reasoning, with Asterion providing a strong harness, tools and constraints. Do not interpret the arc-skill comparison as a request to reduce Asterion to scripts or abandon the framework.
 - Use this preference when designing and reviewing later work. The responsibility boundary and rationale are in `docs/status/DECISIONS.md` (D-2026-10-07-02); specific implementation changes have not been requested or evaluated.
 - User correction 2026-10-07: broad architecture language is insufficient. Assess concrete autonomous behavior and actual failure boundaries. BP35 later levels required sustained outer Codex analysis and P7 adjustments; local actor self-correction must not be reported as an independently completed overall campaign.
+- User refinement 2026-10-07: generic continuation across model turns is acceptable as automatic completion when no outer game reasoning, hints or solver/harness repairs are required. Actor-written research code is part of autonomous solving.
 
 ### project — P7 completed campaign and private sharing
 

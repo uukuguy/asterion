@@ -4233,3 +4233,15 @@
 2026-10-07 18:42 CST — Same-directory arc-skill resume confirmed in source and retained files; physical replay and renewed model solve not yet exercised.
 
 2026-10-07 18:43 CST — Comparison docs-check passes283files/119links and diff-check passes; independent source/evidence review finds no blocker.
+
+2026-10-07 18:43 CST — Record partial arc-skill trial and BP35 external assistance to ground autonomy claims [ed8758d5].
+
+2026-10-07 18:48 CST — User accepts generic continuation as automatic completion without outer game help/repairs; authorizes same-run r11l, additional1800s/max3turns.
+
+2026-10-07 18:51 CST — Original broker replay verifies unchanged49-action/4-level history; native gpt-6.1-sol session resumes, absolute deadline19:19:42, caffeinate owned.
+
+2026-10-07 19:03 CST — Same-run r11l reachesWIN6/6/108actions with one generic continuation, new59actions; gpt-6.1-sol, no outer hints or repairs.
+
+2026-10-07 19:03 CST — Independent continuation audit passes history/model/prompt/hash/timing/cleanup; natural turn ends671.8s, original15files unchanged, owned processes/auth removed.
+
+2026-10-07 19:05 CST — Actor handles2new prediction misses/1reset, updates own notes, completesr11l without outer help; docs-check283/119 and diff-check pass.

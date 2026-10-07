@@ -7,7 +7,7 @@
 - Theme-level focus: LLM autonomous reasoning and harness effectiveness; concrete arc-skill/Prime comparison.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: arc-skill/Prime autonomy evidence comparison; the finite r11l trial is ended and documented, with no active solver. The prior P7 public-game campaign is settled. The original redesign worklist is an implementation reference, not authority for new full benchmarks or official submissions.
+- Active work package: arc-skill/Prime autonomy evidence comparison; original arc-skill/gpt-6.1-sol r11l is verified WIN/6of6 after one generic continuation, with no active solver. External research help or solver repairs are excluded from this claim. The prior P7 public-game campaign is settled; its redesign worklist does not authorize new benchmarks or official submissions.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture
