@@ -77,3 +77,15 @@ links into run summaries, certificates, traces and WorldMap revisions. Preserve
 the producing code identity of each certificate. Do not overwrite live data,
 rewrite old certificates or assume that a newer framework commit produced every
 saved solution. Any new engine replay or model run remains a separate operation.
+
+## Workspace disk maintenance
+
+Keep the immutable baseline snapshot separate from workspace cleanup. Clean merged
+worktrees and unused environments/build caches can be removed after checking for
+unique files and running processes. Preserve corpus inputs, historical experiments,
+P7 raw histories and certificates. For quiescent older text on macOS, transparent
+filesystem compression retains ordinary file paths and reads; verify content hashes
+before replacement and again after completion. It is not a backup and its space
+savings may not survive copying to another filesystem. Keep the maintenance log
+beside the private archive, outside public Git. Do not apply this operation to live
+writers or rewrite certificates to make their source identities current.

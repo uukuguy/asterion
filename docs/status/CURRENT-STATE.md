@@ -54,7 +54,7 @@
 
 ## Key Files
 
-- `tools/p7_research_archive.py`, `docs/guides/prime-p7-private-research-archive.md` — offline private snapshots with file hashes, source bundles and verification; stored outside Git.
+- `tools/p7_research_archive.py`, `docs/guides/prime-p7-private-research-archive.md` — offline private snapshots with file hashes, source bundles and verification; stored outside Git. Workspace cleanup preserves research data and immutable snapshots; private maintenance evidence sits beside the archive. Transparent filesystem compression is local storage maintenance, not a framework feature or backup.
 
 - `AGENTS.md`, `MEMORY.md` — repository and collaboration instructions.
 - `docs/status/INDEX.md`, `JOURNAL.md`, `RESUME-NEXT-SESSION.md`, `DECISIONS.md` — discovery, events, active recovery and decisions.

@@ -1,6 +1,13 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-10-07 16:16 CST. Final session closeout, not an active solver checkpoint.
+> Updated: 2026-10-07 16:40 CST. Active storage cleanup; prior final handoff is superseded.
+
+## 本轮磁盘整理（已验证）
+
+- Removed37 clean internal worktrees with HEADs already in main, without force; retained all source commits. Removed three unused private console environments, Rust target and regenerable analysis/test caches. Current main environment and operator-restarted console remain running.
+- Corpus and historical DCI outputs are unique research data. Private macOS transparent compression preserves paths/content and verifies SHA256/metadata before atomic replacement. Eight fixtures passed;9,106 files compressed with zero failures, saving14,097,330,176 bytes; all compressed files re-read and their SHA256 verified. The14,393,573,105-byte wiki file is unsupported by this compression and remains unchanged.
+- Scripts/logs and before/after evidence: ../asterion-research-archive/maintenance-20261007/. Initial immutable P7 snapshot and raw P7 records untouched. Snapshot verification passed for186,280 files/13,170,556,528 bytes.160 certificate/winner/receipt digests are unchanged. Project allocated size is43,477,626,880 bytes (40.49GiB, du rounds to41G), reduced from about59GiB. Independent immutable archive remains outside that size.
+- Private cleanup-after.json, cleanup-verification.json, full-compaction.log and compact-storage-operations.jsonl retain complete maintenance evidence; no compression subprocess remains. No new solving, model call, official card or deployment in this cleanup.
 
 ## 已验证事实
 
@@ -41,16 +48,16 @@
 - Console complete25cloud publication and BP35L9 cognition/last-page parity were HTTP verified in `complete25-cloud-overview-proof.json` and `complete25-cloud-replay-proof.json`. Individual every-game/every-page cloud visual acceptance is not claimed. Cloud presentation is not a raw research backup.
 - No offsite/second-disk copy; no paid storage upgrade. No new model/SDK/game benchmark or official card is required for PR review or archival inspection.
 
-## 进程收口
+## 进程状态（本轮更新）
 
 - Handoff stopped exact owned publisher PID95390 and local console PID68369 with SIGTERM; both exited. No local solver/coordinator/official/archive subprocess remains. Ubuntu systemd inspection found no Asterion/P7 guest units; all subagents are finished.
-- Local57515 is stopped, and automatic local-to-cloud synchronization is stopped. Vercel production `https://asterion-p7-console.vercel.app` retains the last published readonly snapshot independently of local services. Do not mistake old daemon metadata files for live processes.
+- The operator restarted local console after that handoff: uv52023/Python52024 serve at56659; keep it running. Automatic local-to-cloud synchronization remains stopped. Vercel production `https://asterion-p7-console.vercel.app` retains the last published readonly snapshot independently of local services. Do not mistake old daemon metadata files for live processes.
 - No user browser, OrbStack host or unrelated service was stopped. No automatic restart on a plain `project-state resume`.
 
 ## 下一动作
 
-1. Check PR59 review/comments/checks; address relevant requested changes, rerun the submission validator and push the same fork branch. Do not open a duplicate PR or re-submit an official scorecard.
-2. If the user wants local viewing or continued updates, start the console with `make p7-controller` at57515, then explicitly restart the publisher. Private token stays in environment, never in argv/output. Historical launch metadata is under `launches/vercel-cloud-sync-daemon.json`; use it for arguments, not liveness.
+1. Storage cleanup is complete. Check PR59 review/comments/checks; address relevant requested changes, rerun the submission validator and push the same fork branch. Do not open a duplicate PR or re-submit an official scorecard.
+2. Keep the already-running console at56659; do not launch another server. Restart publisher only upon an explicit update request. Private token stays in environment, never in argv/output. Historical launch metadata is under `launches/vercel-cloud-sync-daemon.json`; use it for arguments, not liveness.
 3. If the user chooses a second private backup location, copy the complete immutable snapshot there and verify it. Do not recreate the historical research or overwrite its certificates just to back it up.
 
 ## 可直接使用的命令
@@ -90,5 +97,5 @@ subprocess.run([
 ], env=env, check=True)
 ```
 
-Closeout boundary commit4140411d; its journal entry is included in the final bookkeeping commit. Closeout validation: docs-check282files/115links and diff-check PASS; core files/index coverage PASS; local57515 closed and both owned processes absent. The final handoff commit leaves both worktrees clean. User's repository handoff
+Closeout boundary commit4140411d; its journal entry is included in the final bookkeeping commit. Closeout validation: docs-check282files/115links and diff-check PASS; core files/index coverage PASS; local57515 closed and both owned processes absent. The cleanup preserves the running operator console; it is not a new process-stop handoff. Only maintenance documentation changed in the repository. User's repository handoff
 contract authorizes direct saving/committing without a draft confirmation round.
