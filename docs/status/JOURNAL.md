@@ -4163,3 +4163,9 @@
 2026-10-07 02:03 CST — 5ee2caf6: Disclose scoped API-equivalent costs and assumed cache rates in bilingual results without claiming actual payment.
 
 2026-10-07 14:00 CST — README console figures and original PNG parity verified; official screenshot pending unavailable browser transport; scorecard link retained.
+
+2026-10-07 14:07 CST — c999ea2e: Add approved console screenshots to bilingual READMEs; preserve official scorecard link pending its screenshot.
+
+2026-10-07 14:07 CST — Zen native screenshots captured official scorecard summary and full page; values100/25/183/6781 verified visually.
+
+2026-10-07 14:08 CST — Official summary/full-page originals added to bilingual READMEs; docs-check281/112 and diff-check PASS; Zen zoom restored70%.

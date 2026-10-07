@@ -10,6 +10,10 @@ Asterion Prime P7 通过编程、真实观察和可修正的假说研究 ARC-AGI
 
 **2026 年 10 月 7 日（UTC+8），Asterion Prime P7 在 ARC-AGI-3 官方评测中取得 100.00 分**，完成 **25/25 道公开题、183/183 关，共 6,781 次动作**。[Competition 成绩卡](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a)已正常关闭，最终回执与每题提交路线逐项核对通过。研究模型为 `gpt-6.1-sol`、seed `0`；最终执行版本为 [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21)。此前保存的路线保留原始代码身份和认证。
 
+[![ARC-AGI-3 官方成绩卡：100.00 分、25 题、183 关、6,781 次动作](docs/assets/arc-agi-3/p7-official-scorecard.png)](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a)
+
+官方结果：**100.00 分**、25 题、183 关、6,781 次动作。[完整网页截图](docs/assets/arc-agi-3/p7-official-scorecard-full.png)。
+
 | 证据 | 状态及含义 |
 |---|---|
 | 本地保存路线 | 25 题全通、183 关、6,781 个选定路线动作、本地汇总 100.000000 |
