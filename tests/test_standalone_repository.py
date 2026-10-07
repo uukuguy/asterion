@@ -428,42 +428,37 @@ class StandaloneRepositoryTests(unittest.TestCase):
 
     def test_readme_is_a_complete_standalone_landing_page(self) -> None:
         text = (PROJECT / "README.md").read_text(encoding="utf-8")
-        for heading in (
-            "## Install and inspect",
-            "## External runtimes and resources",
-            "## Development and promotion",
-            "## Compatibility and history",
+        # Detailed configuration moved to the linked operator guides. Keep
+        # the landing-page contract about inspection, execution and evidence.
+        for target in (
+            "pyproject.toml",
+            "docs/guides/prime-p7-community-reproduction.md",
+            "docs/guides/prime-p7-games-and-official-results.md",
+            "docs/OPERATOR-GUIDE.md",
+            "docs/architecture/agent-framework.md",
         ):
-            with self.subTest(heading=heading):
-                self.assertIn(heading, text)
+            with self.subTest(target=target):
+                self.assertIn(f"]({target})", text)
+                self.assertTrue((PROJECT / target).is_file())
         for command in (
             "uv sync --frozen",
-            "cp .env.template .env",
-            "make doctor",
             "uv run asterion list",
             "uv run asterion describe --provider dci-agent-lite",
-            "uv run asterion verify --provider dci-agent-lite --level acceptance",
+            "make asterion-prime-p7-level-witness GAME=ls20 LEVEL=1",
             "make check",
             "make promotion-check",
         ):
             with self.subTest(command=command):
                 self.assertIn(command, text)
-        for statement in (
-            "global `pi`",
-            "benchmark plan",
-            "zero Agent",
-            "zero Judge",
+        for boundary in (
+            "no model credentials",
+            "bounded local research attempt",
+            "executes real online actions",
+            "closed server scorecard",
+            "private prompts",
         ):
-            with self.subTest(statement=statement):
-                self.assertIn(statement, text)
-        for setting in (
-            ".env",
-            "Corpora",
-            "datasets",
-            "Judge",
-        ):
-            with self.subTest(setting=setting):
-                self.assertIn(setting, text)
+            with self.subTest(boundary=boundary):
+                self.assertIn(boundary, text)
 
     def test_docs_publish_bounded_reproduction_boundary(self) -> None:
         public_documents = (

@@ -23,7 +23,7 @@ class _SelectionEngine:
     def observe(self):
         return {
             "available_actions": ["ACTION6"],
-            "frame": [[[0, self.pixel]]],
+            "frame": [[[0, self.pixel], [0, 0]]],
             "levels_completed": int(len(self.calls) >= 2),
             "state": "NOT_FINISHED",
             "win_levels": 2,
@@ -71,6 +71,32 @@ class TestProbePreparation(P7SolverFixture):
         self.assertEqual(result["stop_reason"], "matched")
         self.assertEqual(result["applied_count"], 2)
         self.assertEqual(len(self.engine.calls), 4)
+
+    def test_current_clicked_cell_can_ground_one_unchanged_prefix_coordinate_probe(self):
+        plan = self.click_plan()
+        plan["steps"] = [plan["steps"][0]]
+        plan["steps"][0]["expect"]["cells"] = [{"x": 1, "y": 1, "value": 0}]
+        result = self.solver.execute_plan(plan)
+        self.assertEqual(result["applied_count"], 1)
+        self.assertEqual(result["stop_reason"], "observation-no-change")
+        self.assertEqual(result["feedback"][0]["differences"], [])
+        repeated = self.click_plan()
+        repeated["plan_id"] = "repeat-no-effect"
+        repeated["steps"] = plan["steps"]
+        self.assertEqual(self.solver.execute_plan(repeated)["applied_count"], 0)
+        self.assertEqual(len(self.engine.calls), 3)
+
+    def test_current_bound_prefix_probe_cannot_exceed_shared_exception_allowance(self):
+        self.broker._unknown_guard_probes.update(
+            (1, "ACTION6", (("x", n), ("y", 0)), "prior-frame") for n in range(32)
+        )
+        plan = self.click_plan()
+        plan["steps"] = [plan["steps"][0]]
+        plan["steps"][0]["expect"]["cells"] = [{"x": 1, "y": 1, "value": 0}]
+        result = self.solver.execute_plan(plan)
+        self.assertEqual(result["applied_count"], 0)
+        self.assertEqual(result["stop_reason"], "prefix-action-reuse")
+        self.assertEqual(len(self.engine.calls), 2)
 
     def test_research_wrapper_forwards_preparation_and_records_each_transition(self):
         trace = Mock()

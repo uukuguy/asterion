@@ -9,6 +9,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from asterion.agents.prime.execution import (
     ASTERION_PRIME_CAPABILITIES,
     ASTERION_PRIME_LIMITS,
+    ASTERION_PRIME_RESEARCH_LIMITS,
     AsterionPrimeLimits,
     PrimeExecutionKernel,
     PrimeRoundDiagnostic,
@@ -44,6 +45,7 @@ class AsterionPrimeSession:
         "_completion_predicate",
         "_continuation_prompt",
         "_rpc_session",
+        "_reusable_session",
         "_used_run_ids",
         "__weakref__",
     )
@@ -57,6 +59,7 @@ class AsterionPrimeSession:
         approved_command: tuple[str, ...],
         approved_environment: Mapping[str, str] | None = None,
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
+        reusable_session: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
         round_admission: Callable[[int, CancellationSignal], Awaitable[bool]] | None = None,
@@ -65,15 +68,13 @@ class AsterionPrimeSession:
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
-            # The host may narrow wall time while preserving the native
-            # callback contract. Application factories authorize exact bounds;
-            # the execution kernel checks transport/request agreement.
-            if type(limits) is not AsterionPrimeLimits or not (
-                limits == AsterionPrimeLimits(None, None, None)
-                or (limits.model_callbacks == ASTERION_PRIME_LIMITS.model_callbacks
-                    and limits.tool_callbacks == ASTERION_PRIME_LIMITS.tool_callbacks
-                    and limits.deadline_ms is not None
-                    and 0 < limits.deadline_ms <= ASTERION_PRIME_LIMITS.deadline_ms)
+            # Application factories authorize exact finite bounds. The kernel
+            # verifies transport agreement; defaults remain the normal profile.
+            if type(limits) is not AsterionPrimeLimits or type(reusable_session) is not bool:
+                raise ProtocolError("Asterion-prime launch material is invalid")
+            limits.__post_init__()
+            if reusable_session and not all(
+                callable(getattr(rpc_session, name, None)) for name in ("open", "prompt", "close")
             ):
                 raise ProtocolError("Asterion-prime launch material is invalid")
             PrimeExecutionKernel._validate_launch_material(
@@ -89,6 +90,7 @@ class AsterionPrimeSession:
                 extension_lease.close()
             raise
         self._rpc_session = rpc_session
+        self._reusable_session = reusable_session
         self._approved_command = approved_command
         self._extension_binding = extension_binding
         self._extension_lease = extension_lease
@@ -114,6 +116,8 @@ class AsterionPrimeSession:
             approved_command=approved_command,
             approved_environment=approved_environment,
             limits=limits,
+            reusable=reusable_session,
+            open_session_before_prompt=reusable_session,
             completion_predicate=completion_predicate,
             continuation_prompt=continuation_prompt or (lambda _: _CONTINUE_PROMPT),
             round_admission=round_admission,
@@ -248,12 +252,19 @@ class AsterionPrimeSession:
         signal: CancellationSignal | None,
         emit: Callable[[str, Mapping[str, object]], None],
     ) -> None:
-        await self._kernel.invoke(request, signal, emit)
+        if not self._reusable_session:
+            await self._kernel.invoke(request, signal, emit)
+            return
+        try:
+            await self._kernel.invoke(request, signal, emit)
+        finally:
+            await self._rpc_session.close()
 
 
 __all__ = (
     "ASTERION_PRIME_CAPABILITIES",
     "ASTERION_PRIME_LIMITS",
+    "ASTERION_PRIME_RESEARCH_LIMITS",
     "AsterionPrimeLimits",
     "AsterionPrimeSession",
     "PrimeRoundDiagnostic",

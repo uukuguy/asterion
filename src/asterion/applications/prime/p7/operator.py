@@ -125,6 +125,7 @@ P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
 P7_RESUME_RUN_ID_ENV = "ASTERION_PRIME_P7_RESUME_RUN_ID"
 P7_COGNITION_MODE_ENV = "ASTERION_PRIME_P7_COGNITION_MODE"
 P7_FRESH_TARGET_POLICY_ENV = "ASTERION_PRIME_P7_FRESH_TARGET_POLICY"
+P7_RESEARCH_PYTHON_ENV = "ASTERION_PRIME_P7_RESEARCH_PYTHON"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
 _DEADLINE_MS = 3_600_000
@@ -281,6 +282,26 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
 
     value = environment.get(P7_OFFLINE_OPTIMIZATION_ENV, "").strip().lower()
     return value in {"integration", "enabled", "true", "1"}
+
+
+def _autonomy_prompt() -> str:
+    """Retain the tool contract while leaving research form to the actor."""
+    from asterion.agents.prime.continuation import AUTONOMOUS_RESEARCH_GUIDANCE
+    prompt = build_solve_prompt(None)
+    paragraphs = prompt.split("\n\n")
+    paragraphs = [text for text in paragraphs if not text.startswith("主路径：")]
+    prompt = "\n\n".join(paragraphs)
+    prompt = "\n".join(line for line in prompt.splitlines()
+                       if not line.startswith("初始和后续 context 的 experience"))
+    prompt = prompt.replace("在自己的程序模型中比较候选路线", "依据当前证据比较候选路线")
+    return (prompt + "\n\n" + AUTONOMOUS_RESEARCH_GUIDANCE
+            + " Complete six levels from this fresh local run, then stop. "
+              "Choose your own hypotheses, representation, notes, experiments, computation and RESET. "
+              "Partial models or a search returning no route do not prove the game impossible. "
+              "Use actual feedback to revise contradicted assumptions. Free-form findings, assumptions "
+              "and open questions may be retained in the existing WorldMap revision or accepted "
+              "source/JSON exports and checkpoint; unsaved namespace is not promised after kernel loss. "
+              "No prior solutions or external gameplay advice are provided.")
 
 
 def _prompt_for_variant(variant: str, tool_registry: object = None) -> str:
@@ -3443,6 +3464,7 @@ class P7RuntimeSelection:
     max_callbacks: int | None
     deadline_ms: int | None
     unbounded_first_round: bool = False
+    autonomy: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -3452,8 +3474,10 @@ class P7RuntimeSelection:
             or type(self.max_actions) is not int
             or not 1 <= self.max_actions <= 5000
             or type(self.unbounded_first_round) is not bool
+            or type(self.autonomy) is not bool
+            or (self.autonomy and (self.unbounded_first_round or self.max_actions != 1000))
             or (self.max_callbacks, self.deadline_ms) != (
-                (None, None) if self.unbounded_first_round else (_MAX_CALLBACKS, _DEADLINE_MS)
+                (None, None) if self.unbounded_first_round else (1024, 5_400_000) if self.autonomy else (_MAX_CALLBACKS, _DEADLINE_MS)
             )
         ):
             raise P7OperatorError("P7 runtime selection is invalid")
@@ -3475,6 +3499,7 @@ class P7RuntimeSelection:
         object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
         object.__setattr__(value, "unbounded_first_round", False)
+        object.__setattr__(value, "autonomy", False)
         return value
 
 
@@ -3548,6 +3573,11 @@ def resolve_p7_runtime(
     except P7ModelSelectionError:
         raise P7OperatorError("P7 model host is unavailable") from None
     provider = selected.provider
+    autonomy = environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy"
+    if autonomy:
+        _autonomy_deadline(environment)
+        if type(game) is not P7GameSelection or game.target_level != 6 or game.action_cap != 1000:
+            raise P7OperatorError("P7 autonomy preset is invalid")
     unbounded = UNBOUNDED_FIRST_ROUND_ENV in environment
     if unbounded and (
         environment[UNBOUNDED_FIRST_ROUND_ENV] != "1"
@@ -3562,8 +3592,9 @@ def resolve_p7_runtime(
         provider=provider,
         model=selected.model,
         max_actions=game.action_cap,
-        max_callbacks=None if unbounded else _MAX_CALLBACKS,
-        deadline_ms=None if unbounded else _DEADLINE_MS,
+        max_callbacks=None if unbounded else 1024 if autonomy else _MAX_CALLBACKS,
+        deadline_ms=None if unbounded else 5_400_000 if autonomy else _DEADLINE_MS,
+        autonomy=autonomy,
         unbounded_first_round=unbounded,
     )
 
@@ -3577,8 +3608,9 @@ def p7_runtime_options(
         type(selection) is not P7RuntimeSelection
         or selection != replace(
             P7RuntimeSelection.fixed(game, selection.provider, selection.model),
-            max_callbacks=None if selection.unbounded_first_round else _MAX_CALLBACKS,
-            deadline_ms=None if selection.unbounded_first_round else _DEADLINE_MS,
+            max_callbacks=None if selection.unbounded_first_round else 1024 if selection.autonomy else _MAX_CALLBACKS,
+            deadline_ms=None if selection.unbounded_first_round else 5_400_000 if selection.autonomy else _DEADLINE_MS,
+            autonomy=selection.autonomy,
             unbounded_first_round=selection.unbounded_first_round,
         )
         or (selection.unbounded_first_round and (
@@ -3617,10 +3649,54 @@ def _private_experiment(
 _WITNESS_STARTED_ENV = "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC"
 
 
+def _research_python(environment: Mapping[str, str]) -> Path | None:
+    """Consume an explicit trusted worker executable only for cold autonomy."""
+    if P7_RESEARCH_PYTHON_ENV not in environment:
+        if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy":
+            raise P7OperatorError("P7 research worker executable is unavailable")
+        return None
+    try:
+        value = environment[P7_RESEARCH_PYTHON_ENV]
+        path = Path(value)
+        if (environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy"
+            and type(value) is str and path.is_absolute()
+            and path.resolve(strict=True) == path
+            and not any(part.is_symlink() for part in (path, *path.parents))
+            and path.is_file() and os.access(path, os.X_OK)):
+            return path
+    except (OSError, TypeError, ValueError):
+        pass
+    raise P7OperatorError("P7 research worker executable is unavailable")
+
+
+def _autonomy_deadline(environment: Mapping[str, str]) -> float | None:
+    """Validate the closed cold preset and consume the guest-owned origin."""
+    if environment.get("ASTERION_PRIME_P7_RUN_MODE") != "autonomy":
+        return None
+    forbidden = {P7_RESUME_RUN_ID_ENV, P7_COGNITION_MODE_ENV, P7_FRESH_TARGET_POLICY_ENV,
+                 UNBOUNDED_FIRST_ROUND_ENV, "ASTERION_PRIME_P7_CONSOLE_RUN_ID"}
+    try:
+        started = float(environment[_WITNESS_STARTED_ENV])
+        valid = (math.isfinite(started) and 0 <= started <= time.monotonic() < started + 5400
+                 and environment.get("OPERATION_MODE", "").lower() == "offline"
+                 and environment.get(TARGET_LEVEL_ENV) == "6"
+                 and environment.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") == "5400"
+                 and re.fullmatch(r"asterion-p7-[0-9a-f]{32}\.service",
+                                  environment.get("ASTERION_PRIME_P7_ATTEMPT_UNIT", ""))
+                 and not forbidden.intersection(environment)
+                 and environment.get(P7_HISTORY_VARIANT_ENV, "verified") == "verified"
+                 and not _offline_optimization_enabled(environment))
+        if valid:
+            return started + 5400
+    except (KeyError, TypeError, ValueError):
+        pass
+    raise P7OperatorError("P7 autonomy preset is invalid")
+
+
 def _witness_deadline(environment: Mapping[str, str]) -> float | None:
     """Consume the guest launcher clock, never a model/provider time budget."""
     if environment.get("ASTERION_PRIME_P7_RUN_MODE") != "witness":
-        if _WITNESS_STARTED_ENV in environment:
+        if _WITNESS_STARTED_ENV in environment and environment.get("ASTERION_PRIME_P7_RUN_MODE") != "autonomy":
             raise P7OperatorError("P7 witness deadline is invalid")
         return None
     try:
@@ -3679,8 +3755,11 @@ def build_p7_operator_resources(
     bridge: _IpythonBridgeServer | None = None
     try:
         variant = _resolve_history_variant(environment, game)
+        research_python = _research_python(environment)
         selection = resolve_p7_runtime(environment, game)
         witness_deadline = _witness_deadline(environment)
+        autonomy_deadline = _autonomy_deadline(environment)
+        task_deadline = autonomy_deadline if autonomy_deadline is not None else witness_deadline
         deadline_ms = 900_000 if witness_deadline is not None else selection.deadline_ms
         runtime_options = dict(p7_runtime_options(selection, game))
         if witness_deadline is not None:
@@ -3688,7 +3767,7 @@ def build_p7_operator_resources(
         evidence_control = getattr(engine, 'set_evidence_control', None)
         if callable(evidence_control):
             evidence_control(cancelled=evidence_cancelled,
-                             deadline=witness_deadline if witness_deadline is not None else (
+                             deadline=task_deadline if task_deadline is not None else (
                                  None if deadline_ms is None else time.monotonic() + deadline_ms / 1000))
         research_mode = variant == "verified" and not cognition_mode
         # The ARC credential belongs only to the SDK session. The Pi model
@@ -3700,7 +3779,7 @@ def build_p7_operator_resources(
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
                 P7_RESUME_RUN_ID_ENV,
                 P7_COGNITION_MODE_ENV, P7_FRESH_TARGET_POLICY_ENV,
-                _WITNESS_STARTED_ENV,
+                _WITNESS_STARTED_ENV, P7_RESEARCH_PYTHON_ENV,
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
@@ -3780,6 +3859,7 @@ def build_p7_operator_resources(
             extension_lease=lease,
             deadline_seconds=None if deadline_ms is None else deadline_ms / 1000,
             witness_deadline_monotonic=witness_deadline,
+            autonomy_deadline_monotonic=autonomy_deadline,
             tool_registry=selected_tools,
             compact_events=True,
             approved_environment=approved_environment,
@@ -3833,9 +3913,11 @@ def build_p7_operator_resources(
                 broker=broker, trace_client=prediction_client,
                 run_root=private_trace_root.parent, run_id=history_run_id,
                 deadline_seconds=(deadline_ms or 3_600_000) / 1000,
-                deadline_monotonic=witness_deadline,
+                deadline_monotonic=task_deadline,
                 event_sink=prediction_client._emit_console,
-                worker=SubprocessPythonWorker() if isinstance(worker, live.SubprocessPythonWorker) else worker,
+                worker=SubprocessPythonWorker(python=research_python) if isinstance(worker, live.SubprocessPythonWorker) else worker,
+                worker_factory=(lambda: SubprocessPythonWorker(python=research_python))
+                               if research_python is not None else None,
                 experience=experience,
             )
         else:
@@ -4061,7 +4143,7 @@ def _select_game_for_mode(
     """Use only an explicitly forwarded level; otherwise solve the full game."""
 
     mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
-    if mode not in {"solve", "witness", "sweep", "cognition"}:
+    if mode not in {"solve", "witness", "sweep", "cognition", "autonomy"}:
         raise P7OperatorError("P7 run mode is unavailable")
     if mode in {"witness", "cognition"} and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 level witness requires explicit LEVEL")
@@ -4073,7 +4155,12 @@ def _select_game_for_mode(
     else:
         selection_environment.pop(TARGET_LEVEL_ENV, None)
     game = resolve_game_selection(selection_environment, arc_root)
-    if mode == "witness":
+    if mode == "autonomy":
+        _autonomy_deadline(process_environment)
+        if game.target_level != 6:
+            raise P7OperatorError("P7 autonomy preset is invalid")
+        game = replace(game, action_cap_override=1000, action_cap_reason="action-cap")
+    elif mode == "witness":
         # A level witness is an efficiency experiment, so its hard ceiling
         # must be the human baseline through the requested level.  The
         # previous fallback of 500 actions made an explicit L1 witness spend
@@ -4217,10 +4304,17 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
+        _research_python(resolved)
+        if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy":
+            _autonomy_deadline(environment)
+            history = root / ".asterion-private" / "prime-p7-live"
+            if history.exists() and any(history.iterdir()):
+                raise P7OperatorError("P7 autonomy requires an empty history root")
         # Config files cannot mint the guest's monotonic clock origin.
         resolved.pop(_WITNESS_STARTED_ENV, None)
         if _WITNESS_STARTED_ENV in environment:
             _witness_deadline(environment)
+            _autonomy_deadline(environment)
             resolved[_WITNESS_STARTED_ENV] = environment[_WITNESS_STARTED_ENV]
         resume_run_id = _resolve_resume_run_id(environment)
         fresh_target_policy = _resolve_fresh_target_policy(environment, resume_run_id=resume_run_id)
@@ -4539,9 +4633,13 @@ async def run_live(
     # A cancelled model task alone must not manufacture an interrupted receipt.
     process_cancellation = run_signal if type(run_signal) is live.ProcessCancellation else None
     witness_deadline = _witness_deadline(invocation.environment)
-    if witness_deadline is not None:
-        run_signal = _WitnessDeadlineSignal(run_signal, witness_deadline)
+    autonomy_deadline = _autonomy_deadline(invocation.environment)
+    task_deadline = autonomy_deadline if autonomy_deadline is not None else witness_deadline
+    if task_deadline is not None:
+        run_signal = _WitnessDeadlineSignal(run_signal, task_deadline)
 
+    if autonomy_deadline is not None and invocation.resume_run_id is not None:
+        raise P7OperatorError("P7 autonomy preset is invalid")
     root = invocation.operator_root
     resume_prior = None
     resume_prefix = None
@@ -4599,7 +4697,7 @@ async def run_live(
             prompt += P7_EXPLORE_APPENDIX
     else:
         prompt = _prompt_for_strategy(strategy, tool_registry)
-    prefix = resume_prefix if research_mode else None if strategy == "cognition" else load_best_prefix(
+    prefix = None if autonomy_deadline is not None else resume_prefix if research_mode else None if strategy == "cognition" else load_best_prefix(
         invocation.arc_root,
         root / ".asterion-private" / "prime-p7-live",
         invocation.game.game_id,
@@ -4701,7 +4799,7 @@ async def run_live(
         flush=True,
     )
     experience = None
-    if research_mode:
+    if research_mode and autonomy_deadline is None:
         from .experience import load_experience
         experience = load_experience(
             root / ".asterion-private" / "prime-p7-live",
@@ -4713,6 +4811,8 @@ async def run_live(
             pinned_source_run_id=invocation.resume_run_id,
             fresh_target_policy=None if fresh_target_policy is None else fresh_target_policy.record(),
         )
+    if autonomy_deadline is not None:
+        prompt = _autonomy_prompt()
     worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
         arc_root=invocation.arc_root,
@@ -4760,6 +4860,11 @@ async def run_live(
     reason: str | None = None
     failure: BaseException | None = None
     diagnostics: dict[str, object] = {}
+    if autonomy_deadline is not None:
+        diagnostics["autonomy"] = {"task_deadline_monotonic": autonomy_deadline,
+                                  "transport_duration_seconds": 5400, "max_natural_rounds": 6,
+                                  "cold_history_excluded": True,
+                                  "research_python_configured": _research_python(invocation.environment) is not None}
     diagnostics["prediction_variant"] = variant
     diagnostics["budget"] = {
         "target_level": invocation.game.target_level,
@@ -4987,7 +5092,7 @@ async def run_live(
             if isinstance(broker_value, ArcBroker):
                 if (isinstance(failure, asyncio.CancelledError)
                         and ((process_cancellation is not None and process_cancellation.cancelled)
-                             or (witness_deadline is not None and time.monotonic() >= witness_deadline))):
+                             or (task_deadline is not None and time.monotonic() >= task_deadline))):
                     try:
                         broker_value.interrupt()
                     except ArcBrokerError:

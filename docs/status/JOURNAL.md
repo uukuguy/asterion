@@ -4286,3 +4286,11 @@
 
 - 2026-10-07 21:16 CST — Authorized layered autonomy implementation and cold BP35 L1–L6; plan5400s/six rounds, no trial started.
 - 2026-10-07 21:27 CST — Found P7 did not enable reusable Pi lifecycle; per-step grounding regression reproduced and repaired.
+- 2026-10-07 21:29 CST — fadef21d scopes layered autonomy and finite BP35 verification; replaces completed analysis-only boundary.
+- 2026-10-07 21:36 CST — Generic86 and grounding106 tests pass; TypeScript35 pass/six external skips; no real trial yet.
+- 2026-10-07 21:51 CST — Astra integrated review closes startup defects;90 generic/227 application/106 grounding tests pass, file fence pending.
+- 2026-10-07 21:36 CST — Correction: recent autonomy journal times were estimates; commit/file logs are authoritative timestamps, verified check results unchanged.
+- 2026-10-07 21:39 CST — Autonomy requires trusted worker wrapper; found kernel-recovery fallback could lose file fence, fixing before trial.
+- 2026-10-07 21:44 CST — Trusted worker recovery validated;229 application tests pass; real Landlock protocol probe passes, final frozen configuration pending.
+- 2026-10-07 21:58 CST — Promotion4262 fails17;15 are pre-existing stale README assertions, corrected; remaining failures being captured before freeze.
+- 2026-10-07 22:04 CST — Core allowlist and stale README checks repaired;isolated wheel/four checks pass;final promotion required before live startup.

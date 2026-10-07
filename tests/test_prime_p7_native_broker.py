@@ -965,6 +965,16 @@ class TestNativeP7Broker(unittest.TestCase):
         self.assertEqual(receipt.terminal_reason, "human-baseline")
         self.assertEqual(engine.calls, ["ACTION1", "ACTION1"])
 
+    def test_explicit_research_action_cap_is_not_human_baseline(self) -> None:
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7.game import P7GameSelection
+
+        game = P7GameSelection("ls20-9607627b", 0, 2, action_cap_override=2,
+                               action_cap_reason="action-cap")
+        broker = ArcBroker(engine=_Engine(), game=game)
+        self.assertEqual(broker.act(("ACTION1", "ACTION1")).applied_count, 2)
+        self.assertEqual(broker.seal().terminal_reason, "action-cap")
+
     def test_initial_game_over_is_rejected_before_any_action(self) -> None:
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 

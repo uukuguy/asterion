@@ -43,6 +43,9 @@ ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
 _MODEL_CALLBACKS = 128
 _TOOL_CALLBACKS = 500
 _DEADLINE_MS = 60 * 60 * 1000
+_RESEARCH_MODEL_CALLBACKS = 1024
+_RESEARCH_TOOL_CALLBACKS = 4096
+_RESEARCH_DEADLINE_MS = 90 * 60 * 1000
 _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
@@ -187,9 +190,9 @@ class AsterionPrimeLimits:
         if any(isinstance(value, bool) or type(value) is not int for value in values):
             raise ValueError("Asterion-prime limits are invalid")
         if (
-            not 1 <= self.model_callbacks <= _MODEL_CALLBACKS
-            or not 1 <= self.tool_callbacks <= _TOOL_CALLBACKS
-            or not 1 <= self.deadline_ms <= _DEADLINE_MS
+            not 1 <= self.model_callbacks <= _RESEARCH_MODEL_CALLBACKS
+            or not 1 <= self.tool_callbacks <= _RESEARCH_TOOL_CALLBACKS
+            or not 1 <= self.deadline_ms <= _RESEARCH_DEADLINE_MS
         ):
             raise ValueError("Asterion-prime limits are invalid")
 
@@ -198,6 +201,10 @@ ASTERION_PRIME_LIMITS = AsterionPrimeLimits(
     model_callbacks=_MODEL_CALLBACKS,
     tool_callbacks=_TOOL_CALLBACKS,
     deadline_ms=_DEADLINE_MS,
+)
+
+ASTERION_PRIME_RESEARCH_LIMITS = AsterionPrimeLimits(
+    _RESEARCH_MODEL_CALLBACKS, _RESEARCH_TOOL_CALLBACKS, _RESEARCH_DEADLINE_MS
 )
 
 
@@ -276,6 +283,7 @@ class PrimeExecutionKernel:
         approved_environment: Mapping[str, str] | None = None,
         limits: AsterionPrimeLimits = ASTERION_PRIME_LIMITS,
         reusable: bool = False,
+        open_session_before_prompt: bool = False,
         completion_predicate: Callable[[], bool] | None = None,
         continuation_prompt: Callable[[int], str] | None = None,
         round_admission: Callable[[int, CancellationSignal], Awaitable[bool]] | None = None,
@@ -295,6 +303,9 @@ class PrimeExecutionKernel:
         self._extension_lease = extension_lease
         self._limits = limits
         self._reusable = reusable
+        if type(open_session_before_prompt) is not bool or (open_session_before_prompt and not reusable):
+            raise ProtocolError("Asterion-prime launch material is invalid")
+        self._open_session_before_prompt = open_session_before_prompt
         self._completion_predicate = completion_predicate
         self._continuation_prompt = continuation_prompt
         if round_admission is not None and not callable(round_admission):
@@ -689,6 +700,7 @@ class PrimeExecutionKernel:
 
         prompt = request.input_text
         round_index = 0
+        session_opened = False
         admission_limits = [value for value in (request.deadline_ms, self._limits.deadline_ms) if value is not None]
         admission_deadline = (
             asyncio.get_running_loop().time() + min(admission_limits) / 1000
@@ -717,6 +729,12 @@ class PrimeExecutionKernel:
                     emit("run.completed", {"status": "cancelled"})
                     return
                 self._extension_lease.validate_launch()
+                if self._open_session_before_prompt and not session_opened:
+                    await self._rpc_session.open(signal=signal or _NeverCancelled())
+                    session_opened = True
+                    if signal is not None and signal.cancelled:
+                        emit("run.completed", {"status": "cancelled"})
+                        return
                 driver = (
                     self._rpc_session.prompt
                     if self._reusable

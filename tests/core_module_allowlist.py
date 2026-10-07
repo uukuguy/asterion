@@ -13,6 +13,7 @@ CORE_MODULES = (
     "asterion.agents.prime.backend",
     "asterion.agents.prime.compaction_budget",
     "asterion.agents.prime.context",
+    "asterion.agents.prime.continuation",
     "asterion.agents.prime.detachment",
     "asterion.agents.prime.execution",
     "asterion.agents.prime.ipython",

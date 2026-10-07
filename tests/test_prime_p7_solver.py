@@ -355,6 +355,35 @@ class TestP7Solver(P7SolverFixture):
         self.assertEqual(result["applied_count"], 1)
         self.assertEqual(result["feedback"][0]["mismatch_kind"], "state")
 
+    def test_each_step_grounds_against_its_actual_start_frame(self):
+        self.revise()
+        observe = self.engine.observe
+
+        def moving_frame():
+            value = observe()
+            frames = ([0, 1], [1, 1], [1, 2])
+            value["frame"] = [[frames[len(self.engine.calls)]]]
+            return value
+
+        self.engine.observe = moving_frame
+        plan = self.plan((1, 1))
+        plan["steps"][1]["expect"]["cells"].append({"x": 1, "y": 0, "value": 2})
+        original = copy.deepcopy(plan)
+        dispatched = []
+        act_checked = self.broker.act_checked
+
+        def record(predictions):
+            dispatched.append(copy.deepcopy(predictions))
+            return act_checked(predictions)
+
+        self.broker.act_checked = record
+        result = self.solver.execute_plan(plan)
+        self.assertEqual(result["applied_count"], 2)
+        self.assertEqual(result["stop_reason"], "matched")
+        self.assertEqual(dispatched[1][0]["expect"]["cell"], {"x": 1, "y": 0, "value": 2})
+        self.assertEqual(plan, original)
+        self.assertEqual(len(result["feedback"][1]["expected"]["cells"]), 2)
+
     def test_unknown_dispatched_result_is_distinct_from_unexecuted_suffix(self):
         self.revise()
         self.engine.raises_on = 2

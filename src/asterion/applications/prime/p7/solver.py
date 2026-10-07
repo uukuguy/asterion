@@ -668,16 +668,9 @@ class Solver:
                     if key in coordinates:
                         raise ValueError
                     coordinates.add(key)
-                # The Broker uses one cell for pre-dispatch grounding. Preserve
-                # a distinguishing prediction wherever it appears; all cells
-                # still receive the full post-action comparison below.
-                frame = context["observation"]["frame"][-1]
-                native_expect["cell"] = next(
-                    (cell for cell in cells if cell["y"] < len(frame)
-                     and cell["x"] < len(frame[cell["y"]])
-                     and frame[cell["y"]][cell["x"]] != cell["value"]),
-                    cells[0],
-                )
+                # Validate the complete plan before dispatch. Grounding is
+                # selected again from the actual observation at each step.
+                native_expect["cell"] = cells[0]
             if "levels_completed" in native_expect:
                 level = native_expect["levels_completed"]
                 if (
@@ -737,15 +730,33 @@ class Solver:
             )
         return kind, differences
 
-    def _probe_preparation(self, plan, translated, index, reference):
+    @staticmethod
+    def _ground_prediction(native, cells, observation):
+        grounded = copy_json(native)
+        if cells:
+            frame = observation["frame"][-1]
+            grounded["expect"]["cell"] = copy_json(next(
+                (cell for cell in cells if cell["y"] < len(frame)
+                 and cell["x"] < len(frame[cell["y"]])
+                 and frame[cell["y"]][cell["x"]] != cell["value"]),
+                cells[0],
+            ))
+        return grounded
+
+    def _probe_preparation(self, plan, translated, index, reference, observation=None):
         if (plan["purpose"] != "probe" or index + 1 >= len(translated)
                 or translated[index]["action"]["name"] != "ACTION6"):
             return None
+        observation = self._observation()[0] if observation is None else observation
+        following = self._ground_prediction(
+            translated[index + 1], plan["steps"][index + 1]["expect"].get("cells"),
+            observation,
+        )
         return {
             "run_id": self.run_id, "level": reference["level"],
             "sequence": reference["sequence"],
             "observation_sha256": reference["observation_sha256"],
-            "next_prediction": translated[index + 1],
+            "next_prediction": following,
         }
 
     def execute_plan(self, plan: Mapping) -> dict:
@@ -825,7 +836,10 @@ class Solver:
                 dispatch_start = getattr(self.broker, "actions_dispatched", None)
                 journal_start = len(self.broker.journal)
                 try:
-                    preparation = self._probe_preparation(value, translated, index, reference)
+                    native = self._ground_prediction(
+                        native, value["steps"][index]["expect"].get("cells"), observation,
+                    )
+                    preparation = self._probe_preparation(value, translated, index, reference, observation)
                     if preparation:
                         dispatched = self.broker.act_checked([native], probe_preparation=preparation)
                     else:

@@ -16,7 +16,6 @@ from tests.test_prime_p7_native_provider import ASSEMBLY, _Worker, _CompletingEn
 from tests.test_asterion_prime_session import SessionFixture, FakePiRpcSession
 from asterion.agents.prime.session import AsterionPrimeSession, AsterionPrimeLimits, ASTERION_PRIME_LIMITS
 from asterion.runtimes.pi_rpc import PiRpcConfig
-from asterion.runtime.protocol import ProtocolError
 from tools import run_prime_p7_guest as guest
 
 
@@ -86,15 +85,11 @@ class TestWitnessDeadline(unittest.TestCase):
                         return AsterionPrimeSession(
                             rpc_session=FakePiRpcSession(config, ()), extension_binding=fixture.binding,
                             extension_lease=lease, approved_command=config.command, limits=limits)
-                    if callbacks != baseline.model_callbacks:
-                        with self.assertRaises(ProtocolError):
-                            build()
-                    else:
-                        build().close()
+                    build().close()
                 finally:
                     lease.close()
                     fixture.close()
-        for deadline in (0, baseline.deadline_ms + 1, float('inf'), float('nan')):
+        for deadline in (0, 5_400_001, float('inf'), float('nan')):
             with self.subTest(deadline=deadline), self.assertRaises(ValueError):
                 AsterionPrimeLimits(baseline.model_callbacks, baseline.tool_callbacks, deadline)
 

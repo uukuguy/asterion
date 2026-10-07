@@ -52,6 +52,16 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     _unit(unit)
     console_id = os.environ.get("ASTERION_PRIME_P7_CONSOLE_RUN_ID")
     mode = os.environ.get("ASTERION_PRIME_P7_RUN_MODE")
+    if mode == "autonomy":
+        if (seconds != 5400 or console_id is not None
+            or not os.environ.get("ASTERION_PRIME_P7_RESEARCH_PYTHON", "").strip()
+            or os.environ.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") != "5400"
+            or os.environ.get("ASTERION_PRIME_P7_ATTEMPT_UNIT") != unit
+            or os.environ.get("ASTERION_PRIME_P7_TARGET_LEVEL") != "6"
+            or os.environ.get("OPERATION_MODE", "").lower() != "offline"
+            or any(name in os.environ for name in ("ASTERION_PRIME_P7_RESUME_RUN_ID",
+                       "ASTERION_PRIME_P7_FRESH_TARGET_POLICY", _UNBOUNDED_FIRST_ROUND_ENV))):
+            raise ValueError("invalid autonomy attempt")
     if console_id is not None or mode == "witness":
         if (
             mode != "witness"
@@ -77,7 +87,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     # existing replay/seal/summary cleanup may outlast the generic 20s stop
     # grace, especially after restoring several completed levels. This is
     # cleanup time, not another model/gameplay interval or a caller knob.
-    stop_seconds = 180 if mode == "witness" else 20
+    stop_seconds = 180 if mode in {"witness", "autonomy"} else 20
     args = [
         "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
         "--service-type=exec", f"--unit={unit}",
@@ -87,7 +97,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     ]
     if seconds is not None:
         args.append(f"--property=RuntimeMaxSec={seconds}s")
-    if mode == "witness":
+    if mode in {"witness", "autonomy"}:
         # Both launcher and operator run in the Linux guest clock domain. Never
         # forward a caller/host timestamp through the shared environment list.
         args.append(f"--setenv=ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC={time.monotonic()}")
@@ -95,7 +105,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
         value = os.environ.get(name)
         if value is None:
             continue
-        if name in {_UNBOUNDED_FIRST_ROUND_ENV, "OPERATION_MODE"} and os.environ.get(_UNBOUNDED_FIRST_ROUND_ENV) != "1":
+        if name in {_UNBOUNDED_FIRST_ROUND_ENV, "OPERATION_MODE"} and os.environ.get(_UNBOUNDED_FIRST_ROUND_ENV) != "1" and mode != "autonomy":
             continue
         args.append(f"--setenv={name}={value}")
     for name in _GUEST_PROXY_ENVIRONMENT:
@@ -122,6 +132,17 @@ def witness(command: list[str]) -> int:
         stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
         os.environ[fields[2]] = f"p7-live-{stamp}-{uuid.uuid4().hex[:24]}"
     return launch(os.environ.get(fields[0], ""), 900, command)
+
+
+def autonomy(command: list[str]) -> int:
+    """Explicit offline cold preset; fixed solve bounds and separate cleanup."""
+    if os.environ.get("ASTERION_PRIME_P7_RUN_MODE") != "autonomy":
+        raise ValueError("invalid autonomy preset")
+    fields = ("ASTERION_PRIME_P7_ATTEMPT_UNIT", "ASTERION_PRIME_P7_ATTEMPT_SECONDS")
+    if not any(name in os.environ for name in fields):
+        os.environ[fields[0]] = f"asterion-p7-{uuid.uuid4().hex}.service"
+        os.environ[fields[1]] = "5400"
+    return launch(os.environ.get(fields[0], ""), 5400, command)
 
 
 def cleanup(unit: str) -> bool:
@@ -153,7 +174,7 @@ def cleanup(unit: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("launch", "cleanup", "witness"))
+    parser.add_argument("mode", choices=("launch", "cleanup", "witness", "autonomy"))
     parser.add_argument("--unit")
     parser.add_argument("--seconds", type=float)
     argv = sys.argv[1:]
@@ -161,10 +182,10 @@ def main() -> int:
     args = parser.parse_args(argv[:split])
     command = argv[split + 1:]
     try:
-        if args.mode == "witness":
+        if args.mode in {"witness", "autonomy"}:
             if args.unit is not None or args.seconds is not None:
                 raise ValueError("invalid witness preset")
-            return witness(command)
+            return witness(command) if args.mode == "witness" else autonomy(command)
         if args.unit is None:
             raise ValueError("missing attempt identity")
         if args.mode == "cleanup":

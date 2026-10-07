@@ -2818,9 +2818,13 @@ class ArcBroker:
                 unavailable_action = name
                 break
             prepared_probe = self._current_probe_preparation(probe_preparation, checked)
+            prefix_reused = witness is None and self._prefix_coordinate_reuse(ArcAction(name, data), expected)
+            current_probe = bool(
+                prefix_reused and not prepared_probe and len(plan) == 1
+                and self._guard_probe_novel(ArcAction(name, data), expected, current_bound=True)
+            )
             if (witness is None
-                    and self._prefix_coordinate_reuse(ArcAction(name, data), expected)
-                    and not prepared_probe):
+                    and prefix_reused and not prepared_probe and not current_probe):
                 stop_reason = "prefix-action-reuse"
                 unavailable_action = name
                 mismatch = {
@@ -2836,7 +2840,7 @@ class ArcBroker:
                 break
             previous_levels = self._current.levels_completed
             distinguishing = len(plan) == 1 and (
-                self._guard_probe_distinguishes(expected)
+                current_probe or self._guard_probe_distinguishes(expected)
                 or self._guard_probe_novel(
                     ArcAction(name, data), expected,
                     prepared=prepared_probe,
@@ -3164,7 +3168,7 @@ class ArcBroker:
                 self._terminal_reason = (("game-won" if after.state == "WIN" else "game-incomplete")
                                          if self._game.is_full_game else "level-completed")
             elif self._primitive_actions == self._game.action_cap:
-                self._terminal_reason = ("human-baseline" if isinstance(self._game, P7GameSelection)
+                self._terminal_reason = (self._game.action_cap_reason if isinstance(self._game, P7GameSelection)
                     and self._game.action_cap_override is not None else "action-cap")
             elif after.state == "GAME_OVER":
                 self._terminal_reason = "reset-required" if self._level_gameplay_actions > 0 else "game-over"
@@ -3217,19 +3221,22 @@ class ArcBroker:
 
     def _guard_probe_novel(
         self, action: ArcAction, expected: Mapping[str, object], *, prepared: bool = False,
+        current_bound: bool = False,
     ) -> bool:
         """Permit one grounded, untried click without inventing a visible effect.
 
         Raw actions keep the aggregate guard. A checked single click can test a
         new payload when its prediction binds the current frame or clicked cell,
         or when Solver supplies a current preparatory probe. At most 32 such
-        exceptions are admitted per level; the same payload is never retried
-        through this path at the same level.
+        exceptions are admitted per level/RESET episode; a payload cannot be
+        retried through this path within that episode. A reused prior-level coordinate
+        can use this same bounded exception when it binds a current fact;
+        an unchanged prediction is still graded, not evidence of progress.
         """
         level = self._current.levels_completed
         position = self._position_key(action)
         if (action.name != "ACTION6" or position is None
-                or self._no_effect_counts.get((level, action.name), 0) < 3
+                or (not current_bound and self._no_effect_counts.get((level, action.name), 0) < 3)
                 or self._tried_actions.get((level, action.name, position), 0)
                 or len(self._unknown_guard_probes) >= 32):
             return False

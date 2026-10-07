@@ -22,6 +22,7 @@ from .experience import CellArchive
 from .research_bridge import ResearchReadServer
 from .solver import Solver
 from .solver_control import SolverControl
+from asterion.agents.prime.continuation import AUTONOMOUS_RESEARCH_GUIDANCE
 
 
 class _EvidenceBroker:
@@ -97,9 +98,12 @@ class P7ResearchRuntime:
     """Thin application host over the generic Prime workspace."""
 
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
-                 deadline_seconds: float, event_sink, worker=None,
+                 deadline_seconds: float, event_sink, worker=None, worker_factory=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None):
+        if worker_factory is not None and not callable(worker_factory):
+            raise ValueError("research worker factory unavailable")
+        self._worker_factory = worker_factory or SubprocessPythonWorker
         self._closed = False
         self.cell_count = 0
         self._lost = False  # The application can rebuild a computation kernel.
@@ -146,7 +150,7 @@ class P7ResearchRuntime:
 
     def _new_kernel(self, worker=None):
         return PersistentIpythonHost(
-            worker=worker or SubprocessPythonWorker(), bootstrap=self._bootstrap,
+            worker=worker if worker is not None else self._worker_factory(), bootstrap=self._bootstrap,
             limits=self._limits,
             observer=self._kernel_event,
         )
@@ -312,9 +316,10 @@ class P7ResearchRuntime:
     def continuation_prompt(self, round_index):
         return (
             f"Continue research round {round_index} from the retained Prime workspace. "
-            "Use the current WorldMap and evidence to compute progress or a useful probe. "
+            "Use actual feedback and the current WorldMap to choose your own next hypothesis, experiment, optional computation or useful action. "
+            "A partial model or no-route search does not prove the task impossible. Retain useful free-form findings, assumptions and open questions in existing workspace revisions or accepted exports. "
             "Submit real actions only with p7_execute_plan. "
-            + ACTOR_FRAME_INSTRUCTION + "\n"
+            + AUTONOMOUS_RESEARCH_GUIDANCE + " " + ACTOR_FRAME_INSTRUCTION + "\n"
             + json.dumps(self.actor_context(), ensure_ascii=False, separators=(",", ":"))
         )
 

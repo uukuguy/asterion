@@ -20,7 +20,7 @@ from asterion.agents.prime.execution import (
 from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.agents.prime.trace import PrimeTraceRecorder
-from asterion.applications.prime.p7.broker import ArcBroker, ArcStatus
+from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
 from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
 from asterion.applications.prime.p7.model_selection import valid_selection_name
@@ -114,13 +114,12 @@ def _launch_selection(command: object) -> tuple[str, str] | None:
 
 
 def _p7_terminal(broker: ArcBroker) -> bool:
-    """Stop model continuation once the broker can no longer accept actions."""
-
+    """Recoverable level failure stays open; RESET is always the actor's choice."""
     try:
-        broker.seal()
-    except Exception:
-        return False
-    return True
+        status = broker.status()
+    except ArcBrokerError:
+        status = broker.terminal_snapshot().status
+    return status.terminal_reason not in {"active", "reset-required"}
 
 
 def _p7_gameplay_terminal(broker: ArcBroker) -> bool:
@@ -228,6 +227,7 @@ class PrimeLaunch:
     compact_events: bool = True
     approved_environment: Mapping[str, str] | None = None
     witness_deadline_monotonic: float | None = None
+    autonomy_deadline_monotonic: float | None = None
 
     def __post_init__(self) -> None:
         lease = self.extension_lease
@@ -253,6 +253,13 @@ class PrimeLaunch:
                 and math.isfinite(self.witness_deadline_monotonic)
                 and self.deadline_seconds == 900.0
                 and time.monotonic() < self.witness_deadline_monotonic <= time.monotonic() + 900
+            ))
+            and (self.autonomy_deadline_monotonic is None or (
+                type(self.autonomy_deadline_monotonic) is float
+                and math.isfinite(self.autonomy_deadline_monotonic)
+                and self.witness_deadline_monotonic is None
+                and self.deadline_seconds == 5400.0
+                and time.monotonic() < self.autonomy_deadline_monotonic <= time.monotonic() + 5400
             ))
             and type(self.tool_registry) is PrimeApplicationToolRegistry
             and not lease.closed
@@ -487,6 +494,7 @@ def build_p7_runtime(
         trace = None if trace_adapter is None else trace_adapter.runtime_recorder
         unbounded = launch is not None and launch.deadline_seconds is None
         witness = launch is not None and launch.witness_deadline_monotonic is not None
+        autonomy = launch is not None and launch.autonomy_deadline_monotonic is not None
         declared = None if launch is None else _launch_selection(launch.approved_command)
         expected_options = dict(_RUNTIME_OPTIONS)
         provider = context.options.get("provider")
@@ -510,6 +518,21 @@ def build_p7_runtime(
             ):
                 raise RuntimeFactoryError(_ERROR)
             expected_options["deadline_ms"] = "900000"
+        if autonomy:
+            from asterion.agents.prime.execution import ASTERION_PRIME_RESEARCH_LIMITS
+            from asterion.agents.prime.continuation import PrimeContinuationBudget, PrimeContinuationController
+            environment = launch.approved_environment or {}
+            if (witness or unbounded or launch.deadline_seconds != 5400.0
+                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "autonomy"
+                or environment.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") != "5400"
+                or type(ipython) is not P7ResearchRuntime
+                or ipython.control._deadline != launch.autonomy_deadline_monotonic
+                or broker.game.target_level != 6 or broker.game.action_cap != 1000
+                or broker.game.action_cap_reason != "action-cap"):
+                raise RuntimeFactoryError(_ERROR)
+            expected_options.update(deadline_ms="5400000", max_callbacks="1024")
+            controller = PrimeContinuationController(PrimeContinuationBudget(
+                launch.autonomy_deadline_monotonic, 6))
         if unbounded:
             # The operator validates OFFLINE authorization before stripping ARC
             # configuration from the model subprocess environment. This seam
@@ -576,20 +599,27 @@ def build_p7_runtime(
             compact_events=launch.compact_events,
             diagnostics=diagnostic_sink,
         )
+        async def outer_admission(round_index, signal):
+            if autonomy and not await controller.admit(round_index, signal):
+                return False
+            return await ipython.admit_round(round_index, signal)
+
         session = AsterionPrimeSession(
             rpc_session=rpc_session,
             extension_binding=binding,
             extension_lease=launch.extension_lease,
             approved_command=launch.approved_command,
             approved_environment=launch.approved_environment,
-            limits=(AsterionPrimeLimits(None, None, None) if unbounded else
+            limits=(ASTERION_PRIME_RESEARCH_LIMITS if autonomy else
+                    AsterionPrimeLimits(None, None, None) if unbounded else
                     AsterionPrimeLimits(ASTERION_PRIME_LIMITS.model_callbacks,
                                        ASTERION_PRIME_LIMITS.tool_callbacks, 900_000)
                     if witness else ASTERION_PRIME_LIMITS),
             completion_predicate=lambda: _p7_terminal(broker),
             continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
                                  else lambda round_index: _p7_continuation_prompt(broker, round_index)),
-            round_admission=ipython.admit_round if type(ipython) is P7ResearchRuntime else None,
+            round_admission=outer_admission if type(ipython) is P7ResearchRuntime else None,
+            reusable_session=autonomy,
             round_diagnostic=_p7_round_diagnostic(trace_adapter),
             failure_diagnostic=getattr(trace_adapter, "record_failure", None),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,

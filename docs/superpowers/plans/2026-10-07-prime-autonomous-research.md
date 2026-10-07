@@ -25,10 +25,10 @@
 
 **Interfaces:** Export `ASTERION_PRIME_RESEARCH_LIMITS = AsterionPrimeLimits(1024,4096,5400000)` while retaining existing default. `PrimeContinuationBudget(deadline_monotonic: float,max_natural_rounds: int)` is frozen; `PrimeContinuationController(budget)` supplies `async admit(round_index,signal)->bool` and a copied/frozen metadata snapshot. Index is zero-based; model callbacks are not natural rounds. Export short `AUTONOMOUS_RESEARCH_GUIDANCE` that asks for optional durable facts/assumptions/open questions, prioritizes actual feedback and lets the actor choose research form.
 
-- [ ] Write and run failing generic tests: a non-ARC fake research goal continues on one Pi session; budget admits indices0..5 and rejects6; expired/cancelled refuses; pause/continuation do not renew deadline; invalid finite/mixed-None limits reject.
-- [ ] Implement the small helper and finite ceiling validation. Session accepts trusted validated finite limits; exact RPC duration/request/launch agreement remains checked. Add `reusable_session=False` opt-in and set it True for autonomy: the existing P7 wrapper had not enabled the kernel reusable mode. Preserve the existing all-None legacy contract without using it for this experiment.
-- [ ] Run `uv run python -m unittest -v tests.test_asterion_prime_session tests.test_prime_round_admission tests.test_pi_rpc_reusable` plus the new policy test module; report named results and modified paths.
-- [ ] Independent review of generic reuse and authority before integration freeze.
+- [x] Write and run failing generic tests: a non-ARC fake research goal continues on one Pi session; budget admits indices0..5 and rejects6; expired/cancelled refuses; pause/continuation do not renew deadline; invalid finite/mixed-None limits reject.
+- [x] Implement the small helper and finite ceiling validation. Session accepts trusted validated finite limits; exact RPC duration/request/launch agreement remains checked. Add `reusable_session=False` opt-in and set it True for autonomy: the existing P7 wrapper had not enabled the kernel reusable mode. Preserve the existing all-None legacy contract without using it for this experiment.
+- [x] Run `uv run python -m unittest -v tests.test_asterion_prime_session tests.test_prime_round_admission tests.test_pi_rpc_reusable` plus the new policy test module; report named results and modified paths.
+- [x] Independent review of generic reuse and authority: two startup findings repaired;90 focused tests pass. Frozen deployment remains Task4.
 
 Implementation contract:
 ```python
@@ -40,15 +40,15 @@ allowed = not signal.cancelled and 0 <= round_index < budget.max_natural_rounds 
 
 ### Task 2: P7 finite cold preset and recoverable terminal adapter
 
-**Ownership:** `src/asterion/applications/prime/p7/operator.py`, `runtime_binding.py`, `research_runtime.py`, `live.py` or prompt resource where necessary, `tools/run_prime_p7_guest.py`, `Makefile`, exact application tests. Separate Sol implementer; no edits to generic files or solver/broker.
+**Ownership:** `src/asterion/applications/prime/p7/operator.py`, `runtime_binding.py`, `research_runtime.py`, `live.py` or prompt resource where necessary, `tools/run_prime_p7_guest.py`, `Makefile`, exact application tests and `tools/p7_guest_environment.txt`. Separate Sol implementer; no edits to generic files or solver/broker.
 
 **Consumes:** Task1 generic research limits/controller/guidance. **Produces:** one explicit `autonomy` guest/operator entry selecting offline fresh target6 with the frozen finite profile; exact launch/runtime/Pi duration agreement and the same origin-absolute task deadline enforced by signal/control/guest. Pi has a separate fixed relative transport ceiling from session open; it cannot enlarge the absolute task authority. Do not silently reinterpret normal solve or witness. Outer-round admission composes generic controller with existing pause/stop, without treating post-tool `admit_round(0)` calls as new rounds.
 
-- [ ] Write failing tests for preset identity and deadline agreement, incompatible witness/resume/competition rejection and state matrix: active/reset-required continue; goal/action cap/nonrecoverable stop.
-- [ ] Implement trusted preset across launch, binding and control. Completion checks task status, not whether `seal()` can produce a failure receipt. Actor performs any RESET. Cold mode explicitly excludes old experience/prefix; no hidden history loading.
-- [ ] Initial/continuation prompts include reusable guidance, actual latest state and retained research references; allow language notes, partial models, local experiments and optional computation. No BP35 solution details.
-- [ ] Validate launcher lifetime covers the same5400 task budget plus bounded cleanup; record metadata separate from solving time. Preserve900 witness and default behavior tests.
-- [ ] Run focused operator/binding/research-runtime/deadline tests and provide launch command/metadata contract for the frozen trial.
+- [x] Write failing tests for preset identity and deadline agreement, incompatible witness/resume/competition rejection and state matrix: active/reset-required continue; goal/action cap/nonrecoverable stop.
+- [x] Implement trusted preset across launch, binding and control. Completion checks task status, not whether `seal()` can produce a failure receipt. Actor performs any RESET. Cold mode explicitly excludes old experience/prefix; no hidden history loading.
+- [x] Initial/continuation prompts include reusable guidance, actual latest state and retained research references; allow language notes, partial models, local experiments and optional computation. No BP35 solution details.
+- [x] Validate launcher lifetime covers the same5400 task budget plus bounded cleanup; record metadata separate from solving time. Preserve900 witness and default behavior tests.
+- [x] Run focused operator/binding/research-runtime/deadline tests and provide launch command/metadata contract for the frozen trial.
 
 Completion contract:
 ```python
@@ -61,10 +61,10 @@ return terminal_reason not in {"active", "reset-required"}
 
 **Ownership:** `src/asterion/applications/prime/p7/solver.py`, `broker.py` only if necessary, `tests/test_prime_p7_solver.py` and focused Broker tests. Root integrates a narrowly scoped patch; final Astra review.
 
-- [ ] Construct a two-step fake plan where the second step's distinguishing cell differs from the plan-start choice. Assert the Broker receives the choice derived from the actual pre-step observation and all cells still receive post-step scoring.
-- [ ] Validate every plan structurally before any dispatch; select the native grounding cell immediately before each action, using the current settled frame. Preserve original immutable candidate cells and full comparisons; mismatch stops suffix.
-- [ ] Examine current-bound no-change probes: only loosen a proven overblock while retaining exact observation identity, novel/preparation bounds, repeated no-effect rejection and unknown-result no-replay. If already admissible, do not add a bypass.
-- [ ] Run the affected solver/Broker matrix and review the actual diff. No actual BP35 frames or routes in tests.
+- [x] Construct a two-step fake plan where the second step's distinguishing cell differs from the plan-start choice. Assert the Broker receives the choice derived from the actual pre-step observation and all cells still receive post-step scoring.
+- [x] Validate every plan structurally before any dispatch; select the native grounding cell immediately before each action, using the current settled frame. Preserve original immutable candidate cells and full comparisons; mismatch stops suffix.
+- [x] Examine current-bound no-change probes: only loosen a proven overblock while retaining exact observation identity, novel/preparation bounds, repeated no-effect rejection and unknown-result no-replay. If already admissible, do not add a bypass.
+- [x] Solver/Broker106 focused tests pass, including per-step frame, one no-change probe and shared32 ceiling; Astra diff review has no blocker. No BP35 solution data in tests.
 
 Selection contract:
 ```python
@@ -81,6 +81,7 @@ cell = next((c for c in cells if c["y"] < len(frame) and c["x"] < len(frame[c["y
 - [ ] Freeze source/wheel/extension hashes and actual `gpt-6.1-sol`/high argv. Use a new external operator root and dedicated provider profile; exclude old solutions, reports and game source from the research worker with an explicit supported filesystem boundary. Tool allowlists alone do not prove that boundary.
 - [ ] Real packaged deployment verification uses the authorized cold profile itself; record the required witness-equivalent package identities and explicit difference from the900-second level-witness command. Do not spend an unrecorded additional model trial.
 - [ ] Run once from zero completed levels and zero restored actions; host supplies only the initial generic task and preauthorized natural continuations. Stop at six or the first finite cap. Do not hot-modify code, notes or plans.
+- [ ] Preserve the trusted research-worker factory on kernel recreation; verify the actual worker protocol under the operator-owned Landlock wrapper before live startup. No unrestricted fallback.
 - [ ] Collect all actions/RESET, per-level edges, natural rounds/model/tool callbacks, real misses versus zero-dispatch rejects, wall time/host gaps, recoveries, stopping reason and cleanup. Preserve failed evidence without promoting partial progress to success.
 - [ ] Compare measured results with the prior arc-skill271-action trajectory and historic P7 successful32/43-action suffixes, explicitly retaining the old total-R&D-cost gap and noncontrolled budget differences. Update the existing standalone HTML and report if useful; synchronize CURRENT/RESUME/DECISIONS/INDEX/JOURNAL and commit.
 

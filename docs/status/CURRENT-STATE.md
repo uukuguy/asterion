@@ -7,12 +7,12 @@
 - Theme-level focus: LLM autonomous reasoning and harness effectiveness; concrete arc-skill/Prime comparison.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-07-prime-autonomous-research.md`; previous WorldMap campaign is historical implementation context.
-- Active work package: user now authorizes layered autonomous-research implementation and one fresh P7 BP35 L1–L6 comparison. Plan fixes5400s/six natural rounds/1000 actions with finite1024 model/4096 tool callbacks. No new run has started; implementation and packaged verification precede the trial. Original arc-skill6of9/271actions remains the baseline; prior analysis-only restriction applies to that completed task, not this new authorization.
+- Active work package: user now authorizes layered autonomous-research implementation and one fresh P7 BP35 L1–L6 comparison. Plan fixes5400s/six natural rounds/1000 actions with finite1024 model/4096 tool callbacks. No new run has started; core implementation/independent review and focused generic90/application229/grounding106 tests are complete; promotion and frozen worker/launch verification precede the trial. Original arc-skill6of9/271actions remains the baseline; prior analysis-only restriction applies to that completed task, not this new authorization.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture
 
-- User-stated direction: the LLM owns research reasoning and strategy; Asterion supplies strong domain-neutral harness, tools, execution constraints and recovery. Minimal public tool contracts support that reasoning. Specific changes to existing WorldMap or other contracts remain undesigned; this direction does not establish new capability evidence.
+- User-stated direction: the LLM owns research reasoning and strategy; Asterion supplies strong domain-neutral harness, tools, execution constraints and recovery. Minimal public tool contracts support that reasoning. The bounded reusable-research plan is now being implemented; existing WorldMap storage is reused rather than replaced. No new solving capability has yet been measured.
 - Python owns composition, application orchestration and execution. The existing Prime session owns model continuation; P7 does not add another runner.
 - Prime owns the persistent Python namespace, finite computation, explicit source/JSON exports and checkpoint recovery. Worker and its async transports live on one bridge event loop through cleanup.
 - P7 supplies immutable `ObservationState` and Broker history, a read-only context/history/frame/artifact service, and versioned WorldMap/task/model/report records. Research code has no injected action channel; this is not an OS sandbox.

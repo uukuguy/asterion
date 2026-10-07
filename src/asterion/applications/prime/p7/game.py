@@ -76,6 +76,7 @@ class P7GameSelection:
     # A local sweep may supply the exact remaining budget for a run.  Keeping
     # this opt-in leaves the normal solve and official contracts unchanged.
     action_cap_override: int | None = None
+    action_cap_reason: str = "human-baseline"
 
     def __post_init__(self) -> None:
         if (
@@ -95,6 +96,8 @@ class P7GameSelection:
                 type(self._metadata_win_levels) is not int
                 or self._metadata_win_levels != len(self._metadata_baseline_actions or ())
             )
+            or type(self.action_cap_reason) is not str
+            or self.action_cap_reason not in {"human-baseline", "action-cap"}
             or self.action_cap_override is not None
             and (
                 type(self.action_cap_override) is not int

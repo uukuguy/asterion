@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 20:53 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-07 22:04 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：通用自主研究与P7冷启动验证
 
@@ -8,7 +8,10 @@
 - 原版arc-skill没有整场/每关固定deadline；RPC/start/search局部限时与online约15min闲置租约分开。旧900秒是P7 witness研发预设；原版实验5400秒为外加总预算。
 - 正式方案[prime-autonomous-research](../superpowers/plans/2026-10-07-prime-autonomous-research.md)：复用Prime自然续轮，通用有限预算/研究指引；P7状态与逐步grounding留应用层。
 - 冻结验证配置：总5400秒、六自然回合、1000总动作、1024 model/4096 tool callbacks，gpt-6.1-sol/high，offline fresh目标六关；不隐性扩大、不热修、不读旧解法、不执行L7或官方卡。
-- 尚未启动新评估。已定位solving completion用seal误把reset-required当终局；当前多cell native grounding选择仍用计划初始帧。实现/测试/打包和独立复审后才启动冻结版本。
+- 方案与授权边界已提交fadef21d。尚未启动评估；两Sol分别实现generic/app，root逐步grounding已复现红测并修复，Astra复审进行中。新发现P7未启用Prime reusable Pi接口，autonomy将明确启用；旧同会话续跑说明需收紧。实现/测试/打包和独立复审后才启动冻结版本。
+
+- 当前源码证据：generic新finite profile/controller与reusable_session opt-in已实现，86项聚焦测试PASS；root逐步grounding/有界当前不变点击/正确action-cap标签的106项测试PASS，Astra Task3复审无阻断。TypeScript35PASS/6外部Pi机制skip；非全量PASS。P7 preset接线完成，227项应用测试PASS/1既有opt-in skip；startup修复后generic90PASS，Astra集成复审无阻断。Landlock worker文件白名单与可信注入/真实worker协议负测正在完成；autonomy要求显式trusted Python wrapper。root发现kernel重建可能回落不受限worker，Sol正在用保留factory修复；冻结前须通过。未运行真实模型。
+- 首次promotion全量4262 tests/335s有17fail：已独立确认15为既有README改版后的旧断言，README与f6c基线字节不变，测试已按当前指南入口/执行边界修正；local全量4262/550.8s确认16fail=同15旧README断言+新generic module未登记core allowlist；allowlist已补，isolated wheel/core/README四项70.785s PASS，Astra复审无阻断。第一次17与本地16存在先后源码快照差别，须最终promotion确认，不假定PASS。准备冻结代码再跑最终gate；formal prep证据根`.asterion-private/p7-cold-bp35-run-20261007T134540Z`，尚无游戏/模型。
 
 ## 已交付：单文件BP35交互解释
 
