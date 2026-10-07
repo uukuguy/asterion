@@ -4,6 +4,8 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-07-04 | 🟢 active | Bounded reusable research implemented; cold target6 failed5/213, actual ARC process audit informs layered candidates |
+| D-2026-10-07-03 | 🟢 active | Distinguish observed model autonomy from outer Codex research and code assistance |
 | D-2026-10-06-08 | 🟢 active | Complete source ancestry, explicit capacity errors and reconciliation of earlier defects |
 | D-2026-10-06-07 | 🟢 active | Diagnose two failed attempts and bind retries to concrete repairs while preserving certified progress |
 | D-2026-10-03-01 | 🟢 active | Solve with partial cognition and refine hypotheses through action feedback |
@@ -1107,9 +1109,15 @@
 
 ## D-2026-10-07-04 — Bounded reusable autonomous research, ARC adapter and cold comparison
 
-- Status: authorized implementation and evaluation; not yet a demonstrated solving capability.
+- Status: implementation/packaged checks verified; frozen cold evaluation ends5of6/213paid at5400 seconds. Six-level target not achieved. Actual process comparison completed; no new code or trial in this analysis.
 - Authority: user explicitly requests P7 optimization, one BP35 L1–L6 comparison and reusable autonomous reasoning infrastructure with ARC-specific layers. This supersedes the completed analysis task's no-code restriction without authorizing L7–L9 or an official card.
 - Decision: reuse the Prime kernel and opt into its reusable Pi lifecycle; a generic continuation budget and research guidance leave research decisions with the actor. P7 owns observation/state, retained domain research, RESET, action grounding and scoring. Completion is distinct from a failed receipt or recoverable game death.
 - Budget: one offline fresh run, total5400 seconds from operator preparation origin, at most six natural rounds/1000 primitive actions/1024 model callbacks/4096 tool callbacks. Default3600 and witness900 presets retain their meaning. The absolute cancellation/control/guest cutoff bounds a separate fixed Pi transport-duration ceiling; no layer renews authority on pause/continue/RESET.
 - Evidence limits: freeze source/package/tool identities before real run; no old solutions or outer game reasoning, no midrun repairs. Tests and implementation do not prove L1–L6 completion; a measured result is required. Existing arc-skill staged271-action evidence is not a controlled causal A/B.
 - Plan: [Prime autonomous research implementation](../superpowers/plans/2026-10-07-prime-autonomous-research.md).
+
+- Post-run finding: L5 autonomously passed30paid/646.165s; L6 unfinished46paid/2174.958s, with15 undo and9 real misses (1 state-reading error,8 explicit negative mechanism experiments). Research did not converge; L6 had no zero-dispatch rejection. ARC retained NOTES, RESET after58 exploration actions, and passed in43 subsequent actions.
+- Interface attribution:50 semantic submissions=29 gate-clearing/21 voluntary; L6=9/6. Negative experiment feedback requires a full revision before another plan, amplifying transactions without proving its exact wall cost. Keep grounding, full scoring and mismatch stopping; consider lighter counterexample recording/atomic revision+plan at application layer.
+- Continuation boundary:1 natural round began,0 completed; no actual continuation. Time was visible, but natural-end-only admission did not create bounded research segments. Generic segment/save/continuation organization and privacy-safe request timing are candidates, not newly verified capability.
+- Timing boundary:58 cells total1.391s; normalized input peaks255820. No complete request UTC/cache split: do not claim CPU exhaustion, network stall, pure thinking latency, lower ARC context, or token-cost ratios. Compare old mature193/6 separately from unknown old R&D total; new213/5 is unsuccessful.
+- Measured analysis: [Cold P7 result and actual ARC process comparison](../reviews/2026-10-07-p7-cold-autonomy-bp35.md), [Offline interactive explanation](../reviews/2026-10-07-bp35-autonomy-explainer.html). Private scalar audit preserves receipt correction and normalized L5 visible-frame equality; neither implies hidden-state equivalence.

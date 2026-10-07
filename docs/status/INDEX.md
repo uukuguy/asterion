@@ -16,7 +16,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 |---|---|---|
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟢 active | Current layered autonomy implementation and fixed cold BP35 L1–L6 trial; default/witness compatibility and evidence limits. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Final official100 result, community PR59, private archive verification, stopped processes and concrete resume commands. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: cold P7 target6 failure5/213 and actual ARC process analysis; prior official100/PR59/archive boundaries retained. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -34,13 +34,13 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../guides/prime-p7-community-reproduction.md` | 🟢 active | Producing-system setup, finite witness and certificate-bound official replay; no private roster bundled. |
 | `../guides/prime-p7-private-research-archive.md` | 🟢 active | Offline private snapshots, exclusions, hashes, retention and isolated restoration. |
 | `../results/arc-agi-3/README.md` | 🟢 active | Final official100 result, producing versions and scoped API-equivalent cost assumptions. |
-| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-07-03 distinguishes observed autonomy from outer research assistance. |
+| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-07-03/04 distinguish outer assistance, failed cold capability and layered research candidates. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | Retained legacy cognition contract; the approved WorldMap/Prime redesign is authoritative for the default solver. |
 | `../reviews/2026-10-05-p7-worldmap-solving-design-review.md` | 🟢 active | Pinned Tycho/Retrodict code comparison supporting the approved design; static research, not capability PASS. |
 | `../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md` | 🟢 active | Original arc-skill/gpt-6.1-sol r11l: WIN/6of6/108actions after one generic continuation; BP35 outer assistance and concrete code/transcript comparison. |
 | `../reviews/2026-10-07-arc-skill-bp35-l5-l6-trial.md` | 🟢 active | Fresh original-skill BP35 reaches6of9/271actions: L5=45/L6=102; outer P7 reasoning diagnosis, Git evidence and actual autonomous correction comparison. |
-| `../reviews/2026-10-07-p7-cold-autonomy-bp35.md` | 🟢 active | Layered autonomous-research implementation, task/tool budget distinction and frozen cold BP35 L1–L6 experiment; result pending. |
-| `../reviews/2026-10-07-bp35-autonomy-explainer.html` | 🟢 active | Standalone offline interactive explanation: original arc-skill trajectory, outer diagnosis, layered implementation and nonrenewing budget; new P7 result pending. |
+| `../reviews/2026-10-07-p7-cold-autonomy-bp35.md` | 🟢 active | Layered research implementation and frozen cold BP35 target6: deadline5completed/213paid, completed actual-process comparison: research nonconvergence, revision amplification, unused continuation and latency limits. |
+| `../reviews/2026-10-07-bp35-autonomy-explainer.html` | 🟢 active | Standalone offline interactive explanation: original arc-skill trajectory, outer diagnosis, layered implementation and nonrenewing budget; P7 target6 failure5/213 and interactive actual-process comparison; no new implementation claimed. |
 | `../reviews/2026-10-05-p7-worldmap-implementation-review.md` | 🟢 active | Implementation review, corrected integration boundaries, background console verification and packaged live evidence. |
 | `../superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md` | 🟢 active | Prime/P7 solver, console and experience reuse worklist; console verified, current failure-experience and deployment evidence are indexed in the active checkpoint. |
 | `../superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` | 🟢 active | Whole solver/console redesign, evidence reuse and source-bound save-time replay preparation and ready-only25-game/183-level initial views; evaluation/deployment boundaries remain in the active checkpoint. |

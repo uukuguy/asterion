@@ -4306,3 +4306,16 @@
 - 2026-10-07 22:30 CST — Frozen cold P7 passes L1 around13minutes/31paid, first natural round continues without outside hints.
 - 2026-10-07 22:34 CST — Cold actor handles recoverable GAME_OVER with paid RESET itself;same natural round/deadline, no outside intervention.
 - 2026-10-07 22:42 CST — Cold P7 passes L2;static audit records remaining revise/plan ceremony without live attribution or hot repair.
+- 2026-10-07 22:42 CST — 7347a3a2 records static tool friction and live progress;preserves frozen run and pending capability conclusion.
+- 2026-10-07 22:51 CST — Frozen cold P7 passes L3 around33minutes/114paid;two actor RESETs, no outer solving, first natural round active.
+- 2026-10-07 23:01 CST — Frozen cold P7 passes four levels/137paid around44minutes;enters specified L5 without outer solving or code changes.
+- 2026-10-07 23:12 CST — Frozen cold P7 autonomously passes specified L5 around54minutes/167paid;enters L6 without outside solving or hot edits.
+
+## 2026-10-08
+- 2026-10-08 00:01 CST — Frozen cold deadline5400s ends5levels/213paid,target6FAIL;owned cleanup10.469s and15frozen hashes verified.
+- 2026-10-08 00:01 CST — Correction:L1actual26paid;previous31was monitor post-pass sample. Finaledges26/73/114/137/167, L6unfinished46.
+- 2026-10-08 00:01 CST — User requires main failure mechanisms against actual arc-skill process; no further source edits or model trial.
+- 2026-10-08 00:12 CST — Actual ARC/P7 process audit: L6 serial experiments failed to converge;15undo,9miss,15revisions=9gate/6voluntary;no L6 zero-dispatch.
+- 2026-10-08 00:12 CST — Normalized ARC hex palette verifies same L5 visible opening;no hidden-state equivalence. First natural P7 round never ended.
+- 2026-10-08 00:12 CST — Cells total1.391s,input peak255820;request clocks/cache split missing. Layered next candidates remain unimplemented.
+- 2026-10-08 00:15 CST — ARC/P7 actual-process HTML and report final review clear;19DOM/static checks,docs286files/131links,diff PASS;docs-only,no new trial.

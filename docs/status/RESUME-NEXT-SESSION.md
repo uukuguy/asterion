@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-07 22:42 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 00:15 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：通用自主研究与P7冷启动验证
 
@@ -15,9 +15,14 @@
 - actual Landlock wrapper协议、numpy、持续2cells/2workers恢复、repo/旧arc/game/auth/proc读取拒绝均PASS。worker factory在kernel重建保留，无不受限fallback；只是明确文件权限边界，不声称完整OS sandbox。
 - root22:16授权后正式UTC14:17:18.698119/CST22:17:18启动；UTC15:47:18.697877/CST23:47:18截止。owned guestunit`asterion-p7-012720cc4c7c462b9d33112abd76602b.service`，operator/orb/caffeinate PID43432/43435/43434，run`p7-live-20261007141718-ec11793657c33f54592b3b4a`。总5400秒从guestlauncher单调origin计、不续期；最多6自然轮/1000动作/目标6；180秒清理另计，不授予新动作。
 - 新报告/launch recovery记录提交`31a7ccc3`；仅文档改动，frozen production仍b696496d。docs-check286Markdown/129本地链接及diff-check通过。
-- 当前进展receipt UTC2026-10-07T14:42:11.531295+00:00：2/6、79paid、round1，仍存活。L1/L2已通过；模型自行GAME_OVER后RESET，无operator解题/恢复。终局逐关边界待审计。
-- 后续静态工具摩擦审计：initial/miss/RESET/level edge/kernel校准仍须先结构revise再plan；action_labels提示要求与optional schema不一致，NOT_FINISHED单独预测校验歧义。不能归因live耗时；不热修。私有tool-friction-audit.md，公开新报告补充；HTML预算交互13DOM checks PASS，Native/视觉viewport未验收。
-- 正式运行期间只监控元数据，不进行外围关卡分析/定向提示/热修/扩预算；不执行L7或官方卡。保留操作者console PID52024/56659。下一动作：读trial agent进展与终局收据，待终局独立审计，再更新报告/HTML/状态并提交。
+- 正式终局：host guard UTC15:47:18.770301/5400.072秒停止，清理UTC15:47:29.278923/5410.581秒结束。主SDK/trace确认5completed/213paid，target6未达；1自然轮、0自然结束、171usage（非直接modelcallback数）。L1–5实际过关seq26/73/114/137/167，新增26/47/41/23/30；L6未完46。RESET只L2/L3各1。
+- 清理核验：owned host43432/43435/43434、guest264179/264198/264215均不存在，unitnotfound/MainPID0，auth删除/caffeinate退出；原operator console保留。15项source/wheel/wrapper/config hash一致。保存验证另重放full213/prefix167，在cleanup内，不叠加主解题动作。
+- 原operator-final-receipt误将solution-certificates当第2run，final_metrics为0；保留原文，operator-final-metadata-correction与真实summary/账本纠正，不能声称0paid或2解题run。此前monitor L1“31”是过关后采样，真实边缘26。
+- 用户最新要求：超时且动作增加，优化不理想；须把主因分析清楚，并与arc-skill实际过程逐段对照。当前仅事后分析，不继续修改源码/开新model trial/延长旧预算。Trial agent核统计时/hash/cleanup，Astra审actor机制与ARC对照，Sol审harness/事务/上下文开销；root整合报告/HTML与状态。
+- 已知静态门槛：initial/miss/RESET/level edge/kernel校准仍须先结构revise再plan。实际50次model_revision中强制与主动分别核算，不能把全部归罪流程；L6 15rev、16plans、14cells/1checkpoint、15撤销、9真实miss，研究未收敛，29硬门槛/21主动。L6=9硬/6主动；9miss中1状态误读/8显式阴性机制试验，没有L6零派发阻塞。Native未测。
+- L5 visible frame独立核实：新P7 seq137、旧seq118与ARC event124最终64×64帧全等；ARC十六进制palette转整数消除原raw编码差异，canonical SHA6dc1bdb2…afdd5。未换event，不证明隐藏状态/上下文等价。
+- 已完成实际过程审计：P7 L5自主补图/校准/候选30步通过；L6晚验关键假设、15undo及串行陰性实验未收敛。ARC局部观察/10NOTES/9短Python、保留学习后RESET，再43步通过，无BFS/rules使用。P7强制档案门槛放大反馈事务，但不解释全部壁钟。58cells1.391s，input峰255820；无请求级时钟/cache拆分，不能断言网络/纯思考或计算费用倍率。
+- 当前分析请求已完成：报告与自包含HTML新增真实过程对照；Astra最终复审无阻断，13既有+6新增DOM/static checks通过，docs-check286files/131links及diff-check通过，无真实浏览器视觉验收。只改文档，无源码/模型/游戏新运行。后续候选为通用有界研究段/计量，应用轻量反例与原子revision+plan，ARC观察helper；尚未实施，无新模型/游戏授权，不把失败改成能力PASS。
 
 ## 已交付：单文件BP35交互解释
 
