@@ -3,11 +3,12 @@
 ## Project Snapshot
 
 - Project: Asterion composable multi-runtime agent framework; native Prime / P7 research application.
-- Current branch: `main`.
+- Current branch: `feat/prime-research-notes`.
 - Theme-level focus: LLM autonomous reasoning and harness effectiveness; concrete arc-skill/Prime comparison.
 - Project route: managed.
-- Canonical worklist: `docs/superpowers/plans/2026-10-07-prime-autonomous-research.md`; previous WorldMap campaign is historical implementation context.
-- Active work package: frozen layered-research implementation is packaged; the one cold BP35 target6 trial ended at5400 seconds with5 completed/213paid, target NOT achieved. L1–5 paid26/47/41/23/30; L6 unfinished46. User now requests clear failure-mechanism analysis against actual arc-skill process and old P7 mature-route costs. No new source changes or trials are authorized by this analysis steering. Original arc-skill6of9/271actions remains the baseline; post-run process audits are complete: L6 research did not converge, 15 undo actions and serial negative experiments consumed actions; mandatory revisions amplify transactions. One natural round never completed, so continuation was not exercised. Request-level latency attribution remains unavailable. See the cold-trial report and offline HTML.
+- Canonical worklist: `docs/superpowers/plans/2026-10-08-prime-research-notes.md`; previous cold comparison is completed failure evidence.
+- Active work package: user authorized generic research memory plus P7 NOTES design and implementation. Immutable freeform snapshots, model-only Pi projection, P7 current-observation/revision binding; no new runner. Verification includes focused tests, package promotion and one bounded real level witness.
+- Prior cold evaluation: frozen layered-research implementation is packaged; the one cold BP35 target6 trial ended at5400 seconds with5 completed/213paid, target NOT achieved. L1–5 paid26/47/41/23/30; L6 unfinished46. User now requests clear failure-mechanism analysis against actual arc-skill process and old P7 mature-route costs. No new source changes or trials are authorized by this analysis steering. Original arc-skill6of9/271actions remains the baseline; post-run process audits are complete: L6 research did not converge, 15 undo actions and serial negative experiments consumed actions; mandatory revisions amplify transactions. One natural round never completed, so continuation was not exercised. Request-level latency attribution remains unavailable. See the cold-trial report and offline HTML.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture

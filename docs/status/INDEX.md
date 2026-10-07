@@ -14,7 +14,9 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | Purpose |
 |---|---|---|
-| `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟢 active | Current layered autonomy implementation and fixed cold BP35 L1–L6 trial; default/witness compatibility and evidence limits. |
+| `../superpowers/specs/2026-10-08-prime-research-notes-design.md` | 🟢 active | User-approved generic research-memory/P7 split, freeform NOTES and actual model-view replacement. |
+| `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | Active implementation: Python immutable notes, TS native context projection, operator integration and bounded deployment check. |
+| `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: cold P7 target6 failure5/213 and actual ARC process analysis; prior official100/PR59/archive boundaries retained. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |

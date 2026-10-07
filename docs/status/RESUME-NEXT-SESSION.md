@@ -1,12 +1,21 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 00:34 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 07:01 CST. **Session remains active — not a final handoff.**
 
-## 当前执行：上下文研究记忆审计（原冷启动已结束）
+## 当前执行：实现通用研究记忆与P7 NOTES
+
+- 用户已明确说“P7的NOTES具体如何设计实现，请继续”，随后再次要求通用/P7分层；此前只读分析限制已由本次实施授权替代。
+- 当前分支feat/prime-research-notes，实施计划docs/superpowers/plans/2026-10-08-prime-research-notes.md；spec同日prime-research-notes-design.md。
+- 已定合同：generic immutable memory无active pointer，现有ResearchWorkspace current pointer唯一commit；notes op精确base_revision/observation_ref/text，16KiB UTF8有限自由文本；现代operator选notes，旧Solver构造/legacy保留。
+- TS通过Pi native context hook投影modelview，trusted context_memory私有envelope含version/revision/content/commit；真实callback id作anchor，完整工具组边界后才cut，rawsession不改。首次实际prompt在追加board前经set_memory_instructions注入，防止删任务说明或保留旧初始board。
+- 分工notes_python owns memory/research/solver/runtime/projection/experience/tests；notes_extension owns TS/schema/bundle/tests；root owns operator/prompt/Pythonmetadata/coreallowlist/docs；Astra notes_contract最终复审。全部在同一共享工作区，禁止互相回滚。
+- 下一动作：完成实现与集成，TS→Python→promotion顺序检查；一次隔离r11l LEVEL1≤900s真实witness验证包/扩展/notes，不跑BP35全套/官方card。原控制台保留。仅测试不能证明六关能力。
+
+## 已完成：上下文研究记忆审计
 
 - 最新用户判断：历史应帮助推理，进入L5无需常驻L1–L4完整过关轨迹；要求理解arc-skill NOTES并反思P7。只读审计已明确：外部WorldMap更新不替换Pi旧消息。NOTES十版整体覆盖511–915bytes，L5final666bytes/9行，L6final779bytes/9行；P7单WorldMap max1873bytes/median1485bytes。NOTES不是ARC全部context，ARC Stage2peak220388tokens。
 - 精确校正：execute_plan只交付最终观察/逐步反馈/未执行后缀，不含完整workspace；IPython无自动fullcontext。b5 ACK/boardcodec仍在。context-witness未P7接线；compact_events只缩Python收到的事件。usage127峰255820紧接128降41315，均在seq167/L6首动作前，不能把L6全程迟缓归25.6万input。
-- 当前方向：模型维护有效事实/假设/反例/当前问题，harness同步模型视图，完整原始执行按引用查询；换关仅迁移仍适用认识。格式由LLM选择，不新增刚性必填表。未实现、未开新模型/游戏。报告及HTML已补规模/机制/边界；私有context-design-audit.md、context-volume-audit.md、arc-notes-memory-audit.md位于既有preparation目录。
+- 当前方向：模型维护有效事实/假设/反例/当前问题，harness同步模型视图，完整原始执行按引用查询；换关仅迁移仍适用认识。格式由LLM选择，不新增刚性必填表。未实现、未开新模型/游戏。报告及HTML已补规模/机制/边界，提交b8701a01；两项独立复审与13DOM/docs/diff检查通过，未push；私有context-design-audit.md、context-volume-audit.md、arc-notes-memory-audit.md位于既有preparation目录。
 - 用户新增授权：核实arc-skill截止机制，实施分层自主研究改进，再用P7 cold BP35 L1–L6验证。上一分析任务“不改P7”已结束，不能误当本任务禁令。
 - 原版arc-skill没有整场/每关固定deadline；RPC/start/search局部限时与online约15min闲置租约分开。旧900秒是P7 witness研发预设；原版实验5400秒为外加总预算。
 - 正式方案[prime-autonomous-research](../superpowers/plans/2026-10-07-prime-autonomous-research.md)：复用Prime自然续轮，通用有限预算/研究指引；P7状态与逐步grounding留应用层。

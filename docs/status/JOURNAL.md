@@ -4323,3 +4323,5 @@
 - 2026-10-08 00:34 CST — Context audit: NOTES511–915bytes,WorldMapmax1873bytes;external memory updates do not replace Pi history;no code/trial.
 - 2026-10-08 00:34 CST — Input peak255820 precedes L6firstaction,then41315;ARCpeak220388 prevents comparing notesbytes with whole-contexttokens.
 - 2026-10-08 00:36 CST — Memory audit independently reviewed;13DOM checks,docs286files/135links,diff PASS;notes/WorldMap bytes distinguished from provider tokens.
+- 2026-10-08 00:37 CST — b8701a01 records NOTES lifecycle and P7 memory/history gap to redirect context design toward useful research knowledge.
+- 2026-10-08 07:01 CST — User authorizes generic/P7 NOTES implementation; selected native model-view projection, immutable memory and one bounded deployment witness.
