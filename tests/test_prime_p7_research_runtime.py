@@ -37,6 +37,34 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_kernel_recovery_reuses_explicit_worker_factory_and_wrapper(self):
+        import shlex
+        import sys
+        from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
+        marker = self.root / 'wrapper-starts.txt'
+        wrapper = self.root / 'trusted-research-python'
+        wrapper.write_text('#!/bin/sh\n'
+                           + 'printf "started\\n" >> ' + shlex.quote(str(marker)) + '\n'
+                           + 'exec ' + shlex.quote(sys.executable) + ' "$@"\n')
+        wrapper.chmod(0o700)
+        calls = []
+        def factory():
+            calls.append(wrapper)
+            return SubprocessPythonWorker(python=wrapper)
+        host = P7ResearchRuntime(broker=self.broker, trace_client=self.trace,
+            run_root=self.root, run_id=self.run_id, deadline_seconds=30,
+            event_sink=lambda *_: None, worker_factory=factory)
+        self.addAsyncCleanup(host.close)
+        first = await host.execute('first-restricted-start', 'print(1)', _Signal())
+        self.assertEqual(first.status, 'ok')
+        lost = await host.execute('lose-restricted-worker', 'import os; os._exit(0)', _Signal())
+        self.assertEqual(lost.status, 'error')
+        restored = await host.execute('second-restricted-start', 'print(2)', _Signal())
+        self.assertEqual(restored.status, 'ok')
+        self.assertEqual(calls, [wrapper, wrapper])
+        self.assertEqual(marker.read_text().splitlines(), ['started', 'started'])
+        self.assertEqual(self.engine.calls, [])
+
     async def test_actor_revision_ack_does_not_repeat_context_and_read_stays_complete(self):
         value = draft()
         before = self.host.current_context()
