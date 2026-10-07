@@ -1,6 +1,14 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 07:29 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 07:39 CST. **Session remains active — not a final handoff.**
+
+## 当前执行：冻结NOTES版BP35 L1–L6对比
+
+- 用户在NOTES完成答复后说“继续”，本轮推进下一项有限BP35比较；沿用5400s总预算/max6自然轮/1000动作/1024model/4096tool、gpt6.1sol/high、offline seed0、目标6。不是900s每关，不续期，不自动跑L7或官方卡。
+- Production ebcefec9，当前HEAD f9ee5ee6只包含后续测试/文档。用已验证wheel7a599c0139e35c043329179f3d8badea8cee7a95f2767480a6944337cc0250a3；不重复未变更的promotion。
+- notes_bp35_trial负责.asterion-private/p7-notes-bp35-20261008/和唯一新外部root的私有launcher/隔离/监控/cleanup。READY后root独立复核再GO。当前未开始模型或游戏。保留原console PID52024/56659。
+- baseline-audit.md已准备：旧cold5/213/5400s、ARC6/271与旧成熟32/43分别比较；notesbytes不等于providerinput。游戏正在运行时不向actor提供外围诊断/答案或改代码。
+- 下一动作：准备冷root和worker restriction probe、冻结identity、独立preflight后启动一次有限运行；最终按真实账本/笔记/投影/时钟核结论，继续更新同一canonical plan Task4。
 
 ## 已完成：通用研究记忆与P7 NOTES实现和有限部署验证
 

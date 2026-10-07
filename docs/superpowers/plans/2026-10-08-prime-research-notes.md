@@ -53,3 +53,16 @@
 - [x] Record implemented/verified/not-observed boundaries, update state/index/journal and commit all substantive changes.
 
 Completion evidence: [implementation and bounded witness](../../reviews/2026-10-08-prime-research-notes.md). Production ebcefec9; installed fixture44091934. BP35 performance remains unmeasured.
+
+## Task4 — Frozen cold BP35 L1–L6 comparison (user continued2026-10-08)
+
+**Status:** preparing one run; NOTES implementation and r11l deployment remain complete.
+
+**Scope:** offline BP35/seed0 from an empty isolated root; exact deployed NOTES productionebcefec9, gpt-6.1-sol/high; existing5400-second absolute task budget, at most6 natural rounds,1000 primitive actions,1024 model callbacks,4096 tool callbacks. At target6 or any terminal/budget boundary stop and retain failure as evidence. Existing180-second cleanup grace is not more solving time. No L7–L9, official card, outer game hints, old answers or midrun repair.
+
+- [ ] Prepare new root/profile and frozen wheel/source/wrapper identities; verify actual provider-free worker restriction/recovery, then independent preflight.
+- [ ] Run once through L6 or the finite boundary, keeping raw evidence and natural continuation; preserve the pre-existing console.
+- [ ] Independently verify actions/RESET/per-level clocks, NOTES ancestry/size/current scope, model input usage, real context projection, source identity and owned-process cleanup.
+- [ ] Compare actual research and outcomes with previous P7 and original arc-skill; distinguish context reduction from solving quality and measured correlation from causality. Commit report and recovery state.
+
+Raw evidence stays private under `.asterion-private/p7-notes-bp35-20261008/`. Root owns public state/report; the trial agent owns only its private harness/evidence/isolated root. Source implementation stays frozen throughout this package.

@@ -15,10 +15,10 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | File | Status | Purpose |
 |---|---|---|
 | `../superpowers/specs/2026-10-08-prime-research-notes-design.md` | 🟢 active | User-approved generic research-memory/P7 split, freeform NOTES and actual model-view replacement. |
-| `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | Completed implementation and r11l L1 deployment verification; BP35 efficiency not remeasured. |
+| `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | NOTES implementation/r11l deployment complete; Task4 is the authorized frozen BP35 comparison. |
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: NOTES implementation/r11l deployment complete; BP35 improvement unmeasured; prior cold failure/official100/archive retained. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: preparing one frozen NOTES BP35 L1–L6 comparison; prior cold failure/official100/archive retained. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
