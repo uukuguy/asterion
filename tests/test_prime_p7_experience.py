@@ -13,6 +13,26 @@ from tests.test_prime_p7_solver import _Kernel, draft
 
 
 class TestExperience(unittest.TestCase):
+    def test_notes_source_is_hash_scoped_readonly_prior_and_corruption_rejects(self):
+        run, workspace = self.source()
+        source = {'run_id': run.name, 'attempt_id': run.name, 'level': 1,
+                  'sequence': 0, 'observation_sha256': digest({'observation': 'opaque'})}
+        boundary = {'level': 1, 'reset_sequence': 0, 'kernel_generation': 'real-generation'}
+        noted = workspace.save_notes(base_revision=workspace.revision,
+                                    observation_ref=source, boundary=boundary,
+                                    text='model-authored prior: hypothesis remains unverified')
+        bundle = self.load()
+        self.assertEqual(bundle.context()['available_count'], 1)
+        research = bundle.read(run.name, 'research')['items'][0]
+        self.assertEqual(research['notes']['text'], noted['notes']['text'])
+        self.assertEqual(research['notes']['observation_ref'], source)
+        path = workspace.memory.root / 'revisions' / (noted['notes_revision'][7:] + '.json')
+        before = path.read_bytes()
+        path.write_bytes(before.replace(b'unverified', b'now-verified'))
+        self.assertEqual(self.load().context()['available_count'], 0)
+        with self.assertRaises(ValueError):
+            bundle.read(run.name, 'research')
+
     def test_legacy_animation_bypasses_metadata_totals_and_reads_only_requested_page(self):
         from asterion.agents.prime.trace import _entry_digest
         from asterion.applications.prime.p7.console_events import SCHEMA

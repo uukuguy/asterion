@@ -1,6 +1,8 @@
 import { closeSync, read, write } from "node:fs";
 import { TextDecoder } from "node:util";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
+import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
+export { CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
@@ -716,6 +718,13 @@ export const P7_WORKSPACE_PARAMETERS = TypeUnion([
   TypeObject({ op: TypeLiteral('revise'), base_revision: EXPORT_ID, worldmap: WORLDMAP_PARAMETERS,
     task: TASK_PARAMETERS, evidence_sequences: TypeArray(TypeInteger({ minimum: 0 }), { minItems: 1, maxItems: 128, uniqueItems: true }),
     correction: CORRECTION_PARAMETERS }, { additionalProperties: false }),
+  TypeObject({ op: TypeLiteral("notes"), base_revision: EXPORT_ID,
+    observation_ref: TypeObject({run_id: ID,attempt_id: ID,level: TypeInteger({minimum:1}),
+      sequence: TypeInteger({minimum:0}),observation_sha256: EXPORT_ID}, {additionalProperties:false}),
+    text: TypeString({minLength:1,maxLength:16384}) }, {additionalProperties:false}),
+  TypeObject({op: TypeLiteral("notes_read"),revision: TypeOptional(EXPORT_ID)}, {additionalProperties:false}),
+  TypeObject({op: TypeLiteral("notes_history"),start: TypeOptional(TypeInteger({minimum:0})),
+    limit: TypeOptional(TypeInteger({minimum:1,maximum:32}))}, {additionalProperties:false}),
 ]);
 const ACTION_PARAMETERS = TypeUnion([
   TypeObject({ name: TypeUnion([TypeLiteral("RESET"), TypeLiteral("ACTION1"), TypeLiteral("ACTION2"), TypeLiteral("ACTION3"), TypeLiteral("ACTION4"), TypeLiteral("ACTION5"), TypeLiteral("ACTION7")]),
@@ -741,9 +750,9 @@ export const P7_EXECUTE_PLAN_PARAMETERS = TypeObject({
 const P7_FRAME_DELIVERY_DESCRIPTION = " Boards may use the lossless palette-row-dictionary/v1 encoding: row_ids selects rows and each row character selects its literal numeric pixel through symbols and palette; shape preserves the singleton frame layer if present. Numeric frames with frame_delivery.encoding=raw are already decoded. Read the exact raw 2D settled board in IPython with p7_research.frame(sequence), using observation_ref.sequence. settled_frame_sha256 identifies the pixel grid, separately from observation_sha256.";
 const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   { name: "p7_workspace", method: "workspace", parameters: P7_WORKSPACE_PARAMETERS,
-    description: "Start with op revise: directly record a concise Chinese WorldMap and task from the current observation, using exact base_revision and evidence_sequences containing the current sequence. Include action_labels on every revision: you judge each currently available action from real visual/action evidence and directly write its short label, purpose, confidence and current-run evidence; unknown/conflicting meanings use null labels. No IPython, program model or prior certification is required. Revise again once after a mismatch, RESET or level advance; matched plans may reuse the revision. Revise retains prior program/report evidence and never certifies new prose. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Revise/publish success returns an acknowledgement with current refs, controls, correction and validation flags; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
+    description: "Use op notes with the exact current base_revision and observation_ref to replace your freeform research NOTES (at most 16 KiB UTF-8). Select useful observations, hypotheses, counterexamples, questions and plans yourself; no required headings, WorldMap, task or action labels. Save fresh notes after a mismatch, RESET, level advance or kernel recovery before acting again. Accepted notes update workspace_revision and replace earlier model history with the current notes/context at a complete tool boundary; raw evidence remains queryable. Read accepted notes with notes_read (optional revision), or page newest-first accepted notes_history (optional start, limit 1–32). Optional revise/publish retains prior program/report evidence and never certifies new prose or substitutes for required fresh NOTES. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Write success returns an acknowledgement with current refs and controls; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
   { name: "p7_execute_plan", method: "execute_plan", parameters: P7_EXECUTE_PLAN_PARAMETERS,
-    description: "Submit one short actor plan from the current observation_ref and a nonempty semantic workspace_revision. If needs_revision is true, first use p7_workspace op revise (or publish) with current evidence; partial rules and unknown goals are sufficient. Each of 1–20 actions needs explicit key-cell, frame, state or progress predictions. The unique Broker executes sequentially and stops the suffix on mismatch, pause or a level boundary. Returns actual feedback, unexecuted steps and needs_revision/revision_reason. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
+    description: "Submit one short actor plan from the current observation_ref and current workspace_revision. If needs_revision is true in NOTES mode, first use p7_workspace op notes with the current observation; freeform partial knowledge and unknown goals are sufficient. Each of 1–20 actions needs explicit key-cell, frame, state or progress predictions. The unique Broker executes sequentially and stops the suffix on mismatch, pause or a level boundary. Returns actual feedback, unexecuted steps and needs_revision/revision_reason. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
 ]);
 
 export function toolNames(): string[] {
@@ -773,28 +782,44 @@ function makeMethodTool(
         ? (input as Record<string, unknown> | null | undefined)?.[inputKey] ?? null
         : input;
       const result = await bridge.callMethod(id, method, params, signal);
+      const record = memoryRecord(result);
+      let visibleResult = result;
+      let details = result;
+      if (record && Object.hasOwn(record,"context_memory")) {
+        const {context_memory: privateEnvelope, ...publicResult} = record;
+        visibleResult = publicResult;
+        const envelope = parseMemoryEnvelope(privateEnvelope);
+        const accepted = method === "workspace" && memoryRecord(input)?.op === "notes"
+          && record.status === "noted" && record.notes_revision === envelope?.revision;
+        const trusted = envelope && (!envelope.commit || accepted)
+          && !["rejected","cancelled","lost","processing-blocked"].includes(String(record.status));
+        // The actual native successful toolResult establishes the checkpoint.
+        // Merely completing this callback does not establish a model cut.
+        details = trusted ? {...publicResult,context_memory:envelope,
+          ...(envelope.commit ? {context_memory_anchor:id} : {})} : publicResult;
+      }
       let text: string;
       try {
-        const serialized = JSON.stringify(result);
+        const serialized = JSON.stringify(visibleResult);
         if (
-          result !== null
-          && typeof result === "object"
-          && !Array.isArray(result)
-          && typeof (result as Record<string, unknown>).cognition_narrative_zh === "string"
+          visibleResult !== null
+          && typeof visibleResult === "object"
+          && !Array.isArray(visibleResult)
+          && typeof (visibleResult as Record<string, unknown>).cognition_narrative_zh === "string"
         ) {
-          const structured = { ...(result as Record<string, unknown>) };
+          const structured = { ...(visibleResult as Record<string, unknown>) };
           const narrative = structured.cognition_narrative_zh as string;
           delete structured.cognition_narrative_zh;
           text = narrative + "\n\n结构化证据（程序校验用）：\n" + JSON.stringify(structured);
         } else {
-          text = serialized === undefined ? String(result) : serialized;
+          text = serialized === undefined ? String(visibleResult) : serialized;
         }
       } catch {
-        text = String(result);
+        text = String(visibleResult);
       }
       return {
         content: [{ type: "text", text }],
-        details: result,
+        details,
       };
     },
   };
@@ -818,6 +843,63 @@ export function createAppLevelTools(bridge: IpythonBridge): MethodTool[] {
 export function createLegacyAppLevelTools(bridge: IpythonBridge): MethodTool[] {
   return [...P7_LEGACY_TOOL_SPECS].sort((a, b) => a.name.localeCompare(b.name)).map((spec) =>
     makeMethodTool(bridge, spec.name, spec.description, spec.parameters, spec.method, spec.inputKey));
+}
+
+/** Recover only extension-validated metadata from actual successful native results. */
+export function recoverP7MemoryContext(controller: MemoryContextController, entries: readonly unknown[]): void {
+  for (const raw of entries) {
+    const entry = memoryRecord(raw);
+    if (entry?.type !== "message") continue;
+    const message = memoryRecord(entry.message);
+    if (message?.role !== "toolResult" || message.isError !== false
+      || !["p7_workspace","p7_execute_plan"].includes(String(message.toolName))
+      || typeof message.toolCallId !== "string") continue;
+    const details = memoryRecord(message.details);
+    const envelope = parseMemoryEnvelope(details?.context_memory);
+    if (!envelope || !details) continue;
+    if (envelope.commit && (message.toolName !== "p7_workspace" || details.status !== "noted"
+      || details.notes_revision !== envelope.revision || details.context_memory_anchor !== message.toolCallId)) continue;
+    controller.accept(message.toolCallId,envelope);
+  }
+}
+
+interface MemoryExtensionApi {
+  on(event: "context", handler: (event: unknown, context: unknown) => unknown): unknown;
+}
+
+/** Pi owns prompt/tools; this hook changes only its cloned conversation view. */
+export function registerP7MemoryContext(pi: unknown): boolean {
+  const api = memoryRecord(pi);
+  if (!api || typeof api.on !== "function") return false;
+  let lastOutcome: string | undefined;
+  (pi as MemoryExtensionApi).on("context", (rawEvent,rawContext) => {
+    const event = memoryRecord(rawEvent);
+    if (event?.type !== "context" || !Array.isArray(event.messages)) return undefined;
+    try {
+      // Rebuild from the selected branch on each request: navigation/reload must
+      // not inherit a checkpoint belonging to another branch.
+      const controller = new MemoryContextController();
+      const context = memoryRecord(rawContext);
+      const manager = memoryRecord(context?.sessionManager);
+      let entries: unknown = event.messages.map(message => ({type:"message",message}));
+      if (manager && typeof manager.getBranch === "function") entries = manager.getBranch();
+      if (!Array.isArray(entries)) return {messages:event.messages};
+      recoverP7MemoryContext(controller,entries);
+      const projected = controller.project(event.messages);
+      const safeOutcome = JSON.stringify(projected.outcome);
+      if (projected.outcome.status !== "inactive" && safeOutcome !== lastOutcome) {
+        console.error("[prime-context-memory] " + safeOutcome);
+        lastOutcome = safeOutcome;
+      }
+      return {messages:projected.messages};
+    } catch {
+      // Pi catches extension exceptions, so an exception is not a request fence.
+      // A projection failure explicitly preserves every original message.
+      console.error('[prime-context-memory] {"status":"projection-unavailable"}');
+      return {messages:event.messages};
+    }
+  });
+  return true;
 }
 
 export function createIpythonTool(bridge: IpythonBridge) {
@@ -853,6 +935,7 @@ export function register(pi: ExtensionApi, dependencies?: unknown): void {
     if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") throw unavailable();
     const bridge = createIpythonBridge(descriptor);
     witness = registerContextWitnessFromEnvironment(pi, dependencies);
+    registerP7MemoryContext(pi);
     pi.registerTool(createIpythonTool(bridge));
     const mode = process.env.ASTERION_PRIME_P7_TOOL_MODE;
     if (mode !== undefined && mode !== "research" && mode !== "legacy") throw unavailable();

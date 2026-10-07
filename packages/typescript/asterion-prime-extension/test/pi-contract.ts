@@ -67,6 +67,11 @@ const shortPlan: Static<typeof P7_EXECUTE_PLAN_PARAMETERS> = {
   workspace_revision: "sha256:" + "b".repeat(64), goal: "移动", purpose: "probe", assumptions: [],
   steps: [{ action: { name: "ACTION1", data: {} }, expect: { cells: [{x: 0, y: 0, value: 1}] } }],
 };
+const researchNotes: Static<typeof P7_WORKSPACE_PARAMETERS> = {
+  op:"notes",base_revision:"sha256:" + "b".repeat(64),text:"当前研究记录。",
+  observation_ref:shortPlan.start,
+};
+const notesHistory: Static<typeof P7_WORKSPACE_PARAMETERS> = {op:"notes_history",start:0,limit:16};
 
 void registeredTool;
 void registeredResult;
@@ -75,3 +80,5 @@ void workspaceRead;
 void workspaceFocus;
 void semanticRevision;
 void shortPlan;
+void researchNotes;
+void notesHistory;

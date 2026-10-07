@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 
 from .score import canonical_bytes, digest
+from asterion.agents.prime.memory import ResearchMemoryStore
 
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _OPERATIONS = {"analyze", "model", "validate", "search", "probe", "execute"}
@@ -157,6 +158,27 @@ def correction(value: object, latest: int) -> dict:
     return copy_json(value)
 
 
+def notes_attachment(record: dict, scope: Mapping) -> dict:
+    refs = record['evidence_refs']
+    if (len(refs) != 1 or type(refs[0]) is not dict
+            or set(refs[0]) != {'observation_ref', 'boundary'}):
+        raise ValueError('research notes attachment invalid')
+    ref, boundary = refs[0]['observation_ref'], refs[0]['boundary']
+    if (type(ref) is not dict
+            or set(ref) != {'run_id', 'attempt_id', 'level', 'sequence', 'observation_sha256'}
+            or ref['run_id'] != scope['run_id'] or ref['attempt_id'] != scope['attempt_id']
+            or type(ref['level']) is not int or not 1 <= ref['level'] <= scope['win_levels']
+            or type(ref['sequence']) is not int or ref['sequence'] < 0
+            or type(ref['observation_sha256']) is not str or _HASH.fullmatch(ref['observation_sha256']) is None
+            or type(boundary) is not dict or set(boundary) != {'level', 'reset_sequence', 'kernel_generation'}
+            or boundary['level'] != ref['level']
+            or type(boundary['reset_sequence']) is not int or not 0 <= boundary['reset_sequence'] <= ref['sequence']
+            or type(boundary['kernel_generation']) is not str
+            or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}', boundary['kernel_generation']) is None):
+        raise ValueError('research notes attachment invalid')
+    return {'revision': record['revision'], 'text': record['text'], **copy_json(refs[0])}
+
+
 def _atomic(path: Path, value: object) -> None:
     if path.is_symlink() or path.parent.is_symlink():
         raise ValueError("research path invalid")
@@ -185,6 +207,7 @@ class ResearchWorkspace:
             if path.is_symlink():
                 raise ValueError("research root invalid")
             path.mkdir(exist_ok=True)
+        self.memory = ResearchMemoryStore(root=self.root / 'memory', scope=self.scope)
         initial = {
             "scope": self.scope,
             "parent_revision": None,
@@ -282,7 +305,44 @@ class ResearchWorkspace:
         value = self._read(self.root / "revisions" / (revision[7:] + ".json"), revision)
         if value["scope"] != self.scope:
             raise ValueError("research scope mismatch")
-        return {"workspace_revision": revision, **value}
+        result = {"workspace_revision": revision, **value}
+        if 'notes_revision' in value:
+            result['notes'] = self._notes(value['notes_revision'])
+        return result
+
+    def _notes(self, revision: str) -> dict:
+        return notes_attachment(self.memory.read(revision), self.scope)
+
+    def save_notes(self, *, base_revision, observation_ref, boundary, text):
+        if base_revision != self.revision:
+            raise ValueError('stale-workspace-revision')
+        previous = self.read()
+        record = self.memory.save(text, parent_revision=previous.get('notes_revision'),
+                                  evidence_refs=[{'observation_ref': observation_ref, 'boundary': boundary}])
+        self._notes(record['revision'])
+        snapshot = {key: value for key, value in previous.items() if key not in {'workspace_revision', 'notes'}}
+        snapshot.update(parent_revision=self.revision, notes_revision=record['revision'])
+        self.revision = self._save_revision(snapshot)
+        return self.read()
+
+    def notes_history(self, *, start=0, limit=16) -> dict:
+        return self.memory.history(self.read().get('notes_revision'), start=start, limit=limit)
+
+    def notes_read(self, revision=None) -> dict | None:
+        current = self.read().get('notes_revision')
+        if revision is None:
+            return self._notes(current) if current is not None else None
+        # An arbitrary blob, including an orphan, is never accepted history.
+        seen = set()
+        while current is not None:
+            if current in seen or len(seen) >= 16384:
+                raise ValueError('research notes ancestry invalid')
+            seen.add(current)
+            record = self.memory.read(current)
+            if current == revision:
+                return self._notes(current)
+            current = record['parent_revision']
+        raise ValueError('research notes unavailable')
 
     def candidate(self, export_id: str, kind: str | None = None) -> dict:
         if type(export_id) is not str or _HASH.fullmatch(export_id) is None:
@@ -434,6 +494,7 @@ class ResearchWorkspace:
                 }
             )
         accepted_correction = correction(value["correction"], latest)
+        previous = self.read()
         accepted = {
             "scope": self.scope,
             "parent_revision": self.revision,
@@ -443,6 +504,7 @@ class ResearchWorkspace:
             "reports": accepted_reports,
             "evidence_sequences": evidence(value["evidence_sequences"], latest),
             "correction": accepted_correction,
+            **({'notes_revision': previous['notes_revision']} if 'notes_revision' in previous else {}),
         }
         for eid, record in candidates.items():
             self._admit(eid, record)
@@ -472,6 +534,7 @@ class ResearchWorkspace:
             "correction": correction(request["correction"], latest),
             "model": previous["model"],
             "reports": previous["reports"],
+            **({'notes_revision': previous['notes_revision']} if 'notes_revision' in previous else {}),
         }
         self.revision = self._save_revision(revised)
         return self.read()

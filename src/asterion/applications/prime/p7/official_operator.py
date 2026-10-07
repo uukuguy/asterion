@@ -35,7 +35,7 @@ from .official_result import (
 from .operator import build_p7_operator_resources
 from .official_replay import execute_saved_prefix, OfficialReplayError
 from .run_story.storage import write_atomic_file
-from .prompt import P7_SOLVE_PROMPT
+from .prompt import build_notes_prompt, initial_research_prompt
 
 
 _FULL_ROSTER_MODEL_ID = "gpt-6.1-sol"
@@ -276,10 +276,8 @@ async def _run_game(
             implementations=application.implementations,
             runtime=runtime,
             run_id=run_id,
-            input_text=P7_SOLVE_PROMPT + "\n\nInitial research context:\n" + json.dumps(
-                resources.host_services["prime.ipython"].actor_context(),
-                ensure_ascii=False, separators=(",", ":"),
-            ),
+            input_text=initial_research_prompt(
+                resources.host_services["prime.ipython"], build_notes_prompt()),
             host_services=resources.host_services,
             implementation_packages={CAPABILITY_REF: PACKAGE_REF},
             signal=live.NeverCancelled(),

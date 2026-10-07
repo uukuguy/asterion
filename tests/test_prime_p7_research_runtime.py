@@ -37,6 +37,80 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_notes_receipt_uses_real_kernel_identity_and_refreshes_current_board(self):
+        self.host.solver.learner_profile = 'notes'
+        self.host.set_memory_instructions('trusted immutable instruction sentinel')
+        signal = _Signal()
+        before = self.host.current_context()
+        noted = self.host.method_call('workspace', {
+            'op': 'notes', 'base_revision': before['workspace_revision'],
+            'observation_ref': before['observation_ref'], 'text': 'model private note sentinel',
+        }, signal)
+        self.assertEqual(noted['status'], 'noted')
+        self.assertNotIn('notes', noted)
+        memory = noted['context_memory']
+        self.assertEqual(set(memory), {'version', 'revision', 'content', 'commit'})
+        self.assertTrue(memory['commit'])
+        instructions, serialized = memory['content'].split('\n\n', 1)
+        self.assertEqual(instructions, 'trusted immutable instruction sentinel')
+        initial = json.loads(serialized)
+        self.assertEqual(initial['notes']['text'], 'model private note sentinel')
+        self.assertEqual(initial['notes']['boundary']['kernel_generation'], self.host.kernel.generation)
+        plan = {'plan_id': 'notes-action', 'start': before['observation_ref'],
+                'workspace_revision': noted['workspace_revision'], 'goal': 'probe',
+                'purpose': 'probe', 'assumptions': [],
+                'steps': [{'action': {'name': 'ACTION1', 'data': {}},
+                           'expect': {'cells': [{'x': 0, 'y': 0, 'value': 1}]}}]}
+        result = self.host.method_call('execute_plan', plan, signal)
+        self.assertEqual(result['applied_count'], 1)
+        refreshed = result['context_memory']
+        self.assertFalse(refreshed['commit'])
+        self.assertEqual(refreshed['revision'], memory['revision'])
+        current = json.loads(refreshed['content'].split('\n\n', 1)[1])
+        self.assertEqual(current['observation_ref']['sequence'], 1)
+        self.assertEqual(current['notes']['observation_ref']['sequence'], 0)
+        rejected = self.host.method_call('workspace', {
+            'op': 'notes', 'base_revision': before['workspace_revision'],
+            'observation_ref': before['observation_ref'], 'text': 'stale write',
+        }, signal)
+        self.assertEqual(rejected['status'], 'rejected')
+        self.assertNotIn('context_memory', rejected)
+        with self.assertRaises(ValueError):
+            self.host.set_memory_instructions('changed instruction')
+
+    async def test_cancel_after_durable_note_keeps_archive_without_cut_receipt(self):
+        from unittest.mock import patch
+        self.host.solver.learner_profile = 'notes'
+        self.host.set_memory_instructions('trusted instructions')
+        signal = _Signal()
+        before = self.host.current_context()
+        workspace = self.host.solver._workspace
+        original = workspace._save_revision
+        def cancel_after_commit(value):
+            revision = original(value)
+            signal.cancelled = True
+            return revision
+        with patch.object(workspace, '_save_revision', side_effect=cancel_after_commit):
+            result = self.host.method_call('workspace', {
+                'op': 'notes', 'base_revision': before['workspace_revision'],
+                'observation_ref': before['observation_ref'], 'text': 'durable cancelled note',
+            }, signal)
+        self.assertEqual(result, {'status': 'rejected', 'reason': 'stopped'})
+        self.assertEqual(self.host.current_context()['notes']['text'], 'durable cancelled note')
+        self.assertEqual(self.engine.calls, [])
+
+    async def test_oversized_context_snapshot_preserves_note_without_cut_receipt(self):
+        self.host.solver.learner_profile = 'notes'
+        self.host.set_memory_instructions('x' * (120 * 1024))
+        before = self.host.current_context()
+        result = self.host.method_call('workspace', {
+            'op': 'notes', 'base_revision': before['workspace_revision'],
+            'observation_ref': before['observation_ref'], 'text': 'n' * (16 * 1024),
+        }, _Signal())
+        self.assertEqual(result['status'], 'noted')
+        self.assertNotIn('context_memory', result)
+        self.assertEqual(self.host.current_context()['notes']['text'], 'n' * (16 * 1024))
+
     async def test_kernel_recovery_reuses_explicit_worker_factory_and_wrapper(self):
         import shlex
         import sys

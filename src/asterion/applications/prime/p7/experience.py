@@ -11,9 +11,10 @@ from pathlib import Path
 from threading import RLock
 
 from asterion.agents.prime.trace import PrimeTraceError, _entry_digest
+from asterion.agents.prime.memory import ResearchMemoryStore
 from .console_events import read_console_events
 from .private_trace import trace_identities_for
-from .research import _atomic, copy_json, export_hash, identifier, task, worldmap
+from .research import _atomic, copy_json, export_hash, identifier, notes_attachment, task, worldmap
 from .score import canonical_bytes, digest
 from .dynamic_evidence import AnimationFrames
 
@@ -180,6 +181,7 @@ class _Source:
                 self.trust['outcome'] = 'completed'
         self.research = []
         self.artifacts = {}
+        note_records = {}
         revision = self.revision
         seen = set()
         while revision is not None:
@@ -188,7 +190,8 @@ class _Source:
             seen.add(revision)
             path = research / 'revisions' / (revision[7:] + '.json')
             snapshot = _json(path)
-            if (set(snapshot) != {'scope', 'parent_revision', 'worldmap', 'task', 'model', 'reports', 'evidence_sequences', 'correction'}
+            required = {'scope', 'parent_revision', 'worldmap', 'task', 'model', 'reports', 'evidence_sequences', 'correction'}
+            if (not required <= set(snapshot) or set(snapshot) - (required | {'notes_revision'})
                     or snapshot.get('scope') != self.scope or digest(snapshot) != revision):
                 raise ValueError('experience revision invalid')
             worldmap(snapshot['worldmap'])
@@ -204,6 +207,18 @@ class _Source:
                     or any(type(seq) is not int or seq < 0 for seq in snapshot['evidence_sequences'])):
                 raise ValueError('experience research metadata invalid')
             self._pin(path)
+            if 'notes_revision' in snapshot:
+                note_revision = snapshot['notes_revision']
+                if note_revision not in note_records:
+                    memory_root = research / 'memory'
+                    _safe(memory_root)
+                    if not memory_root.is_dir() or not (memory_root / 'revisions').is_dir():
+                        raise ValueError('experience notes unavailable')
+                    store = ResearchMemoryStore(root=memory_root, scope=self.scope)
+                    record = store.read(note_revision)
+                    note_records[note_revision] = record
+                    self._pin(memory_root / 'revisions' / (note_revision[7:] + '.json'))
+                snapshot['notes'] = notes_attachment(note_records[note_revision], self.scope)
             self.research.append({'source_run_id': run.name, 'source_revision': revision, **snapshot})
             model = snapshot.get('model', {})
             refs = [(eid, 'text') for eid in model.get('source_export_ids', [])]
@@ -213,6 +228,9 @@ class _Source:
             for eid, kind in refs:
                 self._artifact(research, eid, kind)
             revision = snapshot.get('parent_revision')
+        if any(record['parent_revision'] is not None and record['parent_revision'] not in note_records
+               for record in note_records.values()):
+            raise ValueError('experience notes ancestry invalid')
         checkpoint_path = research / 'checkpoint.json'
         if checkpoint_path.exists():
             checkpoint = _json(checkpoint_path)
@@ -403,6 +421,9 @@ class ExperienceBundle:
                                'correction': snapshot['correction'], 'feedback': latest.feedback[-3:],
                                'exports': [{'export_id': eid, 'kind': record['kind'], 'name': record['name']}
                                            for eid, record in list(latest.artifacts.items())[:16]]}
+            if 'notes' in snapshot:
+                value['latest']['notes_ref'] = {key: snapshot['notes'][key]
+                                               for key in ('revision', 'observation_ref', 'boundary')}
         if len(canonical_bytes(value)) > 16 * 1024 and latest:
             value['truncated'] = True
             prior = value['latest']

@@ -1776,11 +1776,12 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertEqual(border_only["interior_changed_cells"], 0)
 
     def test_operator_prompt_explains_settled_frame_axis(self) -> None:
+        from asterion.applications.prime.p7.actor_projection import ACTOR_FRAME_INSTRUCTION
         from asterion.applications.prime.p7 import operator, official_operator
         from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
         for term in ('settled last frame', 'frame[layer][y][x]', 'p7_research.history(0,32)', 'p7_execute_plan', 'cells', 'frame_sha256', 'levels_completed', 'unexecuted_steps'):
             self.assertIn(term, P7_SOLVE_PROMPT)
-        self.assertIs(official_operator.P7_SOLVE_PROMPT, P7_SOLVE_PROMPT)
+        self.assertIn(ACTOR_FRAME_INSTRUCTION, official_operator.build_notes_prompt())
         self.assertFalse(hasattr(operator, '_P7_FRAME_SEMANTICS'))
 
     def test_saved_level_prefix_reenters_broker_and_rejects_mismatch(self) -> None:

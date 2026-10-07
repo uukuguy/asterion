@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+import json
 from pathlib import Path
 from threading import RLock
 
@@ -27,7 +28,11 @@ class Solver:
         event_sink,
         experience=None,
         diagnostics=None,
+        learner_profile='legacy',
     ):
+        if learner_profile not in {'legacy', 'notes'}:
+            raise ValueError('research learner profile invalid')
+        self.learner_profile = learner_profile
         self.broker, self.kernel, self.control = broker, kernel, control
         self.run_id, self.attempt_id = identifier(run_id), identifier(attempt_id)
         game = broker.game
@@ -116,11 +121,31 @@ class Solver:
             }
             if self._experience is not None:
                 context["experience"] = self._experience.context()
+            if self.learner_profile == 'notes' or 'notes' in current:
+                context['learner_profile'] = self.learner_profile
+                context['notes_boundary'] = self._notes_boundary(reference)
+                context['notes_current'] = (
+                    'notes' in current
+                    and current['notes']['boundary'] == context['notes_boundary']
+                    and not self._needs_revision and not self._needs_calibration
+                )
             return self._bound_context(context)
+
+    def _notes_boundary(self, reference):
+        return {'level': reference['level'],
+                'reset_sequence': next((item.sequence for item in reversed(self.broker.journal)
+                                        if item.action == 'RESET'), 0),
+                'kernel_generation': str(self.kernel.generation)}
 
     @staticmethod
     def _bound_context(context: dict) -> dict:
-        if len(canonical_bytes(context)) <= 56 * 1024:
+        limit = 128 * 1024 if 'notes' in context else 56 * 1024
+        def size(value):
+            if 'notes' in value:
+                return len(json.dumps(value, ensure_ascii=False, allow_nan=False,
+                                      separators=(',', ':')).encode('utf-8'))
+            return len(canonical_bytes(value))
+        if size(context) <= limit:
             return context
         context = copy_json(context)
         context["projection_truncated"] = True
@@ -140,7 +165,7 @@ class Solver:
             v[:300] for v in context["task"]["obstacles"][:8]
         ]
         context["reports"] = context["reports"][:8]
-        if len(canonical_bytes(context)) > 56 * 1024:
+        if size(context) > limit:
             world["description_zh"] = world["description_zh"][:1000]
             for key in (
                 "hud",
@@ -151,7 +176,7 @@ class Solver:
                 "events",
             ):
                 context["observation"].pop(key, None)
-        if len(canonical_bytes(context)) > 56 * 1024:
+        if size(context) > limit:
             world["description_zh"] = world["description_zh"][:500]
             for key in ("rules", "unknowns", "competing_hypotheses"):
                 world[key] = [v[:150] for v in world[key][:2]]
@@ -166,7 +191,7 @@ class Solver:
                 v[:150] for v in context["task"]["obstacles"][:2]
             ]
             context["reports"] = context["reports"][:4]
-        if len(canonical_bytes(context)) > 56 * 1024:
+        if size(context) > limit:
             world["description_zh"] = world["description_zh"][:256]
             world["state_summary"] = world["state_summary"][:64]
             for key in ("rules", "unknowns", "competing_hypotheses"):
@@ -185,7 +210,7 @@ class Solver:
                 v[:64] for v in context["task"]["obstacles"][:2]
             ]
             context["reports"] = context["reports"][:2]
-        if len(canonical_bytes(context)) > 56 * 1024:
+        if size(context) > limit:
             raise ValueError("actor context too large")
         return context
 
@@ -253,6 +278,9 @@ class Solver:
     def kernel_recovered(self) -> None:
         with self._lock:
             self._needs_calibration = True
+            if self.learner_profile == 'notes':
+                self._needs_revision = True
+                self._revision_reason = 'kernel-recovered'
 
     def experience_event(self, summary: str) -> None:
         self._emit("compute_task", "operator", status="declared", operation="analyze",
@@ -360,6 +388,29 @@ class Solver:
                     if "revision" in value:
                         current.update(self._workspace.read(value["revision"]))
                     return self._bound_context(current)
+                if op == 'notes_read' and set(value) <= {'op', 'revision'}:
+                    return {'status': 'ok', 'notes': self._workspace.notes_read(value.get('revision'))}
+                if op == 'notes_history' and set(value) <= {'op', 'start', 'limit'}:
+                    return {'status': 'ok', **self._workspace.notes_history(
+                        start=value.get('start', 0), limit=value.get('limit', 16))}
+                if op == 'notes' and set(value) == {'op', 'base_revision', 'observation_ref', 'text'}:
+                    reference = self._observation()[1]
+                    if (canonical_bytes(value['observation_ref']) != canonical_bytes(reference)
+                            or not self.control.action_allowed()
+                            or getattr(self.kernel, 'lost', False)
+                            or self._environment_uncertain or self._processing_blocked):
+                        raise ValueError
+                    revised = self._workspace.save_notes(
+                        base_revision=value['base_revision'], observation_ref=reference,
+                        boundary=self._notes_boundary(reference), text=value['text'])
+                    if self.learner_profile == 'notes':
+                        self._needs_revision = False
+                        self._needs_calibration = False
+                        self._revision_reason = None
+                    return {'status': 'noted', 'workspace_revision': revised['workspace_revision'],
+                            'notes_revision': revised['notes_revision'], 'observation_ref': reference,
+                            'needs_revision': self._needs_revision, 'revision_reason': self._revision_reason,
+                            'requires_calibration': self._needs_calibration}
                 if op == "focus" and set(value) == {"op", "task"}:
                     focused = self._workspace.focus(value["task"])
                     self._active_task = focused["task"]
@@ -435,18 +486,21 @@ class Solver:
             revised["model"],
             revised["correction"],
         )
-        if (
-            world["description_zh"].strip()
-            and revised["task"]["goal"].strip()
-            and latest in revised["evidence_sequences"]
-            and not getattr(self.kernel, "lost", False)
-        ):
-            self._needs_revision = False
-            self._revision_reason = None
-            self._needs_calibration = False
-        else:
-            self._needs_revision = True
-            self._revision_reason = self._revision_reason or "initial"
+        # Program/model updates cannot stand in for fresh notes at a changed
+        # learning boundary. The default legacy profile retains its old gate.
+        if self.learner_profile == 'legacy':
+            if (
+                world["description_zh"].strip()
+                and revised["task"]["goal"].strip()
+                and latest in revised["evidence_sequences"]
+                and not getattr(self.kernel, "lost", False)
+            ):
+                self._needs_revision = False
+                self._revision_reason = None
+                self._needs_calibration = False
+            else:
+                self._needs_revision = True
+                self._revision_reason = self._revision_reason or "initial"
         self._active_task = revised["task"]
         self._workspace.focus(revised["task"])
         self._focus_event(
@@ -624,6 +678,7 @@ class Solver:
             or self._environment_uncertain
             or self._processing_blocked
             or getattr(self.kernel, "lost", False)
+            or (self.learner_profile == 'notes' and not context.get('notes_current', False))
         ):
             raise ValueError
         if (
@@ -777,7 +832,7 @@ class Solver:
             except (ValueError, TypeError, KeyError, AttributeError):
                 return {
                     "status": "rejected",
-                    "reason": "processing-unavailable" if self._processing_blocked else "worldmap-revision-required"
+                    "reason": "processing-unavailable" if self._processing_blocked else ('notes-revision-required' if self.learner_profile == 'notes' else "worldmap-revision-required")
                     if self._needs_revision
                     else "invalid-actor-plan",
                     "needs_revision": self._needs_revision,

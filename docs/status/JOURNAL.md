@@ -4325,3 +4325,5 @@
 - 2026-10-08 00:36 CST — Memory audit independently reviewed;13DOM checks,docs286files/135links,diff PASS;notes/WorldMap bytes distinguished from provider tokens.
 - 2026-10-08 00:37 CST — b8701a01 records NOTES lifecycle and P7 memory/history gap to redirect context design toward useful research knowledge.
 - 2026-10-08 07:01 CST — User authorizes generic/P7 NOTES implementation; selected native model-view projection, immutable memory and one bounded deployment witness.
+- 2026-10-08 07:04 CST — a0238d65 defines generic memory/P7 adaptation contract; implementation proceeds on feat/prime-research-notes with independent boundary review.
+- 2026-10-08 07:09 CST — Integrated Python227 PASS; installed-Pi provider-free projection14→6 preserves instructions/tools/rawhistory; packaged promotion and finite witness pending.

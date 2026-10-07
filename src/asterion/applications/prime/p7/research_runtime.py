@@ -100,7 +100,8 @@ class P7ResearchRuntime:
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
                  deadline_seconds: float, event_sink, worker=None, worker_factory=None,
                  deadline_monotonic: float | None = None,
-                 limits: KernelLimits | None = None, experience=None):
+                 limits: KernelLimits | None = None, experience=None,
+                 learner_profile='legacy'):
         if worker_factory is not None and not callable(worker_factory):
             raise ValueError("research worker factory unavailable")
         self._worker_factory = worker_factory or SubprocessPythonWorker
@@ -112,6 +113,7 @@ class P7ResearchRuntime:
         self._sink = event_sink
         self._last_control = None
         self._experience = experience
+        self._memory_instructions = None
         self._cell_archive = CellArchive(run_root)
         self.control = SolverControl(run_root, run_id, time.monotonic() + deadline_seconds
                                      if deadline_monotonic is None else deadline_monotonic,
@@ -140,6 +142,7 @@ class P7ResearchRuntime:
                 workspace_root=run_root / "research", run_id=run_id,
                 attempt_id=run_id, event_sink=event_sink, experience=experience,
                 diagnostics=getattr(trace_client, 'processing_diagnostics', None),
+                learner_profile=learner_profile,
             )
             if experience is not None:
                 experience.bind(run_root, self.solver.experience_event)
@@ -300,7 +303,43 @@ class P7ResearchRuntime:
             if self.poll()["state"] not in {"pause_requested", "paused"}:
                 break
             time.sleep(0.05)
-        return project_actor_result(method, params, result)
+        if self._closed or signal.cancelled:
+            return {'status': 'rejected', 'reason': 'stopped'}
+        projected = project_actor_result(method, params, result)
+        request = params.get('request', params) if isinstance(params, Mapping) else {}
+        commit = method == 'workspace' and request.get('op') == 'notes' and result.get('status') == 'noted'
+        if result.get('status') != 'rejected':
+            memory = self._context_memory(commit=commit)
+            if memory is not None:
+                projected['context_memory'] = memory
+        return projected
+
+    def set_memory_instructions(self, prompt: str):
+        """Capture the exact immutable operator guidance before initial state."""
+        if (type(prompt) is not str or not prompt.strip()
+                or len(prompt.encode('utf-8')) > 128 * 1024
+                or (self._memory_instructions is not None and self._memory_instructions != prompt)):
+            raise ValueError('research memory instructions unavailable')
+        self._memory_instructions = prompt
+
+    def _context_memory(self, *, commit):
+        if self._memory_instructions is None:
+            return None
+        try:
+            context = self.actor_context()
+            notes = context.get('notes')
+            if notes is None:
+                return None
+            content = self._memory_instructions + '\n\n' + json.dumps(
+                context, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+            if len(content.encode('utf-8')) > 128 * 1024:
+                return None
+            return {'version': 'asterion.prime-context-memory/v1',
+                    'revision': notes['revision'], 'content': content, 'commit': commit}
+        except (ValueError, TypeError, KeyError, OSError):
+            # A failed view refresh cannot change the committed note or hide an
+            # environment action result; absence leaves the model view uncut.
+            return None
 
     def current_context(self):
         return self.solver.current_context()
@@ -316,7 +355,7 @@ class P7ResearchRuntime:
     def continuation_prompt(self, round_index):
         return (
             f"Continue research round {round_index} from the retained Prime workspace. "
-            "Use actual feedback and the current WorldMap to choose your own next hypothesis, experiment, optional computation or useful action. "
+            "Use actual feedback and current research notes to choose your own next hypothesis, experiment, optional computation or useful action. "
             "A partial model or no-route search does not prove the task impossible. Retain useful free-form findings, assumptions and open questions in existing workspace revisions or accepted exports. "
             "Submit real actions only with p7_execute_plan. "
             + AUTONOMOUS_RESEARCH_GUIDANCE + " " + ACTOR_FRAME_INSTRUCTION + "\n"

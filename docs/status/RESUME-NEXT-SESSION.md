@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 07:01 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 07:09 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：实现通用研究记忆与P7 NOTES
 
@@ -9,6 +9,7 @@
 - 已定合同：generic immutable memory无active pointer，现有ResearchWorkspace current pointer唯一commit；notes op精确base_revision/observation_ref/text，16KiB UTF8有限自由文本；现代operator选notes，旧Solver构造/legacy保留。
 - TS通过Pi native context hook投影modelview，trusted context_memory私有envelope含version/revision/content/commit；真实callback id作anchor，完整工具组边界后才cut，rawsession不改。首次实际prompt在追加board前经set_memory_instructions注入，防止删任务说明或保留旧初始board。
 - 分工notes_python owns memory/research/solver/runtime/projection/experience/tests；notes_extension owns TS/schema/bundle/tests；root owns operator/prompt/Pythonmetadata/coreallowlist/docs；Astra notes_contract最终复审。全部在同一共享工作区，禁止互相回滚。
+- 当前代码已落地：最终Python整合228 PASS，TS43PASS/6skip；真实installed-Pi无provider探针raw14→model6，任务/system/tools/完整siblings/后续用户消息/rawarchive保留。正在promotion，之后冻结提交并运行一次witness。Astra静态复审无阻断，正式记录待收。
 - 下一动作：完成实现与集成，TS→Python→promotion顺序检查；一次隔离r11l LEVEL1≤900s真实witness验证包/扩展/notes，不跑BP35全套/官方card。原控制台保留。仅测试不能证明六关能力。
 
 ## 已完成：上下文研究记忆审计

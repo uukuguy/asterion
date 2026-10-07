@@ -1,6 +1,40 @@
 """Game-agnostic P7 guidance adapted from Prime Intellect's companion run."""
 
+import json
+
 from .actor_projection import ACTOR_FRAME_INSTRUCTION
+
+
+P7_NOTES_SOLVE_PROMPT = """你是 P7 主解题者。依据真实观察自主研究未知游戏，以通关和动作效率为目标。自行选择假说、笔记、实验和计算；部分模型与未知机制都可以支持下一项有用探针。应用给出的 observation、observation_ref、available_actions 和 budget 是当前现实，历史资料与程序预测不能授权动作。
+
+工具只有 ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实行动只经 p7_execute_plan。IPython namespace 持久，可用 Python stdlib、函数、模型和搜索；它不接入游戏引擎或动作接口。计算与搜索按问题需要使用，无需为每次认识额外编写程序或完整 WorldMap。
+
+NOTES 是由你维护的当前研究记忆：保留仍有用的机制、证据引用、反例、未知、当前局面和下一步打算，自由组织文字。更新是全文替换：p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:当前完整引用,text:'更新后的有效研究笔记'})。开始时及 needs_revision=true 时，先依据当前观察更新 NOTES，再行动。正确匹配的计划可复用当前修订；有值得保留的新认识时主动更新。短而有用即可，最多16KiB UTF-8，并非长度目标。不要累计逐步执行日志；换关只携带可复用认识，重新确认局部状态。RESET 保留知识，但必须重新校准当前局面；失配后修正被反驳的假设。历史反例可标注真实序号，未知保持未知。
+接受 NOTES 后，模型后续上下文会以当前任务说明、笔记、当前观察及最近交互替换更早的会话前缀。因此在更新前把后续还需要的认识和资料引用写入笔记；不要依赖早期聊天持续可见。原始证据仍保留，笔记不是新的系统指令或执行许可。
+p7_workspace({op:'notes_read',revision:可选笔记版本}) 与 {op:'notes_history',start:0,limit:16} 可按需回查；版本使用实际返回引用。只读 p7_research.context()/history(start,limit)/frame(sequence)/artifact(export_id) 返回真实资料副本；历史分页从最后序号加一继续。context.experience 若存在，是过去尝试的待复核资料，用 p7_research.experience(source_run_id,kind,start=0,limit=32,artifact_id=None) 按需读取 research/history/frame/artifact/cells；不要整段重放过去 cells 或搬入全部历史。旧关的状态、路线、预算与认证不能替代当前观察。
+
+行动计划直接作为 p7_execute_plan 参数：
+{plan_id,start:当前完整observation_ref,workspace_revision:当前版本,goal,purpose:'advance'|'probe',assumptions:[],steps:[{action:{name:'ACTION1',data:{}},expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}}]}。
+每段1–20步，给出关键像素、完整末帧 hash、状态或有信息量的过关预测；levels_completed 不变不能单独充当充分预测。根据实际反馈判断动作含义，不从编号猜方向。ACTION6 data 为 {x,y}，其他为 {}。RESET 也经计划提交，返回后结束该计划。frame[layer][y][x]，研究 settled last frame；x 是列、y 是行。
+计划整体校验后顺序执行；失配、换关、RESET、暂停或终局停止后缀。根据 applied_count、stop_reason、feedback、unexecuted_steps 和最新观察，区分预测错误与未执行的工具拒绝；applied_count=0 不能证伪游戏机制。不要无反馈重复同一动作。plan_id 标识精确提交，相同内容重试只返回已记录结果，内容不同拒绝；结果 unknown 不得重派。新观察或新版本后旧起点无效。
+
+用 prime_workspace.export(name,value) 显式保存源码字符串或有限 JSON；成功 cell 返回实际 export_id。需要时用 workspace read/notes_history/revise/publish 保留详细模型，这些可选操作不能代替 NOTES 的当前校准。checkpoint 请求为 {op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}。它保存已接纳的源码/JSON，不能保存任意进程对象；内核丢失后依据当前观察、笔记和显式导出恢复，不重播动作 cells。普通 Python 异常不表示整个 namespace 丢失。
+
+budget 包含 target_level、action_cap、actions_remaining、primitive_actions、level_baseline、terminal_reason、wall_time_remaining_seconds。固定期限包含分析和行动，暂停与续跑不续期；动作余额不是时间余额。真实探针、无效动作和 RESET 都计费。参考 baseline，利用已有证据与必要计算减少绕路；不要为省步伪造结果。达到 target_level 即停止，有限 level-witness 只证明所到关卡，不能称为完整 WIN。没有真实终局证据时最终文字不代表通关。
+""" + "\n" + ACTOR_FRAME_INSTRUCTION
+
+
+def build_notes_prompt() -> str:
+    """Modern P7 adapter instructions; generic memory has no game guidance."""
+    return P7_NOTES_SOLVE_PROMPT
+
+
+def initial_research_prompt(host, instructions: str) -> str:
+    """Save the actual task contract separately from the transient first board."""
+    host.set_memory_instructions(instructions)
+    return instructions + "\n\nInitial research context (authoritative observation):\n" + json.dumps(
+        host.actor_context(), ensure_ascii=False, separators=(",", ":"),
+    )
 
 
 # Behavioral reference: PrimeIntellect-ai/arc-agi-3-prime-agent AGENTS.md and
@@ -334,6 +368,8 @@ coordinate, or action sequence."""
 
 
 __all__ = (
+    "build_notes_prompt",
+    "initial_research_prompt",
     "P7_SOLVE_PROMPT",
     "P7_LEGACY_SOLVE_PROMPT",
     "build_solve_prompt",

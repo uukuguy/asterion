@@ -23,9 +23,10 @@ _ACK_FIELDS = {
     'observation_ref', 'budget', 'lifecycle', 'requires_calibration', 'needs_revision',
     'revision_reason', 'environment_result_unknown', 'processing_blocked', 'diagnostics',
     'checkpoint', 'correction', 'projection_truncated',
+    'notes_revision', 'learner_profile', 'notes_boundary', 'notes_current',
 }
 _MUTATION_ECHO_FIELDS = {
-    'worldmap', 'model', 'task', 'reports', 'observation', 'experience',
+    'worldmap', 'model', 'task', 'reports', 'observation', 'experience', 'notes',
 }
 ACTOR_FRAME_INSTRUCTION = (
     'observation.frame may use palette-row-dictionary/v1: each row_ids[y] selects rows; '

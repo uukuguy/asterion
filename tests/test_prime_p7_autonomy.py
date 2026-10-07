@@ -96,6 +96,7 @@ class TestP7Autonomy(unittest.TestCase):
             try:
                 launch = resources.host_services['prime.launch']
                 host = resources.host_services['prime.ipython']
+                self.assertEqual(host.solver.learner_profile, 'notes')
                 self.assertNotIn('ASTERION_PRIME_P7_RESEARCH_PYTHON', launch.approved_environment)
                 self.assertEqual(launch.autonomy_deadline_monotonic, 5500.0)
                 self.assertEqual(host.control._deadline, 5500.0)

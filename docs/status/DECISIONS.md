@@ -1124,3 +1124,13 @@
 
 - Context-memory clarification (2026-10-08): user requires reasoning-useful history; L5 should retain reusable L1–L4 knowledge, not full solved-level execution. Actual ARC NOTES overwrites10 short snapshots (511–915bytes), while P7 stored WorldMap max1873bytes. The structural gap is external-memory updates not replacing obsolete Pi-visible history. Plan replies do not include fullworkspace; compact_events does not prune modelcontext. Treat curated current knowledge plus retrievable raw evidence as the next design contract, with model-owned content and domain-neutral lifecycle; no implementation yet.
 - Measurement correction: P7 peak255820 atusage127 occurs afterL5pass/beforeL6firstaction; usage128 drops41315 then grows138388. ARC Stage2 peak220388, so notesbytes versus providertokens cannot prove context-size causality or sole-NOTES recovery. Cache/request timing and actual output decomposition remain missing.
+
+
+## D-2026-10-08-01 — Model-owned research memory with generic/P7 separation
+
+- User authorizes implementation and explicitly requires reusable infrastructure plus P7-specific adaptation.
+- Generic Python stores immutable free-text snapshots with opaque scope/evidence. Applications own their commit pointer; no second active-memory authority. Generic TypeScript projects only the model view at a complete accepted tool-result boundary, preserving raw session and later user messages.
+- P7 adopts NOTES with exact current observation and workspace parent. Modern solve/witness/autonomy select notes; historical modes preserve their old contract. Level/RESET/kernel/mismatch calibration remains application-owned; no mandatory WorldMap duplication.
+- Operator captures actual invariant instructions before adding the initial board. Accepted note receipts replace earlier model-visible context with current instructions/notes/state; method refreshes do not advance the cut. Missing or unsafe boundaries preserve history.
+- Text is freeform with a16KiB UTF-8 safety limit, not a target length. Full evidence remains queryable. Unit tests/installed-Pi probes verify software boundaries; BP35 improvements require another measured evaluation. One finite r11l L1 deployment witness is the current verification scope.
+- Contract and plan: [design](../superpowers/specs/2026-10-08-prime-research-notes-design.md), [implementation](../superpowers/plans/2026-10-08-prime-research-notes.md).

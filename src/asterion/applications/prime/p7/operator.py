@@ -94,6 +94,8 @@ from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
     P7_EXPLORE_APPENDIX,
     build_solve_prompt,
+    build_notes_prompt,
+    initial_research_prompt,
     build_strategy_prompt,
 )
 from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
@@ -287,19 +289,13 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
 def _autonomy_prompt() -> str:
     """Retain the tool contract while leaving research form to the actor."""
     from asterion.agents.prime.continuation import AUTONOMOUS_RESEARCH_GUIDANCE
-    prompt = build_solve_prompt(None)
-    paragraphs = prompt.split("\n\n")
-    paragraphs = [text for text in paragraphs if not text.startswith("主路径：")]
-    prompt = "\n\n".join(paragraphs)
-    prompt = "\n".join(line for line in prompt.splitlines()
-                       if not line.startswith("初始和后续 context 的 experience"))
-    prompt = prompt.replace("在自己的程序模型中比较候选路线", "依据当前证据比较候选路线")
+    prompt = build_notes_prompt()
     return (prompt + "\n\n" + AUTONOMOUS_RESEARCH_GUIDANCE
             + " Complete six levels from this fresh local run, then stop. "
               "Choose your own hypotheses, representation, notes, experiments, computation and RESET. "
               "Partial models or a search returning no route do not prove the game impossible. "
               "Use actual feedback to revise contradicted assumptions. Free-form findings, assumptions "
-              "and open questions may be retained in the existing WorldMap revision or accepted "
+              "and open questions should be retained in current NOTES or accepted "
               "source/JSON exports and checkpoint; unsaved namespace is not promised after kernel loss. "
               "No prior solutions or external gameplay advice are provided.")
 
@@ -3919,6 +3915,7 @@ def build_p7_operator_resources(
                 worker_factory=(lambda: SubprocessPythonWorker(python=research_python))
                                if research_python is not None else None,
                 experience=experience,
+                learner_profile="notes",
             )
         else:
             prediction_client._capture_console_cognition()
@@ -4691,7 +4688,9 @@ async def run_live(
         playbook_snapshot = None
     tool_registry = None if research_mode else _legacy_tool_reference()
     strategy = _resolve_strategy(invocation.environment)
-    if variant == "legacy":
+    if research_mode:
+        prompt = build_notes_prompt()
+    elif variant == "legacy":
         prompt = _prompt_for_variant(variant, tool_registry)
         if strategy == "explore":
             prompt += P7_EXPLORE_APPENDIX
@@ -4964,10 +4963,7 @@ async def run_live(
                         expectations=parsed_expectations,
                     )
         if research_mode:
-            prompt += "\n\nInitial research context (authoritative observation):\n" + json.dumps(
-                resources_.host_services["prime.ipython"].actor_context(),
-                ensure_ascii=False, separators=(",", ":"),
-            )
+            prompt = initial_research_prompt(resources_.host_services["prime.ipython"], prompt)
             resources_.host_services["prime.ipython"].mark_experience_loaded()
         elif prediction_client is not None:
             print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"initial-context\"}", "stage"), file=sys.stderr, flush=True)
