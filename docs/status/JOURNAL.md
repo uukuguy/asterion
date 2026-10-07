@@ -4211,3 +4211,25 @@
 2026-10-07 17:42 CST — User direction: LLM owns autonomous reasoning; Asterion supplies strong harness/tools/constraints; D-2026-10-07-02 records scope, no implementation change.
 
 2026-10-07 17:43 CST — Direction documentation: docs-check282files115links and diff-check PASS; independent review found no blocker; source and execution unchanged.
+
+2026-10-07 17:43 CST — Persist LLM reasoning/harness responsibility preference for future design and review [2f286a8b].
+
+2026-10-07 17:56 CST — User authorizes original arc-skill/gpt-6.1-sol fresh r11l local trial and BP35 L5–9 evidence comparison; finite900s, no official card.
+
+2026-10-07 18:01 CST — Original arc-skill r11l actor97209 started18:00:52, gpt-6.1-sol; deadline18:15:52, local only, no hints or automatic retry.
+
+2026-10-07 18:02 CST — Codex launcher aborted before model/events/actions; zero-action r11l is host failure, not solve result; owned processes cleaned, provider-free diagnosis underway.
+
+2026-10-07 18:04 CST — Provider-free diagnosis isolates denied inherited log handles; external logs fix Codex launch, original skill unchanged.
+
+2026-10-07 18:04 CST — Valid r11l actor97973 started18:03:16; actual turn_context gpt-6.1-sol/high; deadline18:18:16, no gameplay assistance.
+
+2026-10-07 18:42 CST — Original arc-skill trial ends4/6levels/49actions; operator deadline interrupts pending turn, not model-declared failure; source unchanged, owned processes cleaned.
+
+2026-10-07 18:42 CST — Host sleep delays deadline delivery; strict900s wallclock unverified, all49actions precede planned cutoff; corrected result preserves raw receipt.
+
+2026-10-07 18:42 CST — BP35 review distinguishes outer research/repairs/retries from local actor self-correction; D-2026-10-07-03 records user autonomy criterion.
+
+2026-10-07 18:42 CST — Same-directory arc-skill resume confirmed in source and retained files; physical replay and renewed model solve not yet exercised.
+
+2026-10-07 18:43 CST — Comparison docs-check passes283files/119links and diff-check passes; independent source/evidence review finds no blocker.

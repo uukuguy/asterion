@@ -4,10 +4,10 @@
 
 - Project: Asterion composable multi-runtime agent framework; native Prime / P7 research application.
 - Current branch: `main`.
-- Theme-level focus: Prime/P7 public-result preservation, private research archives and community submission.
+- Theme-level focus: LLM autonomous reasoning and harness effectiveness; concrete arc-skill/Prime comparison.
 - Project route: managed.
 - Canonical worklist: `docs/superpowers/plans/2026-10-05-p7-worldmap-solver-redesign.md`.
-- Active work package: Result preservation and community entry. The public-game research campaign is settled; no solver or official evaluation is active. The original redesign worklist remains the implementation reference, not authority to restart benchmarks.
+- Active work package: arc-skill/Prime autonomy evidence comparison; the finite r11l trial is ended and documented, with no active solver. The prior P7 public-game campaign is settled. The original redesign worklist is an implementation reference, not authority for new full benchmarks or official submissions.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
 ## Current Architecture
