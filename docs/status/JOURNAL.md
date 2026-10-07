@@ -4169,3 +4169,9 @@
 2026-10-07 14:07 CST — Zen native screenshots captured official scorecard summary and full page; values100/25/183/6781 verified visually.
 
 2026-10-07 14:08 CST — Official summary/full-page originals added to bilingual READMEs; docs-check281/112 and diff-check PASS; Zen zoom restored70%.
+
+2026-10-07 14:08 CST — df9367d0: Add native official scorecard screenshots so README readers can inspect confirmed results and the complete game table.
+
+2026-10-07 14:23 CST — Authorized origin/main push765424b0..df9367d0 succeeded; both READMEs and four images match GitHub bytes. Community fork unpushed.
+
+2026-10-07 14:32 CST — Replace sparse official summary image with Zen-original100-score/25-game table screenshot1675x1970; docs-check281/112PASS. README text unchanged.
