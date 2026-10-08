@@ -52,17 +52,21 @@
 - [x] Freeze package identity and run one isolated r11l L1 witness≤900s. Verify actual note use/context projection if observed, cleanup and tool/resource identities. No official card or BP35 full rerun.
 - [x] Record implemented/verified/not-observed boundaries, update state/index/journal and commit all substantive changes.
 
-Completion evidence: [implementation and bounded witness](../../reviews/2026-10-08-prime-research-notes.md). Production ebcefec9; installed fixture44091934. BP35 performance remains unmeasured.
+Completion evidence: [implementation and bounded witness](../../reviews/2026-10-08-prime-research-notes.md). Production ebcefec9; installed fixture44091934. The subsequent Task4 BP35 outcome is recorded below.
 
 ## Task4 — Frozen cold BP35 L1–L6 comparison (user continued2026-10-08)
 
-**Status:** one frozen run active07:45:31–09:15:31 CST; NOTES implementation and r11l deployment remain complete.
+**Status:** closed with failure and partial-finalization evidence; NOTES implementation/r11l deployment remain complete. Four levels/335 committed actions, L5unfinished/L6unentered, plus one truncated late SDK response; strict deadline/grace, normal summary/seal/replay not verified. Eventual owned cleanup and frozen identity verified. See [final comparison](../../reviews/2026-10-08-p7-notes-bp35-comparison.md).
 
 **Scope:** offline BP35/seed0 from an empty isolated root; exact deployed NOTES productionebcefec9, gpt-6.1-sol/high; existing5400-second absolute task budget, at most6 natural rounds,1000 primitive actions,1024 model callbacks,4096 tool callbacks. At target6 or any terminal/budget boundary stop and retain failure as evidence. Existing180-second cleanup grace is not more solving time. No L7–L9, official card, outer game hints, old answers or midrun repair.
 
 - [x] Prepare new root/profile and frozen wheel/source/wrapper identities; verify actual provider-free worker restriction/recovery, then independent preflight.
-- [ ] Run once through L6 or the finite boundary, keeping raw evidence and natural continuation; preserve the pre-existing console.
-- [ ] Independently verify actions/RESET/per-level clocks, NOTES ancestry/size/current scope, model input usage, real context projection, source identity and owned-process cleanup.
-- [ ] Compare actual research and outcomes with previous P7 and original arc-skill; distinguish context reduction from solving quality and measured correlation from causality. Commit report and recovery state.
+- [x] Run once through L6 or the finite boundary, keeping raw evidence and natural continuation; preserve the pre-existing console.
+- [x] Independently verify actions/RESET/per-level clocks, NOTES ancestry/size/current scope, model input usage, real context projection, source identity and owned-process cleanup.
+- [x] Compare actual research and outcomes with previous P7 and original arc-skill; distinguish context reduction from solving quality and measured correlation from causality. Commit report and recovery state.
 
 Raw evidence stays private under `.asterion-private/p7-notes-bp35-20261008/`. Root owns public state/report; the trial agent owns only its private harness/evidence/isolated root. Source implementation stays frozen throughout this package.
+
+## Next design criteria — not implemented
+
+User clarified that the LLM must drive reasoning and research. Stable understanding/current focus/recent evidence are optional supports, not mandatory forms. Generic framework owns reliable data/tools, authority, cancellation and execution/result integrity; P7 owns domain observation helpers. Reassess forced NOTES admission and immediate cuts, prefix/no-effect heuristic blocks and fine-grained forecast ceremony. Preserve the actual failed evidence; no additional model run is authorized by this plan closure. D-2026-10-08-02 and the final comparison are authoritative for the next design, superseding the assumption that all existing research gates must be retained.

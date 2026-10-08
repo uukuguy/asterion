@@ -14,12 +14,12 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | Purpose |
 |---|---|---|
-| `../reviews/2026-10-08-p7-notes-bp35-comparison.md` | 🟢 active | One frozen NOTES cold BP35 trial; actual outcome pending, fixed baselines and measurement boundaries. |
-| `../superpowers/specs/2026-10-08-prime-research-notes-design.md` | 🟢 active | User-approved generic research-memory/P7 split, freeform NOTES and actual model-view replacement. |
-| `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | NOTES implementation/r11l deployment complete; Task4 is the authorized frozen BP35 comparison. |
+| `../reviews/2026-10-08-p7-notes-bp35-comparison.md` | 🟢 active | Completed comparison: four levels/335 committed actions plus partial late response; actual ARC process, memory regression, clock limits and redesign direction. |
+| `../superpowers/specs/2026-10-08-prime-research-notes-design.md` | 🟢 active | Implemented generic/P7 NOTES contract; post-trial research-gate/cut direction is revised by D-2026-10-08-02. |
+| `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | NOTES implementation/r11l deployment and Task4 comparison closed; failure boundaries and unimplemented redesign criteria. |
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: one frozen NOTES BP35 L1–L6 run active07:45:31–09:15:31 CST; prior cold failure/official100/archive retained. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: NOTES trial ended4levels, incomplete late transaction and eventual cleanup audited; LLM-owned research redesign next; no active trial. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -37,7 +37,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../guides/prime-p7-community-reproduction.md` | 🟢 active | Producing-system setup, finite witness and certificate-bound official replay; no private roster bundled. |
 | `../guides/prime-p7-private-research-archive.md` | 🟢 active | Offline private snapshots, exclusions, hashes, retention and isolated restoration. |
 | `../results/arc-agi-3/README.md` | 🟢 active | Final official100 result, producing versions and scoped API-equivalent cost assumptions. |
-| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-07-03/04 distinguish outer assistance, failed cold capability and layered research candidates. Includes D-2026-10-08-01 generic research memory / P7 NOTES. |
+| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-07-03/04 distinguish outer assistance, failed cold capability and layered research candidates. Includes D-2026-10-08-01 memory and D-2026-10-08-02 LLM-owned research, stable understanding and evidence/execution boundaries. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | Retained legacy cognition contract; the approved WorldMap/Prime redesign is authoritative for the default solver. |
 | `../reviews/2026-10-05-p7-worldmap-solving-design-review.md` | 🟢 active | Pinned Tycho/Retrodict code comparison supporting the approved design; static research, not capability PASS. |
 | `../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md` | 🟢 active | Original arc-skill/gpt-6.1-sol r11l: WIN/6of6/108actions after one generic continuation; BP35 outer assistance and concrete code/transcript comparison. |

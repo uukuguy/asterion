@@ -1136,3 +1136,12 @@
 - Contract and plan: [design](../superpowers/specs/2026-10-08-prime-research-notes-design.md), [implementation](../superpowers/plans/2026-10-08-prime-research-notes.md).
 
 - Deployment verified:ebcefec9 + test-only44091934,full promotion25PASS; packaged r11l L1 passed7actions/0RESET with7accepted notes and17native cut outcomes. This closes the software deployment boundary, not BP35 efficiency. See [NOTES evidence](../reviews/2026-10-08-prime-research-notes.md).
+
+## D-2026-10-08-02 — LLM owns research; harness guarantees evidence and execution limits
+
+- User direction: use the LLM's reasoning, quick reuse and overview; avoid turning presumed good research methods into many mandatory gates. ARC NOTES is closer to stable game understanding than a rewritten execution diary.
+- Generic harness responsibilities: trustworthy observations and provenance, discoverable working tools, queryable evidence, operator authorization/data isolation, finite task controls/cancellation, and known versus uncertain execution outcomes. Research method, memory-edit cadence, hypotheses, computation/search, experiment size and strategic retry belong to the actor within those hard controls.
+- Stable task understanding, current research focus and bounded recent evidence are support capabilities with distinct lifetimes, not new mandatory forms or sequential phases. P7 maps them to game/level/observation semantics; generic modules remain domain-neutral.
+- Reassess NOTES-as-action-admission, automatic prefix deletion after every note, prefix-coordinate reuse blocks, no-effect/novelty heuristics and mandatory fine-grained predictions. Their scientific-method preferences must not be called security/authority invariants without justification. Current evidence shows both real useful corrections and semantic regression; retaining more history alone is not proven sufficient.
+- This narrows the future design interpretation of D-2026-10-08-01: free model-authored memory and evidence integrity remain; preservation of every existing research gate is no longer an assumed design goal. Existing public contracts/dependency direction and actual execution controls are still binding.
+- Frozen BP35 trial remains unchanged through its original target/deadline. This decision records user intent and future redesign criteria, not an implemented fix or improved end-to-end capability. See [actual process comparison](../reviews/2026-10-08-p7-notes-bp35-comparison.md).

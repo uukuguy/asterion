@@ -4348,3 +4348,8 @@
 - 2026-10-08 08:23 CST — Frozen NOTES passes L3 at193paid:75levelactions/994.202s;302usage/299cuts,peak20592; L4continues with unchanged code and controls.
 - 2026-10-08 08:33 CST — L3 audit confirms semantic regression/relearning and repeated failures; cuts lack independent recent evidence, causality unproven; frozenL4 continues.
 - 2026-10-08 08:35 CST — Frozen NOTES passes L4 at244paid:51actions/771.431s; enters requestedL5, same initialround, unchanged source and budget.
+- 2026-10-08 08:36 CST — d76f721b records L3 knowledge regression and exact four-level boundary; preserves frozenL5 continuation and causal limits.
+- 2026-10-08 09:08 CST — ARC/L5 audit confirms same visible opening, protected-plan versus rewritten deathcause; late rawreader import succeeds; stable-cognition direction recorded.
+- 2026-10-08 09:10 CST — User directs LLM-owned research with evidence/execution guarantees; stable cognition support must not become mandatory cognitive gates; frozenrun unchanged.
+- 2026-10-08 09:45 CST — Trial ends4levels/335paid; wall7062s versus monotonic5296s and cleanupTimeoutExpired; strict5400s boundary unverified, final independent audit pending.
+- 2026-10-08 09:53 CST — Final audit confirms335committed plus late truncated pending response;4levels, no seal/deadlinePASS; hashes/eventualcleanup verified; optional-support redesign recorded.

@@ -1,5 +1,6 @@
 # Prime research memory and P7 NOTES design
 
+> Post-trial boundary: this records the implemented ebcefec9 contract. BP35 did not improve. D-2026-10-08-02 revises future research-gate and immediate-cut direction toward LLM-owned reasoning; optional memory capabilities must not become mandatory cognitive stages. See [actual comparison](../../reviews/2026-10-08-p7-notes-bp35-comparison.md).
 ## Authority and intent
 
 The user approved implementing P7 NOTES after reviewing actual ARC NOTES and P7 context evidence, and explicitly requires generic and P7-specific layers. The LLM chooses useful facts, hypotheses, counterexamples, questions and plans. Entering L5 must not require carrying the full L1–L4 execution transcript. Existing raw evidence remains queryable. This document concretizes that approved direction; software and a bounded deployment check do not establish BP35 L1–L6 solving ability.

@@ -1,21 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 08:36 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 09:53 CST. **Session remains active — not a final handoff.**
 
-## 当前执行：冻结NOTES版BP35 L1–L6对比
+## 本轮已完成：NOTES BP35对照与自主研究方向修正
 
-- 用户在NOTES完成答复后说“继续”，本轮推进下一项有限BP35比较；沿用5400s总预算/max6自然轮/1000动作/1024model/4096tool、gpt6.1sol/high、offline seed0、目标6。不是900s每关，不续期，不自动跑L7或官方卡。
-- Production ebcefec9，后续提交仅测试/文档；最新启动记录e5259227。用已验证wheel7a599c0139e35c043329179f3d8badea8cee7a95f2767480a6944337cc0250a3；不重复未变更的promotion。
-- notes_bp35_trial负责.asterion-private/p7-notes-bp35-20261008/和唯一新外部root的私有launcher/隔离/监控/cleanup。独立预检含stderr完整捕获通过，root已GO；本次已启动且运行中。保留原console PID52024/56659。
-- baseline-audit.md已准备：旧cold5/213/5400s、ARC6/271与旧成熟32/43分别比较；notesbytes不等于providerinput。游戏正在运行时不向actor提供外围诊断/答案或改代码。
-- 当前运行：2026-10-08 CST07:45:31启动，09:15:31固定截止，另180s仅清理。run p7-live-20261007234531-87e38f105ea518bdba94623a，unit asterion-p7-f68acec0bb5e488fbe2d7a1880d30aba.service，operator96888/orb96891/caffeinate96890。
-- 下一动作：监控至目标或有限终局，按真实账本/笔记/投影/时钟核结论并清理本次owned进程/auth。private readiness/launch/progress/最终receipt均在.asterion-private/p7-notes-bp35-20261008/；完整Pi stderr在新外部root/runtime/pi-stderr-full.log，模型不可读取。初态0关0动作0notes。
+- 本轮只跑一次冻结ebcefec9、offline BP35 seed0、gpt6.1sol/high、目标L6；实际4关/335已提交动作，L5未过、L6未进入。另有一个执行中计划的迟到SDK响应被截断，335不是物理动作上界。不得再写“完整90分钟基准”或“335完整终局”。没有新试跑或求解进程。
+- 四关边界44/118/193/244；动作44/74/75/51，观察到过关639.972/585.888/994.202/771.431秒。L5已提交91动作/6RESET；全程11RESET。相较旧P7与ARC，已完成关卡的动作均明显增加。
+- 145NOTES版本495–1439bytes、中位861/final595，654实际cut。661usage normalized input7205603/output191495、peak36572。242cells=178ok/64error，实际计算总2.863秒。输入变小未带来有效整体推理；不能把usage条数叫准确API调用次数。
+- ARC L5与新seq244/旧seq137开场逐像素相同。ARC将失败组织成跨画面地图、门状态实验、保护返程计划；新P7将正确记录的移动死亡改写成删门致死并重复危险移动。L3也有开关知识退化/重学。先前rawreader非缺失：seq311后actor首次import成功，未外部干预。
+- 用户最新要求：稳定认知支持快速复用/总览；发挥LLM自主思考，避免细碎研究门控。通用层支持稳定认识/当前焦点/有限近期证据，P7映射游戏/关卡/真实观察；均为可用能力非必填表。框架保障可靠数据/工具和权限、预算取消、未知结果处理等硬约束。D-2026-10-08-02已记录；当前代码未改，下一设计需重审强制NOTES、每次裁剪、坐标复用/无效动作启发式及细粒度预测准入。
+- 严格截止/清理宽限未验证：原CST09:15:31截止，guard09:30:16、final09:43:13；wall7062.072 vs monotonic5295.828。系统记录09:11:54起合盖/maintenance休眠；不能把全部差值精确归因。最后完整seq335 RESET09:12:26.641042；第338SDK行09:43:13.027182的ACTION6/GAME_OVER/4关前缀截断，匹配未结束plan。原文件保留，summary/seal/replay缺失，不修复成PASS。
+- 后验cleanup已独立核实：本次operator96888/orb96891/caffeinate96890及guest unit/cgroup/独有路径进程消失，临时auth删除；原console52024/56659活着且保留。563source/tool+8launch哈希不变，579安装wheel文件与保留wheel一致。原TimeoutExpired收据保留。
+- 完整公开报告：docs/reviews/2026-10-08-p7-notes-bp35-comparison.md。私有.asterion-private/p7-notes-bp35-20261008/包含public-final-metadata.json、operator-final-audit.json、recording-integrity-metadata.json、final-independent-review.md、各关过程审计、睡眠/清理证据；exact-run-binding.json定位唯一run。
+- Canonical计划Task4已结束，目标能力未达到；下一动作按D-2026-10-08-02形成精简研究接口/记忆与执行保障的具体设计，不恢复旧强制流程，不把新增试跑视为已授权。先读上述报告与决策，避免只看早期r11l成功就重复当前设计。
 
-- 中途已核：L1真实边界44paid，07:56:12.344639过关，launch+641.305s；不是采样猜测。模型继续L2。独立私有interim-representation-friction.md确认p7_research需import但actor只查globals，提示未示例导入；有手抄编码帧及错误事实笔记，后来自行纠正。不能将context裁剪成功等同解题高效，不向actor反馈、不热修。
-
-- L2已核：08:05:58.233021真过关，累计118paid；本关74=6失败+RESET+26额外失败+RESET+40成功，旧P747=6+RESET+40。额外27步对应格边/中心误读导致的一次失败；NOTES随后自行纠正并跨RESET保留。private completed-l2-analysis.md另分8次prefix门控与11未执行步，不能算paid。当前L3，继续原冻结轮。
-
-- L3已核：08:22:32.434557过关，累计193paid；75=13+RESET+6+RESET+12+RESET+41成功。private completed-l3-analysis.md证实开关知识退化/重学、保留反例仍错误规划，不能全归裁剪。实际投影无独立近期前后帧/动作结果窗口；ARC短NOTES无同样skill级删前缀。候选分离笔记更新与裁剪、保留有限近期证据，均未实现。后续L4于08:35:23.865701以累计244paid通过，51actions/771.431s；当前进入指定L5，继续原截止。
+## 历史已完成边界（以下均为先前阶段，不代表当前仍在运行）
 
 ## 已完成：通用研究记忆与P7 NOTES实现和有限部署验证
 
