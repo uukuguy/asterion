@@ -4370,3 +4370,5 @@
 - 2026-10-08 11:12 CST — Authoritative installed-location probe and independent observer review PASS; same-source isolated replacement r11l witness GO issued.
 - 2026-10-08 11:15 CST — Replacement r11l L1 PASS3paid/0NOTES/64.865s; installed identities, replay, seal and cleanup verified; BP35 remains unmeasured.
 - 2026-10-08 11:16 CST — Independent final audit PASS;3ACTION6/0paidRESET,2successful reader cells,74artifact manifest; no live expiry or BP35 capability claim.
+- 2026-10-08 11:17 CST — 5d8f4137 records verified autonomous-interface deployment and preserved observer failure, separating r11l integration from unmeasured BP35 capability.
+- 2026-10-08 11:49 CST — User authorizes frozen autonomous BP35 L1–L6 comparison; prior finite controls retained, cold preparation started without production changes.

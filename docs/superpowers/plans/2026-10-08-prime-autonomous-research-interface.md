@@ -10,3 +10,9 @@ Design: [contract](../specs/2026-10-08-prime-autonomous-research-interface-desig
 Ownership: root owns research_runtime.py, research_bridge.py, actor_projection.py, operator.py, prompt.py, launcher/packaging and state docs. Parallel workers own disjoint files listed above; no worker reverts another's changes. All implementation remains subject to integration review.
 
 Changed-code review READY; TS48pass/6existing skips, real installed-Pi probe provider-free PASS, focused Python343tests/1existing skip, targeted Ruff PASS. Final-source full promotion PASS25commands/provider0; replacement packaged r11l L1 PASS3actions/0NOTES/64.865s, replay/seal/cleanup verified; prior private observer failure preserved separately; see [review](../../reviews/2026-10-08-prime-autonomous-research-interface.md).
+
+## Task 5 — User-authorized BP35 comparison
+
+**Status:** preparing one frozen cold BP35 L1–L6 run after the user requested “准备好了就实测 BP35”. The implementation/deployment package above is complete; this is its explicitly authorized capability evaluation.
+
+Use frozen production6ca76ca4/gpt-6.1-sol high/seed0, empty isolated state, the prior5400s/6round/1000action/1024model/4096tool controls and180s fixed settlement. No old solution knowledge, outside game hints or midrun code repair. Stop at six levels or the existing termination/budget boundary. Audit outcome, per-level research/action cost, context behavior and cleanup against the fixed ARC/old-P7/NOTES baselines. [Trial evidence](../../reviews/2026-10-08-p7-autonomous-bp35-comparison.md).

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 11:15 CST. Implementation and bounded deployment completed; not a final handoff.
+Updated: 2026-10-08 11:49 CST. New user-authorized BP35 comparison preparing; not a final handoff.
 
 ## Current work
 
@@ -11,7 +11,7 @@ Updated: 2026-10-08 11:15 CST. Implementation and bounded deployment completed; 
 - Replacement packaged r11l L1 completed:3paid/3committed,0actorRESET/0NOTES,64.865s wall, replay/seal/cleanup and independent scalar audit verified. Two SDK initialization RESETs are separate. Two successful IPython cells actually use new render/geometry/frame/current/history readers; diff was not observed.6usage entries, normalized input158796/output1424/peak42058; do not confuse tokens with48KiB history target. No live context transcript or original Pi argv observed; installed code/registry/resource/configuration identities are verified.
 - First promotion failed4318tests/2failures/1error; an obsolete installed-official fixture was repaired. Other failure headings were omitted by the original bounded logger and did not recur; no invented attribution. Later two full promotions passed, including final6ca.
 - First packaged launch ended by private observer error before actions; corrected authoritative import location probe and independent review passed before replacement. Preserve both attempts; no solving failure or provider-free claim for the cancelled first launch.
-- No new full BP35 trial in this package. This small witness verifies package/tool/action integration and optional NOTES, not BP35 improvement or live expiry behavior. No current trial process remains; preserve existing user console PID52024/port56659.
+- The user has now authorized a successor cold BP35 L1–L6 comparison in Task5; preparing one isolated run. This small witness verifies package/tool/action integration and optional NOTES, not BP35 improvement or live expiry behavior. No current trial process remains; preserve existing user console PID52024/port56659.
 
 ## Exact deployment evidence
 
@@ -32,6 +32,6 @@ Updated: 2026-10-08 11:15 CST. Implementation and bounded deployment completed; 
 
 ## Next concrete action
 
-1. No further benchmark is active or queued. Do not infer BP35 L5/L6 improvement from the short witness or unit tests.
-2. The next research evaluation, when continued, is a frozen cold BP35 L1–L6 comparison against the recorded arc-skill and two P7 baselines, with fixed nonrenewing finite controls and no outside solving/code edits.
+1. Trial agent prepares one frozen6ca BP35 L1–L6 run; extension agent reviews only launch differences/isolation/cleanup, review agent owns independent scalar audit. Root owns docs. READY then root GO without another user permission request.
+2. Existing controls:5400s total,6natural rounds,1000actions,1024model/4096tool callbacks;180s settlement. No outside solving/code edits, old knowledge or L7. [Current comparison](../reviews/2026-10-08-p7-autonomous-bp35-comparison.md).
 3. Measure per-level actions/RESETs, retained recent evidence and model understanding, model request usage and wall/monotonic clocks. NOTES size alone does not establish context quality or solving efficiency.
