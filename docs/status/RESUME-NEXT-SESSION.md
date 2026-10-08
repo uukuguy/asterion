@@ -10,6 +10,10 @@ Latestdiagnostic: userauthorizedcontinuedinvestigation; oneboundedactualguestPi 
 
 PriorTask13scoremediumclosed5levels168paid thenL6requestfailure16paid;184sealed/168replayed,sourcecleanupPASS. Coldreplacement repairedinitialmissingSDK andkeptoriginaldeadline, nootherretry. Perlevel22/43/34/23/46/16unfinished vsold21/71/34/23/30/42. ExplicitNOTESscoreusage observed, no provenefficiencybenefit; seecanonicalreport.
 
+Task15 initialprivateobserver failedbeforePi dueclosedinheritedFD,0paid/usage;notproviderfailure. FDfixclose_fdsFalse passesRED/GREEN plusactualinstalledP7extension/get_state child0. RootreviewREADY forfreshreplacement .asterion-private/p7-deepseek-high2-bp35-20261008/replacement/; originalabsolute deadline1791463326.270520 (12:42:06Z) kept, no renewal. Trialowner nowauthorizedlaunchafterchecks. No source changes.
+
+Task16 userexplicitlyauthorizes robust genericRPC mechanism. Spec docs/superpowers/specs/2026-10-08-prime-rpc-failure-recovery-design.md. Sharedisolatedworktree /tmp/asterion-rpc-diagnostics branchfix/pi-rpc-diagnostics: rpc_failure_diagnostics owns pi_rpc/services diagnostics/private sink; rpc_recovery_contract(Astra) owns execution/session/tools/P7 recovery admission. Max1 samechildrecovery perrun aftercomplete native_retry_exhausted+exactack/settled+effectguards+remainingoriginalbudget; no blindtoolreplay/rebuild/renewal, permanent/protocol/unknown effectsstop. Mainproductionfrozenuntiltrialcleanup. Reviewerthreads mayhit4concurrencyslots; rootreviewsprivateobserverpreflightdirectly. Need integrate/review/test actualcode, not only design.
+
 ## Verified facts
 
 - Task7 continuity repair9b62d2c2 keeps real native history, native Pi compaction, private computation archive and inspectable definitions; optional model-authored NOTES. Generic/application boundaries preserved. Prior promotion25PASS, TS49PASS/6skips, Python119PASS and packagedr11lL1 verified.

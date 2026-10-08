@@ -129,3 +129,8 @@ Task14 CLOSED external/runtime-limited: exactdeepseek-flash/high confirmed offli
 ## Task 15 — Explicitly authorized DeepSeek continuation with private failure capture
 
 After current.env→actualPi get_state and a bounded API request both pass, user explicitly says continue. Run one fresh DeepSeek Flash/high BP35 L1–L6 under unchangedscorepolicy/sourcec33, samefinitecontrols5400s/6round/1000actions/1024model/4096tool+180cleanup. Newbase .asterion-private/p7-deepseek-high2-bp35-20261008/trial/. No inheritedknowledge/actorhints/hotfix. Beforelaunch add only run-private transparent failureevent observation so another failure yields evidence: byteidentical stdout forwarding, bounded600privatefailurefields, no normalprompt/content/headers/credentials, no changedcompact_events/context. Trialowner implements/preflights; reviewowner verifies synthetic forwarding/failure/limits/cleanup. No productiondiagnosticframework refactor inthistrial. OnceREADY launch directly; if failure diagnose exactcapturedcause, no blindextraattempt. If running continue perlevelcomparison. Preserveconsole.
+
+
+## Task16 — User-authorized generic RPC diagnosis and safe recovery
+
+See ../specs/2026-10-08-prime-rpc-failure-recovery-design.md. Isolated worktree /tmp/asterion-rpc-diagnostics: rpc_failure_diagnostics owns typed/private failure infrastructure; rpc_recovery_contract owns recovery contract/session execution and P7 admission after interface coordination. Main production remains frozen for Task15. Focused redaction/effects/deadline tests and independent review; integrate only after live source seal/cleanup. No automatic extra full trial.

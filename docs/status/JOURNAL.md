@@ -4458,3 +4458,5 @@
 - 2026-10-08 — Actual P7-launched Pi get_state confirms current .env Flash/high selection without model call; previous failure remains unexplained.
 - 2026-10-08 — 0e37155f records successful bounded API and actual Pi selection probes, separating present configuration from unexplained prior failure.
 - 2026-10-08 — User authorizes renewed DeepSeek P7 trial after verified configuration; prepare private failure capture before cold launch.
+- 2026-10-08 — 5b248aa4 records renewed DeepSeek trial authorization and bounded private diagnostics without changing production reasoning policy.
+- 2026-10-08 — User authorizes generic RPC diagnosis and bounded same-session recovery; isolated implementation preserves frozen live comparison.
