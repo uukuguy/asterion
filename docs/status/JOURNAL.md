@@ -4360,3 +4360,9 @@
 - 2026-10-08 10:44 CST — First full promotion failed:4318tests/2fail1error. Installed-official error reproduced as obsolete fixture requiring NOTES admission, updated to autonomous behavior and standalone installed test PASS. Other failure headings were hidden by bounded diagnostics; investigating before any game launch.
 - 2026-10-08 10:45 CST — 959fcb0c implements optional research, usable evidence, bounded context and durable effects; final promotion/deployment pending.
 - 2026-10-08 10:51 CST — Deployment preflight aligned trusted worker injection for witness/autonomy and retained numeric enum reply metadata; Python343tests/1skip and Ruff PASS. Full promotion remains pending.
+- 2026-10-08 10:51 CST — 6ca76ca4 aligns witness worker isolation and raw reply metadata for packaged deployment; capability verification pending.
+- 2026-10-08 10:54 CST — Full promotion on pre-deployment-fix snapshot PASS25commands/provider0; final6ca76ca4 source promotion running before isolated r11l witness.
+
+- 2026-10-08 11:04 CST — Final6ca76ca4 promotion PASS25commands/provider0; isolated r11l L1 witness GO issued, source frozen and outcome pending.
+- 2026-10-08 11:05 CST — Packaged r11l L1 started11:03:51; actual wheel/source/bundle frozen, host900s guard and guest-origin budget separately recorded.
+- 2026-10-08 11:07 CST — Private observer cancelled first witness before actions; cleanup verified, source unchanged; observer repair precedes replacement validation.

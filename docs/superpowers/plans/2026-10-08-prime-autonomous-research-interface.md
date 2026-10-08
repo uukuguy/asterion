@@ -9,4 +9,4 @@ Design: [contract](../specs/2026-10-08-prime-autonomous-research-interface-desig
 
 Ownership: root owns research_runtime.py, research_bridge.py, actor_projection.py, operator.py, prompt.py, launcher/packaging and state docs. Parallel workers own disjoint files listed above; no worker reverts another's changes. All implementation remains subject to integration review.
 
-Changed-code review READY; TS48pass/6existing skips, real installed-Pi probe provider-free PASS, focused Python319tests/1existing skip, targeted Ruff PASS. Full promotion and packaged witness remain pending; see [review](../../reviews/2026-10-08-prime-autonomous-research-interface.md).
+Changed-code review READY; TS48pass/6existing skips, real installed-Pi probe provider-free PASS, focused Python343tests/1existing skip, targeted Ruff PASS. Final-source full promotion PASS25commands/provider0; packaged witness launch authorized and outcome pending; see [review](../../reviews/2026-10-08-prime-autonomous-research-interface.md).

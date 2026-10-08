@@ -1128,6 +1128,8 @@
 
 ## D-2026-10-08-01 — Model-owned research memory with generic/P7 separation
 
+- Historical gate/cut selection below is superseded by D-2026-10-08-02; immutable memory and evidence provenance remain.
+
 - User authorizes implementation and explicitly requires reusable infrastructure plus P7-specific adaptation.
 - Generic Python stores immutable free-text snapshots with opaque scope/evidence. Applications own their commit pointer; no second active-memory authority. Generic TypeScript projects only the model view at a complete accepted tool-result boundary, preserving raw session and later user messages.
 - P7 adopts NOTES with exact current observation and workspace parent. Modern solve/witness/autonomy select notes; historical modes preserve their old contract. Level/RESET/kernel/mismatch calibration remains application-owned; no mandatory WorldMap duplication.
@@ -1145,3 +1147,5 @@
 - Reassess NOTES-as-action-admission, automatic prefix deletion after every note, prefix-coordinate reuse blocks, no-effect/novelty heuristics and mandatory fine-grained predictions. Their scientific-method preferences must not be called security/authority invariants without justification. Current evidence shows both real useful corrections and semantic regression; retaining more history alone is not proven sufficient.
 - This narrows the future design interpretation of D-2026-10-08-01: free model-authored memory and evidence integrity remain; preservation of every existing research gate is no longer an assumed design goal. Existing public contracts/dependency direction and actual execution controls are still binding.
 - Frozen BP35 trial remains unchanged through its original target/deadline. This decision records user intent and future redesign criteria, not an implemented fix or improved end-to-end capability. See [actual process comparison](../reviews/2026-10-08-p7-notes-bp35-comparison.md).
+
+- Implementation follow-through: `959fcb0c`/`6ca76ca4` implement optional notes/predictions and remove heuristic action gates in the modern P7 profile, capacity-driven generic context retention, discoverable P7 evidence helpers, generic dual clocks and P7 durable pending effects. [Current contract](../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md) and [implementation evidence](../reviews/2026-10-08-prime-autonomous-research-interface.md) supersede the former mandatory-note/cut behavior. Source tests and final-source full promotion pass; packaged deployment verification is pending after a private observer cancelled the first pre-action attempt. No BP35 improvement is yet established.
