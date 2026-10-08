@@ -4441,3 +4441,5 @@
 - 2026-10-08 — Independent high2 audit passes; actor eventually corrects truncated map autonomously, while integrated scoring/config tests26 and docs pass.
 - 2026-10-08 — e869a3dd restores medium and records completed high comparison plus verified score-feedback integration without claiming new gameplay results.
 - 2026-10-08 — User authorizes one cold score-aware medium BP35 trial, matching prior controls and tracking each level without actor feedback.
+- 2026-10-08 — 0855ef05 records frozen score-aware medium trial scope and independent per-level comparison ownership.
+- 2026-10-08 — Score-aware medium launches09:39:28Z after cold/source/install/scoring checks; fixeddeadline11:09:28Z, sixlevel stop, independent comparisons active.
