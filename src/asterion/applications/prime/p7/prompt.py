@@ -33,6 +33,8 @@ def build_autonomous_prompt() -> str:
     """P7 supplies evidence and execution authority; the actor owns research."""
     return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
 
+计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
+
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r
 print(r.render()['text'])

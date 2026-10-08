@@ -1,11 +1,11 @@
-"""Local score accounting stays correct without actor score guidance."""
+"""Actor score facts preserve original autonomy and local accounting."""
 from pathlib import Path
 import unittest
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game import ArcGameContract, P7GameSelection
 from asterion.applications.prime.p7.prompt import build_autonomous_prompt
-from asterion.applications.prime.p7.score import partial_game_score, score_planning_facts
+from asterion.applications.prime.p7.score import partial_game_score
 from tests.test_prime_p7_solver import P7SolverFixture
 from tests.test_prime_p7_native_broker import _Engine
 
@@ -38,11 +38,8 @@ class TestP7ScorePlanning(P7SolverFixture):
 
     def scoring(self):
         budget = self.solver.current_context()['budget']
-        self.assertNotIn('scoring', budget)
-        status = (self.broker.status() if budget['terminal_reason'] in {'active', 'reset-required'}
-                  else self.broker.terminal_snapshot().status)
-        return score_planning_facts(self.broker.game, self.broker.journal,
-            primitive_actions=status.primitive_actions, levels_completed=status.levels_completed)
+        self.assertIn('scoring', budget)
+        return budget['scoring']
 
     def test_full_game_objective_and_all_baselines_do_not_extend_stop_boundary(self):
         facts = self.scoring()
@@ -56,7 +53,7 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(self.scoring()['baseline_actions'], [10] * 9)
         self.assertEqual(self.engine.calls, [])
         from asterion.applications.prime.p7.actor_projection import project_actor_context
-        self.assertNotIn('scoring', project_actor_context(self.solver.current_context())['budget'])
+        self.assertEqual(project_actor_context(self.solver.current_context())['budget']['scoring'], self.scoring())
         # Test the existing sixth-level stop using a real sequential prefix.
         for level in range(6):
             self.engine.level_after = len(self.engine.calls) + 1
@@ -75,8 +72,8 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(self.scoring()['full_game_score'], '0.000000')
         self.engine.level_after = 4
         feedback = self.solver.execute_plan(self.minimal('complete'))
-        self.assertNotIn('scoring', feedback['budget'])
-        facts = self.scoring()
+        facts = feedback['budget']['scoring']
+        self.assertEqual(facts, self.scoring())
         self.assertEqual(facts['completed_levels'], [{'level': 1, 'paid_actions': 4, 'baseline': 10,
                                                      'level_score': '115.000000'}])
         self.assertEqual(facts['current_level']['paid_actions'], 0)
@@ -86,10 +83,7 @@ class TestP7ScorePlanning(P7SolverFixture):
         reconstructed = Solver(broker=self.broker, kernel=self.kernel, control=self.control,
             workspace_root=Path(self.directory.name), run_id='run-1', attempt_id='attempt-1',
             event_sink=lambda *args: None, learner_profile='autonomous')
-        status = reconstructed.broker.status()
-        self.assertNotIn('scoring', reconstructed.current_context()['budget'])
-        self.assertEqual(score_planning_facts(reconstructed.broker.game, reconstructed.broker.journal,
-            primitive_actions=status.primitive_actions, levels_completed=status.levels_completed), facts)
+        self.assertEqual(reconstructed.current_context()['budget']['scoring'], facts)
         self.solver.execute_plan(self.minimal('next'))
         self.assertEqual(self.scoring()['current_level']['paid_actions'], 1)
         self.assertEqual(self.scoring()['completed_levels'], facts['completed_levels'])
@@ -115,8 +109,7 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(facts['accounting_status'], 'settled')
         self.engine.raises_on = 1
         result = self.solver.execute_plan(self.minimal('unknown'))
-        self.assertNotIn('scoring', result['budget'])
-        facts = self.scoring()
+        facts = result['budget']['scoring']
         self.assertEqual(result['applied_count'], 0)
         self.assertTrue(self.solver.current_context()['environment_result_unknown'])
         self.assertEqual(result['budget']['primitive_actions'], 1)
@@ -124,13 +117,24 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertIsNone(facts['full_game_score'])
         self.assertIsNone(facts['current_level'])
 
-    def test_autonomous_prompt_keeps_target_level_goal_without_score_guidance(self):
+    def test_autonomous_prompt_adds_score_facts_without_changing_original_goal(self):
         prompt = build_autonomous_prompt()
-        for fragment in ('直到达到 budget.target_level', '兼顾过关与动作效率',
-                         '不会续期', '达到目标后停止行动'):
-            self.assertIn(fragment, prompt)
-        for fragment in ('budget.scoring', '整局满分100', 'q_i=', '稳定目标'):
+        intro, facts, remainder = prompt.split('\n\n', 2)
+        self.assertEqual(intro, '你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。')
+        for fragment in ('计分事实：budget.scoring', 'N', 'b_i', 'a_i',
+                         'q_i=min(115,100*(b_i/a_i)^2)', 'W=N*(N+1)/2',
+                         'min(sum(i*q_i)/W,100*sum(已完成关i)/W)',
+                         '未完成关贡献为0', '初始化 RESET 不计费', '撤销',
+                         'RESET 不清零', 'baseline 是100分参考', 'null 表示未知'):
+            with self.subTest(fact=fragment):
+                self.assertIn(fragment, facts)
+        for fragment in ('争取', '优化', '自行权衡', '不要', '须', '必须', '硬限'):
+            with self.subTest(behavior=fragment):
+                self.assertNotIn(fragment, facts)
+        self.assertTrue(remainder.startswith('工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。'))
+        for fragment in ('完整通关', '整局满分100', '稳定目标', '执行停止边界'):
             self.assertNotIn(fragment, prompt)
+        self.assertIn('固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。', prompt)
 
 
 class TestP7ScoreFormula(unittest.TestCase):
