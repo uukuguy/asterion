@@ -185,3 +185,21 @@ class PrivateFailureBoundsTests(unittest.TestCase):
             self.assertTrue(all(record["observed_bytes"] > record["retained_bytes"] for record in records))
             self.assertTrue(all(record["retained_bytes"] == len(record["error_text"].encode()) for record in records))
             self.assertTrue(all(len(line) <= 8192 for line in path.read_bytes().splitlines(keepends=True)))
+
+    def test_private_error_with_unpaired_surrogate_cannot_interrupt_transport(self):
+        import json
+        from asterion.services.diagnostics import FailureMetadata, capture_private_failure
+
+        records = []
+        metadata = FailureMetadata(stop_reason="error", http_status=400)
+        error_text = "bad\ud800message"
+        tagged, retained = capture_private_failure(
+            SimpleNamespace(record=records.append), metadata,
+            {"errorMessage": error_text}, remaining_bytes=65536,
+        )
+        self.assertEqual(tagged.http_status, 400)
+        self.assertIsNotNone(tagged.diagnostic_id)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(json.loads(records[0].error_bytes)["errorMessage"], error_text)
+        self.assertEqual(retained, len(records[0].error_bytes))
+        self.assertEqual(records[0].observed_bytes, retained)
