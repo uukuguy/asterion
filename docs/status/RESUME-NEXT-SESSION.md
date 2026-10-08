@@ -14,6 +14,10 @@ Task15 initialprivateobserver failedbeforePi dueclosedinheritedFD,0paid/usage;no
 
 Task16 userexplicitlyauthorizes robust genericRPC mechanism. Spec docs/superpowers/specs/2026-10-08-prime-rpc-failure-recovery-design.md. Sharedisolatedworktree /tmp/asterion-rpc-diagnostics branchfix/pi-rpc-diagnostics: rpc_failure_diagnostics owns pi_rpc/services diagnostics/private sink; rpc_recovery_contract(Astra) owns execution/session/tools/P7 recovery admission. Max1 samechildrecovery perrun aftercomplete native_retry_exhausted+exactack/settled+effectguards+remainingoriginalbudget; no blindtoolreplay/rebuild/renewal, permanent/protocol/unknown effectsstop. Mainproductionfrozenuntiltrialcleanup. Reviewerthreads mayhit4concurrencyslots; rootreviewsprivateobserverpreflightdirectly. Need integrate/review/test actualcode, not only design.
 
+CURRENT Task15 replacement CLOSED: actualDeepSeek HTTP400 invalid_request_error: p7_workspace function root schema expectedobject/gotnull. Sourceunchanged/cleanupPASS,0paid. Exactfailedreplacement .asterion-private/p7-deepseek-high2-bp35-20261008/replacement/,runp7-live-20261008112000-57c22d069d69de08eac3abe3,rawfailuremode600/338B,manifest71filesd167e5e... . InitialobserverFDbugseparate. Noactorprogress.
+
+Task16 implementation INTEGRATED onmain: b8031e67 genericTS tool-schema normalization at registration (P7 originalunionunchanged), fb423f72 typedRPC failures, a4fbc12d boundedrecovery,27bbe286 genericsink,adae30ec genericdeadline/reuse,db546e2b surrogatefix. IndependentreviewREADY. Newgenericservices.private_failure included in coreallowlist. FinalTS50PASS/6existing skips; finalPython/coreinstall165PASS (log/tmp/asterion-final-prime-python.log). Do NOT runprovider untilPython thenmakepromotionPASS. Trialowner preparedMake r11lL1 witness followedby freshBP35 under original12:42:06Z absoluteceiling; waitroot finalsourcefreeze/promotionGO. Newerrorfile runroot/pi-rpc-failures.jsonl, genericbounded0600 sink; nooldwrapperneeded. Testscoveronceperrun/noactionreplay/effectguard/deadline/permanentrejection. Liveabilitynotyetverified.
+
 ## Verified facts
 
 - Task7 continuity repair9b62d2c2 keeps real native history, native Pi compaction, private computation archive and inspectable definitions; optional model-authored NOTES. Generic/application boundaries preserved. Prior promotion25PASS, TS49PASS/6skips, Python119PASS and packagedr11lL1 verified.
@@ -24,7 +28,7 @@ Task16 userexplicitlyauthorizes robust genericRPC mechanism. Spec docs/superpowe
 
 ## Current judgment
 
-Medium is the default again: lowest paidactions andelapsed among these completed samples, not a universalstatisticalranking. High2's observedsameframe divergence involves incomplete spatialcoverage and unknown-as-wall modeling; calculation itself wasfast. ARC corrected the explorationboundary inNOTES, medium explored directly. Do not inject these specific routes into a coldactor.
+Current experiment uses DeepSeek Flash/high. Sol/medium had the lowest paid actions and elapsed time among completed comparisons; this is not a universal statistical ranking. High2's observedsameframe divergence involves incomplete spatialcoverage and unknown-as-wall modeling; calculation itself wasfast. ARC corrected the explorationboundary inNOTES, medium explored directly. Do not inject these specific routes into a coldactor.
 
 ## Unfinished boundaries / next action
 

@@ -164,6 +164,7 @@ CORE_MODULES = (
     "asterion.services.controlled_executor",
     "asterion.services.controlled_executor_jsonl",
     "asterion.services.diagnostics",
+    "asterion.services.private_failure",
     "asterion.services.executor_protocol",
     "asterion.services.managed_controlled_executor",
     "asterion.services.presentation",

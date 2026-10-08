@@ -4460,3 +4460,10 @@
 - 2026-10-08 — User authorizes renewed DeepSeek P7 trial after verified configuration; prepare private failure capture before cold launch.
 - 2026-10-08 — 5b248aa4 records renewed DeepSeek trial authorization and bounded private diagnostics without changing production reasoning policy.
 - 2026-10-08 — User authorizes generic RPC diagnosis and bounded same-session recovery; isolated implementation preserves frozen live comparison.
+- 2026-10-08 — b7e6fe98 defines generic failure evidence and exact bounded recovery while isolated implementation preserves trial freeze.
+- 2026-10-08 — b8031e67 normalizes object-only function schemas in Prime registration without changing P7 declarations; TS50pass6skip and reviewREADY.
+- 2026-10-08 — fb423f72 integrates generic RPC diagnosis and bounded recovery components after live trial cleanup.
+- 2026-10-08 — a4fbc12d integrates generic RPC diagnosis and bounded recovery components after live trial cleanup.
+- 2026-10-08 — 27bbe286 integrates generic RPC diagnosis and bounded recovery components after live trial cleanup.
+- 2026-10-08 — adae30ec integrates generic RPC diagnosis and bounded recovery components after live trial cleanup.
+- 2026-10-08 — db546e2b prevents malformed Unicode failure text from disrupting RPC diagnostics; independent review READY.
