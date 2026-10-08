@@ -4,14 +4,14 @@ Updated: 2026-10-08 after Task21 settlement. Session remains active; this is not
 
 ## Current intent and next action
 
-User wants LLM autonomous reasoning with complete objective facts and reliable generic harness. Latest request: after this trial, analyze death-triggered RESET causes and improvements. Analysis is complete in [the canonical comparison](../reviews/2026-10-08-p7-continuity-bp35-comparison.md). No new code repair or game trial is authorized. Discuss concrete generic/P7 improvements when requested; avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
+User approved implementation after the concrete layered design. Task22 adds read-only r.transition(sequence) and P7 research/NOTES descriptions. Generic Prime facilities and registered tools unchanged. Source implementation/review and61Python tests PASS; TS50PASS/6externalPi skips, lint/docsPASS. Promotion and the required fresh packaged r11lL1 deployment witness remain pending; no BP35 trial authorized. Design [transition research spec](../superpowers/specs/2026-10-08-p7-transition-research-design.md); canonical worklist Task22. Avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
 
 ## Current source and configuration
 
 - Branch feat/prime-research-notes; production1a22dc33. Task21 adds only factual scoring paragraph and budget.scoring, preserving the original actor goal/behavior from9b62d2c2. score.py unchanged;49 focused tests passed. Generic schema/RPC/config repairs remain.
 - Operator.env openai-codex/gpt-6.1-sol/medium, ASTERION_PRIME_EFFORT takes precedence. Preserve credentials; do not print whole.env.
 - No active trial. Task21 owned host/guest processes and temporary auth/environment removed, exact unit7a6e9c2a4fd947d2800595330a3dc376 stopped. User console52024/56659 preserved.
-- State/report commit84df08e3; JOURNAL append-only. Canonical worklist [research interface plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
+- Task21 state/report commit84df08e3; Task22 approved spec4c65f470, source commit pending. JOURNAL append-only. Canonical worklist [research interface plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
 
 ## Task21 verified facts
 

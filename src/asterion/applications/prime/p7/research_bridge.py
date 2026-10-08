@@ -13,7 +13,7 @@ from .processing_diagnostics import public_diagnostic
 
 
 class ResearchReadServer:
-    def __init__(self, *, context, history, frame, artifact, experience=None, animation=None, cell_history=None, cell_read=None, diagnostic_sink=None):
+    def __init__(self, *, context, history, frame, artifact, experience=None, animation=None, transition=None, cell_history=None, cell_read=None, diagnostic_sink=None):
         callbacks = {
             "context": context,
             "history": history,
@@ -30,7 +30,7 @@ class ResearchReadServer:
             if not callable(animation):
                 raise ValueError('research readers unavailable')
             callbacks['animation'] = animation
-        for name, callback in (("cell_history", cell_history), ("cell_read", cell_read)):
+        for name, callback in (("transition", transition), ("cell_history", cell_history), ("cell_read", cell_read)):
             if callback is not None:
                 if not callable(callback):
                     raise ValueError("research readers unavailable")
@@ -111,6 +111,9 @@ class ResearchReadServer:
                     raise ValueError
             elif method == "frame":
                 if len(args) != 1 or (args[0] is not None and (type(args[0]) is not int or args[0] < 0)):
+                    raise ValueError
+            elif method == "transition":
+                if len(args) != 1 or type(args[0]) is not int or args[0] < 1:
                     raise ValueError
             elif method in {'render', 'geometry', 'diff'}:
                 if len(args) != (6 if method == 'render' else 3):
@@ -196,6 +199,9 @@ def _read(method, args):
         return result["value"]
 def context(): return _read("context", [])
 def history(start, limit): return _read("history", [start, limit])
+def transition(sequence):
+    """One committed paid action (sequence >= 1), exact before/after refs, and after animation metadata; no pixels."""
+    return _read("transition", [sequence])
 def cell_history(start=0, limit=16):
     """Current-run computation directory, at most 64 records per page."""
     return _read("cell_history", [start, limit])

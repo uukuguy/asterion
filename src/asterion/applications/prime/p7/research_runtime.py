@@ -30,6 +30,7 @@ class _EvidenceBroker:
 
     def __init__(self, broker, trace_client):
         self._broker, self._trace_client = broker, trace_client
+        self._evidence_lock = threading.RLock()
 
     def __getattr__(self, name):
         return getattr(self._broker, name)
@@ -47,6 +48,10 @@ class _EvidenceBroker:
             return self._broker.terminal_snapshot().status
 
     def act_checked(self, plan, *, probe_preparation: Mapping[str, object] | None = None):
+        with self._evidence_lock:
+            return self._act_checked(plan, probe_preparation=probe_preparation)
+
+    def _act_checked(self, plan, *, probe_preparation: Mapping[str, object] | None = None):
         start = len(self._broker.journal)
         try:
             result = self._broker.act_checked(plan, probe_preparation=probe_preparation)
@@ -129,6 +134,7 @@ class P7ResearchRuntime:
                         experience.read(source, kind, start=start, limit=limit, artifact_id=artifact_id))
                        if experience is not None else None,
             animation=self._animation,
+            transition=self._transition,
             cell_history=lambda start, limit: self.kernel.cell_history(start=start, limit=limit),
             cell_read=lambda cell_id, field, start, limit: self.kernel.cell_read(
                 cell_id, field=field, start=start, limit=limit),
@@ -171,27 +177,80 @@ class P7ResearchRuntime:
             except Exception:
                 pass  # Independent private log/context/summary retain the fault.
 
+    def _committed_observation(self, sequence):
+        """Read only paired broker snapshots whose existing history is settled.
+
+        The caller holds the same lock as the runtime action path. Engines with
+        a write-ahead journal must also have acknowledged the transaction;
+        advancing that journal proves earlier actions committed sequentially.
+        """
+        journal = self._broker.journal
+        observations = self._broker.replay_observations
+        records = tuple(self._broker._bound_history())
+        if (type(sequence) is not int or sequence < 0 or sequence > len(journal)
+                or sequence >= len(observations) or sequence >= len(records)):
+            raise ValueError('observation evidence unavailable')
+        observation, record = observations[sequence], records[sequence]
+        expected_hash = (journal[sequence - 1].after_sha256 if sequence else
+                         journal[0].before_sha256 if journal else
+                         self._broker.observation_reference()['observation_sha256'])
+        if (record.sequence != sequence or record.run_id != self.solver.run_id
+                or record.after_state_sha256 != expected_hash
+                or record.state != observation.state
+                or record.levels_completed != observation.levels_completed):
+            raise ValueError('observation evidence unavailable')
+        if sequence:
+            transition = journal[sequence - 1]
+            if (transition.sequence != sequence or record.action != transition.action
+                    or record.data != transition.data
+                    or record.before_state_sha256 != transition.before_sha256
+                    or records[sequence - 1].after_state_sha256 != transition.before_sha256):
+                raise ValueError('transition evidence unavailable')
+            transaction = getattr(self._broker._engine, 'action_journal', None)
+            if transaction is not None:
+                receipt = transaction.snapshot()
+                if (type(receipt) is not dict or type(receipt.get('sequence')) is not int
+                        or receipt['sequence'] < sequence):
+                    raise ValueError('transition evidence unavailable')
+                if receipt['sequence'] == sequence:
+                    if (receipt.get('phase') != 'committed' or receipt.get('outcome_known') is not True
+                            or receipt.get('action') != {'name': transition.action, 'data': dict(transition.data)}
+                            or receipt.get('before', {}).get('observation_sha256') != transition.before_sha256
+                            or receipt.get('observation_ref', {}).get('sequence') != sequence
+                            or receipt.get('observation_ref', {}).get('observation_sha256') != transition.after_sha256):
+                        raise ValueError('transition evidence unavailable')
+        reference = {'run_id': self.solver.run_id, 'attempt_id': self.solver.attempt_id,
+                     'level': min(observation.levels_completed + 1, self._broker.game.win_levels),
+                     'sequence': sequence, 'observation_sha256': expected_hash}
+        return observation, reference
+
+    def _transition(self, sequence):
+        if type(sequence) is not int or sequence < 1:
+            raise ValueError('transition evidence unavailable')
+        with self._broker._evidence_lock:
+            after, after_reference = self._committed_observation(sequence)
+            _, before_reference = self._committed_observation(sequence - 1)
+            transition = self._broker.journal[sequence - 1]
+            from .dynamic_evidence import AnimationFrames
+            return {'sequence': sequence, 'action': transition.action, 'data': dict(transition.data),
+                    'before_observation_ref': before_reference, 'after_observation_ref': after_reference,
+                    'state': after.state, 'levels_completed': after.levels_completed,
+                    'after_animation_ref': AnimationFrames.capture(after.frame).reference()}
+
     def _animation(self, reference, start, limit):
         if (type(reference) is not dict or set(reference) != {'run_id', 'attempt_id', 'level', 'sequence', 'observation_sha256'}
                 or reference['run_id'] != self.solver.run_id or reference['attempt_id'] != self.solver.attempt_id
                 or type(reference['sequence']) is not int or reference['sequence'] < 0
                 or type(reference['level']) is not int or reference['level'] < 1):
             raise ValueError('animation reference unavailable')
-        sequence = reference['sequence']
-        observations = self._broker.replay_observations
-        if sequence >= len(observations):
-            raise ValueError('animation reference unavailable')
-        expected_hash = (self._broker.journal[sequence - 1].after_sha256 if sequence
-                         else self._broker.journal[0].before_sha256 if self._broker.journal
-                         else self._broker.observation_reference()['observation_sha256'])
-        observation = observations[sequence]
-        if (reference['observation_sha256'] != expected_hash
-                or reference['level'] != min(observation.levels_completed + 1, self._broker.game.win_levels)):
-            raise ValueError('animation reference unavailable')
-        from .dynamic_evidence import AnimationFrames
-        frames = AnimationFrames.capture(observation.frame)
-        return {'observation_ref': reference, 'animation_ref': frames.reference(), 'start': start,
-                'frames': [[list(row) for row in grid] for grid in frames.page(start, limit)]}
+        with self._broker._evidence_lock:
+            observation, expected_reference = self._committed_observation(reference['sequence'])
+            if reference != expected_reference:
+                raise ValueError('animation reference unavailable')
+            from .dynamic_evidence import AnimationFrames
+            frames = AnimationFrames.capture(observation.frame)
+            return {'observation_ref': expected_reference, 'animation_ref': frames.reference(), 'start': start,
+                    'frames': [[list(row) for row in grid] for grid in frames.page(start, limit)]}
 
     def _kernel_event(self, kind, payload):
         if kind == "cell_started":

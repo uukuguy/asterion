@@ -38,11 +38,15 @@ def build_autonomous_prompt() -> str:
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r
 print(r.render()['text'])
-这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态；r.geometry() 返回各颜色连通区域的大小和边界；r.diff(before_sequence) 比较历史与当前画面，变化坐标有界返回。render/geometry/diff 可指定 sequence、窗口或颜色；help(r) 查看参数。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块没有预设游戏含义。可自由写程序处理这些数据、建立模型和搜索；此研究接口只读。
+这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态。r.render(sequence=None,x0=0,y0=0,x1=None,y1=None,max_cells=4096) 显示带坐标的原始像素，可选半开窗口；r.geometry(sequence=None,colors=None,limit=40) 返回颜色计数与连通区域；r.diff(before_sequence,after_sequence=None,limit=80) 返回变化总数和有界变化坐标，after_sequence 缺省为当前。输出会标明省略范围。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块没有预设游戏含义。此研究接口只读。
+
+已有付费动作后，r.transition(sequence) 联合返回该动作与参数、before_observation_ref、after_observation_ref、实际 state/levels_completed 和 after_animation_ref。sequence 是本次运行的已提交动作序号，从1开始。用 r.frame(t['before_observation_ref']['sequence']) 与 r.frame(t['after_observation_ref']['sequence']) 读前后终态；r.animation(t['after_observation_ref'],start=0,limit=32) 按页读该动作的 SDK 返回帧，after_animation_ref['frame_count'] 是记录帧数。它不补造 SDK 未记录的过程。
+
+可自由写程序表示状态、推演转移或搜索，再用真实历史转移检验假说。自建表示是解释，保留仍需区分的原始类别、形状和坐标对应；未知保持未知。一次动作可能触发连续变化，研究其后果时考虑实际停留状态及途中变化，不只直接输入后的第一步。模型适用范围和未覆盖区域由你判断，自主选择回读、实验、计算或行动。
 
 当前运行的计算源码和实际输出自动存档：r.cell_history(start=0,limit=16) 返回计算目录，r.cell_read(cell_id,field="source",start=0,limit=4096) 回读源码，field="output" 回读输出或报错。文本按字符分页，目录不自动展开内容。查看仍存活的函数定义可用 inspect.getsource(function)。优先回读所需定义和结果，无需反复用 globals 或反汇编重建代码。档案只是记录，不会自动执行；内核恢复只还原显式保存的 checkpoint。
 
-建议用简短 NOTES 保持游戏稳定认识、重要反例、尚不确定之处与当前计划的总览。有信息价值的失配后修正认识，换关后保留可复用知识。内容、格式与更新时机由你决定，写笔记不是行动前置条件：
+建议用简短 NOTES 保持可用于决策的游戏稳定认识、适用条件、连续后果、重要反例及证据引用，以及尚不确定之处与当前计划的总览。有信息价值的失配后修正认识。换关或 RESET 后，已发现的机制仍可作为待复核认识复用，坐标、当前局面和路径需重新核实；内核代际变化还需确认程序对象是否仍存在。notes_current 是笔记边界标记，不代表全部机制知识失效。内容、格式与更新时机由你决定，写笔记不是行动前置条件：
 p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:当前完整引用,text:'替换后的有效笔记'})。
 自由文字最多16KiB，不是长度目标。过关后保留可复用认识即可，无需累计前几关完整行动记录。真实交互历史由宿主保留，长上下文由 Pi 原生压缩管理；更新笔记只替换状态快照，不删除研究交互。将有用理解保存在笔记，具体行动和计算资料可按需回查。NOTES 是研究记忆，不是环境认证。可用 workspace op read/notes_read/notes_history 复查，复杂模型可按需显式导出或 checkpoint。
 

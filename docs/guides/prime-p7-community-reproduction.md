@@ -85,6 +85,10 @@ This calls the model and OFFLINE ARC engine. The standard witness has a fixed 90
 
 The application supplies exact observations and execution budgets. The LLM chooses its research, optional NOTES/WorldMap, computation and action plans. Predictions are optional; supplied predictions are compared with real feedback. In IPython, `import p7_research as r` exposes current/raw frames, grid rendering, geometry and differences. Notes updates preserve recent complete interactions; history trimming is driven by capacity. Unknown action outcomes stop further execution and remain recorded for inspection. The witness deadline is a bounded deployment preset, not a reasoning-stage timer.
 
+After an action is committed, `r.transition(sequence)` bundles its recorded action/data, exact before/after observation references, resulting state/level count and `after_animation_ref`. Sequences start at 1 within the current run. Read a referenced board with `r.frame(ref['sequence'])`; read only SDK-recorded process frames with `r.animation(t['after_observation_ref'], start=0, limit=32)`, using `t['after_animation_ref']['frame_count']` for pagination. A single recorded frame does not establish that no intermediate motion occurred. The bundle contains references rather than duplicated boards and does not interpret colors, infer hazards, or execute an action.
+
+The actor may build and test its own state/transition programs against this evidence. Original pixel values and shapes remain available even if an actor-authored projection merges them. NOTES may preserve mechanism applicability, consequences, counterexamples and evidence references; level/RESET boundaries require rechecking the current situation, not automatically discarding all mechanism knowledge. These research choices remain optional. Improved solving quality requires a separate cold comparison; interface verification does not establish fewer deaths.
+
 For a full-game attempt, or a solve through an explicitly selected level:
 
 ```bash
