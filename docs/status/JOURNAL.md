@@ -4365,4 +4365,8 @@
 
 - 2026-10-08 11:04 CST — Final6ca76ca4 promotion PASS25commands/provider0; isolated r11l L1 witness GO issued, source frozen and outcome pending.
 - 2026-10-08 11:05 CST — Packaged r11l L1 started11:03:51; actual wheel/source/bundle frozen, host900s guard and guest-origin budget separately recorded.
-- 2026-10-08 11:07 CST — Private observer cancelled first witness before actions; cleanup verified, source unchanged; observer repair precedes replacement validation.
+- 2026-10-08 11:06 CST — Private observer cancelled first witness before actions; cleanup verified, source unchanged; observer repair precedes replacement validation.
+- 2026-10-08 11:06 CST — 569be6a6 records final promotion and observer failure to preserve deployment limits while preparing corrected validation.
+- 2026-10-08 11:12 CST — Authoritative installed-location probe and independent observer review PASS; same-source isolated replacement r11l witness GO issued.
+- 2026-10-08 11:15 CST — Replacement r11l L1 PASS3paid/0NOTES/64.865s; installed identities, replay, seal and cleanup verified; BP35 remains unmeasured.
+- 2026-10-08 11:16 CST — Independent final audit PASS;3ACTION6/0paidRESET,2successful reader cells,74artifact manifest; no live expiry or BP35 capability claim.

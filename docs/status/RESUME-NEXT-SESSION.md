@@ -1,23 +1,25 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 11:04 CST. Active implementation/deployment verification; not a final handoff.
+Updated: 2026-10-08 11:15 CST. Implementation and bounded deployment completed; not a final handoff.
 
 ## Current work
 
-- User direction: LLM owns reasoning and research strategy; harness supplies reliable evidence/tools and actual execution controls. Generic support and P7 application behavior remain layered. NOTES preserve stable understanding, not accumulated execution logs. No mandatory reasoning headings/stages.
-- Canonical package: [autonomous research interface](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md); [contract](../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md); [implementation review](../reviews/2026-10-08-prime-autonomous-research-interface.md).
-- Source committed as `6ca76ca4` (base `959fcb0c`) (not pushed); final promotion passed; packaged deployment outcome pending. Source implemented: optional P7 notes/predictions/research metadata; capacity-driven complete recent context; discoverable raw/render/geometry/diff readers; generic dual clocks; durable action intent/reply/commit and fixed evidence settlement. Same runner and three tools.
-- Changed-code review READY. TS48pass/6existing skips; actual installed-Pi probe PASS with0provider calls; Python343tests/1existing skip; targeted Ruff PASS. Second full promotion PASS25commands/provider0 on pre-final-fix snapshot. Final-source `6ca76ca4` promotion PASS25commands/provider0 (private log `promotion-deployment.log`); first packaged r11l L1 launch cancelled by private observer error after6.836seconds/0committed actions; observer repair and replacement witness preparation underway. No deployment or BP35 capability claim yet.
-- First promotion FAILED4318tests/2failures/1error; installed-official fixture was corrected and standalone passes. Remaining failures did not recur in second full promotion; first log omitted their headings, so no invented attribution. Final-source promotion accounts for later trusted witness worker and enum metadata fixes. Do not repeatedly broaden tests absent new failures or changes.
-- Agents: notes_extension owns TS/bundle (frozen); notes_bp35_review owns deadline/journal/live (frozen, review complete); notes_bp35_trial owns Solver/Broker/helpers (frozen) and prepares one isolated r11l L1 deployment witness. First witness ended; trial owns private observer repair and provider-free preflight, extension agent independently reviews it. Replacement needs root GO after readiness.
-- No new full BP35 trial in this package. Small witness uses existing900-second preset/gpt-6.1-sol/high and verifies package/tool/runtime integration only. Preserve existing user console PID52024/port56659; never stop it as trial cleanup.
+- User direction: LLM owns reasoning and research strategy; harness supplies reliable evidence/tools and real execution controls. Keep reusable support separate from P7 adaptation. NOTES hold stable understanding; no mandatory reasoning headings/stages.
+- Canonical [implementation plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md), [contract](../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md), and [review/evidence](../reviews/2026-10-08-prime-autonomous-research-interface.md).
+- Production committed as `6ca76ca4` (base `959fcb0c`, not pushed): optional P7 NOTES/predictions/research metadata; capacity-driven complete recent context; discoverable frame/render/geometry/diff readers; generic dual clocks; P7 durable intent/reply/commit and fixed evidence settlement. Same runner and three tools.
+- Changed-code review READY. TS48pass/6existing skips; actual installed-Pi projection probe PASS/0provider calls; Python343tests/1existing skip; targeted Ruff PASS. Final-source full promotion PASS25commands/provider0 (`promotion-deployment.log`).
+- Replacement packaged r11l L1 completed:3paid/3committed,0actorRESET/0NOTES,64.865s wall, replay/seal/cleanup and independent scalar audit verified. Two SDK initialization RESETs are separate. Two successful IPython cells actually use new render/geometry/frame/current/history readers; diff was not observed.6usage entries, normalized input158796/output1424/peak42058; do not confuse tokens with48KiB history target. No live context transcript or original Pi argv observed; installed code/registry/resource/configuration identities are verified.
+- First promotion failed4318tests/2failures/1error; an obsolete installed-official fixture was repaired. Other failure headings were omitted by the original bounded logger and did not recur; no invented attribution. Later two full promotions passed, including final6ca.
+- First packaged launch ended by private observer error before actions; corrected authoritative import location probe and independent review passed before replacement. Preserve both attempts; no solving failure or provider-free claim for the cancelled first launch.
+- No new full BP35 trial in this package. This small witness verifies package/tool/action integration and optional NOTES, not BP35 improvement or live expiry behavior. No current trial process remains; preserve existing user console PID52024/port56659.
 
-## Ended first witness / replacement pending
+## Exact deployment evidence
 
-- Run `p7-live-20261008023619-5cb327a1be074acda9448da1`; unit `asterion-p7-600df0049a3043668f4ff8ba8d466497.service`. Supervisor4045 / Make4048 / caffeinate4047, exec session7533. All three owned host processes are gone; guest unit/cgroup and temporary auth/.env cleanup verified. User console52024 remains alive.
-- Host starts2026-10-08T03:03:51.479172Z; fixed900s host deadline03:18:51.479163Z. Guest deadline originates later in guest; do not conflate clocks or renew either budget.
-- Private evidence: `.asterion-private/p7-autonomous-interface-20261008/witness/` (`application.log`, `progress.json`, final audit after completion).
-- Actual Make wheel SHA256 `e9440b89eefb5f2f8c927200bbc7efe56a2e5b56924dafdec3cd020a845f101c`; bundled extension `b93dc05d92e039b55de77db4bd5c1276f7a46c8f0524203c42a22cb23ef15d3a`;564 sourcefiles match frozen6ca. No outside game hints or live code edits.
+- Private root `.asterion-private/p7-autonomous-interface-20261008/`: final tests/promotion and implementation review. `witness/` preserves cancelled first run `p7-live-20261008023619-5cb327a1be074acda9448da1`; `witness-replacement/` holds successful run `p7-live-20261008030719-27774d8b3ee84492aa4cfc47`.
+- Replacement unit `asterion-p7-b16ea01b7838420b86c4deae441b8f3d.service`; host supervisor10731 / Make10734 / caffeinate10733 all gone. Unit/cgroup empty, temporary auth/.env removed, user console retained.
+- Frozen production6ca, modelgpt-6.1-sol/high, seed0, target1. Host start03:12:34.064780Z, fixed900s deadline03:27:34.064775Z; guest own paired clocks consistent across all journal transactions. No renewed budget, outside game hints or hot edits.
+- `public-final-metadata.json`, `installed-runtime-identity.json`, `frozen-source.json` and associated trace/journal/cleanup artifacts prove the stated boundaries.3committed equals3potential_effects with unresolved=false; potential count includes committed effects.
+- Actual wheel SHA256 `e9440b89eefb5f2f8c927200bbc7efe56a2e5b56924dafdec3cd020a845f101c`; bundled extension `b93dc05d92e039b55de77db4bd5c1276f7a46c8f0524203c42a22cb23ef15d3a`;564 source files and582 installed package files match.
 
 ## Prior verified evidence
 
@@ -30,6 +32,6 @@ Updated: 2026-10-08 11:04 CST. Active implementation/deployment verification; no
 
 ## Next concrete action
 
-1. Complete private observer repair and provider-free installed-location preflight; independent extension review before replacement GO. Production6ca76ca4 remains frozen.
-2. Complete one replacement bounded r11l L1 witness. Audit current journal/terminal status, tool allowlist, wheel/resource identity, action/reset count and owned cleanup.
-3. Commit implementation/evidence/state promptly. Mark only measured boundaries verified; no BP35 improvement claim from this small run.
+1. No further benchmark is active or queued. Do not infer BP35 L5/L6 improvement from the short witness or unit tests.
+2. The next research evaluation, when continued, is a frozen cold BP35 L1–L6 comparison against the recorded arc-skill and two P7 baselines, with fixed nonrenewing finite controls and no outside solving/code edits.
+3. Measure per-level actions/RESETs, retained recent evidence and model understanding, model request usage and wall/monotonic clocks. NOTES size alone does not establish context quality or solving efficiency.

@@ -18,9 +18,9 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-research-notes-design.md` | 🟢 active | Implemented generic/P7 NOTES contract; post-trial research-gate/cut direction is revised by D-2026-10-08-02. |
 | `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | NOTES implementation/r11l deployment and Task4 comparison closed; failure boundaries and unimplemented redesign criteria. |
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
-| `../reviews/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implementation changes and verification boundary; packaged witness pending. |
+| `../reviews/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implemented autonomy/support layers; final promotion and r11l L1 packaged witness verified, BP35 unmeasured. |
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
-| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Current implementation package; review, promotion and one small packaged witness pending. |
+| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Completed implementation/review/promotion and bounded r11l L1 deployment; BP35 improvement not established. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: NOTES trial ended4levels, incomplete late transaction and eventual cleanup audited; LLM-owned research redesign next; no active trial. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
