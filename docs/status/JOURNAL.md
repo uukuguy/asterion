@@ -4398,3 +4398,6 @@
 - 2026-10-08 — Frozen medium BP35 starts05:46:08Z targeting sixlevels;5400second shared budget, isolatedstate, no external solving or production changes.
 - 2026-10-08 — Medium BP35 L1 passes21paid/0RESET at102.179seconds; frozen L2 continues, no external intervention.
 - 2026-10-08 — BP35 L2 passes71paid/2RESET; prior126/4 improved but ARC48/1 remains better; frozen L3 continues.
+- 2026-10-08 — 2c0581b4 checkpoints verified BP35 L1/L2 costs and diagnostic suppression boundaries while frozen trial continues.
+- 2026-10-08 — BP35 L3/L4 pass34/23actions withoutRESET; fivelevels/179actions observed, frozen L6 continues without intervention.
+- 2026-10-08 — L5 verified30paid/0RESET; NOTES3accepted writes660–1074bytes, including first L2 write previously omitted from replacement counts.

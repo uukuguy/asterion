@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Task8 active: user authorized requirement review followed by frozen medium BP35 L1-L6. Task7 re-review READY with32 and33 overlapping targeted testsPASS; no new production changes. Trial active, owned by notes_bp35_trial; root monitors and writes evidence. Latest verified L1=21paid/0RESET, L2=71paid/2RESET;2completed/92paid at301.480s; L3running. Details in new comparison. This is a live checkpoint.
+Task8 active: user authorized requirement review followed by frozen medium BP35 L1-L6. Task7 re-review READY with32 and33 overlapping targeted testsPASS; no new production changes. Trial active, owned by notes_bp35_trial; root monitors and writes evidence. Latest verified L1=21/0RESET,L2=71/2,L3=34/0,L4=23/0.L5=30/0RESET verified at721.798s;L6running36actions/0RESET at06:03:06Z. NOTES3accepted writes660–1074B,current1012B; firstwriteL2 (do not confuse replacements with allwrites). Details in new comparison. This is a live checkpoint.
 
 ## Verified facts
 
