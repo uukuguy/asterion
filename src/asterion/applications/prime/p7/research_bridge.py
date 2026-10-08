@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import secrets
 import socketserver
 import threading
@@ -12,7 +13,7 @@ from .processing_diagnostics import public_diagnostic
 
 
 class ResearchReadServer:
-    def __init__(self, *, context, history, frame, artifact, experience=None, animation=None, diagnostic_sink=None):
+    def __init__(self, *, context, history, frame, artifact, experience=None, animation=None, cell_history=None, cell_read=None, diagnostic_sink=None):
         callbacks = {
             "context": context,
             "history": history,
@@ -29,6 +30,11 @@ class ResearchReadServer:
             if not callable(animation):
                 raise ValueError('research readers unavailable')
             callbacks['animation'] = animation
+        for name, callback in (("cell_history", cell_history), ("cell_read", cell_read)):
+            if callback is not None:
+                if not callable(callback):
+                    raise ValueError("research readers unavailable")
+                callbacks[name] = callback
         callbacks.update(render=self._render, geometry=self._geometry, diff=self._diff)
         self._readers = callbacks
         self._server = None
@@ -91,6 +97,17 @@ class ResearchReadServer:
                     or args[0] < 0
                     or not 1 <= args[1] <= 32
                 ):
+                    raise ValueError
+            elif method == "cell_history":
+                if (len(args) != 2 or any(type(v) is not int for v in args)
+                        or args[0] < 0 or not 1 <= args[1] <= 64):
+                    raise ValueError
+            elif method == "cell_read":
+                if (len(args) != 4 or type(args[0]) is not str
+                        or re.fullmatch(r"cell:[0-9a-f]{64}", args[0]) is None
+                        or type(args[1]) is not str or args[1] not in {"source", "output"}
+                        or type(args[2]) is not int or args[2] < 0
+                        or type(args[3]) is not int or not 1 <= args[3] <= 16384):
                     raise ValueError
             elif method == "frame":
                 if len(args) != 1 or (args[0] is not None and (type(args[0]) is not int or args[0] < 0)):
@@ -179,6 +196,12 @@ def _read(method, args):
         return result["value"]
 def context(): return _read("context", [])
 def history(start, limit): return _read("history", [start, limit])
+def cell_history(start=0, limit=16):
+    """Current-run computation directory, at most 64 records per page."""
+    return _read("cell_history", [start, limit])
+def cell_read(cell_id, field="source", start=0, limit=4096):
+    """Read source or output by character offset; at most 16384 characters."""
+    return _read("cell_read", [cell_id, field, start, limit])
 def current(): return context()
 def frame(sequence=None):
     """Exact 2D pixels; omit sequence for the current board."""

@@ -2,7 +2,7 @@
 
 The operator supplies all bootstrap resources. Arbitrary Python runs under the
 operator's UID; this lifecycle and capability separation is not an OS sandbox.
-Only explicit successful-cell exports are durable, never arbitrary namespaces.
+Cell evidence is retained automatically; only explicit exports restore state.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from typing import Literal, Protocol
 import uuid
 
 from asterion.agents.prime.tools import PrimeToolResult, _freeze_json
+from asterion.agents.prime.cell_history import CellHistory
 from asterion.runtime.host import CancellationSignal
 
 
@@ -109,6 +110,8 @@ class KernelLimits:
     max_exports: int = 256
     max_total_export_bytes: int = 16 * 1024 * 1024
     cleanup_seconds: float = 2.0
+    max_history_records: int = 16384
+    max_history_bytes: int = 2 * 1024 * 1024 * 1024
 
     def __post_init__(self) -> None:
         for name in (
@@ -118,6 +121,8 @@ class KernelLimits:
             "max_export_bytes",
             "max_exports",
             "max_total_export_bytes",
+            "max_history_records",
+            "max_history_bytes",
         ):
             value = getattr(self, name)
             if type(value) is not int or value <= 0:
@@ -238,6 +243,10 @@ class PersistentIpythonHost:
         self._observer = observer
         self._generation = uuid.uuid4().hex
         self._execution_status = "idle"
+        self._history = CellHistory(bootstrap.workspace, source_limit=limits.max_code_bytes,
+            output_limit=limits.max_output_bytes, max_records=limits.max_history_records,
+            max_bytes=limits.max_history_bytes)
+        self._history_error = None
 
     def __repr__(self) -> str:
         return "<PersistentIpythonHost redacted>"
@@ -258,6 +267,7 @@ class PersistentIpythonHost:
                 "lost": self._lost,
                 "closed": self._closed,
                 "started": self._started,
+                **({"history_error": self._history_error} if self._history_error else {}),
             }
         )
 
@@ -293,6 +303,13 @@ class PersistentIpythonHost:
                 )
             started_at = monotonic()
             try:
+                cell_id = self._history.begin(self.generation, call_id, code)
+            except Exception:
+                self._history_error = 'history-write-unavailable'
+                return self._result(call_id, "error", "IPython history unavailable; cell not executed")
+            received_output = None
+            received_truncated = False
+            try:
                 await self._start(signal)
                 self._used = True
                 self._emit("cell_started", call_id, "running", None)
@@ -301,35 +318,45 @@ class PersistentIpythonHost:
                 )
                 if (
                     not isinstance(value, Mapping)
-                    or set(value) != {"is_error", "output", "exports"}
+                    or set(value) not in ({"is_error", "output", "exports"},
+                                         {"is_error", "output", "exports", "output_truncated"})
                     or type(value["is_error"]) is not bool
                     or type(value["output"]) is not str
                     or type(value["exports"]) is not list
+                    or type(value.get("output_truncated", False)) is not bool
                 ):
                     raise PersistentIpythonHostError()
                 output = value["output"]
+                output_truncated = value.get("output_truncated", False)
                 if len(output.encode("utf-8")) > self._limits.max_output_bytes:
                     raise PersistentIpythonHostError()
+                received_output, received_truncated = output, output_truncated
                 if value["is_error"]:
+                    self._finish_cell(cell_id, 'python-error', output, output_truncated=output_truncated)
                     self._emit("cell_finished", call_id, "python-error", started_at)
-                    return self._result(call_id, "error", output)
+                    return self._result(call_id, "error", output, output_truncated=output_truncated)
                 try:
                     exports = self._publish(call_id, value["exports"])
                 except _ExportLimitError:
+                    self._finish_cell(cell_id, 'python-error', output, output_truncated=output_truncated)
                     self._emit("cell_finished", call_id, "python-error", started_at)
                     return self._result(
                         call_id,
                         "error",
                         "IPython export limit reached; no exports published",
                     )
+                self._finish_cell(cell_id, 'ok', output, output_truncated=output_truncated,
+                                  export_ids=[artifact.export_id for artifact in exports])
                 self._emit("cell_finished", call_id, "ok", started_at, exports)
-                return self._result(call_id, "ok", output, exports)
+                return self._result(call_id, "ok", output, exports, output_truncated=output_truncated)
             except asyncio.CancelledError:
+                self._finish_cell(cell_id, 'interrupted')
                 await self._mark_lost()
                 self._emit("cell_interrupted", call_id, "interrupted", started_at)
                 self._emit("kernel_lost", call_id, "interrupted", started_at)
                 raise
             except (TimeoutError, asyncio.TimeoutError):
+                self._finish_cell(cell_id, 'interrupted')
                 await self._mark_lost()
                 self._emit("cell_interrupted", call_id, "interrupted", started_at)
                 self._emit("kernel_lost", call_id, "interrupted", started_at)
@@ -340,6 +367,8 @@ class PersistentIpythonHost:
                     execution_status="interrupted",
                 )
             except Exception:
+                self._finish_cell(cell_id, 'lost', received_output,
+                                  output_truncated=received_truncated)
                 await self._mark_lost()
                 self._emit("kernel_lost", call_id, "lost", started_at)
                 return self._result(
@@ -347,6 +376,33 @@ class PersistentIpythonHost:
                     "uncertain",
                     "IPython kernel lost; computation did not complete",
                 )
+
+    def _finish_cell(self, cell_id, status, output=None, **metadata):
+        try:
+            self._history.finish(cell_id, status, output, **metadata)
+        except Exception:
+            # A recording failure cannot rewrite the actual computation outcome.
+            self._history_error = 'history-write-unavailable'
+
+    def cell_history(self, start=0, limit=16):
+        """Private, synchronous current-workspace directory; no code execution."""
+        try:
+            value = self._history.history(start, limit)
+            if self._history_error:
+                value['history_error'] = self._history_error
+            return value
+        except Exception:
+            raise PersistentIpythonHostError() from None
+
+    def cell_read(self, cell_id, field='source', start=0, limit=4096):
+        """Read a character page of retained source/output, never evaluate it."""
+        try:
+            value = self._history.read(cell_id, field, start, limit)
+            if self._history_error:
+                value['history_error'] = self._history_error
+            return value
+        except Exception:
+            raise PersistentIpythonHostError() from None
 
     def read_export(self, export_id: str) -> KernelExport:
         try:
@@ -540,12 +596,13 @@ class PersistentIpythonHost:
         exports: tuple[KernelExport, ...] = (),
         *,
         execution_status: str | None = None,
+        output_truncated: bool = False,
     ) -> PrimeToolResult:
         self._execution_status = (
             execution_status
             or {"ok": "ok", "error": "python-error", "uncertain": "lost"}[status]
         )
-        metadata = self._metadata(self._execution_status, output, exports, False)
+        metadata = self._metadata(self._execution_status, output, exports, output_truncated)
         if len(metadata.encode()) > self._limits.max_output_bytes:
             # Budget the escaped JSON representation, not only raw stdout.
             marker = "\n[stdout truncated]"

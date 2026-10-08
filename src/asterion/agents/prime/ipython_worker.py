@@ -189,6 +189,7 @@ def _controller(descriptor: int) -> None:
     import ast
     import contextlib
     import io
+    import linecache
     import math
     import re
     import traceback
@@ -208,15 +209,30 @@ def _controller(descriptor: int) -> None:
     namespace = {"__name__": "__prime_workspace__"}
     pending: list[dict[str, object]] = []
     accepting_exports = False
+    source_number = 0
+
+    def source_filename(source, kind):
+        nonlocal source_number
+        source_number += 1
+        filename = f'<prime-{kind}-{source_number}>'
+        lines = source.splitlines(keepends=True)
+        if lines and not lines[-1].endswith('\n'):
+            lines[-1] += '\n'
+        linecache.cache[filename] = (len(source), None, lines, filename)
+        return filename
 
     class BoundedOutput(io.TextIOBase):
         def __init__(self) -> None:
             self.buffer = bytearray()
+            self.truncated = False
 
         def write(self, text: str) -> int:
+            encoded = text.encode("utf-8", "replace")
             remaining = output_limit - len(self.buffer)
+            if len(encoded) > remaining:
+                self.truncated = True
             if remaining > 0:
-                self.buffer.extend(text.encode("utf-8", "replace")[:remaining])
+                self.buffer.extend(encoded[:remaining])
             return len(text)
 
         def text(self) -> str:
@@ -300,7 +316,7 @@ def _controller(descriptor: int) -> None:
                 module = types.ModuleType(name)
                 sys.modules[name] = module
                 exec(
-                    compile(source, "<prime-bootstrap-module>", "exec"),
+                    compile(source, source_filename(source, 'bootstrap'), "exec"),
                     module.__dict__,
                     module.__dict__,
                 )
@@ -321,7 +337,7 @@ def _controller(descriptor: int) -> None:
                 ):
                     for source in request["sources"]:
                         exec(
-                            compile(source, "<prime-restored-source>", "exec"),
+                            compile(source, source_filename(source, 'restored'), "exec"),
                             namespace,
                             namespace,
                         )
@@ -334,22 +350,23 @@ def _controller(descriptor: int) -> None:
         accepting_exports = True
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                tree = ast.parse(request["code"], "<prime-cell>", "exec")
+                filename = source_filename(request["code"], 'cell')
+                tree = ast.parse(request["code"], filename, "exec")
                 if tree.body and isinstance(tree.body[-1], ast.Expr):
                     prefix = ast.Module(body=tree.body[:-1], type_ignores=[])
                     ast.fix_missing_locations(prefix)
-                    exec(compile(prefix, "<prime-cell>", "exec"), namespace, namespace)
+                    exec(compile(prefix, filename, "exec"), namespace, namespace)
                     expression = ast.Expression(tree.body[-1].value)
                     ast.fix_missing_locations(expression)
                     result = eval(
-                        compile(expression, "<prime-cell>", "eval"),
+                        compile(expression, filename, "eval"),
                         namespace,
                         namespace,
                     )
                     if result is not None:
                         print(repr(result))
                 else:
-                    exec(compile(tree, "<prime-cell>", "exec"), namespace, namespace)
+                    exec(compile(tree, filename, "exec"), namespace, namespace)
         except BaseException:
             is_error = True
             output.write(traceback.format_exc(limit=2))
@@ -359,6 +376,7 @@ def _controller(descriptor: int) -> None:
             {
                 "is_error": is_error,
                 "output": output.text(),
+                "output_truncated": output.truncated,
                 "exports": [] if is_error else pending,
             }
         )

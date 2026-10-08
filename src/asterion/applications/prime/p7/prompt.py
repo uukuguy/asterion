@@ -38,9 +38,11 @@ import p7_research as r
 print(r.render()['text'])
 这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态；r.geometry() 返回各颜色连通区域的大小和边界；r.diff(before_sequence) 比较历史与当前画面，变化坐标有界返回。render/geometry/diff 可指定 sequence、窗口或颜色；help(r) 查看参数。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块没有预设游戏含义。可自由写程序处理这些数据、建立模型和搜索；此研究接口只读。
 
-NOTES 可选，用于保存稳定理解、重要反例与当前关注点，由你决定内容和更新时机：
+当前运行的计算源码和实际输出自动存档：r.cell_history(start=0,limit=16) 返回计算目录，r.cell_read(cell_id,field="source",start=0,limit=4096) 回读源码，field="output" 回读输出或报错。文本按字符分页，目录不自动展开内容。查看仍存活的函数定义可用 inspect.getsource(function)。优先回读所需定义和结果，无需反复用 globals 或反汇编重建代码。档案只是记录，不会自动执行；内核恢复只还原显式保存的 checkpoint。
+
+建议用简短 NOTES 保持游戏稳定认识、重要反例、尚不确定之处与当前计划的总览。有信息价值的失配后修正认识，换关后保留可复用知识。内容、格式与更新时机由你决定，写笔记不是行动前置条件：
 p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:当前完整引用,text:'替换后的有效笔记'})。
-自由文字最多16KiB，不是长度目标。过关后保留可复用认识即可，无需累计前几关完整行动记录。近期完整交互按容量保留，更新笔记不会立即清空前文；早期资料可按真实序号回查。NOTES 是研究记忆，不是环境认证。可用 workspace op read/notes_read/notes_history 复查，复杂模型可按需显式导出或 checkpoint。
+自由文字最多16KiB，不是长度目标。过关后保留可复用认识即可，无需累计前几关完整行动记录。真实交互历史由宿主保留，长上下文由 Pi 原生压缩管理；更新笔记只替换状态快照，不删除研究交互。将有用理解保存在笔记，具体行动和计算资料可按需回查。NOTES 是研究记忆，不是环境认证。可用 workspace op read/notes_read/notes_history 复查，复杂模型可按需显式导出或 checkpoint。
 
 行动最小格式：
 {plan_id:'唯一提交标识',start:当前完整observation_ref,steps:[{action:{name:'ACTION1',data:{}}}]}。

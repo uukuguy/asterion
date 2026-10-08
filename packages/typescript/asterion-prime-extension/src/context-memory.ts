@@ -1,15 +1,10 @@
-/** Capacity-driven request-time projection; application text remains opaque. */
+/** Snapshot-only model view; Pi owns conversation history and compaction. */
 export const CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v2";
 const LEGACY_VERSION = "asterion.prime-context-memory/v1";
 const SNAPSHOT_BYTE_CAP = 128 * 1024;
-const HISTORY_TRIGGER_BYTES = 96 * 1024;
-const HISTORY_TARGET_BYTES = 48 * 1024;
-const MAX_RECENT_UNITS = 8;
-const PROTECTED_RECENT_UNITS = 2;
 const REVISION = /^sha256:[0-9a-f]{64}$(?![\s\S])/;
 const CALL_ID = /^[A-Za-z0-9][A-Za-z0-9._:|-]{0,255}$(?![\s\S])/;
 const CUSTOM_TYPE = "asterion_context_memory";
-const PINNED_ROLES = new Set(["user","system","compactionSummary","branchSummary"]);
 
 type RecordValue = Record<string, unknown>;
 export interface MemoryEnvelope {
@@ -32,14 +27,12 @@ interface MemoryMessage {
   timestamp: number;
 }
 export interface MemoryProjectionOutcome {
-  readonly status: "inactive" | "retained" | "trimmed" | "over-budget" | "unsafe-boundary";
+  readonly status: "inactive" | "retained" | "unsafe-boundary";
   readonly removed_messages: number;
   readonly retained_messages: number;
-  readonly history_bytes: number;
-  readonly retained_history_bytes: number;
+  readonly history_bytes: number | null;
+  readonly retained_history_bytes: number | null;
   readonly snapshot_bytes: number;
-  readonly retained_complete_units: number;
-  readonly pinned_messages: number;
 }
 export interface MemoryProjection<T> {
   readonly messages: Array<T | MemoryMessage>;
@@ -103,124 +96,39 @@ function messageBytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(projection),"utf8");
 }
 
-interface ContextUnits {
-  readonly completed: number[][];
-  readonly protectedTail: number[];
-  readonly pinned: Set<number>;
-}
-
-/** Each unit includes the observation prelude leading into its assistant/tool group. */
-function contextUnits(messages: readonly unknown[]): ContextUnits | undefined {
-  const completed: number[][] = [];
-  const pinned = new Set<number>();
-  const seen = new Set<string>();
-  const pending = new Map<string,string>();
-  let prelude: number[] = [];
-  let active: number[] | undefined;
-  for (let index = 0; index < messages.length; index++) {
-    const message = memoryRecord(messages[index]);
-    if (!message) return undefined;
-    if (PINNED_ROLES.has(String(message.role))) {
-      pinned.add(index);
-      continue;
-    }
-    if (message.role === "assistant") {
-      if (active || !Array.isArray(message.content)) return undefined;
-      active = [...prelude,index];
-      prelude = [];
-      for (const raw of message.content) {
-        const block = memoryRecord(raw);
-        if (block?.type !== "toolCall") continue;
-        const id = block.id;
-        if (typeof id !== "string" || !CALL_ID.test(id) || seen.has(id)
-          || typeof block.name !== "string" || !block.name) return undefined;
-        seen.add(id);
-        pending.set(id,block.name);
-      }
-      if (!pending.size) {
-        completed.push(active);
-        active = undefined;
-      }
-    } else if (message.role === "toolResult") {
-      const id = message.toolCallId;
-      if (!active || typeof id !== "string" || !pending.has(id)
-        || pending.get(id) !== message.toolName) return undefined;
-      active.push(index);
-      pending.delete(id);
-      if (!pending.size) {
-        completed.push(active);
-        active = undefined;
-      }
-    } else {
-      (active ?? prelude).push(index);
-    }
+/** Unmeasurable diagnostics never remove or block native conversation messages. */
+function historyBytes(messages: readonly unknown[]): number | null {
+  try {
+    return 2 + messages.reduce<number>((bytes,message,index) => bytes+messageBytes(message)+(index ? 1 : 0),0);
+  } catch {
+    return null;
   }
-  return {completed,protectedTail:active ?? prelude,pinned};
 }
 
 function unchanged<T>(messages: readonly T[], status: "inactive" | "unsafe-boundary"): MemoryProjection<T> {
+  const bytes = historyBytes(messages);
   return {messages:[...messages],outcome:{status,removed_messages:0,retained_messages:messages.length,
-    history_bytes:0,retained_history_bytes:0,snapshot_bytes:0,retained_complete_units:0,pinned_messages:0}};
+    history_bytes:bytes,retained_history_bytes:bytes,snapshot_bytes:0}};
 }
 
-function arrayBytes(indices: Iterable<number>, costs: readonly number[]): number {
-  let bytes = 2;
-  let count = 0;
-  for (const index of indices) {
-    bytes += costs[index] ?? 0;
-    if (count++) bytes += 1;
-  }
-  return bytes;
-}
-
-/** Notes refresh the snapshot; history capacity alone selects a safe recent window. */
+/** Replace only our own snapshot; retain all native history in its original order. */
 export function projectMemoryContext<T>(messages: readonly T[], checkpoint?: MemoryCheckpoint): MemoryProjection<T> {
   if (!checkpoint) return unchanged(messages,"inactive");
   const valid = parseMemoryEnvelope({version:CONTEXT_MEMORY_VERSION,revision:checkpoint.revision,
     content:checkpoint.content,commit:false});
   if (!valid) return unchanged(messages,"unsafe-boundary");
   const visible = messages.filter(message => !synthetic(message));
-  let costs: number[];
-  try { costs = visible.map(messageBytes); }
-  catch { return unchanged(messages,"unsafe-boundary"); }
-  const groups = contextUnits(visible);
-  if (!groups) return unchanged(messages,"unsafe-boundary");
-  const historyBytes = arrayBytes(costs.keys(),costs);
-  const selected = new Set(groups.pinned);
-  let retainedUnits = groups.completed.length;
-  let status: MemoryProjectionOutcome["status"] = "retained";
-  if (historyBytes >= HISTORY_TRIGGER_BYTES) {
-    for (const index of groups.protectedTail) selected.add(index);
-    retainedUnits = Math.min(PROTECTED_RECENT_UNITS,groups.completed.length);
-    const protectedUnits = retainedUnits ? groups.completed.slice(-retainedUnits) : [];
-    for (const unit of protectedUnits) {
-      for (const index of unit) selected.add(index);
-    }
-    status = arrayBytes(selected,costs) > HISTORY_TARGET_BYTES ? "over-budget" : "trimmed";
-    if (status !== "over-budget") {
-      for (let index = groups.completed.length-retainedUnits-1; index >= 0 && retainedUnits < MAX_RECENT_UNITS; index--) {
-        const candidate = new Set(selected);
-        for (const messageIndex of groups.completed[index]!) candidate.add(messageIndex);
-        if (arrayBytes(candidate,costs) > HISTORY_TARGET_BYTES) break;
-        for (const messageIndex of candidate) selected.add(messageIndex);
-        retainedUnits += 1;
-      }
-    }
-  } else {
-    for (let index = 0; index < visible.length; index++) selected.add(index);
-  }
-  const retained = visible.filter((_message,index) => selected.has(index));
+  const bytes = historyBytes(visible);
   const memory: MemoryMessage = {role:"custom",customType:CUSTOM_TYPE,content:checkpoint.content,display:false,timestamp:0};
-  // Preserve the leading Pi system transcript even when this pure helper is used
-  // directly. The registered conversation-only hook normally sees no system role.
+  // Preserve leading Pi system messages. The registered conversation-only hook
+  // normally excludes the system role and Pi restores it after this hook.
   let insertion = 0;
-  while (memoryRecord(retained[insertion])?.role === "system") insertion += 1;
-  const projected: Array<T | MemoryMessage> = [...retained];
+  while (memoryRecord(visible[insertion])?.role === "system") insertion += 1;
+  const projected: Array<T | MemoryMessage> = [...visible];
   projected.splice(insertion,0,memory);
-  return {messages:projected,outcome:{status,removed_messages:visible.length-retained.length,
-    retained_messages:retained.length,history_bytes:historyBytes,
-    retained_history_bytes:arrayBytes(selected,costs),snapshot_bytes:Buffer.byteLength(checkpoint.content,"utf8"),
-    retained_complete_units:retainedUnits,pinned_messages:groups.pinned.size}};
+  return {messages:projected,outcome:{status:"retained",removed_messages:0,
+    retained_messages:visible.length,history_bytes:bytes,retained_history_bytes:bytes,
+    snapshot_bytes:Buffer.byteLength(checkpoint.content,"utf8")}};
 }
 
 /** Only native trusted application results may admit snapshots. */

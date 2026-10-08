@@ -137,3 +137,16 @@ Only a checked `closed-confirmed` receipt establishes the final server score. A 
 The [community requirements](https://github.com/arcprize/ARC-AGI-Community-Leaderboard/blob/main/CONTRIBUTING.md) focus on a general-purpose method, an open producing system, a novel contribution, and a Competition Mode scorecard for ARC-AGI-3. They do not impose a fixed-version, empty-store, fully automatic 100-score evaluation as a submission prerequisite. ARC-AGI-3 numerical scores are read from the scorecard rather than entered in submission YAML.
 
 This record comes from iterative public-game research with retained experience, retries, operator scheduling, and mid-campaign application repairs, followed by model-free online replay. The public system implements the method; the result record identifies selected outputs. Credentials, full research conversations, and earlier private attempt records remain external. Operators can run the public system with their own assets and accumulate their own experience and certified routes.
+
+## P7 thinking preset and bounded diagnostics
+
+P7's application-owned Pi command now selects `--thinking medium`; generic runtime and other applications do not acquire this default. Historical ARC/P7 comparisons explicitly using high retain that evidence label. This is a new P7 experiment choice, not proof that high caused repeated research.
+
+Context-projection diagnostic stderr is limited to4KiB UTF8 per loaded extension module across normal and failure paths, including one suppression notice. The Pi RPC64KiB process stderr guard remains. After suppression, stderr no longer reports every projection; do not infer complete run-wide trim counts from that bounded log. This logging change does not change context-retention behavior.
+
+
+## Current computation and context continuity
+
+The extension replaces only its own trusted state snapshot. It preserves real native messages and leaves long-context compaction to Pi; NOTES updates do not erase research interactions. The earlier96/48KiB rolling window is removed.
+
+Generic Prime automatically archives admitted cell source and bounded actual worker output under the injected private workspace. P7 exposes `r.cell_history()` and `r.cell_read(cell_id, field="source"|"output")` as reads in `p7_research`, alongside `inspect.getsource` for live functions. Text pages use character offsets; unavailable output and actual truncation are explicit. Reading never replays code; only explicit checkpoint exports restore state after kernel loss. P7 encourages concise stable mechanics, counterexamples, uncertainty and plans, with no note-before-action gate. These infrastructure changes do not establish improved BP35 performance without another measured trial.

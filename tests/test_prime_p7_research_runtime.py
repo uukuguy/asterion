@@ -201,6 +201,36 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.addAsyncCleanup(self.host.close)
 
+    async def test_current_computation_reads_survive_kernel_loss_without_replay(self):
+        source = "def learned_rule(x):\n    return x + 7\nprint('private-result')"
+        result = await self.host.execute('learn-rule', source, _Signal())
+        self.assertEqual(result.status, 'ok')
+        record = self.host.kernel.cell_history()['items'][0]
+        cell_id = record['cell_id']
+        inspected = await self.host.execute('read-rule',
+            "import inspect, p7_research as r\n"
+            "print(inspect.getsource(learned_rule))\n"
+            f"print(r.cell_read({cell_id!r})['text'])\n"
+            f"print(r.cell_read({cell_id!r}, field='output')['text'])", _Signal())
+        self.assertEqual(inspected.status, 'ok')
+        output = json.loads(inspected.content[0]['text'])['stdout']
+        self.assertIn('return x + 7', output)
+        self.assertIn('private-result', output)
+        await self.host.execute('failed-calculation', "raise ValueError('calculation-example')", _Signal())
+        failed = self.host.kernel.cell_history()['items'][-1]
+        self.assertIn('calculation-example', self.host.kernel.cell_read(failed['cell_id'], field='output')['text'])
+        await self.host.execute('lose-kernel', 'import os; os._exit(0)', _Signal())
+        recovered = await self.host.execute('read-after-recovery',
+            "import p7_research as r\n"
+            f"print(r.cell_read({cell_id!r})['text'])\n"
+            "print('learned_rule' in globals())", _Signal())
+        self.assertEqual(recovered.status, 'ok')
+        output = json.loads(recovered.content[0]['text'])['stdout']
+        self.assertIn(source, output)
+        self.assertTrue(output.rstrip().endswith('False'))
+        self.assertNotIn('private-result', json.dumps(self.host.actor_context()))
+        self.assertEqual(self.engine.calls, [])
+
     async def test_failed_cell_research_is_inert_then_explicitly_reused_in_new_scope(self):
         from asterion.agents.prime.trace import PrimeTraceRecorder
         from asterion.applications.prime.p7.experience import load_experience

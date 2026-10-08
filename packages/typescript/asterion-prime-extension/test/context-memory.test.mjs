@@ -17,7 +17,7 @@ const longHistory = (count=20,size=8192) => [user("PINNED_TASK"),...Array.from({
 const envelope = (commit=true,selectedRevision=revision,content=checkpoint.content,version="asterion.prime-context-memory/v2") => ({version,revision:selectedRevision,content,commit});
 const snapshotOf = projected => projected.messages.find(message => message.customType === "asterion_context_memory");
 
-test("accepted notes preserve complete history below capacity and do not mutate evidence", () => {
+test("accepted notes preserve complete history and do not mutate evidence", () => {
   const messages = history();
   const original = structuredClone(messages);
   const projected = extension.projectMemoryContext(messages,checkpoint);
@@ -28,18 +28,21 @@ test("accepted notes preserve complete history below capacity and do not mutate 
   assert.deepEqual(messages,original);
 });
 
-test("capacity independently keeps bounded recent complete units and their observation preludes", () => {
+test("large research history survives notes replacement without an extension window", () => {
   const messages = longHistory();
   messages.splice(16,0,user("LATER_OPERATOR_CORRECTION"));
   const original = structuredClone(messages);
   const projected = extension.projectMemoryContext(messages,checkpoint);
-  assert.equal(projected.outcome.status,"trimmed");
+  assert.equal(projected.outcome.status,"retained");
   assert.ok(projected.outcome.history_bytes>96*1024);
-  assert.ok(projected.outcome.retained_history_bytes<=48*1024);
-  assert.ok(projected.outcome.retained_complete_units>=2);
-  assert.ok(projected.outcome.retained_complete_units<=8);
+  assert.equal(projected.outcome.retained_history_bytes,projected.outcome.history_bytes);
+  assert.equal(projected.outcome.removed_messages,0);
+  assert.equal(projected.outcome.retained_messages,messages.length);
+  assert.equal(Object.hasOwn(projected.outcome,"retained_complete_units"),false);
+  assert.equal(Object.hasOwn(projected.outcome,"pinned_messages"),false);
   assert.match(JSON.stringify(projected.messages),/RAW_GROUP_19|grounding-19/);
-  assert.doesNotMatch(JSON.stringify(projected.messages),/RAW_GROUP_0 /);
+  assert.match(JSON.stringify(projected.messages),/RAW_GROUP_0 /);
+  assert.deepEqual(projected.messages.filter(message => message.customType !== "asterion_context_memory"),messages);
   assert.deepEqual(projected.messages.filter(message => message.role === "user"),[user("PINNED_TASK"),user("LATER_OPERATOR_CORRECTION")]);
   for (const message of projected.messages.filter(message => message.role === "assistant")) {
     const id = message.content[0].id;
@@ -60,7 +63,7 @@ test("private result metadata and provider usage do not count as model history",
   assert.equal(extension.projectMemoryContext(messages,checkpoint).outcome.status,"retained");
 });
 
-test("duplicate orphan and crossing tool groups preserve the original model view", () => {
+test("pending or irregular tool groups stay untouched without a window boundary decision", () => {
   for (const messages of [
     [...history(),result("note")],
     [user("old"),assistant("earlier"),assistant("note"),result("note"),result("earlier")],
@@ -69,37 +72,51 @@ test("duplicate orphan and crossing tool groups preserve the original model view
   ]) {
     const original = structuredClone(messages);
     const projected = extension.projectMemoryContext(messages,checkpoint);
-    assert.equal(projected.outcome.status,"unsafe-boundary");
-    assert.deepEqual(projected.messages,original);
+    assert.equal(projected.outcome.status,"retained");
+    assert.equal(projected.outcome.removed_messages,0);
+    assert.deepEqual(projected.messages.filter(message => message.customType !== "asterion_context_memory"),original);
     assert.deepEqual(messages,original);
   }
 });
 
-test("capacity protects every pending sibling and reports indivisible over-budget evidence", () => {
+test("large instructions evidence and every pending sibling survive snapshot refresh", () => {
   const messages = [...longHistory(4,32*1024),assistant("pending","sibling"),result("pending","PENDING_RESULT")];
   const projected = extension.projectMemoryContext(messages,checkpoint);
-  assert.equal(projected.outcome.status,"over-budget");
-  assert.equal(projected.outcome.retained_complete_units,2);
+  assert.equal(projected.outcome.status,"retained");
+  assert.equal(projected.outcome.removed_messages,0);
+  assert.deepEqual(projected.messages.filter(message => message.customType !== "asterion_context_memory"),messages);
   assert.deepEqual(projected.messages.slice(-2),messages.slice(-2));
   assert.match(JSON.stringify(projected.messages),/RAW_GROUP_3|RAW_GROUP_2|PENDING_RESULT/);
-  assert.doesNotMatch(JSON.stringify(projected.messages),/RAW_GROUP_0 /);
+  assert.match(JSON.stringify(projected.messages),/RAW_GROUP_0 /);
   const pinned = extension.projectMemoryContext([user("x".repeat(100*1024)),...history()],checkpoint);
-  assert.equal(pinned.outcome.status,"over-budget");
+  assert.equal(pinned.outcome.status,"retained");
   assert.equal(pinned.messages.find(message => message.role === "user").content.length,100*1024);
 });
 
-test("compaction fallback and repeated projection retain one current snapshot", () => {
-  const messages = [{role:"compactionSummary",summary:"archive summary",timestamp:4},user("pending question")];
+test("native compaction and branch summaries retain large research history and one current snapshot", () => {
+  const messages = [{role:"system",content:"native system",timestamp:0},
+    {role:"compactionSummary",summary:"archive summary",timestamp:4},
+    {role:"branchSummary",summary:"branch research",timestamp:5},...longHistory(),user("pending question")];
   const projected = extension.projectMemoryContext(messages,checkpoint);
   assert.equal(projected.outcome.status,"retained");
+  assert.ok(projected.outcome.history_bytes>96*1024);
+  assert.equal(projected.messages[0],messages[0]);
   assert.deepEqual(projected.messages.filter(message => message.customType !== "asterion_context_memory"),messages);
   assert.deepEqual(extension.projectMemoryContext(projected.messages,checkpoint).messages,projected.messages);
+  const refreshed = extension.projectMemoryContext(projected.messages,{revision:nextRevision,content:"updated state"});
+  assert.equal(refreshed.messages.filter(message => message.customType === "asterion_context_memory").length,1);
+  assert.equal(snapshotOf(refreshed).content,"updated state");
+  assert.deepEqual(refreshed.messages.filter(message => message.customType !== "asterion_context_memory"),messages);
 });
 
-test("v2 state without notes initializes capacity projection and old v1 refreshes remain revision-bound", () => {
+test("v2 state without notes retains large history and old v1 refreshes remain revision-bound", () => {
   const controller = new extension.MemoryContextController();
   assert.equal(controller.accept("read",envelope(false,null,"current state without notes")),true);
-  assert.equal(controller.project(longHistory()).outcome.status,"trimmed");
+  const research = longHistory();
+  const withoutNotes = controller.project(research);
+  assert.equal(withoutNotes.outcome.status,"retained");
+  assert.ok(withoutNotes.outcome.history_bytes>96*1024);
+  assert.deepEqual(withoutNotes.messages.filter(message => message.customType !== "asterion_context_memory"),research);
   assert.equal(snapshotOf(controller.project(history())).content,"current state without notes");
   controller.accept("note",envelope());
   controller.accept("read",envelope(false,revision,"current chapter 6"));
@@ -230,7 +247,7 @@ test("registered context hooks share a 4 KiB diagnostic budget without changing 
   }
   assert.deepEqual(messages,original);
   const output = lines.join("");
-  assert.match(output,/"status":"trimmed"/);
+  assert.match(output,/"status":"retained"/);
   assert.match(output,/"status":"projection-unavailable"/);
   assert.doesNotMatch(output,/PRIVATE_DIAGNOSTIC_SENTINEL/);
   assert.ok(Buffer.byteLength(output,"utf8")<=4*1024,

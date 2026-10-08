@@ -4383,3 +4383,7 @@
 - 2026-10-08 12:37 CST — BP35 ends2levels/166committed from64KiB diagnosticstderr overflow; completed150prefix replay, source identity and cleanup independently verified.
 - 2026-10-08 12:39 CST — b9792fb7 closes interrupted BP35 evidence, separating diagnostic overflow, exploration regression and replay scope; fixes remain unimplemented.
 - 2026-10-08 12:52 CST — User challenges repetition root cause; ARC also useshigh; bounded diagnostics and P7medium implementation underway, memory redesign separate.
+- 2026-10-08 12:53 CST — cbeddf3f bounds projection diagnostics and selects P7medium; records ARC continuity evidence, deployment verification pending.
+- 2026-10-08 12:55 CST — User reaffirms generic/P7 repair split; computation/context infrastructure generic, game cognition and medium experiment selection application-owned.
+- 2026-10-08 13:04 CST — User rejects partial packaging; Task7 now implements generic computation history/context continuity and P7 memory adaptation before deployment.
+- 2026-10-08 — Task7 source/context continuity implemented; independent review READY; TS49 and Python119 pass; combined promotion and witness pending.

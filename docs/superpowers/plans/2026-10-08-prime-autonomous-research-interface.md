@@ -2,7 +2,7 @@
 
 Design: [contract](../specs/2026-10-08-prime-autonomous-research-interface-design.md). Previous [NOTES package](2026-10-08-prime-research-notes.md) is closed with failed BP35 comparison evidence.
 
-1. **Implemented — generic context projection.** TypeScript owner implements capacity-triggered complete-message retention, trusted state without notes, optional plan metadata, tests and bundled resource.
+1. **Historical implementation — generic context projection (superseded by Task7).** TypeScript owner implements capacity-triggered complete-message retention, trusted state without notes, optional plan metadata, tests and bundled resource.
 2. **Implemented — P7 research autonomy.** Solver/Broker owner removes cognitive admission gates only for the modern autonomous profile, preserves true authority checks and adds pure observation helpers. Root integrates read-only research discovery, concise prompt and trusted state refresh.
 3. **Implemented — execution settlement.** Deadline owner implements generic dual-clock deadline, SolverControl/SDK adapter integration and small durable action journal. Root and Broker owner wire the same budget, journal, guest origins and minimal finalization receipt.
 4. **Verified — review and bounded deployment.** Review changed implementation, run TS then relevant Python tests and promotion; deploy one finite packaged r11l L1 witness. Record actual evidence and limits; do not claim BP35 improvement without a later comparison.
@@ -17,8 +17,47 @@ Changed-code review READY; TS48pass/6existing skips, real installed-Pi probe pro
 
 Use frozen production6ca76ca4/gpt-6.1-sol high/seed0, empty isolated state, the prior5400s/6round/1000action/1024model/4096tool controls and180s fixed settlement. No old solution knowledge, outside game hints or midrun code repair. Stop at six levels or the existing termination/budget boundary. Audit outcome, per-level research/action cost, context behavior and cleanup against the fixed ARC/old-P7/NOTES baselines. [Trial evidence](../../reviews/2026-10-08-p7-autonomous-bp35-comparison.md).
 
-## Task 6 — Bounded diagnostics and medium effort
+## Task 6 — Bounded diagnostics and medium effort (intermediate; superseded by Task7)
 
 User requests concrete repairs and asks whether P7 should use medium/low effort. Implement the directly proven telemetry defect with one shared4KiB UTF8 diagnostic budget including suppression, keeping the RPC64KiB guard. Change only P7's fixed thinking setting high→medium, not the generic runtime/defaults. ARC actually usedhigh; medium is a new intervention, not a proven root-cause fix. Keep context retention/NOTES/source APIs unchanged in this small package so effort is not confounded with a new memory design.
 
 Acceptance: regression reproduces changing-outcome and exception log overflow, projections remain intact, TS/resource + related Python + promotion pass, one finite packaged mediumr11lL1 deployment witness. No BP35 rerun. Current-source retrieval and knowledge continuity remain a distinct unimplemented follow-up, described in the comparison.
+
+### Layer ownership reaffirmed by user
+
+| Concern | Owner and boundary |
+| --- | --- |
+| Diagnostic budget | Generic Prime extension diagnostic facility; P7 memory hook uses it. Keep runtime stderr guard separate. |
+| Current computation source/results/errors and dynamic definition retrieval | Generic computation/kernel facilities; narrow bounded read APIs. P7 consumes them without importing game knowledge into Prime. |
+| Complete interaction retention and compaction/recovery coordination | Generic context/session lifecycle. No game ids, board rules or level semantics. |
+| Stable mechanics, counterexamples, current-level plan, old-level detail retirement | P7 adaptation/prompt and model-authored notes. Generic memory stores opaque content; host does not decide game truth. |
+| Thinking level, target level and experiment budget selection | P7 operator policy. Generic runtime accepts the exact injected configuration and execution budget. |
+
+This user constraint governs the separate source-retrieval/context follow-up. Current Task6 changes only diagnostic budget and P7thinking; it does not imply the broader follow-up is implemented.
+
+## Task 7 — Implement usable computation history and context continuity now
+
+User explicitly rejected stopping after Task6 packaging. Task7 must be implemented before the next packaged verification. Task6 promotion on cbeddf3f passed but does not verify this expanded package. No small witness has launched.
+
+### 7A Generic computation (kernel owner)
+
+Files: `agents/prime/ipython.py`, `ipython_worker.py`, a focused `cell_history.py`, and generic kernel tests. Automatic private current-workspace cell archive, full admitted source and real bounded worker output/status; no automatic replay/export. Public-safe failures remain codes; private read returns actual content. Source remains available after ordinary Python errors and kernel replacement in the same workspace. Unique virtual filenames and linecache make inspect.getsource work for current and older function references.
+
+Interface: `PersistentIpythonHost.cell_history(start=0,limit=16)` returns items/start/next_start/total with stable `cell:<sha256(generation,call_id)>` identity, ordinal, generation, status, source_bytes, output_bytes, output_available/output_truncated and export ids. `cell_read(cell_id,field='source'|'output',start=0,limit=4096)` returns metadata plus text/character offsets; page maxima64items/16384characters. Storage under injected workspace/cells, atomic/thread-safe, no cross-root paths. Existing16KiB source/64KiB worker output apply. Host limits bound records/serialized storage (16384/2GiB defaults); capacity refusal occurs before execution, never silent eviction. Archival failure after execution must preserve real execution outcome and mark readback unavailable. Tests cover real function introspection, failed result/source retrieval, pagination, kernel recovery, independent scope and pending/limit semantics.
+
+### 7B Generic context (TypeScript owner)
+
+Files: `context-memory.ts`, hook compatibility in `ipython-extension.ts`, tests/installed-Pi probe and packagedresource. Remove96/48KiB rolling deletion. Replace only owned synthetic snapshot; all real native messages, tool sibling groups, instructions and native compaction/branch summaries remain in original order. Native Pi manages compaction. Preserve trusted v1/v2 admission and4KiB diagnostic budget. Output truthful private metrics; remove unsupported window-count metrics. Tests use >96KiB history with0NOTES, committedNOTES, pending tools and native summaries; raw evidence and all real model-visible messages must remain intact.
+
+### 7C P7 adaptation (root)
+
+Files: `research_bridge.py`, `research_runtime.py`, `prompt.py`, P7 read/runtime integration tests. Add only read-server routes `cell_history` and `cell_read`; callbacks delegate to current generic kernelhost. Expose `r.cell_history(start=0,limit=16)` and `r.cell_read(cell_id,field='source',start=0,limit=4096)` in the existing injected module, no new registered action tool. Reject invalid ids/field/bounds before callback. Source/result content stays private and readonly; querying never dispatches an environment action.
+
+Prompt explains automatic code/result history and direct function source inspection; encourages concise verifiedmechanics/counterexamples/uncertainties/currentplan notes, revise after informative surprises and retain reusable knowledge across levels. No mandatory schema or note-before-action gate. Explain native compaction and independent notes retention accurately; do not promise arbitrary kernel objects survive restart.
+
+### 7D Integration/acceptance
+
+- [x] Kernel and TS focused regressions pass; P7 real subprocess test defines helper, reads source/result through injected API, recovers explicit state and re-reads prior archive without an action.
+- [x] Independent changed-code review across generic/application boundary, lifetime, read scope, truncation and post-execution failure semantics.
+- [ ] Final TS, related Python, promotion, then one actual packaged mediumr11lL1 witness, with exact resource/source identity and cleanup. No new BP35 trial in this package.
+- [ ] Commit implementation and evidence, update state; report implemented continuity separately from unmeasured BP35 improvement.

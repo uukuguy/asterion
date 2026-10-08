@@ -129,6 +129,9 @@ class P7ResearchRuntime:
                         experience.read(source, kind, start=start, limit=limit, artifact_id=artifact_id))
                        if experience is not None else None,
             animation=self._animation,
+            cell_history=lambda start, limit: self.kernel.cell_history(start=start, limit=limit),
+            cell_read=lambda cell_id, field, start, limit: self.kernel.cell_read(
+                cell_id, field=field, start=start, limit=limit),
             diagnostic_sink=self._read_diagnostic,
         )
         try:

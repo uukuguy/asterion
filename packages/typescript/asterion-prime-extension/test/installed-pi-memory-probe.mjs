@@ -69,6 +69,18 @@ for (let chapter = 1; chapter <= 4; chapter++) {
   session.appendMessage(toolResult("chapter-"+chapter,"p7_workspace",
     {content:[{type:"text",text:"RAW_CHAPTER_"+chapter}],details:{}}));
 }
+for (let group = 0; group < 20; group++) {
+  const id = "before-note-"+group;
+  session.appendMessage(assistant(call(id,"p7_execute_plan")));
+  session.appendMessage(toolResult(id,"p7_execute_plan",
+    {content:[{type:"text",text:"BEFORE_NOTES_RESEARCH_"+group+" "+"x".repeat(8192)}],details:{}}));
+}
+source = session.buildSessionContext().messages;
+assert.ok(Buffer.byteLength(JSON.stringify(source),"utf8")>96*1024);
+projected = await runner.emitContext(source);
+assert.deepEqual(projected.filter(message => message.customType !== "asterion_context_memory"),source,
+  "research before any notes survives beyond the former 96 KiB trigger");
+assert.match(JSON.stringify(projected),/No notes saved|BEFORE_NOTES_RESEARCH_0 /);
 session.appendMessage(user("LATER_OPERATOR_CORRECTION"));
 session.appendMessage(assistant(call("accepted-note","p7_workspace"),call("sibling","p7_execute_plan")));
 const accepted = await workspace.execute("accepted-note",{op:"notes"});
@@ -76,7 +88,7 @@ session.appendMessage(toolResult("accepted-note","p7_workspace",accepted));
 source = session.buildSessionContext().messages;
 projected = await runner.emitContext(source);
 assert.deepEqual(projected.filter(message => message.customType !== "asterion_context_memory"),source,
-  "notes and a pending sibling do not erase history below capacity");
+  "notes and a pending sibling preserve all research beyond the former trigger");
 session.appendMessage(toolResult("sibling","p7_execute_plan",
   {content:[{type:"text",text:"SIBLING_RESULT"}],details:{}}));
 source = session.buildSessionContext().messages;
@@ -99,19 +111,27 @@ const serialized = JSON.stringify(modelView);
 for (const text of ["PI_OWNED_SYSTEM_PROMPT","OPERATOR_TASK_INSTRUCTIONS","LATER_OPERATOR_CORRECTION",
   "IMMUTABLE_DOCUMENT_RESEARCH_INSTRUCTIONS","NOTES: selected findings","CURRENT_CHAPTER_5_BOARD",
   "LARGE_EVIDENCE_19","PENDING_CURRENT_QUESTION"]) assert.ok(serialized.includes(text),text);
-assert.doesNotMatch(serialized,/RAW_CHAPTER_|LARGE_EVIDENCE_0 /);
+for (const text of ["RAW_CHAPTER_1","RAW_CHAPTER_4","BEFORE_NOTES_RESEARCH_0 ","LARGE_EVIDENCE_0 "])
+  assert.ok(serialized.includes(text),text);
+assert.deepEqual(projected.filter(message => message.customType !== "asterion_context_memory"),source);
 assert.deepEqual(projected[0].toolsAdded,source[0].toolsAdded);
 assert.deepEqual(session.getBranch(),rawBefore,"native raw branch remains unchanged");
 assert.deepEqual(errors,[]);
 const restored = new native.ExtensionRunner([factory],runtime,process.cwd(),session,{});
 const compacted = [{role:"system",content:"PI_OWNED_SYSTEM_PROMPT",timestamp:0},
-  {role:"compactionSummary",summary:"NATIVE_RETAINED_SUMMARY",timestamp:4},user("pending")];
-const recovered = native.convertToLlm(await restored.emitContext(compacted));
+  {role:"compactionSummary",summary:"NATIVE_RETAINED_SUMMARY",timestamp:4},
+  {role:"branchSummary",summary:"NATIVE_BRANCH_RESEARCH",timestamp:5},...source.slice(-41)];
+assert.ok(Buffer.byteLength(JSON.stringify(compacted),"utf8")>96*1024);
+const restoredView = await restored.emitContext(compacted);
+assert.deepEqual(restoredView.filter(message => message.customType !== "asterion_context_memory"),compacted);
+const recovered = native.convertToLlm(restoredView);
 assert.match(JSON.stringify(recovered),/CURRENT_CHAPTER_5_BOARD/);
 assert.match(JSON.stringify(recovered),/NATIVE_RETAINED_SUMMARY/);
-assert.equal(recovered.length,4);
+assert.match(JSON.stringify(recovered),/NATIVE_BRANCH_RESEARCH|LARGE_EVIDENCE_0 /);
+assert.equal(restoredView.filter(message => message.customType === "asterion_context_memory").length,1);
 const manifest = JSON.parse(readFileSync(resolve(packageRoot,"package.json"),"utf8"));
 console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest.version,provider_calls:0,
   raw_messages:source.length,model_messages:modelView.length,state_before_notes:true,minimal_plan_validated:true,
-  below_capacity_history_retained:true,above_capacity_history_trimmed:true,pinned_user_corrections:true,
+  research_without_notes_retained:true,research_with_notes_retained:true,native_compaction_research_retained:true,
+  user_corrections_retained:true,
   complete_sibling_group:true,system_and_tools_preserved:true,raw_branch_unchanged:true,restart_after_compaction:true}));

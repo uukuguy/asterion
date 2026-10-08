@@ -82,7 +82,7 @@ class TestP7Research(P7SolverFixture):
         }
         request["evidence_sequences"] = [1]
         for mutate in (
-            lambda candidate: candidate.update(base_revision="sha256:" + "a" * 64),
+            lambda candidate: candidate.update(base_revision="cell:" + "a" * 64),
             lambda candidate: candidate.update(evidence_sequences=[0]),
             lambda candidate: candidate.update(model={"source_export_ids": []}),
             lambda candidate: candidate.update(reports=[]),
@@ -279,6 +279,38 @@ class TestP7Research(P7SolverFixture):
         self.assertEqual(module["frame"](0), [[0, 1]])
         with self.assertRaises(ValueError):
             module["_read"]("act_checked", [{}])
+        self.assertEqual(self.engine.calls, [])
+
+    def test_cell_read_routes_validate_before_delegation(self):
+        calls = []
+        payload = {"items": [{"cell_id": "cell:" + "a" * 64}]}
+        def history(start, limit):
+            calls.append((start, limit))
+            return payload
+        server = ResearchReadServer(
+            context=lambda: {}, history=lambda *a: [], frame=lambda *a: [],
+            artifact=lambda *a: {}, cell_history=history,
+            cell_read=lambda *a: {"text": "private-source", "args": list(a)},
+        )
+        self.addCleanup(server.close)
+        module = {}
+        exec(server.start(), module)
+        result = module["cell_history"]()
+        result["items"].clear()
+        self.assertEqual(len(payload["items"]), 1)
+        self.assertEqual(calls, [(0, 16)])
+        cell_id = "cell:" + "a" * 64
+        self.assertEqual(module["cell_read"](cell_id)["text"], "private-source")
+        for method, args in [
+            ("cell_history", [True, 1]), ("cell_history", [0, 65]),
+            ("cell_history", [-1, 1]), ("cell_read", [cell_id, "exec", 0, 1]),
+            ("cell_read", ["../private", "source", 0, 1]),
+            ("cell_read", [cell_id, "output", 0, 16385]),
+            ("cell_read", [cell_id, "source", False, 1]),
+        ]:
+            with self.subTest(method=method, args=args):
+                self.assertEqual(server.dispatch({"method": method, "args": args})["status"], "rejected")
+        self.assertEqual(calls, [(0, 16)])
         self.assertEqual(self.engine.calls, [])
 
     def test_read_wire_caps_complete_response_and_surfaces_safe_diagnostic(self):
