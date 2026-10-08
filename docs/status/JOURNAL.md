@@ -4447,3 +4447,5 @@
 - 2026-10-08 — Scoring-medium exits during startup after2.230seconds with no committed actions; preserve evidence and investigate before any retry.
 - 2026-10-08 — Startup cause: omitted SDK dependencies; cleanup verified, repair cold installation under original absolute deadline without production changes.
 - 2026-10-08 — Cold replacement starts09:52:56Z with verified SDKs; actual action observed, original11:09:28Z deadline and source remain fixed.
+- 2026-10-08 — 23216966 records startup failure cause, cleanup and replacement identity while preserving original deadline and truthful elapsed clocks.
+- 2026-10-08 — Scoring-medium completes five levels168paid then RPC failure atL6; sealed184, replay168, cleanup verified, no new retry.
