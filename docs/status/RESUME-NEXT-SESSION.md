@@ -38,3 +38,7 @@ TrackTask19 throughsixleveltarget or budget/error; compare exactSDKboundarytimes
 Task19 SDK goalPASS2103.806813seconds/234paid/3RESET:24/51/47/25/44/43. ~2.056timesold1023.280s, paid+5.9percent; notwithinrough20percentcriterion. Cleanupclear2171.983286wallseconds; allowned/authremoved/sourceunchanged/consolepreserved. Full234replayindependentauditPASS; main/replay236SDKrowsidentical. Final46cellsallok/3NOTES(3rdpostpass)/115usage. No newtrial authorized; single-variable scoreguidance rollback is only proposedafteranalysis, no codechange.
 
 Finaldiagnostic caveat: native128tail3retry_start/1retry_end; private sink4errorends(1socket+3fetchfail,statusnull/codeunknown), runrecoveredtopass. Retryfullcount/timingunknown; scoreguidance-onlycausalitynotestablished.
+
+LATESTTask20 userapproved score-guidance A/B. Worker score_ab_revert restores prompt/actorbudget to9b62 baseline only, retains all genericfixes and scoreaccounting. Trialowner privateprep .asterion-private/p7-scoring-ab-sol-medium-bp35-20261008/trial/, unit6a8e583ddc484b97b9998ac19baf7a20, no launch yet, waits source/testsGO. Same Solmedium/5400+180/target6/no hints; oldTask19 fullyclosed.
+
+Baselinevisibilitycorrection: legacyfacade haslevel_baseline, but actualautonomous Solver/context/r.current at9b62 andTask20 hasneitherlevel_baseline norscoring. Task19scoreawarebudget.scoring didprovideallbaselines. Rootinitialclaimofretainedcurrentbaseline waswrongandcorrected; do notinjectbaselineintothisAB. Prompt+solver exact9b62,score.pyunchanged;49focusedtests/lint/docsPASS.

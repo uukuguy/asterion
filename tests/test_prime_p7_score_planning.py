@@ -1,11 +1,11 @@
-"""P7 scoring facts are planning data, never execution authority."""
+"""Local score accounting stays correct without actor score guidance."""
 from pathlib import Path
 import unittest
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.game import ArcGameContract, P7GameSelection
 from asterion.applications.prime.p7.prompt import build_autonomous_prompt
-from asterion.applications.prime.p7.score import partial_game_score
+from asterion.applications.prime.p7.score import partial_game_score, score_planning_facts
 from tests.test_prime_p7_solver import P7SolverFixture
 from tests.test_prime_p7_native_broker import _Engine
 
@@ -38,8 +38,11 @@ class TestP7ScorePlanning(P7SolverFixture):
 
     def scoring(self):
         budget = self.solver.current_context()['budget']
-        self.assertIn('scoring', budget)
-        return budget['scoring']
+        self.assertNotIn('scoring', budget)
+        status = (self.broker.status() if budget['terminal_reason'] in {'active', 'reset-required'}
+                  else self.broker.terminal_snapshot().status)
+        return score_planning_facts(self.broker.game, self.broker.journal,
+            primitive_actions=status.primitive_actions, levels_completed=status.levels_completed)
 
     def test_full_game_objective_and_all_baselines_do_not_extend_stop_boundary(self):
         facts = self.scoring()
@@ -53,7 +56,7 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(self.scoring()['baseline_actions'], [10] * 9)
         self.assertEqual(self.engine.calls, [])
         from asterion.applications.prime.p7.actor_projection import project_actor_context
-        self.assertEqual(project_actor_context(self.solver.current_context())['budget']['scoring'], self.scoring())
+        self.assertNotIn('scoring', project_actor_context(self.solver.current_context())['budget'])
         # Test the existing sixth-level stop using a real sequential prefix.
         for level in range(6):
             self.engine.level_after = len(self.engine.calls) + 1
@@ -72,7 +75,8 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(self.scoring()['full_game_score'], '0.000000')
         self.engine.level_after = 4
         feedback = self.solver.execute_plan(self.minimal('complete'))
-        facts = feedback['budget']['scoring']
+        self.assertNotIn('scoring', feedback['budget'])
+        facts = self.scoring()
         self.assertEqual(facts['completed_levels'], [{'level': 1, 'paid_actions': 4, 'baseline': 10,
                                                      'level_score': '115.000000'}])
         self.assertEqual(facts['current_level']['paid_actions'], 0)
@@ -82,7 +86,10 @@ class TestP7ScorePlanning(P7SolverFixture):
         reconstructed = Solver(broker=self.broker, kernel=self.kernel, control=self.control,
             workspace_root=Path(self.directory.name), run_id='run-1', attempt_id='attempt-1',
             event_sink=lambda *args: None, learner_profile='autonomous')
-        self.assertEqual(reconstructed.current_context()['budget']['scoring'], facts)
+        status = reconstructed.broker.status()
+        self.assertNotIn('scoring', reconstructed.current_context()['budget'])
+        self.assertEqual(score_planning_facts(reconstructed.broker.game, reconstructed.broker.journal,
+            primitive_actions=status.primitive_actions, levels_completed=status.levels_completed), facts)
         self.solver.execute_plan(self.minimal('next'))
         self.assertEqual(self.scoring()['current_level']['paid_actions'], 1)
         self.assertEqual(self.scoring()['completed_levels'], facts['completed_levels'])
@@ -108,7 +115,8 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(facts['accounting_status'], 'settled')
         self.engine.raises_on = 1
         result = self.solver.execute_plan(self.minimal('unknown'))
-        facts = result['budget']['scoring']
+        self.assertNotIn('scoring', result['budget'])
+        facts = self.scoring()
         self.assertEqual(result['applied_count'], 0)
         self.assertTrue(self.solver.current_context()['environment_result_unknown'])
         self.assertEqual(result['budget']['primitive_actions'], 1)
@@ -116,12 +124,13 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertIsNone(facts['full_game_score'])
         self.assertIsNone(facts['current_level'])
 
-    def test_autonomous_prompt_separates_stable_full_score_goal_and_stop_authority(self):
+    def test_autonomous_prompt_keeps_target_level_goal_without_score_guidance(self):
         prompt = build_autonomous_prompt()
-        for fragment in ('完整通关', '整局满分100', 'budget.target_level', '停止边界',
-                         '115', 'baseline', '未完成关', '不会续期'):
+        for fragment in ('直到达到 budget.target_level', '兼顾过关与动作效率',
+                         '不会续期', '达到目标后停止行动'):
             self.assertIn(fragment, prompt)
-        self.assertNotIn('直到达到 budget.target_level', prompt)
+        for fragment in ('budget.scoring', '整局满分100', 'q_i=', '稳定目标'):
+            self.assertNotIn(fragment, prompt)
 
 
 class TestP7ScoreFormula(unittest.TestCase):

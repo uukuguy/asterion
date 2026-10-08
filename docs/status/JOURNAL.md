@@ -4477,3 +4477,4 @@
 - 2026-10-08 — 766d71e0 prioritizes configured Prime effort across launchers and guest transport; tests, independent review and promotion pass.
 - 2026-10-08 — 4dd830c5 checkpoints the authorized latest Sol medium trial and exact comparison boundaries.
 - 2026-10-08 — edfd8ea2 records latest234-action six-level pass and full replay; elapsed doubles versus best medium.
+- 2026-10-08 — b543ee0e retains recovered request failures so timing analysis does not overattribute slowdown to scoring.
