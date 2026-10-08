@@ -172,3 +172,16 @@ Task20 userSTOPat4levels151completedpaid+10unfinishedL5=161total;full161replay/c
 
 
 Task21 CLOSED/independent PASS: source1a22dc33, actualSolmedium, cold sixlevels221paid/3deathRESET/1296.819519s; perlevel19/43/41/38/31/49. All221paid/223SDK fullreplay, sourceidentity/seal/cleanup verified; no hints/edits. Quality115/115/115/100/113.319459/115, partial9game46.666667. Same221paid vsbest but+26.73percenttime; versusTask19 -13paid/-38.36percenttime. Death costs23vsold31, success198vs190. Userrequests posttrialdeathRESETanalysis: allthreeautomaticverticalmotion, L2newmechanism/L3lossypurpleopenclosedrepresentation+jointmodel/L4crossviewpath+standposition. Canonicalcomparison holds ARC actual note evidence and generic/P7 layered improvement proposals. No new codefix or trial authorized; objective-only source remains current.
+
+
+## Task22 — Approved transition evidence and research capability implementation
+
+Spec: [P7 transition research design](../specs/2026-10-08-p7-transition-research-design.md). User says同意继续 after the concrete layered design. Root integrates and owns prompt/docs; p7_transition_impl owns research_bridge/research_runtime and focused transition tests. Review owner checks architecture and correctness independently. No concurrent actor trial.
+
+- [ ] Add focused failing unittest for r.transition(sequence): actual committed action, before/after refs and recorded animation descriptor; invalid/future/unknown reads rejected, immutable, no effect.
+- [ ] Run `uv run python -m unittest -v tests.test_prime_p7_research_transition` and observe missing-interface failure before implementation.
+- [ ] Implement through the existing read-only P7 bridge; preserve existing history/frame/animation and registered tool contracts. No Prime framework changes or game semantics.
+- [ ] Root updates build_autonomous_prompt with transition/animation examples, actual helper signatures, optional executable models and freely organized decision-useful NOTES. Preserve objective scoring facts and all action/budget boundaries.
+- [ ] Run transition, research runtime/observation and autonomous suites; independent code review; `make lint`, `make docs-check`, `make promotion-check`. TS registration/resource unchanged; run existing extension tests for deployment consistency.
+- [ ] Commit integrated source before a fresh packaged bounded `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`; verify exact wheel/resources/allowlist/cleanup, preserve console. Do not silently start BP35.
+- [ ] Record implemented/provider-free/packaged evidence separately; no claim death rate improved until separately authorized cold comparison.
