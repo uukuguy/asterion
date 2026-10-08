@@ -36,3 +36,5 @@ P7 canbuildmaps/search: prior medium semanticgrid; high2 camera map+BFS incorrec
 TrackTask19 throughsixleveltarget or budget/error; compare exactSDKboundarytimes/actions, independentlyverifyreplay/seal/source/cleanup. Update canonicalreport docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md and worklist docs/superpowers/plans/2026-10-08-prime-autonomous-research-interface.md. No live source edits, hints or silent retry. Journal remains append-only.
 
 Task19 SDK goalPASS2103.806813seconds/234paid/3RESET:24/51/47/25/44/43. ~2.056timesold1023.280s, paid+5.9percent; notwithinrough20percentcriterion. Cleanupclear2171.983286wallseconds; allowned/authremoved/sourceunchanged/consolepreserved. Full234replayindependentauditPASS; main/replay236SDKrowsidentical. Final46cellsallok/3NOTES(3rdpostpass)/115usage. No newtrial authorized; single-variable scoreguidance rollback is only proposedafteranalysis, no codechange.
+
+Finaldiagnostic caveat: native128tail3retry_start/1retry_end; private sink4errorends(1socket+3fetchfail,statusnull/codeunknown), runrecoveredtopass. Retryfullcount/timingunknown; scoreguidance-onlycausalitynotestablished.

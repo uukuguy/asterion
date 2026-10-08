@@ -294,3 +294,5 @@ L5首次NOTES明确引用前关得分76.56/88.58/87.64/115，并写后续争取�
 L6终局逐帧补核：new192–207对应old180–195，剔除new208的HUD-only点击后，new209–234对应old196–221；全部对应HUD外画面逐步一致。因此43vs42没有路径层面的明显绕行，却耗638.970vs301.482秒。L6usage26vs18、reported input4678461vs3136700、output12545vs6959；计算10cells/281msvs7/142ms。直接支持更多研究/模型交互，不足拆分provider等待与内部推理或确认评分因果。
 
 最终独立审计PASS：234trace与234committed/known journal动作参数逐项一致；主SDK236行与回放236行（包含2初始化RESET）的动作、状态及全部frames逐行一致，无unknown。实际Sol/medium、566冻结source/584installed、扩展resource身份一致，source未变、ownedguest/host为空、auth已移除、用户console保留。通过耗时2103.806813秒，至清理2171.983286墙钟/2171.972589单调秒，未触期限。最终46cells全ok且无source/output截断；NOTES过关时2write，收尾追加第3write，最终1089→1226→1940B；115usage input14225897/output42765/peak239310。trace只有1个prime.model.round，115usage不是115自然轮。
+
+终局重试证据补充：原生尾部128事件含3auto_retry_start/1auto_retry_end；通用私有failure sink保存4条message_end错误（1socket相关、3fetch-failed，status=null/code=unknown），最终恢复并达到目标。尾部不代表完整重试总量，也没有精确请求时钟可归因耗时；不能把时间增加全部归为评分驱动或模型推理。stderr4048B含24条保留projection和1抑制通知，后续projection/compaction未测。
