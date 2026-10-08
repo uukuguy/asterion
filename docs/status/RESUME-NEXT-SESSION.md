@@ -6,7 +6,7 @@ Updated: 2026-10-08 13:53 UTC. Active work; not a final handoff.
 
 Task19: latest P7 cold BP35 L1–L6, gpt-6.1-sol/medium. User explicitly authorizes direct BP35 and asks comparison with best17minutes; source frozen766d71e0. .env verified provideropenai-codex/modelgpt-6.1-sol/EFFORTmedium. No inherited notes/routes, actor hints or midrun edits.
 
-ACTIVE exactrunp7-live-20261008135210-f004c211b221e4998d93b7fb, unit8cb6e6178bf849d1981f047627eea814; supervisor9666/orb9675/caffeinate9674/session24503. Start13:52:10.497966Z; fixeddeadline15:22:10.497473Z+180seconds cleanup. Bounds5400seconds/6round/1000paid/1024model/4096tool. Preserve user console52024/56659. Trialowner notes_bp35_trial owns launch/monitor/replay/cleanup; reviewer notes_bp35_review observes comparisons, no actorfeedback. Privatebase .asterion-private/p7-latest-sol-medium-bp35-20261008/trial/.
+CLOSED target-reached exactrunp7-live-20261008135210-f004c211b221e4998d93b7fb, unit8cb6e6178bf849d1981f047627eea814; supervisor9666/orb9675/caffeinate9674/session24503. Start13:52:10.497966Z; fixeddeadline15:22:10.497473Z+180seconds cleanup. Bounds5400seconds/6round/1000paid/1024model/4096tool. Preserve user console52024/56659. Trialowner notes_bp35_trial owns launch/monitor/replay/cleanup; reviewer notes_bp35_review observes comparisons, no actorfeedback. Privatebase .asterion-private/p7-latest-sol-medium-bp35-20261008/trial/.
 
 Latestwheel f7aa3c1c517442ee517e9b8775f459d56ffd89e319b31bd4708765952c5cdcca; extension7aeb06f055e429255c878f826f155469206bae909897f84f9bc7c2e9afbe7c62. Frozen566source/584installed/48dependencies+SDK verified; actualPi get_stateSol/medium verified. No duplicate run/r11l. Initial42.829s8paid/5usage/0levels, effects known.
 
@@ -34,3 +34,5 @@ P7 canbuildmaps/search: prior medium semanticgrid; high2 camera map+BFS incorrec
 ## Next
 
 TrackTask19 throughsixleveltarget or budget/error; compare exactSDKboundarytimes/actions, independentlyverifyreplay/seal/source/cleanup. Update canonicalreport docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md and worklist docs/superpowers/plans/2026-10-08-prime-autonomous-research-interface.md. No live source edits, hints or silent retry. Journal remains append-only.
+
+Task19 SDK goalPASS2103.806813seconds/234paid/3RESET:24/51/47/25/44/43. ~2.056timesold1023.280s, paid+5.9percent; notwithinrough20percentcriterion. Cleanupclear2171.983286wallseconds; allowned/authremoved/sourceunchanged/consolepreserved. Full234replayindependentauditPASS; main/replay236SDKrowsidentical. Final46cellsallok/3NOTES(3rdpostpass)/115usage. No newtrial authorized; single-variable scoreguidance rollback is only proposedafteranalysis, no codechange.

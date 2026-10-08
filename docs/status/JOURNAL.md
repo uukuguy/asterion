@@ -4475,3 +4475,4 @@
 - 2026-10-08 — 761e5f9f records Pro cancellation and restored Sol configuration; no further model run authorized.
 - 2026-10-08 — a046cc7c restores medium reasoning to match the best completed Sol comparison; four configuration tests pass.
 - 2026-10-08 — 766d71e0 prioritizes configured Prime effort across launchers and guest transport; tests, independent review and promotion pass.
+- 2026-10-08 — 4dd830c5 checkpoints the authorized latest Sol medium trial and exact comparison boundaries.
