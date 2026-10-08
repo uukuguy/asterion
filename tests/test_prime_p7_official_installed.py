@@ -81,8 +81,8 @@ const published = await call('p7_workspace', {
 });
 if (published.status !== 'published' || published.workspace_revision === current.workspace_revision)
   throw Error('real workspace rejected publication');
-if (!published.needs_revision)
-  throw Error('program publication bypassed current NOTES admission');
+if (published.needs_revision || published.requires_calibration)
+  throw Error('autonomous publication imposed a research admission gate');
 const noted = await call('p7_workspace', {
   op: 'notes', base_revision: published.workspace_revision,
   observation_ref: published.observation_ref,

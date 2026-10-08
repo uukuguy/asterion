@@ -2437,6 +2437,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     "ASTERION_PRIME_P7_ATTEMPT_UNIT": "asterion-p7-" + "a" * 32 + ".service",
                     "ASTERION_PRIME_P7_CONSOLE_RUN_ID": "p7-live-20261005123456-" + "a" * 24,
                     "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC": "100.0",
+                    "ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH": str(__import__("time").time()),
                 } if witness else {})},
                 pi_base_command=(),
                 extension_path=root,

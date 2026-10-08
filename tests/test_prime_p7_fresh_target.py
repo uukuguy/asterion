@@ -68,6 +68,7 @@ class TestFreshTargetPolicy(unittest.TestCase):
             root = Path(directory).resolve()
             environment = {"ASTERION_PRIME_P7_RUN_MODE": "witness",
                            "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC": str(time.monotonic()),
+                           "ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH": str(time.time()),
                            "ASTERION_PRIME_P7_ATTEMPT_SECONDS": "900",
                            "ASTERION_PRIME_P7_ATTEMPT_UNIT": "asterion-p7-" + "a" * 32 + ".service",
                            "ASTERION_PRIME_P7_CONSOLE_RUN_ID": "p7-live-20261006123456-" + "a" * 24}

@@ -10,6 +10,8 @@ import tempfile
 import threading
 import time
 
+from asterion.agents.prime.deadline import TaskDeadline
+
 SCHEMA = 'asterion.prime.p7-run-control/v1'
 _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:@+-]{0,159}\Z')
 _HASH = re.compile(r'sha256:[0-9a-f]{64}\Z')
@@ -116,10 +118,14 @@ def read_control_ack(run_root: Path, *, run_id: str) -> dict | None:
 
 class SolverControl:
     """Admission gate; it neither dispatches work nor claims process cleanup."""
-    def __init__(self, run_root: Path, run_id: str, deadline: float, *, clock=time.monotonic):
+    def __init__(self, run_root: Path, run_id: str, deadline: float, *, clock=time.monotonic,
+                 task_deadline: TaskDeadline | None = None):
         self._root = _root(run_root, run_id)
         if type(deadline) not in (int, float) or not math.isfinite(deadline):
             raise ValueError('solver control unavailable')
+        if task_deadline is not None and not isinstance(task_deadline, TaskDeadline):
+            raise ValueError('solver control unavailable')
+        self._task_deadline = task_deadline
         self._run_id, self._deadline, self._clock = run_id, deadline, clock
         self._lock = threading.RLock()
         self._active = {'cell': 0, 'action': 0, 'model_round': 0}
@@ -130,7 +136,8 @@ class SolverControl:
         self._position, self._hash = 0, None
 
     def _settle(self):
-        if self._clock() >= self._deadline:
+        if ((self._task_deadline is not None and self._task_deadline.expired())
+                or self._clock() >= self._deadline):
             self._state, self._reason = 'stop_requested', 'deadline_expired'
         elif self._state == 'pause_requested' and not any(self._active.values()):
             self._state = 'paused'
@@ -148,7 +155,10 @@ class SolverControl:
     def budget_snapshot(self) -> dict:
         """Expose wall time separately from the closed lifecycle contract."""
         with self._lock:
-            return {'wall_time_remaining_seconds': max(0.0, self._deadline - self._clock())}
+            remaining = max(0.0, self._deadline - self._clock())
+            if self._task_deadline is not None:
+                remaining = min(remaining, self._task_deadline.remaining_seconds())
+            return {'wall_time_remaining_seconds': remaining}
 
     def request(self, operation: str, command_id: str) -> dict:
         with self._lock:

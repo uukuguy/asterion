@@ -82,7 +82,7 @@ make p7-controller
 
 This calls the model and OFFLINE ARC engine. The standard witness has a fixed 900-second guest allowance and cleanup checks. Its action ceiling is the human baseline through the target when no prefix is restored; with a restored prefix, it counts that prefix's actual actions plus the target-level baseline. When an existing verified target route supplies a bound, its saved target action count replaces that target baseline. `LEVEL=2` means completing levels 1 and 2 in order, not jumping to level 2. The verified variant is the default; the model uses the current three-tool research interface. No legacy variant is needed.
 
-The application supplies observations and budgets, the LLM revises a WorldMap and optionally computes in persistent IPython, and the broker checks short plans against real feedback. An unknown mechanism can be probed with a short discriminating action. Planning and hypothesis validation need not finish a complete formal model before acting.
+The application supplies exact observations and execution budgets. The LLM chooses its research, optional NOTES/WorldMap, computation and action plans. Predictions are optional; supplied predictions are compared with real feedback. In IPython, `import p7_research as r` exposes current/raw frames, grid rendering, geometry and differences. Notes updates preserve recent complete interactions; history trimming is driven by capacity. Unknown action outcomes stop further execution and remain recorded for inspection. The witness deadline is a bounded deployment preset, not a reasoning-stage timer.
 
 For a full-game attempt, or a solve through an explicitly selected level:
 

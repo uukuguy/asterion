@@ -21,6 +21,8 @@ operator module may import it and never the other way round.
 from __future__ import annotations
 
 from .dynamic_evidence import AnimationFrames, EvidenceProcessingError
+from .action_journal import ActionJournal
+from asterion.agents.prime.deadline import TaskDeadline
 
 import asyncio
 from collections.abc import Mapping
@@ -37,6 +39,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 
 from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
 from asterion.applications.prime.p7.game import DEFAULT_GAME, P7GameSelection
@@ -146,7 +149,17 @@ class ArcadeEngine:
         arc_root: Path,
         recordings_dir: Path,
         game: P7GameSelection = DEFAULT_GAME,
+        task_deadline: TaskDeadline | None = None,
+        settlement_deadline: TaskDeadline | None = None,
+        journal: ActionJournal | None = None,
+        cancelled=None,
     ) -> None:
+        self._evidence_cancelled, self._evidence_deadline = None, None
+        self.set_dispatch_control(task_deadline=task_deadline, settlement_deadline=settlement_deadline,
+                                  journal=journal, cancelled=cancelled)
+        self._check_dispatch(record_rejection=False)
+        if journal is not None and journal.has_unresolved:
+            raise EvidenceProcessingError("engine-no-reply", stage="dispatched-no-reply", outcome_known=False)
         from arc_agi import Arcade, OperationMode
         from arcengine import GameAction
 
@@ -177,6 +190,7 @@ class ArcadeEngine:
         )
         if self._arcade.operation_mode != OperationMode.OFFLINE:
             raise P7LiveSolveError("offline ARC mode is unavailable")
+        self._check_dispatch(record_rejection=False)
         self._environment = self._arcade.make(
             game.game_id,
             seed=game.seed,
@@ -185,8 +199,9 @@ class ArcadeEngine:
         )
         if self._environment is None:
             raise P7LiveSolveError("ARC environment is unavailable")
-        self._evidence_cancelled, self._evidence_deadline = None, None
-        self._current = self._snapshot(self._environment.reset())
+        # Startup RESETs are nonpaid initialization, not journal sequence1.
+        self._check_dispatch(record_rejection=False)
+        self._current = self._snapshot(self._environment.reset(), **self.evidence_control())
 
     def __repr__(self) -> str:
         return "<ArcadeEngine redacted>"
@@ -194,14 +209,91 @@ class ArcadeEngine:
     def observe(self) -> Mapping[str, object]:
         return self._current
 
+    def set_dispatch_control(self, *, task_deadline: TaskDeadline | None = None,
+                             settlement_deadline: TaskDeadline | None = None,
+                             journal: ActionJournal | None = None, cancelled=None):
+        """Bind operator-owned admission and evidence-only finalization bounds."""
+        if (task_deadline is not None and not isinstance(task_deadline, TaskDeadline)
+                or settlement_deadline is not None and not isinstance(settlement_deadline, TaskDeadline)
+                or journal is not None and not isinstance(journal, ActionJournal)
+                or cancelled is not None and not callable(cancelled)):
+            raise ValueError("dispatch control unavailable")
+        if task_deadline is not None and (settlement_deadline is None
+                or not task_deadline.deadline_epoch <= settlement_deadline.deadline_epoch <= task_deadline.deadline_epoch + 180
+                or not task_deadline.deadline_monotonic <= settlement_deadline.deadline_monotonic <= task_deadline.deadline_monotonic + 180):
+            raise ValueError("dispatch control unavailable")
+        prior = getattr(self, 'task_deadline', None)
+        if prior is not None and task_deadline is not prior:
+            raise ValueError("dispatch control unavailable")
+        self.task_deadline, self._settlement_deadline = task_deadline, settlement_deadline
+        self.action_journal, self._dispatch_cancelled = journal, cancelled
+
+    def _check_dispatch(self, *, record_rejection=True):
+        budget = getattr(self, 'task_deadline', None)
+        cancelled = getattr(self, '_dispatch_cancelled', None)
+        reason = ('deadline-expired' if budget is not None and budget.expired() else
+                  'cancelled' if cancelled is not None and cancelled() else None)
+        if reason is None:
+            return
+        journal = getattr(self, 'action_journal', None)
+        if record_rejection and journal is not None:
+            current = journal.snapshot()
+            if current is not None and current['phase'] in {'prepared', 'entered'}:
+                journal.not_dispatched(reason)
+        raise EvidenceProcessingError('action-not-dispatched', stage='not-dispatched', outcome_known=True)
+
+    @staticmethod
+    def _response_metadata(value):
+        """Record bounded raw reply metadata, never claim a validated observation."""
+        state = getattr(value, 'state', None)
+        state = getattr(state, 'value', getattr(state, 'name', state))
+        return {'state': state[:64] if type(state) is str else None,
+                'levels_completed': getattr(value, 'levels_completed', None)
+                if type(getattr(value, 'levels_completed', None)) is int else None,
+                'win_levels': getattr(value, 'win_levels', None)
+                if type(getattr(value, 'win_levels', None)) is int else None}
+
     def step(self, action: str, data: Mapping[str, int] | None = None) -> Mapping[str, object]:
         if action not in self._actions:
             raise P7LiveSolveError("ARC action is unavailable")
-        self._current = self._snapshot(self._environment.step(self._actions[action], {} if data is None else dict(data)),
-                                      cancelled=self._evidence_cancelled, deadline=self._evidence_deadline)
+        action_data = {} if data is None else dict(data)
+        self._check_dispatch()
+        journal = getattr(self, 'action_journal', None)
+        if journal is not None:
+            try:
+                journal.dispatch_entered({'name': action, 'data': action_data})
+            except (OSError, ValueError):
+                raise EvidenceProcessingError('action-not-dispatched', stage='not-dispatched', outcome_known=True) from None
+        # Recheck after durable intent/entry I/O; nothing blocking is placed
+        # between this check and SDK entry. Userspace cannot make them atomic.
+        self._check_dispatch()
+        try:
+            reply = self._environment.step(self._actions[action], action_data)
+        except BaseException:
+            if journal is not None:
+                try:
+                    journal.unresolved('dispatched-no-reply')
+                except (OSError, ValueError):
+                    pass  # The earlier durable pending record remains unresolved.
+            raise EvidenceProcessingError('engine-no-reply', stage='dispatched-no-reply', outcome_known=False) from None
+        if journal is not None:
+            try:
+                metadata = self._response_metadata(reply)
+                metadata['received_epoch'] = time.time()
+                metadata['task_deadline_expired'] = bool(self.task_deadline and self.task_deadline.expired())
+                journal.response_received(metadata)
+            except (OSError, ValueError):
+                raise EvidenceProcessingError('evidence-write-failed', stage='reply-received-unvalidated',
+                                              outcome_known=False) from None
+        self._current = self._snapshot(reply, **self.evidence_control())
         return self._current
 
     def evidence_control(self):
+        settlement = getattr(self, '_settlement_deadline', None)
+        if settlement is not None:
+            # A received effect gets bounded evidence-only settlement even
+            # when the research signal is cancelled. This grants no new action.
+            return {'cancelled': settlement.expired, 'deadline': None}
         return {"cancelled": self._evidence_cancelled, "deadline": self._evidence_deadline}
 
     def set_evidence_control(self, *, cancelled=None, deadline=None):

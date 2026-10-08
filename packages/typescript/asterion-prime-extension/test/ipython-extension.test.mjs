@@ -188,12 +188,14 @@ test("registers the ipython and P7 application tools", async () => {
     registered.slice(1).map((tool) => tool.executionMode),
     registered.slice(1).map(() => "sequential"),
   );
-  assert.match(registered.find((tool) => tool.name === "p7_execute_plan").description, /unique Broker.*stops the suffix/);
+  assert.match(registered.find((tool) => tool.name === "p7_execute_plan").description, /unique Broker.*stop the suffix/);
   assert.match(registered.find((tool) => tool.name === "p7_workspace").description, /Publishing never dispatches actions/);
   for (const name of ["p7_workspace", "p7_execute_plan"]) {
     const description = registered.find((tool) => tool.name === name).description;
     assert.match(description, /palette-row-dictionary\/v1/);
-    assert.match(description, /p7_research\.frame\(sequence\)/);
+    assert.match(description, /import p7_research as r/);
+    assert.match(description, /r\.frame\(sequence\)/);
+    assert.match(description, /r\.render\(\).*r\.geometry\(\).*r\.diff\(before_sequence\)/);
   }
   assert.match(registered.find((tool) => tool.name === "p7_workspace").description, /acknowledgement/);
   assert.equal(registered[0].label, "ipython");

@@ -2,6 +2,7 @@
 import os
 import asyncio
 import tempfile
+import time
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -18,6 +19,7 @@ def environment(wrapper=None):
             'ASTERION_PRIME_P7_ATTEMPT_SECONDS': '5400',
             'ASTERION_PRIME_P7_ATTEMPT_UNIT': 'asterion-p7-' + 'a' * 32 + '.service',
             'ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC': '100.0',
+            'ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH': str(time.time()),
             **({'ASTERION_PRIME_P7_RESEARCH_PYTHON': str(wrapper)} if wrapper else {})}
 
 
@@ -96,7 +98,7 @@ class TestP7Autonomy(unittest.TestCase):
             try:
                 launch = resources.host_services['prime.launch']
                 host = resources.host_services['prime.ipython']
-                self.assertEqual(host.solver.learner_profile, 'notes')
+                self.assertEqual(host.solver.learner_profile, 'autonomous')
                 self.assertNotIn('ASTERION_PRIME_P7_RESEARCH_PYTHON', launch.approved_environment)
                 self.assertEqual(launch.autonomy_deadline_monotonic, 5500.0)
                 self.assertEqual(host.control._deadline, 5500.0)

@@ -4353,3 +4353,8 @@
 - 2026-10-08 09:10 CST — User directs LLM-owned research with evidence/execution guarantees; stable cognition support must not become mandatory cognitive gates; frozenrun unchanged.
 - 2026-10-08 09:45 CST — Trial ends4levels/335paid; wall7062s versus monotonic5296s and cleanupTimeoutExpired; strict5400s boundary unverified, final independent audit pending.
 - 2026-10-08 09:53 CST — Final audit confirms335committed plus late truncated pending response;4levels, no seal/deadlinePASS; hashes/eventualcleanup verified; optional-support redesign recorded.
+- 2026-10-08 09:53 CST — 00886aa7 closes failed NOTES comparison with partial-result limits and LLM-owned research direction; docs290files/150links and independent review pass.
+
+- 2026-10-08 Autonomous research interface implementation authorized by continued user direction; written layered contract and disjoint agent assignments. Prior NOTES comparison stays failed evidence; no new BP35 run.
+- 2026-10-08 10:40 CST — Autonomous interface source implemented and changed-code review READY; TS48pass/6existing skips, installed-Pi probe0provider calls PASS, Python319tests/1existing skip, targeted Ruff PASS. Full promotion and packaged witness pending; no new BP35 trial.
+- 2026-10-08 10:44 CST — First full promotion failed:4318tests/2fail1error. Installed-official error reproduced as obsolete fixture requiring NOTES admission, updated to autonomous behavior and standalone installed test PASS. Other failure headings were hidden by bounded diagnostics; investigating before any game launch.

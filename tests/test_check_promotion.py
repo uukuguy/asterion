@@ -15,6 +15,7 @@ from tools.check_promotion import (
     _closed_prime_subprocess_environment,
     _closed_npm_subprocess_environment,
     _default_runner,
+    _run,
     _resolve_promotion_npm_cache,
     main,
     run_promotion,
@@ -58,6 +59,33 @@ def completed(
 
 
 class PromotionCheckTests(unittest.TestCase):
+    def test_failed_command_preserves_unittest_headings_before_bounded_tail(self) -> None:
+        command = ('python', '-m', 'unittest')
+        headings = (
+            'FAIL: test_first (tests.test_example.ExampleTests.test_first)',
+            'ERROR: test_second (tests.test_example.ExampleTests.test_second)',
+        )
+        output = '\n'.join((
+            headings[0] + " (private_payload='sentinel-secret')",
+            *('traceback detail ' + 'x' * 300 for _ in range(25)),
+            headings[1],
+            *('traceback detail ' + 'x' * 300 for _ in range(25)),
+            'FAILED (failures=1, errors=1)',
+        ))
+
+        def runner(args, cwd):
+            return subprocess.CompletedProcess(args, 1, stdout='', stderr=output)
+
+        with self.assertRaises(PromotionError) as caught:
+            _run(runner, command, Path('.'))
+        prefix, diagnostic = str(caught.exception).split('\n', 1)
+        self.assertEqual(prefix, 'promotion command failed: python -m unittest')
+        for heading in headings:
+            self.assertIn(heading, diagnostic)
+        self.assertNotIn('sentinel-secret', diagnostic)
+        self.assertTrue(diagnostic.endswith('FAILED (failures=1, errors=1)'))
+        self.assertLessEqual(len(diagnostic), 4000)
+
     def test_resource_smoke_accepts_standalone_gameplay_package(self) -> None:
         from importlib import resources
 

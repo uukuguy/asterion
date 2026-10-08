@@ -71,6 +71,10 @@ const researchNotes: Static<typeof P7_WORKSPACE_PARAMETERS> = {
   op:"notes",base_revision:"sha256:" + "b".repeat(64),text:"当前研究记录。",
   observation_ref:shortPlan.start,
 };
+const autonomousPlan: Static<typeof P7_EXECUTE_PLAN_PARAMETERS> = {
+  plan_id:"autonomous",start:shortPlan.start,stop_on_mismatch:false,
+  steps:[{action:{name:"ACTION1",data:{}}}],
+};
 const notesHistory: Static<typeof P7_WORKSPACE_PARAMETERS> = {op:"notes_history",start:0,limit:16};
 
 void registeredTool;
@@ -82,3 +86,4 @@ void semanticRevision;
 void shortPlan;
 void researchNotes;
 void notesHistory;
+void autonomousPlan;

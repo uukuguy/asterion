@@ -588,8 +588,20 @@ def _bounded_tail(completed: subprocess.CompletedProcess[str]) -> str:
     combined = "\n".join(
         part for part in (completed.stdout, completed.stderr) if part
     )
-    lines = combined.splitlines()[-20:]
-    return "\n".join(lines)[-4000:]
+    lines = combined.splitlines()
+    # Keep test identities, excluding subtest values that can contain private data.
+    headings = "\n".join(dict.fromkeys(
+        match.group(0)
+        for line in lines
+        if (match := re.match(
+            r"^(?:ERROR|FAIL): [A-Za-z_][A-Za-z0-9_]* \([A-Za-z_][A-Za-z0-9_.]*\)",
+            line,
+        ))
+    ))[:2000]
+    tail = "\n".join(lines[-20:])
+    if headings:
+        return headings + "\n" + tail[-(3999 - len(headings)):]
+    return tail[-4000:]
 
 
 def _run(

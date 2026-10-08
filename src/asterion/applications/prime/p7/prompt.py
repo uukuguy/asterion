@@ -29,6 +29,27 @@ def build_notes_prompt() -> str:
     return P7_NOTES_SOLVE_PROMPT
 
 
+def build_autonomous_prompt() -> str:
+    """P7 supplies evidence and execution authority; the actor owns research."""
+    return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
+
+工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
+import p7_research as r
+print(r.render())
+这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态；r.geometry() 返回各颜色连通区域的大小和边界；r.diff(before_sequence) 比较历史与当前画面，变化坐标有界返回。render/geometry/diff 可指定 sequence、窗口或颜色；help(r) 查看参数。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块没有预设游戏含义。可自由写程序处理这些数据、建立模型和搜索；此研究接口只读。
+
+NOTES 可选，用于保存稳定理解、重要反例与当前关注点，由你决定内容和更新时机：
+p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:当前完整引用,text:'替换后的有效笔记'})。
+自由文字最多16KiB，不是长度目标。过关后保留可复用认识即可，无需累计前几关完整行动记录。近期完整交互按容量保留，更新笔记不会立即清空前文；早期资料可按真实序号回查。NOTES 是研究记忆，不是环境认证。可用 workspace op read/notes_read/notes_history 复查，复杂模型可按需显式导出或 checkpoint。
+
+行动最小格式：
+{plan_id:'唯一提交标识',start:当前完整observation_ref,steps:[{action:{name:'ACTION1',data:{}}}]}。
+每段1–20步；ACTION6 data 为 {x,y}，其他动作 data 为 {}，包括 RESET。动作含义由实际反馈判断。可选字段：workspace_revision（提供则必须是当前版本）、goal、purpose（advance 或 probe）、assumptions；每步可选 expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}。默认在预测失配时停下；明确设置 stop_on_mismatch:false 可继续研究已知结果的失配。换关、RESET、GAME_OVER、未知结果、暂停或预算截止仍停止后缀。缺少预测表示未作断言，不视为预测成功。
+观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
+固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。
+""" + "\n" + ACTOR_FRAME_INSTRUCTION
+
+
 def initial_research_prompt(host, instructions: str) -> str:
     """Save the actual task contract separately from the transient first board."""
     host.set_memory_instructions(instructions)
@@ -369,6 +390,7 @@ coordinate, or action sequence."""
 
 __all__ = (
     "build_notes_prompt",
+    "build_autonomous_prompt",
     "initial_research_prompt",
     "P7_SOLVE_PROMPT",
     "P7_LEGACY_SOLVE_PROMPT",

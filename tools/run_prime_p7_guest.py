@@ -101,6 +101,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
         # Both launcher and operator run in the Linux guest clock domain. Never
         # forward a caller/host timestamp through the shared environment list.
         args.append(f"--setenv=ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC={time.monotonic()}")
+        args.append(f"--setenv=ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH={time.time()}")
     for name in _environment_names():
         value = os.environ.get(name)
         if value is None:

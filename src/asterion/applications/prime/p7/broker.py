@@ -386,7 +386,11 @@ class ArcBroker:
         game_mechanics_store: GameMechanicsStore | None = None,
         semantic_cognition_store: SemanticCognitionStore | None = None,
         semantic_cognition_read_only: bool = False,
+        action_profile: str = 'verified',
     ) -> None:
+        if action_profile not in {'verified', 'autonomous'}:
+            raise ArcBrokerError('unavailable')
+        self._action_profile = action_profile
         if type(game) not in (P7GameSelection, ArcGameContract):
             raise ArcBrokerError("unavailable")
         if not callable(getattr(engine, "observe", None)) or not (
@@ -463,7 +467,7 @@ class ArcBroker:
         # it counts repeated (level, action) pairs with no observed frame
         # change during the current run and surfaces that count to the model.
         # It starts empty and accumulates only from the current run.
-        self._no_effect_guard = True
+        self._no_effect_guard = action_profile != 'autonomous'
         self._no_effect_counts: dict[tuple[int, str], int] = {}
         self._unknown_guard_probes: set[tuple[int, str, tuple[tuple[str, int], ...], str]] = set()
         self._retrodict_no_effect_hint: dict[str, object] | None = None
@@ -2753,7 +2757,8 @@ class ArcBroker:
                 validate_prediction(
                     item,
                     current_levels=self._current.levels_completed,
-                    allow_nondistinguishing=cognition_probe,
+                    allow_nondistinguishing=cognition_probe or (self._action_profile == 'autonomous' and not replay_expectations),
+                    allow_unpredicted=self._action_profile == 'autonomous' and not replay_expectations,
                 )
                 for item in plan
             ]
@@ -2784,6 +2789,8 @@ class ArcBroker:
                 "no_effect": record.changed_cell_count == 0,
                 "stop_reason": item_stop_reason,
             }
+            if self._action_profile == 'autonomous':
+                item['prediction_present'] = bool(checked[len(feedback)][2])
             promotion_candidates = self._visual_promotion_candidates(record)
             if promotion_candidates:
                 item["promotion_candidates"] = promotion_candidates
@@ -2818,7 +2825,8 @@ class ArcBroker:
                 unavailable_action = name
                 break
             prepared_probe = self._current_probe_preparation(probe_preparation, checked)
-            prefix_reused = witness is None and self._prefix_coordinate_reuse(ArcAction(name, data), expected)
+            prefix_reused = (self._action_profile != 'autonomous' and witness is None
+                             and self._prefix_coordinate_reuse(ArcAction(name, data), expected))
             current_probe = bool(
                 prefix_reused and not prepared_probe and len(plan) == 1
                 and self._guard_probe_novel(ArcAction(name, data), expected, current_bound=True)
@@ -2839,7 +2847,7 @@ class ArcBroker:
                 }
                 break
             previous_levels = self._current.levels_completed
-            distinguishing = len(plan) == 1 and (
+            distinguishing = self._action_profile != 'autonomous' and len(plan) == 1 and (
                 current_probe or self._guard_probe_distinguishes(expected)
                 or self._guard_probe_novel(
                     ArcAction(name, data), expected,
@@ -2931,7 +2939,9 @@ class ArcBroker:
                 break
             if expected:
                 self._prediction_matches += 1
-            append_feedback(record, "matched")
+            append_feedback(record, "matched" if expected else "executed")
+            if not expected:
+                stop_reason = 'executed'
         result = ArcActResult(len(transitions), self._current.levels_completed - self._initial.levels_completed, tuple(transitions))
         return {
             "applied_count": result.applied_count,
@@ -2953,8 +2963,28 @@ class ArcBroker:
         }
 
     def _require_open(self) -> None:
+        transaction = getattr(self._engine, 'action_journal', None)
+        if transaction is not None and transaction.has_unresolved:
+            pending = transaction.snapshot()
+            stage = pending.get('stage', 'reply-received-unvalidated'
+                                if pending['phase'] == 'reply-received' else 'dispatched-no-reply')
+            known = pending['outcome_known']
+            self._terminal_reason = 'evidence-unavailable' if known else 'engine-uncertain'
+            error = EvidenceProcessingError('engine-no-reply' if stage == 'dispatched-no-reply'
+                                            else 'evidence-write-failed', stage=stage,
+                action_sequence=pending['sequence'], outcome_known=known)
+            self.processing_diagnostic = error.diagnostic
+            raise error
         if self._processing_blocked or self._terminal_reason not in {"active", "reset-required"}:
             raise ArcBrokerError("closed")
+
+    def _retain_unresolved_effect(self, error: EvidenceProcessingError) -> None:
+        transaction = getattr(self._engine, 'action_journal', None)
+        if transaction is not None:
+            try:
+                transaction.unresolved(error.stage, outcome_known=error.outcome_known)
+            except (OSError, ValueError):
+                pass  # A failed update leaves the earlier pending intent in place.
 
     @property
     def _primitive_actions(self) -> int:
@@ -3068,13 +3098,48 @@ class ArcBroker:
                 self._terminal_reason = "action-unavailable"
                 raise ArcBrokerError("unavailable")
             before = self._current
+            transaction = getattr(self._engine, 'action_journal', None)
+            adapter_controls_dispatch = callable(getattr(self._engine, 'set_dispatch_control', None))
+            action_payload = {'name': action.name, 'data': dict(action.data)}
+            if transaction is not None:
+                try:
+                    transaction.prepare(sequence=self._actions_dispatched + 1,
+                                        action=action_payload, before=self.observation_reference())
+                except (OSError, ValueError):
+                    error = EvidenceProcessingError('evidence-write-failed', stage='not-dispatched',
+                        action_sequence=self._actions_dispatched + 1, outcome_known=True)
+                    self.processing_diagnostic = error.diagnostic
+                    raise error from None
             self._actions_dispatched += 1
             try:
+                if not adapter_controls_dispatch:
+                    if transaction is not None:
+                        try:
+                            transaction.dispatch_entered(action_payload)
+                        except (OSError, ValueError):
+                            raise EvidenceProcessingError('action-not-dispatched', stage='not-dispatched', outcome_known=True) from None
+                    deadline = getattr(self._engine, 'task_deadline', None)
+                    cancelled = getattr(self._engine, '_dispatch_cancelled', None)
+                    if ((deadline is not None and deadline.expired())
+                            or (callable(cancelled) and cancelled())):
+                        raise EvidenceProcessingError('action-not-dispatched', stage='not-dispatched', outcome_known=True)
                 reply = self._step(action)
             except EvidenceProcessingError as failure:
+                if failure.stage == 'not-dispatched':
+                    attempted_sequence = self._actions_dispatched
+                    self._actions_dispatched -= 1
+                    if transaction is not None:
+                        try:
+                            transaction.not_dispatched('action-not-dispatched')
+                        except (OSError, ValueError):
+                            pass  # Preserve any partial durable intent; no retry is automatic.
+                    error = failure.at_action(attempted_sequence, outcome_known=True)
+                    self.processing_diagnostic = error.diagnostic
+                    raise error from None
                 self._failed_action = action.name
                 self._terminal_reason = "evidence-unavailable"
                 error = failure.at_action(self._actions_dispatched)
+                self._retain_unresolved_effect(error)
                 self.processing_diagnostic = error.diagnostic
                 raise error from None
             except BaseException:
@@ -3082,14 +3147,24 @@ class ArcBroker:
                 self._terminal_reason = "engine-uncertain"
                 error = EvidenceProcessingError("engine-no-reply", stage="dispatched-no-reply",
                                                 action_sequence=self._actions_dispatched, outcome_known=False)
+                self._retain_unresolved_effect(error)
                 self.processing_diagnostic = error.diagnostic
                 raise error from None
             try:
+                if transaction is not None and not adapter_controls_dispatch:
+                    try:
+                        metadata = {key: reply.get(key) if isinstance(reply, Mapping) else None
+                                    for key in ('state', 'levels_completed', 'win_levels')}
+                        transaction.response_received(metadata)
+                    except (OSError, ValueError):
+                        raise EvidenceProcessingError('evidence-write-failed', stage='reply-received-unvalidated',
+                            outcome_known=False) from None
                 after = _snapshot_observation(reply, win_levels=self._game.win_levels)
             except EvidenceProcessingError as failure:
                 self._failed_action = action.name
                 self._terminal_reason = "evidence-unavailable"
                 error = failure.at_action(self._actions_dispatched)
+                self._retain_unresolved_effect(error)
                 self.processing_diagnostic = error.diagnostic
                 raise error from None
             except (ValueError, TypeError):
@@ -3097,6 +3172,7 @@ class ArcBroker:
                 self._terminal_reason = "engine-invalid"
                 error = EvidenceProcessingError("engine-response-invalid", stage="reply-received-invalid",
                                                 action_sequence=self._actions_dispatched, outcome_known=False)
+                self._retain_unresolved_effect(error)
                 self.processing_diagnostic = error.diagnostic
                 raise error from None
             finally:
@@ -3110,6 +3186,7 @@ class ArcBroker:
                 self._terminal_reason = "engine-invalid"
                 error = EvidenceProcessingError("engine-response-invalid", stage="reply-received-invalid",
                                                 action_sequence=self._actions_dispatched, outcome_known=False)
+                self._retain_unresolved_effect(error)
                 self.processing_diagnostic = error.diagnostic
                 raise error
             try:
@@ -3154,6 +3231,7 @@ class ArcBroker:
                          if isinstance(failure, EvidenceProcessingError) else
                          EvidenceProcessingError("evidence-hash-failed", action_sequence=self._actions_dispatched))
                 self.processing_diagnostic = error.diagnostic
+                self._retain_unresolved_effect(error)
                 raise error from None
             self._journal.append(transition)
             self._replay_observations.append(after)
@@ -3174,6 +3252,17 @@ class ArcBroker:
                 self._terminal_reason = "reset-required" if self._level_gameplay_actions > 0 else "game-over"
             else:
                 self._terminal_reason = "active"
+            if transaction is not None:
+                try:
+                    transaction.commit(sequence=transition.sequence, observation_ref=self.observation_reference())
+                except (OSError, ValueError):
+                    self._processing_blocked = True
+                    error = EvidenceProcessingError('evidence-write-failed', stage='derived-failed',
+                        action_sequence=self._actions_dispatched, outcome_known=True,
+                        durable=evidence_reference is not None, recovery='read-only-rebuild')
+                    self._retain_unresolved_effect(error)
+                    self.processing_diagnostic = error.diagnostic
+                    raise error from None
             try:
                 if self._history is not None:
                     record = ArcHistoryRecord.following(
@@ -3197,7 +3286,7 @@ class ArcBroker:
                     # tuple, regardless of outcome. The model can query this to
                     # see what it has already tried — both succeeded and not.
                     self._record_tried_action(action, after.levels_completed)
-                    if self._no_effect_guard and after.frame[-1] == before.frame[-1]:
+                    if after.frame[-1] == before.frame[-1]:
                         self._record_no_effect(action, after.levels_completed)
             except Exception as failure:
                 if isinstance(failure, ArcBrokerError) and str(failure) == "cognition-experiment-mismatch":

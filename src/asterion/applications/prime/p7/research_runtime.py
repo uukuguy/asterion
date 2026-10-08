@@ -53,7 +53,9 @@ class _EvidenceBroker:
         finally:
             self._trace_client._record_transitions(self._broker.journal[start:])
         self._trace_client._count("checked_plans")
-        self._trace_client._count("matched_expectations", result["applied_count"])
+        self._trace_client._count("matched_expectations", sum(
+            item.get('prediction_present', True) and item.get('stop_reason') == 'matched'
+            for item in result.get('feedback', [])))
         self._trace_client._count("unexecuted_items", result["unexecuted_count"])
         if result["mismatch"] is not None:
             self._trace_client._count("mismatches")
@@ -101,7 +103,7 @@ class P7ResearchRuntime:
                  deadline_seconds: float, event_sink, worker=None, worker_factory=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None,
-                 learner_profile='legacy'):
+                 learner_profile='legacy', task_deadline=None):
         if worker_factory is not None and not callable(worker_factory):
             raise ValueError("research worker factory unavailable")
         self._worker_factory = worker_factory or SubprocessPythonWorker
@@ -117,7 +119,7 @@ class P7ResearchRuntime:
         self._cell_archive = CellArchive(run_root)
         self.control = SolverControl(run_root, run_id, time.monotonic() + deadline_seconds
                                      if deadline_monotonic is None else deadline_monotonic,
-                                     clock=time.monotonic)
+                                     clock=time.monotonic, task_deadline=task_deadline)
         self._read_server = ResearchReadServer(
             context=lambda: self.solver.current_context(),
             history=self._broker.history,
@@ -328,14 +330,14 @@ class P7ResearchRuntime:
         try:
             context = self.actor_context()
             notes = context.get('notes')
-            if notes is None:
+            if commit and notes is None:
                 return None
             content = self._memory_instructions + '\n\n' + json.dumps(
                 context, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
             if len(content.encode('utf-8')) > 128 * 1024:
                 return None
-            return {'version': 'asterion.prime-context-memory/v1',
-                    'revision': notes['revision'], 'content': content, 'commit': commit}
+            return {'version': 'asterion.prime-context-memory/v2',
+                    'revision': None if notes is None else notes['revision'], 'content': content, 'commit': commit}
         except (ValueError, TypeError, KeyError, OSError):
             # A failed view refresh cannot change the committed note or hide an
             # environment action result; absence leaves the model view uncut.

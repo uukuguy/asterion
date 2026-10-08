@@ -30,7 +30,7 @@ class Solver:
         diagnostics=None,
         learner_profile='legacy',
     ):
-        if learner_profile not in {'legacy', 'notes'}:
+        if learner_profile not in {'legacy', 'notes', 'autonomous'}:
             raise ValueError('research learner profile invalid')
         self.learner_profile = learner_profile
         self.broker, self.kernel, self.control = broker, kernel, control
@@ -51,9 +51,9 @@ class Solver:
         self._experience = experience
         self._plans = {}
         self._lock = RLock()
-        self._needs_calibration = self._workspace.loaded
-        self._needs_revision = True
-        self._revision_reason = "initial"
+        self._needs_calibration = self._workspace.loaded and learner_profile != 'autonomous'
+        self._needs_revision = learner_profile != 'autonomous'
+        self._revision_reason = "initial" if self._needs_revision else None
         self._environment_uncertain = False
         self._active_task = None
         self._cell_tasks = {}
@@ -111,9 +111,9 @@ class Solver:
                 "observation_ref": reference,
                 "budget": self._budget(),
                 "lifecycle": copy_json(self.control.snapshot()),
-                "requires_calibration": self._needs_calibration,
-                "needs_revision": self._needs_revision,
-                "revision_reason": self._revision_reason,
+                "requires_calibration": self._needs_calibration if self.learner_profile != 'autonomous' else False,
+                "needs_revision": self._needs_revision if self.learner_profile != 'autonomous' else False,
+                "revision_reason": self._revision_reason if self.learner_profile != 'autonomous' else None,
                 "environment_result_unknown": self._environment_uncertain,
                 "processing_blocked": self._processing_blocked,
                 "diagnostics": self.diagnostics.projection()[-8:],
@@ -121,7 +121,7 @@ class Solver:
             }
             if self._experience is not None:
                 context["experience"] = self._experience.context()
-            if self.learner_profile == 'notes' or 'notes' in current:
+            if self.learner_profile in {'notes', 'autonomous'} or 'notes' in current:
                 context['learner_profile'] = self.learner_profile
                 context['notes_boundary'] = self._notes_boundary(reference)
                 context['notes_current'] = (
@@ -277,7 +277,7 @@ class Solver:
 
     def kernel_recovered(self) -> None:
         with self._lock:
-            self._needs_calibration = True
+            self._needs_calibration = self.learner_profile != 'autonomous'
             if self.learner_profile == 'notes':
                 self._needs_revision = True
                 self._revision_reason = 'kernel-recovered'
@@ -314,7 +314,7 @@ class Solver:
 
     def _processing_failure(self, error):
         self._processing_blocked = True
-        self._environment_uncertain = error.stage == "dispatched-no-reply"
+        self._environment_uncertain = not error.outcome_known
         diagnostic = self.diagnostics.record(error.diagnostic)
         try:
             self._sink("diagnostic", diagnostic)
@@ -650,7 +650,7 @@ class Solver:
         return validation
 
     def _validate_plan(self, plan: dict, context: dict) -> list[dict]:
-        if set(plan) != {
+        fields = {
             "plan_id",
             "start",
             "workspace_revision",
@@ -658,7 +658,10 @@ class Solver:
             "purpose",
             "assumptions",
             "steps",
-        }:
+        }
+        if self.learner_profile == 'autonomous':
+            fields.add('stop_on_mismatch')
+        if set(plan) != fields:
             raise ValueError
         identifier(plan["plan_id"])
         start = plan["start"]
@@ -673,11 +676,10 @@ class Solver:
         if (
             plan["start"] != context["observation_ref"]
             or plan["workspace_revision"] != self._workspace.revision
-            or self._needs_calibration
-            or self._needs_revision
+            or (self.learner_profile != 'autonomous' and (self._needs_calibration or self._needs_revision))
             or self._environment_uncertain
             or self._processing_blocked
-            or getattr(self.kernel, "lost", False)
+            or (self.learner_profile != 'autonomous' and getattr(self.kernel, "lost", False))
             or (self.learner_profile == 'notes' and not context.get('notes_current', False))
         ):
             raise ValueError
@@ -696,6 +698,9 @@ class Solver:
         if type(plan["steps"]) is not list or not 1 <= len(plan["steps"]) <= 20:
             raise ValueError
         translated = []
+        autonomous = self.learner_profile == 'autonomous'
+        if autonomous and type(plan['stop_on_mismatch']) is not bool:
+            raise ValueError
         current_levels = context["observation"]["levels_completed"]
         for step in plan["steps"]:
             if type(step) is not dict or set(step) != {"action", "expect"}:
@@ -703,7 +708,7 @@ class Solver:
             expect = step["expect"]
             if (
                 type(expect) is not dict
-                or not expect
+                or (not expect and not autonomous)
                 or not set(expect)
                 <= {"cells", "frame_sha256", "state", "levels_completed"}
             ):
@@ -737,7 +742,8 @@ class Solver:
                     # Broker only accepts progress witnesses; equality stays a host assertion.
                     del native_expect["levels_completed"]
             native = {"action": step["action"], "expect": native_expect}
-            validate_prediction(native, current_levels=current_levels)
+            validate_prediction(native, current_levels=current_levels,
+                                allow_unpredicted=autonomous, allow_nondistinguishing=autonomous)
             translated.append(native)
         return translated
 
@@ -828,6 +834,23 @@ class Solver:
                         raise ValueError
                     return self._plan_projection(previous["result"])
                 context = self.current_context()
+                if self.learner_profile == 'autonomous':
+                    if not {'plan_id', 'start', 'steps'} <= set(value) <= {
+                        'plan_id', 'start', 'steps', 'workspace_revision', 'goal',
+                        'purpose', 'assumptions', 'stop_on_mismatch',
+                    }:
+                        raise ValueError
+                    value.setdefault('workspace_revision', self._workspace.revision)
+                    value.setdefault('goal', '')
+                    value.setdefault('purpose', 'advance')
+                    value.setdefault('assumptions', [])
+                    value.setdefault('stop_on_mismatch', True)
+                    if type(value['steps']) is not list:
+                        raise ValueError
+                    for step in value['steps']:
+                        if type(step) is not dict:
+                            raise ValueError
+                        step.setdefault('expect', {})
                 translated = self._validate_plan(value, context)
             except (ValueError, TypeError, KeyError, AttributeError):
                 return {
@@ -876,6 +899,7 @@ class Solver:
             emit_plan("proposed")
             emit_plan("executing")
             stop_reason = "matched"
+            all_predictions_matched = True
             unexecuted_start = 0
             for index, native in enumerate(translated):
                 self.control.poll(
@@ -894,7 +918,8 @@ class Solver:
                     native = self._ground_prediction(
                         native, value["steps"][index]["expect"].get("cells"), observation,
                     )
-                    preparation = self._probe_preparation(value, translated, index, reference, observation)
+                    preparation = (self._probe_preparation(value, translated, index, reference, observation)
+                                   if self.learner_profile != 'autonomous' else None)
                     if preparation:
                         dispatched = self.broker.act_checked([native], probe_preparation=preparation)
                     else:
@@ -906,15 +931,20 @@ class Solver:
                     result["applied_count"] += count
                     unexecuted_start = result["applied_count"]
                     observation, reference = self._observation()
+                    expectation = value['steps'][index]['expect']
+                    prediction_present = bool(expectation)
+                    all_predictions_matched = all_predictions_matched and prediction_present
                     mismatch_kind, differences = (
-                        self._compare(value["steps"][index]["expect"], observation)
-                        if count
+                        self._compare(expectation, observation)
+                        if count and prediction_present
                         else ("unknown", [])
                     )
+                    all_predictions_matched = all_predictions_matched and not differences
                     native_reason = dispatched.get("stop_reason", "unknown")
                     feedback = {
                         "step_index": index,
                         "expected": copy_json(value["steps"][index]["expect"]),
+                        "prediction_present": prediction_present,
                         "actual": {
                             "frame_sha256": digest(observation["frame"][-1]),
                             "state": observation["state"],
@@ -932,25 +962,30 @@ class Solver:
                         "feedback",
                         "environment",
                         plan_id=plan_id,
-                        expected_summary="核对计划中的关键像素、状态和关卡预测。",
+                        expected_summary="核对计划中的关键像素、状态和关卡预测。" if prediction_present else "本步未提供预测。",
                         actual_summary="预测与真实观察一致。"
                         if mismatch_kind == "none"
-                        else "真实观察与预测有差异。",
+                        else "真实观察与预测有差异。" if prediction_present else "已返回真实观察，未判定预测匹配。",
                         mismatch_kind=mismatch_kind,
                         unexecuted_count=len(actions) - result["applied_count"],
                         counterexample_sequence=feedback["counterexample_sequence"],
                     )
-                    if differences:
-                        stop_reason = "prediction-mismatch"
+                    continue_mismatch = self.learner_profile == 'autonomous' and not value['stop_on_mismatch']
+                    if differences and self.learner_profile != 'autonomous':
+                        stop_reason = 'prediction-mismatch'
                     elif observation["state"] in {"WIN", "GAME_OVER"}:
                         stop_reason = (
                             "win" if observation["state"] == "WIN" else "game-over"
                         )
                     elif observation["levels_completed"] > before_levels:
                         stop_reason = "level-advanced"
-                    elif native_reason != "matched":
+                    elif differences and not continue_mismatch:
+                        stop_reason = "prediction-mismatch"
+                    elif native_reason not in {'matched', 'executed'} and not (
+                        continue_mismatch and native_reason == 'prediction-mismatch'
+                    ):
                         stop_reason = native_reason
-                    if count:
+                    if count and self.learner_profile != 'autonomous':
                         reason = (
                             "reset-applied"
                             if native["action"]["name"] == "RESET"
@@ -982,11 +1017,11 @@ class Solver:
                                 observation, reference = self._observation()
                             except EvidenceProcessingError:
                                 pass  # Keep the prior pixels, with the explicit processing fault.
-                    stop_reason = "environment-result-unknown" if error.stage == "dispatched-no-reply" else "processing-failed"
+                    stop_reason = "environment-result-unknown" if not error.outcome_known else "processing-failed"
                     self._processing_failure(error)
                     result["diagnostics"] = self.diagnostics.projection()
-                    unexecuted_start = index + 1
-                    if error.stage == "dispatched-no-reply":
+                    unexecuted_start = index if error.stage == 'not-dispatched' else index + 1
+                    if not error.outcome_known:
                         result["uncertain_step_index"] = index
                         result["uncertain_step"] = copy_json(value["steps"][index])
                         result["feedback"].append({
@@ -1059,12 +1094,12 @@ class Solver:
                 if stop_reason != "matched":
                     break
             result.update(
-                stop_reason=stop_reason,
+                stop_reason='executed' if stop_reason == 'matched' and not all_predictions_matched else stop_reason,
                 observation=observation,
                 observation_ref=reference,
                 budget=self._budget(),
-                needs_revision=self._needs_revision,
-                revision_reason=self._revision_reason,
+                needs_revision=self._needs_revision if self.learner_profile != 'autonomous' else False,
+                revision_reason=self._revision_reason if self.learner_profile != 'autonomous' else None,
                 unexecuted_steps=copy_json(value["steps"][unexecuted_start:]),
             )
             emit_plan("completed" if stop_reason == "matched" else "stopped")

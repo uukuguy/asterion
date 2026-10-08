@@ -29,12 +29,32 @@ class ResearchReadServer:
             if not callable(animation):
                 raise ValueError('research readers unavailable')
             callbacks['animation'] = animation
+        callbacks.update(render=self._render, geometry=self._geometry, diff=self._diff)
         self._readers = callbacks
         self._server = None
         self._thread = None
         self._closed = False
         self._token = secrets.token_hex(32)
         self._diagnostic_sink = diagnostic_sink
+
+    def _frame(self, sequence):
+        if sequence is None:
+            sequence = self._readers['context']()['observation_ref']['sequence']
+        if type(sequence) is not int or sequence < 0:
+            raise ValueError('invalid observation sequence')
+        return self._readers['frame'](sequence)
+
+    def _render(self, sequence, x0, y0, x1, y1, max_cells):
+        from .research_observation import render
+        return render(self._frame(sequence), x0=x0, y0=y0, x1=x1, y1=y1, max_cells=max_cells)
+
+    def _geometry(self, sequence, colors, limit):
+        from .research_observation import geometry
+        return geometry(self._frame(sequence), colors=colors, limit=limit)
+
+    def _diff(self, before_sequence, after_sequence, limit):
+        from .research_observation import diff
+        return diff(self._frame(before_sequence), self._frame(after_sequence), limit=limit)
 
     def _rejection(self, code, *, observed=None):
         diagnostic = public_diagnostic(dict(
@@ -73,7 +93,10 @@ class ResearchReadServer:
                 ):
                     raise ValueError
             elif method == "frame":
-                if len(args) != 1 or type(args[0]) is not int or args[0] < 0:
+                if len(args) != 1 or (args[0] is not None and (type(args[0]) is not int or args[0] < 0)):
+                    raise ValueError
+            elif method in {'render', 'geometry', 'diff'}:
+                if len(args) != (6 if method == 'render' else 3):
                     raise ValueError
             elif method == 'animation':
                 if (len(args) != 3 or type(args[0]) is not dict
@@ -89,7 +112,7 @@ class ResearchReadServer:
                     raise ValueError
             elif len(args) != 1 or type(args[0]) is not str or len(args[0]) != 71:
                 raise ValueError
-            result = {"status": "ok", "value": self._readers[method](*args)}
+            result = {"status": "ok", "value": (self._frame(*args) if method == "frame" else self._readers[method](*args))}
             encoded = json.dumps(result, allow_nan=False, separators=(',', ':')).encode() + b'\n'
             if len(encoded) > 1048576:
                 return self._rejection('research-response-budget-exceeded', observed=len(encoded))
@@ -156,7 +179,19 @@ def _read(method, args):
         return result["value"]
 def context(): return _read("context", [])
 def history(start, limit): return _read("history", [start, limit])
-def frame(sequence): return _read("frame", [sequence])
+def current(): return context()
+def frame(sequence=None):
+    """Exact 2D pixels; omit sequence for the current board."""
+    return _read("frame", [sequence])
+def render(sequence=None, *, x0=0, y0=0, x1=None, y1=None, max_cells=4096):
+    """Row-numbered exact pixels in an optional half-open window."""
+    return _read("render", [sequence, x0, y0, x1, y1, max_cells])
+def geometry(sequence=None, *, colors=None, limit=40):
+    """Counts and 4-connected components; all colors unless explicitly filtered."""
+    return _read("geometry", [sequence, colors, limit])
+def diff(before_sequence, after_sequence=None, *, limit=80):
+    """Exact count and bounded changed cells, before versus current by default."""
+    return _read("diff", [before_sequence, after_sequence, limit])
 def animation(observation_ref, start=0, limit=32):
     """Read animation pages for one exact committed current-run observation."""
     return _read("animation", [observation_ref, start, limit])

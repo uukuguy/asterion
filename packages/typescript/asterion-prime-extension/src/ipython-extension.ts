@@ -14,6 +14,7 @@ import {
   String as TypeString,
   Union as TypeUnion,
   Optional as TypeOptional,
+  Boolean as TypeBoolean,
   Literal as TypeLiteral,
   type Static,
 } from "typebox";
@@ -736,23 +737,25 @@ export const P7_EXECUTE_PLAN_PARAMETERS = TypeObject({
   plan_id: ID,
   start: TypeObject({ run_id: ID, attempt_id: ID, level: TypeInteger({ minimum: 1 }),
     sequence: TypeInteger({ minimum: 0 }), observation_sha256: EXPORT_ID }, { additionalProperties: false }),
-  workspace_revision: EXPORT_ID, goal: PUBLIC_TEXT, purpose: TypeUnion([TypeLiteral("advance"), TypeLiteral("probe")]),
-  assumptions: TypeArray(PUBLIC_TEXT, { maxItems: 32 }),
-  steps: TypeArray(TypeObject({ action: ACTION_PARAMETERS, expect: TypeObject({
+  workspace_revision: TypeOptional(EXPORT_ID), goal: TypeOptional(PUBLIC_TEXT),
+  purpose: TypeOptional(TypeUnion([TypeLiteral("advance"), TypeLiteral("probe")])),
+  assumptions: TypeOptional(TypeArray(PUBLIC_TEXT, { maxItems: 32 })),
+  stop_on_mismatch: TypeOptional(TypeBoolean()),
+  steps: TypeArray(TypeObject({ action: ACTION_PARAMETERS, expect: TypeOptional(TypeObject({
     cells: TypeOptional(TypeArray(TypeObject({ x: TypeInteger({ minimum: 0, maximum: 63 }),
       y: TypeInteger({ minimum: 0, maximum: 63 }), value: TypeInteger({ minimum: 0, maximum: 255 }) },
       { additionalProperties: false }), { minItems: 1, maxItems: 128 })),
     frame_sha256: TypeOptional(EXPORT_ID),
     state: TypeOptional(TypeUnion([TypeLiteral("NOT_FINISHED"), TypeLiteral("WIN"), TypeLiteral("GAME_OVER")])),
     levels_completed: TypeOptional(TypeInteger({ minimum: 0 })),
-  }, { additionalProperties: false, minProperties: 1 }) }, { additionalProperties: false }), { minItems: 1, maxItems: 20 }),
+  }, { additionalProperties: false })) }, { additionalProperties: false }), { minItems: 1, maxItems: 20 }),
 }, { additionalProperties: false });
-const P7_FRAME_DELIVERY_DESCRIPTION = " Boards may use the lossless palette-row-dictionary/v1 encoding: row_ids selects rows and each row character selects its literal numeric pixel through symbols and palette; shape preserves the singleton frame layer if present. Numeric frames with frame_delivery.encoding=raw are already decoded. Read the exact raw 2D settled board in IPython with p7_research.frame(sequence), using observation_ref.sequence. settled_frame_sha256 identifies the pixel grid, separately from observation_sha256.";
+const P7_FRAME_DELIVERY_DESCRIPTION = " Boards may use the lossless palette-row-dictionary/v1 encoding: row_ids selects rows and each row character selects its literal numeric pixel through symbols and palette; shape preserves the singleton frame layer if present. Numeric frames with frame_delivery.encoding=raw are already decoded. For optional research in IPython, use import p7_research as r. Read the current exact raw 2D settled board with r.frame(), or a historical board with r.frame(sequence). r.render(), r.geometry(), and r.diff(before_sequence) provide read-only observation helpers; choose whichever investigation is useful. settled_frame_sha256 identifies the pixel grid, separately from observation_sha256.";
 const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   { name: "p7_workspace", method: "workspace", parameters: P7_WORKSPACE_PARAMETERS,
-    description: "Use op notes with the exact current base_revision and observation_ref to replace your freeform research NOTES (at most 16 KiB UTF-8). Select useful observations, hypotheses, counterexamples, questions and plans yourself; no required headings, WorldMap, task or action labels. Save fresh notes after a mismatch, RESET, level advance or kernel recovery before acting again. Accepted notes update workspace_revision and replace earlier model history with the current notes/context at a complete tool boundary; raw evidence remains queryable. Read accepted notes with notes_read (optional revision), or page newest-first accepted notes_history (optional start, limit 1–32). Optional revise/publish retains prior program/report evidence and never certifies new prose or substitutes for required fresh NOTES. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Write success returns an acknowledgement with current refs and controls; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
+    description: "Optionally use op notes with the exact current base_revision and observation_ref to replace your freeform research NOTES (at most 16 KiB UTF-8). Select useful observations, hypotheses, counterexamples, questions and plans yourself; no required headings, WorldMap, task or action labels. Notes are an external memory aid, not an action prerequisite. A notes update preserves recent evidence; capacity-triggered projection retains current context and coherent recent tool groups while raw evidence remains queryable. Read accepted notes with notes_read (optional revision), or page newest-first accepted notes_history (optional start, limit 1–32). Optional revise/publish retains prior program/report evidence and never certifies new prose. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Write success returns an acknowledgement with current refs and controls; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
   { name: "p7_execute_plan", method: "execute_plan", parameters: P7_EXECUTE_PLAN_PARAMETERS,
-    description: "Submit one short actor plan from the current observation_ref and current workspace_revision. If needs_revision is true in NOTES mode, first use p7_workspace op notes with the current observation; freeform partial knowledge and unknown goals are sufficient. Each of 1–20 actions needs explicit key-cell, frame, state or progress predictions. The unique Broker executes sequentially and stops the suffix on mismatch, pause or a level boundary. Returns actual feedback, unexecuted steps and needs_revision/revision_reason. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
+    description: "Submit a short ordered plan with plan_id, start equal to the current observation_ref, and 1–20 action steps. Notes, WorldMap and program models are optional research aids. workspace_revision, goal, purpose, assumptions and each step's expect prediction may be omitted; a supplied workspace_revision must match the current workspace. Predictions can test key cells, a complete frame, state or progress; an omitted prediction is not a confirmed match. stop_on_mismatch defaults to true; explicitly false allows continuing known prediction misses. The unique Broker executes sequentially; unknown effects, pause, RESET, game-over, level changes, budget and cancellation stop the suffix. Returns actual feedback and unexecuted steps. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
 ]);
 
 export function toolNames(): string[] {

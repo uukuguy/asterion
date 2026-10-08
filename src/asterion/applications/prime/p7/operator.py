@@ -21,6 +21,9 @@ from typing import cast
 
 from asterion.applications.prime._console_logging import configure_console_logging
 from asterion.agents.prime.trace import PrimeTraceRecorder
+from asterion.agents.prime.deadline import TaskDeadline
+from .action_journal import ActionJournal
+from .run_story.storage import write_atomic_file
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
 from asterion.applications.prime.p7.broker import (
     ArcAction,
@@ -94,7 +97,7 @@ from asterion.applications.prime.p7.prompt import (
     P7_LEGACY_SOLVE_PROMPT,
     P7_EXPLORE_APPENDIX,
     build_solve_prompt,
-    build_notes_prompt,
+    build_autonomous_prompt,
     initial_research_prompt,
     build_strategy_prompt,
 )
@@ -289,7 +292,7 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
 def _autonomy_prompt() -> str:
     """Retain the tool contract while leaving research form to the actor."""
     from asterion.agents.prime.continuation import AUTONOMOUS_RESEARCH_GUIDANCE
-    prompt = build_notes_prompt()
+    prompt = build_autonomous_prompt()
     return (prompt + "\n\n" + AUTONOMOUS_RESEARCH_GUIDANCE
             + " Complete six levels from this fresh local run, then stop. "
               "Choose your own hypotheses, representation, notes, experiments, computation and RESET. "
@@ -3236,6 +3239,7 @@ def _seal_verified_partial_run(
     private: Path,
     *,
     verification_witnesses: list[object] | None = None,
+    settlement_budget=None,
 ) -> dict[str, object] | None:
     """Retain completed levels when a later solve step fails."""
 
@@ -3279,7 +3283,7 @@ def _seal_verified_partial_run(
             lambda: live.ArcadeEngine(
                 arc_root=arc_root,
                 recordings_dir=private / "prefix-replay-recordings",
-                game=game,
+                game=game, task_deadline=settlement_budget, settlement_deadline=settlement_budget,
             ),
         )
         if verified_receipt != receipt:
@@ -3643,6 +3647,7 @@ def _private_experiment(
 
 
 _WITNESS_STARTED_ENV = "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC"
+_WITNESS_EPOCH_ENV = "ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH"
 
 
 def _research_python(environment: Mapping[str, str]) -> Path | None:
@@ -3712,13 +3717,69 @@ def _witness_deadline(environment: Mapping[str, str]) -> float | None:
     raise P7OperatorError("P7 witness deadline is invalid")
 
 
+def _task_budget(environment, deadline_monotonic, seconds):
+    """Guest origins are trusted process input, never model/config state."""
+    if deadline_monotonic is None:
+        if seconds is None:
+            return None
+        return TaskDeadline(deadline_monotonic=time.monotonic() + seconds,
+                            deadline_epoch=time.time() + seconds)
+    try:
+        epoch = float(environment[_WITNESS_EPOCH_ENV])
+        allowance = 5400 if environment.get('ASTERION_PRIME_P7_RUN_MODE') == 'autonomy' else 900
+        if not math.isfinite(epoch) or epoch <= 0 or epoch > time.time():
+            raise ValueError
+        budget = TaskDeadline(deadline_monotonic=deadline_monotonic,
+                              deadline_epoch=epoch + allowance)
+        if budget.expired():
+            raise ValueError
+        return budget
+    except (KeyError, ValueError, TypeError):
+        raise P7OperatorError('P7 task deadline is invalid') from None
+
+
+def _settlement_budget(budget):
+    if budget is None:
+        return None
+    return TaskDeadline(deadline_monotonic=budget.deadline_monotonic + 180,
+                        deadline_epoch=budget.deadline_epoch + 180)
+
+
+def _action_scope(run_id, game, budget):
+    return {'run_id': run_id, 'game_id': game.game_id, 'seed': game.seed,
+            'deadline_monotonic': None if budget is None else budget.deadline_monotonic,
+            'deadline_epoch': None if budget is None else budget.deadline_epoch}
+
+
+def _write_terminal_status(private, run_id, broker, budget, journal, *, phase):
+    """Persist cheap evidence before optional replay, trace analysis or cleanup."""
+    try:
+        try:
+            status = broker.status()
+        except ArcBrokerError:
+            status = broker.terminal_snapshot().status
+        record = {'run_id': run_id, 'phase': phase,
+                  'committed_actions': len(broker.journal),
+                  'potential_effects': broker.actions_dispatched,
+                  'unresolved_effect': journal.has_unresolved if journal is not None else False,
+                  'levels_completed': status.levels_completed,
+                  'terminal_reason': status.terminal_reason,
+                  'deadline_expired': budget.expired() if budget is not None else False,
+                  'last_transaction': journal.snapshot() if journal is not None else None}
+        write_atomic_file(private / 'terminal-status.json', json.dumps(
+            record, ensure_ascii=False, allow_nan=False, separators=(',', ':')).encode())
+    except (OSError, ValueError, ArcBrokerError):
+        pass  # A failed derivative cannot change durable action outcomes.
+
+
 class _WitnessDeadlineSignal:
     def __init__(self, parent: object, deadline: float) -> None:
         self._parent, self._deadline = parent, deadline
 
     @property
     def cancelled(self) -> bool:
-        return self._parent.cancelled or time.monotonic() >= self._deadline
+        return self._parent.cancelled or (self._deadline.expired() if isinstance(self._deadline, TaskDeadline)
+                                           else time.monotonic() >= self._deadline)
 
 
 def build_p7_operator_resources(
@@ -3738,6 +3799,9 @@ def build_p7_operator_resources(
     cognition_mode: bool = False,
     experience: object | None = None,
     evidence_cancelled=None,
+    execution_budget=None,
+    settlement_budget=None,
+    action_journal=None,
 ) -> P7OperatorResources:
     """Preflight the exact native P7 host-service closure from injected edges."""
 
@@ -3760,8 +3824,17 @@ def build_p7_operator_resources(
         runtime_options = dict(p7_runtime_options(selection, game))
         if witness_deadline is not None:
             runtime_options["deadline_ms"] = "900000"
+        execution_budget = execution_budget or _task_budget(
+            environment, task_deadline, None if deadline_ms is None else deadline_ms / 1000)
+        settlement_budget = settlement_budget or _settlement_budget(execution_budget)
+        action_journal = action_journal or ActionJournal(private_trace_root.parent / 'action-journal',
+            _action_scope(private_trace_root.parent.name, game, execution_budget))
+        dispatch_control = getattr(engine, 'set_dispatch_control', None)
+        if callable(dispatch_control):
+            dispatch_control(task_deadline=execution_budget, settlement_deadline=settlement_budget,
+                             journal=action_journal, cancelled=evidence_cancelled)
         evidence_control = getattr(engine, 'set_evidence_control', None)
-        if callable(evidence_control):
+        if callable(evidence_control) and not callable(dispatch_control):
             evidence_control(cancelled=evidence_cancelled,
                              deadline=task_deadline if task_deadline is not None else (
                                  None if deadline_ms is None else time.monotonic() + deadline_ms / 1000))
@@ -3775,7 +3848,7 @@ def build_p7_operator_resources(
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
                 P7_RESUME_RUN_ID_ENV,
                 P7_COGNITION_MODE_ENV, P7_FRESH_TARGET_POLICY_ENV,
-                _WITNESS_STARTED_ENV, P7_RESEARCH_PYTHON_ENV,
+                _WITNESS_STARTED_ENV, _WITNESS_EPOCH_ENV, P7_RESEARCH_PYTHON_ENV,
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
@@ -3863,6 +3936,7 @@ def build_p7_operator_resources(
         trace = PrimeTraceRecorder(private_trace_root)
         broker = ArcBroker(
             engine=engine,
+            action_profile="autonomous" if research_mode else "verified",
             game=game,
             world_model=None if research_mode else WorldModelStore(game.game_id, game.seed, game.win_levels),
             cognition_store=None if research_mode else cognition_store,
@@ -3910,12 +3984,13 @@ def build_p7_operator_resources(
                 run_root=private_trace_root.parent, run_id=history_run_id,
                 deadline_seconds=(deadline_ms or 3_600_000) / 1000,
                 deadline_monotonic=task_deadline,
+                task_deadline=execution_budget,
                 event_sink=prediction_client._emit_console,
                 worker=SubprocessPythonWorker(python=research_python) if isinstance(worker, live.SubprocessPythonWorker) else worker,
                 worker_factory=(lambda: SubprocessPythonWorker(python=research_python))
                                if research_python is not None else None,
                 experience=experience,
-                learner_profile="notes",
+                learner_profile="autonomous",
             )
         else:
             prediction_client._capture_console_cognition()
@@ -4309,10 +4384,13 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
                 raise P7OperatorError("P7 autonomy requires an empty history root")
         # Config files cannot mint the guest's monotonic clock origin.
         resolved.pop(_WITNESS_STARTED_ENV, None)
+        resolved.pop(_WITNESS_EPOCH_ENV, None)
         if _WITNESS_STARTED_ENV in environment:
             _witness_deadline(environment)
             _autonomy_deadline(environment)
             resolved[_WITNESS_STARTED_ENV] = environment[_WITNESS_STARTED_ENV]
+            _task_budget(environment, _autonomy_deadline(environment) or _witness_deadline(environment), None)
+            resolved[_WITNESS_EPOCH_ENV] = environment[_WITNESS_EPOCH_ENV]
         resume_run_id = _resolve_resume_run_id(environment)
         fresh_target_policy = _resolve_fresh_target_policy(environment, resume_run_id=resume_run_id)
         # An operator file describes configuration; it cannot select a saved
@@ -4632,8 +4710,11 @@ async def run_live(
     witness_deadline = _witness_deadline(invocation.environment)
     autonomy_deadline = _autonomy_deadline(invocation.environment)
     task_deadline = autonomy_deadline if autonomy_deadline is not None else witness_deadline
-    if task_deadline is not None:
-        run_signal = _WitnessDeadlineSignal(run_signal, task_deadline)
+    execution_budget = (_task_budget(invocation.environment, task_deadline, None)
+                        if task_deadline is not None else None)
+    settlement_budget = _settlement_budget(execution_budget)
+    if execution_budget is not None:
+        run_signal = _WitnessDeadlineSignal(run_signal, execution_budget)
 
     if autonomy_deadline is not None and invocation.resume_run_id is not None:
         raise P7OperatorError("P7 autonomy preset is invalid")
@@ -4689,7 +4770,7 @@ async def run_live(
     tool_registry = None if research_mode else _legacy_tool_reference()
     strategy = _resolve_strategy(invocation.environment)
     if research_mode:
-        prompt = build_notes_prompt()
+        prompt = build_autonomous_prompt()
     elif variant == "legacy":
         prompt = _prompt_for_variant(variant, tool_registry)
         if strategy == "explore":
@@ -4812,11 +4893,21 @@ async def run_live(
         )
     if autonomy_deadline is not None:
         prompt = _autonomy_prompt()
+    if execution_budget is None:
+        execution_budget = _task_budget(invocation.environment, None,
+            None if UNBOUNDED_FIRST_ROUND_ENV in invocation.environment else _DEADLINE_MS / 1000)
+        settlement_budget = _settlement_budget(execution_budget)
+        if execution_budget is not None:
+            run_signal = _WitnessDeadlineSignal(run_signal, execution_budget)
+    action_journal = ActionJournal(private / 'action-journal',
+        _action_scope(run_id, invocation.game, execution_budget))
     worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
         arc_root=invocation.arc_root,
         recordings_dir=private / "recordings",
         game=invocation.game,
+        task_deadline=execution_budget, settlement_deadline=settlement_budget,
+        journal=action_journal, cancelled=lambda: run_signal.cancelled,
     )
     print(_p7_style("[asterion-prime-p7] preflight", "stage"), file=sys.stderr, flush=True)
     resources_ = build_p7_operator_resources(
@@ -4841,6 +4932,8 @@ async def run_live(
         cognition_mode=cognition_mode,
         experience=experience,
         evidence_cancelled=lambda: run_signal.cancelled,
+        execution_budget=execution_budget, settlement_budget=settlement_budget,
+        action_journal=action_journal,
     )
     broker_for_playbook = resources_.host_services.get("prime.arc-broker")
     if not research_mode and isinstance(broker_for_playbook, ArcBroker) and playbook_snapshot is not None:
@@ -5022,6 +5115,7 @@ async def run_live(
         broker = resources_.host_services["prime.arc-broker"]
         if not isinstance(broker, ArcBroker):
             raise live.P7LiveSolveError("P7 broker is unavailable")
+        _write_terminal_status(private, run_id, broker, execution_budget, action_journal, phase='settling')
         broker_receipt = broker.seal()
         if not cognition_mode:
             _, witness = verify_for_save(
@@ -5029,7 +5123,7 @@ async def run_live(
                 lambda: live.ArcadeEngine(
                     arc_root=invocation.arc_root,
                     recordings_dir=private / "replay-recordings",
-                    game=invocation.game,
+                    game=invocation.game, task_deadline=settlement_budget, settlement_deadline=settlement_budget,
                 )
             )
             if witness is not None:
@@ -5086,9 +5180,10 @@ async def run_live(
         try:
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
+                _write_terminal_status(private, run_id, broker_value, execution_budget, action_journal, phase='settling')
                 if (isinstance(failure, asyncio.CancelledError)
                         and ((process_cancellation is not None and process_cancellation.cancelled)
-                             or (task_deadline is not None and time.monotonic() >= task_deadline))):
+                             or (execution_budget is not None and execution_budget.expired()))):
                     try:
                         broker_value.interrupt()
                     except ArcBrokerError:
@@ -5163,7 +5258,7 @@ async def run_live(
                             lambda: live.ArcadeEngine(
                                 arc_root=invocation.arc_root,
                                 recordings_dir=private / "replay-recordings",
-                                game=invocation.game,
+                                game=invocation.game, task_deadline=settlement_budget, settlement_deadline=settlement_budget,
                             )
                         )
                         if witness is not None:
@@ -5179,7 +5274,7 @@ async def run_live(
                 ):
                     completed_prefix = _seal_verified_partial_run(
                         broker_value, evidence_value, invocation.arc_root, private,
-                        verification_witnesses=verification_witnesses,
+                        verification_witnesses=verification_witnesses, settlement_budget=settlement_budget,
                     )
                     if completed_prefix is not None:
                         replay_verified = True
@@ -5313,6 +5408,9 @@ async def run_live(
                 processing_diagnostics=diagnostics.get("processing_diagnostics"),
             )
         finally:
+            if isinstance(broker_value, ArcBroker):
+                _write_terminal_status(private, run_id, broker_value, execution_budget, action_journal,
+                                       phase='closed' if cleanup_complete else 'cleanup-incomplete')
             live.write_summary(
                 root,
                 private,

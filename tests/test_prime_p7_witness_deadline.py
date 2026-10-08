@@ -4,6 +4,7 @@ from dataclasses import replace
 import os
 from pathlib import Path
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -29,6 +30,7 @@ def environment(start='100.0'):
         'ASTERION_PRIME_P7_ATTEMPT_UNIT': 'asterion-p7-' + 'a' * 32 + '.service',
         'ASTERION_PRIME_P7_CONSOLE_RUN_ID': 'p7-live-20261005123456-' + 'a' * 24,
         STARTED: start,
+        operator._WITNESS_EPOCH_ENV: str(time.time()),
     }
 
 
@@ -117,8 +119,10 @@ class TestWitnessDeadline(unittest.TestCase):
                     self.assertNotIn(STARTED, launch.approved_environment)
                     self.assertEqual(resources.runtime_options['deadline_ms'], '900000' if witness else '3600000')
                     ipython = resources.host_services['prime.ipython']
-                    self.assertEqual(ipython.control.budget_snapshot()['wall_time_remaining_seconds'],
-                                     875.0 if witness else 3600.0)
+                    remaining = ipython.control.budget_snapshot()['wall_time_remaining_seconds']
+                    expected = 875.0 if witness else 3600.0
+                    self.assertLessEqual(remaining, expected)
+                    self.assertGreater(remaining, expected - 1)
                     context = RuntimeFactoryContext(
                         provider_id='prime-applications', application_id='prime.arc-agi-3-solving',
                         application_version='1.0.0', runtime_id='asterion.prime',
