@@ -4456,3 +4456,5 @@
 - 2026-10-08 — 3f8ce186 records DeepSeek first-request failure, verified cleanup and missing diagnostics without claiming gameplay results.
 - 2026-10-08 — DeepSeek minimal diagnostic returns HTTP200 with Flash/high; persisted .env selection now deepseek/flash, actual Pi state verification pending.
 - 2026-10-08 — Actual P7-launched Pi get_state confirms current .env Flash/high selection without model call; previous failure remains unexplained.
+- 2026-10-08 — 0e37155f records successful bounded API and actual Pi selection probes, separating present configuration from unexplained prior failure.
+- 2026-10-08 — User authorizes renewed DeepSeek P7 trial after verified configuration; prepare private failure capture before cold launch.

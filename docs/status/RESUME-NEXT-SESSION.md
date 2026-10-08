@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 Task14 CLOSED. No active trial or extra retry authorized. DeepSeek Flash/high firstprompt failed beforepaidactions; cleanup/source auditPASS.
+Updated: 2026-10-08 Task15 PREPARING after user explicitly asks to continue real P7. One new DeepSeek Flash/high cold BP35 L1-L6 authorized; trialowner prepares .asterion-private/p7-deepseek-high2-bp35-20261008/trial/ with private bounded transparent failurecapture, reviewowner checks before launch. Productionc33/high/scorepolicy unchanged; current.env selectsDeepSeek. New5400s startsactualrun, sameothercontrols, nooldknowledge/hints/hotfix/extraattempt. Task14 CLOSED. DeepSeek Flash/high firstprompt failed beforepaidactions; cleanup/source auditPASS.
 
 Productionc33e7c11 changes onlythinkingmedium→high onscoreawaree869;26testsPASS. Privateexperimentselecteddeepseek/deepseek-flash; User now confirms persistent.env selectsdeepseek/deepseek-flash; rootverified values andno shelloverride. Sourcehigh remains. Host+guestactualPi builderfetch0 verifiedexactflash/thinking.enabled/reasoning_effort.high, noProrewrite; fresh565source/583installed/48dependencies/SDKimportsPASS. Runtimeidentityobserver missed shortprocess; onlypreflightinstalledidentity andactualarc.run.context.model_id verifythe availableboundary.
 
