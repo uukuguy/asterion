@@ -246,3 +246,12 @@ High2 L5=31动作/0RESET，SDK08:21:21.101600Z、累计159/host+1154.454秒。�
 终局184动作/186SDK完整对齐且无未知效果，封存184；回放只验证已完成五关168动作，不能称全184回放通过。L6无死亡、RESET或undo；末128native事件含7retry_start/5retry_end，具体HTTP/body/finalstopReason缺测，不猜测provider根因。19cells18ok+1已修正IndentationError；3NOTES1073/1337/1583B；112usage input8,817,111/output26,701/peak206118。源码/安装/清理独立核验一致，用户console保留。新策略完整L1–L6对照未完成，不标PASS；无新试跑授权。
 
 证据：`.asterion-private/p7-scoring-medium-bp35-20261008/replacement/` finalmetadata/receipt/report及上级comparison-progress.md；初次安装失败证据保留在sibling trial/。
+
+
+## DeepSeek Flash / high（Task14：首请求失败，未形成解题成绩）
+
+用户授权一次同评分版BP35实测。c33e7c11只把P7 effort改high；26相关测试通过。临时operator绑定deepseek/deepseek-flash，不改持久.env。Host及guest实际Pi请求构造器provider-free检查确认model=deepseek-flash、thinking.type=enabled、reasoning_effort=high，未改写Pro，fetch=0；freshwheel/565源码/583安装/48依赖及两SDK预检通过。
+
+run p7-live-20261008104822-a973c8d0533d5c17ecc93310于10:48:21.856493Z启动，约2.586秒首prompt失败，清理4.750秒完成。0paid，SDK仅2次初始化RESET，无NOTES/bridgecall；唯一usage为input0/output0，这是错误轮记录，不证明provider0。实际arc.run.context.model_id=deepseek-flash。summary仅保留model_rpc_error/RuntimeError/pi.prompt/Pi RPC prompt execution failed；12个完整native事件类型无重试，stderr0B，HTTP/body/stopReason未保存，不能判断认证、额度、模型兼容性等具体原因。运行过短未抓到actualruntime身份，不将provider-free安装证明冒充运行时抓取。
+
+终局源码未变、专属进程及临时认证清理独立核验PASS，console保留。无追加试跑，不是DeepSeek解题能力失败。当前诊断缺口为原生模型错误细节未持久化；需要先解决可诊断性，不能盲目用更多实测猜原因。证据 `.asterion-private/p7-deepseek-high-bp35-20261008/trial/`。

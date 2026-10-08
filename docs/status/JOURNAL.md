@@ -4451,3 +4451,5 @@
 - 2026-10-08 — Scoring-medium completes five levels168paid then RPC failure atL6; sealed184, replay168, cleanup verified, no new retry.
 - 2026-10-08 — 95802250 records per-level scoring-medium evidence and RPC-limited outcome with accurate replay scope and cleanup status.
 - 2026-10-08 — User authorizes DeepSeek Flash high cold BP35 comparison; prepare exact backend binding, preserve scoring policy and prior evidence.
+- 2026-10-08 — c33e7c11 selects high effort for authorized DeepSeek comparison; scoring logic unchanged and26focusedtests pass.
+- 2026-10-08 — DeepSeek Flash high firstprompt fails before actions; model binding confirmed, cleanup verified, native error detail unavailable, no retry.
