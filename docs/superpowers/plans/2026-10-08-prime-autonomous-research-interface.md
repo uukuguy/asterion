@@ -134,3 +134,10 @@ After current.env→actualPi get_state and a bounded API request both pass, user
 ## Task16 — User-authorized generic RPC diagnosis and safe recovery
 
 See ../specs/2026-10-08-prime-rpc-failure-recovery-design.md. Isolated worktree /tmp/asterion-rpc-diagnostics: rpc_failure_diagnostics owns typed/private failure infrastructure; rpc_recovery_contract owns recovery contract/session execution and P7 admission after interface coordination. Main production remains frozen for Task15. Focused redaction/effects/deadline tests and independent review; integrate only after live source seal/cleanup. No automatic extra full trial.
+
+
+Task16 implemented: generic schema normalization, private typed failure capture and bounded same-session recovery integrated through c5f8e71a. Independent review READY; TS50/Python165/lint/docs/promotion25 PASS. First packaged witness installed identity and IPython observation PASS, but confirmed host sleep caused deadline cancellation before game actions. Full witness NOT PASS.
+
+## Task 17 — Continue repaired DeepSeek packaged verification and BP35
+
+User explicitly says “改完了就继续” after the sleep-interrupted run. One fresh 5400-second task window covers Make r11l L1 (at most900seconds) then independent cold BP35 L1–L6 using the remaining task time, plus180seconds cleanup. No automatic deadline renewal. Frozen production c5f8e71a, documentation HEAD46e087ed; DeepSeek Flash/high from operator .env. Existing6round/1000paid/1024model/4096tool limits remain. Trial owner notes_bp35_trial owns fresh private evidence, installation identity, launch, monitoring and cleanup; review owner observes per-level comparisons without actor feedback. No production changes or prior game knowledge transfer. Preserve console52024/56659. Host power assertions are checked without changing system power settings.
