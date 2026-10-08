@@ -151,13 +151,17 @@ class PrimeToolLedger:
             raise ProtocolError("Asterion-prime emitted a duplicate tool result")
         self._results[result.call_id] = result
 
-    def seal(self) -> None:
-        if self._sealed:
-            raise ProtocolError("Asterion-prime tool ledger is already sealed")
+    def assert_settled(self) -> None:
+        """Check effects without ending the ledger or renewing its allowance."""
         if self._calls.keys() != self._results.keys():
             raise ProtocolError("Asterion-prime has an unmatched tool call")
         if any(result.status == "uncertain" for result in self._results.values()):
             raise ProtocolError("Asterion-prime has an uncertain tool effect")
+
+    def seal(self) -> None:
+        if self._sealed:
+            raise ProtocolError("Asterion-prime tool ledger is already sealed")
+        self.assert_settled()
         self._sealed = True
 
 

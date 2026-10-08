@@ -31,6 +31,7 @@ from asterion.runtimes.pi_rpc import (
     PiRpcConfig,
     PiRpcCompactResult,
     PiRpcEvent,
+    PiRpcPromptFailure,
     PiRpcResult,
     PiRpcSession,
     validate_pi_compact_result,
@@ -270,6 +271,29 @@ class PrimeExecutionResult:
         return "<PrimeExecutionResult redacted>"
 
 
+@dataclass(frozen=True, slots=True)
+class PrimePromptRecovery:
+    """Trusted admission for one retained-session recovery in a finite run."""
+
+    effect_guard: Callable[[], bool]
+    backoff_seconds: float = 1.0
+
+    def __post_init__(self) -> None:
+        if (not callable(self.effect_guard)
+                or type(self.backoff_seconds) not in (int, float)
+                or not math.isfinite(self.backoff_seconds)
+                or not 0 <= self.backoff_seconds <= 30):
+            raise ValueError("Prime prompt recovery is invalid")
+
+
+_RECOVERY_PROMPT = (
+    "Continue the current task from the retained workspace and latest confirmed "
+    "observations. The previous model request failed after its retry allowance. "
+    "Completed tool results remain authoritative; do not replay earlier actions "
+    "merely because that request failed. Use the current state to choose the next step."
+)
+
+
 class PrimeExecutionKernel:
     """The sole native event validator, tool ledger and run-event producer."""
 
@@ -289,6 +313,7 @@ class PrimeExecutionKernel:
         round_admission: Callable[[int, CancellationSignal], Awaitable[bool]] | None = None,
         round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
+        prompt_recovery: PrimePromptRecovery | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         self._validate_launch_material(
@@ -317,6 +342,13 @@ class PrimeExecutionKernel:
             raise ProtocolError("Asterion-prime failure diagnostic is invalid")
         self._round_diagnostic = round_diagnostic
         self._failure_diagnostic = failure_diagnostic
+        if prompt_recovery is not None and (
+            type(prompt_recovery) is not PrimePromptRecovery
+            or not reusable or limits.deadline_ms is None
+        ):
+            raise ProtocolError("Asterion-prime prompt recovery is invalid")
+        self._prompt_recovery = prompt_recovery
+        self._prompt_recovery_used = False
         if (
             type(allowed_tool_names) is not tuple
             or not allowed_tool_names
@@ -755,6 +787,19 @@ class PrimeExecutionKernel:
                 protocol_failure = ProtocolError(_TRANSPORT_PROTOCOL_ERROR)
             except asyncio.CancelledError:
                 raise
+            except PiRpcPromptFailure as error:
+                report_failure()
+                if (round_terminal_seen and not pending_calls
+                        and compaction_reason is None and not compaction_retry_pending
+                        and await self._recover_prompt(error, ledger, signal, admission_deadline)):
+                    prompt = _RECOVERY_PROMPT
+                    continue
+                if signal is not None and signal.cancelled:
+                    emit("run.completed", {"status": "cancelled"})
+                else:
+                    emit("run.failed", {"code": "asterion_prime_failed",
+                                        "message": "Asterion-prime execution failed."})
+                return
             except Exception:
                 report_failure()
                 if signal is not None and signal.cancelled:
@@ -832,6 +877,44 @@ class PrimeExecutionKernel:
             )
             if type(prompt) is not str or not prompt:
                 raise ProtocolError("Asterion-prime continuation is invalid")
+
+    async def _recover_prompt(self, error, ledger, signal, deadline) -> bool:
+        policy = self._prompt_recovery
+        metadata = error.failure_metadata
+        if (policy is None or self._prompt_recovery_used or deadline is None
+                or not metadata.native_retry_exhausted or metadata.permanent_rejection
+                or metadata.stop_reason != "error"):
+            return False
+
+        def eligible():
+            if (signal is not None and signal.cancelled
+                    or asyncio.get_running_loop().time() >= deadline
+                    or self._limits.model_callbacks is not None
+                    and self.model_callbacks >= self._limits.model_callbacks
+                    or self._limits.tool_callbacks is not None
+                    and self.tool_callbacks >= self._limits.tool_callbacks):
+                return False
+            ledger.assert_settled()
+            return policy.effect_guard() is True
+
+        try:
+            if not eligible():
+                return False
+            # This allowance belongs to the kernel, never to a natural round.
+            self._prompt_recovery_used = True
+            wake = asyncio.get_running_loop().time() + policy.backoff_seconds
+            while asyncio.get_running_loop().time() < wake:
+                remaining = min(wake, deadline) - asyncio.get_running_loop().time()
+                if remaining <= 0 or signal is not None and signal.cancelled:
+                    return False
+                await asyncio.sleep(min(.05, remaining))
+            if not eligible():
+                return False
+            self._extension_lease.validate_launch()
+            self._rpc_session.settle_failed_prompt(error)
+            return True
+        except Exception:
+            return False
 
     async def _await_round_admission(self, round_index, signal, deadline):
         task = asyncio.create_task(self._round_admission(round_index, signal))
