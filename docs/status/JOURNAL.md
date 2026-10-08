@@ -4443,3 +4443,7 @@
 - 2026-10-08 — User authorizes one cold score-aware medium BP35 trial, matching prior controls and tracking each level without actor feedback.
 - 2026-10-08 — 0855ef05 records frozen score-aware medium trial scope and independent per-level comparison ownership.
 - 2026-10-08 — Score-aware medium launches09:39:28Z after cold/source/install/scoring checks; fixeddeadline11:09:28Z, sixlevel stop, independent comparisons active.
+- 2026-10-08 — 5dd40221 records active scoring-medium run identity, fixed deadline and verified cold deployment for recovery.
+- 2026-10-08 — Scoring-medium exits during startup after2.230seconds with no committed actions; preserve evidence and investigate before any retry.
+- 2026-10-08 — Startup cause: omitted SDK dependencies; cleanup verified, repair cold installation under original absolute deadline without production changes.
+- 2026-10-08 — Cold replacement starts09:52:56Z with verified SDKs; actual action observed, original11:09:28Z deadline and source remain fixed.
