@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Task11 active: userexplicitlyrequests a secondhigh trial. Priorhigh closed; root switches onlyeffortbacktohigh, srcidenticala7cf5826,114focusedtestsPASS. Trialagent prepares newcoldBASE .asterion-private/p7-high2-bp35-20261008/trial/, waitsrootcommit/GO; no newproviderstarted yet. Same5400s/6round/1000action/1024model/4096tool+180cleanup; oldhigh evidence kept, no inheritedknowledge/hints/hotfix/thirdtrial. Preserveconsole52024/56659.
+Task11 active: userexplicitlyrequests a secondhigh trial. Priorhigh closed; root switches onlyeffortbacktohigh, srcidenticala7cf5826,114focusedtestsPASS. High2ACTIVE: BASE .asterion-private/p7-high2-bp35-20261008/trial/;runp7-live-20261008080206-d08739db556d1a552284eef9;unitasterion-p7-3f67d82935984a3fa84752a018df9e88.service;start08:02:06.647196Z/deadline09:32:06.647191Z;hostPIDs53718/53720/53719,agentexec41746. HEADd445b365,srcidenticala7cf5826;retainedwheel6b6f4a...,583/high/3tools/coldverified. Trialowner notes_bp35_trial supervises;rootdocs/read-onlymonitor. LatestHigh2L1PASS23/0RESET/164.392s,L2PASS47/1RESET/361.993scumulative70;L3running. L2=6failed+RESET+40success,6cellsok/1NOTES847B. Same5400s/6round/1000action/1024model/4096tool+180cleanup; oldhigh evidence kept, no inheritedknowledge/hints/hotfix/thirdtrial. Preserveconsole52024/56659.
 
 ## Verified facts
 
