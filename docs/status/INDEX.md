@@ -77,4 +77,4 @@ If you want to record a **finding/lesson** that's a long-lived project fact → 
 
 Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-08-prime-research-notes.md).
 
-- Completed medium/low and technically interrupted high comparison: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
+- Completed medium/low/high comparison and score-awareness implementation: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).

@@ -140,7 +140,7 @@ This record comes from iterative public-game research with retained experience, 
 
 ## P7 thinking preset and bounded diagnostics
 
-P7's application-owned Pi command currently selects `--thinking medium` (restored after the same-version low/high comparisons; low completed six levels, high was interrupted by a model request failure); generic runtime and other applications do not acquire this default. Historical ARC/P7 comparisons explicitly using high retain that evidence label. This is a new P7 experiment choice, not proof that high caused repeated research.
+P7's application-owned Pi command currently selects `--thinking medium` (restored after same-version comparisons: medium221, low231 and second high262 paid actions through six levels; first high request failure is separate); generic runtime and other applications do not acquire this default. Historical ARC/P7 comparisons explicitly using high retain that evidence label. This is a new P7 experiment choice, not proof that high caused repeated research.
 
 Context-projection diagnostic stderr is limited to4KiB UTF8 per loaded extension module across normal and failure paths, including one suppression notice. The Pi RPC64KiB process stderr guard remains. After suppression, stderr no longer reports every projection; do not infer complete run-wide trim counts from that bounded log. This logging change does not change context-retention behavior.
 
