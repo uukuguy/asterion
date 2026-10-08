@@ -48,6 +48,14 @@ The actor later manually transcribes compressed frame rows and indices into two 
 
 The actual ARC L1 log instead shows a row-numbered full grid, short queries using prebound `grid`/`np`, and worded geometry transitions. These affordances reduce the work needed to inspect evidence. They do not establish that encoding or NOTES alone caused the observed performance difference. No finding was fed to the actor; no live repair was made. Final analysis must also inspect later successful reads, corrections and outcomes.
 
+### Completed L2: extra failure, not a longer final route
+
+L2 passed at paid sequence118,2026-10-08 08:05:58.233021 CST,585.888382seconds after L1. Its74 actions divide exactly into6 actions to first death +1 RESET +26 actions to second death +1 RESET +40 successful actions. Previous P7 used6+1+40=47; ARC used6+1+41=48. The extra failed episode and RESET explain all27 additional actions against previous P7; its final successful episode is equally long.
+
+The second death follows a concrete perception error. NOTES at sequence73 treats a central column as clear, while the recorded frame contains hazard-colored pixels at all three relevant tile centers. Sequence77 NOTES explicitly corrects confusion between tile edges and centers; the correction survives RESET78 and the final successful episode. No outside diagnosis was supplied.
+
+L2 has18 note revisions of688–1051bytes. All retain an absent/possibly absent reader belief; its19 cells contain13 namespace inspections and no research-module import. Eight `prefix-action-reuse` stops introduce separate tool friction:6 dispatch no actions and2 stop after a partial prefix, leaving11 proposed steps unexecuted. Those11 are not paid actions; no paid undo or unchanged-board action appears in this level. A short memory can preserve both useful corrections and mistaken capability beliefs.
+
 ## Evidence status
 
 Preflight and exact packaged identity are verified. The active run is `p7-live-20261007234531-87e38f105ea518bdba94623a`. Result, post-run audit and cleanup remain pending.

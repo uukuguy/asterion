@@ -4340,3 +4340,6 @@
 - 2026-10-08 07:46 CST — e5259227 records frozen BP35 launch and six-level ARC baseline; running evidence remains pending, production unchanged.
 - 2026-10-08 07:56 CST — Frozen NOTES passes L1: exact44paid,641.305s from launch;73actual cuts,peak20592input; same naturalround,no intervention.
 - 2026-10-08 07:59 CST — Read-only review confirms import discoverability and false-note friction; ARC actual array/grid affordances differ; frozen run continues unchanged.
+- 2026-10-08 07:59 CST — ef40c8bc records L1 pass and independently verified evidence-access friction; preserves frozen trial and pending final outcome.
+- 2026-10-08 08:06 CST — Frozen NOTES passes L2 at118paid:74levelactions/585.888s;155usage/152cuts,peak20592; L3continues without intervention.
+- 2026-10-08 08:11 CST — L2 audit isolates27extra actions to misread-center failure plusRESET; correction survives, final40-step route equals oldP7; no intervention.

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 07:59 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 08:11 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：冻结NOTES版BP35 L1–L6对比
 
@@ -12,6 +12,8 @@
 - 下一动作：监控至目标或有限终局，按真实账本/笔记/投影/时钟核结论并清理本次owned进程/auth。private readiness/launch/progress/最终receipt均在.asterion-private/p7-notes-bp35-20261008/；完整Pi stderr在新外部root/runtime/pi-stderr-full.log，模型不可读取。初态0关0动作0notes。
 
 - 中途已核：L1真实边界44paid，07:56:12.344639过关，launch+641.305s；不是采样猜测。模型继续L2。独立私有interim-representation-friction.md确认p7_research需import但actor只查globals，提示未示例导入；有手抄编码帧及错误事实笔记，后来自行纠正。不能将context裁剪成功等同解题高效，不向actor反馈、不热修。
+
+- L2已核：08:05:58.233021真过关，累计118paid；本关74=6失败+RESET+26额外失败+RESET+40成功，旧P747=6+RESET+40。额外27步对应格边/中心误读导致的一次失败；NOTES随后自行纠正并跨RESET保留。private completed-l2-analysis.md另分8次prefix门控与11未执行步，不能算paid。当前L3，继续原冻结轮。
 
 ## 已完成：通用研究记忆与P7 NOTES实现和有限部署验证
 
