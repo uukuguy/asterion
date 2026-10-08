@@ -115,7 +115,7 @@ from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.services.diagnostics import FailureDiagnostic
-from .private_failure import P7PrivateFailureSink
+from asterion.services.private_failure import FilePrivateFailureSink
 
 
 _RUNTIME_ID = "asterion.prime"
@@ -3939,7 +3939,7 @@ def build_p7_operator_resources(
             autonomy_deadline_monotonic=autonomy_deadline,
             tool_registry=selected_tools,
             compact_events=True,
-            private_failure_sink=P7PrivateFailureSink(private_trace_root.parent / "pi-rpc-failures.jsonl"),
+            private_failure_sink=FilePrivateFailureSink(private_trace_root.parent / "pi-rpc-failures.jsonl"),
             approved_environment=approved_environment,
         )
         trace = PrimeTraceRecorder(private_trace_root)
