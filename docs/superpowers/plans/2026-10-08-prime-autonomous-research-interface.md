@@ -64,3 +64,8 @@ Prompt explains automatic code/result history and direct function source inspect
 
 
 Task7 result: production9b62d2c2, core-install allowlist fixa4003544. TS49PASS/6existing skips; relatedPython119PASS; core-install4PASS; independent reviewREADY; finalpromotion25PASS/provider0. One packaged mediumr11lL1 PASS5paid/0RESET/2successfulcells/0NOTES, SDKpass85.099s afterhostMake, cleanup91.089s. Automaticarchive2records observed; readback/recovery and >96KiB continuity covered by provider-free real-kernel/Pi tests, not claimed as live actor use. Replay/seal/identity/cleanupPASS. See [updated evidence](../../reviews/2026-10-08-p7-autonomous-bp35-comparison.md). BP35 improvement remains unmeasured.
+
+
+## Task 8 — User-authorized review and frozen BP35 comparison
+
+User requests rechecking Task7 design/implementation against requirements, then running BP35. Review concrete generic computation/context/P7 boundaries and deployment identity; fix only evidence-backed blockers before freeze. Once READY, run one coldsol/medium BP35 L1-L6 with existing5400s/6round/1000action/1024model/4096tool and180s settlement bounds. No old knowledge, external solve hints, production hotfix or retry. Track per-level paidactions/RESET, cells/errors/readback, NOTES, usage and naturalcontinuation with explicit evidence completeness. [Current comparison](../../reviews/2026-10-08-p7-continuity-bp35-comparison.md).

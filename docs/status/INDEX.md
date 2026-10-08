@@ -76,3 +76,5 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 If you want to record a **finding/lesson** that's a long-lived project fact → write to `CLAUDE.md` (structural facts section). If it's collaboration meta-information → write to the project's memory store. If it's a complete audit / experiment report → write a `docs/status/<topic>.md` here AND add its INDEX row.
 
 Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-08-prime-research-notes.md).
+
+- Active authorized comparison: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).

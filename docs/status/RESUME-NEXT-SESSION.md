@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Task7 complete: both missing repairs implemented, reviewed, packaged and verified on r11l L1. No task process remains. This is a live checkpoint, not an explicit handoff.
+Task8 active: user authorized requirement review followed by frozen medium BP35 L1-L6. Task7 re-review READY with32 and33 overlapping targeted testsPASS; no new production changes. Trial preparation owns notes_bp35_trial, awaiting finalfreeze/GO. This is a live checkpoint.
 
 ## Verified facts
 
@@ -18,6 +18,6 @@ ARC also usedhigh. Medium is experimental, not established root-cause cure. Prio
 
 Failed coldBP35 6ca76ca4/high ended2levels/166committed from diagnostic stderr overflow; replay verified150completed-prefix actions, sealedtrace166. Old mandatoryNOTES/short-window designs are superseded. Do not restart these paths or treat original externally assisted100score as a coldbaseline.
 
-New BP35 L1-L6 has not been run; no improvement or ARC-level autonomy established. No benchmark process is queued. Next research step is a separately selected frozen BP35 comparison using the same evidence definitions; do not silently launch a new full benchmark from this checkpoint.
+New BP35 L1-L6 is now explicitly authorized. One coldsol/medium trial,5400s/6round/1000action/1024model/4096tool+180cleanup. Private `.asterion-private/p7-medium-bp35-20261008/trial/`; userconsole52024/56659 preserved. No old solve knowledge, externalgame hints, productionhotfix or extra retry. Await finalfreeze then launch once; retain observation limits (`--no-session`, last128nativeevents, boundedstderr). New report: `docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md`.
 
 Canonical plan: `docs/superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` Task7. Full comparison and repair evidence: `docs/reviews/2026-10-08-p7-autonomous-bp35-comparison.md`. All workers frozen; trial cleanup complete. Reuse agents if needed; new-agent thread limit reached.
