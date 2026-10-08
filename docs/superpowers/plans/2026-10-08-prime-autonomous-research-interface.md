@@ -59,5 +59,8 @@ Prompt explains automatic code/result history and direct function source inspect
 
 - [x] Kernel and TS focused regressions pass; P7 real subprocess test defines helper, reads source/result through injected API, recovers explicit state and re-reads prior archive without an action.
 - [x] Independent changed-code review across generic/application boundary, lifetime, read scope, truncation and post-execution failure semantics.
-- [ ] Final TS, related Python, promotion, then one actual packaged mediumr11lL1 witness, with exact resource/source identity and cleanup. No new BP35 trial in this package.
-- [ ] Commit implementation and evidence, update state; report implemented continuity separately from unmeasured BP35 improvement.
+- [x] Final TS, related Python, promotion, then one actual packaged mediumr11lL1 witness, with exact resource/source identity and cleanup. No new BP35 trial in this package.
+- [x] Commit implementation and evidence, update state; report implemented continuity separately from unmeasured BP35 improvement.
+
+
+Task7 result: production9b62d2c2, core-install allowlist fixa4003544. TS49PASS/6existing skips; relatedPython119PASS; core-install4PASS; independent reviewREADY; finalpromotion25PASS/provider0. One packaged mediumr11lL1 PASS5paid/0RESET/2successfulcells/0NOTES, SDKpass85.099s afterhostMake, cleanup91.089s. Automaticarchive2records observed; readback/recovery and >96KiB continuity covered by provider-free real-kernel/Pi tests, not claimed as live actor use. Replay/seal/identity/cleanupPASS. See [updated evidence](../../reviews/2026-10-08-p7-autonomous-bp35-comparison.md). BP35 improvement remains unmeasured.

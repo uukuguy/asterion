@@ -1,25 +1,23 @@
 # Live Session Checkpoint
 
-Task7 implements both previously missing repairs before deployment; session remains active.
+Task7 complete: both missing repairs implemented, reviewed, packaged and verified on r11l L1. No task process remains. This is a live checkpoint, not an explicit handoff.
 
 ## Verified facts
 
-- Failed cold BP35 trial (6ca76ca4/high) ended2levels/166committed from diagnostic stderr overflow. See `docs/reviews/2026-10-08-p7-autonomous-bp35-comparison.md`; historical replay verifies150completed-prefix actions, sealed trace166. No trial process remains. Preserve user console PID52024/port56659.
-- Intermediate cbeddf3f implemented shared4KiB diagnostics and P7medium; its promotion passed25commands/provider0. Its witness never launched and does not verify Task7.
-- Task7 generic archive stores current-run source/actual bounded stdout/errors; paged reads use `cell:<digest>` IDs; dynamic functions have inspectable unique filenames. Read-only archive survives kernel replacement, without auto replay or arbitrary object restoration.
-- Generic context now replaces only its synthetic snapshot; all real history stays, Pi native compaction owns lifecycle. Actual installed-Pi provider-free probe retains341307bytes of research history. Final TS49PASS/6existing skips; related Python119PASS; Ruff and diff checks PASS.
-- P7 consumes generic reads through existing injected module, guides concise stable mechanics/counterexamples/uncertainty/plans without a notes action gate. Real subprocess tests verify source/output/error and recovery with zero game actions.
-- Independent review READY; found ID prefix mismatch, fixed and regression passed. Generic8tests/TS14tests independently passed.
+- Production9b62d2c2: generic current-run source/output/error archive, bounded read APIs, dynamic inspect.getsource; native history retained, extension only replaces its own snapshot. P7 consumes reads and guides stable notes without cognitive admission gates. Shared4KiB diagnostics; P7medium preset.
+- HEADa4003544 before evidence close adds missing core-module allowlist. First promotion failed only that check; final promotion PASS25commands/provider0. TS49PASS/6existing skips, relatedPython119PASS, core-install4PASS; independent reviewREADY. Real-kernel source/error/recovery/no-replay tests and actualPi >341KiB continuity probe pass without provider.
+- Packaged r11l L1 medium PASS:5paid/0RESET/2successfulcells/0NOTES; SDKpass85.099s fromhostMake,91.089s includingcleanup. Genericarchive2source/output records observed. Actor did not invoke new read APIs; short run does not verify long-context compaction. All565production/583installed files, bundle/three tools/medium identity pass. Replay/seal/cleanupPASS. Console52024/56659 preserved.
+- Actual wheel796ca01ae3a51b21b5047a2277e175d2d7ebed819b1faa63c52b0cf2f039df23; bundle71bbd6163b85350741e1f03b4025618fce55e8585922dedcfdfaec203d7f360d.
+- Evidence `.asterion-private/p7-medium-projection-20261008/witness/public-final-metadata.json`; runp7-live-20261008045029-470dfa663aa348cb8b0f8f1d. Exact receipts/promotion log in same directory.
 
-## Current judgment and boundaries
+## Current judgment
 
-ARC also usedhigh. Medium is experimental, not established root-cause cure. Prior tiny context combined with inaccessible definitions plausibly caused reconstruction churn; no isolated causal proof. Infrastructure tests do not establish improved BP35 performance.
+ARC also usedhigh. Medium is experimental, not established root-cause cure. Prior tiny history combined with inaccessible definitions plausibly caused repeated reconstruction. Fixes remove these concrete defects; no isolated causal attribution is claimed.
 
-## Next actions
+## Historical archive and unfinished boundary
 
-1. Combined Task7 committed9b62d2c2. First promotion ran4330tests with one missing core-module allowlist failure; root added cell_history entry. Rerun final promotion after targeted check; earlier cbed result insufficient.
-2. Re-freeze prepared medium r11l L1 small witness against final source/resource. Old preparation is under `.asterion-private/p7-medium-projection-20261008/witness/`; no auth/provider staged. notes_bp35_trial owns witness and awaits root GO after promotion.
-3. Run exactly one packaged witness with900s task/guest and180s cleanup, record identity, outcome and cleanup. No full BP35 rerun queued.
-4. Update evidence/state and commit. Do not claim unmeasured BP35 improvement.
+Failed coldBP35 6ca76ca4/high ended2levels/166committed from diagnostic stderr overflow; replay verified150completed-prefix actions, sealedtrace166. Old mandatoryNOTES/short-window designs are superseded. Do not restart these paths or treat original externally assisted100score as a coldbaseline.
 
-Canonical plan: `docs/superpowers/plans/2026-10-08-prime-autonomous-research-interface.md`, Task7. Generic owner notes_bp35_review and TS owner notes_extension frozen; root owns P7/docs; trial agent independently reviewed. Reuse agents; new agent thread limit reached.
+New BP35 L1-L6 has not been run; no improvement or ARC-level autonomy established. No benchmark process is queued. Next research step is a separately selected frozen BP35 comparison using the same evidence definitions; do not silently launch a new full benchmark from this checkpoint.
+
+Canonical plan: `docs/superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` Task7. Full comparison and repair evidence: `docs/reviews/2026-10-08-p7-autonomous-bp35-comparison.md`. All workers frozen; trial cleanup complete. Reuse agents if needed; new-agent thread limit reached.

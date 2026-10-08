@@ -159,4 +159,24 @@ ARC也会重复观测：L2有6次、L3有5次arc python读取；不能说它不�
 | 通用上下文层 | 移除96/48KiB滚动删除，只更新自有状态快照；真实交互和原生压缩摘要保持 | 真实Pi无provider探测保留341307字节研究历史；NOTES及未完成工具组保持 |
 | P7适配层 | 现有p7_research暴露cell_history/cell_read；明确稳定认识、反例、不确定点和计划的笔记指导 | 严格参数校验与零游戏动作回读通过；仍允许不写NOTES直接行动 |
 
-最终TS49通过/6既有跳过，相关Python119通过；独立代码复审发现并修复cellID前缀联调问题，其余无阻断。最终打包及r11l L1 medium部署验证进行中。此提交改变多个机制；即使后续表现改善也不能单独归因于medium，当前仍无新版BP35效果证据。
+最终TS49通过/6既有跳过，相关Python119通过；独立代码复审发现并修复cellID前缀联调问题，其余无阻断。最终promotion25项PASS/provider0；r11l L1 medium部署验证PASS，详见下表。此提交改变多个机制；即使后续表现改善也不能单独归因于medium，当前仍无新版BP35效果证据。
+
+
+### 完整修复的部署验证（不是BP35复测）
+
+运行 `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`，生产9b62d2c2、HEADa4003544、gpt-6.1-sol/medium、seed0、冷目录；任务900秒与清理180秒有限控制。一次运行，无现场提示、修改或重试。
+
+| 指标 | 实际结果 |
+| --- | --- |
+| 通关 | r11l L1，5计费动作、0计费RESET；SDK初始化2次RESET另计 |
+| 时间 | SDK通过05:30:17.021489Z，距host Make启动85.099秒；含清理总墙钟91.089秒，非纯推理时间 |
+| 计算/笔记 | 2cells/2成功，自动通用档案2条源码及输出可用、无截断；0NOTES |
+| 模型用量 | 7usage，normalized input合计202206，output1771，单次输入峰值44399 |
+| 上下文诊断 | 完整stderr822字节，5次retained、删除真实消息0；短运行未触发日志抑制或长上下文压缩 |
+| 结果完整性 | 5committed=5trace，未知结果0；完整5动作回放与封存通过 |
+| 部署身份 | 565生产文件、583安装文件一致，三工具/medium/新bundle核验通过 |
+| 清理 | 本次host进程、guest unit/cgroup和临时认证均清理；用户console52024/56659保留 |
+
+实际wheel SHA256 `796ca01ae3a51b21b5047a2277e175d2d7ebed819b1faa63c52b0cf2f039df23`；扩展 `71bbd6163b85350741e1f03b4025618fce55e8585922dedcfdfaec203d7f360d`。私有证据 `.asterion-private/p7-medium-projection-20261008/witness/public-final-metadata.json`，同目录保存promotion-final.log、安装身份、SDK与清理证据；run `p7-live-20261008045029-470dfa663aa348cb8b0f8f1d`。
+
+**边界**：实际自动存档已经观察到；本次模型没有主动调用cell_history/cell_read/getsource，回读与恢复由真实内核的provider-free测试验证。跨96KiB研究历史保持由实际Pi provider-free探测验证。这次首关部署不能证明BP35 L5/L6能力、重复检索改善或medium优于high；没有重跑BP35。
