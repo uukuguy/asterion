@@ -31,7 +31,9 @@ def build_notes_prompt() -> str:
 
 def build_autonomous_prompt() -> str:
     """P7 supplies evidence and execution authority; the actor owns research."""
-    return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
+    return """你是 P7 主解题者。稳定目标是完整通关并争取整局满分100。依据真实画面自主理解游戏、验证想法、规划高效行动。budget.target_level 是本轮执行停止边界，不改变整局目标；到达该边界、终局或预算截止必须停止，不能自行越界续关或重开整局。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
+
+budget.scoring 提供总关数N、全部可用baseline、已完成关的累计付费动作a_i/关分、当前关付费动作和整局累计分；baseline=null 表示未知，不猜值。P7本地评分q_i=min(115,100*(b_i/a_i)^2)，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，W=N*(N+1)/2；未完成关不贡献。整局满分须全部N关完成且sum(i*q_i)>=100*W。baseline 是100分参考，不是最优路线或动作硬限。失败探针、无效动作、撤销和RESET均付费，RESET不清零，初始化不计费。自行权衡研究成本、风险与动作效率，不为局部高分放弃完整通关。
 
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r
@@ -48,7 +50,7 @@ p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:
 {plan_id:'唯一提交标识',start:当前完整observation_ref,steps:[{action:{name:'ACTION1',data:{}}}]}。
 每段1–20步；ACTION6 data 为 {x,y}，其他动作 data 为 {}，包括 RESET。动作含义由实际反馈判断。可选字段：workspace_revision（提供则必须是当前版本）、goal、purpose（advance 或 probe）、assumptions；每步可选 expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}。默认在预测失配时停下；明确设置 stop_on_mismatch:false 可继续研究已知结果的失配。换关、RESET、GAME_OVER、未知结果、暂停或预算截止仍停止后缀。缺少预测表示未作断言，不视为预测成功。
 观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
-固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。
+固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到执行停止边界或终局后停止行动。
 """ + "\n" + ACTOR_FRAME_INSTRUCTION
 
 
