@@ -4343,3 +4343,8 @@
 - 2026-10-08 07:59 CST — ef40c8bc records L1 pass and independently verified evidence-access friction; preserves frozen trial and pending final outcome.
 - 2026-10-08 08:06 CST — Frozen NOTES passes L2 at118paid:74levelactions/585.888s;155usage/152cuts,peak20592; L3continues without intervention.
 - 2026-10-08 08:11 CST — L2 audit isolates27extra actions to misread-center failure plusRESET; correction survives, final40-step route equals oldP7; no intervention.
+- 2026-10-08 08:14 CST — L2 comparison committed to distinguish extra failed exploration from final route and unexecuted tool proposals.
+- 2026-10-08 08:15 CST — 3fe78eb0 preserves verified L2 failure decomposition; docs290files/147links and diff checks pass, frozen production unchanged.
+- 2026-10-08 08:23 CST — Frozen NOTES passes L3 at193paid:75levelactions/994.202s;302usage/299cuts,peak20592; L4continues with unchanged code and controls.
+- 2026-10-08 08:33 CST — L3 audit confirms semantic regression/relearning and repeated failures; cuts lack independent recent evidence, causality unproven; frozenL4 continues.
+- 2026-10-08 08:35 CST — Frozen NOTES passes L4 at244paid:51actions/771.431s; enters requestedL5, same initialround, unchanged source and budget.

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-08 08:11 CST. **Session remains active — not a final handoff.**
+> Updated: 2026-10-08 08:36 CST. **Session remains active — not a final handoff.**
 
 ## 当前执行：冻结NOTES版BP35 L1–L6对比
 
@@ -14,6 +14,8 @@
 - 中途已核：L1真实边界44paid，07:56:12.344639过关，launch+641.305s；不是采样猜测。模型继续L2。独立私有interim-representation-friction.md确认p7_research需import但actor只查globals，提示未示例导入；有手抄编码帧及错误事实笔记，后来自行纠正。不能将context裁剪成功等同解题高效，不向actor反馈、不热修。
 
 - L2已核：08:05:58.233021真过关，累计118paid；本关74=6失败+RESET+26额外失败+RESET+40成功，旧P747=6+RESET+40。额外27步对应格边/中心误读导致的一次失败；NOTES随后自行纠正并跨RESET保留。private completed-l2-analysis.md另分8次prefix门控与11未执行步，不能算paid。当前L3，继续原冻结轮。
+
+- L3已核：08:22:32.434557过关，累计193paid；75=13+RESET+6+RESET+12+RESET+41成功。private completed-l3-analysis.md证实开关知识退化/重学、保留反例仍错误规划，不能全归裁剪。实际投影无独立近期前后帧/动作结果窗口；ARC短NOTES无同样skill级删前缀。候选分离笔记更新与裁剪、保留有限近期证据，均未实现。后续L4于08:35:23.865701以累计244paid通过，51actions/771.431s；当前进入指定L5，继续原截止。
 
 ## 已完成：通用研究记忆与P7 NOTES实现和有限部署验证
 

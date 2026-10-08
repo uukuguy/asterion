@@ -56,6 +56,22 @@ The second death follows a concrete perception error. NOTES at sequence73 treats
 
 L2 has18 note revisions of688–1051bytes. All retain an absent/possibly absent reader belief; its19 cells contain13 namespace inspections and no research-module import. Eight `prefix-action-reuse` stops introduce separate tool friction:6 dispatch no actions and2 stop after a partial prefix, leaving11 proposed steps unexecuted. Those11 are not paid actions; no paid undo or unchanged-board action appears in this level. A short memory can preserve both useful corrections and mistaken capability beliefs.
 
+### Completed L3: knowledge regression and repeated relearning
+
+L3 passed at sequence193,2026-10-08 08:22:32.434557 CST,994.201536seconds after L2. Its75 actions comprise13+6+12 failed gameplay actions,3 RESETs, then41 successful-episode actions. Old P7 used6+1+34=41; ARC completed a clean34. Against old P7,27 extra failed/restart actions and7 extra final-episode actions account for the34-action gap.
+
+The strongest evidence concerns a toggle whose center pixel remains unchanged while its surrounding shape changes. NOTES correctly learns it, later reinterprets the unchanged center as an ineffective click, and then learns the same toggle again. A known hazard briefly becomes “unknown.” One repeated fatal move occurs even though the current note retains the earlier counterexample; the new plan relies on an unsupported blocking-wall assumption. Later the actor correctly uses closed gates as protective ceilings and completes. ARC's actual L3 log applies that protective-ceiling idea early, then reuses it without death/RESET.
+
+L3's36 note snapshots are649–1026bytes. They preserve useful controls, deaths and later strategy, while key shape/palette facts regress. Forty-seven archived cells include18 failures;27 inspect the namespace and none imports the raw reader. Twenty of54 plans stop for prediction mismatch, including both harmful outcomes and harmless pixel-prediction mistakes. These are distinct from actual deaths and zero-dispatch tool rejections.
+
+The current view policy replaces messages preceding the accepted NOTES tool group with instructions/current notes/current board, retaining that group and later messages. It has no independent short buffer of previous frames and action results. Therefore an incorrect summary can remain while its contradictory earlier evidence exits the immediate view. Actual cuts and semantic regressions coexist here, but exact request clocks/revision-tagged cut logs are unavailable, and this run does not prove that cuts caused any specific error. The retained-but-ignored counterexample also prevents blaming all failures on missing history.
+
+ARC's short NOTES does not itself trigger comparable prefix deletion; its outer conversation retains earlier tool evidence, subject to host behavior. A future bounded recent-evidence window and separating note editing from automatic prefix deletion are candidates for controlled comparison. This does not justify restoring all old execution logs or claiming that more context alone solves the task. No such change is made during this run.
+
+## L4 boundary
+
+L4 passed at sequence244,2026-10-08 08:35:23.865701 CST,51 actions and771.431144seconds after L3. Both comparison baselines used23 actions. The frozen run now enters the requested L5; its result and L6 remain pending.
+
 ## Evidence status
 
 Preflight and exact packaged identity are verified. The active run is `p7-live-20261007234531-87e38f105ea518bdba94623a`. Result, post-run audit and cleanup remain pending.
