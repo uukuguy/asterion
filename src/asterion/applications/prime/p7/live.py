@@ -80,7 +80,7 @@ _PI_RPC_FLAGS = (
     "--no-themes",
     "--no-context-files",
     "--thinking",
-    "low",
+    "high",
 )
 
 

@@ -77,3 +77,10 @@ Task8 completed: re-reviewREADY,32/33overlapping targetedtestsPASS, no newproduc
 ## Task 9 — User-authorized low-effort comparison
 
 Change only P7 application thinking medium→low; generic defaults/prompt/context/tools remain frozen. Run one fresh BP35 L1-L6 with exactly Task8 seed0/modelsol/budgets/cleanup and no inherited game knowledge, external solve feedback, hotfix or extra retry. Compare against Task8 medium221paid/2RESET/1023.280s/21successfulcells/3NOTES. First verify command selection with a failing-low regression then focused checks; inspect rebuilt wheel/installed low setting and unchanged extension identity. This is an effort selection change, not a resources/protocol change; prior full promotion remains historical, focused114tests and exact newwheel identity verify this narrow delta. Report individual-run evidence, not statistical proof; default choice remains subject to outcome.
+
+
+Task9 complete: low231paid/2RESET/1968.197s target reached,15successfulcells,3NOTES; all231replay/cleanup/sourcefreezePASS. Actionefficiency modestly worse thanmedium221, elapsed~1.92x; no single-run statistical/latency attribution.
+
+## Task 10 — User-authorized same-version high comparison
+
+Afterlowclosed, change only P7 effortlow→high, retain Task7 code/prompt/bundle and identical coldBP35L1-L6 finitecontrols. Newsource/wheel/installedidentity +focused114tests; thenonefrozenrun, no outsidegamehelp/hotfix/retry. Compare medium/low/high on sameimplementation, unlikeoldhighfailures. Preserveconsole52024/56659 and ordinarycleanup/evidenceboundaries.

@@ -4412,3 +4412,6 @@
 - 2026-10-08 — 564942f0 records low L2 action improvement and explains continued measurement under the user’s conditional stop instruction.
 - 2026-10-08 — User authorizes same-repaired-version high comparison afterlow; previoushigh usedoldercode and cannot rankeffort againstmedium.
 - 2026-10-08 — LowL3/L4 pass35/38actions; L4oneRESET, cumulative144versusmedium149 butslower; frozenL5continues without persistentfailure.
+- 2026-10-08 — b6db54b3 checkpoints low four-level costs and records user authorization for a subsequent same-code high comparison.
+- 2026-10-08 — First5 low159success+14failed+2RESET versusmedium148+29+2; total savings reflect exploration, not shorter successful routes.
+- 2026-10-08 — Low sixlevels PASS231paid/2RESET/1968.197s; cleanupverified before high-onlyeffort change,114focusedtestsPASS.
