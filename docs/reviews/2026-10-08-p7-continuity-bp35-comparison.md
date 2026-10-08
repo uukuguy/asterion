@@ -366,3 +366,18 @@ L6额外7步均在早期：new178=old185同画面，旧立即远程点(27,29)重
 本轮35cells全部ok，4NOTES写入，99usage reported input11087866/output28764/peak207778；NOTES最终1058B，不能与上下文peak混为一谈。比旧83usage/peak193870仍有更多模型往返，L6计算9cells仅复用view，计算时间不是长耗时的主要解释；尚未得到请求级等待/内部推理时间拆分，不能归因全部延时。全221paid/223SDK回放、封存、安装/冻结源码与清理由trial owner及独立复审核验PASS；至清理1337.083墙钟秒，用户console保留，无新trial。
 
 终局NOTES为662→754→969→1058B，最后一次在目标通过后；单个自然round index0完成，无续跑receipt。原生128事件尾部未见retry，不代表全程无重试；无failure-sink文件。私有manifest1906项 SHA132ba40891733435f1a9aa5f36e7bfc25362a879d36c9f863c72fea3286f33dd。
+
+
+## Task22 — 已批准的研究接口改进与部署验证
+
+用户同意具体分层设计后，源码ecd20b2f实现r.transition(sequence)，位于P7 research bridge/runtime；它只组合已提交动作、前后精确观察引用、实际state/levels_completed和SDK动画描述，不内嵌画面或推断危险。现有r.frame/r.animation按需读数据。未提交尾部、非法或未来序号拒绝；正式行动与读取共享证据锁，返回副本。原生动画读取复用同一已提交证据核验。
+
+P7自主prompt介绍模型自编状态/转移程序、历史检验、类别/形状/坐标保真及连续后果；NOTES继续自由文本和可选更新，并澄清局面与内核边界变化不自动否定机制知识。没有BP35规则、坐标、路线、必填WorldMap、每步预测、强制BFS或行动门禁。通用Prime执行/记忆、三项注册工具、TypeScript与扩展资源均未变。设计见[研究接口说明](../superpowers/specs/2026-10-08-p7-transition-research-design.md)。
+
+provider-free验证：新增7项真实转移/worker/分页/非法读取测试；相邻36及autonomous/observation18，合计61PASS。独立代码复审READY；TS50PASS/6外部Pi兼容测试环境缺失跳过；lint/docsPASS；promotion fullPASS commands25/provider_operations0/full_datasetno。
+
+部署实跑：一次实际make asterion-prime-p7-level-witness GAME=r11l LEVEL=1，冷态Solmedium。runp7-live-20261008154616-e22ad3cb0cf24d009afd24d3，hostMake15:58:07.351552Z启动、SDK目标15:59:17.994021Z，70.642472秒/7paid/0RESET；目标L1后无L2动作。全部7paid/9SDK回放、seal、566冻结source/584installed及owned/auth清理PASS；至清理177.418283墙钟秒。wheelce5f8f222a2230527c496999395decc74f316b56d87bf46adecbd9ffa6a16199，resource7aeb06f055e429255c878f826f155469206bae909897f84f9bc7c2e9afbe7c62未变，三工具一致。已安装P7配置的无prompt Pi get_state为Solmedium/messageCount0；真实witness argv因Pi改写title不可直接观察，运行身份由选定配置与安装代码绑定支持。
+
+安装后合成探针使用真实persistentworker、一个fakeaction/三帧，0SDK构造/0真实游戏动作/0模型请求，验证新入口、前后引用、动画末帧和非法0拒绝。真实模型的第二个成功cell主动执行顶层print(r.transition(1))，没有r/transition重绑定，确认实际可发现与调用。2cells全ok，10usage/input226011/output1896/peak35950。这验证接口与部署闭环，不证明BP35死亡减少；Task21仍是旧source1a22dc33的结果。没有启动新BP35，改进效果需另获授权冷测。
+
+私有证据 .asterion-private/p7-transition-witness-20261008/trial/，public-final-metadata/operator-final-receipt/worker-transition-providerfree及完整记录；用户console52024/56659保留。最终独立终局核验PASS：566源码及wheel逐文件一致，7trace/7committed journal与9SDK完整回放一致，全部33paid返回帧一致；封存、无遗留效果、专属host/guest/auth清理及console保留均通过。manifest127项 SHA804c9c8a519e8b3973e356135541304229181679120e593429e39e7cf7be5e17。1次初写NOTES669B，0替换；1个自然round完成。

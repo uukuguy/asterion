@@ -182,8 +182,12 @@ Spec: [P7 transition research design](../specs/2026-10-08-p7-transition-research
 - [x] Run `uv run python -m unittest -v tests.test_prime_p7_research_transition` and observe missing-interface failure before implementation.
 - [x] Implement through the existing read-only P7 bridge; preserve existing history/frame/animation and registered tool contracts. No Prime framework changes or game semantics.
 - [x] Root updates build_autonomous_prompt with transition/animation examples, actual helper signatures, optional executable models and freely organized decision-useful NOTES. Preserve objective scoring facts and all action/budget boundaries.
-- [ ] Run transition, research runtime/observation and autonomous suites; independent code review; `make lint`, `make docs-check`, `make promotion-check`. TS registration/resource unchanged; run existing extension tests for deployment consistency.
-- [ ] Commit integrated source before a fresh packaged bounded `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`; verify exact wheel/resources/allowlist/cleanup, preserve console. Do not silently start BP35.
-- [ ] Record implemented/provider-free/packaged evidence separately; no claim death rate improved until separately authorized cold comparison.
+- [x] Run transition, research runtime/observation and autonomous suites; independent code review; `make lint`, `make docs-check`, `make promotion-check`. TS registration/resource unchanged; run existing extension tests for deployment consistency.
+- [x] Commit integrated source before a fresh packaged bounded `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`; verify exact wheel/resources/allowlist/cleanup, preserve console. Do not silently start BP35.
+- [x] Record implemented/provider-free/packaged evidence separately; no claim death rate improved until separately authorized cold comparison.
 
 Task22 source ready: new read-only helper exact refs/action/state/SDK animation descriptor, committed-only transaction guard and shared evidence lock. Focused RED observed before implementation; GREEN7 includes real persistent worker and pagination; adjacent36 and root18 regressions PASS. Independent review READY, TS50PASS/6externalPi skips, lint/docs PASS. No Prime generic code, registered tool, TypeScript or bundled extension changed. Promotion running; packaged witness pending, BP35 death reduction unverified.
+
+Task22 promotion fullPASS commands25/provider_operations0/full_datasetno. Frozen sourceecd20b2f; deployment owner GO issued for fresh actual Make r11lL1 witness and isolated installed worker probe. No BP35 or actor hints.
+
+Task22 packaged actualMake witnessPASS: r11lL1 coldSolmedium7paid/0RESET/70.642472s toSDKgoal. Exactfreshwheel/source/resource/three-tools, all7paid/9SDKreplay, seal/cleanup verified; realinstalledworker syntheticAPIprobePASS and actualmodeltop-levelr.transition(1) calledsuccessfully. Cleanup177.418283wall, consolepreserved. No newBP35; effectondeathrateunverified. FinalindependentauditPASS; manifest127files SHA804c9c8a519e8b3973e356135541304229181679120e593429e39e7cf7be5e17. Task22complete within implementation/deployment boundary.

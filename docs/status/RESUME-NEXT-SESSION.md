@@ -4,14 +4,14 @@ Updated: 2026-10-08 after Task21 settlement. Session remains active; this is not
 
 ## Current intent and next action
 
-User approved implementation after the concrete layered design. Task22 adds read-only r.transition(sequence) and P7 research/NOTES descriptions. Generic Prime facilities and registered tools unchanged. Source implementation/review and61Python tests PASS; TS50PASS/6externalPi skips, lint/docsPASS. Promotion and the required fresh packaged r11lL1 deployment witness remain pending; no BP35 trial authorized. Design [transition research spec](../superpowers/specs/2026-10-08-p7-transition-research-design.md); canonical worklist Task22. Avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
+User approved implementation after the concrete layered design. Task22 adds read-only r.transition(sequence) and P7 research/NOTES descriptions. Generic Prime facilities and registered tools unchanged. Source implementation/review and61Python tests PASS; TS50PASS/6externalPi skips, lint/docsPASS. Promotion fullPASS commands25/provider_operations0; the required fresh packaged r11lL1 deployment witness completed7paid/0RESET/70.642472seconds, replay/source/cleanupPASS; no BP35 trial authorized. Design [transition research spec](../superpowers/specs/2026-10-08-p7-transition-research-design.md); canonical worklist Task22. Avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
 
 ## Current source and configuration
 
-- Branch feat/prime-research-notes; production1a22dc33. Task21 adds only factual scoring paragraph and budget.scoring, preserving the original actor goal/behavior from9b62d2c2. score.py unchanged;49 focused tests passed. Generic schema/RPC/config repairs remain.
+- Branch feat/prime-research-notes; current productionecd20b2f; Task21 frozen1a22dc33. Task21 adds only factual scoring paragraph and budget.scoring, preserving the original actor goal/behavior from9b62d2c2. score.py unchanged;49 focused tests passed. Generic schema/RPC/config repairs remain.
 - Operator.env openai-codex/gpt-6.1-sol/medium, ASTERION_PRIME_EFFORT takes precedence. Preserve credentials; do not print whole.env.
-- No active trial. Task21 owned host/guest processes and temporary auth/environment removed, exact unit7a6e9c2a4fd947d2800595330a3dc376 stopped. User console52024/56659 preserved.
-- Task21 state/report commit84df08e3; Task22 approved spec4c65f470, source commit pending. JOURNAL append-only. Canonical worklist [research interface plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
+- No active trial. Task22 owned processes/auth cleared and consolepreserved. Task21 owned host/guest processes and temporary auth/environment removed, exact unit7a6e9c2a4fd947d2800595330a3dc376 stopped. User console52024/56659 preserved.
+- Task21 state/report commit84df08e3; Task22 approved spec4c65f470, source commit ecd20b2f. JOURNAL append-only. Canonical worklist [research interface plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
 
 ## Task21 verified facts
 
@@ -47,3 +47,10 @@ Current judgment: improve joint representation and application of action→autom
 ## Previously verified framework repairs
 
 Generic object-root tool schema normalization, bounded private RPC diagnostics, once-per-run exact same-session recovery under original budget; P7 only injects effect facts/storage/deadline. TS50/Python165/promotion25PASS. Recovery code is not a claim all errors prevented or live transient recovery proven. Effort.env shared launcher/guest configuration156related tests(one skip), Make fix49(one skip), promotion25PASS. Current trial required no registry change or repeated r11l.
+
+
+## Task22 packaged witness CLOSED
+
+Privatebase .asterion-private/p7-transition-witness-20261008/trial/, unit34881721826a4524810e7c3bd30836f5/runp7-live-20261008154616-e22ad3cb0cf24d009afd24d3. ActualMake GAME=r11l LEVEL=1 coldSolmedium:15:58:07.351552Z→SDK15:59:17.994021Z=70.642472seconds,7paid/0RESET/1level. Target1noL2actions. Full7paid/9SDKframesreplay/seal/source566/install584/cleanupPASS. Cleanup177.418283wall/177.417295mono, allowned/authremoved, console52024/56659preserved.
+
+Wheelce5f8f222a2230527c496999395decc74f316b56d87bf46adecbd9ffa6a16199/resource7aeb06 unchanged/three-tools. Installedconfiguration noPromptPigetstateSolmedium/messageCount0; actualargv titleoverwritten, identityboundbyselectedconfig+installedcode. Installedrealworker synthetictransition/3frameprobePASS with0SDK/provider. Actualsuccessfulsecondcelltop-levelr.transition(1) called bymodel;2cellsok/10usage/input226011/output1896/peak35950. Interfaceanddeploymentverified, NOTBP35deathimprovement. FinalindependentauditPASS;127filemanifest SHA804c9c8a519e8b3973e356135541304229181679120e593429e39e7cf7be5e17. Task22complete. No newBP35 authorized. Rootsourceecd20b2funchanged; currentnextboundaryisuserdecisiononfurthercoldcomparison.
