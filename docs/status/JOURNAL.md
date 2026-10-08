@@ -4381,3 +4381,5 @@
 - 2026-10-08 12:17 CST — fbcd3b65 records L2 failed-exploration overhead and source-retrieval gap while frozen L3 continues without intervention.
 - 2026-10-08 12:29 CST — L3 research churn persists; first natural round unfinished, no NOTES, frequent projection trims; frozen run continues.
 - 2026-10-08 12:37 CST — BP35 ends2levels/166committed from64KiB diagnosticstderr overflow; completed150prefix replay, source identity and cleanup independently verified.
+- 2026-10-08 12:39 CST — b9792fb7 closes interrupted BP35 evidence, separating diagnostic overflow, exploration regression and replay scope; fixes remain unimplemented.
+- 2026-10-08 12:52 CST — User challenges repetition root cause; ARC also useshigh; bounded diagnostics and P7medium implementation underway, memory redesign separate.

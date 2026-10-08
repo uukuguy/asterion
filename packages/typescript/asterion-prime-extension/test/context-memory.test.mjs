@@ -197,3 +197,43 @@ test("raw branch recovery retains current note refresh through native compaction
   assert.equal(snapshotOf(projected).content,"LATEST_BOARD");
   assert.deepEqual(projected.messages.filter(message => message.customType !== "asterion_context_memory"),compacted);
 });
+
+test("registered context hooks share a 4 KiB diagnostic budget without changing projections or error fallback", async () => {
+  const bounded = await import("../dist/ipython-extension.mjs?diagnostic-budget");
+  const hooks = [];
+  for (let index=0;index<2;index++) {
+    assert.equal(bounded.registerP7MemoryContext({on:(event,handler) => {
+      assert.equal(event,"context");
+      hooks.push(handler);
+    }}),true);
+  }
+  const content = "当前研究状态";
+  const entries = [{type:"message",message:{...result("read"),toolName:"p7_workspace",
+    details:{status:"read",context_memory:envelope(false,null,content)}}}];
+  const context = {sessionManager:{getBranch:() => entries}};
+  const failing = {sessionManager:{getBranch:() => {throw new Error("PRIVATE_DIAGNOSTIC_SENTINEL");}}};
+  const messages = longHistory(12);
+  const original = structuredClone(messages);
+  const lines = [];
+  const previous = console.error;
+  console.error = message => lines.push(String(message)+"\n");
+  try {
+    for (let index=0;index<350;index++) {
+      const event = {type:"context",messages:[...messages,user("追加更正".repeat(index+1))]};
+      const expected = bounded.projectMemoryContext(event.messages,{revision:null,content});
+      const hook = hooks[index%hooks.length];
+      assert.deepEqual(hook(event,context),{messages:expected.messages});
+      assert.deepEqual(hook(event,failing),{messages:event.messages});
+    }
+  } finally {
+    console.error = previous;
+  }
+  assert.deepEqual(messages,original);
+  const output = lines.join("");
+  assert.match(output,/"status":"trimmed"/);
+  assert.match(output,/"status":"projection-unavailable"/);
+  assert.doesNotMatch(output,/PRIVATE_DIAGNOSTIC_SENTINEL/);
+  assert.ok(Buffer.byteLength(output,"utf8")<=4*1024,
+    "normal and error diagnostics across registered hooks must share one byte budget including newlines");
+  assert.equal(lines.filter(line => line.includes('"status":"diagnostics-suppressed"')).length,1);
+});

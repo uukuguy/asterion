@@ -870,6 +870,26 @@ interface MemoryExtensionApi {
   on(event: "context", handler: (event: unknown, context: unknown) => unknown): unknown;
 }
 
+const MEMORY_DIAGNOSTIC_LIMIT = 4 * 1024;
+const MEMORY_DIAGNOSTIC_SUPPRESSED = '[prime-context-memory] {"status":"diagnostics-suppressed"}';
+const MEMORY_DIAGNOSTIC_SUPPRESSED_BYTES = Buffer.byteLength(MEMORY_DIAGNOSTIC_SUPPRESSED+"\n","utf8");
+// All registered hooks in this module instance share the process log budget.
+let memoryDiagnosticBytes = 0;
+let memoryDiagnosticsSuppressed = false;
+
+function emitMemoryDiagnostic(line: string): void {
+  if (memoryDiagnosticsSuppressed) return;
+  const bytes = Buffer.byteLength(line+"\n","utf8");
+  if (memoryDiagnosticBytes+bytes+MEMORY_DIAGNOSTIC_SUPPRESSED_BYTES>MEMORY_DIAGNOSTIC_LIMIT) {
+    memoryDiagnosticsSuppressed = true;
+    memoryDiagnosticBytes += MEMORY_DIAGNOSTIC_SUPPRESSED_BYTES;
+    console.error(MEMORY_DIAGNOSTIC_SUPPRESSED);
+    return;
+  }
+  memoryDiagnosticBytes += bytes;
+  console.error(line);
+}
+
 /** Pi owns prompt/tools; this hook changes only its cloned conversation view. */
 export function registerP7MemoryContext(pi: unknown): boolean {
   const api = memoryRecord(pi);
@@ -891,14 +911,14 @@ export function registerP7MemoryContext(pi: unknown): boolean {
       const projected = controller.project(event.messages);
       const safeOutcome = JSON.stringify(projected.outcome);
       if (projected.outcome.status !== "inactive" && safeOutcome !== lastOutcome) {
-        console.error("[prime-context-memory] " + safeOutcome);
+        emitMemoryDiagnostic("[prime-context-memory] " + safeOutcome);
         lastOutcome = safeOutcome;
       }
       return {messages:projected.messages};
     } catch {
       // Pi catches extension exceptions, so an exception is not a request fence.
       // A projection failure explicitly preserves every original message.
-      console.error('[prime-context-memory] {"status":"projection-unavailable"}');
+      emitMemoryDiagnostic('[prime-context-memory] {"status":"projection-unavailable"}');
       return {messages:event.messages};
     }
   });

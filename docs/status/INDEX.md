@@ -21,7 +21,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
 | `../reviews/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implemented autonomy/support layers; promotion/r11l verified; subsequent failed BP35 trial is separately indexed. |
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
-| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implementation/r11l complete; Task5 measurement closed with failed six-level target and diagnostic-overflow boundary. |
+| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 closed with interrupted target failure; Task6 bounded diagnostics/P7medium implementation and deployment verification active. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: BP35 trial ended2levels/166actions, cleanup verified; logging/source-retrieval issues remain unimplemented. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |

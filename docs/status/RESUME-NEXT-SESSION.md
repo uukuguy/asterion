@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 12:37 CST. BP35 measurement and cleanup complete; not a final handoff.
+Updated: 2026-10-08 12:37 CST. BP35 measurement closed; diagnostic/medium small fix and ARC mechanism comparison active; not a final handoff.
 
 ## Current verified result
 
@@ -29,3 +29,9 @@ Updated: 2026-10-08 12:37 CST. BP35 measurement and cleanup complete; not a fina
 - Separate usable-data gap: current cell source is archived but cannot be queried by the actor; dynamic exec has no source cache. Ordinary Python exceptions do reach model JSON, while cell archive omits error text; do not claim all failing cells lacked feedback.
 - Repeated history/helper reconstruction, failed source inspection and0NOTES suggest knowledge continuity remains weak. More careful context retention and model-owned consolidation need evaluation; lowtoken alone is not success. Exact causal split is unproven.
 - No fixes above have been implemented. The latest user authorized this measurement; no new full trial is queued. Next continuation should address the verified generic diagnostic/source-read boundaries, then define the smallest appropriate evaluation without midrun repair.
+
+## Active successor Task6
+
+- User requests concrete fixes and medium/low effort, then asks whyARC avoids repeated retrieval. Root/extension implement only bounded diagnostic stderr and P7medium; context/NOTES/source API unchanged. See appended comparison for directARC evidence; both prior runs usedhigh, so effort is not established as root cause.
+- TS49pass/6existing skips with real registered-hook changing+exception log regression; extensionbundle13db425a72aa4e4e2ef0fa2c35a15071f90026748ee1bcd01e1334301efd31b8. Python133testsPASS, targetedRuffPASS, independentchanged-code reviewREADY. Promotion and deployment pending.
+- Trial agent prepares only one mediumr11lL1/900+180 witness under `.asterion-private/p7-medium-projection-20261008/witness/`, no launch until exact finalsource checks pass/rootGO. No new BP35 run. Preserve userconsole52024.
