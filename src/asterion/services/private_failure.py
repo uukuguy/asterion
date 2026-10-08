@@ -14,13 +14,13 @@ from asterion.services.diagnostics import (
 )
 
 
-class P7PrivateFailureSink:
+class FilePrivateFailureSink:
     def __init__(self, path: Path) -> None:
         self._path = path
         self._lock = threading.Lock()
 
     def __repr__(self) -> str:
-        return "<P7PrivateFailureSink redacted>"
+        return "<FilePrivateFailureSink redacted>"
 
     def record(self, diagnostic: PrivateFailureDiagnostic) -> None:
         if type(diagnostic) is not PrivateFailureDiagnostic:

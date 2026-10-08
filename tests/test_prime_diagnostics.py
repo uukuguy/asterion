@@ -171,10 +171,10 @@ class PrivateFailureBoundsTests(unittest.TestCase):
         import tempfile
         from pathlib import Path
         from asterion.services.diagnostics import (FailureMetadata, capture_private_failure)
-        from asterion.applications.prime.p7.private_failure import P7PrivateFailureSink
+        from asterion.services.private_failure import FilePrivateFailureSink
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "failures.jsonl"
-            sink = P7PrivateFailureSink(path)
+            sink = FilePrivateFailureSink(path)
             for _ in range(20):
                 capture_private_failure(sink, FailureMetadata(), {"errorMessage": "秘密" * 5000}, remaining_bytes=65536)
             self.assertEqual(path.stat().st_mode & 0o777, 0o600)
