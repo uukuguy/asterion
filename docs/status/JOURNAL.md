@@ -4423,3 +4423,8 @@
 - 2026-10-08 — d445b365 prepares authorized secondhigh with identicalproduction and freshstate, preserving firsthigh request-failure evidence.
 - 2026-10-08 — High2starts08:02:06Z aftercold/source/installchecks;5400second deadline09:32:06Z, sameverifiedhighwheel, no inheritedknowledge.
 - 2026-10-08 — High2 L1/L2 pass23/47paid withoneRESET total;70actions/361.993s, frozenL3continues without requestfailure.
+- 2026-10-08 — 6058667e checkpoints verified high2 L1/L2 outcomes and continued frozen experiment identity.
+- 2026-10-08 — Verifiedmetadata baseline21/48/44/38/33/87; high2L2=47 isbelow48, correctingearlier unverifiedover-baseline statement.
+- 2026-10-08 — Verified115% levelcap differsbaseline100%; high2L2 47steps scores104.30%, caprequires44; L4passes24/0RESET.
+- 2026-10-08 — Readonlyreview finds autonomousprompt/budget omit scoringformula andlevelbaseline; P7-specific objectivefeedback proposed, frozenhigh2 unchanged.
+- 2026-10-08 — High2L5passes31/0RESET;159cumulative,152success+6failed+1RESET; frozenL6continues withscore-guidancegap documented only.

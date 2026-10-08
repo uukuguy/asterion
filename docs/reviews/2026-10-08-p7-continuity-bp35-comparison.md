@@ -1,5 +1,22 @@
 # 研究连续性修复复核与 BP35 L1–L6 实测
 
+## 正式逐关 baseline
+
+本次实际ARC根目录 `external-prime/arc-agi-3/environment_files/bp35/0a0ad940/metadata.json` 的 `baseline_actions` 前六关是 **21 / 48 / 44 / 38 / 33 / 87**。这是逐关评分基准，不是最短解证明，也不是arc-skill实测动作数或P7旧成功路线。
+
+| 关卡 | baseline | medium | low | 第二次high（当前） |
+| --- | ---: | ---: | ---: | ---: |
+| L1 |21|21|28|23|
+| L2 |48|71|43|47|
+| L3 |44|34|35|34|
+| L4 |38|23|38|24|
+| L5 |33|30|31|31|
+| L6 |87|42|56|进行中|
+
+纠正一次对话判断：第二次high L1超过baseline2步，L2实际低于baseline1步；先前未经查metadata即认同“L1/L2都超”不正确。用户提出这一核对后，只读审查员定位实际metadata，root直接复核数组，未反馈给actor或查看游戏解法源码。
+
+评分口径补充：按[官方评分说明](https://docs.arcprize.org/methodology)及当前SDK/P7评分代码，单关`min(115%,100%*(baseline/actions)^2)`，baseline对应100%而非115%封顶。L2=47时104.300589%，未达115%；最多44步才封顶。L1–L6的115%封顶动作上限分别19/44/41/35/30/81。整个游戏100%需要全关完成并满足加权分数，单关未封顶不等于整个游戏必不满100；本次只测6/9，不产生官方100分结论。
+
 ## 同修复版 effort 对照总览
 
 | 项目 | medium | low | high |
@@ -176,3 +193,16 @@ High本次进程、guestunit、临时认证已清理，原console保留；267.29
 
 
 第二次high L1=23动作/0RESET，SDK08:04:51.038738Z、host+164.392秒。L2=47动作/1RESET，SDK08:08:08.640077Z、累计70/361.993秒；分解为6失败动作+RESET+40成功。前两关medium92/301.480秒，low71/531.540秒。High2研究至L2后6cells全部成功、NOTES首次847字节，进入L3；尚无完整结论，无外围反馈/修订。
+
+
+第二次high L3=34/0RESET，SDK08:10:23.232219Z、累计104/496.585秒；L4=24/0RESET，SDK08:15:38.944475Z、累计128/812.297秒。L4后14cells全部成功、NOTES2次/current1092字节，进入L5。当前单关baseline/115%封顶分开报告，不将通关或低于baseline称为单关封顶。
+
+
+## 评分目标传达缺口（High2运行期间只读发现）
+
+用户追问P7是否知道步数/分数关系。实际autonomous路径使用prompt.py:build_autonomous_prompt，仅要求兼顾通关与动作效率，没有评分公式。旧P7_SOLVE_PROMPT有公式但本轮不选它。solver.py:_budget提供总动作/剩余/目标/期限，没有level_baseline、当前关计费动作或分数目标；research_runtime.actor_context直接投影此context。operator旧_status_view中的baseline字段不等于autonomous实际收到该字段。达到target_level即结算，本轮目标是六关完成，不是分数门槛/全游戏WIN。
+
+这是P7目标与反馈表达的实际缺口，不能将本次超baseline全部解释为effort不足。建议后续在P7适配层明确公式及评分目标，按可用真实metadata给baseline/当前关累计动作（含失败RESET）/目标分数对应步数余量；通用层仍只持有预算和执行边界。不先增加强制每步认知流程，也不在未知机制下直接用baseline硬截断探索。此为待设计建议，当前冻结high2不做生产改动，不将讨论当作已实现。
+
+
+High2 L5=31动作/0RESET，SDK08:21:21.101600Z、累计159/host+1154.454秒。前五关high2最终成功一轮[23,40,34,24,31]=152，失败6+RESET1；medium成功148/失败29/RESET2，low成功159/失败14/RESET2。因此high2总动作最少主要来自少失败探索，不能称成功路线全部更短。L6已进入，21cells全部成功，NOTES3/current1488字节，仍无完整六关结论。
