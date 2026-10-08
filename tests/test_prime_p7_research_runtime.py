@@ -68,6 +68,8 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(refreshed['revision'], memory['revision'])
         current = json.loads(refreshed['content'].split('\n\n', 1)[1])
         self.assertEqual(current['observation_ref']['sequence'], 1)
+        self.assertEqual(current['budget']['scoring'], result['budget']['scoring'])
+        self.assertEqual(current['budget']['scoring']['current_level']['paid_actions'], 1)
         self.assertEqual(current['notes']['observation_ref']['sequence'], 0)
         rejected = self.host.method_call('workspace', {
             'op': 'notes', 'base_revision': before['workspace_revision'],
@@ -77,6 +79,25 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('context_memory', rejected)
         with self.assertRaises(ValueError):
             self.host.set_memory_instructions('changed instruction')
+
+    async def test_scoring_facts_reach_initial_actor_v2_snapshot_and_continuation_without_notes(self):
+        from asterion.applications.prime.p7.prompt import build_autonomous_prompt, initial_research_prompt
+        instructions = build_autonomous_prompt()
+        initial = initial_research_prompt(self.host, instructions)
+        expected = self.host.current_context()['budget']['scoring']
+        self.assertEqual(self.host.actor_context()['budget']['scoring'], expected)
+        delivered = json.loads(initial.split('Initial research context (authoritative observation):\n', 1)[1])
+        self.assertEqual(delivered['budget']['scoring'], expected)
+        result = self.host.method_call('workspace', {'op': 'read'}, _Signal())
+        envelope = result['context_memory']
+        self.assertEqual(envelope['version'], 'asterion.prime-context-memory/v2')
+        self.assertIsNone(envelope['revision'])
+        self.assertTrue(envelope['content'].startswith(instructions + '\n\n'))
+        snapshot = json.loads(envelope['content'][len(instructions) + 2:])
+        self.assertEqual(snapshot['budget']['scoring'], expected)
+        continuation = self.host.continuation_prompt(1)
+        self.assertEqual(json.loads(continuation.split('\n', 1)[1])['budget']['scoring'], expected)
+        self.assertEqual(self.engine.calls, [])
 
     async def test_cancel_after_durable_note_keeps_archive_without_cut_receipt(self):
         from unittest.mock import patch

@@ -8,7 +8,7 @@ from pathlib import Path
 from threading import RLock
 
 from .research import ResearchWorkspace, copy_json, identifier
-from .score import canonical_bytes, digest
+from .score import canonical_bytes, digest, score_planning_facts
 from .solver_events import build_solver_payload
 from .verified_history import validate_prediction
 from .dynamic_evidence import EvidenceProcessingError
@@ -266,6 +266,8 @@ class Solver:
             "terminal_reason": status.terminal_reason,
             "target_level": self.broker.game.target_level,
             "action_cap": self.broker.game.action_cap,
+            "scoring": score_planning_facts(self.broker.game, self.broker.journal,
+                primitive_actions=status.primitive_actions, levels_completed=status.levels_completed),
             **(wall_budget() if callable(wall_budget) else {}),
         }
 
