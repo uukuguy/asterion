@@ -4428,3 +4428,5 @@
 - 2026-10-08 — Verified115% levelcap differsbaseline100%; high2L2 47steps scores104.30%, caprequires44; L4passes24/0RESET.
 - 2026-10-08 — Readonlyreview finds autonomousprompt/budget omit scoringformula andlevelbaseline; P7-specific objectivefeedback proposed, frozenhigh2 unchanged.
 - 2026-10-08 — High2L5passes31/0RESET;159cumulative,152success+6failed+1RESET; frozenL6continues withscore-guidancegap documented only.
+- 2026-10-08 — e8bab389 records verified scoring thresholds, autonomous score-awareness gap, and frozen high2 L5 checkpoint.
+- 2026-10-08 — User authorizes explicit goals, baselines and scoring information for autonomous planning; implement after frozen high2 finishes.

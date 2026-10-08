@@ -29,3 +29,5 @@ HighfullL1-L6 comparisonremainsuncompleted; one newhightrial nowexplicitlyauthor
 ## Latest user discussion during high2
 
 User asks whetherP7knows score-vs-actions and suggests step pressure. Read-onlycodecheck finds autonomousprompt lacksformula; Solver._budget lackslevel_baseline/currentlevelactions/scoretarget despite legacy prompt/statushavingthem. Actualgoal is target_level completion, globalactioncap notperlevelscore. Rootexplainedgap andsuggested P7-specific explicitobjective/scorefeedback/softstepgoal, genericbudgetunchanged; nohardcognitivegates. Notimplemented/NOmidrunchange. Captureaftertrial asdesignfollowup; do not claim thisscore-guidance exists.
+
+User subsequently authorizes this explicit objective/baseline/scoring guidance. Task12 in canonicalplan records the accepted scope; implement only after Task11 frozen run cleanup. Existing generic context transport suffices; score semantics stay P7-specific. No new live comparison implicitly authorized.
