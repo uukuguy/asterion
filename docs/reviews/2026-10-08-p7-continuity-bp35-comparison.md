@@ -117,4 +117,10 @@ SDK过关06:03:12.160753Z，累计seq221、host+1023.280秒。L6=42动作/0RESET
 
 用户在medium六关通过后授权再试一次low，判断明显回退。生产仅将P7 thinking medium→low，其余实现、提示、seed0、冷启动和5400秒/6round/1000动作/1024模型/4096工具、180秒收尾条件保持。比较对象是上述同版本medium实测，不以arc-skill代替baseline；用户明确指出medium L1持平baseline、L2超出，L5/L6未超出。
 
-low配置回归先RED后GREEN，配置/模型选择/启动相关114testsPASS。新wheel精确安装身份核对后才启动唯一实测；实测中不修改代码或提供解题提示。证据目录 `.asterion-private/p7-low-bp35-20261008/trial/`。目前尚未启动、尚无low效果结论。
+low配置回归先RED后GREEN，配置/模型选择/启动相关114testsPASS。新wheel精确安装身份核对后才启动唯一实测；实测中不修改代码或提供解题提示。证据目录 `.asterion-private/p7-low-bp35-20261008/trial/`。已于07:05:32.998515Z启动，host截止08:35:32.998511Z；尚无low效果结论。生产8a8a7020，565文件对比只live.py effort值改变，扩展不变，583实际安装文件/low/三工具核对通过；wheel214eeb0509755ce8944e0fad946b22e1d1fa33fc2a04d01e7b305a5b7eb287fa。runp7-live-20261008070533-d55ad91a939611aad479d0c7。
+
+
+Low L1已通过：SDK07:09:26.382917Z、seq28、host+233.384秒，28动作/0RESET；medium为21动作/+102.179秒。动作差额全部体现在ACTION6数量（15对8），不据此未经轨迹分析称全部无效。3cells全部成功、NOTES0次写入，过关附近22usage/inputpeak43527。首关效率下降，后续仍进行中，尚无完整low结论。
+
+
+Low L2已通过：SDK07:14:24.538942Z、累计seq71、host+531.540秒。本关43动作/1RESET，对medium71/2动作更省；本关用时298.156秒对medium199.301秒更慢。两关累计71动作对medium92，累计用时531.540秒对301.480秒。用户要求看L2、若仍明显差则停；根据L2没有延续动作效率退化，root选择暂不停止并向用户说明，继续既有授权范围观察，无新增预算/重试。

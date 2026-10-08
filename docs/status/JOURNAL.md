@@ -4405,3 +4405,7 @@
 - 2026-10-08 — BP35 sixlevels PASS221paid/2RESET;21successfulcells,3NOTES; fullreplay and independent identity/cleanup audit verified, no production intervention.
 - 2026-10-08 — 0d214f57 records independently verified autonomous BP35 six-level completion, process evidence and remaining attribution boundaries.
 - 2026-10-08 — User authorizes low-only BP35 comparison; P7effort regression RED/GREEN,114focusedtestsPASS; remaining production unchanged.
+- 2026-10-08 — 8a8a7020 changes only P7effort tolow for an authorized controlled BP35 comparison; focused114testsPASS.
+- 2026-10-08 — Low-only frozen BP35 starts07:05:32Z; installedidentity and emptyhistory verified, samefinite controls, no inherited medium knowledge.
+- 2026-10-08 — Low BP35 L1 passes28paid/0RESET at233.384s versusmedium21/102.179s; remaining levels continue frozen.
+- 2026-10-08 — LowL2 passes43paid/1RESET versusmedium71/2; slower298s, actionimprovement means userconditionalstop not triggered; trialcontinues.

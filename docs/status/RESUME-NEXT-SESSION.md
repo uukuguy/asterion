@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Task9 active: user authorized one low BP35 comparison after successful medium run. Root changes only P7 thinking and config test;114focusedtestsPASS. notes_bp35_trial prepares newcoldroot/wheel, awaits committedfreeze/GO. PriorTask8 facts below remain the medium baseline.
+Task9 active: user authorized one low BP35 comparison after successful medium run. Root changes only P7 thinking and config test;114focusedtestsPASS. Lowtrial now active:source8a8a7020,runp7-live-20261008070533-d55ad91a939611aad479d0c7,unitasterion-p7-0b6861be77c347c19a5c4f984abf8dbc.service;hostPIDs31731/31733/31732,agentexec90457. Start07:05:32.998515Z,hostdeadline08:35:32.998511Z;guestoriginseparate. Installed583/low/3tools/coldchecked;wheel214eeb0509755ce8944e0fad946b22e1d1fa33fc2a04d01e7b305a5b7eb287fa,samebundle71bbd616. Trialowner notes_bp35_trial supervisescleanup; rootdocs/readprogressonly. Latest lowL1PASS28/0RESET at233.384s;L2PASS43/1RESET,298.156s exclusive,cumulative71actions/531.540s;L3running. Userconditionalstop ifL2still markedlyworse;root judged43/1 vsmedium71/2 improvesactions despite slower298vs199s, informeduser andcontinues originalscope. Noextra budget/retry. PriorTask8 facts below remain the medium baseline.
 
 ## Verified facts
 
