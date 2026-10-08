@@ -4409,3 +4409,6 @@
 - 2026-10-08 — Low-only frozen BP35 starts07:05:32Z; installedidentity and emptyhistory verified, samefinite controls, no inherited medium knowledge.
 - 2026-10-08 — Low BP35 L1 passes28paid/0RESET at233.384s versusmedium21/102.179s; remaining levels continue frozen.
 - 2026-10-08 — LowL2 passes43paid/1RESET versusmedium71/2; slower298s, actionimprovement means userconditionalstop not triggered; trialcontinues.
+- 2026-10-08 — 564942f0 records low L2 action improvement and explains continued measurement under the user’s conditional stop instruction.
+- 2026-10-08 — User authorizes same-repaired-version high comparison afterlow; previoushigh usedoldercode and cannot rankeffort againstmedium.
+- 2026-10-08 — LowL3/L4 pass35/38actions; L4oneRESET, cumulative144versusmedium149 butslower; frozenL5continues without persistentfailure.
