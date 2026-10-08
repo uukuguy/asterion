@@ -4387,3 +4387,5 @@
 - 2026-10-08 12:55 CST — User reaffirms generic/P7 repair split; computation/context infrastructure generic, game cognition and medium experiment selection application-owned.
 - 2026-10-08 13:04 CST — User rejects partial packaging; Task7 now implements generic computation history/context continuity and P7 memory adaptation before deployment.
 - 2026-10-08 — Task7 source/context continuity implemented; independent review READY; TS49 and Python119 pass; combined promotion and witness pending.
+- 2026-10-08 — 9b62d2c2 preserves native research history and exposes computation archives to prevent repeated source reconstruction.
+- 2026-10-08 — Promotion4330tests found missing cell_history core-module allowlist entry; corrected, no runtime changes; final promotion pending.

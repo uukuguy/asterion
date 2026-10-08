@@ -17,7 +17,7 @@ ARC also usedhigh. Medium is experimental, not established root-cause cure. Prio
 
 ## Next actions
 
-1. Commit combined Task7 implementation, then final-source `make promotion-check` (earlier cbed result insufficient).
+1. Combined Task7 committed9b62d2c2. First promotion ran4330tests with one missing core-module allowlist failure; root added cell_history entry. Rerun final promotion after targeted check; earlier cbed result insufficient.
 2. Re-freeze prepared medium r11l L1 small witness against final source/resource. Old preparation is under `.asterion-private/p7-medium-projection-20261008/witness/`; no auth/provider staged. notes_bp35_trial owns witness and awaits root GO after promotion.
 3. Run exactly one packaged witness with900s task/guest and180s cleanup, record identity, outcome and cleanup. No full BP35 rerun queued.
 4. Update evidence/state and commit. Do not claim unmeasured BP35 improvement.

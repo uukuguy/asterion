@@ -11,6 +11,7 @@ CORE_MODULES = (
     "asterion.agents",
     "asterion.agents.prime",
     "asterion.agents.prime.backend",
+    "asterion.agents.prime.cell_history",
     "asterion.agents.prime.compaction_budget",
     "asterion.agents.prime.context",
     "asterion.agents.prime.continuation",
