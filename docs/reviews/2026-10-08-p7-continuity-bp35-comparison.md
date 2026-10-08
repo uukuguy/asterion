@@ -28,4 +28,16 @@
 
 ## 当前状态
 
-准备中，尚未启动。本次私有证据目录 `.asterion-private/p7-medium-bp35-20261008/trial/`。审查结论、运行身份、各关动作与最终边界将在核实后更新。
+已启动，尚无最终结论。本次私有证据目录 `.asterion-private/p7-medium-bp35-20261008/trial/`。运行身份 `p7-live-20261008054609-044b2b6813e67003ec37cac9`；unit `asterion-p7-3b93c3d5c1214f3ca2fb2b89e9868c34.service`。host启动05:46:08.880870Z、5400秒截止07:16:08.880867Z，guest独立原点；PIDs12845/12848/12847。直接启动已验证wheel，无重复构建；HEAD907f4623仅文档变化、生产9b62d2c2，wheel796ca01ae3a51b21b5047a2277e175d2d7ebed819b1faa63c52b0cf2f039df23，扩展71bbd6163b85350741e1f03b4025618fce55e8585922dedcfdfaec203d7f360d。各关动作与最终边界将在核实后更新。
+
+
+## L1 已完成，后续仍进行中
+
+SDK过关05:47:51.060284Z，付费序号21，距host启动102.179秒。L1=21计费动作/0RESET；上一自主P7为24，ARC为19。约153秒快照累计29动作（L2已8动作，含1RESET）。当时自动档案2cells/2成功，NOTES更新0。首关改善仅描述本次前缀，不能外推L5/L6或归因于medium。
+
+
+## L2 已完成，后续仍进行中
+
+SDK过关05:51:10.360811Z，累计付费序号92，距host启动301.480秒；L2独占71动作/2RESET，距L1过关199.301秒。上一自主P7为126动作/4RESET，ARC为48动作/1RESET，旧cold为47；本次改善但仍有额外探索成本，不能称效率已追平ARC。
+
+过关附近快照5genericcells/5成功、0NOTES更新，单次reported input峰值92776。stderr已记录24次retained后输出一次diagnostics-suppressed，4KiB预算正常工作；此后投影全程计数缺测。未观察到roundreceipt不等于完成轮次数为0。

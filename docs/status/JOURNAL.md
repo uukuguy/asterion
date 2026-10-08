@@ -4394,3 +4394,7 @@
 - 2026-10-08 — Task7 packaged r11lL1 PASS5paid/0RESET; archive, identity, replay and cleanup verified; BP35 improvement unmeasured.
 - 2026-10-08 — 1113af6d records complete continuity repairs and verified r11l deployment, separating implemented infrastructure from unmeasured BP35 improvement.
 - 2026-10-08 — User authorizes requirement review then cold medium BP35 L1-L6;32targeted tests pass, launch awaiting review completion.
+- 2026-10-08 — 907f4623 records requirement review READY and frozen medium BP35 comparison contract following user authorization.
+- 2026-10-08 — Frozen medium BP35 starts05:46:08Z targeting sixlevels;5400second shared budget, isolatedstate, no external solving or production changes.
+- 2026-10-08 — Medium BP35 L1 passes21paid/0RESET at102.179seconds; frozen L2 continues, no external intervention.
+- 2026-10-08 — BP35 L2 passes71paid/2RESET; prior126/4 improved but ARC48/1 remains better; frozen L3 continues.
