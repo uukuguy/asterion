@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 11:49 CST. New user-authorized BP35 comparison preparing; not a final handoff.
+Updated: 2026-10-08 11:56 CST. New user-authorized BP35 comparison running; not a final handoff.
 
 ## Current work
 
@@ -11,9 +11,14 @@ Updated: 2026-10-08 11:49 CST. New user-authorized BP35 comparison preparing; no
 - Replacement packaged r11l L1 completed:3paid/3committed,0actorRESET/0NOTES,64.865s wall, replay/seal/cleanup and independent scalar audit verified. Two SDK initialization RESETs are separate. Two successful IPython cells actually use new render/geometry/frame/current/history readers; diff was not observed.6usage entries, normalized input158796/output1424/peak42058; do not confuse tokens with48KiB history target. No live context transcript or original Pi argv observed; installed code/registry/resource/configuration identities are verified.
 - First promotion failed4318tests/2failures/1error; an obsolete installed-official fixture was repaired. Other failure headings were omitted by the original bounded logger and did not recur; no invented attribution. Later two full promotions passed, including final6ca.
 - First packaged launch ended by private observer error before actions; corrected authoritative import location probe and independent review passed before replacement. Preserve both attempts; no solving failure or provider-free claim for the cancelled first launch.
-- The user has now authorized a successor cold BP35 L1–L6 comparison in Task5; preparing one isolated run. This small witness verifies package/tool/action integration and optional NOTES, not BP35 improvement or live expiry behavior. No current trial process remains; preserve existing user console PID52024/port56659.
+- The user has now authorized a successor cold BP35 L1–L6 comparison in Task5; one isolated run started11:56:17CST. This small witness verifies package/tool/action integration and optional NOTES, not BP35 improvement or live expiry behavior. No current trial process remains; preserve existing user console PID52024/port56659.
 
-## Exact deployment evidence
+## Active BP35 run
+
+- Private `.asterion-private/p7-autonomous-bp35-20261008/trial/`; guest unit `asterion-p7-3f1fc059de41439682ef6b6225f9a4c0.service`. Trial agent prepares and owns launch/cleanup; extension independently reviews launch-only differences.
+- Direct exact installedwheel launcher, notMake; reviewed Node stderr tee captures full context projection. Actual run `p7-live-20261008035617-7e0aedbc2f61f977aa10608e` uniquely bound. Started03:56:17.280239Z; host5400s deadline05:26:17.280236Z. Supervisor22530 / Orb22533 / caffeinate22532, exec40455. Trial agent owns supervision and cleanup; do not stop user console52024.
+
+## Prior exact r11l deployment evidence
 
 - Private root `.asterion-private/p7-autonomous-interface-20261008/`: final tests/promotion and implementation review. `witness/` preserves cancelled first run `p7-live-20261008023619-5cb327a1be074acda9448da1`; `witness-replacement/` holds successful run `p7-live-20261008030719-27774d8b3ee84492aa4cfc47`.
 - Replacement unit `asterion-p7-b16ea01b7838420b86c4deae441b8f3d.service`; host supervisor10731 / Make10734 / caffeinate10733 all gone. Unit/cgroup empty, temporary auth/.env removed, user console retained.
@@ -32,6 +37,6 @@ Updated: 2026-10-08 11:49 CST. New user-authorized BP35 comparison preparing; no
 
 ## Next concrete action
 
-1. Trial agent prepares one frozen6ca BP35 L1–L6 run; extension agent reviews only launch differences/isolation/cleanup, review agent owns independent scalar audit. Root owns docs. READY then root GO without another user permission request.
+1. Supervise active frozen6ca BP35 L1–L6 run through target or fixed boundary; trial agent owns processes and cleanup, review agent independent scalar audit, root docs. Launch review and source/installed identity passed; no code edits or actor hints during run.
 2. Existing controls:5400s total,6natural rounds,1000actions,1024model/4096tool callbacks;180s settlement. No outside solving/code edits, old knowledge or L7. [Current comparison](../reviews/2026-10-08-p7-autonomous-bp35-comparison.md).
 3. Measure per-level actions/RESETs, retained recent evidence and model understanding, model request usage and wall/monotonic clocks. NOTES size alone does not establish context quality or solving efficiency.

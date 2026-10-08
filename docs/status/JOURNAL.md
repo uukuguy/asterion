@@ -4372,3 +4372,5 @@
 - 2026-10-08 11:16 CST — Independent final audit PASS;3ACTION6/0paidRESET,2successful reader cells,74artifact manifest; no live expiry or BP35 capability claim.
 - 2026-10-08 11:17 CST — 5d8f4137 records verified autonomous-interface deployment and preserved observer failure, separating r11l integration from unmeasured BP35 capability.
 - 2026-10-08 11:49 CST — User authorizes frozen autonomous BP35 L1–L6 comparison; prior finite controls retained, cold preparation started without production changes.
+- 2026-10-08 11:50 CST — e5eefc22 fixes BP35 six-level scope, controls and baselines so the authorized cold comparison remains reproducible.
+- 2026-10-08 11:56 CST — Frozen6ca BP35 starts11:56:17, targetL6 and13:26:17hostdeadline; independent launch review passed, no outside solving.
