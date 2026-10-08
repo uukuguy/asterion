@@ -4378,3 +4378,6 @@
 - 2026-10-08 12:01 CST — Frozen autonomous L1 verified24paid/0RESET/142.532s; immediate reader use and active context trimming observed, L2 continues unchanged.
 - 2026-10-08 12:02 CST — 676f7769 records exact L1 progress and reader/context observations while preserving frozen L2 evaluation.
 - 2026-10-08 12:16 CST — Frozen autonomous L2 passes at150paid,126levelactions/1021.960s; L3 continues without hints or hot edits.
+- 2026-10-08 12:17 CST — fbcd3b65 records L2 failed-exploration overhead and source-retrieval gap while frozen L3 continues without intervention.
+- 2026-10-08 12:29 CST — L3 research churn persists; first natural round unfinished, no NOTES, frequent projection trims; frozen run continues.
+- 2026-10-08 12:37 CST — BP35 ends2levels/166committed from64KiB diagnosticstderr overflow; completed150prefix replay, source identity and cleanup independently verified.

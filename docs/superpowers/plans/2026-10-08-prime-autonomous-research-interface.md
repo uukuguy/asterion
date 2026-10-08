@@ -13,6 +13,6 @@ Changed-code review READY; TS48pass/6existing skips, real installed-Pi probe pro
 
 ## Task 5 — User-authorized BP35 comparison
 
-**Status:** preparing one frozen cold BP35 L1–L6 run after the user requested “准备好了就实测 BP35”. The implementation/deployment package above is complete; this is its explicitly authorized capability evaluation.
+**Status:** measurement closed, target NOT achieved. Frozen6ca run ended after about34minutes with2levels/166committed; L3unfinished. Projection diagnostics exceeded64KiB Pi RPC stderr quota, before5400sdeadline. L2 independently regressed to126paid versus47/74/48 baselines; its final route remained40steps. Completed150action prefix replay and sealed166action trace, identity and cleanup verified. No production edit or retry; see the comparison below. Implementation/deployment above remains verified only in its stated boundary.
 
 Use frozen production6ca76ca4/gpt-6.1-sol high/seed0, empty isolated state, the prior5400s/6round/1000action/1024model/4096tool controls and180s fixed settlement. No old solution knowledge, outside game hints or midrun code repair. Stop at six levels or the existing termination/budget boundary. Audit outcome, per-level research/action cost, context behavior and cleanup against the fixed ARC/old-P7/NOTES baselines. [Trial evidence](../../reviews/2026-10-08-p7-autonomous-bp35-comparison.md).

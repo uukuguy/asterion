@@ -14,16 +14,16 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | Purpose |
 |---|---|---|
-| `../reviews/2026-10-08-p7-autonomous-bp35-comparison.md` | 🟢 active | Authorized frozen autonomous P7 BP35 L1–L6 trial, fixed ARC/P7 baselines and outcome boundaries. |
+| `../reviews/2026-10-08-p7-autonomous-bp35-comparison.md` | 🟢 active | Completed trial:2levels/166committed, stderr diagnostic overflow; L2 exploration regression, source-retrieval gap, exact replay/cleanup boundaries. |
 | `../reviews/2026-10-08-p7-notes-bp35-comparison.md` | 🟢 active | Completed comparison: four levels/335 committed actions plus partial late response; actual ARC process, memory regression, clock limits and redesign direction. |
 | `../superpowers/specs/2026-10-08-prime-research-notes-design.md` | 🟢 active | Implemented generic/P7 NOTES contract; post-trial research-gate/cut direction is revised by D-2026-10-08-02. |
 | `../superpowers/plans/2026-10-08-prime-research-notes.md` | 🟢 active | NOTES implementation/r11l deployment and Task4 comparison closed; failure boundaries and unimplemented redesign criteria. |
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
-| `../reviews/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implemented autonomy/support layers; final promotion and r11l L1 packaged witness verified, BP35 unmeasured. |
+| `../reviews/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implemented autonomy/support layers; promotion/r11l verified; subsequent failed BP35 trial is separately indexed. |
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
-| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Completed implementation and r11l deployment; user-authorized Task5 BP35 comparison now active. |
+| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implementation/r11l complete; Task5 measurement closed with failed six-level target and diagnostic-overflow boundary. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: autonomous interface deployed; new user-authorized frozen BP35 L1–L6 comparison. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: BP35 trial ended2levels/166actions, cleanup verified; logging/source-retrieval issues remain unimplemented. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |

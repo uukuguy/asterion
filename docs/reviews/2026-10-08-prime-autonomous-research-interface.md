@@ -1,6 +1,6 @@
 # Autonomous research interface implementation review
 
-This package responds to the [failed NOTES BP35 comparison](2026-10-08-p7-notes-bp35-comparison.md). Implementation and deployment checks do not establish BP35 L5/L6 capability. No new BP35 trial is part of this package.
+This package responds to the [failed NOTES BP35 comparison](2026-10-08-p7-notes-bp35-comparison.md). Implementation and deployment checks do not establish BP35 L5/L6 capability. The original implementation/deployment boundary below did not include a new BP35 trial. A subsequent user-authorized [BP35 comparison](2026-10-08-p7-autonomous-bp35-comparison.md) ended2levels/166committed with diagnostic stderr overflow; consult that report for current capability evidence.
 
 ## Changes and reasons
 
@@ -67,4 +67,4 @@ Host Make starts2026-10-08T03:12:34.064780Z and has a fixed deadline03:27:34.064
 
 Private result and receipts: `.asterion-private/p7-autonomous-interface-20261008/witness-replacement/public-final-metadata.json`, `installed-runtime-identity.json`, `frozen-source.json`, `reader-and-reset-metadata.json`, `action-clocks.json`, and the associated trace/journal/cleanup artifacts. `evidence-sha256.json` indexes74 final private artifacts. The separate certified replay also has two initialization RESETs and three ACTION6 actions; replay verification is not folded into paid solving actions. The first failed observer attempt remains separately preserved in `witness/`.
 
-Independent final scalar audit passed: committed trace and five complete SDK rows align (two initialization RESETs plus three ACTION6 actions), with no unresolved effect. The implementation and small packaged deployment are verified within these boundaries. BP35 L1–L6 has not been rerun on this version; improved long-range reasoning, action efficiency and L5/L6 autonomous completion remain unverified. A later comparison should retain per-level paid actions/RESETs, useful recent evidence, model-authored understanding, request usage and clock data rather than judging by NOTES size alone.
+Independent final scalar audit passed: committed trace and five complete SDK rows align (two initialization RESETs plus three ACTION6 actions), with no unresolved effect. The implementation and small packaged deployment are verified within these boundaries. At this deployment checkpoint BP35 had not yet been rerun. The subsequent comparison linked above failed its six-level target; improved long-range reasoning, action efficiency and L5/L6 autonomous completion remain unverified. A later comparison should retain per-level paid actions/RESETs, useful recent evidence, model-authored understanding, request usage and clock data rather than judging by NOTES size alone.

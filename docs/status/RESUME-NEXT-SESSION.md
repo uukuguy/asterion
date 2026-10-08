@@ -1,47 +1,31 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 12:16 CST. New user-authorized BP35 comparison running; not a final handoff.
+Updated: 2026-10-08 12:37 CST. BP35 measurement and cleanup complete; not a final handoff.
 
-## Current work
+## Current verified result
 
-- User direction: LLM owns reasoning and research strategy; harness supplies reliable evidence/tools and real execution controls. Keep reusable support separate from P7 adaptation. NOTES hold stable understanding; no mandatory reasoning headings/stages.
-- Canonical [implementation plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md), [contract](../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md), and [review/evidence](../reviews/2026-10-08-prime-autonomous-research-interface.md).
-- Production committed as `6ca76ca4` (base `959fcb0c`, not pushed): optional P7 NOTES/predictions/research metadata; capacity-driven complete recent context; discoverable frame/render/geometry/diff readers; generic dual clocks; P7 durable intent/reply/commit and fixed evidence settlement. Same runner and three tools.
-- Changed-code review READY. TS48pass/6existing skips; actual installed-Pi projection probe PASS/0provider calls; Python343tests/1existing skip; targeted Ruff PASS. Final-source full promotion PASS25commands/provider0 (`promotion-deployment.log`).
-- Replacement packaged r11l L1 completed:3paid/3committed,0actorRESET/0NOTES,64.865s wall, replay/seal/cleanup and independent scalar audit verified. Two SDK initialization RESETs are separate. Two successful IPython cells actually use new render/geometry/frame/current/history readers; diff was not observed.6usage entries, normalized input158796/output1424/peak42058; do not confuse tokens with48KiB history target. No live context transcript or original Pi argv observed; installed code/registry/resource/configuration identities are verified.
-- First promotion failed4318tests/2failures/1error; an obsolete installed-official fixture was repaired. Other failure headings were omitted by the original bounded logger and did not recur; no invented attribution. Later two full promotions passed, including final6ca.
-- First packaged launch ended by private observer error before actions; corrected authoritative import location probe and independent review passed before replacement. Preserve both attempts; no solving failure or provider-free claim for the cancelled first launch.
-- The user has now authorized a successor cold BP35 L1–L6 comparison in Task5; one isolated run started11:56:17CST. This small witness verifies package/tool/action integration and optional NOTES, not BP35 improvement or live expiry behavior. No current trial process remains; preserve existing user console PID52024/port56659.
+- Latest user request: “准备好了就实测 BP35”. One frozen cold BP35 L1–L6 evaluation completed as a measurement, with target NOT achieved. No production changes, outside game hints or retry during/after this trial.
+- Production `6ca76ca4` (base `959fcb0c`), gpt-6.1-sol/high, bp35-0a0ad940 seed0, cold isolated root. Intended5400s/6natural rounds/1000paid actions/1024model+4096tool callbacks,180s settlement. Runtime ended after about34minutes, before deadline.
+- Final2levels/166committed: L1=24/0RESET/142.532s; L2=126/4RESET/1021.960s; L3=16unfinished/2RESET. L4–L6unentered. No unresolved effect, mainSDK168complete rows=2initial+166paid.
+- Direct terminal cause:306 context-projection diagnostic lines,65650bytes, exceed Pi RPC65536byte cumulative stderr bound. Error model_rpc_error / Pi RPC output limit exceeded (stderr), ApplicationRunError. Allstderr lines are projection metadata. Not5400timeout; deadline_expired=false.
+- L2 extra cost is failed exploration:2+RESET+6+RESET+40+RESET+34+RESET+40success. Final40-step route equals oldcold/NOTES; +79paid versus oldcold entirely failed/restart overhead.
+-254cells180completed/74failed;0NOTES/0exports.307usage input7192543/output43430/peak54193.306projections269trimmed/9retained/28over-budget. Bytes/uniquecontext/provider tokens distinct; no controlled single-variable causal attribution.
+- Trace166sealed; positive replay evidence covers completed L1–L2 prefix150, NOT all166. Natural-round completion not fully reconstructable from retainednative tail; no demonstrated natural continuation. Do not infer rounds from usage counts.
+- Frozen source/wheel/bundle, installed582files and independent scalar audit verified. Owned supervisor22530/Orb22533/caffeinate22532 gone, guestunit/cgroup empty, temporaryauth/.env removed. Original user consolePID52024/port56659 retained. No trial running or queued.
 
-## Active BP35 run
+## Evidence and recovery
 
-- Private `.asterion-private/p7-autonomous-bp35-20261008/trial/`; guest unit `asterion-p7-3f1fc059de41439682ef6b6225f9a4c0.service`. Trial agent prepares and owns launch/cleanup; extension independently reviews launch-only differences.
-- Direct exact installedwheel launcher, notMake; reviewed Node stderr tee captures full context projection. Actual run `p7-live-20261008035617-7e0aedbc2f61f977aa10608e` uniquely bound. Started03:56:17.280239Z; host5400s deadline05:26:17.280236Z. Supervisor22530 / Orb22533 / caffeinate22532, exec40455. Trial agent owns supervision and cleanup; do not stop user console52024.
+- [Final comparison](../reviews/2026-10-08-p7-autonomous-bp35-comparison.md) is authoritative for actual process, baselines, failure and future directions. [Canonical plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md) Task5 measurement closed, target failed. [Implementation/deployment review](../reviews/2026-10-08-prime-autonomous-research-interface.md) preserves earlier small-witness boundary.
+- Private `.asterion-private/p7-autonomous-bp35-20261008/trial/`; run `p7-live-20261008035617-7e0aedbc2f61f977aa10608e`, unit `asterion-p7-3f1fc059de41439682ef6b6225f9a4c0.service`. Read public-final-metadata.json and final audit/artifact receipts. Direct installedwheel launcher, notMake.
+- Host starts03:56:17.280239Z; host5400deadline05:26:17.280236Z; guestdeadline05:26:17.340229Z. Distinct fixed origins, no renewal. LastSDK04:26:39.560602Z; runtime later fails from diagnostics.
+- Wheel SHA256 `e9440b89eefb5f2f8c927200bbc7efe56a2e5b56924dafdec3cd020a845f101c`; extension `b93dc05d92e039b55de77db4bd5c1276f7a46c8f0524203c42a22cb23ef15d3a`;564 source files unchanged.
+- Prior verification: TS48pass/6existing skips, installed-Pi provider-free projection PASS, Python343tests/1skip, full final promotion25commands/provider0. Smallr11lL1 passed3paid/0NOTES/64.865s. These did not exercise long-run log exhaustion.
+- Earlier baselines: oldcold P7 fivelevels/213paid (L1–6:26/47/41/23/30/46unfinished); NOTES fourlevels/335committed plus latepartial unknown (44/74/75/51/91unfinished/unentered), clock/finalization failed; arc-skill sixlevels/271paid (19/48/34/23/45/102), L5/L6 oneRESET each. Historical final100 depended on accumulated outer research; not a cold capability baseline.
 
-- L2 passed04:15:43.124368Z / cumulative150paid / level126paid /1021.960209s afterL1. L3active, same source/budget, no intervention. Independent audit PASS:2+RESET+6+RESET+40+RESET+34+RESET+40success.4paidRESET; final40-step route equals oldcold/NOTES; excess cost is failed exploration.108cells/29failed/0NOTES.
-- Exact L1 passed at03:58:41.164159Z /24paid/0RESET/0NOTES,142.532s from initial observation (143.884s host). Independent SDK/trace audit PASS. Subsequently L2passed; run unchanged. Raw reader used in first cell. Projection trimming observed but records lack timestamps; no exact level-only cut counts.
+## Current judgment and unimplemented boundary
 
-- Read-only source audit identified missing current-run cell-source read API; ordinary Python error feedback is present, private archive omits error text. Dynamic getsource limitation is code-based inference, not verified per-error transcript. No source edits; do not inject fixes/hints during current run.
-
-## Prior exact r11l deployment evidence
-
-- Private root `.asterion-private/p7-autonomous-interface-20261008/`: final tests/promotion and implementation review. `witness/` preserves cancelled first run `p7-live-20261008023619-5cb327a1be074acda9448da1`; `witness-replacement/` holds successful run `p7-live-20261008030719-27774d8b3ee84492aa4cfc47`.
-- Replacement unit `asterion-p7-b16ea01b7838420b86c4deae441b8f3d.service`; host supervisor10731 / Make10734 / caffeinate10733 all gone. Unit/cgroup empty, temporary auth/.env removed, user console retained.
-- Frozen production6ca, modelgpt-6.1-sol/high, seed0, target1. Host start03:12:34.064780Z, fixed900s deadline03:27:34.064775Z; guest own paired clocks consistent across all journal transactions. No renewed budget, outside game hints or hot edits.
-- `public-final-metadata.json`, `installed-runtime-identity.json`, `frozen-source.json` and associated trace/journal/cleanup artifacts prove the stated boundaries.3committed equals3potential_effects with unresolved=false; potential count includes committed effects.
-- Actual wheel SHA256 `e9440b89eefb5f2f8c927200bbc7efe56a2e5b56924dafdec3cd020a845f101c`; bundled extension `b93dc05d92e039b55de77db4bd5c1276f7a46c8f0524203c42a22cb23ef15d3a`;564 source files and582 installed package files match.
-
-## Prior verified evidence
-
-- [NOTES BP35 comparison](../reviews/2026-10-08-p7-notes-bp35-comparison.md): run `p7-live-20261007234531-87e38f105ea518bdba94623a`, frozen source `ebcefec97d40dd7466d41725688fac9eb011a8aa`. Four levels/335 committed actions; L5 unfinished91paid/6RESET, L6 unentered. L1–L4 paid44/74/75/51. One late truncated SDK response remains uncommitted;335 is not the physical-effect upper bound.
--145 notes495–1439bytes/median861;654 cuts usually retain only2messages; peak input36572 vs old255820. Reduced tokens did not improve solving. Old cold P7 reached5levels/213paid; original arc-skill reached6levels/271paid with natural continuations.
-- Prior NOTES trial clock/cleanup boundary failed: wall7062s vs mono5296s, host Sleep/Wake evidence, original cleanupTimeoutExpired. Strict5400/180 and clean seal are not PASS. Eventual owned process/auth cleanup and source/resource hashes verified. No previous trial process remains active; user console preserved.
-- Actual process comparison found reader discoverability failure, manual grid reconstruction, lost counterexamples/stable state understanding and excessive note-triggered cuts. ARC small NOTES coexisted with substantial recent context; notes size is not total context size. No controlled single-variable causal claim.
-- [ARC L5/L6 evidence](../reviews/2026-10-07-arc-skill-bp35-l5-l6-trial.md): this gpt-6.1-sol run L5=45paid (13+RESET+31), L6=102paid (58+RESET+43), each1RESET. Author scorecard's L6=73 is a separate run. ARC received no intermediate game solution/code repair; operator recovery and natural continuation are recorded separately.
-- User's historical P7 outer analysis/code interventions are documented in the ARC comparison and Git timeline, not dismissed by final successful route lengths. [Interactive HTML](../reviews/2026-10-07-bp35-autonomy-explainer.html) explains the earlier comparison; the new implementation review is authoritative for current code.
-
-## Next concrete action
-
-1. Supervise active frozen6ca BP35 L1–L6 run through target or fixed boundary; trial agent owns processes and cleanup, review agent independent scalar audit, root docs. Launch review and source/installed identity passed; no code edits or actor hints during run.
-2. Existing controls:5400s total,6natural rounds,1000actions,1024model/4096tool callbacks;180s settlement. No outside solving/code edits, old knowledge or L7. [Current comparison](../reviews/2026-10-08-p7-autonomous-bp35-comparison.md).
-3. Measure per-level actions/RESETs, retained recent evidence and model understanding, model request usage and wall/monotonic clocks. NOTES size alone does not establish context quality or solving efficiency.
+- Preserve LLM-owned reasoning, optional research structure and real execution safeguards. Failed autonomy must not be answered by restoring mandatory per-action prose gates.
+- Deterministic repair priority: bound/disable context-hook stderr telemetry; two log sites need a shared finite budget. Keep RPCguard. Do not merely raise its quota or assume status-change dedup guarantees a bound.
+- Separate usable-data gap: current cell source is archived but cannot be queried by the actor; dynamic exec has no source cache. Ordinary Python exceptions do reach model JSON, while cell archive omits error text; do not claim all failing cells lacked feedback.
+- Repeated history/helper reconstruction, failed source inspection and0NOTES suggest knowledge continuity remains weak. More careful context retention and model-owned consolidation need evaluation; lowtoken alone is not success. Exact causal split is unproven.
+- No fixes above have been implemented. The latest user authorized this measurement; no new full trial is queued. Next continuation should address the verified generic diagnostic/source-read boundaries, then define the smallest appropriate evaluation without midrun repair.
