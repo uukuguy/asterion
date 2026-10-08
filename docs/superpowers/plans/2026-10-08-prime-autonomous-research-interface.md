@@ -146,3 +146,5 @@ User explicitly says “改完了就继续” after the sleep-interrupted run. O
 ## Task 18 — User-directed DeepSeek V4 Pro direct BP35 comparison
 
 User interrupts Flash and changes .env to deepseek-v4-pro. Stop/seal/clean the exact Flash trial, then directly launch fresh cold BP35 L1–L6 with current Pro/high and the already verified frozen wheel, no repeat r11l. Verify actual Pi identity before model work. New finite5400second launch window plus180cleanup; standard6round/1000paid/1024model/4096tool controls. Retain per-level comparisons and user preference to stop if L2/L3 show a large gap. Trial owner owns evidence/launch/cleanup; root owns stop decisions and state.
+
+Task18 user-stopped: Pro L1 unfinished30paid,30usage,1109.028seconds through cleanup; committed effects known and cleanup receipt clear. No L2/L3 transfer assessment achieved. User restored .env to openai-codex/gpt-6.1-sol; effort remains high, no further trial authorized.

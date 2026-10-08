@@ -4471,3 +4471,4 @@
 - 2026-10-08 — 46e087ed records packaged checks and sleep-interrupted witness, preserving the incomplete live verification boundary.
 - 2026-10-08 — 4ae31556 records authorized bounded DeepSeek continuation and refreshes the live recovery checkpoint.
 - 2026-10-08 — DeepSeek packaged r11l L1 passes10paid/0RESET; real tools, replay, installation and cleanup verified.
+- 2026-10-08 — f1d3df16 records settled Flash cancellation and user-directed fresh Pro BP35 trial.
