@@ -57,6 +57,25 @@ for line in sys.stdin:
             with open(sys.argv[1], "w", encoding="utf-8") as marker:
                 marker.write(json.dumps(abort, separators=(",", ":")))
             time.sleep(60)
+        if message == "invalid-failure-json":
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-INVALID", "status": float("nan")}})
+            continue
+        if message in {"retry-exhausted", "retry-exhausted-two", "retry-no-settlement", "retry-bad-end"}:
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-RETRY-ERROR HTTP 403"}})
+            emit({"type": "agent_end", "willRetry": True})
+            emit({"type": "auto_retry_start", "attempt": 1, "maxAttempts": 2 if message == "retry-exhausted-two" else 1, "delayMs": 0, "errorMessage": "PRIVATE-START"})
+            emit({"type": "agent_start"})
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-FINAL"}})
+            if message == "retry-exhausted-two":
+                emit({"type": "agent_end", "willRetry": True})
+                emit({"type": "auto_retry_start", "attempt": 2, "maxAttempts": 2, "delayMs": 0, "errorMessage": "PRIVATE-START-TWO"})
+                emit({"type": "agent_start"})
+                emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-FINAL-TWO"}})
+            emit({"type": "agent_end", "willRetry": False})
+            emit({"type": "auto_retry_end", "success": False, "attempt": 2 if message in {"retry-bad-end", "retry-exhausted-two"} else 1, "finalError": "PRIVATE-FINAL"})
+            if message != "retry-no-settlement":
+                emit({"type": "agent_settled"})
+            continue
         if message == "retry-recovered":
             emit({"type": "message_end", "message": {"role": "assistant", "stopReason": "error", "errorMessage": "PRIVATE-RETRY-ERROR"}})
             emit({"type": "agent_end", "willRetry": True})
@@ -71,7 +90,7 @@ for line in sys.stdin:
             "assistantMessageEvent": {"type": "text_delta", "delta": message},
         })
         if message in {"assistant-error", "assistant-aborted"}:
-            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": message.removeprefix("assistant-"), "errorMessage": "PRIVATE-ERROR"}})
+            emit({"type": "message_end", "message": {"role": "assistant", "stopReason": message.removeprefix("assistant-"), "errorMessage": "PRIVATE-ERROR HTTP 999", "error": {"message": "PRIVATE-ERROR", "status": 403, "code": "SECRET-PROVIDER-CODE", "headers": {"secret": "PRIVATE-HEADER"}}, "content": [{"text": "PRIVATE-CONTENT"}]}})
         emit({"type": "agent_end", "messages": []})
         if message == "continuation":
             emit({"type": "agent_start"})
@@ -130,6 +149,8 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
                     )
                     self.assertEqual(result.final_text, "recovered")
                     self.assertFalse(rpc._lifecycle_poisoned)
+                    self.assertIsNone(rpc.last_diagnostic)
+                    self.assertNotIn("PRIVATE-RETRY-ERROR", repr(result.events))
                 finally:
                     await rpc.close()
 
@@ -147,7 +168,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
 
     def make_session(
         self, *, deadline_seconds: float | None = 2.0, compact_events: bool = False,
-        diagnostics=None,
+        diagnostics=None, private_failure_sink=None,
     ) -> PiRpcSession:
         return PiRpcSession(
             PiRpcConfig(
@@ -157,7 +178,7 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
                 deadline_seconds=deadline_seconds,
                 compact_events=compact_events,
             ),
-            diagnostics=diagnostics,
+            diagnostics=diagnostics, private_failure_sink=private_failure_sink,
         )
 
     async def test_explicit_no_deadline_keeps_reusable_commands_and_cancellation(self) -> None:
@@ -271,6 +292,126 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("PRIVATE-ERROR", str(caught.exception))
         finally:
             await rpc.close()
+
+    async def test_provider_failure_metadata_and_private_capture_in_both_modes(self) -> None:
+        class Sink:
+            def __init__(self):
+                self.records = []
+            def record(self, record):
+                self.records.append(record)
+        for compact_events in (False, True):
+            with self.subTest(compact_events=compact_events):
+                private = Sink()
+                diagnostics = MemoryDiagnosticSink()
+                rpc = self.make_session(compact_events=compact_events, diagnostics=diagnostics,
+                                        private_failure_sink=private)
+                await rpc.open(signal=NeverCancelled())
+                try:
+                    with self.assertRaises(RuntimeError) as caught:
+                        await rpc.prompt("assistant-error", signal=NeverCancelled(), on_event=self.events.append)
+                    metadata = caught.exception.failure_metadata
+                    self.assertEqual(metadata.http_status, 403)
+                    self.assertEqual(metadata.provider_code, "unknown")
+                    self.assertTrue(metadata.permanent_rejection)
+                    self.assertEqual(metadata.stop_reason, "error")
+                    self.assertFalse(metadata.native_retry_exhausted)
+                    self.assertEqual(rpc.last_diagnostic.failure_code, "pi-provider-execution")
+                    self.assertEqual(rpc.last_diagnostic.failure_metadata, metadata)
+                    self.assertIn(b"PRIVATE-ERROR", private.records[0].error_bytes)
+                    self.assertNotIn(b"PRIVATE-HEADER", private.records[0].error_bytes)
+                    self.assertNotIn(b"PRIVATE-CONTENT", private.records[0].error_bytes)
+                    public = str(caught.exception) + repr(rpc.last_diagnostic) + repr(self.events)
+                    self.assertNotIn("PRIVATE-ERROR", public)
+                    self.assertNotIn("SECRET-PROVIDER-CODE", public)
+                finally:
+                    await rpc.close()
+
+    async def test_invalid_json_is_rejected_before_private_capture(self) -> None:
+        class Sink:
+            def __init__(self):
+                self.records = []
+            def record(self, record):
+                self.records.append(record)
+        sink = Sink()
+        rpc = self.make_session(private_failure_sink=sink)
+        await rpc.open(signal=NeverCancelled())
+        try:
+            with self.assertRaisesRegex(RuntimeError, "invalid JSONL"):
+                await rpc.prompt("invalid-failure-json", signal=NeverCancelled(), on_event=lambda event: None)
+            self.assertEqual(rpc._private_failure_bytes, 0)
+            self.assertEqual(sink.records, [])
+        finally:
+            await rpc.close()
+
+    async def test_private_sink_failure_does_not_change_execution(self) -> None:
+        class Sink:
+            def record(self, record):
+                raise RuntimeError("PRIVATE-SINK-SECRET")
+        rpc = self.make_session(private_failure_sink=Sink())
+        await rpc.open(signal=NeverCancelled())
+        try:
+            with self.assertRaisesRegex(RuntimeError, "Pi RPC prompt execution failed") as caught:
+                await rpc.prompt("assistant-error", signal=NeverCancelled(), on_event=lambda event: None)
+            self.assertIsNone(caught.exception.failure_metadata.diagnostic_id)
+            self.assertTrue(rpc._lifecycle_poisoned)
+        finally:
+            await rpc.close()
+
+    async def test_exact_exhausted_failure_can_be_settled_once_without_reset(self) -> None:
+        from asterion.runtimes.pi_rpc import PiRpcPromptFailure
+        for compact_events in (False, True):
+            with self.subTest(compact_events=compact_events):
+                rpc = self.make_session(compact_events=compact_events)
+                await rpc.open(signal=NeverCancelled())
+                try:
+                    process, deadline = rpc.process, rpc._session_deadline
+                    with self.assertRaises(PiRpcPromptFailure) as caught:
+                        await rpc.prompt("retry-exhausted", signal=NeverCancelled(), on_event=self.events.append)
+                    error = caught.exception
+                    self.assertTrue(error.failure_metadata.native_retry_exhausted)
+                    self.assertEqual(error.failure_metadata.native_retry_count, 1)
+                    self.assertIsNone(error.failure_metadata.http_status)
+                    with self.assertRaises(RuntimeError):
+                        rpc.settle_failed_prompt(PiRpcPromptFailure(error.failure_metadata))
+                    sequence = rpc._event_sequence
+                    rpc.settle_failed_prompt(error)
+                    self.assertIs(rpc.process, process)
+                    self.assertEqual(rpc._session_deadline, deadline)
+                    self.assertEqual(rpc._event_sequence, sequence)
+                    with self.assertRaises(RuntimeError):
+                        rpc.settle_failed_prompt(error)
+                    result = await rpc.prompt("next", signal=NeverCancelled(), on_event=lambda event: None)
+                    self.assertEqual(result.final_text, "next")
+                    self.assertIsNone(rpc.last_diagnostic)
+                finally:
+                    await rpc.close()
+
+    async def test_native_retry_episode_has_one_end_after_multiple_attempts(self) -> None:
+        rpc = self.make_session()
+        await rpc.open(signal=NeverCancelled())
+        try:
+            with self.assertRaises(RuntimeError) as caught:
+                await rpc.prompt("retry-exhausted-two", signal=NeverCancelled(), on_event=lambda event: None)
+            self.assertTrue(caught.exception.failure_metadata.native_retry_exhausted)
+            self.assertEqual(caught.exception.failure_metadata.native_retry_count, 2)
+            rpc.settle_failed_prompt(caught.exception)
+            self.assertFalse(rpc._lifecycle_poisoned)
+        finally:
+            await rpc.close()
+
+    async def test_incomplete_or_invalid_native_retry_never_unpoisons(self) -> None:
+        for prompt in ("retry-no-settlement", "retry-bad-end", "assistant-error"):
+            with self.subTest(prompt=prompt):
+                rpc = self.make_session(deadline_seconds=0.15)
+                await rpc.open(signal=NeverCancelled())
+                try:
+                    with self.assertRaises(RuntimeError) as caught:
+                        await rpc.prompt(prompt, signal=NeverCancelled(), on_event=lambda event: None)
+                    with self.assertRaises(RuntimeError):
+                        rpc.settle_failed_prompt(caught.exception)
+                    self.assertTrue(rpc._lifecycle_poisoned)
+                finally:
+                    await rpc.close()
 
     async def test_compact_semantics_match_in_both_projection_modes(self) -> None:
         for compact_events in (False, True):
