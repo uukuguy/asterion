@@ -4430,3 +4430,5 @@
 - 2026-10-08 — High2L5passes31/0RESET;159cumulative,152success+6failed+1RESET; frozenL6continues withscore-guidancegap documented only.
 - 2026-10-08 — e8bab389 records verified scoring thresholds, autonomous score-awareness gap, and frozen high2 L5 checkpoint.
 - 2026-10-08 — User authorizes explicit goals, baselines and scoring information for autonomous planning; implement after frozen high2 finishes.
+- 2026-10-08 — 758dd3d0 records authorized score-aware planning scope while preserving frozen high2 comparison and P7 domain boundaries.
+- 2026-10-08 — User clarifies stable full-game score objective; L6 is external stop boundary, isolated implementation preserves active trial.
