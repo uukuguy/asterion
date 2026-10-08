@@ -141,3 +141,8 @@ Task16 implemented: generic schema normalization, private typed failure capture 
 ## Task 17 — Continue repaired DeepSeek packaged verification and BP35
 
 User explicitly says “改完了就继续” after the sleep-interrupted run. One fresh 5400-second task window covers Make r11l L1 (at most900seconds) then independent cold BP35 L1–L6 using the remaining task time, plus180seconds cleanup. No automatic deadline renewal. Frozen production c5f8e71a, documentation HEAD46e087ed; DeepSeek Flash/high from operator .env. Existing6round/1000paid/1024model/4096tool limits remain. Trial owner notes_bp35_trial owns fresh private evidence, installation identity, launch, monitoring and cleanup; review owner observes per-level comparisons without actor feedback. No production changes or prior game knowledge transfer. Preserve console52024/56659. Host power assertions are checked without changing system power settings.
+
+
+## Task 18 — User-directed DeepSeek V4 Pro direct BP35 comparison
+
+User interrupts Flash and changes .env to deepseek-v4-pro. Stop/seal/clean the exact Flash trial, then directly launch fresh cold BP35 L1–L6 with current Pro/high and the already verified frozen wheel, no repeat r11l. Verify actual Pi identity before model work. New finite5400second launch window plus180cleanup; standard6round/1000paid/1024model/4096tool controls. Retain per-level comparisons and user preference to stop if L2/L3 show a large gap. Trial owner owns evidence/launch/cleanup; root owns stop decisions and state.

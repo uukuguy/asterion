@@ -4469,3 +4469,5 @@
 - 2026-10-08 — db546e2b prevents malformed Unicode failure text from disrupting RPC diagnostics; independent review READY.
 - 2026-10-08 — c5f8e71a verifies generic recovery core packaging and records passing tests before live deployment.
 - 2026-10-08 — 46e087ed records packaged checks and sleep-interrupted witness, preserving the incomplete live verification boundary.
+- 2026-10-08 — 4ae31556 records authorized bounded DeepSeek continuation and refreshes the live recovery checkpoint.
+- 2026-10-08 — DeepSeek packaged r11l L1 passes10paid/0RESET; real tools, replay, installation and cleanup verified.

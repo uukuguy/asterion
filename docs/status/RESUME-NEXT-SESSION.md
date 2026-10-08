@@ -21,3 +21,11 @@ Generic recovery permits at most one neutral continuation in the same healthy ch
 ## Evidence and next steps
 
 Canonical comparison: docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md. Worklist Tasks13–17 preserves trial sequence. Design: docs/superpowers/specs/2026-10-08-prime-rpc-failure-recovery-design.md. New task .asterion-private/p7-deepseek-continuation-20261008/task-budget.json launched12:43:19.814340Z, fixed deadline14:13:19.814340Z plus180seconds cleanup; witness deadline12:58:19.814340Z. Witness runp7-live-20261008124300-7822f3ae18df4c0fba4978c5, supervisor32715/Make32720/caffeinate32719/session92734. Owned power assertions observed; track through completion, independently verify installation/actions/replay/cleanup, then update canonical report and commit state. Keep runtime frozen while active.
+
+Task17 witness PASS: exact12:50:50.593344Z,450.779004seconds fromhostlaunch,10paid/0RESET. Actual workspace1/execute_plan6 successful,10actionssealed/fullreplayPASS, installedidentity/source/cleanup verified. Trial owner now launches fresh coldBP35 under unchanged14:13:19.814340Z deadline. No r11lknowledge transfer.
+
+User steering during Task17: assess L2/L3 transfer; stop early if gap remains large (actions, ineffective repetition or stalled progress). Do not force completion throughL6. Model weakness is a hypothesis, not proven cause. Root owns early-stop decision; trial owner notified.
+
+LATEST USER STEERING supersedes Flash task: stop current Flash trial now; .env changed to deepseek-v4-pro, independently confirmed. Trial owner instructed immediate graceful stop/cleanup/seal, then fresh direct BP35 without r11l. One new5400second Pro/high launch window plus180cleanup, same limits; require actual Pi Pro identity and cold root. No source changes or knowledge transfer. Per-level tracking and poor L2/L3 early-stop preference remain.
+
+Flash final after user stop:54paid/0levels/1RESET/3UNDO;54journalcommittedknown, no unresolvedeffects. 679.111957wall/679.106755mono, ownedcleanup/source/consolePASS. This is a user-stopped partial, not a completed ability trial. Fresh Pro preparation underway.
