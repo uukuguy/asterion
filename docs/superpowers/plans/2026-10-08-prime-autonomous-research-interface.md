@@ -108,3 +108,10 @@ In the isolated worktree, verify exact authoritative accounting source and score
 
 
 Task11 completed: high2 L1–L6 PASS262paid/2RESET/4409.249s, full replay/source/cleanup verified; no trial active. Task12 isolated61951178 integrated as851ee071 aftercleanup; related94tests/finalprojection22tests/independentreviewREADY, provider-free wheel install and scoreprobePASS. Newpolicy gameplay not yet measured; arbitrary crosssession continuation not added.
+
+
+## Task 13 — Authorized score-aware medium BP35 comparison
+
+User explicitly authorizes one fresh BP35 L1–L6 trial of the integrated score-awareness change and requests per-level process comparisons. Freeze production e869a3dd (scoring851ee071 plus medium default); build a new medium wheel, do not use isolated Task12 high wheel. Same seed0/sol/5400seconds/6rounds/1000paid/1024model/4096tool+180cleanup. No prior notes/routes, outside solve hints, midrun source/prompt edits or extra attempt. Full-game/100 objective and all scoring facts remain stable; operator stops afterL6. Preserve console52024/56659.
+
+Trialowner notes_bp35_trial owns fresh privatebase .asterion-private/p7-scoring-medium-bp35-20261008/trial/, coldroot, installedidentity, exactrun supervisor and finalreplay/cleanup. notes_bp35_review observes only, reporting eachlevel vs oldmedium (21/71/34/23/30/42,221paid/2RESET/1023.280s): totalpaid, failed/RESET/successful episode decomposition, exploration/model/route differences, NOTES revisions, scorefact usage evidence and timed compute versus unclassified waiting. No feedback toactor. Root owns docs and finalintegration. One sample cannot establish causal or general improvement.

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 after high2 cleanup and score-planning integration. No trial remains active; no handoff requested.
+Updated: 2026-10-08 Task13 preparation. User authorizes one new score-aware medium BP35 L1–L6 trial with per-level process tracking. Trialowner notes_bp35_trial prepares fresh .asterion-private/p7-scoring-medium-bp35-20261008/trial/; source e869a3dd frozen, newmedium wheel required. Same5400s/6round/1000action/1024model/4096tool+180cleanup. No hints/hotfix/oldknowledge/extraattempt. Readonly comparisonowner notes_bp35_review. Preserveconsole52024/56659. No handoff requested.
 
 ## Verified facts
 
@@ -16,7 +16,7 @@ Medium is the default again: lowest paidactions andelapsed among these completed
 
 ## Unfinished boundaries / next action
 
-- Sourcepolicy improvement has no newliveBP35 evidence. No extra providertrial authorized by this checkpoint. Final integrated26tests/Ruff/docs295files163linksPASS.
+- Sourcepolicy improvement has no newliveBP35 evidence. Exactly one new Task13 providertrial now authorized; no extra retry. Final integrated26tests/Ruff/docs295files163linksPASS.
 - User wants stable fullgame objective regardless temporaryL6 stop; do not restore sixlevel-local-score objective. Existingstop stillenforced; no automaticbudgetrenewal. This change doesnot implement arbitrarycrosssession L6→L9 continuation.
 - Allcomparisons stop6/9; none prove newfullgame100. NOTESsmall doesnot mean wholecontextsmall; providerwaiting vs reasoningtime notfully separated.
 - Independenthigh2 auditPASS; seq224–239 laterexplores missingupperright,seq240 reverses,NOTES acknowledges truncatedmap and last22actionsfinish. Earlyseq223 analysis is not finalfailure.

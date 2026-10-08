@@ -4439,3 +4439,5 @@
 - 2026-10-08 — 851ee071 integrates reviewed full-game scoring feedback after frozen high2 cleanup, preserving operator stop boundaries.
 - 2026-10-08 — Task12 wheel matches commit and preserved extension; installed prompt and scoring probe pass with zero provider calls.
 - 2026-10-08 — Independent high2 audit passes; actor eventually corrects truncated map autonomously, while integrated scoring/config tests26 and docs pass.
+- 2026-10-08 — e869a3dd restores medium and records completed high comparison plus verified score-feedback integration without claiming new gameplay results.
+- 2026-10-08 — User authorizes one cold score-aware medium BP35 trial, matching prior controls and tracking each level without actor feedback.
