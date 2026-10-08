@@ -4474,3 +4474,4 @@
 - 2026-10-08 — f1d3df16 records settled Flash cancellation and user-directed fresh Pro BP35 trial.
 - 2026-10-08 — 761e5f9f records Pro cancellation and restored Sol configuration; no further model run authorized.
 - 2026-10-08 — a046cc7c restores medium reasoning to match the best completed Sol comparison; four configuration tests pass.
+- 2026-10-08 — 766d71e0 prioritizes configured Prime effort across launchers and guest transport; tests, independent review and promotion pass.

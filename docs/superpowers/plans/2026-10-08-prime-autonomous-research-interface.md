@@ -148,3 +148,8 @@ User explicitly says “改完了就继续” after the sleep-interrupted run. O
 User interrupts Flash and changes .env to deepseek-v4-pro. Stop/seal/clean the exact Flash trial, then directly launch fresh cold BP35 L1–L6 with current Pro/high and the already verified frozen wheel, no repeat r11l. Verify actual Pi identity before model work. New finite5400second launch window plus180cleanup; standard6round/1000paid/1024model/4096tool controls. Retain per-level comparisons and user preference to stop if L2/L3 show a large gap. Trial owner owns evidence/launch/cleanup; root owns stop decisions and state.
 
 Task18 user-stopped: Pro L1 unfinished30paid,30usage,1109.028seconds through cleanup; committed effects known and cleanup receipt clear. No L2/L3 transfer assessment achieved. User restored .env to openai-codex/gpt-6.1-sol; effort remains high, no further trial authorized.
+
+
+## Task 19 — Latest Sol medium BP35 verification
+
+User authorizes one latest-version cold BP35 L1–L6 comparison against best1023.280seconds/221paid. Production766d71e0 includes generic RPC fixes, score guidance and env effort control; current operator.env explicitly openai-codex/gpt-6.1-sol/medium. Rebuild/install matching wheel, verify actualPi identity, then run5400second finite ceiling/6round/1000paid/1024model/4096tool plus180cleanup. No new r11l prerequisite (tool registry unchanged), no inherited game knowledge or actor hints. Root interprets “相差不大” initially as roughly20% elapsed overhead (1227.936seconds) plus no material action regression, not an execution cutoff or statistical equivalence claim. Trial owner owns private installation/launch/monitor/replay/cleanup; root tracks per-level against21/71/34/23/30/42, RESET0/2/0/0/0/0. Preserve console52024/56659.
