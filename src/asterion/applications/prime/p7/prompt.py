@@ -35,7 +35,7 @@ def build_autonomous_prompt() -> str:
 
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r
-print(r.render())
+print(r.render()['text'])
 这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态；r.geometry() 返回各颜色连通区域的大小和边界；r.diff(before_sequence) 比较历史与当前画面，变化坐标有界返回。render/geometry/diff 可指定 sequence、窗口或颜色；help(r) 查看参数。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块没有预设游戏含义。可自由写程序处理这些数据、建立模型和搜索；此研究接口只读。
 
 NOTES 可选，用于保存稳定理解、重要反例与当前关注点，由你决定内容和更新时机：

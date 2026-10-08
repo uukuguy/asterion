@@ -93,7 +93,7 @@ class TestAutonomousRuntime(unittest.IsolatedAsyncioTestCase):
             learner_profile='autonomous')
         self.addAsyncCleanup(host.close)
         host.set_memory_instructions(prompt.build_autonomous_prompt())
-        code = 'import p7_research as r\nassert r.frame() == [[0, 1]]\nprint(r.render())'
+        code = 'import p7_research as r\nassert r.frame() == [[0, 1]]\nprint(r.render()["text"])'
         computed = await host.execute('read-first', code, _Signal())
         self.assertEqual(computed.status, 'ok')
         result = host.method_call('execute_plan', {

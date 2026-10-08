@@ -3659,7 +3659,7 @@ def _research_python(environment: Mapping[str, str]) -> Path | None:
     try:
         value = environment[P7_RESEARCH_PYTHON_ENV]
         path = Path(value)
-        if (environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy"
+        if (environment.get("ASTERION_PRIME_P7_RUN_MODE") in {"autonomy", "witness"}
             and type(value) is str and path.is_absolute()
             and path.resolve(strict=True) == path
             and not any(part.is_symlink() for part in (path, *path.parents))

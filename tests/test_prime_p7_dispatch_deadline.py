@@ -1,5 +1,6 @@
 """Real adapter boundary with a fake SDK; no game or provider calls."""
 from pathlib import Path
+from enum import Enum
 from types import SimpleNamespace
 import tempfile
 import unittest
@@ -17,6 +18,15 @@ def reply():
 
 
 class TestDispatchDeadline(unittest.TestCase):
+    def test_response_metadata_preserves_numeric_enum_name(self):
+        class State(Enum):
+            GAME_OVER = 3
+        for state in (State.GAME_OVER, 'GAME_OVER', SimpleNamespace(value='GAME_OVER')):
+            with self.subTest(state=state):
+                value = reply()
+                value.state = state
+                self.assertEqual(ArcadeEngine._response_metadata(value)['state'], 'GAME_OVER')
+
     def fixture(self, root, effect):
         now = [100.]
         task = TaskDeadline(deadline_monotonic=200., deadline_epoch=110.,

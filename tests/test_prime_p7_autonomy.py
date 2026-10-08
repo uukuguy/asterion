@@ -31,7 +31,7 @@ class TestP7Autonomy(unittest.TestCase):
         self.wrapper.write_text('#!/bin/sh\nexit 0\n')
         self.wrapper.chmod(0o700)
 
-    def test_research_python_wrapper_is_explicit_autonomy_only_and_not_symlink(self):
+    def test_research_python_wrapper_is_explicit_bounded_preset_and_not_symlink(self):
         self.assertTrue(callable(getattr(operator, '_research_python', None)))
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -41,6 +41,8 @@ class TestP7Autonomy(unittest.TestCase):
             field = 'ASTERION_PRIME_P7_RESEARCH_PYTHON'
             selected = {**environment(self.wrapper), field: str(wrapper)}
             self.assertEqual(operator._research_python(selected), wrapper)
+            self.assertEqual(operator._research_python({**selected,
+                'ASTERION_PRIME_P7_RUN_MODE': 'witness'}), wrapper)
             self.assertIsNone(operator._research_python({}))
             with self.assertRaises(operator.P7OperatorError):
                 operator._research_python({"ASTERION_PRIME_P7_RUN_MODE": "autonomy"})

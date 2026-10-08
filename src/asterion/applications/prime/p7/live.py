@@ -246,7 +246,10 @@ class ArcadeEngine:
     def _response_metadata(value):
         """Record bounded raw reply metadata, never claim a validated observation."""
         state = getattr(value, 'state', None)
-        state = getattr(state, 'value', getattr(state, 'name', state))
+        state_value = getattr(state, 'value', None)
+        if type(state_value) is not str:
+            state_value = getattr(state, 'name', state)
+        state = state_value
         return {'state': state[:64] if type(state) is str else None,
                 'levels_completed': getattr(value, 'levels_completed', None)
                 if type(getattr(value, 'levels_completed', None)) is int else None,
