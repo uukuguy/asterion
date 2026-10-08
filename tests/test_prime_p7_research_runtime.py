@@ -70,7 +70,8 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(current['observation_ref']['sequence'], 1)
         self.assertEqual(current['budget']['primitive_actions'], result['budget']['primitive_actions'])
         self.assertEqual(current['budget']['primitive_actions'], 1)
-        self.assertNotIn('scoring', current['budget'])
+        self.assertEqual(current['budget']['scoring'], result['budget']['scoring'])
+        self.assertEqual(current['budget']['scoring']['current_level']['paid_actions'], 1)
         self.assertEqual(current['notes']['observation_ref']['sequence'], 0)
         rejected = self.host.method_call('workspace', {
             'op': 'notes', 'base_revision': before['workspace_revision'],
@@ -81,13 +82,14 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             self.host.set_memory_instructions('changed instruction')
 
-    async def test_initial_actor_v2_snapshot_and_continuation_omit_score_guidance(self):
+    async def test_initial_actor_v2_snapshot_and_continuation_deliver_score_facts(self):
         from asterion.applications.prime.p7.prompt import build_autonomous_prompt, initial_research_prompt
         instructions = build_autonomous_prompt()
         initial = initial_research_prompt(self.host, instructions)
         expected = self.host.current_context()['budget']
-        self.assertNotIn('scoring', expected)
-        self.assertNotIn('budget.scoring', instructions)
+        self.assertIn('scoring', expected)
+        self.assertIn('budget.scoring', instructions)
+        self.assertNotIn('整局满分100', instructions)
         actor = self.host.actor_context()
         delivered = json.loads(initial.split('Initial research context (authoritative observation):\n', 1)[1])
         result = self.host.method_call('workspace', {'op': 'read'}, _Signal())
