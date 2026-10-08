@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 12:01 CST. New user-authorized BP35 comparison running; not a final handoff.
+Updated: 2026-10-08 12:16 CST. New user-authorized BP35 comparison running; not a final handoff.
 
 ## Current work
 
@@ -18,7 +18,10 @@ Updated: 2026-10-08 12:01 CST. New user-authorized BP35 comparison running; not 
 - Private `.asterion-private/p7-autonomous-bp35-20261008/trial/`; guest unit `asterion-p7-3f1fc059de41439682ef6b6225f9a4c0.service`. Trial agent prepares and owns launch/cleanup; extension independently reviews launch-only differences.
 - Direct exact installedwheel launcher, notMake; reviewed Node stderr tee captures full context projection. Actual run `p7-live-20261008035617-7e0aedbc2f61f977aa10608e` uniquely bound. Started03:56:17.280239Z; host5400s deadline05:26:17.280236Z. Supervisor22530 / Orb22533 / caffeinate22532, exec40455. Trial agent owns supervision and cleanup; do not stop user console52024.
 
-- Exact L1 passed at03:58:41.164159Z /24paid/0RESET/0NOTES,142.532s from initial observation (143.884s host). Independent SDK/trace audit PASS. L2active; run unchanged. Raw reader used in first cell. Projection trimming observed but records lack timestamps; no exact level-only cut counts.
+- L2 passed04:15:43.124368Z / cumulative150paid / level126paid /1021.960209s afterL1. L3active, same source/budget, no intervention. Independent audit PASS:2+RESET+6+RESET+40+RESET+34+RESET+40success.4paidRESET; final40-step route equals oldcold/NOTES; excess cost is failed exploration.108cells/29failed/0NOTES.
+- Exact L1 passed at03:58:41.164159Z /24paid/0RESET/0NOTES,142.532s from initial observation (143.884s host). Independent SDK/trace audit PASS. Subsequently L2passed; run unchanged. Raw reader used in first cell. Projection trimming observed but records lack timestamps; no exact level-only cut counts.
+
+- Read-only source audit identified missing current-run cell-source read API; ordinary Python error feedback is present, private archive omits error text. Dynamic getsource limitation is code-based inference, not verified per-error transcript. No source edits; do not inject fixes/hints during current run.
 
 ## Prior exact r11l deployment evidence
 
