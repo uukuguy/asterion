@@ -69,7 +69,7 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
         self.assertIn("--no-context-files", command)
         tools = command[command.index("--tools") + 1].split(",")
         self.assertEqual(tools, ["ipython", "p7_execute_plan", "p7_workspace"])
-        self.assertEqual(command[command.index("--thinking") + 1], "medium")
+        self.assertEqual(command[command.index("--thinking") + 1], "high")
 
 
 if __name__ == "__main__":

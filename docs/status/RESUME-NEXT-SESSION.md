@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-08 Task13 CLOSED, no active trial. Score-aware medium replacement completed5levels, then model_rpc_error/Pi RPC prompt execution failed duringL6. No further retry launched or authorized. Source unchanged, ownedcleanupPASS; preserveconsole52024/56659.
+Updated: 2026-10-08 Task14 PREPARING: user explicitly authorizes deepseek-flash/high cold BP35 L1-L6. Trialowner notes_bp35_trial preparing exactprovider/model/high mapping and freshprivatebase .asterion-private/p7-deepseek-high-bp35-20261008/trial/. Root changes only P7 thinkingmedium→high,26focusedtestsPASS. New5400s budget startsactualnewlaunch, sameothercontrols. No modelstarted yet; exactFlash API bindingmustbeverified. Task13 CLOSED. Score-aware medium replacement completed5levels, then model_rpc_error/Pi RPC prompt execution failed duringL6. No further retry launched or authorized. Source unchanged, ownedcleanupPASS; preserveconsole52024/56659.
 
 Replacementrun p7-live-20261008095257-b5e47c5feac586ad1b5ffd15; BASE .asterion-private/p7-scoring-medium-bp35-20261008/replacement/. Launched09:52:56.834209Z; originaldeadline11:09:28.656029Z neverrenewed/notreached. Finalcleanup1611.741776s afterreplacementlaunch,2419.919905s originaltask including808.178175s installationrepair. Initialtrial failed2.230s due missingarc-agi/arcengine; evidence preserved siblingtrial/.
 
