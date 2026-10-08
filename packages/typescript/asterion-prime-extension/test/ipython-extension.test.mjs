@@ -26,6 +26,7 @@ import register, {
   createLegacyAppLevelTools,
   P7_WORKSPACE_PARAMETERS,
   P7_EXECUTE_PLAN_PARAMETERS,
+  normalizeFunctionParameters,
   createIpythonBridge,
   registerContextWitness,
   summarizeInstruction,
@@ -889,6 +890,13 @@ test("research workspace accepts direct actor action labels with closed confiden
   const calls = [];
   const tools = createAppLevelTools({callMethod: async (...args) => { calls.push(args); return {status: "published"}; }});
   assert.deepEqual(tools.map(t => t.name), ["p7_execute_plan", "p7_workspace"]);
+  for (const tool of tools) {
+    assert.equal(tool.parameters.type, "object", `${tool.name} must expose an object-root function schema`);
+  }
+  assert.equal(Check(P7_WORKSPACE_PARAMETERS, {op: "read"}), true);
+  assert.equal(Check(P7_WORKSPACE_PARAMETERS, {op: "read", text: "wrong branch"}), false);
+  assert.equal(Check(P7_WORKSPACE_PARAMETERS, {op: "notes"}), false);
+  assert.equal(Check(P7_WORKSPACE_PARAMETERS, []), false);
   assert.equal(IsSchema(P7_WORKSPACE_PARAMETERS), true);
   assert.equal(IsSchema(P7_EXECUTE_PLAN_PARAMETERS), true);
   assert.deepEqual(P7_WORKSPACE_PARAMETERS.anyOf.map(s => s.properties.op.const), ["read", "publish", "checkpoint", "focus", "revise", "notes", "notes_read", "notes_history"]);
@@ -897,4 +905,25 @@ test("research workspace accepts direct actor action labels with closed confiden
   const request = {op: "read"};
   await tools.find(t => t.name === "p7_workspace").execute("research-1", request);
   assert.deepEqual(calls, [["research-1", "workspace", request, undefined]]);
+});
+
+
+test("Prime normalizes object-only function schemas without changing application declarations", () => {
+  const schema = Object.freeze({anyOf: [
+    {type: "object", properties: {op: {const: "read"}}, required: ["op"], additionalProperties: false},
+    {type: "object", properties: {op: {const: "write"}, value: {type: "string"}}, required: ["op", "value"], additionalProperties: false},
+  ]});
+  const normalized = normalizeFunctionParameters(schema);
+  assert.equal(schema.type, undefined);
+  assert.equal(normalized.type, "object");
+  assert.deepEqual(normalized.anyOf, schema.anyOf);
+  for (const input of [{op: "read"}, {op: "write", value: "ok"}, {op: "write"}, {op: "read", extra: 1}, [], null, "read"]) {
+    assert.equal(Check(normalized, input), Check(schema, input));
+  }
+  for (const invalid of [{type: "string"}, {anyOf: [{type: "object"}, {type: "null"}]}, {}, null]) {
+    assert.throws(() => normalizeFunctionParameters(invalid), /only objects/);
+  }
+  assert.equal(normalizeFunctionParameters({oneOf: [{type: "object"}]}).type, "object");
+  assert.equal(normalizeFunctionParameters({allOf: [{type: "object"}, {required: ["x"]}]}).type, "object");
+  assert.equal(P7_WORKSPACE_PARAMETERS.type, undefined, "application union remains unchanged");
 });

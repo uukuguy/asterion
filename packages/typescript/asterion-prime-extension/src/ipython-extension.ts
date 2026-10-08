@@ -1,5 +1,7 @@
 import { closeSync, read, write } from "node:fs";
 import { TextDecoder } from "node:util";
+import { normalizeFunctionParameters } from "./tool-schema.js";
+export { normalizeFunctionParameters } from "./tool-schema.js";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
 import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
 export { CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
@@ -774,7 +776,7 @@ function makeMethodTool(
     name,
     label: name,
     description,
-    parameters: inputType,
+    parameters: normalizeFunctionParameters(inputType),
     executionMode: "sequential" as const,
     execute: async (
       id: string,
