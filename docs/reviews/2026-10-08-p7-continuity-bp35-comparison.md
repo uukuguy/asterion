@@ -255,3 +255,5 @@ High2 L5=31动作/0RESET，SDK08:21:21.101600Z、累计159/host+1154.454秒。�
 run p7-live-20261008104822-a973c8d0533d5c17ecc93310于10:48:21.856493Z启动，约2.586秒首prompt失败，清理4.750秒完成。0paid，SDK仅2次初始化RESET，无NOTES/bridgecall；唯一usage为input0/output0，这是错误轮记录，不证明provider0。实际arc.run.context.model_id=deepseek-flash。summary仅保留model_rpc_error/RuntimeError/pi.prompt/Pi RPC prompt execution failed；12个完整native事件类型无重试，stderr0B，HTTP/body/stopReason未保存，不能判断认证、额度、模型兼容性等具体原因。运行过短未抓到actualruntime身份，不将provider-free安装证明冒充运行时抓取。
 
 终局源码未变、专属进程及临时认证清理独立核验PASS，console保留。无追加试跑，不是DeepSeek解题能力失败。当前诊断缺口为原生模型错误细节未持久化；需要先解决可诊断性，不能盲目用更多实测猜原因。证据 `.asterion-private/p7-deepseek-high-bp35-20261008/trial/`。
+
+后续诊断（用户授权）：host/guest无认证GET均可达；同guest/providerbuilder一次256token/60s/无重试最小Flash-high请求HTTP200，input33/output19。用户确认持久.env改为deepseek/deepseek-flash，当前shell无旧选择覆盖；实际P7资源构造→approvedcommand→PiRpcConfig启动的Pi get_state明确返回deepseek-flash/deepseek/high，messageCount0，无新模型请求。当前配置传递正常；不据此还原先前失败原因。证据 `.asterion-private/p7-deepseek-diagnostics-20261008/`；凭据与进程均清理。

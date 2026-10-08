@@ -4453,3 +4453,6 @@
 - 2026-10-08 — User authorizes DeepSeek Flash high cold BP35 comparison; prepare exact backend binding, preserve scoring policy and prior evidence.
 - 2026-10-08 — c33e7c11 selects high effort for authorized DeepSeek comparison; scoring logic unchanged and26focusedtests pass.
 - 2026-10-08 — DeepSeek Flash high firstprompt fails before actions; model binding confirmed, cleanup verified, native error detail unavailable, no retry.
+- 2026-10-08 — 3f8ce186 records DeepSeek first-request failure, verified cleanup and missing diagnostics without claiming gameplay results.
+- 2026-10-08 — DeepSeek minimal diagnostic returns HTTP200 with Flash/high; persisted .env selection now deepseek/flash, actual Pi state verification pending.
+- 2026-10-08 — Actual P7-launched Pi get_state confirms current .env Flash/high selection without model call; previous failure remains unexplained.
