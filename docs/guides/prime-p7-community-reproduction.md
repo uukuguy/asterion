@@ -53,9 +53,10 @@ For the recorded model identity, put these non-secret selections in your operato
 ```dotenv
 ASTERION_PRIME_PROVIDER=openai-codex
 ASTERION_PRIME_MODEL=gpt-6.1-sol
+ASTERION_PRIME_EFFORT=high
 ```
 
-The model is selected explicitly: the code default is currently `gpt-6-sol`, and DCI's model settings are separate. See [model selection](../../src/asterion/applications/prime/p7/model_selection.py). Provider availability and authentication must be usable in your own Pi profile; configuration text alone cannot establish that.
+The model is selected explicitly: the code default is currently `gpt-6-sol`, and DCI's model settings are separate. See [model selection](../../src/asterion/applications/prime/p7/model_selection.py). `ASTERION_PRIME_EFFORT` is a shared Prime operator setting passed to Pi's `--thinking`: accepted values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. An explicit operator `.env` value overrides stale terminal exports and the launcher's default. If omitted, P7/P1 retain `medium`; bounded no-tool Prime sessions retain `off`. Invalid values fail before model launch. Provider availability and authentication must be usable in your own Pi profile; configuration text alone cannot establish that.
 
 Review the Make defaults before running. Pass your actual paths through `ASTERION_PRIME_OPERATOR_ROOT`, `ASTERION_PRIME_ARC_ROOT`, `ASTERION_PRIME_PI_ENTRY`, and `ASTERION_PRIME_PI_AGENT_DIR`, and select `PRIME_ORB_MACHINE` as appropriate. Guest commands must be able to read the checkout, newly built wheel, ARC assets, and Pi/profile paths. The default Pi entry uses an OrbStack `/mnt/mac` mount and a Homebrew installation; it is not a portable Linux path. The local console also has an `ASTERION_PRIME_LOCAL_PI_ENTRY` setting.
 
@@ -140,7 +141,7 @@ This record comes from iterative public-game research with retained experience, 
 
 ## P7 thinking preset and bounded diagnostics
 
-P7's application-owned Pi command currently selects `--thinking high` for the user-selected DeepSeek Flash experiment; the operator-owned `.env` selects `ASTERION_PRIME_PROVIDER=deepseek` and `ASTERION_PRIME_MODEL=deepseek-flash` (completed prior sol comparisons: medium221, low231, high262 paid actions through six levels); generic runtime and other applications do not acquire this default. Historical ARC/P7 comparisons explicitly using high retain that evidence label. This is a new P7 experiment choice, not proof that high caused repeated research.
+Prime reasoning effort is selected by the operator's `ASTERION_PRIME_EFFORT`, independently of provider/model selection. Historical comparisons retain their recorded effort labels (prior sol comparisons: medium221, low231, high262 paid actions through six levels); those observations do not establish that reasoning effort caused repeated research.
 
 Context-projection diagnostic stderr is limited to4KiB UTF8 per loaded extension module across normal and failure paths, including one suppression notice. The Pi RPC64KiB process stderr guard remains. After suppression, stderr no longer reports every projection; do not infer complete run-wide trim counts from that bounded log. This logging change does not change context-retention behavior.
 

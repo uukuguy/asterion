@@ -71,6 +71,36 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
         self.assertEqual(tools, ["ipython", "p7_execute_plan", "p7_workspace"])
         self.assertEqual(command[command.index("--thinking") + 1], "medium")
 
+    def test_pi_base_command_uses_prime_effort_and_rejects_invalid_configuration(self) -> None:
+        from asterion.applications.prime.p7.live import P7LiveSolveError, pi_base_command
+
+        for effort in ("off", "low", "high", "max"):
+            with self.subTest(effort=effort):
+                command = pi_base_command(node=Path("/usr/bin/node"), pi_entry=Path("/opt/pi/rpc-entry.js"),
+                                          environment={"ASTERION_PRIME_EFFORT": effort})
+                self.assertEqual(command.count("--thinking"), 1)
+                self.assertEqual(command[command.index("--thinking") + 1], effort)
+        with self.assertRaisesRegex(P7LiveSolveError, "^Prime reasoning effort is invalid$"):
+            pi_base_command(node=Path("/usr/bin/node"), pi_entry=Path("/opt/pi/rpc-entry.js"),
+                            environment={"ASTERION_PRIME_EFFORT": "SENTINELSECRET"})
+
+    def test_invalid_effort_rejects_operator_resources_before_service_preflight(self) -> None:
+        from unittest.mock import patch
+        from asterion.applications.prime.p7 import operator
+
+        with patch.object(operator, "resolve_p7_runtime") as resolve, \
+             patch.object(operator.socket, "socketpair") as sockets, \
+             self.assertRaises(operator.P7OperatorError) as raised:
+            operator.build_p7_operator_resources(
+                environment={"ASTERION_PRIME_EFFORT": "SENTINELSECRET"},
+                pi_base_command=("node", "pi", "--thinking", "medium"),
+                extension_path=Path("/unused"), working_directory=Path("/unused"),
+                worker=None, engine=None, private_trace_root=Path("/unused"),
+            )
+        self.assertNotIn("SENTINELSECRET", str(raised.exception))
+        resolve.assert_not_called()
+        sockets.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

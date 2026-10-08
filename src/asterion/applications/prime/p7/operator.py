@@ -63,6 +63,7 @@ from asterion.applications.prime.p7.ipython_host import (
     p7_client_facade,
 )
 from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
+from asterion.applications.prime.operator_config import apply_pi_effort
 from asterion.applications.prime.p7.world_model import WorldModelStore
 from asterion.applications.prime.p7 import live
 from asterion.applications.prime.p7.model_selection import (
@@ -3822,6 +3823,7 @@ def build_p7_operator_resources(
     trace: PrimeTraceRecorder | None = None
     bridge: _IpythonBridgeServer | None = None
     try:
+        configured_command = apply_pi_effort(pi_base_command, environment)
         variant = _resolve_history_variant(environment, game)
         research_python = _research_python(environment)
         selection = resolve_p7_runtime(environment, game)
@@ -3914,7 +3916,7 @@ def build_p7_operator_resources(
         # The installed Pi command and runtime registry must expose the same
         # exact tool set. Historical cognition uses its explicit legacy set.
         selected_tools = P7_TOOL_REGISTRY if research_mode else P7_LEGACY_TOOL_REGISTRY
-        base_command = list(pi_base_command)
+        base_command = list(configured_command)
         if "--tools" in base_command:
             base_command[base_command.index("--tools") + 1] = ",".join(selected_tools.tool_names)
         command = (
@@ -4430,6 +4432,7 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             pi_base_command=live.pi_base_command(
                 node=live.resolve_node(resolved),
                 pi_entry=live.resolve_pi_entry(resolved),
+                environment=resolved,
             ),
             extension_path=live.extension_path(),
             game=_select_game_for_mode(environment, resolved, arc_root),

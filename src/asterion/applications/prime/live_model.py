@@ -16,7 +16,7 @@ import time
 from types import MappingProxyType
 from typing import Mapping
 
-from dotenv import dotenv_values
+from asterion.applications.prime.operator_config import load_operator_environment, resolve_pi_effort
 
 from asterion.runtime.host import CancellationSignal
 from asterion.runtimes.pi_rpc import (
@@ -80,12 +80,8 @@ def resolve_live_model_launch(
             or "site-packages" not in package.parts
         ):
             raise ValueError
-        dotenv = {
-            name: value
-            for name, value in dotenv_values(root / ".env").items()
-            if value is not None
-        }
-        merged = {**dotenv, **dict(environment)}
+        merged = load_operator_environment(root, environment)
+        effort = resolve_pi_effort(merged, default="off")
         credential = merged.get("DEEPSEEK_API_KEY", "")
         if (
             type(credential) is not str
@@ -122,7 +118,7 @@ def resolve_live_model_launch(
             "--system-prompt",
             "Follow the user task exactly. Return only the requested JSON.",
             "--thinking",
-            "off",
+            effort,
             "--provider",
             "deepseek",
             "--model",

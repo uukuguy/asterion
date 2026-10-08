@@ -517,13 +517,17 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
                     "ASTERION_PRIME_P7_RUN_MODE": "sweep",
                     "OPERATION_MODE": "offline",
+                    "ASTERION_PRIME_EFFORT": "high",
                 },
-                pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
+                pi_base_command=("/usr/bin/pi", "--mode", "rpc", "--thinking", "medium"),
                 extension_path=extension, working_directory=root,
                 worker=_Worker(), engine=_CompletingEngine(), private_trace_root=trace_root,
                 game=game,
             )
             try:
+                command = resources.host_services["prime.launch"].approved_command
+                self.assertEqual(command.count("--thinking"), 1)
+                self.assertEqual(command[command.index("--thinking") + 1], "high")
                 runtime = build_p7_runtime(RuntimeFactoryContext(
                     provider_id="prime-applications", application_id="prime.arc-agi-3-solving",
                     application_version="1.0.0", runtime_id="asterion.prime",

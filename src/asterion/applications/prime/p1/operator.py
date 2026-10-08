@@ -1013,7 +1013,8 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
     try:
         resolved = live.load_operator_environment(root)
         pi_base_command = live.pi_base_command(
-            node=live.resolve_node(resolved), pi_entry=live.resolve_pi_entry(resolved)
+            node=live.resolve_node(resolved), pi_entry=live.resolve_pi_entry(resolved),
+            environment=resolved,
         )
         extension = live.extension_path()
     except live.P7LiveSolveError:

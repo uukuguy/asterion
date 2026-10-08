@@ -256,6 +256,23 @@ class TestResolveLiveModelLaunch(unittest.TestCase):
             )
         self.assertEqual(launch.environment["DEEPSEEK_API_KEY"], "from-env")
 
+    def test_prime_effort_overrides_bounded_launch_default(self):
+        with patch.object(asterion, "__file__", str(self.installed)):
+            launch = resolve_live_model_launch(self.root, self.environment)
+            self.assertEqual(launch.command[launch.command.index("--thinking") + 1], "off")
+            launch = resolve_live_model_launch(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "low"})
+            self.assertEqual(launch.command[launch.command.index("--thinking") + 1], "low")
+            with (self.root / ".env").open("a") as handle:
+                handle.write("ASTERION_PRIME_EFFORT=high\n")
+            launch = resolve_live_model_launch(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "low"})
+            self.assertEqual(launch.command[launch.command.index("--thinking") + 1], "high")
+
+    def test_invalid_effort_rejects_bounded_launch(self):
+        with patch.object(asterion, "__file__", str(self.installed)), self.assertRaisesRegex(
+            LiveModelError, "^Prime live model session failed$"
+        ):
+            resolve_live_model_launch(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "SENTINELSECRET"})
+
     def test_source_checkout_is_rejected(self):
         with patch.object(
             asterion, "__file__", str(self.root / "src/asterion/__init__.py")

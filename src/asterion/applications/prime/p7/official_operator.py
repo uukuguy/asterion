@@ -154,6 +154,7 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
             live.pi_base_command(
                 node=live.resolve_node(environment),
                 pi_entry=live.resolve_pi_entry(environment),
+                environment=environment,
             ),
             live.extension_path(),
             api_key,

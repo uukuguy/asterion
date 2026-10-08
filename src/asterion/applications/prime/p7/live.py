@@ -42,6 +42,11 @@ import threading
 import time
 
 from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
+from asterion.applications.prime.operator_config import (
+    EFFORT_ENV,
+    apply_pi_effort,
+    load_operator_environment as load_prime_operator_environment,
+)
 from asterion.applications.prime.p7.game import DEFAULT_GAME, P7GameSelection
 from asterion.applications.prime.p7.ipython_host import (
     IpythonWorkerResult,
@@ -1092,17 +1097,16 @@ def load_operator_environment(operator_root: Path) -> Mapping[str, str]:
 
     The process environment supplies runtime paths and credentials. Model
     selection is configuration-owned: when the operator file declares a
-    provider or model, it wins over stale exported values from the terminal.
+    provider, model or effort, it wins over stale exported terminal values.
     ``ASTERION_PRIME_PI_AGENT_DIR`` is required here so the operator rejects
     an invocation without an authenticated Pi profile before it starts any
     process.
     """
 
-    dotenv = _dotenv_values(operator_root / ".env")
-    values = {**dotenv, **os.environ}
-    for key in ("ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL"):
-        if key in dotenv:
-            values[key] = dotenv[key]
+    values = load_prime_operator_environment(
+        operator_root,
+        file_owned_keys=("ASTERION_PRIME_PROVIDER", "ASTERION_PRIME_MODEL", EFFORT_ENV),
+    )
     if not values.get(PI_AGENT_DIR_ENV, "").strip():
         raise P7LiveSolveError("Pi agent profile is unavailable")
     return values
@@ -1175,7 +1179,9 @@ def resolve_arc_root(environment: Mapping[str, str]) -> Path:
     return root
 
 
-def pi_base_command(*, node: Path, pi_entry: Path) -> tuple[str, ...]:
+def pi_base_command(
+    *, node: Path, pi_entry: Path, environment: Mapping[str, str] | None = None,
+) -> tuple[str, ...]:
     """Return the exact Pi base argv the application launches.
 
     ``build_p7_operator_resources`` appends the fixed provider, model and
@@ -1183,7 +1189,11 @@ def pi_base_command(*, node: Path, pi_entry: Path) -> tuple[str, ...]:
     them, so this function must not add them either.
     """
 
-    return (str(node), str(pi_entry), *_PI_RPC_FLAGS)
+    try:
+        return apply_pi_effort((str(node), str(pi_entry), *_PI_RPC_FLAGS),
+                               {} if environment is None else environment)
+    except ValueError:
+        raise P7LiveSolveError("Prime reasoning effort is invalid") from None
 
 
 def extension_path() -> Path:

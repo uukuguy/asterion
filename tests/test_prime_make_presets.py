@@ -170,14 +170,16 @@ class TestPrimeMakePresets(unittest.TestCase):
         self.assertIn('tr "\\\\n" " "', recipe)
         self.assertIn("ASTERION_PRIME_PROVIDER\n", contract)
         self.assertIn("ASTERION_PRIME_MODEL\n", contract)
+        self.assertIn("ASTERION_PRIME_EFFORT\n", contract)
 
     def test_make_model_selection_overrides_stale_terminal_export(self) -> None:
         root = Path(__file__).resolve().parents[1]
         dotenv = {
             "ASTERION_PRIME_PROVIDER": "fixture-provider",
             "ASTERION_PRIME_MODEL": "fixture-model",
+            "ASTERION_PRIME_EFFORT": "high",
         }
-        probe = "p7-model-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_PROVIDER):$(ASTERION_PRIME_MODEL)'\n"
+        probe = "p7-model-probe:\n\t@printf '%s\\n' '$(ASTERION_PRIME_PROVIDER):$(ASTERION_PRIME_MODEL):$(ASTERION_PRIME_EFFORT)'\n"
         with tempfile.TemporaryDirectory() as temporary:
             operator_root = Path(temporary)
             (operator_root / ".env").write_text(
@@ -187,13 +189,32 @@ class TestPrimeMakePresets(unittest.TestCase):
             completed = subprocess.run(
                 ["make", "--no-print-directory", "-s", "-f", str(root / "Makefile"),
                  "-f", "-", "p7-model-probe", "ASTERION_PRIME_PROVIDER=stale",
-                 "ASTERION_PRIME_MODEL=gpt-6-sol"],
+                 "ASTERION_PRIME_MODEL=gpt-6-sol", "ASTERION_PRIME_EFFORT=low"],
                 cwd=operator_root, text=True, input=probe, capture_output=True, check=True,
             )
         self.assertEqual(
             completed.stdout.strip(),
-            f"{dotenv['ASTERION_PRIME_PROVIDER']}:{dotenv['ASTERION_PRIME_MODEL']}",
+            f"{dotenv['ASTERION_PRIME_PROVIDER']}:{dotenv['ASTERION_PRIME_MODEL']}:{dotenv['ASTERION_PRIME_EFFORT']}",
         )
+
+    def test_make_leaves_missing_effort_absent_and_preserves_explicit_empty(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        inherited = {name: value for name, value in os.environ.items()
+                     if name != "ASTERION_PRIME_EFFORT"}
+        probe = ("prime-effort-env-probe:\n\t@python3 -c \"import os; "
+                 "print(repr(os.environ.get('ASTERION_PRIME_EFFORT')))\"\n")
+        for effort, expected in ((None, "None"), ("", "''"), ("low", "'low'")):
+            with self.subTest(effort=effort), tempfile.TemporaryDirectory() as temporary:
+                environment = dict(inherited)
+                if effort is not None:
+                    environment["ASTERION_PRIME_EFFORT"] = effort
+                completed = subprocess.run(
+                    ["make", "--no-print-directory", "-s", "-f", str(root / "Makefile"),
+                     "-f", "-", "prime-effort-env-probe"],
+                    cwd=temporary, env=environment, text=True, input=probe,
+                    capture_output=True, check=True,
+                )
+                self.assertEqual(completed.stdout.strip(), expected)
 
     def test_p7_history_variant_reaches_only_local_witness_and_sweep_guest(self) -> None:
         root = Path(__file__).resolve().parents[1]

@@ -4473,3 +4473,4 @@
 - 2026-10-08 — DeepSeek packaged r11l L1 passes10paid/0RESET; real tools, replay, installation and cleanup verified.
 - 2026-10-08 — f1d3df16 records settled Flash cancellation and user-directed fresh Pro BP35 trial.
 - 2026-10-08 — 761e5f9f records Pro cancellation and restored Sol configuration; no further model run authorized.
+- 2026-10-08 — a046cc7c restores medium reasoning to match the best completed Sol comparison; four configuration tests pass.
