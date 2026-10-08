@@ -101,7 +101,9 @@ def capture_private_failure(sink: PrivateFailureSink | None, metadata: FailureMe
             fields[key] = {name: item for name, item in value.items()
                            if name in {"message", "status", "statusCode", "httpStatus", "code"}
                            and type(item) in {str, int}}
-    encoded = json.dumps(fields, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    # Native JSON may contain escaped unpaired surrogates. Keep them escaped
+    # so private diagnostics cannot turn a provider failure into a read error.
+    encoded = json.dumps(fields, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
     limit = min(PRIVATE_FAILURE_EVENT_BYTES, remaining_bytes)
     retained = encoded[:limit]
     tagged = replace(metadata, diagnostic_id=uuid4().hex)
