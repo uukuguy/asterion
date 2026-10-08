@@ -4401,3 +4401,5 @@
 - 2026-10-08 — 2c0581b4 checkpoints verified BP35 L1/L2 costs and diagnostic suppression boundaries while frozen trial continues.
 - 2026-10-08 — BP35 L3/L4 pass34/23actions withoutRESET; fivelevels/179actions observed, frozen L6 continues without intervention.
 - 2026-10-08 — L5 verified30paid/0RESET; NOTES3accepted writes660–1074bytes, including first L2 write previously omitted from replacement counts.
+- 2026-10-08 — 937bc2f1 records autonomous L5 success and corrects NOTES counting to include the first accepted write.
+- 2026-10-08 — BP35 sixlevels PASS221paid/2RESET;21successfulcells,3NOTES; fullreplay and independent identity/cleanup audit verified, no production intervention.

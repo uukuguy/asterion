@@ -21,7 +21,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/plans/2026-10-07-prime-autonomous-research.md` | 🟡 decision-history | Completed cold BP35 comparison ended5/6; implementation and measurement boundaries. |
 | `../reviews/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Implemented autonomy/support layers; promotion/r11l verified; subsequent failed BP35 trial is separately indexed. |
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
-| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; BP35 improvement remains unmeasured. |
+| `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
 | `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: BP35 trial ended2levels/166actions, cleanup verified; logging/source-retrieval issues remain unimplemented. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
@@ -77,4 +77,4 @@ If you want to record a **finding/lesson** that's a long-lived project fact → 
 
 Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-08-prime-research-notes.md).
 
-- Active authorized comparison: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
+- Completed authorized comparison: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).

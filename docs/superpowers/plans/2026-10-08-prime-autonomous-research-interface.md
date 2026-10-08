@@ -69,3 +69,6 @@ Task7 result: production9b62d2c2, core-install allowlist fixa4003544. TS49PASS/6
 ## Task 8 — User-authorized review and frozen BP35 comparison
 
 User requests rechecking Task7 design/implementation against requirements, then running BP35. Review concrete generic computation/context/P7 boundaries and deployment identity; fix only evidence-backed blockers before freeze. Once READY, run one coldsol/medium BP35 L1-L6 with existing5400s/6round/1000action/1024model/4096tool and180s settlement bounds. No old knowledge, external solve hints, production hotfix or retry. Track per-level paidactions/RESET, cells/errors/readback, NOTES, usage and naturalcontinuation with explicit evidence completeness. [Current comparison](../../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
+
+
+Task8 completed: re-reviewREADY,32/33overlapping targetedtestsPASS, no newproductionchanges. Frozen medium BP35 L1-L6 PASS221paid/2RESET,21successfulcells,3acceptedNOTESwrites660–1074B;1023.280s toL6SDKpass. Full221replay/seal/identity/cleanupPASS. One completednaturalroundrecorded, fullcompactioncountunavailable. See comparison for perlevel costs and multi-intervention limitations.
