@@ -16,7 +16,9 @@ from asterion.agents.prime.execution import (
     ASTERION_PRIME_LIMITS,
     AsterionPrimeLimits,
     PrimeRoundDiagnostic,
+    PrimePromptRecovery,
 )
+from asterion.applications.prime.p7.action_journal import ActionJournal
 from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.agents.prime.trace import PrimeTraceRecorder
@@ -48,7 +50,7 @@ from asterion.runtime.native_rpc import build_rpc_session
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 from asterion.immutable import RedactedImmutableMapping
-from asterion.services.diagnostics import MemoryDiagnosticSink
+from asterion.services.diagnostics import MemoryDiagnosticSink, PrivateFailureSink
 
 
 _HOST_CAPABILITIES = frozenset(
@@ -120,6 +122,27 @@ def _p7_terminal(broker: ArcBroker) -> bool:
     except ArcBrokerError:
         status = broker.terminal_snapshot().status
     return status.terminal_reason not in {"active", "reset-required"}
+
+
+def _p7_recovery_effects_settled(ipython, broker) -> bool:
+    """Require the existing action receipt and live worker before continuation."""
+    try:
+        engine = broker._engine
+        journal = getattr(engine, "action_journal", None)
+        budget = getattr(engine, "task_deadline", None)
+        if (type(journal) is not ActionJournal or journal.has_unresolved
+                or budget is None or budget.expired()
+                or broker._processing_blocked or _p7_terminal(broker)
+                or ipython._closed or ipython._lost):
+            return False
+        if type(ipython) is P7ResearchRuntime:
+            status = ipython.kernel.status()
+            return (not status["lost"] and not status["closed"]
+                    and not ipython.kernel._lock.locked()
+                    and not ipython.solver.current_context()["processing_blocked"])
+        return type(ipython) is PersistentIpythonHost and not ipython._lock.locked()
+    except Exception:
+        return False
 
 
 def _p7_gameplay_terminal(broker: ArcBroker) -> bool:
@@ -208,8 +231,9 @@ class PrimeLaunch:
 
     Carries only operator-owned authorization (command argv, environment) and
     the extension resource's plain identity plus its already-acquired pinned
-    file descriptors. The only live object is the transferable ``ExtensionLease``
-    itself: it is the single owner of the pinned descriptors, and dropping it in
+    file descriptors, plus an optional operator-owned private failure sink.
+    The transferable ``ExtensionLease`` is the single owner of the pinned
+    descriptors, and dropping it in
     favour of a plain snapshot would force a path re-resolution (TOCTOU) or a
     second descriptor owner. See ``runtime/pinned_extension.py``.
     """
@@ -228,6 +252,7 @@ class PrimeLaunch:
     approved_environment: Mapping[str, str] | None = None
     witness_deadline_monotonic: float | None = None
     autonomy_deadline_monotonic: float | None = None
+    private_failure_sink: PrivateFailureSink | None = None
 
     def __post_init__(self) -> None:
         lease = self.extension_lease
@@ -598,6 +623,14 @@ def build_p7_runtime(
             inherited_fds=launch.extension_lease.inherited_fds,
             compact_events=launch.compact_events,
             diagnostics=diagnostic_sink,
+            private_failure_sink=launch.private_failure_sink,
+        )
+        # Recovery retains this exact process, worker and action journal. A
+        # missing receipt or an unbounded launch never grants that authority.
+        recovery = (
+            PrimePromptRecovery(lambda: _p7_recovery_effects_settled(ipython, broker))
+            if not unbounded and type(getattr(broker._engine, "action_journal", None)) is ActionJournal
+            else None
         )
         async def outer_admission(round_index, signal):
             if autonomy and not await controller.admit(round_index, signal):
@@ -619,7 +652,8 @@ def build_p7_runtime(
             continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
                                  else lambda round_index: _p7_continuation_prompt(broker, round_index)),
             round_admission=outer_admission if type(ipython) is P7ResearchRuntime else None,
-            reusable_session=autonomy,
+            reusable_session=autonomy or recovery is not None,
+            prompt_recovery=recovery,
             round_diagnostic=_p7_round_diagnostic(trace_adapter),
             failure_diagnostic=getattr(trace_adapter, "record_failure", None),
             allowed_tool_names=launch.tool_registry.allowed_tool_names,

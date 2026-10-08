@@ -13,6 +13,7 @@ from asterion.agents.prime.execution import (
     AsterionPrimeLimits,
     PrimeExecutionKernel,
     PrimeRoundDiagnostic,
+    PrimePromptRecovery,
 )
 from asterion.services.diagnostics import FailureDiagnostic
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
@@ -65,6 +66,7 @@ class AsterionPrimeSession:
         round_admission: Callable[[int, CancellationSignal], Awaitable[bool]] | None = None,
         round_diagnostic: Callable[[PrimeRoundDiagnostic], None] | None = None,
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
+        prompt_recovery: PrimePromptRecovery | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
     ) -> None:
         try:
@@ -123,6 +125,7 @@ class AsterionPrimeSession:
             round_admission=round_admission,
             round_diagnostic=round_diagnostic,
             failure_diagnostic=failure_diagnostic,
+            prompt_recovery=prompt_recovery,
             allowed_tool_names=allowed_tool_names,
         )
 
