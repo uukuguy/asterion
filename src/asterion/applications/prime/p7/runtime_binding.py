@@ -125,14 +125,12 @@ def _p7_terminal(broker: ArcBroker) -> bool:
 
 
 def _p7_recovery_effects_settled(ipython, broker) -> bool:
-    """Require the existing action receipt and live worker before continuation."""
+    """Expose only application receipt/worker facts to Prime admission."""
     try:
         engine = broker._engine
         journal = getattr(engine, "action_journal", None)
-        budget = getattr(engine, "task_deadline", None)
         if (type(journal) is not ActionJournal or journal.has_unresolved
-                or budget is None or budget.expired()
-                or broker._processing_blocked or _p7_terminal(broker)
+                or broker._processing_blocked
                 or ipython._closed or ipython._lost):
             return False
         if type(ipython) is P7ResearchRuntime:
@@ -233,8 +231,8 @@ class PrimeLaunch:
     the extension resource's plain identity plus its already-acquired pinned
     file descriptors, plus an optional operator-owned private failure sink.
     The transferable ``ExtensionLease`` is the single owner of the pinned
-    descriptors, and dropping it in
-    favour of a plain snapshot would force a path re-resolution (TOCTOU) or a
+    descriptors; replacing it with a plain snapshot would force a path
+    re-resolution (TOCTOU) or a
     second descriptor owner. See ``runtime/pinned_extension.py``.
     """
 
@@ -628,7 +626,11 @@ def build_p7_runtime(
         # Recovery retains this exact process, worker and action journal. A
         # missing receipt or an unbounded launch never grants that authority.
         recovery = (
-            PrimePromptRecovery(lambda: _p7_recovery_effects_settled(ipython, broker))
+            PrimePromptRecovery(
+                lambda: _p7_recovery_effects_settled(ipython, broker),
+                deadline_monotonic=getattr(getattr(broker._engine, "task_deadline", None),
+                                           "deadline_monotonic", None),
+            )
             if not unbounded and type(getattr(broker._engine, "action_journal", None)) is ActionJournal
             else None
         )
@@ -652,7 +654,7 @@ def build_p7_runtime(
             continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
                                  else lambda round_index: _p7_continuation_prompt(broker, round_index)),
             round_admission=outer_admission if type(ipython) is P7ResearchRuntime else None,
-            reusable_session=autonomy or recovery is not None,
+            reusable_session=autonomy,
             prompt_recovery=recovery,
             round_diagnostic=_p7_round_diagnostic(trace_adapter),
             failure_diagnostic=getattr(trace_adapter, "record_failure", None),
@@ -741,6 +743,7 @@ def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeCli
             deadline_seconds=launch.deadline_seconds,
             inherited_fds=launch.extension_lease.inherited_fds,
             compact_events=launch.compact_events,
+            private_failure_sink=launch.private_failure_sink,
         )
         session = AsterionPrimeSession(
             rpc_session=rpc_session,
