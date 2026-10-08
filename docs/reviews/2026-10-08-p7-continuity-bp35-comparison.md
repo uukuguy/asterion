@@ -296,3 +296,27 @@ L6终局逐帧补核：new192–207对应old180–195，剔除new208的HUD-only�
 最终独立审计PASS：234trace与234committed/known journal动作参数逐项一致；主SDK236行与回放236行（包含2初始化RESET）的动作、状态及全部frames逐行一致，无unknown。实际Sol/medium、566冻结source/584installed、扩展resource身份一致，source未变、ownedguest/host为空、auth已移除、用户console保留。通过耗时2103.806813秒，至清理2171.983286墙钟/2171.972589单调秒，未触期限。最终46cells全ok且无source/output截断；NOTES过关时2write，收尾追加第3write，最终1089→1226→1940B；115usage input14225897/output42765/peak239310。trace只有1个prime.model.round，115usage不是115自然轮。
 
 终局重试证据补充：原生尾部128事件含3auto_retry_start/1auto_retry_end；通用私有failure sink保存4条message_end错误（1socket相关、3fetch-failed，status=null/code=unknown），最终恢复并达到目标。尾部不代表完整重试总量，也没有精确请求时钟可归因耗时；不能把时间增加全部归为评分驱动或模型推理。stderr4048B含24条保留projection和1抑制通知，后续projection/compaction未测。
+
+
+## 无评分指导对照 Task20（用户主动中止）
+
+生产cfc46c63只将actor prompt与Solver预算恢复为9b62d2c2；通用RPC/schema/effort修复和评分计算保留。实际autonomous上下文没有baseline或scoring字段，旧legacy facade的level_baseline不属于本研究接口；早先“仍保留当前baseline”的口头判断已纠正。49相关测试和provider-free实上下文核验通过。
+
+| 关卡 | 付费动作 | RESET | 关卡秒数 |
+|---|---:|---:|---:|
+| L1 |21|0|92.131|
+| L2 |72|2|228.753|
+| L3 |34|0|131.517|
+| L4 |24|0|169.835|
+| 完成前四 |151|2|622.235|
+| L5未完成 |10|0|不作过关计时|
+
+前四关对旧最佳149/543.032，多2动作/79.203秒（14.6%）；对评分指导版147/842.593，多4动作但少220.358秒（26.2%）。仍为不同研究轨迹，未完成L5/L6，不得推断整轮17分钟或证明评分因果。L2两次失败后通过历史图校准；L3未出现评分版的错误紫块耐久模型。L1/L2较少计算但并不全面更省动作。
+
+用户明确中止并要求直接新开客观规则版。STOP15:00:06.156210Z；最后动作14:59:45.747123Z早于STOP。终局4levels/161paid/2RESET，完整161paid与163SDK（含2初始化RESET）回放一致，completedprefix151另计。无unknown、source未变、ownedprocess/auth清理、console保留。清理至749.187197墙钟秒。13cells12ok1NameError(help不可用，自行绕过)，NOTES1次初写1010B；60usage/input5256302/output16465/peak154863。
+
+证据 .asterion-private/p7-scoring-ab-sol-medium-bp35-20261008/trial/，manifest1279项 SHA cbb3173cbb9e553ae1ca52191a06842b3cf977676a53cbe2b605f9392a3d893d。
+
+## 客观评分事实版 Task21（准备/运行中）
+
+用户授权只加入客观规则。生产1a22dc33增加一个计分事实段落及budget.scoring；原来的目标、研究行为和停止说明保持9b62，不加争取满分、权衡策略或硬限指导。score.py未改，49测试PASS。新轮会知道全部baseline、公式和已发生费用，但框架不指示如何取舍。Task20完全清理后才构建新wheel，freshSolmedium/directBP35，同5400+180控制，不带旧NOTES或路线。

@@ -4478,3 +4478,6 @@
 - 2026-10-08 — 4dd830c5 checkpoints the authorized latest Sol medium trial and exact comparison boundaries.
 - 2026-10-08 — edfd8ea2 records latest234-action six-level pass and full replay; elapsed doubles versus best medium.
 - 2026-10-08 — b543ee0e retains recovered request failures so timing analysis does not overattribute slowdown to scoring.
+- 2026-10-08 — cfc46c63 restores exact pre-scoring actor prompt/context for A/B while preserving generic repairs and score accounting.
+- 2026-10-08 — 492a5daa adds factual score context while preserving actor autonomy in the isolated comparison implementation.
+- 2026-10-08 — 1a22dc33 integrates objective scoring facts after prior trial cleanup, preserving original actor goals and controls.
