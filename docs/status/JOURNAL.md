@@ -4415,3 +4415,6 @@
 - 2026-10-08 — b6db54b3 checkpoints low four-level costs and records user authorization for a subsequent same-code high comparison.
 - 2026-10-08 — First5 low159success+14failed+2RESET versusmedium148+29+2; total savings reflect exploration, not shorter successful routes.
 - 2026-10-08 — Low sixlevels PASS231paid/2RESET/1968.197s; cleanupverified before high-onlyeffort change,114focusedtestsPASS.
+- 2026-10-08 — a7cf5826 records low completion and changes only P7effort tohigh for the user-authorized same-version comparison.
+- 2026-10-08 — High-only samecode BP35 starts07:44:51Z; isolatedinstall/coldstate verified, lowfullyclosed, identicalfinitecontrols.
+- 2026-10-08 — High ends afterL1/24paid with modelRPCerror/native retries; cleanupverified; restoredmedium matches9bsource,114testsPASS.

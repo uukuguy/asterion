@@ -1,5 +1,22 @@
 # 研究连续性修复复核与 BP35 L1–L6 实测
 
+## 同修复版 effort 对照总览
+
+| 项目 | medium | low | high |
+| --- | ---: | ---: | --- |
+| 完成目标 | L1–L6 | L1–L6 | L1后模型请求故障中断，未完成对照 |
+| 逐关计费动作 |21/71/34/23/30/42|28/43/35/38/31/56|24/未进入/未进入/未进入/未进入/未进入|
+| 总动作/RESET |221/2|231/2|24/0，仅L1 |
+| 最终成功一轮动作合计 |190|215|24，仅L1 |
+| 失败尝试动作合计（不含RESET） |29|14|0，仅L1 |
+| 目标通过用时 |1023.280秒|1968.197秒|L1为235.379秒；请求中断，不能比较六关用时 |
+| 计算 |21全部成功|15全部成功|4次：3成功、1普通Python错误 |
+| NOTES全部接受写入 |3|3，末次在过关后收尾|0|
+
+Low没有失去自主完成六关的能力，但本样本比medium总动作多4.5%、最终成功一轮动作多13.2%、总耗时约1.92倍。Low失败探索更少，成功一轮更长，不能仅凭前五关总动作略少称路线更优；总耗时未拆分provider等待，不能声称差额全由思考策略造成。两者input累计约874万/892万接近，不能据effort更低就推断本次token成本显著下降。
+
+High没有产生六关能力对照。最新修复版仅medium/low完成，旧high失败版本代码不同；不得用旧high、或本次技术中断证明medium推理能力优于high。当前默认已恢复medium，仅恢复effort值，生产`src`与9b62d2c2无差异，配置相关114testsPASS。
+
 ## 最终结果
 
 **既定修复要求复核READY；冻结P7以gpt-6.1-sol/medium自主通过BP35 L1–L6。** 共221个计费动作、2次计费RESET，SDK第六关通过距host启动1023.280秒（17分3.280秒）。运行中没有外围解题提示、源码/提示修改、旧解题资料注入或第二次试跑。目标止于L6，不代表BP35全部9关或新的官方100分。
@@ -113,7 +130,7 @@ SDK过关06:03:12.160753Z，累计seq221、host+1023.280秒。L6=42动作/0RESET
 独立终局核验：223主SDK响应与223回放响应的action/frame/state逐条一致；221trace序号连续，221事务全committed且结果已知；各关动作、RESET、21成功计算、3笔记写入、单轮receipt、冻结565源码及583安装身份、清理记录均无差异。
 
 
-## Low 对照实验（进行中）
+## Low 对照实验（已完成）
 
 用户在medium六关通过后授权再试一次low，判断明显回退。生产仅将P7 thinking medium→low，其余实现、提示、seed0、冷启动和5400秒/6round/1000动作/1024模型/4096工具、180秒收尾条件保持。比较对象是上述同版本medium实测，不以arc-skill代替baseline；用户明确指出medium L1持平baseline、L2超出，L5/L6未超出。
 
@@ -139,6 +156,15 @@ Low L5通过31动作/0RESET（medium30/0），SDK07:25:59.896210Z、累计175、
 
 Low六关通过，SDK07:38:21.195401Z、seq231、启动至目标1968.197秒（32分48.197秒）。逐关[28,43,35,38,31,56]，RESET[0,1,0,1,0,0]。对medium221动作/1023.280秒，low231动作多10（4.5%）、用时约1.92倍。两轮均无外围解题干预。最终成功一轮合计low215/medium190，失败动作14/29，两者RESET均2；故low少失败探索，却没有更短成功路线。L6 low56（含5次ACTION7）对medium42，均无RESET。
 
-Low15cells全部成功，NOTES3次接受写入/末版1165字节；110usage，input累计8743851/output26587/peak204488。完整231回放、封存和事务核对通过，无未知结果；完成自然轮次index0，完整压缩次数缺测。清理完成07:39:07.709738Z、host墙钟2014.711秒/单调2014.702秒，所有本次进程和临时认证清理，用户console保留。源码未变化由low终局receipt确认；随后high改源码不倒推为low被修改。
+Low15cells全部成功，NOTES3次接受写入963→1411→1165字节（第三次07:38:43Z在达到L6目标后的收尾阶段，不能当作此前解题依据，无L7动作）；110usage，input累计8743851/output26587/peak204488。完整231回放、封存和事务核对通过，无未知结果；完成自然轮次index0，完整压缩次数缺测。清理完成07:39:07.709738Z、host墙钟2014.711秒/单调2014.702秒，所有本次进程和临时认证清理，用户console保留。源码未变化由low终局receipt确认；随后high改源码不倒推为low被修改。
 
-已完成high配置回归RED→GREEN，相关114testsPASS。high只改同修复版P7effort，其他生产/提示/扩展不变；使用新的冷目录，仍5400秒/6轮/1000动作/1024模型/4096工具+180秒收尾。低轮已退出并清理后才准备high，不并行provider。high尚未启动，无结果。
+已完成high配置回归RED→GREEN，相关114testsPASS。high只改同修复版P7effort，其他生产/提示/扩展不变；使用新的冷目录，仍5400秒/6轮/1000动作/1024模型/4096工具+180秒收尾。低轮已退出并清理后才准备high，不并行provider。high已启动07:44:51.157171Z，host截止09:14:51.157167Z，尚无结果。生产a7cf5826，实测安装583文件/high/3工具核验通过，与medium/low仅effort值不同；wheel6b6f4a366a026e58cc14ee24b403379940461c99dfb9dfc557473e73d7452c0e。runp7-live-20261008074451-f8616de49c243e850e99f089；证据 .asterion-private/p7-high-bp35-20261008/trial/。
+
+
+## High 技术中断及证据边界
+
+High L1 SDK通过07:48:46.536028Z，seq24、0RESET、host+235.379秒。之后ApplicationRunError/model_rpc_error，Pi RPC prompt execution failed，stage pi.prompt/RuntimeError；没有L2真实动作。终态24committed/24trace/24journal全部已知，封存通过；验证回放仅完成的L1/24动作，不表示六关目标完成。完整stderr1815字节，仅11条projection诊断，无配额溢出。19usage/input338077/output3388/peak42938；4cells中1次NameError，其后计算成功，不能将它当作RPC原因。
+
+保留的原生事件尾部有5次auto_retry_start与3次auto_retry_end，非完整会话。实际安装Pi的重试判定要求assistant error及provider/transport暂态错误文本匹配（含overload/429/5xx/network/WebSocket/timeout等类别），context overflow另处理，billing/quota/subscription-limit文本排除。因此能确认原生自动重试活动、且符合其暂态请求错误分类；具体HTTP码、错误正文和最终assistant stopReason没有持久化，不能在这些类别中选定根因。并非游戏失败/截止/桥接错误的证据。原生多次重试后不盲目启动新一轮。
+
+High本次进程、guestunit、临时认证已清理，原console保留；267.298秒墙钟/267.296秒单调为终态清理口径。生产a7cf5826在整个high运行期间未变由终局receipt与frozenwheel证明。随后恢复medium不构成试跑热修。证据位于 `.asterion-private/p7-high-bp35-20261008/trial/` 的finalmetadata、report、manifest与failure receipts；状态为请求故障导致的未完成对照，不是high解题能力失败。没有追加provider试跑。

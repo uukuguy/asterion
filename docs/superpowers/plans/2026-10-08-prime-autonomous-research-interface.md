@@ -84,3 +84,6 @@ Task9 complete: low231paid/2RESET/1968.197s target reached,15successfulcells,3NO
 ## Task 10 — User-authorized same-version high comparison
 
 Afterlowclosed, change only P7 effortlow→high, retain Task7 code/prompt/bundle and identical coldBP35L1-L6 finitecontrols. Newsource/wheel/installedidentity +focused114tests; thenonefrozenrun, no outsidegamehelp/hotfix/retry. Compare medium/low/high on sameimplementation, unlikeoldhighfailures. Preserveconsole52024/56659 and ordinarycleanup/evidenceboundaries.
+
+
+Task10 attempted/external-runtime-limited: highL1PASS24paid/0RESET/235.379s, thenmodel_rpc_error after nativeautoretry, target6NOTachieved.24actioncompletedprefix replay/seal/sourceidentity/cleanupPASS. Errorbody/statusnotpersisted, no causalclassification beyondnative transientprovider/transport retrycategory. No additionalprovidertrial. Restoremediumdefault afterhighcleanup;114focusedtestsPASS, production`src`exactlymatchesverified9b62d2c2. This doesnot close highabilitycomparison asPASS.
