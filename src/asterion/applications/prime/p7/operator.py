@@ -115,6 +115,7 @@ from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext
 from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.services.diagnostics import FailureDiagnostic
+from .private_failure import P7PrivateFailureSink
 
 
 _RUNTIME_ID = "asterion.prime"
@@ -142,17 +143,24 @@ _BRIDGE_JOIN_SECONDS = 6.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 
 
-def _safe_failure_diagnostic(value: object) -> dict[str, str] | None:
+def _safe_failure_diagnostic(value: object) -> dict[str, object] | None:
     """Project bounded private failure metadata without exception bodies."""
 
     if type(value) is not FailureDiagnostic:
         return None
-    return {
+    result: dict[str, object] = {
         "diagnostic_id": value.diagnostic_id,
         "stage": value.stage,
         "exception_type": value.exception_type,
         "failure_code": value.failure_code or "",
     }
+    if value.failure_metadata is not None:
+        from dataclasses import asdict
+        result["failure_metadata"] = {
+            **asdict(value.failure_metadata),
+            "permanent_rejection": value.failure_metadata.permanent_rejection,
+        }
+    return result
 
 class P7OperatorError(RuntimeError):
     """The fixed P7 model host is unavailable."""
@@ -3931,6 +3939,7 @@ def build_p7_operator_resources(
             autonomy_deadline_monotonic=autonomy_deadline,
             tool_registry=selected_tools,
             compact_events=True,
+            private_failure_sink=P7PrivateFailureSink(private_trace_root.parent / "pi-rpc-failures.jsonl"),
             approved_environment=approved_environment,
         )
         trace = PrimeTraceRecorder(private_trace_root)

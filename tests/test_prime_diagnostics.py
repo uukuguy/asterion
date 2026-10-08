@@ -148,3 +148,40 @@ class TestFailureCodeDiagnostics(unittest.TestCase):
         record = sink.get(diagnostic_id)
         self.assertEqual(record.failure_code, "prime-native-event")
         self.assertNotIn("Asterion-prime native event is invalid", repr(record))
+
+
+class PrivateFailureBoundsTests(unittest.TestCase):
+    def test_wrapped_typed_failure_reaches_safe_p7_projection(self):
+        from asterion.runtimes.pi_rpc import PiRpcPromptFailure
+        from asterion.services.diagnostics import FailureMetadata
+        from asterion.applications.prime.p7.operator import _safe_failure_diagnostic
+        metadata = FailureMetadata(http_status=400, provider_code="invalid_request_error")
+        error = RuntimeError("PRIVATE-WRAPPER")
+        error.__cause__ = PiRpcPromptFailure(metadata)
+        sink = MemoryDiagnosticSink()
+        identity = capture_failure(sink, stage="pi.prompt", error=error, subject_id="PRIVATE-IDENTITY")
+        safe = _safe_failure_diagnostic(sink.get(identity))
+        self.assertEqual(safe["failure_code"], "pi-provider-execution")
+        self.assertTrue(safe["failure_metadata"]["permanent_rejection"])
+        self.assertEqual(safe["failure_metadata"]["http_status"], 400)
+        self.assertNotIn("PRIVATE", repr(safe))
+
+    def test_private_sink_caps_and_mode(self):
+        import json
+        import tempfile
+        from pathlib import Path
+        from asterion.services.diagnostics import (FailureMetadata, capture_private_failure)
+        from asterion.applications.prime.p7.private_failure import P7PrivateFailureSink
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "failures.jsonl"
+            sink = P7PrivateFailureSink(path)
+            for _ in range(20):
+                capture_private_failure(sink, FailureMetadata(), {"errorMessage": "秘密" * 5000}, remaining_bytes=65536)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertLessEqual(path.stat().st_size, 65536)
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertGreater(len(records), 1)
+            self.assertTrue(all(record["truncated"] for record in records))
+            self.assertTrue(all(record["observed_bytes"] > record["retained_bytes"] for record in records))
+            self.assertTrue(all(record["retained_bytes"] == len(record["error_text"].encode()) for record in records))
+            self.assertTrue(all(len(line) <= 8192 for line in path.read_bytes().splitlines(keepends=True)))

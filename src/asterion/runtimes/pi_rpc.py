@@ -13,7 +13,7 @@ import subprocess
 import threading
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
@@ -24,6 +24,11 @@ from asterion.services.diagnostics import (
     DiagnosticSink,
     FailureDiagnostic,
     capture_failure,
+    FailureMetadata,
+    PrivateFailureSink,
+    PRIVATE_FAILURE_TOTAL_BYTES,
+    capture_private_failure,
+    extract_failure_metadata,
 )
 
 
@@ -41,6 +46,10 @@ _PIPE_DRAIN_SECONDS = 0.25
 _POLL_SECONDS = 0.05
 _PROMPT_DRIVER_EXIT_SECONDS = 1.0
 _STDOUT_EOF = object()
+
+
+def _reject_json_constant(_value: str) -> object:
+    raise ValueError("Pi RPC emitted invalid JSONL")
 
 
 def normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
@@ -182,6 +191,25 @@ def _freeze(value: object, active: set[int] | None = None) -> object:
         finally:
             active.remove(identity)
     raise ValueError("Pi RPC event payload is invalid")
+
+
+class PiRpcPromptFailure(RuntimeError):
+    """Safe provider failure; settlement authority stays with its session."""
+
+    def __init__(self, metadata: FailureMetadata) -> None:
+        super().__init__("Pi RPC prompt execution failed")
+        self.failure_metadata = metadata
+
+
+@dataclass(frozen=True, slots=True)
+class _PromptFailureWitness:
+    error: PiRpcPromptFailure
+    lifecycle_identity: object | None
+    request_id: str
+    event_sequence: int
+    acknowledged: bool
+    settled: bool
+    recoverable: bool
 
 
 class PiRpcDirective(Enum):
@@ -518,6 +546,7 @@ class PiRpcSession:
         _popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
         _thread_factory: Callable[..., threading.Thread] = threading.Thread,
         diagnostics: DiagnosticSink | None = None,
+        private_failure_sink: PrivateFailureSink | None = None,
     ) -> None:
         if type(config) is not PiRpcConfig:
             raise TypeError("Pi RPC config is invalid")
@@ -525,6 +554,10 @@ class PiRpcSession:
         self._popen = _popen
         self._thread_factory = _thread_factory
         self._diagnostics = diagnostics
+        self._private_failure_sink = private_failure_sink
+        self._private_failure_bytes = 0
+        self._event_failures: dict[int, FailureMetadata] = {}
+        self._pending_prompt_failure: _PromptFailureWitness | None = None
         self._last_diagnostic_id: str | None = None
         self._state: _ProcessState | None = None
         self._last_stderr = b""
@@ -689,13 +722,39 @@ class PiRpcSession:
                     self._fail_output(state, "Pi RPC output limit exceeded (raw total)")
                     return
                 try:
-                    payload = json.loads(raw.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError):
+                    payload = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
+                except (UnicodeDecodeError, ValueError):
                     self._fail_output(state, "Pi RPC emitted invalid JSONL")
                     return
                 if not isinstance(payload, dict):
                     self._fail_output(state, "Pi RPC emitted a non-object JSON value")
                     return
+                metadata = None
+                native_type = payload.get("type")
+                native_message = payload.get("message")
+                if (native_type == "message_end" and isinstance(native_message, Mapping)
+                        and native_message.get("role") == "assistant"
+                        and type(native_message.get("stopReason")) is str
+                        and native_message.get("stopReason") in {"error", "aborted"}):
+                    metadata = extract_failure_metadata(native_message, event_type="message_end")
+                    metadata, retained = capture_private_failure(
+                        self._private_failure_sink, metadata, native_message,
+                        remaining_bytes=PRIVATE_FAILURE_TOTAL_BYTES - self._private_failure_bytes,
+                    )
+                    self._private_failure_bytes += retained
+                    # The failed aggregate can contain partial content/tool calls.
+                    # Keep protocol controls/usage only in both projection modes.
+                    payload = _compact_rpc_event(payload)
+                elif native_type in {"auto_retry_start", "auto_retry_end"}:
+                    if native_type == "auto_retry_end" and payload.get("success") is False:
+                        metadata = extract_failure_metadata(payload, event_type="auto_retry_end")
+                        metadata, retained = capture_private_failure(
+                            self._private_failure_sink, metadata, payload,
+                            remaining_bytes=PRIVATE_FAILURE_TOTAL_BYTES - self._private_failure_bytes,
+                        )
+                        self._private_failure_bytes += retained
+                    payload = {key: value for key, value in payload.items()
+                               if key not in {"errorMessage", "error", "finalError"}}
                 if (
                     self.config.compact_events
                     and payload.get("type") == "message_update"
@@ -740,6 +799,8 @@ class PiRpcSession:
                         state, "Pi RPC output limit exceeded (projected total)"
                     )
                     return
+                if metadata is not None:
+                    self._event_failures[id(payload)] = metadata
                 state.stdout_queue.put(payload)
         except (OSError, ValueError):
             pass
@@ -862,11 +923,21 @@ class PiRpcSession:
         activity_seen = False
         aborted = False
         cycle_failure = False
+        cycle_metadata: FailureMetadata | None = None
+        retry_count = 0
+        retry_start: tuple[int, int] | None = None
+        retry_max: int | None = None
+        retry_valid = True
+        retry_exhausted = False
+        final_agent_end = False
+        cycle_end_count = 0
+        compaction_seen = False
         retry_allowed = False
         completion_requested = False
         while True:
             event = control.read_event()
             event_type = event.get("type")
+            metadata = self._event_failures.pop(id(event), None)
             if event_type == "response":
                 if event.get("id") != request_id:
                     raise RuntimeError("Pi RPC response did not match the prompt")
@@ -889,12 +960,57 @@ class PiRpcSession:
                 if cycle_failure and not retry_allowed:
                     raise RuntimeError("Pi RPC failed cycle continued without retry")
                 cycle_failure = False
+                cycle_metadata = None
+                final_agent_end = False
+                cycle_end_count = 0
                 retry_allowed = False
             if event_type == "message_end":
                 assistant = event.get("message")
                 if isinstance(assistant, Mapping) and assistant.get("role") == "assistant":
                     cycle_failure |= assistant.get("stopReason") in {"error", "aborted"}
+                    if metadata is not None:
+                        cycle_metadata = metadata
+                        if final_agent_end:
+                            retry_valid = False
+            if event_type in {"compaction_start", "compaction_end"}:
+                compaction_seen = True
+            if event_type == "auto_retry_start":
+                attempt, maximum, delay = event.get("attempt"), event.get("maxAttempts"), event.get("delayMs")
+                valid = (type(attempt) is int and type(maximum) is int
+                         and 1 <= attempt <= maximum and attempt == retry_count + 1
+                         and (retry_start is None or retry_start[0] == attempt - 1)
+                         and final_agent_end and retry_allowed and cycle_failure
+                         and (retry_max is None or retry_max == maximum)
+                         and type(delay) in {int, float} and math.isfinite(delay) and delay >= 0)
+                retry_valid &= valid
+                if valid:
+                    retry_count = attempt
+                    retry_max = maximum
+                    retry_start = (attempt, maximum)
+                retry_exhausted = False
+            if event_type == "auto_retry_end":
+                if metadata is not None and cycle_metadata is not None:
+                    cycle_metadata = replace(
+                        metadata, stop_reason=cycle_metadata.stop_reason,
+                        http_status=metadata.http_status if metadata.http_status is not None else cycle_metadata.http_status,
+                        provider_code=metadata.provider_code if metadata.provider_code != "unknown" else cycle_metadata.provider_code,
+                        diagnostic_id=metadata.diagnostic_id or cycle_metadata.diagnostic_id,
+                    )
+                success, attempt = event.get("success"), event.get("attempt")
+                valid = (retry_start is not None and type(success) is bool
+                         and type(attempt) is int and attempt == retry_start[0])
+                retry_valid &= valid
+                retry_exhausted = bool(valid and success is False and retry_start[0] == retry_start[1]
+                                       and final_agent_end and cycle_failure)
+                retry_start = None
+                if valid and success is True:
+                    retry_count = 0
+                    retry_max = None
             if event_type == "agent_end":
+                final_agent_end = True
+                cycle_end_count += 1
+                if "willRetry" in event and type(event["willRetry"]) is not bool:
+                    retry_valid = False
                 retry_allowed = event.get("willRetry") is True
             directive = on_event(event, control)
             if type(directive) is not PiRpcDirective:
@@ -908,8 +1024,41 @@ class PiRpcSession:
             # before finally emitting this operation's settlement barrier.
             if acknowledged and settled_seen and completion_requested:
                 if aborted or cycle_failure:
-                    raise RuntimeError("Pi RPC prompt execution failed")
+                    if cycle_metadata is None:
+                        raise RuntimeError("Pi RPC prompt execution failed")
+                    metadata = replace(cycle_metadata, native_retry_count=retry_count,
+                                       native_retry_exhausted=retry_valid and retry_exhausted)
+                    error = PiRpcPromptFailure(metadata)
+                    self._pending_prompt_failure = _PromptFailureWitness(
+                        error, self._lifecycle_identity, request_id, self._event_sequence,
+                        acknowledged, settled_seen,
+                        not aborted and not compaction_seen and final_agent_end and cycle_end_count == 1
+                        and metadata.stop_reason == "error" and not metadata.permanent_rejection and not retry_allowed
+                        and retry_start is None and metadata.native_retry_exhausted,
+                    )
+                    raise error
                 return control.remaining_seconds()
+
+    def settle_failed_prompt(self, error: PiRpcPromptFailure) -> None:
+        """Consume an exact settled failure after the owner proves its effects.
+
+        This transport primitive never chooses to retry. The application owner
+        must independently validate complete tool effects and its finite budget.
+        """
+        witness = self._pending_prompt_failure
+        state = self._state
+        if (type(error) is not PiRpcPromptFailure or witness is None or witness.error is not error
+                or not witness.acknowledged or not witness.settled or not witness.recoverable
+                or witness.lifecycle_identity is not self._lifecycle_identity
+                or witness.event_sequence != self._event_sequence
+                or self._command_lock.locked() or self._prompt_driver_lock.locked()
+                or not self._lifecycle_open or not self._lifecycle_poisoned
+                or state is None or state.output_error is not None
+                or state.process.poll() is not None or not state.stdout_queue.empty()
+                or self._session_deadline is None or self._session_deadline <= time.monotonic()):
+            raise RuntimeError("Pi RPC prompt failure settlement is invalid")
+        self._pending_prompt_failure = None
+        self._lifecycle_poisoned = False
 
     def abort(self) -> None:
         """Send one literal abort request when the process is still writable."""
@@ -1155,6 +1304,7 @@ class PiRpcSession:
             raise RuntimeError("Pi RPC session already has an active command")
         async with self._command_lock:
             self._last_diagnostic_id = None
+            self._pending_prompt_failure = None
             self._check_command_ready("prompt", signal)
             absolute_deadline = self._session_deadline
             events: list[PiRpcEvent] = []
@@ -1445,6 +1595,7 @@ def build_rpc_session(
     inherited_fds: tuple[int, ...] = (),
     compact_events: bool = False,
     diagnostics: DiagnosticSink | None = None,
+    private_failure_sink: PrivateFailureSink | None = None,
 ) -> PiRpcSession:
     """Construct one session from neutral launch material, Pi-side."""
 
@@ -1458,6 +1609,7 @@ def build_rpc_session(
             compact_events=compact_events,
         ),
         diagnostics=diagnostics,
+        private_failure_sink=private_failure_sink,
     )
 
 
@@ -1467,6 +1619,7 @@ __all__ = (
     "PiRpcDirective",
     "PiRpcEvent",
     "PiRpcPromptControl",
+    "PiRpcPromptFailure",
     "PiRpcResult",
     "PiRpcSession",
     "build_rpc_session",
