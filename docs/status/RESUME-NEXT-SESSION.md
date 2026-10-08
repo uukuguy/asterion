@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Task8 completed: review READY and frozen medium BP35 L1–L6 PASS. No trial process remains; session not explicitly handed off.
+Task9 active: user authorized one low BP35 comparison after successful medium run. Root changes only P7 thinking and config test;114focusedtestsPASS. notes_bp35_trial prepares newcoldroot/wheel, awaits committedfreeze/GO. PriorTask8 facts below remain the medium baseline.
 
 ## Verified facts
 
@@ -23,4 +23,4 @@ Research continuity improved in this sample:21successfulcells versus prior254/74
 
 ## Historical archive and unfinished boundary
 
-Oldshort-window autonomousBP35 failed2levels/166paid; oldmandatoryNOTES and externallyassisted100score are distinct baselines. ARC sixthlevel comparison271paid versusnew221 (50fewer), not a universal superiority claim. Newcode has not provenothergames, fullBP35L7–L9, actualcross-compactioncontinuation, or statisticallyrepeatedperformance. No additional provider run authorized/queued. If user continues, use these boundedfacts rather than restarting olddiagnostic/sourcefailures.
+Oldshort-window autonomousBP35 failed2levels/166paid; oldmandatoryNOTES and externallyassisted100score are distinct baselines. ARC sixthlevel comparison271paid versusnew221 (50fewer), not a universal superiority claim. Newcode has not provenothergames, fullBP35L7–L9, actualcross-compactioncontinuation, or statisticallyrepeatedperformance. One low comparison now authorized: same5400s/6round/1000action/1024model/4096tool+180cleanup, no inherited knowledge/hotfix/retry; private .asterion-private/p7-low-bp35-20261008/trial/. Preserveconsole52024/56659. Do not launchadditional trials.

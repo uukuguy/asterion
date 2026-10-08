@@ -4403,3 +4403,5 @@
 - 2026-10-08 — L5 verified30paid/0RESET; NOTES3accepted writes660–1074bytes, including first L2 write previously omitted from replacement counts.
 - 2026-10-08 — 937bc2f1 records autonomous L5 success and corrects NOTES counting to include the first accepted write.
 - 2026-10-08 — BP35 sixlevels PASS221paid/2RESET;21successfulcells,3NOTES; fullreplay and independent identity/cleanup audit verified, no production intervention.
+- 2026-10-08 — 0d214f57 records independently verified autonomous BP35 six-level completion, process evidence and remaining attribution boundaries.
+- 2026-10-08 — User authorizes low-only BP35 comparison; P7effort regression RED/GREEN,114focusedtestsPASS; remaining production unchanged.

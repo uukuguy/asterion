@@ -72,3 +72,8 @@ User requests rechecking Task7 design/implementation against requirements, then 
 
 
 Task8 completed: re-reviewREADY,32/33overlapping targetedtestsPASS, no newproductionchanges. Frozen medium BP35 L1-L6 PASS221paid/2RESET,21successfulcells,3acceptedNOTESwrites660–1074B;1023.280s toL6SDKpass. Full221replay/seal/identity/cleanupPASS. One completednaturalroundrecorded, fullcompactioncountunavailable. See comparison for perlevel costs and multi-intervention limitations.
+
+
+## Task 9 — User-authorized low-effort comparison
+
+Change only P7 application thinking medium→low; generic defaults/prompt/context/tools remain frozen. Run one fresh BP35 L1-L6 with exactly Task8 seed0/modelsol/budgets/cleanup and no inherited game knowledge, external solve feedback, hotfix or extra retry. Compare against Task8 medium221paid/2RESET/1023.280s/21successfulcells/3NOTES. First verify command selection with a failing-low regression then focused checks; inspect rebuilt wheel/installed low setting and unchanged extension identity. This is an effort selection change, not a resources/protocol change; prior full promotion remains historical, focused114tests and exact newwheel identity verify this narrow delta. Report individual-run evidence, not statistical proof; default choice remains subject to outcome.
