@@ -4374,3 +4374,5 @@
 - 2026-10-08 11:49 CST — User authorizes frozen autonomous BP35 L1–L6 comparison; prior finite controls retained, cold preparation started without production changes.
 - 2026-10-08 11:50 CST — e5eefc22 fixes BP35 six-level scope, controls and baselines so the authorized cold comparison remains reproducible.
 - 2026-10-08 11:56 CST — Frozen6ca BP35 starts11:56:17, targetL6 and13:26:17hostdeadline; independent launch review passed, no outside solving.
+- 2026-10-08 11:57 CST — 2f66b961 records exact BP35 launch, process ownership and immutable deadline for recoverable supervision.
+- 2026-10-08 12:01 CST — Frozen autonomous L1 verified24paid/0RESET/142.532s; immediate reader use and active context trimming observed, L2 continues unchanged.
