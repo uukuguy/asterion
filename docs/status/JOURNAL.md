@@ -4418,3 +4418,5 @@
 - 2026-10-08 — a7cf5826 records low completion and changes only P7effort tohigh for the user-authorized same-version comparison.
 - 2026-10-08 — High-only samecode BP35 starts07:44:51Z; isolatedinstall/coldstate verified, lowfullyclosed, identicalfinitecontrols.
 - 2026-10-08 — High ends afterL1/24paid with modelRPCerror/native retries; cleanupverified; restoredmedium matches9bsource,114testsPASS.
+- 2026-10-08 — 86262114 records low completion/high request interruption and restores verifiedmedium with explicit comparison limits.
+- 2026-10-08 — Userexplicitlyauthorizes secondhigh; restoredexacthighsource,114focusedtestsPASS; newcoldstate pendinglaunch, priorfailureevidencepreserved.

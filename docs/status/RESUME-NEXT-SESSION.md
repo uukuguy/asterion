@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Medium/low complete; high attempt closed by model RPC failure. Default restoredmedium after allcleanup. No provider/trial process remains; no explicit handoff requested.
+Task11 active: userexplicitlyrequests a secondhigh trial. Priorhigh closed; root switches onlyeffortbacktohigh, srcidenticala7cf5826,114focusedtestsPASS. Trialagent prepares newcoldBASE .asterion-private/p7-high2-bp35-20261008/trial/, waitsrootcommit/GO; no newproviderstarted yet. Same5400s/6round/1000action/1024model/4096tool+180cleanup; oldhigh evidence kept, no inheritedknowledge/hints/hotfix/thirdtrial. Preserveconsole52024/56659.
 
 ## Verified facts
 
@@ -23,4 +23,4 @@ Wheels:medium796ca01ae3a51b21b5047a2277e175d2d7ebed819b1faa63c52b0cf2f039df23;lo
 
 Lowretainsautonomoussixlevelability butthissampleis4.5%moretotalactions,13.2%morefinalsuccessactions,~1.92xelapsed; no providerclockbreakdown/statisticalreplicates. Mediumselectedasverifieddefault; cannotranklatesthighbecausefailurewasrequest-levelandexactcauseunknown.
 Researchcontinuityimproved againstoldshortwindowfailure; actualnewreadback APIs notusedinmedium/low, so donotattributeallgainstosourcereadback. NOTESsmall!=wholecontextsmall. Medium/low eachobservedonecompletedroundindex0, fullcompactioncountunknown because--no-session/tail128; diagnosticsafter4KiBsuppressionunmeasured.
-HighfullL1-L6 comparisonremainsuncompleted; no furtherprovidertrialqueued. Prioroldhighfailureuseddifferentcode; originalexternallyassisted100scoreandARCcomparisonarenotseffortbaselines. All6comparisonstoppedbeforeL7–L9; notfullgame/newofficial100score.
+HighfullL1-L6 comparisonremainsuncompleted; one newhightrial nowexplicitlyauthorized andpreparing. Prioroldhighfailureuseddifferentcode; originalexternallyassisted100scoreandARCcomparisonarenotseffortbaselines. All6comparisonstoppedbeforeL7–L9; notfullgame/newofficial100score.

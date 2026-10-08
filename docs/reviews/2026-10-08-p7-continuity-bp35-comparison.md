@@ -168,3 +168,8 @@ High L1 SDK通过07:48:46.536028Z，seq24、0RESET、host+235.379秒。之后App
 保留的原生事件尾部有5次auto_retry_start与3次auto_retry_end，非完整会话。实际安装Pi的重试判定要求assistant error及provider/transport暂态错误文本匹配（含overload/429/5xx/network/WebSocket/timeout等类别），context overflow另处理，billing/quota/subscription-limit文本排除。因此能确认原生自动重试活动、且符合其暂态请求错误分类；具体HTTP码、错误正文和最终assistant stopReason没有持久化，不能在这些类别中选定根因。并非游戏失败/截止/桥接错误的证据。原生多次重试后不盲目启动新一轮。
 
 High本次进程、guestunit、临时认证已清理，原console保留；267.298秒墙钟/267.296秒单调为终态清理口径。生产a7cf5826在整个high运行期间未变由终局receipt与frozenwheel证明。随后恢复medium不构成试跑热修。证据位于 `.asterion-private/p7-high-bp35-20261008/trial/` 的finalmetadata、report、manifest与failure receipts；状态为请求故障导致的未完成对照，不是high解题能力失败。没有追加provider试跑。
+
+
+## 第二次 High（用户明确授权，准备中）
+
+用户要求high再实测一次。使用和首high完全相同的生产源码（与a7cf5826的src无差异），只从medium默认切回high；114项配置/模型/启动测试通过。复用已验证highwheel，重新建立空白隔离研究目录与run/unit，同seed0/5400秒及其它有限控制。首high请求故障记录保留，不将本次视为原运行无缝续跑，也不继承其L1经验。证据目录 `.asterion-private/p7-high2-bp35-20261008/trial/`；尚未启动，无结果。

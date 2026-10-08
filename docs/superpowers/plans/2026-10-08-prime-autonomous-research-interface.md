@@ -87,3 +87,8 @@ Afterlowclosed, change only P7 effortlow→high, retain Task7 code/prompt/bundle
 
 
 Task10 attempted/external-runtime-limited: highL1PASS24paid/0RESET/235.379s, thenmodel_rpc_error after nativeautoretry, target6NOTachieved.24actioncompletedprefix replay/seal/sourceidentity/cleanupPASS. Errorbody/statusnotpersisted, no causalclassification beyondnative transientprovider/transport retrycategory. No additionalprovidertrial. Restoremediumdefault afterhighcleanup;114focusedtestsPASS, production`src`exactlymatchesverified9b62d2c2. This doesnot close highabilitycomparison asPASS.
+
+
+## Task 11 — Explicitly authorized second high trial
+
+User explicitly requests high again after the request-interrupted firsthigh. Use exactlya7cf5826 production (onlyefforthigh), retained verified highwheel, newcoldroot/unit/run, same5400s/6round/1000action/1024model/4096tool+180cleanup. Priorhigh evidence stayssealed; no oldnotes/routes injected, no productionfix/newinstrumentation, no unrequestedthirdattempt. Current114focusedtests and exactsrc equality topriorhigh plus newinstalledidentity cover unchangeddeployment. Finish goalL6 orfiniteboundary thenaudit/cleanup/report.

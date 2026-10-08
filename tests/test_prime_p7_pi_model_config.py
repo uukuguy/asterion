@@ -58,7 +58,7 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
             with self.assertRaisesRegex(P7LiveSolveError, "unavailable"):
                 resolve_pi_agent_dir({"ASTERION_PRIME_PI_AGENT_DIR": str(alias)})
 
-    def test_pi_base_command_isolated_and_medium_reasoning(self) -> None:
+    def test_pi_base_command_isolated_and_high_reasoning(self) -> None:
         from asterion.applications.prime.p7.live import pi_base_command
 
         command = pi_base_command(
@@ -69,7 +69,7 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
         self.assertIn("--no-context-files", command)
         tools = command[command.index("--tools") + 1].split(",")
         self.assertEqual(tools, ["ipython", "p7_execute_plan", "p7_workspace"])
-        self.assertEqual(command[command.index("--thinking") + 1], "medium")
+        self.assertEqual(command[command.index("--thinking") + 1], "high")
 
 
 if __name__ == "__main__":
