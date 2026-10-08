@@ -4486,3 +4486,4 @@
 - 2026-10-08 — a9ce13d3 refreshes the live checkpoint to preserve completed trial evidence and the analysis-only next boundary.
 - 2026-10-08 — 4c65f470 defines approved transition evidence and autonomous research changes for focused implementation.
 - 2026-10-08 — ecd20b2f adds committed transition evidence and autonomous model/NOTES guidance to reduce research assembly friction.
+- 2026-10-09 — 83924d75 records packaged transition verification and clear cleanup, separating deployment success from untested BP35 improvements.
