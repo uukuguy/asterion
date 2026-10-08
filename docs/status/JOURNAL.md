@@ -4481,3 +4481,4 @@
 - 2026-10-08 — cfc46c63 restores exact pre-scoring actor prompt/context for A/B while preserving generic repairs and score accounting.
 - 2026-10-08 — 492a5daa adds factual score context while preserving actor autonomy in the isolated comparison implementation.
 - 2026-10-08 — 1a22dc33 integrates objective scoring facts after prior trial cleanup, preserving original actor goals and controls.
+- 2026-10-08 — fff6a64f seals the stopped control and records the newly authorized objective-score trial without overlap.
