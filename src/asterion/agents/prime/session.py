@@ -75,6 +75,10 @@ class AsterionPrimeSession:
             if type(limits) is not AsterionPrimeLimits or type(reusable_session) is not bool:
                 raise ProtocolError("Asterion-prime launch material is invalid")
             limits.__post_init__()
+            # Retained-process ownership is a Prime execution choice, not an
+            # application-specific retry implementation.
+            if prompt_recovery is not None:
+                reusable_session = True
             if reusable_session and not all(
                 callable(getattr(rpc_session, name, None)) for name in ("open", "prompt", "close")
             ):

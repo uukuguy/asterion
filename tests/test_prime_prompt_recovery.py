@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import asyncio
 import sys
+import time
 import unittest
 from types import SimpleNamespace
 
@@ -61,7 +62,7 @@ for line in sys.stdin:
 class TestPrimePromptRecovery(unittest.IsolatedAsyncioTestCase):
     async def run_case(self, *, scenario='certain', guard=lambda: True,
                        compact=False, backoff=0, deadline_ms=2000, signal=None,
-                       completion=None, model_callbacks=20):
+                       completion=None, model_callbacks=20, host_deadline_seconds=None):
         self.assertTrue(hasattr(execution, 'PrimePromptRecovery'))
         fixture = SessionFixture()
         self.addCleanup(fixture.close)
@@ -81,9 +82,13 @@ class TestPrimePromptRecovery(unittest.IsolatedAsyncioTestCase):
         session = AsterionPrimeSession(
             rpc_session=rpc, extension_binding=fixture.binding, extension_lease=lease,
             approved_command=config.command, approved_environment=config.environment,
-            limits=limits, reusable_session=True,
+            limits=limits,
             completion_predicate=completion,
-            prompt_recovery=execution.PrimePromptRecovery(guard, backoff_seconds=backoff),
+            prompt_recovery=execution.PrimePromptRecovery(
+                guard, backoff_seconds=backoff,
+                deadline_monotonic=(None if host_deadline_seconds is None
+                                    else time.monotonic() + host_deadline_seconds),
+            ),
         )
         public = await collect(session, signal=signal, deadline_ms=deadline_ms)
         validate_event_stream([event.to_mapping() for event in public])
@@ -152,6 +157,14 @@ class TestPrimePromptRecovery(unittest.IsolatedAsyncioTestCase):
         public, prompts, _ = await self.run_case(guard=guard, signal=signal, backoff=.1)
         self.assertEqual(public[-1].payload, {'status': 'cancelled'})
         self.assertEqual(len(prompts), 1)
+
+    async def test_prime_admission_honors_earlier_host_deadline_and_completion(self):
+        for options in ({'host_deadline_seconds': .15, 'backoff': .2},
+                        {'completion': lambda: True}):
+            with self.subTest(options=options):
+                public, prompts, _ = await self.run_case(**options)
+                self.assertEqual(public[-1].type, 'run.failed')
+                self.assertEqual(len(prompts), 1)
 
 
 class TestP7RecoveryEffects(unittest.IsolatedAsyncioTestCase):

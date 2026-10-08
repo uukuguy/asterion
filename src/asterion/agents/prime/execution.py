@@ -277,12 +277,16 @@ class PrimePromptRecovery:
 
     effect_guard: Callable[[], bool]
     backoff_seconds: float = 1.0
+    deadline_monotonic: float | None = None
 
     def __post_init__(self) -> None:
         if (not callable(self.effect_guard)
                 or type(self.backoff_seconds) not in (int, float)
                 or not math.isfinite(self.backoff_seconds)
-                or not 0 <= self.backoff_seconds <= 30):
+                or not 0 <= self.backoff_seconds <= 30
+                or self.deadline_monotonic is not None and (
+                    type(self.deadline_monotonic) not in (int, float)
+                    or not math.isfinite(self.deadline_monotonic))):
             raise ValueError("Prime prompt recovery is invalid")
 
 
@@ -885,6 +889,8 @@ class PrimeExecutionKernel:
                 or not metadata.native_retry_exhausted or metadata.permanent_rejection
                 or metadata.stop_reason != "error"):
             return False
+        if policy.deadline_monotonic is not None:
+            deadline = min(deadline, policy.deadline_monotonic)
 
         def eligible():
             if (signal is not None and signal.cancelled
@@ -893,6 +899,8 @@ class PrimeExecutionKernel:
                     and self.model_callbacks >= self._limits.model_callbacks
                     or self._limits.tool_callbacks is not None
                     and self.tool_callbacks >= self._limits.tool_callbacks):
+                return False
+            if self._completion_predicate is not None and self._completion_predicate():
                 return False
             ledger.assert_settled()
             return policy.effect_guard() is True
