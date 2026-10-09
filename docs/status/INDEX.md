@@ -93,3 +93,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task32中止实测：[BP35 L1与策略记录缺口](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)：Task32 L1 22步/Q91.12与Task34 L1 19步/Q115，均L2中止死亡1次并封存；追加Task35 L1 20步/Q110.25和Task36 L1 24步/Q76.5625；开局理由可读、目标关联不足与整动画输出膨胀已发现；追加同版Task37 L1 21步/Q100/161.36秒，无RESET；轨迹波动与当前接口先验缺口，动作差异/时延/策略采用边界。
 
 - 最新 Task38：[接口先验 BP35 六关冷测及 NOTES 未完成边界](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)：215步/零RESET/1482.66秒，官方九关部分整局分46.67；L1恢复19/Q115，L2回退、L5变慢。NOTES984B仍伴235k输入峰，主要认知投影尚未实现；动作撤销与停靠开关成本区分。
+
+- Task39 进行中：[NOTES 主要工作认知设计](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md)：普通笔记直接承接工作上下文、重要错误反例记录、按引用专项回读、三层执行/恢复保障；设计实现与后续BP35已获授权，尚未验证。

@@ -1,6 +1,14 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-10 local / 2026-10-09 UTC: Task38 six-level cold closed / independent READY; NOTES-primary concrete design investigation active, no owned model. Session active, not final handoff.
+Updated: 2026-10-10 local / 2026-10-09 UTC: Task38 six-level cold closed / independent READY; Task39 NOTES-primary design/implementation authorized, no owned model. Session active, not final handoff.
+
+## Active Task39 design / implementation preparation
+
+User explicitlyauthorizes design+implementation+simple review+BP35. NormalNOTES mustbe primaryworkingcognition, richerusefulgameunderstanding/importantnegativeevidence, detailedhistoryselectivelyqueried. Noextraoptionalmodelcheckpointhandoff; acceptingnormalnotes establishesepoch viahostinternalreceipt. Spec docs/superpowers/specs/2026-10-10-prime-notes-primary-context-design.md; decisionD-2026-10-10-01; canonicalworklistTask39.
+
+context_impl ownsTSgenericcontext/archive/workspaceadapter/tests/buildresource; deployment ownsPythonP7runtime/envelope/prompt/metadata/tests thenpackaging/witness/liveeval; reviewAstraindependentdesign/source contracts; rootintegrationdocs. DesignAPPROVE收到，workers实施TS/Python并协调v3四键envelope/native私有receipt与context_interaction(version/effect/feedback)结构化标记；notes保存不因退休失败回滚，完整group闭合后才应用。 Oldv2commitcannotbe silentlyredefined. Reader selectedbranch/opaqueboundedref/fullgroup; note boundarybeforeitsassistantgroup, siblings/unknown/userconstraints preserved, recentrealnegativefeedback protected; compaction/reloadnotreviveoldprefix, epochappend/nooldboardrewrites. No4thtool/noBP35route/forcedmentalforms.
+
+UserauthorizedfuturecoldBP35 aftersourceAPPROVE/TS→Python→promotion/necessaryapptoolpackagedwitness/preflightREADY/rootGO, sameenvSolmedium/seed0/native6/5400+180; NO currentpaidrun/sourcefix complete yet. Task38 sealedneverrewrite.
 
 ## Task38 completed / independent READY
 

@@ -294,3 +294,13 @@ Userauthorized singleBP35L1 repeat, no productionchanges: same94dabe66/wheelbbf1
 - [x] Record implemented vs provider-free verified vs model-quality untested boundaries; close checkpoint. User subsequently authorized fresh BP35 L1–L6: exactSolmedium/seed0/native6/5400+180, preflightREADY/rootGO, no inheritedknowledge orL1stopper/19gate; prioritize L1 comparison and monitor each level.
 
 Task38CLOSED: source8e2e8a29/packagingverified; freshBP35target6 naturalexit0/215paid/zeroRESET/1482.657593s, actualofficial9levelpartialscore46.666667. Final1908manifest3cebc44d independentlyREADY/217SDKreplay/ownedcleanup. Evaluation containsL1interfaceadoption, L2/L6undocorrection, L5time/cache and goalvsfinalusage. NewNOTES-primarydesigninvestigation followsuserexplicit cognition/history concern; no newmodel trial orcontextsourcechanges.
+
+## Task39 — Normal NOTES primary cognition, selective evidence retrieval
+
+User explicitlyauthorizes implementation/simple review/coldBP35. [Design](../specs/2026-10-10-prime-notes-primary-context-design.md) changes ordinaryacceptedNOTES toprimaryworkingbaseline, noadditionalmodelcheckpointswitch. Prime TSworker owns genericarchive-reader/selection/completegroupcursor/v3receipt/projection/compaction+cache; Pythonworker owns genericenvelope/domainbindings/P7cognitionprompt/workspacemetadata; root integration/docs, independent review beforepackage/GO. No productioncodeuntildesignAPPROVE.
+
+- [ ] Agree Python/TS v3 envelope and appworkspace native-read contract; addfocused RED tests foractualselectedbranch reads/unknown/group/sibling boundaries andordinarynotesepochs.
+- [ ] Implement read-by-ref first, thennotesautomaticepoch projection, preserveactualcurrentfacts/programgeneration/userconstraints/errors/refutations/unknowns; epochappend andcompaction/reload semantics. No blindbytewindow ornewtool.
+- [ ] Explain richerfreeNOTES andimportantcounterexamples inactualP7prompt; syncschema/registration/allowlist/buildresource/bridge, focusedtests+simplechanged-codeAPPROVE.
+- [ ] Sourcecommit; TS→relevantPython→promotion→necessaryrealpackagedsmallwitness forapptoolchanges; independentlypreflightREADY freshBP35/Solmedium/seed0/native6/5400+180, rootactualGO.
+- [ ] Trackeachlevelpoints/paid/deathRESET/time, acceptednoteepoch/inputpeak/rawcache/refretrieval/programcontinuity; fullSDKreplay/seal/cleanup/finalREADY. Don'tpromote optionalAPIorunittest toNOTES-primary ability.
