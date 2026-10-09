@@ -28,10 +28,26 @@
 - 时间/工具lane：54focusedPASS，兼容和确定性修复针对性PASS。
 - 最终联合19modules：191PASS，26.935秒，日志/tmp/asterion-task30-python-final-green.log；早期191项中1error记录保留在/tmp/asterion-task30-python-final.log，已修复，不能将早期结果标PASS。
 - TypeScript扩展测试：79PASS/6externalcompatibilityskips，注册与bundled资源未修改。
-- make lint、docs-check、diffcheck通过；完整promotion及实际打包小验证待完成。
+- make lint、docs-check、diffcheck通过；完整promotion PASS：25commands/provider_operations=0/full_dataset=no。
+
+## 冻结版本部署验证
+
+生产提交26250c0e；canonical wheel fc6d064b9ff7f779095048de83b26c14bae88ba13524c7877ff16a890262c616；扩展a799561245c1d8ba7b6a1156f7d1954d44cc6072e05feaa831404b73c641d140。source570/install588/archive1685逐项一致。
+
+一次fresh packaged r11l L1（Solmedium，900+180未续期）：4计费动作、0计费RESET、Q115；baseline22，目标67.896532秒，收口含清理86.545788秒。2初始化RESET另外记录，不计费。6个SDK反馈完整回放、4事务、17trace/seal均一致。目标阶段7usage input173093/output1404/peak32507；最终9usage input245003/output1855/peak36710。9context峰值108320字节，9prefix峰值105285字节；既有计算前缀保持的请求对已核对。8研究记录=3compute/4experiment/1acceptedNOTES，0omitted/unknown。
+
+真实installed Runtime.execute+worker的首JSON新增资源日期/评分字段、错误保留、stdout隔离与纯计算锚点不刷新均provider-free验证。实际Pi工具正文没有持久保存，故实际字段收取及模型采用未直接观测；不得由小关成功推断策略收益。进程/auth/env已清理，用户console52024:56659保留。
+
+独立审计READY：101manifest项bytes/SHA及coverage一致，manifest SHA aefaf300d353d77860b6647401049d92dc438fa78b45a4bebf3c72f78b557ccc。私有证据 `.asterion-private/p7-task30-witness-20261009/trial/`。Task30部署闭环已完成；封存版本仍有条件分字段，后续用户要求改为直接115/100剩余动作空间（Task31），不能把本次见证标为后续源码验证。
 
 ## 尚未验证
 
 是否改善BP35 L1探索成本、策略转换、总耗时或得分，需要另一次用户授权的实测。本轮没有启动新BP35；不会由单元测试、提示内容或r11l小验证推断这些能力。通用快照与指导可以被其它领域适配，跨领域效果仍未评估。
 
 [设计](../superpowers/specs/2026-10-09-prime-resource-aware-research-design.md)、[计划](../superpowers/plans/2026-10-09-prime-resource-aware-research.md)、[上一轮BP35结果](2026-10-09-p7-bp35-task29-evaluation.md)。
+
+## Task31：直接评分动作空间修订
+
+用户要求去掉条件分，直接给出115满分与baseline100的剩余步数。数据层删除条件分，新增100阈值/剩余/超额及115超额；研究层同步host小投影和prompt，Prime通用层未改。阈值相等时remaining/exceeded均0，超出时exceeded正数，未知null。实际未完成贡献、累计计费和执行硬边界保持。
+
+独立changed-code APPROVE；评分17与runtime31各RED→GREEN；root联合48tests PASS15.933秒，TS79PASS/6external skips，lint/docs/diff通过。Astra另跑最大20step/60KiB合法反馈回归PASS，新增字段不裁旧证据。新源码冻结/promotion/新的packaged见证待完成，本节不能继承Task30部署证据。

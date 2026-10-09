@@ -10,9 +10,12 @@ from asterion.applications.prime.p7.score import score_planning_facts
 
 
 FIELDS = (
-    'level_score_at_current_paid',
     'max_paid_actions_for_115',
     'additional_paid_actions_preserving_115',
+    'paid_actions_exceeding_115',
+    'max_paid_actions_for_100',
+    'additional_paid_actions_preserving_100',
+    'paid_actions_exceeding_100',
 )
 
 
@@ -26,13 +29,13 @@ def facts(baseline, paid, *, actions=None):
 
 
 class TestP7ResourceScoring(TestCase):
-    def test_zero_paid_has_scoring_room_but_no_conditional_score(self):
+    def test_zero_paid_reports_both_remaining_action_counts(self):
         value = facts(21, 0)
         current = value['current_level']
         self.assertEqual(current.get('max_paid_actions_for_115'), 19)
         self.assertEqual(current.get('additional_paid_actions_preserving_115'), 19)
-        self.assertIn('level_score_at_current_paid', current)
-        self.assertIsNone(current['level_score_at_current_paid'])
+        self.assertEqual([current.get(key) for key in FIELDS], [19, 19, 0, 21, 21, 0])
+        self.assertNotIn('level_score_at_current_paid', current)
         self.assertEqual(value['completed_levels'], [])
         self.assertEqual(value['full_game_score'], '0.000000')
 
@@ -44,21 +47,23 @@ class TestP7ResourceScoring(TestCase):
                     current = facts(baseline, paid)['current_level']
                     self.assertEqual(current.get('max_paid_actions_for_115'), threshold)
                     self.assertEqual(current.get('additional_paid_actions_preserving_115'), 0)
+                    self.assertEqual(current.get('paid_actions_exceeding_115'), paid - threshold)
                     self.assertLessEqual(115 * threshold ** 2, 100 * baseline ** 2)
                     self.assertGreater(115 * (threshold + 1) ** 2, 100 * baseline ** 2)
-                    if paid:
-                        self.assertEqual(current['level_score_at_current_paid'] == '115.000000',
-                                         paid == threshold)
+                    self.assertNotIn('level_score_at_current_paid', current)
 
-    def test_conditional_score_and_additional_room_do_not_award_unfinished_level(self):
-        for baseline, paid, score, threshold, additional in (
-                (48, 42, '115.000000', 44, 2),
-                (21, 25, '70.560000', 19, 0),
-                (10, 10, '100.000000', 9, 0)):
+    def test_remaining_and_exceeded_distinguish_equality_without_awarding_unfinished_level(self):
+        for baseline, paid, expected in (
+                (48, 42, [44, 2, 0, 48, 6, 0]),
+                (21, 25, [19, 0, 6, 21, 0, 4]),
+                (10, 9, [9, 0, 0, 10, 1, 0]),
+                (10, 10, [9, 0, 1, 10, 0, 0]),
+                (10, 11, [9, 0, 2, 10, 0, 1])):
             with self.subTest(baseline=baseline, paid=paid):
                 value = facts(baseline, paid)
                 self.assertEqual([value['current_level'].get(key) for key in FIELDS],
-                                 [score, threshold, additional])
+                                 expected)
+                self.assertNotIn('level_score_at_current_paid', value['current_level'])
                 self.assertEqual(value['full_game_score'], '0.000000')
                 self.assertNotIn('action_cap', value['current_level'])
 
@@ -70,6 +75,9 @@ class TestP7ResourceScoring(TestCase):
         current = facts(10, 3, actions=['ACTION1', 'RESET', 'ACTION7'])['current_level']
         self.assertEqual(current['paid_actions'], 3)
         self.assertEqual(current['additional_paid_actions_preserving_115'], 6)
+        self.assertEqual(current['additional_paid_actions_preserving_100'], 7)
+        self.assertEqual(current['paid_actions_exceeding_115'], 0)
+        self.assertEqual(current['paid_actions_exceeding_100'], 0)
 
     def test_unknown_baseline_and_unsettled_tail_do_not_invent_scoring_room(self):
         unknown = score_planning_facts(ArcGameContract('ls20-9607627b', 9), (),
@@ -95,11 +103,15 @@ class TestP7ResourceScoring(TestCase):
             self.assertNotIn(marker, prompt.P7_SOLVE_PROMPT)
             self.assertNotIn(marker, prompt.P7_NOTES_SOLVE_PROMPT)
 
-    def test_primary_prompt_explains_conditional_scoring_and_dated_resource_view(self):
+    def test_primary_prompt_explains_direct_remaining_actions_and_dated_resource_view(self):
         text = build_autonomous_prompt()
         for field in (*FIELDS, 'host_resource_snapshot', 'time_snapshot.status'):
             with self.subTest(field=field):
                 self.assertIn(field, text)
-        self.assertIn('条件分', text)
+        self.assertNotIn('level_score_at_current_paid', text)
+        self.assertIn('115分还剩', text)
+        self.assertIn('100分还剩', text)
+        self.assertIn('已超过', text)
+        self.assertIn('不构成动作授权或执行停止条件', text)
         self.assertIn('采样', text)
 

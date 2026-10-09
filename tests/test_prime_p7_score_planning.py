@@ -123,8 +123,12 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertEqual(facts['completed_levels'], [])
         self.assertEqual(facts['current_level'], {
             'level': 1, 'paid_actions': 0, 'baseline': 10,
-            'level_score_at_current_paid': None, 'max_paid_actions_for_115': 9,
+            'max_paid_actions_for_115': 9,
             'additional_paid_actions_preserving_115': 9,
+            'paid_actions_exceeding_115': 0,
+            'max_paid_actions_for_100': 10,
+            'additional_paid_actions_preserving_100': 10,
+            'paid_actions_exceeding_100': 0,
         })
         self.assertEqual(facts['full_game_score'], '0.000000')
         self.assertEqual(self.solver.current_context()['budget']['target_level'], 6)

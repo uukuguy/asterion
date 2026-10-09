@@ -31,3 +31,13 @@ Compact view includes source marker, observation_ref, known/blocked flags, host 
 ## Verification and limits
 
 RED→GREEN focused tests: dual-clock/stickyexpiry/finite values/immutability; fresh sampled time after delayed cells/pause; Python-error/interrupted result fidelity; stdout spoof isolation; bounded near-cap result; same-id historical read unchanged with distinct current facts; unknown accounting null; exact115 threshold equality/reset; source/key/dependency neutrality. Test ordinary outcomes rather than hardcoding prompt prose. Independent Astra design and changed-code review; TS tests→focused Python→lint/docs→fullpromotion→sourcecommit→actual packaged r11lL1 identity/replay/cleanup audit. Do not repeat broad checks after green without a new concern. No unseen-game/stable strategy/cross-domain optimality claim; BP35 effects remain untested.
+
+## Task31：直接表达115/100的剩余动作空间
+
+用户修订：条件得分绕了一层，应直接告诉模型满分115还剩多少步，以及baseline100还剩多少步。替换而不叠加字段；不使用单个带符号数来迫使模型解释负数。
+
+P7数据层删除 `current_level.level_score_at_current_paid`；115与100各提供 `max_paid_actions_for_X`、`additional_paid_actions_preserving_X`、`paid_actions_exceeding_X`。115阈值沿用精确整数计算，100阈值为baseline。remaining=max(0,threshold-paid)，exceeded=max(0,paid-threshold)。恰好门槛时两者均0；超过门槛时remaining0/exceeded正数，说明该分已不可保持。未知baseline全null；累计已确认paid/RESET不退/未完成真实贡献0保留。
+
+P7研究层同步紧凑host投影和prompt直接解释。Prime通用层不改；这些是领域评分事实，非动作硬上限。仍由LLM自主决定探索与推进，不引入策略切换或补充关卡路线。快照2KiB及原反馈容量/错误/前缀/未知边界继续有效。
+
+Task30封存见证仅验证26250c0e，不覆盖本变更。Task31须独立changed-code review、focused tests、TS→Python→promotion及新的有限packagedr11l见证；无新BP35授权。

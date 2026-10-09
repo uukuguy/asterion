@@ -1,12 +1,12 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09 Task30 design+implementation active. Session active; not final handoff.
+Updated: 2026-10-09 Task30 closed; Task31 direct score action room implementation active. Session active, not final handoff.
 
-## Active Task30 implementation
+## Active Task31 / closed Task30
 
-User authorizes “设计与实现” resource-sensitive dynamic strategy. Spec/plan4e848873: docs/superpowers/specs/2026-10-09-prime-resource-aware-research-design.md and matching plan. Context_impl owns genericdeadline.snapshot/guidance, P7control/runtimefirstJSONhost resource delivery and focusedtests; deployment owns score/prompt/tests then requiredpackageddeployment afterrootGO; review independently challenges design and changedcode. Root docs/commits/integration. Workers preserve shared edits.
+User asks direct115fullscore and baseline100 remaining actions instead of conditional score. Same dated-resource spec/plan Task31 amendment. Data fields: max_paid_actions_for_115/100, additional_paid_actions_preserving_115/100, paid_actions_exceeding_115/100. Unknownnull, paidRESETnorefund, remaining/exceeded nonnegative, nohardcap. Primegeneric unchanged; P7data/research only. deployment owns score/prompt/tests, context_impl runtimeprojection/tests, Astra review, root docs/commits. Source modifications complete/focusedGREEN; finalintegration/review/freeze/promotion/newpackagedwitness pending. NoBP35authorized.
 
-Chosen minimal dated tool-completion facts, not newFD/percontextread/origin inference. Preserve anchoredmemory/cellprefix, nativeexecution/error/firsttextbridge/unknownboundaries. Current scoringconditional/115threshold/remaining scoringroom are facts nothardgates. Task2 conditionalscore/primaryguidance GREEN17/independentPASS; TS79PASS/6externalcompatibilityskips. Task1 implementation complete; final191Python/TS79+6external skip/lint/docs/diff/independentAPPROVE. Astra independentcontrolclock regression reproduced90vs0 and fixed by sampling control ownclock; optional newfacts never displace capped result. Productionfreeze/promotion/actualr11l deployment stillpending; no deployed newability yet. No current model/game process; no newBP35authorized. AfterREDGREEN/review runTS→Python→promotion→sourcefreeze→oneactualpackagedr11lL1(original900+180), seal/cleanup/independentREADY then docsclose. Userconsole remains.
+Task30 source26250c0e closed:191Python/79TS+6external skip/lint/docs/fullpromotion25PASS/provider0. Fresh packagedr11lL1 Solmedium 900+180 goal67.896532s/4paid/0paidRESET/Q115 (2initRESET separate); finalcleanup86.545788s. Exactsource570/install588/archive1685/wheelfc6d064b/resourcea79956, SDK6replay/4tx/17trace/9usage/8researchrecords verified. Final101manifest SHAaefaf300d353d77860b6647401049d92dc438fa78b45a4bebf3c72f78b557ccc independentREADY; private .asterion-private/p7-task30-witness-20261009/trial sealed, neverrewrite. ActualPi resourcebody receipt/adoption unknown; installed realRuntime/worker firstJSON verified. BP35strategy improvement untested. Ownedhost84592/84594/84593 andguest/cgroup stopped, auth/envgone, console52024:56659preserved. New Task31 source must not inherit old deploymentPASS.
 
 ## Prior Task29 closed evaluation
 

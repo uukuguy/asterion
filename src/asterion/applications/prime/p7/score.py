@@ -63,8 +63,8 @@ def score_planning_facts(game: P7GameSelection | ArcGameContract, transitions: I
 
     A dispatched but unsettled action remains charged in the surrounding budget;
     its unknown level/result cannot supply a made-up score or current-level count.
-    Current conditional scores describe completion at the given paid count, not
-    an earned score or an execution limit. Unknown baselines stay unknown.
+    Remaining and exceeded counts describe the 115/100 scoring thresholds,
+    not an earned score or an execution limit. Unknown baselines stay unknown.
     """
     baselines = game.baseline_actions if type(game) is P7GameSelection else None
     facts = {
@@ -108,11 +108,16 @@ def score_planning_facts(game: P7GameSelection | ArcGameContract, transitions: I
             "level": completed + 1,
             "paid_actions": paid,
             "baseline": baseline,
-            "level_score_at_current_paid": (_format_score(_level_score(baseline, paid))
-                                             if baseline is not None and paid > 0 else None),
             "max_paid_actions_for_115": threshold,
             "additional_paid_actions_preserving_115": (max(0, threshold - paid)
                                                       if threshold is not None else None),
+            "paid_actions_exceeding_115": (max(0, paid - threshold)
+                                           if threshold is not None else None),
+            "max_paid_actions_for_100": baseline,
+            "additional_paid_actions_preserving_100": (max(0, baseline - paid)
+                                                      if baseline is not None else None),
+            "paid_actions_exceeding_100": (max(0, paid - baseline)
+                                           if baseline is not None else None),
         }
     facts.update(
         accounting_status="settled",

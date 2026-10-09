@@ -37,7 +37,7 @@ def build_autonomous_prompt() -> str:
     """P7 supplies evidence and execution authority; the actor owns research."""
     return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
 
-计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。current_level.level_score_at_current_paid 是以当前累计付费动作结束该关时的条件分，当前关未完成时没有已得贡献；0动作或baseline未知时为null。max_paid_actions_for_115 是保持115分的累计付费动作整数阈值；additional_paid_actions_preserving_115 是该阈值内尚余的付费动作数。这些是评分空间，与宿主动作额度分别计算，不构成动作授权或执行停止条件。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
+计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。current_level 中 max_paid_actions_for_115 是保持115分的累计付费动作整数阈值，additional_paid_actions_preserving_115 直接表示保持115分还剩多少步，paid_actions_exceeding_115 表示已超过该阈值多少步；max_paid_actions_for_100 等于 baseline，additional_paid_actions_preserving_100 表示保持baseline的100分还剩多少步，paid_actions_exceeding_100 表示已超过100分阈值多少步。剩余数和超额数均不小于0；剩余为0时，超额为0表示恰好到达阈值，超额大于0表示已超过。baseline 未知时这些字段为null。这些是评分空间，与宿主动作额度分别计算，不构成动作授权或执行停止条件。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
 
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r

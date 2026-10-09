@@ -4638,3 +4638,12 @@
 - Task30 scoring RED→17PASS and independentPASS; TS79PASS/6external skips. Generic/resource integration finalreview and tests pending.
 
 - Task30 final191PythonPASS/79TS+6externalskip/lint/docs/diff/independentAPPROVE; memory/flag regressions fixed; sourcefreeze and packaged deployment pending.
+
+- 26250c0e: Implemented dated resources and conditional score facts after independent review, preserving autonomous strategy and settled evidence.
+
+- Task30 source26250c0e fullpromotionPASS25/provider0; actual r11lL1 launched14:37:08.850380UTC, original900+180, fresh canonicalwheel fc6d064b.
+
+- Task30 packagedr11l4paid/0paidRESET/Q115/67.896532s, SDKreplay/identities/cleanup/101manifest independentREADY; actualPi resource receipt unknown.
+- Task31 user replaces conditionalscore with direct115/100remaining/exceeded facts; domain data/research adjustment, generic Prime unchanged.
+
+- Task31 direct115/100room source reviewedAPPROVE; root48PythonPASS/79TS+6skip/lint/docs/diff; new packaged closure pending.

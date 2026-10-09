@@ -18,6 +18,25 @@ from tests.test_prime_p7_research_runtime import _Signal, _TraceClient
 
 
 class TestP7ResourceSnapshot(unittest.IsolatedAsyncioTestCase):
+    async def test_current_level_delivers_direct_115_and_100_step_room_and_excess(self):
+        for paid, baseline in ((0, 21), (25, 21), (5, None)):
+            with self.subTest(paid=paid, baseline=baseline):
+                context = self.host.current_context()
+                level = {'level': 1, 'paid_actions': paid, 'baseline': baseline}
+                for score, threshold in ((115, 19 if baseline is not None else None), (100, baseline)):
+                    level.update({
+                        f'max_paid_actions_for_{score}': threshold,
+                        f'additional_paid_actions_preserving_{score}':
+                            max(0, threshold - paid) if threshold is not None else None,
+                        f'paid_actions_exceeding_{score}':
+                            max(0, paid - threshold) if threshold is not None else None,
+                    })
+                context['budget']['scoring']['current_level'] = level
+                snapshot = self.host._host_resource_snapshot(context)
+                self.assertEqual(snapshot['current_level'], level)
+                self.assertNotIn('level_score_at_current_paid', snapshot['current_level'])
+                self.assertLessEqual(len(json.dumps(snapshot, separators=(',', ':')).encode()), 2048)
+
     async def asyncSetUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -49,6 +68,7 @@ class TestP7ResourceSnapshot(unittest.IsolatedAsyncioTestCase):
         self.assertGreaterEqual(facts['time_snapshot']['sampled_at_monotonic'], before)
         self.assertEqual(metadata['stdout'], spoof + '\n')
         self.assertEqual(facts['actions_remaining'], self.host.current_context()['budget']['actions_remaining'])
+        self.assertEqual(facts['current_level'], self.host.current_context()['budget']['scoring']['current_level'])
         self.assertEqual(len(metadata['kernel_exports']), 1)
         self.assertNotIn('context_memory', metadata)
         self.assertNotIn('frame', json.dumps(facts))

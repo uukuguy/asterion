@@ -32,9 +32,19 @@ Ownership: P7 score.py/prompt.py; tests/test_prime_p7_score_planning.py and new 
 ## Task3 — Integration and packaged closure (root + deployment + review)
 
 - [x] Root independent design challenge followed by final changed-code review; fix important findings with focused tests.
-- [ ] Run npm --prefix packages/typescript/asterion-prime-extension test, relevant Python unittest, lint/docs and RUST_TEST_THREADS=1 make promotion-check. No TS registration change planned; resource identity stays exact.
-- [ ] Commit reviewed source, journal and checkpoint. Deployment creates one fresh finite actual make asterion-prime-p7-level-witness GAME=r11l LEVEL=1 (current.env), original900+180.
-- [ ] Verify actualinstalled source/wheel/resource/allowlist, real resource facts/error/prefix boundary as applicable; fullSDKreplay/trace/manifest/cleanup and independentREADY. Preserve userconsole.
-- [ ] Close standalone review, canonical worklist/state/index; journal allcommits. Distinguish implementation/deployment from untested BP35 policy effect. No further run.
+- [x] Run npm --prefix packages/typescript/asterion-prime-extension test, relevant Python unittest, lint/docs and RUST_TEST_THREADS=1 make promotion-check. No TS registration change planned; resource identity stays exact.
+- [x] Commit reviewed source, journal and checkpoint. Deployment creates one fresh finite actual make asterion-prime-p7-level-witness GAME=r11l LEVEL=1 (current.env), original900+180.
+- [x] Verify actualinstalled source/wheel/resource/allowlist, real resource facts/error/prefix boundary as applicable; fullSDKreplay/trace/manifest/cleanup and independentREADY. Preserve userconsole.
+- [x] Close standalone review, canonical worklist/state/index; journal allcommits. Distinguish implementation/deployment from untested BP35 policy effect. No further run.
 
-Implementation final191PASS/TS79PASS+6externalskip/lint/docs/diff/independentAPPROVE. Sourcefreeze/promotion/packagedr11ldeployment pending. No BP35.
+Implementation final191PASS/TS79PASS+6externalskip/lint/docs/diff/independentAPPROVE. Sourcefreeze26250c0e/fullpromotion25PASS/packagedr11l4paid0RESET67.896532s/independentREADY complete. ActualPi fact receipt/adoption unknown. No BP35. Subsequent direct115/100room adjustment is Task31, outside this sealed deployment.
+
+## Task31 — Direct scoring action room (follow-up)
+
+User requests direct115/100remaining steps instead of conditional score. Same spec Task31 amendment. Deployment owns score/prompt/scoringtests; context_impl owns runtimeprojection/resourcetests; root integrates docs/commit; Astra reviews. Preserve shared edits and sealedTask30evidence.
+
+- [x] RED→GREEN exact115/100remaining/exceeded facts; unknown/reset/threshold edges; remove conditional score.
+- [x] Synchronize smallhost projection and factual prompt; retain allresource/cap/prefix/error boundaries.
+- [ ] Independent changed-code review, focusedintegration/TS/lint/docs/diff.
+- [ ] Freeze reviewed source, fullpromotion and fresh r11lL1 original900+180; source/install/tool identities, replay/seal/cleanup and independentREADY.
+- [ ] Update state with exact verification boundary; noBP35.

@@ -383,8 +383,9 @@ class P7ResearchRuntime:
             'win_levels': scoring['win_levels'],
             'time_snapshot': budget['time_snapshot'],
             'current_level': None if level is None else {key: level[key] for key in (
-                'level', 'paid_actions', 'baseline', 'level_score_at_current_paid',
-                'max_paid_actions_for_115', 'additional_paid_actions_preserving_115')},
+                'level', 'paid_actions', 'baseline',
+                'max_paid_actions_for_115', 'additional_paid_actions_preserving_115', 'paid_actions_exceeding_115',
+                'max_paid_actions_for_100', 'additional_paid_actions_preserving_100', 'paid_actions_exceeding_100')},
         }
         # Copy through the same finite JSON representation used on the bridge.
         text = json.dumps(snapshot, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
