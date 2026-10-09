@@ -1,16 +1,16 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09 after Task22 settlement. Session remains active; this is not a final handoff.
+Updated: 2026-10-09 at Task23 cold-trial launch. Session remains active; this is not a final handoff.
 
 ## Current intent and next action
 
-User approved implementation after the concrete layered design. Task22 adds read-only r.transition(sequence) and P7 research/NOTES descriptions. Generic Prime facilities and registered tools unchanged. Source implementation/review and61Python tests PASS; TS50PASS/6externalPi skips, lint/docsPASS. Promotion fullPASS commands25/provider_operations0; the required fresh packaged r11lL1 deployment witness completed7paid/0RESET/70.642472seconds, replay/source/cleanupPASS; no BP35 trial authorized. Design [transition research spec](../superpowers/specs/2026-10-08-p7-transition-research-design.md); canonical worklist Task22. Avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
+User approved implementation after the concrete layered design. Task22 adds read-only r.transition(sequence) and P7 research/NOTES descriptions. Generic Prime facilities and registered tools unchanged. Source implementation/review and61Python tests PASS; TS50PASS/6externalPi skips, lint/docsPASS. Promotion fullPASS commands25/provider_operations0; the required fresh packaged r11lL1 deployment witness completed7paid/0RESET/70.642472seconds, replay/source/cleanupPASS; user now authorizes Task23 cold BP35 L1–L6; track through target or original finite limits. Design [transition research spec](../superpowers/specs/2026-10-08-p7-transition-research-design.md); canonical worklist Task23. Avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
 
 ## Current source and configuration
 
 - Branch feat/prime-research-notes; current productionecd20b2f; Task21 frozen1a22dc33. Task21 adds only factual scoring paragraph and budget.scoring, preserving the original actor goal/behavior from9b62d2c2. score.py unchanged;49 focused tests passed. Generic schema/RPC/config repairs remain.
 - Operator.env openai-codex/gpt-6.1-sol/medium, ASTERION_PRIME_EFFORT takes precedence. Preserve credentials; do not print whole.env.
-- No active trial. Task22 owned processes/auth cleared and consolepreserved. Task21 owned host/guest processes and temporary auth/environment removed, exact unit7a6e9c2a4fd947d2800595330a3dc376 stopped. User console52024/56659 preserved.
+- Task23 active; exact process/unit/deadline are recorded below. Previous Task22 owned processes/auth cleared and consolepreserved. Task21 owned host/guest processes and temporary auth/environment removed, exact unit7a6e9c2a4fd947d2800595330a3dc376 stopped. User console52024/56659 preserved.
 - Task21 state/report commit84df08e3; Task22 approved spec4c65f470, source commit ecd20b2f. JOURNAL append-only. Canonical worklist [research interface plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
 
 ## Task21 verified facts
@@ -64,3 +64,6 @@ D-2026-10-09-01 defines Prime for autonomous long-horizon, open-ended, falsifiab
 ## Latest intent — Task23 prepared cold BP35 authorized
 
 User now requests README/AGENTS reflect overallPrimeguidance, firstP7researchstabilization, thenpreparedcoldverification. Update README/README.zh-CN/AGENTS beforelaunch, productionecd20b2funchanged; docscheckonly(no repeatpromotion/r11l). Trialownerpreparing .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/. FreshSolmedium/.env/target6of9/original5400+180/6round/1000paid/1024model/4096tool/noNOTES-routeinheritance/noactorhints. GOafterdoccommit. Comparepaid,time,perlevelscore,deathRESETmechanisms toTask21and17minutebest. Preserveconsole52024/56659. Actualunit/run/clockspendinglaunchreceipt.
+
+
+Task23 ACTIVE exactrunp7-live-20261009032713-41edfbb078eaa7de208c454f/unit e4749fe01fa84944a462674521e1dc86. Hoststart2026-10-09T03:27:12.949955Z, fixeddeadline04:57:12.949479Z+180cleanup;mono2223267.9618925. Supervisor81001/launcher81003/caffeinate81002/session59224. SourceECD20b2f/HEADabf3f428/wheelce5f8f22/566source584installed3tools/current.env+installednoPromptPigetstateSolmediumverified. Trialowner notes_bp35_trial, read-onlyreviewer prime_effort_config. Preserveconsole52024/56659. No source/env/actorhints duringtrial. Privatebase .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/; directcoldtarget6. Do notinfercompletedresultfromlaunch.

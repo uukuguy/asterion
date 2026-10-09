@@ -4489,3 +4489,4 @@
 - 2026-10-09 — 83924d75 records packaged transition verification and clear cleanup, separating deployment success from untested BP35 improvements.
 - 2026-10-09 — 32d98ece checkpoints completed transition deployment so later sessions retain the correct verification boundary.
 - 2026-10-09 — a5d8d57c establishes Prime autonomous computational research positioning and traceable research-record goals beyond games.
+- 2026-10-09 — abf3f428 aligns README and agent guidance with Prime purpose and records the authorized latest cold BP35 comparison.
