@@ -41,7 +41,13 @@ class TestAutonomousResearchInterface(unittest.TestCase):
 
     def test_prompt_requests_strategy_reports_before_paid_actions_and_on_changes(self):
         text = prompt.build_autonomous_prompt()
-        for fragment in ('开局可先免费观察或计算', '在首个付费动作前',
+        for fragment in ('开局先依据自动提供的初始画面、目标和115/100剩余评分空间',
+                         '判断现有证据是否足以行动，并选择推进路线与探索投入',
+                         '不要默认“先试一下”', '若选择付费探针，事先说明',
+                         '为何值得消耗有限步数、什么结果会改变路线选择',
+                         '已有信息足够时直接推进，不为确认而重复试探',
+                         '不以“未知很多”代替策略判断', '必要时可免费观察或计算',
+                         '在首个付费动作前',
                          '选择的游戏策略、依据、预期付费动作代价及主要不确定性',
                          '无法估计时写未知及原因', '实质改变时，在下一批行动前',
                          '策略未变不重复报告', '不改变宿主动作准入或额度',
@@ -49,6 +55,7 @@ class TestAutonomousResearchInterface(unittest.TestCase):
             with self.subTest(requirement=fragment):
                 self.assertTrue(fragment in text, f'missing strategy-report requirement: {fragment}')
         self.assertNotIn('写笔记不是行动前置条件', text)
+        self.assertNotIn('开局可先免费观察或计算', text)
         self.assertIn('策略和表述形式由你选择', text)
         self.assertIn('日常笔记更新时机由你决定', text)
 

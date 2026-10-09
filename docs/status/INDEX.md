@@ -90,4 +90,4 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - Task30实施评审：[动态资源事实实现与验证](../reviews/2026-10-09-prime-resource-aware-research-review.md)：模型自主权衡、边界修复、代码APPROVE/191tests/promotion/r11l部署独立READY；模型采用和BP35策略效果未验证。
 
-- Task32中止实测：[BP35 L1与策略记录缺口](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)：Task32 L1 22步/Q91.12与Task34 L1 19步/Q115，均L2中止死亡1次并封存；动作差异/时延/策略采用边界。
+- Task32中止实测：[BP35 L1与策略记录缺口](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)：Task32 L1 22步/Q91.12与Task34 L1 19步/Q115，均L2中止死亡1次并封存；追加Task35 L1 20步/Q110.25、明确评分取舍但初始投入低效；动作差异/时延/策略采用边界。

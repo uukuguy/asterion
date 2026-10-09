@@ -67,3 +67,9 @@ Task30封存版本26250c0e落实用户提出的方向：策略随证据、剩余
 仅prompt与两个focused接口测试变更，增加935UTF8字节；无新tool/schema/hostgate，Prime通用层与P7数据层未改。已有NOTES与提出/执行计划事件、submitted_plan研究链保存外显选择理由，不要求内部思考展开。协议goal仍可省略，研究提示要求填写；直接行动无NOTES的宿主边界测试仍通过。
 
 独立changed-code APPROVE/接口5PASS；root35相关Python PASS1.678秒，lint/docs/diff通过。**已实现提示合同，未新实跑或新版本打包见证；模型遵从、理由质量和效率改善尚未验证。** Task32封存中无这些新要求，不能把后加说明当成当时依据。
+
+## Task35/36：从后期资源取舍到开局选择
+
+Task35生产b2d1a453已部署冷测，模型在start10/start15公开引用准确评分余量选择推进/保100，但L120paidQ110.25未达115，授权早停；source与304manifest独立READY，详情在Task32–35中止分析。没有证明总体策略改善。
+
+Task36只修改P7主prompt初报段和已有focused接口测试。开局依据初始画面、目标和115/100余量先选择推进路线/探索投入，不默认先probe；probe事先说明动作价值及哪些结果改变路线。已有信息足则推进，未知不能替代判断，必要免费分析可做。无新工具/数据/Primegeneric逻辑/hostgate，报告仍简短NOTES与goal。+433UTF8B，主prompt13484B。独立changed-code APPROVE/23相关PythonPASS0.970秒/Ruff/lint/docs/diff。源合同已实现，实际开局遵从及分数待新冷测；不能回填为Task35依据。

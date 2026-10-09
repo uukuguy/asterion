@@ -53,3 +53,15 @@ L2公开理由展示更清楚的风险链：seq24NOTES保留15内部11/0，远�
 用户于15:53:02.710672UTC停止：74knownpaid=L119+L2unfinished55，死亡RESET1，重置后31步。76SDK完整回放，112trace/74tx/35研究记录=8compute23experiment4notes一致。23/23plan有goal、4acceptedNOTES，外显说明真实可读，但可读不等于选择正确。35completedusage input1856539/out9138/peak89364，raw1430683/cache425856；hook36取消在途usage未知。36context峰313561/累计6206654字节，prefix峰306273。35资源交付正确，最后L2已超115门槛11步、100门槛7步，未通关没有该关已得贡献。
 
 owned进程/unit/auth/env均清理，用户console保留；收口423.170680046秒。私有Task34trial封存648manifest独立READY，SHA bc2e99b5ed08fcfcecb857cf276488aa11d44b6cb0cad5d88c0b1633e8a15f6d。用户要求将紧迫性指导写得明确再测，允许完整L1–L6，但L1不理想可先中止。新Task35提示及实测不能回填为本次决策依据。
+
+## Task35：明确评分取舍已发生，开局投入仍低效
+
+生产b2d1a453，freshSolmedium/seed0/5400+180，授权L1不理想早停。L1实际20paid/Q110.25、0RESET，mint至goal197.061843秒（receipt口径197.061094秒）。未守住19步门槛，按约定停止；停止前L2已有5paid，最终25paid/27SDK，不能宣称只执行L1或完整六关通过。
+
+本轮出现可核的当时取舍：start10真实115/100余9/11，goal写下一段需5步，“因此不再试空处”，5步执行完成；start15真实余4/6，预计剩5步，明确超115空间但可保100，后续1+2+2正好完成。start16/18的100余5/3也一致。资源事实被公开用为选择依据已验证，不能等同真实内部因果或稳定策略收益。
+
+相对Task34，动作同为8次点击+1次ACTION7，本轮多1次水平移动。早期撤销了右移，后段需右4而非右3，额外步来源可追溯。seq1/4空处点击无地图变化；开局虽报19/21，但以“先点击验证、机制和总路线未知”开始，未公开比较初始推进路线与探索投入。后期主动推进无法退回初期已计费动作。用户因此要求开局就作策略选择判断（Task36），不能把该要求追认成本次行为。
+
+首NOTES工具回传早于首paid6.207612秒；12/12计划非空goal，23记录=8compute12experiment3notes。L1goal19usage input717983/out4165/peak55742；最终23完成usage input958220/out4891/peak63128，raw398348/cacheRead559872；第24请求取消usage未知。停止16:09:10.285935UTC，最后SDK16:08:54.655415早于信号；收口243.743776083秒，ownedhost/guest/auth/env均gone，用户console52024:56659保留。
+
+27完整SDK回放、25known事务、51trace/23chain/ref与metrics通过；source570/install588/resourcea799/wheel2b095一致。私有Task35trial final304manifest逐bytes/SHA/coverage独立READY：f3037061cb58f305181b998e062c22e532b8071ec674462597f38ba639f8ab4b。没有续跑授权，后续源码修改与新实测分开。

@@ -68,5 +68,15 @@ P7prompt+focusedtest context_impl; Astra simplechangedcodeAPPROVE; root43PythonP
 
 - [x] Explicit scarce score/time plus adequate evidence favorsprogress; necessary valuableprobe stillallowed, noforcedunknownresolution/threshold/gate.
 - [x] Concisegoal onlywhen resource materially changes choice; noextra notes/query ororacle.
-- [ ] Freeze/preflight/newcoldrun; monitorL1threshold19 and repeated/no-effect choices with actualreasons, stopifpoor orcontinueL6.
-- [ ] SDKreplay/seal/ownedcleanup/independentREADY and truthful state; strategy adoption/cause onlyif supported.
+- [x] Freeze/preflight/newcoldrun; monitorL1threshold19 and repeated/no-effect choices with actualreasons, stopifpoor orcontinueL6.
+- [x] SDKreplay/seal/ownedcleanup/independentREADY and truthful state; strategy adoption/cause onlyif supported.
+
+Task35 userauthorizedearlystop: L120/Q110.25/197.061843s; explicitgoalresourcechoice verified, nofullscore orstablebenefit claim. L2partial5, final304manifest independentREADY/sourceb2d1 sealed.
+
+## Task36 — Choose strategy at the opening
+
+Userrequiresinitialchoice, notdefaultprobe. Ownercontext_impl P7prompt/onefocusedtest; Astra simplereview; rootdocs/commit. Continueuserauthorizedclarify-and-retest BP35L1-L6/L1poor earlystop, onefreshtrial.
+
+- [x] Replace initial report instruction with real initialroute/exploration allocation judgment; paidprobe reason and route-changing outcome, no invented costs/hardgate.
+- [x] Focusedtests/independentreview/lint/docs/diff andsourcefreeze; 23PASS/APPROVE.
+- [ ] Onefresh fullcoldBP35same5400+180, L1earlystopifpoor, SDKreplay/seal/cleanup/independentREADY; liveadherence/quality pending.

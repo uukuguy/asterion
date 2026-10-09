@@ -4681,3 +4681,12 @@
 
 - Task34 userstopped74paid/L119Q115+unfinishedL255death1; 648manifestbc2e independentREADY, allownedcleanup, noresume.
 - Task35 explicitscarcity/adequateevidence→preferprogress P7prompt,43PythonPASS/lint/docs/APPROVE; fullBP35authorized withL1earlystop discretion.
+
+- b2d1a453: Made scarce score/time favor informed progress and concise tradeoffs, preserving autonomous verification and execution boundaries.
+
+- Task35 actuallaunch16:05:08.424492UTC/deadline17:35:08.423743+180, run9d62d956/unitc96c7d72/owned52123,52125,52124; L1>19earlystopauthorized.
+
+- Task35 L120/Q110.25 triggersauthorizedearlystop, L2partial5; final304manifestf303 independentREADY/ownedcleanup.
+- Task36 userrequires openingstrategy judgment beforedefaultprobe; P7prompt refinement sourceonly, no newrun authorization.
+
+- Task36 initialstrategychoice beforedefaultprobe implemented23PASS/APPROVE; continueprioruserclarify-and-retest authorization onefreshBP35/L1gate.
