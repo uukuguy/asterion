@@ -257,3 +257,5 @@ Task28 targetcomplete:236paid/two deathRESET/1069.976586s,18/62/36/23/31/66paid 
 ## Task29 — Dynamic settled-observation boundaries
 
 User authorizes design+implementation and directlyrelatedthree-layerdefects. [Design](../specs/2026-10-09-p7-observation-boundary-design.md), [plan](2026-10-09-p7-observation-boundary.md): objectiveboundedpixeltranslationcandidate, defaultsoftyield/actoroptout/optionalcheckpoint, hardRESET/terminalpriorityrepair. ExistingPrime lifecycle reused; no newBP35. Implementation/review/deploymentpending.
+
+Task29 CLOSED:reviewedimplementation9557ad63/defaultsoftyield+actorcheckpoint/RESETpriority/cappedfeedback fixes. TS79PASS/6external skip/Python142PASS/promotion25PASS/provider0; actualpackagedr11lL1sixpaid/104.040866s/zero paidRESET, fullreplay/identities/cleanup and110entryindependentauditREADY. Installedsyntheticnewboundaryverified; naturalwitnessno boundary; no newBP35effectclaim. Standalone [Task29 review](../../reviews/2026-10-09-p7-observation-boundary-review.md).

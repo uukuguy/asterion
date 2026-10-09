@@ -42,12 +42,14 @@ Files: `packages/typescript/asterion-prime-extension/src/ipython-extension.ts`, 
 
 - [x] RED TypeBoxvalidation boolonly/unknownkeys and descriptions; add onlytwooptionalfields toexistingclosedparameters; toolsremainipython,p7_execute_plan,p7_workspace.
 - [x] Explainyield doesnotmeanterminal/unsafe, pending suffixneedsnewid/currentref, softpolicyfalsecannotbypasshardstops.
-- [ ] Syncresource, run `npm --prefix packages/typescript/asterion-prime-extension test`, relatedPython, lint/docs and `RUST_TEST_THREADS=1 make promotion-check`.
+- [x] Syncresource, run `npm --prefix packages/typescript/asterion-prime-extension test`, relatedPython, lint/docs and `RUST_TEST_THREADS=1 make promotion-check`.
 - [x] Astra independentdesign/spec/code review; fiximportantfindings. Rootfreeze reviewedimplementationcommit.
 
 ## Task4 — Packaged deployment and truthful close (deployment/review/root)
 
-- [ ] One actual `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` underexisting900+180preset; exactwheel/resource/tools/operator.env, nonewBP35.
-- [ ] Installedprovider-freeboundaryfixture verifiescopy/evidence/typedfield/unexecuted suffix where naturalwitness lacks suchchanges.
-- [ ] Fullwitnessreplay/trace/source/install/cleanup andindependentfinalaudit, preserveconsole.
-- [ ] Recordimplemented/providerfree/deployed separately, no death-rate or efficiencyclaim; commitdesign/source/state promptly andjournalhashes.
+- [x] One actual `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` underexisting900+180preset; exactwheel/resource/tools/operator.env, nonewBP35.
+- [x] Installedprovider-freeboundaryfixture verifiescopy/evidence/typedfield/unexecuted suffix where naturalwitness lacks suchchanges.
+- [x] Fullwitnessreplay/trace/source/install/cleanup andindependentfinalaudit, preserveconsole.
+- [x] Recordimplemented/providerfree/deployed separately, no death-rate or efficiencyclaim; commitdesign/source/state promptly andjournalhashes.
+
+Task29 CLOSED:source9557ad63/resourcea79956/wheel3aed093f21d8f7ed9b1d67430fc6daf3828008aedf062b8873322c24e8e02327; finalTS79PASS/6externalcompatibilityskips, Python142PASS/lint/docs, fullpromotion25PASS/provider0, overallindependentAPPROVE. Actualpackagedr11lL1sixpaid/zero paidRESET/104.040866sgoal/110.1874218scleanup. Installedproviderfreeprobe coversboundary/id/optout/history; naturalwitnessno boundary/optionalAPIcall. Finalindependent110entryauditREADY/SHA72c31f036812bfd0aacda6700cd9be3afe665f3a53ecb91c2da168c8d3a515c5/source570/install588/archive1679/8SDKreplay/6committedtrace19/cleanup. NoBP35 effect orcross-domainclaim.

@@ -4592,3 +4592,9 @@
 - 2e393dbf: Designed dynamic observation boundaries and RESET hard-stop repair to return control before unobserved batch consequences.
 
 - Task29 typedtools: RED strictoptionalfieldfailure→79PASS/6external skips; independentAPPROVE, bundledresourcea7995612. Python implementation pending.
+
+- 9557ad63: Implemented autonomous observation boundaries and repaired RESET/projection failures to preserve known action feedback across layers.
+
+- Task29 fullpromotion25PASS/provider0; singlepackagedr11lL1sixpaid goal observed, preciseauditpending. Source9557ad63 unchanged; noBP35.
+
+- Task29 CLOSED: fullpromotion25PASS, actualr11lL1sixpaid/104.040866s, installedboundaryprobe and110entryauditREADY; noBP35effectclaim.

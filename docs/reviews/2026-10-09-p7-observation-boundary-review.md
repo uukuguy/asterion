@@ -44,4 +44,25 @@
 
 ## 最终源码评审与集成检查
 
-独立 Astra 评审 APPROVE，无未解决发现；容量缺陷两轮窄复审均保留真实证据，最终反例正常返回60,893字节，原始记录354,430字节未改。最终TypeScript79 PASS/6外部兼容测试跳过；Python142 PASS，涵盖数据/历史/API、Solver边界、真实交易、未知结果、控制、投影与容量。`make lint`、`make docs-check`、`git diff --check`通过。日志 `/tmp/asterion-task29-ts-final.log`、`/tmp/asterion-task29-python-final.log`。源码冻结后promotion及实际打包见证仍待完成，尚不能称部署验证完成。
+独立 Astra 评审 APPROVE，无未解决发现；容量缺陷两轮窄复审均保留真实证据，最终反例正常返回60,893字节，原始记录354,430字节未改。最终TypeScript79 PASS/6外部兼容测试跳过；Python142 PASS，涵盖数据/历史/API、Solver边界、真实交易、未知结果、控制、投影与容量。`make lint`、`make docs-check`、`git diff --check`通过。日志 `/tmp/asterion-task29-ts-final.log`、`/tmp/asterion-task29-python-final.log`。源码冻结后的promotion与实际打包见证已完成，见下方独立封存证据。
+
+
+## 实际打包与独立审计结果
+
+`RUST_TEST_THREADS=1 make promotion-check`：完整25项检查 PASS，provider_operations=0，full_dataset=no；日志 `/tmp/asterion-task29-promotion.log`。
+
+冻结实现提交 `9557ad63`；wheel SHA `3aed093f21d8f7ed9b1d67430fc6daf3828008aedf062b8873322c24e8e02327`；扩展资源 SHA `a799561245c1d8ba7b6a1156f7d1954d44cc6072e05feaa831404b73c641d140`。570源文件、588实际安装文件、1679归档文件身份一致。
+
+安装包中的真实 Solver/Runtime 合成探针验证：默认边界只执行首步并返回后缀、相同 ID 不重派、新 ID 可以继续、关闭软策略仍在 GAME_OVER 停止、历史读取/ref/hash和 certainty 正确。探针无模型与官方引擎调用。
+
+单次实际 `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`，gpt-6.1-sol/medium、全新状态、900+180秒原定控制。**L1六步、零付费 RESET，104.040866秒达到目标，110.187422秒完成清理。** 两次初始化 SDK RESET 单列，不混入动作评分。八条完整 SDK 返回重放一致（仅 guid 不同），六条已提交事务、19条轨迹链及封存一致。没有执行 L2 或 BP35。
+
+最终9次用量返回：输入221984、输出2193、单次输入峰值32391；到达目标时8次：输入189593、输出2161、峰值29670。研究链8项=3计算+5实验，零NOTES更新、零遗漏；上下文/请求前缀各9次观测，无不可测量。原始缓存拆分不可用，不能宣称本次缓存比例。
+
+自然运行没有触发观察边界，也没有调用可选 `r.view_change` 或 `r.patches`。六组实际帧的离线数据比较为五组no-candidate、一组ambiguous。不能把这次小验证写成自然模型使用新策略的证明；新策略的机制证据来自安装后的合成探针。
+
+早期 installed discovery-unavailable 记录保留；之后成功的588文件实际身份核验提供当前验证依据。所有本轮宿主/guest/观察进程、临时认证与.env已清理，用户控制台52024/56659保持。独立审查 **READY，无未解决发现**，110项证据逐项大小、SHA与覆盖范围通过。
+
+证据 `.asterion-private/p7-task29-witness-20261009/trial/`；manifest SHA `72c31f036812bfd0aacda6700cd9be3afe665f3a53ecb91c2da168c8d3a515c5`。运行 `p7-live-20261009122302-2eeba174ab7942a1a2012c88`，实际启动2026-10-09T12:32:07.658962Z，预分配名称时间不作为启动时间。
+
+**最终评价：设计、实现、评审、打包部署验证完成；RESET和合法长计划反馈缺陷已验证修复。新观察边界对 BP35 的收益与代价仍未实测。**
