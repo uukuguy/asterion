@@ -58,4 +58,9 @@ Wheelce5f8f222a2230527c496999395decc74f316b56d87bf46adecbd9ffa6a16199/resource7a
 
 ## User-confirmed Prime positioning
 
-D-2026-10-09-01 defines Prime for autonomous long-horizon, open-ended, falsifiable computational research on work requiring substantial human time/effort. Generic infrastructure + domain research + domain data; P7 is a reference application, not the scope. Output is a human-understandable, machine-verifiable, evidence-traceable, replayable externalized research record, including counterexamples and revisions. Core architecture and MEMORY intent index updated. This is positioning, not new runtime capability or cross-domain verification; Task22 remains completed and no new BP35/model run is authorized by this statement.
+D-2026-10-09-01 defines Prime for autonomous long-horizon, open-ended, falsifiable computational research on work requiring substantial human time/effort. Generic infrastructure + domain research + domain data; P7 is a reference application, not the scope. Output is a human-understandable, machine-verifiable, evidence-traceable, replayable externalized research record, including counterexamples and revisions. Core architecture and MEMORY intent index updated. This is positioning, not new runtime capability or cross-domain verification; Task22 remains completed; the subsequent explicit user request authorizes Task23 cold BP35.
+
+
+## Latest intent — Task23 prepared cold BP35 authorized
+
+User now requests README/AGENTS reflect overallPrimeguidance, firstP7researchstabilization, thenpreparedcoldverification. Update README/README.zh-CN/AGENTS beforelaunch, productionecd20b2funchanged; docscheckonly(no repeatpromotion/r11l). Trialownerpreparing .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/. FreshSolmedium/.env/target6of9/original5400+180/6round/1000paid/1024model/4096tool/noNOTES-routeinheritance/noactorhints. GOafterdoccommit. Comparepaid,time,perlevelscore,deathRESETmechanisms toTask21and17minutebest. Preserveconsole52024/56659. Actualunit/run/clockspendinglaunchreceipt.

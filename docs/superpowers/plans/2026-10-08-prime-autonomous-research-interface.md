@@ -191,3 +191,10 @@ Task22 source ready: new read-only helper exact refs/action/state/SDK animation 
 Task22 promotion fullPASS commands25/provider_operations0/full_datasetno. Frozen sourceecd20b2f; deployment owner GO issued for fresh actual Make r11lL1 witness and isolated installed worker probe. No BP35 or actor hints.
 
 Task22 packaged actualMake witnessPASS: r11lL1 coldSolmedium7paid/0RESET/70.642472s toSDKgoal. Exactfreshwheel/source/resource/three-tools, all7paid/9SDKreplay, seal/cleanup verified; realinstalledworker syntheticAPIprobePASS and actualmodeltop-levelr.transition(1) calledsuccessfully. Cleanup177.418283wall, consolepreserved. No newBP35; effectondeathrateunverified. FinalindependentauditPASS; manifest127files SHA804c9c8a519e8b3973e356135541304229181679120e593429e39e7cf7be5e17. Task22complete within implementation/deployment boundary.
+
+
+## Task23 — User-authorized latest P7 cold BP35 verification
+
+User requests README/AGENTS guidance updates, then the prepared cold verification. Keep Prime positioning as overall guidance; develop and stabilize first on P7. Update bothREADME languages/AGENTS beforelaunch; sourceecd20b2f remains frozen. No repeatedr11l, TS orpromotion (Task22 verifiedtheexactsameproduction). Current operator.env Solmedium, fresh isolatedcoldBP35L1–L6 withno oldNOTES/routes/hints. Original5400seconds+180cleanup,6round/1000paid/1024model/4096tool, norewal. Stopat6of9; modelmay naturallycontinue underoriginalbudget.
+
+Trialowner notes_bp35_trial owns .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/, install/wheel/sourcebinding, actualconfigurationpreflight, launch/monitor/fullreplay/cleanup. Root owns documentation/comparison; independentreviewer auditsprocesswithoutactorfeedback. Compare Task21 objectivefacts221/1296.819519s/3RESET (19/43/41/38/31/49), best221/1023.279883s, Task19fullguidance234/2103.806813s. Track perlevel totalpaid/successfulsegment/deathRESET/score/time, evidenceuse and actor modelprograms. Newhelperissupport; no death-ratecausalityclaimfromonesample.

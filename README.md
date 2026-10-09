@@ -4,6 +4,8 @@
 
 **A composable, multi-runtime agent application framework for sustained, evidence-driven research.**
 
+Asterion Prime targets autonomous problem-solving for work that consumes substantial human time and effort. Its guiding purpose is long-horizon, open-ended, falsifiable computational research, producing a research chain that humans can understand, machines can check, evidence can trace, and conclusions can replay. Prime supplies reusable infrastructure; each domain supplies its research and data layers. We are first developing and testing this approach in P7 before extending it to other domains. This is the architectural direction; verified capabilities remain scoped to their recorded tests. See the [Prime architecture](docs/architecture/agent-framework.md#asterion-prime-positioning).
+
 Asterion Prime P7 studies interactive ARC-AGI-3 games by writing programs, testing hypotheses against real observations, and carrying useful experience into later attempts. Its producing system is public: the LLM, persistent IPython workspace, versioned WorldMap, checked action broker, experience store, and certification/submission code are in this repository.
 
 ## ARC-AGI-3: official result
