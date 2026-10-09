@@ -73,3 +73,5 @@ Task30封存版本26250c0e落实用户提出的方向：策略随证据、剩余
 Task35生产b2d1a453已部署冷测，模型在start10/start15公开引用准确评分余量选择推进/保100，但L120paidQ110.25未达115，授权早停；source与304manifest独立READY，详情在Task32–35中止分析。没有证明总体策略改善。
 
 Task36只修改P7主prompt初报段和已有focused接口测试。开局依据初始画面、目标和115/100余量先选择推进路线/探索投入，不默认先probe；probe事先说明动作价值及哪些结果改变路线。已有信息足则推进，未知不能替代判断，必要免费分析可做。无新工具/数据/Primegeneric逻辑/hostgate，报告仍简短NOTES与goal。+433UTF8B，主prompt13484B。独立changed-code APPROVE/23相关PythonPASS0.970秒/Ruff/lint/docs/diff。源合同已实现，实际开局遵从及分数待新冷测；不能回填为Task35依据。
+
+Task36 frozen94dabe66独立打包/安装身份检查通过并完成一轮freshBP35：开局判断报告实际存在，但L124paid/Q76.5625、247.167053秒，授权早停，L2未行动。26SDK完整回放/24tx/47trace/ownedcleanup/final280manifest独立READY。初始选择有条件依据，不等于合理路线；批量清块未证目标关联。一次print整组animation导致65536B截断并显著增下一输入，研究输出组织需另行设计。实际评估详见Task32–36中止分析；不宣称新策略优于baseline。

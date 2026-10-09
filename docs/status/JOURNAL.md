@@ -4690,3 +4690,10 @@
 - Task36 userrequires openingstrategy judgment beforedefaultprobe; P7prompt refinement sourceonly, no newrun authorization.
 
 - Task36 initialstrategychoice beforedefaultprobe implemented23PASS/APPROVE; continueprioruserclarify-and-retest authorization onefreshBP35/L1gate.
+
+- 94dabe66: Required an initial strategy choice before paid exploration, making opening action value auditable without execution gates.
+
+- Task36 launch16:21:16.625035UTC/fixeddeadline17:51:16.624152+180; run1a4d15f6/unitb56b4b49/owned62613,62615,62614; source94dabe/wheelbbf153.
+
+- Task36 finalL124Q76.5625/247.167053s,L2none; 280manifest460fe independentREADY/ownedcleanup;20wasstaleearlystopdetection.
+- Task36 directprint5frameanimation65536Btruncated; nextinput30946→86730; unverifiedclearall-goal link remains, no newfix/trial.

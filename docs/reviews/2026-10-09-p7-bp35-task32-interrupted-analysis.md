@@ -65,3 +65,19 @@ owned进程/unit/auth/env均清理，用户console保留；收口423.170680046�
 首NOTES工具回传早于首paid6.207612秒；12/12计划非空goal，23记录=8compute12experiment3notes。L1goal19usage input717983/out4165/peak55742；最终23完成usage input958220/out4891/peak63128，raw398348/cacheRead559872；第24请求取消usage未知。停止16:09:10.285935UTC，最后SDK16:08:54.655415早于信号；收口243.743776083秒，ownedhost/guest/auth/env均gone，用户console52024:56659保留。
 
 27完整SDK回放、25known事务、51trace/23chain/ref与metrics通过；source570/install588/resourcea799/wheel2b095一致。私有Task35trial final304manifest逐bytes/SHA/coverage独立READY：f3037061cb58f305181b998e062c22e532b8071ec674462597f38ba639f8ab4b。没有续跑授权，后续源码修改与新实测分开。
+
+## Task36：初始选择可读，目标因果与输出规模仍失控
+
+生产94dabe66、prompt13484B，新wheelbbf153/source570/install588/resourcea799。freshSolmedium/seed0/5400+180，保持用户授权L1质量早停；未注入路线或提示。初报先选择“向右推进兼探针”，说明移动/挖土与转向/推动两种反馈对应的后续路线，有条件判断可读。首NOTES工具回传比首paid早6.321877秒。
+
+随后seq3选择清除全部14圆块，理由仅“有明确清除效果”，同时承认胜利条件未知；未有清除与通关关联的证据。5次批量点击未通关，继续点10、试ACTION7、点邻格检验连接，直到seq14才明确10为通道、自动上浮。seq14随后估剩6步而115/100只余5/7，选择阶段推进；seq20还未完成，100只余1却估剩4，实际再4步通关。模型所称多阶段/房间只是解释，像素no-candidate不能证明其语义。
+
+最终L1 **24paid/Q76.5625/0RESET/247.167053秒**（mint口径），L2paid0。20未通关是检测时的旧状态，检测到发信号约26秒延迟，又结算4步；最终goal16:25:23.791205UTC、停止16:25:24.678381UTC，所有动作在信号前，之后0paid。该监控延迟明确记录，不宣称严格20步截断。没有baseline应用硬cap，source与actor输入始终冻结。
+
+本轮发现具体大输入源：计算cell1直接打印整组animation，stdout65536B并截断，5个完整像素帧输出。下一request6 normalized input30946→86730（+55784），provider JSON78834→146305B。后续该输出持续留在有效历史；多数动作/NOTES请求cacheRead19456，rawinput68914逐步增至90816。纯计算继发前缀仍完整；这是实际输出膨胀和复用不足证据，不证明全部时延来自它、不是wire/cache内部完整诊断。
+
+最终20completedusage input1580569/out5481/peak110272，raw897817/cache682752；request21取消用量未知。19次resource delivery与已得事实一致，11/11plan有goal，20研究记录=6compute11experiment3NOTES。26完整SDK回放、24known事务、47trace与21metrics通过。owned62613/62615/62614/observer/guestunitb56b清理、auth/envgone，用户console保留，收口249.963477135秒。
+
+final280manifest bytes/SHA/coverage独立READY，SHA460fe039a76eae4b05f6cdf07fd01fb7fa48d3a3f65ff1d93029bf2733bbfe59，私有 `.asterion-private/p7-task36-cold-bp35-20261010/trial/`。源合同已实跑，报告理由更具体，决策质量和稳定成绩未改善。
+
+当前判断：继续增加策略措辞缺乏支持。下一设计应先处理目标因果证据与研究输出：领域研究不能把能改画面当作已知推进；原始动画应供程序计算并按需回读，模型主要收到可用结论/必要局部。若改输出组织，Prime通用层负责证据保存、限额、来源及模型投影，P7数据层提供真实可回读帧/差分，P7研究层决定假说/路线和计算摘要。不能裁旧错误/结果或丢原始证据来实现，也不能把本轮观察泛化为所有模型的能力结论。尚无下一改动或新运行已实施。
