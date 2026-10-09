@@ -81,3 +81,23 @@ owned进程/unit/auth/env均清理，用户console保留；收口423.170680046�
 final280manifest bytes/SHA/coverage独立READY，SHA460fe039a76eae4b05f6cdf07fd01fb7fa48d3a3f65ff1d93029bf2733bbfe59，私有 `.asterion-private/p7-task36-cold-bp35-20261010/trial/`。源合同已实跑，报告理由更具体，决策质量和稳定成绩未改善。
 
 当前判断：继续增加策略措辞缺乏支持。下一设计应先处理目标因果证据与研究输出：领域研究不能把能改画面当作已知推进；原始动画应供程序计算并按需回读，模型主要收到可用结论/必要局部。若改输出组织，Prime通用层负责证据保存、限额、来源及模型投影，P7数据层提供真实可回读帧/差分，P7研究层决定假说/路线和计算摘要。不能裁旧错误/结果或丢原始证据来实现，也不能把本轮观察泛化为所有模型的能力结论。尚无下一改动或新运行已实施。
+
+## Task37：同版本 L1 复测，策略和输出选择确有波动
+
+用户要求再测L1以检查随机波动。本轮不改生产94dabe66、wheelbbf153、13484B prompt、Solmedium、seed0，fresh历史/NOTES。Native仍target6/5400+180，外部只读watcher在已结算L1goal后停止，避免将目标改为1影响策略；取消属于外部评估边界，不是自然六关完成。没有19步中止门槛，也没有外部路线提示。
+
+L1 SDK goal2026-10-09T16:49:01.713588Z，21paid/Q100/0RESET。相同版本Task36为24paid/Q76.5625/247.167053秒；严格budget mint至goal161.361755秒（launch receipt至goal161.360909秒）。同版少3步、快85.805298秒。两条轨迹证明同版本结果可变，不能由两次运行估计随机分布、排除提示影响或断言全部差异来自随机性。
+
+初NOTES仍选择1步右移，但明确受阻改点击开路、探针值1paid及反馈对应分支，引用19/21空间。接着点10、点5、ACTION7各一次，没有可见推进；然后右移3步到竖井发生自动上升。seq7修订为沿通道上升，只点挡路14圆块，引用115/100余12/14，写“优先直达上层，不重复空点”。Task36却在seq3转为全清圆块，seq14才明确通道/自动上升。差异是实际反馈后的研究策略选择，不能把过程叫作无原因的随机动作。
+
+后段资源取舍可读：seq13引用115/100余6/8，选无需清顶块的路线，预计8步；seq16余3/5，预计5步完成，明确保baseline100，最后5步实际通关。尚未达到19步/115，开局三次无效交互探针仍有成本。逐trace动作构成为6点击+14水平+1ACTION7，对Task36的13点击+10水平+1ACTION7；少7点击、多4水平，净少3步。10acceptedplans均有goal；另2次plan调用isError且无SDK/计费，未保留错误正文，不能猜测具体拒绝原因。首NOTES回传早于首paid6.014978秒。
+
+计算cell1主动用print(str(animation)[:1800])，输出1970B；Task36整组动画stdout65536B并截断。本轮没有重复相同输出膨胀行为，说明模型研究输出选择也会改变效率；不能用一次更短输出证明通用历史组织缺陷已修复。严格goal前16completedusage normalizedinput562112/output4100/peak49872，raw228032/cacheRead334080；最终完成usage相同，17th hook取消usage未知。相对Task36总input1580569减少64.44%，单次peak110272下降54.77%；这说明本轮记录的输入负担更低，不是隔离变量的token时延因果实验。context峰169505B/providerprefix165488B（字节，不是tokens），研究链14=2compute10experiment2notes，14次实际资源事实交付。
+
+外部watcher SIGTERM16:49:02.485563UTC，距SDKgoal0.771975秒；L2paid0。23完整SDK replay/21known事务通过，cleanupwall163.815961838秒。最终258manifest SHAfd2d6ae8871719a5a2b6e522610d54c4e62a3c31bb1f392c5fa9e535472efe2b independentREADY，23SDK完整回放/21known事务/40trace seal/14chain+refs/17份闭形metrics一致。owned71099/71101/71100/watcher71222/observer71563和guest已停止，auth/envgone，用户console52024:56659保留。私有 .asterion-private/p7-task37-repeat-bp35-l1-20261010/trial 封存，不续跑或改写。
+
+### 新发现：当前 autonomous 缺少接口先验
+
+用户指出[arc-skill 的SKILL.md](https://github.com/pbshgthm/arc-skill/blob/main/skills/arc-skill/SKILL.md)提供ACTION1/2/3/4方向、5交互、6点击坐标、7撤销的“接口先验，非保证”，且可用动作会改变。当前build_autonomous_prompt只给ACTION6坐标格式及依据反馈判断动作含义，没有完整标准映射。prompt.py旧legacy提示有standard ARC mapping，但不能用未启用提示推断本轮模型已收到。独立复核确认installed13484B主prompt、initialcontext、genesis/两次workspace修订及TS工具schema均无完整映射；available_actions只有编号列表，action_labels是模型可自行提交判断，不是预注入先验。
+
+当前判断：接口惯例是合法的领域接口信息，适合P7领域研究说明/领域数据元信息，不进入Prime通用层。提供可证伪先验、保留实际反馈修订，比让模型从匿名编号重建控制用途更合理；未知游戏效果（自动上升、可清地形、目标）仍需研究。不能把本轮ACTION7、点10/5三个探针直接从21步扣除，或者声称加先验必然18步/115。本轮无源码更改，尚未实现或验证该方向。

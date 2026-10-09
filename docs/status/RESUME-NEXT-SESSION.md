@@ -1,6 +1,16 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-10 local / 2026-10-09 UTC: Task36 stopped/sealed/independentREADY. Session active, not final handoff.
+Updated: 2026-10-10 local / 2026-10-09 UTC: Task37 same-version BP35L1 repeat closed / independent READY; no active owned trial. Session active, not final handoff.
+
+## Task37 completed / next boundary
+
+Userauthorized unchanged-version BP35L1 repeat completed: sameproduction94dabe66/wheelbbf153/Solmedium/seed0/freshhistory/no hints. Nativetarget6/5400+180 actorinputs retained, externalownedwatcher stops after knownL1goal/no19gate. L121paid/Q100/0RESET/mint161.361755s, L2paid0; versus Task36sameversion24/Q76.5625/247.167053s. Goal16:49:01.713588UTC, signal16:49:02.485563UTC/latency0.771975s, no poststoppaid. Launch16:46:20.352679/fixeddeadline18:16:20.351833+180, runp7-live-20261009164621-25fc1ea27660f463f166457c/unitdf68970e249641c3957be65913bcabf6. Observerprebindingerror retained; restartedobserver only, actor/budget notrenewed.
+
+Earlierseq7 mechanismrevision/onlyrouteblockingcircles, vsTask36seq3clearall. 6click+14horizontal+1ACTION7 vs13+10+1. InitialNOTES returned6.014978s beforefirstpaid; actualgoalscite12/14 then3/5room, choose5stepfinishforbaseline100. Stillthreeineffectiveinteractionprobes; no19step115. Animationprintlimited1800chars/output1970B instead65536B. Two trajectoriesprovevariation, notrandomdistribution orpromptcausality; no sourcefix implemented.
+
+Goal/final16completedusage norm562112/out4100/peak49872/raw228032/cache334080; hook17cancelusageunknown. Context169505B/prefix165488B,14chain=2compute10experiment2notes,12plan calls incl2unpaiderrors(causeunknown),10acceptedgoals,14actualfactsdeliveries. 23SDKfullreplay/21knowntx/40trace/17closedmetrics/258manifest SHAfd2d6ae8871719a5a2b6e522610d54c4e62a3c31bb1f392c5fa9e535472efe2b independentREADY. Private .asterion-private/p7-task37-repeat-bp35-l1-20261010/trial sealedneverrewrite. Owned71099/71101/71100/watcher71222/observer71563/guest stopped/authenvgone; console52024:56659preserved. Cleanup163.815961838s.
+
+Latestuserquestion: arc-skill interfacepriors mayreducecontroltesting. Independentlyconfirmed currentactual13484B autonomousprompt/initialcontext/toolschemas lackfullACTION1–7mapping; oldlegacy standardmappingnotdelivered. Revisableinterfacepriors belongP7domaininterface/research, notPrimegeneric; game-specificeffectsstillneedtest. Analysisdirectiononly, notimplemented/verified; cannotdeductallthreeprobesorclaim18stepwithouttest. No nextcodechange orrepeatstarted/authorized. Cumulativeevaluation docs/reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md includesTask37/sourceboundary.
 
 ## Task36 completed / unresolved quality
 

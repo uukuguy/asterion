@@ -4699,3 +4699,11 @@
 - Task36 directprint5frameanimation65536Btruncated; nextinput30946→86730; unverifiedclearall-goal link remains, no newfix/trial.
 
 - 2ab00194: Preserved the failed trial, early-stop delay and animation-driven context growth for evidence-based follow-up.
+
+- c49579eb: Closed the canonical trial worklist so future work does not reuse superseded execution authority.
+
+- Task37 userauthorized same94dabe repeatBP35L1; preserveclosedfull6/5400+180 actorinputs, externalstopatL1goal, no inheritednotes/hints.
+
+- Task37 launch16:46:20.352679UTC/deadline18:16:20.351833+180; run25fc1ea2/unitdf68970e/owned71099,71101,71100/watcher71222; samewheelbbf153.
+
+- Task37 L121/Q100/161.361755s, sameversionvariation; 258manifestfd2d independentREADY/ownedcleanup, autonomousACTIONpriorsmissing confirmed; no sourcefix.
