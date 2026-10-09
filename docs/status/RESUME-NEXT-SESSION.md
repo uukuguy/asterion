@@ -10,6 +10,10 @@ Latest user evaluation: 115 is capped target; fewer successful steps after cap r
 
 Next provider-free candidate: generic current snapshot sits before history; plan/workspace cache ratios4.542/2.064percent vs cell98.994percent support checking cache-compatible layout. High-cache #91 still79.883s prevents a total-latency causal claim; old rawcache unavailable. Astra reviewed snapshot-at-tail candidate with original user role, message pairing/archive and latest state completeness preserved. Validate actual Pi-converted prefix with recovery/compaction before implementation; no production change/new provider trial in this analysis turn. Other candidate: bounded final-model-view composition metrics and P7 representation/model counterexample checks. Preserve Prime generic + P7 research + P7 data boundaries; no mandatory cognition, BFS or zero-death gate.
 
+## Active implementation checkpoint
+
+User now authorizes Task26 implementation: context_impl TS snapshot placement/metrics; chain_impl Python passive research chain; root metrics FD/P7 operator/resource/docs; Astra review. No code had landed before daemon restart; final implementation now complete in the worktree, Astra APPROVE, TS68PASS/6external skips, focusedPython46PASS, lint/docsPASS. Final-source promotion and packaged witness pending. Existing Task25 CLOSED remains baseline. Required finite packaged r11l witness follows source review/TS/Python/promotion; no new BP35 launched.
+
 ## Verified facts
 
 - Prime positioning: autonomous long-horizon, open-ended, falsifiable computational research for work requiring substantial human effort; generic infrastructure + domain research + domain data. Output is an externalized, human-understandable, machine-verifiable, evidence-traceable and replayable research record. Cross-domain capability is a target, not verified. README.md, README.zh-CN.md, AGENTS.md, core architecture, DECISIONS and MEMORY intent index agree.

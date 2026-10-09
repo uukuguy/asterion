@@ -4528,3 +4528,7 @@
 - 2026-10-09 User sets115capped evaluation andpre-death avoidability; Task25 gradualtoken growth andexternal macrochain independently documented.
 
 2026-10-09 — Corrected batch-feedback interpretation; recorded cache-layout candidate with counterexample and independent review.
+
+2026-10-09 — d5c67186 clarified capped scoring, audited context/cache and research/reset evidence to guide targeted optimization.
+
+2026-10-09 — User approved Task26 implementation; resumed disjoint context and passive-chain work after server restart.

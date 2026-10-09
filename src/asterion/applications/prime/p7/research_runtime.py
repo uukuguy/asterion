@@ -20,6 +20,7 @@ from .broker import ArcBrokerError
 from .actor_projection import ACTOR_FRAME_INSTRUCTION, project_actor_context, project_actor_result
 from .experience import CellArchive
 from .research_bridge import ResearchReadServer
+from .research_chain import P7ResearchChain
 from .solver import Solver
 from .solver_control import SolverControl
 from asterion.agents.prime.continuation import AUTONOMOUS_RESEARCH_GUIDANCE
@@ -155,6 +156,7 @@ class P7ResearchRuntime:
                 diagnostics=getattr(trace_client, 'processing_diagnostics', None),
                 learner_profile=learner_profile,
             )
+            self._research_chain = P7ResearchChain(run_root=run_root, workspace=self.solver._workspace)
             if experience is not None:
                 experience.bind(run_root, self.solver.experience_event)
             self.poll()
@@ -321,8 +323,15 @@ class P7ResearchRuntime:
         try:
             await self._recover_kernel(combined)
             generation = self.kernel.generation
+            try:
+                history_start = self.kernel.cell_history()['total']
+            except (ValueError, TypeError, KeyError, OSError):
+                history_start = None
             self._cell_archive.started(call_id, generation, code)
-            result = await self.kernel.execute(call_id, code, combined)
+            try:
+                result = await self.kernel.execute(call_id, code, combined)
+            finally:
+                self._research_chain.computation(self.kernel, history_start)
             export_ids = []
             for content in result.content:
                 if content.get("type") == "text":
@@ -358,9 +367,14 @@ class P7ResearchRuntime:
         else:
             return {"status": "rejected", "reason": "stopped"}
         if method == "workspace" and isinstance(params, Mapping):
-            result = self.solver.workspace(params.get("request", params))
+            request = params.get("request", params)
+            result = self.solver.workspace(request)
+            self._research_chain.workspace_result(result)
         elif method == "execute_plan" and isinstance(params, Mapping):
-            result = self.solver.execute_plan(params.get("plan", params))
+            plan = params.get("plan", params)
+            journal_start = len(self._broker.journal)
+            result = self.solver.execute_plan(plan)
+            self._research_chain.experiment(plan, result, self._broker.journal[journal_start:])
         else:
             raise ValueError("research method unavailable")
         while not self._closed and not signal.cancelled:
@@ -452,6 +466,10 @@ class P7ResearchRuntime:
 
     def current_context(self):
         return self.solver.current_context()
+
+    def research_chain_summary(self):
+        """Numeric coverage only; private research content stays under the run root."""
+        return self._research_chain.summary()
 
     def actor_context(self):
         return project_actor_context(self.current_context())

@@ -4,6 +4,8 @@ import { normalizeFunctionParameters } from "./tool-schema.js";
 export { normalizeFunctionParameters } from "./tool-schema.js";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
 import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
+import { ContextViewTelemetry, contextViewMetricsFromEnvironment, type ContextViewNumbers, type ContextViewMetricsSink } from "./context-metrics.js";
+export { ContextViewTelemetry, contextViewMetricsFromEnvironment } from "./context-metrics.js";
 import { admitToolStateView, projectToolStateViewContext } from "./tool-state-view.js";
 export { TOOL_STATE_VIEW_VERSION, admitToolStateView, projectToolStateViews, projectToolStateViewContext } from "./tool-state-view.js";
 export { CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
@@ -917,10 +919,14 @@ function emitMemoryDiagnostic(line: string): void {
 }
 
 /** Pi owns prompt/tools; this hook changes only its cloned conversation view. */
-export function registerP7MemoryContext(pi: unknown): boolean {
+export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: ContextViewNumbers) => void): boolean {
   const api = memoryRecord(pi);
   if (!api || typeof api.on !== "function") return false;
   let lastOutcome: string | undefined;
+  const metrics = telemetry ? new ContextViewTelemetry() : undefined;
+  const observe = (messages: readonly unknown[]): void => {
+    try {if (metrics && telemetry) telemetry(metrics.observe(messages));} catch {}
+  };
   (pi as MemoryExtensionApi).on("context", (rawEvent,rawContext) => {
     const event = memoryRecord(rawEvent);
     if (event?.type !== "context" || !Array.isArray(event.messages)) return undefined;
@@ -932,7 +938,7 @@ export function registerP7MemoryContext(pi: unknown): boolean {
       const manager = memoryRecord(context?.sessionManager);
       let entries: unknown = event.messages.map(message => ({type:"message",message}));
       if (manager && typeof manager.getBranch === "function") entries = manager.getBranch();
-      if (!Array.isArray(entries)) return {messages:event.messages};
+      if (!Array.isArray(entries)) {observe(event.messages); return {messages:event.messages};}
       recoverP7MemoryContext(controller,entries);
       const branchMessages = entries.flatMap(raw => {
         const entry = memoryRecord(raw);
@@ -945,11 +951,13 @@ export function registerP7MemoryContext(pi: unknown): boolean {
         emitMemoryDiagnostic("[prime-context-memory] " + safeOutcome);
         lastOutcome = safeOutcome;
       }
+      observe(projected.messages);
       return {messages:projected.messages};
     } catch {
       // Pi catches extension exceptions, so an exception is not a request fence.
       // A projection failure explicitly preserves every original message.
       emitMemoryDiagnostic('[prime-context-memory] {"status":"projection-unavailable"}');
+      observe(event.messages);
       return {messages:event.messages};
     }
   });
@@ -984,12 +992,20 @@ interface ExtensionApi {
 export function register(pi: ExtensionApi, dependencies?: unknown): void {
   let descriptor: number | undefined;
   let witness: ContextWitness | undefined;
+  let metrics: ContextViewMetricsSink | undefined;
   try {
+    metrics = contextViewMetricsFromEnvironment();
     descriptor = descriptorFromEnvironment();
     if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") throw unavailable();
     const bridge = createIpythonBridge(descriptor);
     witness = registerContextWitnessFromEnvironment(pi, dependencies);
-    registerP7MemoryContext(pi);
+    if (!registerP7MemoryContext(pi, metrics)) metrics?.close();
+    if (metrics && typeof memoryRecord(pi)?.on === "function") {
+      try {
+        (pi as ExtensionApi & {on(event: string, handler: () => void): unknown})
+          .on("session_shutdown", () => metrics?.close());
+      } catch {metrics.close();}
+    }
     pi.registerTool(createIpythonTool(bridge));
     const mode = process.env.ASTERION_PRIME_P7_TOOL_MODE;
     if (mode !== undefined && mode !== "research" && mode !== "legacy") throw unavailable();
@@ -999,6 +1015,7 @@ export function register(pi: ExtensionApi, dependencies?: unknown): void {
     }
   } catch {
     witness?.close();
+    metrics?.close();
     discardContextWitnessEnvironment();
     try {
       if (descriptor !== undefined) closeSync(descriptor);

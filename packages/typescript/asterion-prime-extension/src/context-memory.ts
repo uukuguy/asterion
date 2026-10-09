@@ -64,7 +64,7 @@ function synthetic(value: unknown): boolean {
 }
 
 /** Count the model-bearing JSON only; private details and provider usage are excluded. */
-function messageBytes(value: unknown): number {
+export function contextMessageBytes(value: unknown): number {
   const message = memoryRecord(value);
   if (!message || typeof message.role !== "string") throw new Error("invalid context");
   let projection: RecordValue;
@@ -99,7 +99,7 @@ function messageBytes(value: unknown): number {
 /** Unmeasurable diagnostics never remove or block native conversation messages. */
 function historyBytes(messages: readonly unknown[]): number | null {
   try {
-    return 2 + messages.reduce<number>((bytes,message,index) => bytes+messageBytes(message)+(index ? 1 : 0),0);
+    return 2 + messages.reduce<number>((bytes,message,index) => bytes+contextMessageBytes(message)+(index ? 1 : 0),0);
   } catch {
     return null;
   }
@@ -120,12 +120,9 @@ export function projectMemoryContext<T>(messages: readonly T[], checkpoint?: Mem
   const visible = messages.filter(message => !synthetic(message));
   const bytes = historyBytes(visible);
   const memory: MemoryMessage = {role:"custom",customType:CUSTOM_TYPE,content:checkpoint.content,display:false,timestamp:0};
-  // Preserve leading Pi system messages. The registered conversation-only hook
-  // normally excludes the system role and Pi restores it after this hook.
-  let insertion = 0;
-  while (memoryRecord(visible[insertion])?.role === "system") insertion += 1;
-  const projected: Array<T | MemoryMessage> = [...visible];
-  projected.splice(insertion,0,memory);
+  // Dynamic state follows native history, keeping the stable history prefix in
+  // its original order. Pi converts this owned custom message to a user role.
+  const projected: Array<T | MemoryMessage> = [...visible,memory];
   return {messages:projected,outcome:{status:"retained",removed_messages:0,
     retained_messages:visible.length,history_bytes:bytes,retained_history_bytes:bytes,
     snapshot_bytes:Buffer.byteLength(checkpoint.content,"utf8")}};

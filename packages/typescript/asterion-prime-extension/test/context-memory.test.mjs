@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import {mkdtempSync,openSync,readFileSync,writeFileSync,rmSync,closeSync,fstatSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {Check} from "typebox/value";
 import * as extension from "../dist/ipython-extension.mjs";
 
@@ -85,7 +88,7 @@ test("large instructions evidence and every pending sibling survive snapshot ref
   assert.equal(projected.outcome.status,"retained");
   assert.equal(projected.outcome.removed_messages,0);
   assert.deepEqual(projected.messages.filter(message => message.customType !== "asterion_context_memory"),messages);
-  assert.deepEqual(projected.messages.slice(-2),messages.slice(-2));
+  assert.deepEqual(projected.messages.slice(-3,-1),messages.slice(-2));
   assert.match(JSON.stringify(projected.messages),/RAW_GROUP_3|RAW_GROUP_2|PENDING_RESULT/);
   assert.match(JSON.stringify(projected.messages),/RAW_GROUP_0 /);
   const pinned = extension.projectMemoryContext([user("x".repeat(100*1024)),...history()],checkpoint);
@@ -253,4 +256,202 @@ test("registered context hooks share a 4 KiB diagnostic budget without changing 
   assert.ok(Buffer.byteLength(output,"utf8")<=4*1024,
     "normal and error diagnostics across registered hooks must share one byte budget including newlines");
   assert.equal(lines.filter(line => line.includes('"status":"diagnostics-suppressed"')).length,1);
+});
+
+
+test("dynamic current snapshot follows all native history and replaces only owned snapshots", () => {
+  const stale = {role:"custom",customType:"asterion_context_memory",content:"STALE",display:false,timestamp:0};
+  const native = [{role:"system",content:"native system"},...history(),
+    {role:"compactionSummary",summary:"native archive"},{role:"branchSummary",summary:"native branch"}];
+  const source = [stale,...native.slice(0,3),stale,...native.slice(3)];
+  const original = structuredClone(source);
+  const projected = extension.projectMemoryContext(source,checkpoint);
+  assert.equal(projected.messages.at(-1).customType,"asterion_context_memory");
+  assert.equal(projected.messages.at(-1).role,"custom");
+  assert.equal(projected.messages.at(-1).content,checkpoint.content);
+  assert.deepEqual(projected.messages.slice(0,-1),native);
+  native.forEach((message,index) => assert.equal(projected.messages[index],message));
+  assert.deepEqual(source,original);
+  const refreshed = extension.projectMemoryContext(projected.messages,{revision:nextRevision,content:"CURRENT_AFTER_ACTION"});
+  assert.deepEqual(refreshed.messages.slice(0,-1),native);
+  assert.equal(refreshed.messages.at(-1).content,"CURRENT_AFTER_ACTION");
+});
+
+test("context composition collector keeps fixed numeric latest peak and cumulative views", () => {
+  const collector = new extension.ContextViewTelemetry();
+  const source = [user("USER_CONTENT_SENTINEL"),...history().slice(1),
+    {role:"custom",customType:"asterion_context_memory",content:"CURRENT_CONTENT_SENTINEL"}];
+  source[1].usage = {secret:"PRIVATE_USAGE_SENTINEL"};
+  source[2].details = {secret:"PRIVATE_DETAILS_SENTINEL"};
+  const original = structuredClone(source);
+  const first = collector.observe(source);
+  assert.deepEqual(Object.keys(first).sort(),["assistant_bytes","cumulative_total_bytes","current_snapshot_bytes",
+    "other_bytes","peak_total_bytes","requests","tool_result_bytes","total_bytes","unmeasurable_requests"]);
+  assert.equal(first.requests,1);
+  assert.equal(first.total_bytes,first.assistant_bytes+first.current_snapshot_bytes+first.tool_result_bytes+first.other_bytes);
+  assert.equal(first.peak_total_bytes,first.total_bytes);
+  assert.equal(first.cumulative_total_bytes,first.total_bytes);
+  for (const value of Object.values(first)) assert.ok(Number.isSafeInteger(value) && value>=0);
+  assert.ok(first.assistant_bytes>0 && first.current_snapshot_bytes>0 && first.tool_result_bytes>0 && first.other_bytes>0);
+  assert.ok(Object.isFrozen(first));
+  const second = collector.observe([user("tiny")]);
+  assert.equal(second.requests,2);
+  assert.equal(second.peak_total_bytes,first.total_bytes);
+  assert.equal(second.cumulative_total_bytes,first.total_bytes+second.total_bytes);
+  assert.equal(second.assistant_bytes,0);
+  const bad = {role:"unknown",content:"UNMEASURABLE_SENTINEL"};
+  const third = collector.observe([bad]);
+  assert.equal(third.requests,3);
+  assert.equal(third.unmeasurable_requests,1);
+  assert.equal(third.total_bytes,0);
+  assert.equal(third.cumulative_total_bytes,second.cumulative_total_bytes);
+  assert.doesNotMatch(JSON.stringify([first,second,third]),/SENTINEL|secret|content/);
+  assert.deepEqual(source,original);
+  assert.deepEqual(collector.observe(source.map(message => {
+    const {usage,details,...visible}=message; return visible;
+  })).total_bytes,first.total_bytes);
+});
+
+test("registered context telemetry sees final owned projections and cannot block native messages", () => {
+  let hook;
+  const records=[];
+  extension.registerP7MemoryContext({on:(_event,handler) => {hook=handler;}},value => records.push(value));
+  const source=history();
+  const entries=[{type:"message",message:{...result("read"),toolName:"p7_workspace",
+    details:{status:"read",context_memory:envelope(false,null,"CURRENT_VIEW")}}}];
+  const projected=hook({type:"context",messages:source},{sessionManager:{getBranch:() => entries}}).messages;
+  assert.equal(projected.at(-1).content,"CURRENT_VIEW");
+  assert.equal(records.length,1);
+  const expected=new extension.ContextViewTelemetry().observe(projected);
+  assert.deepEqual(records[0],expected);
+  extension.registerP7MemoryContext({on:(_event,handler) => {hook=handler;}},() => {throw Error("COLLECTOR_SECRET");});
+  assert.deepEqual(hook({type:"context",messages:source},{sessionManager:{getBranch:() => entries}}).messages,projected);
+});
+
+
+test("metrics descriptor is overwritten with bounded numeric samples without leaking model content", () => {
+  const directory=mkdtempSync(join(tmpdir(),"prime-metrics-"));
+  const path=join(directory,"metrics.json");
+  let descriptor;
+  const environment="ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
+  const previous=process.env[environment];
+  try {
+    descriptor=openSync(path,"w+",0o600);
+    process.env[environment]=String(descriptor);
+    const sink=extension.contextViewMetricsFromEnvironment();
+    assert.equal(process.env[environment],undefined);
+    const collector=new extension.ContextViewTelemetry();
+    writeFileSync(path,"SENTINEL".repeat(60000));
+    for(let index=0;index<1026;index++) sink(collector.observe([user("SECRET_CONTENT".repeat(index===0 ? 100 : 1))]));
+    const text=readFileSync(path,"utf8");
+    const payload=JSON.parse(text);
+    assert.deepEqual(Object.keys(payload).sort(),["latest","measurement","samples","samples_truncated","version"]);
+    assert.equal(payload.version,"asterion.prime-context-view-metrics/v1");
+    assert.equal(payload.measurement,"extension-hook-json-utf8");
+    assert.equal(payload.latest.requests,1026);
+    assert.equal(payload.samples.length,1024);
+    assert.equal(payload.samples[0].requests,1);
+    assert.equal(payload.samples.at(-1).requests,1024);
+    assert.equal(payload.samples_truncated,1);
+    assert.ok(payload.latest.peak_total_bytes>payload.latest.total_bytes);
+    assert.ok(Buffer.byteLength(text)<512*1024);
+    assert.doesNotMatch(text,/SECRET_CONTENT|SENTINEL|user|content|tmp/);
+    sink.close(); descriptor=undefined;
+  } finally {
+    if (descriptor!==undefined) try {closeSync(descriptor);} catch {}
+    if(previous===undefined) delete process.env[environment]; else process.env[environment]=previous;
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test("metrics descriptor rejects missing invalid or non-file targets without writing diagnostics", () => {
+  const environment="ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
+  const previous=process.env[environment];
+  const lines=[]; const stderr=console.error; console.error=value=>lines.push(value);
+  try {
+    for(const value of [undefined,"0","2","PRIVATE_INVALID_FD","999999999999999999999"]) {
+      if(value===undefined) delete process.env[environment]; else process.env[environment]=value;
+      assert.equal(extension.contextViewMetricsFromEnvironment(),undefined);
+      assert.equal(process.env[environment],undefined);
+    }
+    const descriptor=openSync(tmpdir(),"r");
+    process.env[environment]=String(descriptor);
+    assert.equal(extension.contextViewMetricsFromEnvironment(),undefined);
+    assert.equal(process.env[environment],undefined);
+    assert.deepEqual(lines,[]);
+  } finally {
+    console.error=stderr;
+    if(previous===undefined) delete process.env[environment]; else process.env[environment]=previous;
+  }
+});
+
+
+test("failed extension registration consumes and closes the injected metrics descriptor", () => {
+  const directory=mkdtempSync(join(tmpdir(),"prime-metrics-registration-"));
+  const descriptor=openSync(join(directory,"metrics.json"),"w+",0o600);
+  const environment="ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
+  const previous=process.env[environment],previousBridge=process.env.ASTERION_PRIME_IPYTHON_FD;
+  try {
+    delete process.env.ASTERION_PRIME_IPYTHON_FD;
+    process.env[environment]=String(descriptor);
+    assert.throws(()=>extension.register({registerTool:()=>{}}),/bridge is unavailable/);
+    assert.equal(process.env[environment],undefined);
+    assert.throws(()=>fstatSync(descriptor),{code:"EBADF"});
+  } finally {
+    try {closeSync(descriptor);} catch {}
+    if(previous===undefined) delete process.env[environment]; else process.env[environment]=previous;
+    if(previousBridge===undefined) delete process.env.ASTERION_PRIME_IPYTHON_FD;
+    else process.env.ASTERION_PRIME_IPYTHON_FD=previousBridge;
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+
+test("successful extension registration releases metrics descriptor on native session shutdown", () => {
+  const directory=mkdtempSync(join(tmpdir(),"prime-metrics-shutdown-"));
+  const descriptor=openSync(join(directory,"metrics.json"),"w+",0o600);
+  const bridgeDescriptor=openSync(join(directory,"bridge"),"w+",0o600);
+  const environment="ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
+  const previous=process.env[environment],previousBridge=process.env.ASTERION_PRIME_IPYTHON_FD;
+  try {
+    process.env.ASTERION_PRIME_IPYTHON_FD=String(bridgeDescriptor);
+    process.env[environment]=String(descriptor);
+    const hooks=new Map();
+    extension.register({registerTool:()=>{},on:(event,handler)=>hooks.set(event,handler)});
+    assert.equal(process.env[environment],undefined);
+    assert.ok(fstatSync(descriptor).isFile());
+    assert.equal(typeof hooks.get("session_shutdown"),"function");
+    hooks.get("session_shutdown")();
+    assert.throws(()=>fstatSync(descriptor),{code:"EBADF"});
+  } finally {
+    try {closeSync(descriptor);} catch {}
+    try {closeSync(bridgeDescriptor);} catch {}
+    if(previous===undefined) delete process.env[environment]; else process.env[environment]=previous;
+    if(previousBridge===undefined) delete process.env.ASTERION_PRIME_IPYTHON_FD;
+    else process.env.ASTERION_PRIME_IPYTHON_FD=previousBridge;
+    rmSync(directory,{recursive:true,force:true});
+  }
+});
+
+test("unwritable metrics descriptor disables collection silently and leaves context output usable", () => {
+  const directory=mkdtempSync(join(tmpdir(),"prime-metrics-readonly-"));
+  const path=join(directory,"metrics.json"); writeFileSync(path,"untouched");
+  const descriptor=openSync(path,"r");
+  const environment="ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
+  const previous=process.env[environment];
+  const lines=[]; const stderr=console.error; console.error=value=>lines.push(value);
+  try {
+    process.env[environment]=String(descriptor);
+    const sink=extension.contextViewMetricsFromEnvironment();
+    const numbers=new extension.ContextViewTelemetry().observe([user("PRIVATE_MODEL_SENTINEL")]);
+    assert.doesNotThrow(()=>sink(numbers));
+    assert.doesNotThrow(()=>sink(numbers));
+    assert.throws(()=>fstatSync(descriptor),{code:"EBADF"});
+    assert.equal(readFileSync(path,"utf8"),"untouched");
+    assert.deepEqual(lines,[]);
+  } finally {
+    console.error=stderr; try {closeSync(descriptor);} catch {}
+    if(previous===undefined) delete process.env[environment]; else process.env[environment]=previous;
+    rmSync(directory,{recursive:true,force:true});
+  }
 });

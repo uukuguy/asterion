@@ -100,6 +100,9 @@ class TestP7Autonomy(unittest.TestCase):
             try:
                 launch = resources.host_services['prime.launch']
                 host = resources.host_services['prime.ipython']
+                metrics_fd = int(launch.approved_environment['ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD'])
+                self.assertIn(metrics_fd, launch.extension_lease.inherited_fds)
+                self.assertEqual(resources.context_view_metrics(), {'status': 'not-recorded'})
                 self.assertEqual(host.solver.learner_profile, 'autonomous')
                 self.assertNotIn('ASTERION_PRIME_P7_RESEARCH_PYTHON', launch.approved_environment)
                 self.assertEqual(launch.autonomy_deadline_monotonic, 5500.0)

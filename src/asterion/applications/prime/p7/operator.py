@@ -22,6 +22,7 @@ from typing import cast
 from asterion.applications.prime._console_logging import configure_console_logging
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.agents.prime.deadline import TaskDeadline
+from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile
 from .action_journal import ActionJournal
 from .run_story.storage import write_atomic_file
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
@@ -3520,6 +3521,7 @@ class P7OperatorResources:
     runtime_options: Mapping[str, str]
     _bridge: _IpythonBridgeServer
     _prediction_client: _P7BrokerClient | None = None
+    _context_metrics: ContextViewMetricsFile | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -3531,6 +3533,10 @@ class P7OperatorResources:
 
     def __repr__(self) -> str:
         return "<P7OperatorResources redacted>"
+
+    def context_view_metrics(self) -> dict:
+        """Private body-free extension-hook accounting, independent of stderr."""
+        return self._context_metrics.read() if self._context_metrics is not None else {"status": "unavailable"}
 
     async def close(self) -> None:
         """Boundedly release all resources retained by the operator."""
@@ -3555,7 +3561,11 @@ class P7OperatorResources:
                         raise P7OperatorError("P7 host services are unavailable")
                     trace.close()
                 finally:
-                    launch.extension_lease.close()
+                    try:
+                        launch.extension_lease.close()
+                    finally:
+                        if self._context_metrics is not None:
+                            self._context_metrics.close()
 
 
 def resolve_pi_provider(
@@ -3822,6 +3832,7 @@ def build_p7_operator_resources(
     child: socket.socket | None = None
     trace: PrimeTraceRecorder | None = None
     bridge: _IpythonBridgeServer | None = None
+    context_metrics: ContextViewMetricsFile | None = None
     try:
         configured_command = apply_pi_effort(pi_base_command, environment)
         variant = _resolve_history_variant(environment, game)
@@ -3862,6 +3873,7 @@ def build_p7_operator_resources(
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
+        provider_environment.pop("ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD", None)
         if not research_mode:
             provider_environment["ASTERION_PRIME_P7_TOOL_MODE"] = "legacy"
         if environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT") == "1":
@@ -3900,12 +3912,17 @@ def build_p7_operator_resources(
             raise ValueError
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         descriptor = child.fileno()
+        if research_mode:
+            context_metrics = ContextViewMetricsFile(private_trace_root.parent / "context-view-metrics.json")
+        metrics_fds = () if context_metrics is None else (context_metrics.descriptor,)
+        metrics_environment = {} if context_metrics is None else {
+            "ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD": str(context_metrics.descriptor)}
         binding = ExtensionBinding(
             extension_id="prime.ipython",
             path=extension_path,
             capabilities=("prime.tool.ipython",),
-            inherited_fds=(descriptor,),
-            environment={"ASTERION_PRIME_IPYTHON_FD": str(descriptor)},
+            inherited_fds=tuple(sorted((descriptor, *metrics_fds))),
+            environment={"ASTERION_PRIME_IPYTHON_FD": str(descriptor), **metrics_environment},
         )
         lease = binding.preflight()
         child.close()
@@ -4028,6 +4045,7 @@ def build_p7_operator_resources(
             runtime_options=MappingProxyType(runtime_options),
             _bridge=bridge,
             _prediction_client=prediction_client,
+            _context_metrics=context_metrics,
         )
     except Exception as error:
         print(
@@ -4050,6 +4068,8 @@ def build_p7_operator_resources(
             parent.close()
         if lease is not None:
             lease.close()
+        if context_metrics is not None:
+            context_metrics.close()
         raise P7OperatorError("P7 host services are unavailable") from None
 
 
@@ -5375,7 +5395,13 @@ async def run_live(
                 diagnostics["route_adoption"] = route_adoption()
             elif isinstance(prediction_client, _P7BrokerClient):
                 diagnostics["route_adoption"] = prediction_client.route_adoption()
+            metrics_reader = getattr(resources_, "context_view_metrics", None)
+            if callable(metrics_reader):
+                diagnostics["context_view_metrics"] = metrics_reader()
             research_host = resources_.host_services.get("prime.ipython") if research_mode else None
+            chain_reader = getattr(research_host, "research_chain_summary", None)
+            if callable(chain_reader):
+                diagnostics["research_chain"] = chain_reader()
             processing_log = getattr(getattr(research_host, "solver", None), "diagnostics", None)
             if processing_log is None:
                 processing_log = getattr(prediction_client, 'processing_diagnostics', None)

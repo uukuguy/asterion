@@ -19,10 +19,11 @@ const assistant = (...calls) => ({role:"assistant",content:calls,api:"openai-res
 const toolResult = (id,name,value) => ({role:"toolResult",toolCallId:id,toolName:name,isError:false,...value,timestamp:3});
 const current = "IMMUTABLE_DOCUMENT_RESEARCH_INSTRUCTIONS\nCURRENT_CHAPTER_5_BOARD";
 const calls = [];
+const telemetry = [];
 let hasNotes = false;
 const runtime = native.createExtensionRuntime();
 const factory = await loadExtensionFromFactory(pi => {
-  assert.equal(registerP7MemoryContext(pi),true);
+  assert.equal(registerP7MemoryContext(pi,numbers => telemetry.push(numbers)),true);
   for (const tool of createAppLevelTools({callMethod:async (id,method,params) => {
     calls.push({id,method,params});
     const commit = method === "workspace" && params.op === "notes";
@@ -114,6 +115,12 @@ for (const text of ["PI_OWNED_SYSTEM_PROMPT","OPERATOR_TASK_INSTRUCTIONS","LATER
 for (const text of ["RAW_CHAPTER_1","RAW_CHAPTER_4","BEFORE_NOTES_RESEARCH_0 ","LARGE_EVIDENCE_0 "])
   assert.ok(serialized.includes(text),text);
 assert.deepEqual(projected.filter(message => message.customType !== "asterion_context_memory"),source);
+assert.equal(projected.at(-1).customType,"asterion_context_memory");
+assert.equal(modelView.at(-1).role,"user","Pi keeps its native custom-to-user conversion");
+assert.match(JSON.stringify(modelView.at(-1)),/CURRENT_CHAPTER_5_BOARD/);
+assert.equal(modelView.at(-2).content,"PENDING_CURRENT_QUESTION");
+assert.ok(telemetry.at(-1).current_snapshot_bytes>0);
+assert.equal(telemetry.at(-1).requests,telemetry.length);
 assert.deepEqual(projected[0].toolsAdded,source[0].toolsAdded);
 assert.deepEqual(session.getBranch(),rawBefore,"native raw branch remains unchanged");
 assert.deepEqual(errors,[]);
@@ -129,9 +136,22 @@ assert.match(JSON.stringify(recovered),/CURRENT_CHAPTER_5_BOARD/);
 assert.match(JSON.stringify(recovered),/NATIVE_RETAINED_SUMMARY/);
 assert.match(JSON.stringify(recovered),/NATIVE_BRANCH_RESEARCH|LARGE_EVIDENCE_0 /);
 assert.equal(restoredView.filter(message => message.customType === "asterion_context_memory").length,1);
+assert.equal(restoredView.at(-1).customType,"asterion_context_memory");
+assert.equal(recovered.at(-1).role,"user");
+// Navigating to a branch without trusted state must not inherit another branch's snapshot.
+const otherSession=native.SessionManager.inMemory(process.cwd());
+otherSession.appendMessage(user("OTHER_BRANCH_OPERATOR"));
+const otherRunner=new native.ExtensionRunner([factory],runtime,process.cwd(),otherSession,{});
+const otherSource=otherSession.buildSessionContext().messages;
+const otherView=await otherRunner.emitContext(otherSource);
+assert.deepEqual(otherView,otherSource);
+assert.doesNotMatch(JSON.stringify(otherView),/CURRENT_CHAPTER_5_BOARD/);
+assert.deepEqual(session.getBranch(),rawBefore);
 const manifest = JSON.parse(readFileSync(resolve(packageRoot,"package.json"),"utf8"));
 console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest.version,provider_calls:0,
   raw_messages:source.length,model_messages:modelView.length,state_before_notes:true,minimal_plan_validated:true,
   research_without_notes_retained:true,research_with_notes_retained:true,native_compaction_research_retained:true,
   user_corrections_retained:true,
-  complete_sibling_group:true,system_and_tools_preserved:true,raw_branch_unchanged:true,restart_after_compaction:true}));
+  complete_sibling_group:true,system_and_tools_preserved:true,raw_branch_unchanged:true,restart_after_compaction:true,
+  snapshot_at_history_end:true,snapshot_native_user_conversion:true,selected_branch_isolated:true,
+  final_extension_view_numeric_telemetry:true}));

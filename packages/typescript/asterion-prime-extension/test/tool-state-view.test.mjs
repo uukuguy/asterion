@@ -118,3 +118,23 @@ test("registered context hook projects marked state without notes and keeps curr
   const unpaired=source.slice(2).map(message => ({type:"message",message}));
   assert.deepEqual(hook({type:"context",messages:source},{sessionManager:{getBranch:() => unpaired}}).messages,source);
 });
+
+
+test("context composition telemetry measures stale-state replacement and appended snapshot together", () => {
+  let hook; const records=[];
+  extension.registerP7MemoryContext({on:(_event,handler) => {hook=handler;}},numbers=>records.push(numbers));
+  const source=messages();
+  const snapshot={type:"message",message:{role:"toolResult",toolCallId:"read",toolName:"p7_workspace",isError:false,
+    content:[{type:"text",text:"read"}],details:{status:"read",context_memory:{version:"asterion.prime-context-memory/v2",
+      revision:null,content:"LATEST_SNAPSHOT_SENTINEL",commit:false}}}};
+  const original=structuredClone(source);
+  const branch=[...source.map(message=>({type:"message",message})),snapshot];
+  const projected=hook({type:"context",messages:source},{sessionManager:{getBranch:()=>branch}}).messages;
+  assert.equal(projected[2].content[0].text,"board archived; feedback: mismatch");
+  assert.equal(projected.at(-1).content,"LATEST_SNAPSHOT_SENTINEL");
+  const raw=new extension.ContextViewTelemetry().observe(source);
+  assert.ok(records[0].tool_result_bytes<raw.tool_result_bytes);
+  assert.deepEqual(records[0],new extension.ContextViewTelemetry().observe(projected));
+  assert.deepEqual(source,original);
+  assert.doesNotMatch(JSON.stringify(records),/SENTINEL|board|feedback|compute/);
+});
