@@ -376,7 +376,52 @@ class P7ResearchRuntime:
             memory = self._context_memory(commit=commit)
             if memory is not None:
                 projected['context_memory'] = memory
+        state_view = self._tool_state_view(method, projected)
+        if state_view is not None:
+            projected['tool_state_view'] = state_view
         return projected
+
+    @staticmethod
+    def _tool_state_view(method, projected):
+        """Mark only settled action-board copies; retain every research result.
+
+        The extension admits this closed proposal after binding its hash to the
+        actual model-visible text. This view never changes the archived result.
+        """
+        if (method != 'execute_plan' or projected.get('status') != 'recorded'
+                or projected.get('environment_result_unknown') is True
+                or projected.get('processing_blocked') is True
+                or 'uncertain_step' in projected
+                or projected.get('stop_reason') in {'unknown', 'environment-result-unknown', 'processing-failed'}):
+            return None
+        observation = projected.get('observation')
+        reference = projected.get('observation_ref')
+        if (type(observation) is not dict or 'frame' not in observation
+                or type(reference) is not dict
+                or type(reference.get('run_id')) is not str
+                or type(reference.get('attempt_id')) is not str
+                or type(reference.get('sequence')) is not int):
+            return None
+        replacement = {key: value for key, value in projected.items()
+                       if key not in {'context_memory', 'tool_state_view', 'observation'}}
+        archived = {key: value for key, value in observation.items()
+                    if key not in {'frame', 'frame_delivery', 'animation_ref'}}
+        archived['frame_read'] = {'sequence': reference['sequence'],
+                                  'read_api': 'p7_research.frame(sequence)'}
+        if observation.get('animation_ref') is not None:
+            archived['animation_read'] = {'observation_ref': reference,
+                                          'read_api': 'p7_research.animation(observation_ref)'}
+        replacement['observation'] = archived
+        try:
+            text = json.dumps(replacement, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+            text_bytes = len(text.encode('utf-8'))
+        except (ValueError, TypeError, UnicodeError, RecursionError):
+            return None
+        if text_bytes > 128 * 1024:
+            return None
+        return {'version': 'asterion.prime-tool-state-view/v1',
+                'state_key': f"p7.board:{reference['run_id']}:{reference['attempt_id']}",
+                'replacement_text': text}
 
     def set_memory_instructions(self, prompt: str):
         """Capture the exact immutable operator guidance before initial state."""

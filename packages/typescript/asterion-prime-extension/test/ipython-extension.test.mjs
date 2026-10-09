@@ -31,6 +31,7 @@ import register, {
   registerContextWitness,
   summarizeInstruction,
   toolNames,
+  registerP7MemoryContext,
 } from "../dist/ipython-extension.mjs";
 
 const artifactPath = resolve("dist/ipython-extension.mjs");
@@ -41,6 +42,53 @@ const material = JSON.parse(readFileSync(
 const loaderPath = resolve(
   "../../../src/asterion/runtimes/resources/asterion_pi_extension_loader.mjs",
 );
+
+test("real method bridge admits private state view and context hook retains feedback and latest board", async () => {
+  const pair = await socketPair();
+  const source = [];
+  let hook;
+  registerP7MemoryContext({on:(_event,handler) => {hook=handler;}});
+  let pending = "";
+  pair.peer.on("data", chunk => {
+    pending += chunk.toString("utf8");
+    for (;;) {
+      const end = pending.indexOf("\n");
+      if (end < 0) break;
+      const request = JSON.parse(pending.slice(0,end));
+      pending = pending.slice(end+1);
+      const visible = {status:"recorded",stop_reason:"executed",反馈:"实际反馈保持中文",budget:{seconds:12.5},
+        observation:{frame:request.request_id+"像素".repeat(1024)}};
+      const replacement = {...visible,observation:{frame_read:request.request_id}};
+      pair.peer.write(JSON.stringify({protocol:PROTOCOL,request_id:request.request_id,type:"method_result",
+        status:"ok",output:JSON.stringify({...visible,tool_state_view:{
+          version:"asterion.prime-tool-state-view/v1",state_key:"fixture.board",replacement_text:JSON.stringify(replacement),
+        }})})+"\n");
+    }
+  });
+  try {
+    const bridge = createIpythonBridge(pair.descriptor);
+    const tool = createAppLevelTools(bridge).find(tool => tool.name === "p7_execute_plan");
+    for (const id of ["older","latest"]) {
+      source.push({role:"assistant",content:[{type:"text",text:"自主假设与程序"},
+        {type:"toolCall",id,name:tool.name,arguments:{plan:{}}}]});
+      const reply = await tool.execute(id,{plan:{}});
+      source.push({role:"toolResult",toolCallId:id,toolName:tool.name,isError:false,...reply});
+    }
+    const original=structuredClone(source);
+    const branch=source.map(message => ({type:"message",message}));
+    // Pi's model-bearing clone may omit private details; branch is authoritative.
+    const visible=source.map(({details,...message}) => message);
+    const projected=hook({type:"context",messages:visible},{sessionManager:{getBranch:() => branch}}).messages;
+    const older=JSON.parse(projected[1].content[0].text);
+    assert.equal(older.反馈,"实际反馈保持中文");
+    assert.deepEqual(older.budget,{seconds:12.5});
+    assert.deepEqual(older.observation,{frame_read:"older"});
+    assert.deepEqual(projected[3],visible[3]);
+    assert.deepEqual(projected.filter(message => message.role === "assistant"),
+      original.filter(message => message.role === "assistant"));
+    assert.deepEqual(source,original);
+  } finally {pair.close();}
+});
 
 async function socketPair() {
   const root = mkdtempSync(join(tmpdir(), "asterion-ipython-bridge-"));
@@ -907,6 +955,25 @@ test("research workspace accepts direct actor action labels with closed confiden
   assert.deepEqual(calls, [["research-1", "workspace", request, undefined]]);
 });
 
+
+test("P7 action schema admits optional literal screen preconditions with closed bounds", () => {
+  const start = {run_id: "run-1", attempt_id: "attempt-1", level: 1, sequence: 0,
+    observation_sha256: "sha256:" + "0".repeat(64)};
+  const action = {name: "ACTION1", data: {}};
+  const cell = {x: 0, y: 63, value: 255};
+  const plan = before => ({plan_id: "plan-1", start, steps: [{action, before}]});
+  assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS, {plan_id: "plan-1", start, steps: [{action}]}), true);
+  assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS, plan({cells: [cell]})), true);
+  for (const before of [{}, {cells: []}, {cells: [cell], state: "WIN"}, {cells: [cell, {...cell, x: 64}]},
+    {cells: [{...cell, value: true}]}, {cells: [cell, {...cell, y: -1}]}, {cells: Array(129).fill(cell)}]) {
+    assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS, plan(before)), false, JSON.stringify(before));
+  }
+  const tool = createAppLevelTools({callMethod: async () => ({status: "recorded"})})
+    .find(item => item.name === "p7_execute_plan");
+  assert.match(tool.description, /before/);
+  assert.match(tool.description, /screen/);
+  assert.match(tool.description, /precondition_feedback/);
+});
 
 test("Prime normalizes object-only function schemas without changing application declarations", () => {
   const schema = Object.freeze({anyOf: [

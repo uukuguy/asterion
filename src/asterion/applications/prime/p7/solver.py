@@ -220,11 +220,12 @@ class Solver:
         if len(canonical_bytes(projected)) <= 60 * 1024:
             return projected
         projected["projection_truncated"] = True
-        for feedback in projected["feedback"]:
+        for feedback in [*projected["feedback"], *projected.get("precondition_feedback", [])]:
             cells = feedback["expected"].get("cells", [])
             if len(cells) > 8:
                 feedback["expected"]["cells"] = cells[:8]
-                feedback["expect_cells_omitted"] = len(cells) - 8
+                omitted_key = "before_cells_omitted" if "status" in feedback else "expect_cells_omitted"
+                feedback[omitted_key] = len(cells) - 8
             differences = feedback.get("differences", [])
             if len(differences) > 8:
                 feedback["differences"] = differences[:8]
@@ -237,6 +238,10 @@ class Solver:
             if len(cells) > 8:
                 step["expect"]["cells"] = cells[:8]
                 step["expect_cells_omitted"] = len(cells) - 8
+            before_cells = step.get("before", {}).get("cells", [])
+            if len(before_cells) > 8:
+                step["before"]["cells"] = before_cells[:8]
+                step["before_cells_omitted"] = len(before_cells) - 8
         if len(canonical_bytes(projected)) > 60 * 1024:
             projected["observation"] = {
                 key: value
@@ -705,8 +710,14 @@ class Solver:
             raise ValueError
         current_levels = context["observation"]["levels_completed"]
         for step in plan["steps"]:
-            if type(step) is not dict or set(step) != {"action", "expect"}:
+            if (type(step) is not dict or not {"action", "expect"} <= set(step)
+                    or not set(step) <= {"action", "expect", "before"}):
                 raise ValueError
+            if "before" in step:
+                before = step["before"]
+                if type(before) is not dict or set(before) != {"cells"}:
+                    raise ValueError
+                self._validate_cells(before["cells"], step["action"], current_levels)
             expect = step["expect"]
             if (
                 type(expect) is not dict
@@ -718,18 +729,7 @@ class Solver:
             native_expect = {k: v for k, v in expect.items() if k != "cells"}
             if "cells" in expect:
                 cells = expect["cells"]
-                if type(cells) is not list or not 1 <= len(cells) <= 128:
-                    raise ValueError
-                coordinates = set()
-                for cell in cells:
-                    validate_prediction(
-                        {"action": step["action"], "expect": {"cell": cell}},
-                        current_levels=current_levels,
-                    )
-                    key = (cell["x"], cell["y"])
-                    if key in coordinates:
-                        raise ValueError
-                    coordinates.add(key)
+                self._validate_cells(cells, step["action"], current_levels)
                 # Validate the complete plan before dispatch. Grounding is
                 # selected again from the actual observation at each step.
                 native_expect["cell"] = cells[0]
@@ -748,6 +748,21 @@ class Solver:
                                 allow_unpredicted=autonomous, allow_nondistinguishing=autonomous)
             translated.append(native)
         return translated
+
+    @staticmethod
+    def _validate_cells(cells: object, action: dict, current_levels: int) -> None:
+        if type(cells) is not list or not 1 <= len(cells) <= 128:
+            raise ValueError
+        coordinates = set()
+        for cell in cells:
+            validate_prediction(
+                {"action": action, "expect": {"cell": cell}},
+                current_levels=current_levels,
+            )
+            key = (cell["x"], cell["y"])
+            if key in coordinates:
+                raise ValueError
+            coordinates.add(key)
 
     def _compare(self, expect: dict, observation: dict) -> tuple[str, list[dict]]:
         frame = observation["frame"]
@@ -907,9 +922,29 @@ class Solver:
                 self.control.poll(
                     reference["sequence"], reference["observation_sha256"]
                 )
-                if not self.control.action_allowed() or not self.control.enter(
-                    "action"
-                ):
+                if not self.control.action_allowed():
+                    stop_reason = self.control.snapshot().get("state", "stopped")
+                    break
+                before = value["steps"][index].get("before")
+                if before is not None:
+                    _, differences = self._compare(before, observation)
+                    result.setdefault("precondition_feedback", []).append({
+                        "step_index": index,
+                        "status": "mismatch" if differences else "matched",
+                        "expected": copy_json(before),
+                        "actual": {
+                            "frame_sha256": digest(observation["frame"][-1]),
+                            "state": observation["state"],
+                            "levels_completed": observation["levels_completed"],
+                        },
+                        "differences": differences,
+                        "observation_ref": copy_json(reference),
+                    })
+                    if differences:
+                        stop_reason = "precondition-mismatch"
+                        unexecuted_start = index
+                        break
+                if not self.control.enter("action"):
                     stop_reason = self.control.snapshot().get("state", "stopped")
                     break
                 before_levels = observation["levels_completed"]

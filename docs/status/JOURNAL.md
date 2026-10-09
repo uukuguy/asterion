@@ -4495,3 +4495,7 @@
 - 2026-10-09 Task23 verified: sixlevels203paid/1RESET/1420.864428s; fullreplay/source/cleanup/manifest independent PASS; L6 autonomous settle+BFS executed20-step route.
 - 2026-10-09 378a7d80 records Task23 audited cold results and remaining limits for reproducible research recovery.
 - 2026-10-09 f2469d16 defines layered state-view and optional-precondition design to address duplicate context and coordinate errors.
+- 2026-10-09 52945685 plans layered fixes and cold verification, correcting L5 screen-map diagnosis for implementation.
+- 2026-10-09 Layered fixes verified: Python71/TS59PASS+6external skips; astraREADY; stateview/socket integration PASS; deployment pending.
+- 2026-10-09 Promotion full4389tests: one existing console descendant-cleanup failure; source71/TS59 remainPASS; isolated diagnosis pending, no providerGO.
+- 2026-10-09 Cleanup failure not reproduced: three isolatedPASS plus matchingextrasPASS; fullpromotion rerun underway, cause unproven.

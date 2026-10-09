@@ -4,6 +4,8 @@ import json
 
 from .actor_projection import ACTOR_FRAME_INSTRUCTION
 
+P7_ACTION_PRECONDITIONS_INSTRUCTION = """每步可选 before:{cells:[{x,y,value}]}，对执行该步之前的真实 settled 画面断言1–128个不重复位置的字面像素值。x 是当前屏幕列、y 是当前屏幕行；自建模型坐标必须先由你映射到当前屏幕，画面或视角改变后重新核实。整段语法先校验，每步行动前再核对 before；失配返回 precondition_feedback 中的真实 observation_ref 与 differences，stop_reason='precondition-mismatch'，当前步和后缀未执行、不新增动作计费，已经执行的前缀仍计费。stop_on_mismatch:false 只影响行动后的 expect 预测，不能绕过 before。before 匹配只确认当前像素，不保证动作后的安全，也不视为行动后的预测成功；未提供 before 的行为保持原样。"""
+
 
 P7_NOTES_SOLVE_PROMPT = """你是 P7 主解题者。依据真实观察自主研究未知游戏，以通关和动作效率为目标。自行选择假说、笔记、实验和计算；部分模型与未知机制都可以支持下一项有用探针。应用给出的 observation、observation_ref、available_actions 和 budget 是当前现实，历史资料与程序预测不能授权动作。
 
@@ -21,7 +23,7 @@ p7_workspace({op:'notes_read',revision:可选笔记版本}) 与 {op:'notes_histo
 用 prime_workspace.export(name,value) 显式保存源码字符串或有限 JSON；成功 cell 返回实际 export_id。需要时用 workspace read/notes_history/revise/publish 保留详细模型，这些可选操作不能代替 NOTES 的当前校准。checkpoint 请求为 {op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}。它保存已接纳的源码/JSON，不能保存任意进程对象；内核丢失后依据当前观察、笔记和显式导出恢复，不重播动作 cells。普通 Python 异常不表示整个 namespace 丢失。
 
 budget 包含 target_level、action_cap、actions_remaining、primitive_actions、level_baseline、terminal_reason、wall_time_remaining_seconds。固定期限包含分析和行动，暂停与续跑不续期；动作余额不是时间余额。真实探针、无效动作和 RESET 都计费。参考 baseline，利用已有证据与必要计算减少绕路；不要为省步伪造结果。达到 target_level 即停止，有限 level-witness 只证明所到关卡，不能称为完整 WIN。没有真实终局证据时最终文字不代表通关。
-""" + "\n" + ACTOR_FRAME_INSTRUCTION
+""" + "\n" + P7_ACTION_PRECONDITIONS_INSTRUCTION + "\n" + ACTOR_FRAME_INSTRUCTION
 
 
 def build_notes_prompt() -> str:
@@ -55,7 +57,7 @@ p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:
 每段1–20步；ACTION6 data 为 {x,y}，其他动作 data 为 {}，包括 RESET。动作含义由实际反馈判断。可选字段：workspace_revision（提供则必须是当前版本）、goal、purpose（advance 或 probe）、assumptions；每步可选 expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}。默认在预测失配时停下；明确设置 stop_on_mismatch:false 可继续研究已知结果的失配。换关、RESET、GAME_OVER、未知结果、暂停或预算截止仍停止后缀。缺少预测表示未作断言，不视为预测成功。
 观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
 固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。
-""" + "\n" + ACTOR_FRAME_INSTRUCTION
+""" + "\n" + P7_ACTION_PRECONDITIONS_INSTRUCTION + "\n" + ACTOR_FRAME_INSTRUCTION
 
 
 def initial_research_prompt(host, instructions: str) -> str:
@@ -111,7 +113,7 @@ RESET 也只通过 step {action:{name:'RESET',data:{}},expect:明确预期} 提�
 p7_workspace({op:'checkpoint',revision:当前版本,state_export_id?,frontier_export_id?,analyzed_through:真实序号}) 只保存已显式接纳的源码和 JSON，不保存任意进程对象或重播真实动作 cells。kernel 丢失时未保存的 frontier 丢失；恢复后重新读取当前真实观察、校准 state 并发布包含当前 evidence_sequence 的新 revision 后再行动。新关卡也应重新估计布局/资源/局部状态，复用规则与程序，不复用精确动作路线。绝对运行期限与动作上限由应用固定预设控制，暂停不延长期限。
 """
 
-P7_SOLVE_PROMPT += "\n" + ACTOR_FRAME_INSTRUCTION + "\n"
+P7_SOLVE_PROMPT += "\n" + P7_ACTION_PRECONDITIONS_INSTRUCTION + "\n" + ACTOR_FRAME_INSTRUCTION + "\n"
 
 P7_CONTINUE_PROMPT = """继续当前 P7 研究与求解。复用仍存活的 IPython namespace，结合应用附加的真实 observation/ref、当前 WorldMap revision 和最近反馈，选择下一项有用计算或短行动计划。以通关和减少真实动作共同为目标，参考当前 level_baseline；先用已有证据和自己的程序比较路线，避免重复探针与不必要的 RESET。needs_revision=true 时先用 p7_workspace op revise 直接更新语义 WorldMap/task，并引用当前 base_revision 和证据序号；无需先写程序。未知保持未知；失配先修订模型并重算，不重派旧起点或未知结果的计划。正确匹配的计划可复用原修订。""" + "\n" + ACTOR_FRAME_INSTRUCTION
 

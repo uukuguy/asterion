@@ -4,7 +4,7 @@ Updated: 2026-10-09 after Task23 cold verification, independent audit and result
 
 ## Current intent and boundary
 
-User now authorizes discovered-problem design, implementation and cold verification. Design f2469d16: generic stale-state model view, P7 optional before.cells guard, no game rules or mandatory cognition. Source stillECD while workers implement; no trial GO. Task24 private prep .asterion-private/p7-task24-cold-bp35-20261009/trial/, finite original controls/current.env Solmedium and payload-free Pi receive-clock observer provider-free proof passed. Next: implement/review/test/package witness then frozen cold BP35. L2 unknown hazard is not promised solved.
+User authorizes discovered-problem design, implementation and cold verification. Design f2469d16/plan52945685 implemented in workingtree: generic stale-state model view, P7 optional before.cells guard; no game rules or mandatory cognition. Python71/TS59PASS+6external skips; astra finalREADY, realbridge/hookPASS, packagedresource synced. Firstpromotion full4389tests failed one unchangedconsole descendant-cleanup assertion; isolated3runs and matchingextrasrunPASS, causeunproven. Secondfullpromotion session90260running; no providerGO untilPASS/sourcecommit. Task24 cold/privatewitness prepared at .asterion-private/p7-task24-{cold-bp35,witness}-20261009/trial/; current.env Solmedium, finiteoriginalcontrols, neutral Pi clocks/guardcounts observer proofPASS. Next packagedr11lL1 deployment/cleanup then frozen coldBP35. L2 unknownhazard is not promised solved.
 
 ## Verified facts
 

@@ -4,6 +4,8 @@ import { normalizeFunctionParameters } from "./tool-schema.js";
 export { normalizeFunctionParameters } from "./tool-schema.js";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
 import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
+import { admitToolStateView, projectToolStateViewContext } from "./tool-state-view.js";
+export { TOOL_STATE_VIEW_VERSION, admitToolStateView, projectToolStateViews, projectToolStateViewContext } from "./tool-state-view.js";
 export { CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
@@ -743,7 +745,12 @@ export const P7_EXECUTE_PLAN_PARAMETERS = TypeObject({
   purpose: TypeOptional(TypeUnion([TypeLiteral("advance"), TypeLiteral("probe")])),
   assumptions: TypeOptional(TypeArray(PUBLIC_TEXT, { maxItems: 32 })),
   stop_on_mismatch: TypeOptional(TypeBoolean()),
-  steps: TypeArray(TypeObject({ action: ACTION_PARAMETERS, expect: TypeOptional(TypeObject({
+  steps: TypeArray(TypeObject({ action: ACTION_PARAMETERS,
+    before: TypeOptional(TypeObject({ cells: TypeArray(TypeObject({
+      x: TypeInteger({ minimum: 0, maximum: 63 }), y: TypeInteger({ minimum: 0, maximum: 63 }),
+      value: TypeInteger({ minimum: 0, maximum: 255 }),
+    }, { additionalProperties: false }), { minItems: 1, maxItems: 128 }) }, { additionalProperties: false })),
+    expect: TypeOptional(TypeObject({
     cells: TypeOptional(TypeArray(TypeObject({ x: TypeInteger({ minimum: 0, maximum: 63 }),
       y: TypeInteger({ minimum: 0, maximum: 63 }), value: TypeInteger({ minimum: 0, maximum: 255 }) },
       { additionalProperties: false }), { minItems: 1, maxItems: 128 })),
@@ -757,7 +764,7 @@ const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   { name: "p7_workspace", method: "workspace", parameters: P7_WORKSPACE_PARAMETERS,
     description: "Optionally use op notes with the exact current base_revision and observation_ref to replace your freeform research NOTES (at most 16 KiB UTF-8). Select useful observations, hypotheses, counterexamples, questions and plans yourself; no required headings, WorldMap, task or action labels. Notes are an external memory aid, not an action prerequisite. A notes update replaces only the current state snapshot and preserves conversation history; Pi's native compaction manages the context window. Read accepted notes with notes_read (optional revision), or page newest-first accepted notes_history (optional start, limit 1–32). Optional revise/publish retains prior program/report evidence and never certifies new prose. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Write success returns an acknowledgement with current refs and controls; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
   { name: "p7_execute_plan", method: "execute_plan", parameters: P7_EXECUTE_PLAN_PARAMETERS,
-    description: "Submit a short ordered plan with plan_id, start equal to the current observation_ref, and 1–20 action steps. Notes, WorldMap and program models are optional research aids. workspace_revision, goal, purpose, assumptions and each step's expect prediction may be omitted; a supplied workspace_revision must match the current workspace. Predictions can test key cells, a complete frame, state or progress; an omitted prediction is not a confirmed match. stop_on_mismatch defaults to true; explicitly false allows continuing known prediction misses. The unique Broker executes sequentially; unknown effects, pause, RESET, game-over, level changes, budget and cancellation stop the suffix. Returns actual feedback and unexecuted steps. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
+    description: "Submit a short ordered plan with plan_id, start equal to the current observation_ref, and 1–20 action steps. Notes, WorldMap and program models are optional research aids. workspace_revision, goal, purpose, assumptions and each step's expect prediction may be omitted; a supplied workspace_revision must match the current workspace. Optional step.before={cells:[{x,y,value}]} checks 1–128 distinct literal pixels on the actual settled screen immediately before that step. x is the current screen column and y the row; map your model coordinates to the current screen yourself and recheck after view changes. The entire plan syntax validates before dispatch. A before mismatch returns precondition_feedback with the observed reference and differences, stops the current step and suffix without executing or charging them, and preserves the executed prefix. A matched before is not a post-action prediction or a safety guarantee. Predictions can test key cells, a complete frame, state or progress; an omitted prediction is not a confirmed match. stop_on_mismatch defaults to true; explicitly false allows continuing known post-action prediction misses but never bypasses before. The unique Broker executes sequentially; unknown effects, pause, RESET, game-over, level changes, budget and cancellation stop the suffix. Returns actual feedback and unexecuted steps. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
 ]);
 
 export function toolNames(): string[] {
@@ -787,9 +794,19 @@ function makeMethodTool(
         ? (input as Record<string, unknown> | null | undefined)?.[inputKey] ?? null
         : input;
       const result = await bridge.callMethod(id, method, params, signal);
-      const record = memoryRecord(result);
+      let record = memoryRecord(result);
       let visibleResult = result;
       let details = result;
+      // A private application proposal is not model content. Bind its admitted
+      // form only after constructing the exact visible text below.
+      let stateProposal: unknown;
+      if (record && Object.hasOwn(record,"tool_state_view")) {
+        const {tool_state_view: privateProposal,...publicResult} = record;
+        stateProposal = privateProposal;
+        record = publicResult;
+        visibleResult = publicResult;
+        details = publicResult;
+      }
       if (record && Object.hasOwn(record,"context_memory")) {
         const {context_memory: privateEnvelope, ...publicResult} = record;
         visibleResult = publicResult;
@@ -821,6 +838,13 @@ function makeMethodTool(
         }
       } catch {
         text = String(visibleResult);
+      }
+      if (method === "execute_plan" && record?.status === "recorded"
+        && record.environment_result_unknown !== true && record.processing_blocked !== true
+        && !Object.hasOwn(record,"uncertain_step")
+        && !["unknown","environment-result-unknown","processing-failed"].includes(String(record.stop_reason))) {
+        const view = admitToolStateView(stateProposal,text,id,name);
+        if (view) details = {...memoryRecord(details),tool_state_view:view};
       }
       return {
         content: [{ type: "text", text }],
@@ -910,9 +934,14 @@ export function registerP7MemoryContext(pi: unknown): boolean {
       if (manager && typeof manager.getBranch === "function") entries = manager.getBranch();
       if (!Array.isArray(entries)) return {messages:event.messages};
       recoverP7MemoryContext(controller,entries);
-      const projected = controller.project(event.messages);
-      const safeOutcome = JSON.stringify(projected.outcome);
-      if (projected.outcome.status !== "inactive" && safeOutcome !== lastOutcome) {
+      const branchMessages = entries.flatMap(raw => {
+        const entry = memoryRecord(raw);
+        return entry?.type === "message" ? [entry.message] : [];
+      });
+      const stateView = projectToolStateViewContext(event.messages,branchMessages);
+      const projected = controller.project(stateView.messages);
+      const safeOutcome = JSON.stringify({...projected.outcome,state_view:stateView.outcome});
+      if ((projected.outcome.status !== "inactive" || stateView.outcome.replaced_results > 0) && safeOutcome !== lastOutcome) {
         emitMemoryDiagnostic("[prime-context-memory] " + safeOutcome);
         lastOutcome = safeOutcome;
       }
