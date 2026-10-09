@@ -4713,3 +4713,25 @@
 - Task38 userapproved revisableACTION1–7priors/undo-reset distinction; P7prompt-only implementation/review/providerfreepackaging, no paidrun.
 
 - Task38 useradded BP35coldL1–L6 authority afterreview/package/preflightREADY; sameSolmedium/seed0/native6/5400+180, no hints/19gate.
+
+- 8e2e8a29: Added revisable ARC action priors so P7 need not rediscover interface conventions from anonymous controls.
+
+- Task38 packaging/actual13966prompt/preflightREADY, fullpromotion25PASS/provider0; rootactualGO coldBP35/native6/no19gate delivered.
+
+- Task38 launch17:16:19.701698UTC/deadline18:46:19.701698+180; run311170ef/unit83df5c7d/owned92157,92159,92158; source8e2e/wheel3856.
+
+- Task38 L1goal19/Q115/0RESET/167.947122s; prioradopted/noACTION7probe, differentroute, continueL2/noactorhint.
+
+- Task38 L248/Q100/0RESET/239.182609s; fourundoscorrectriskroute, twoactualsoftyields, Task29L242/Q115 faster; continueL3.
+
+- Task38 L336/Q115/139.206047s/0RESET; previous36matched, first3total103paid/Q115,100,115; continueL4.
+
+- Task38 L423/Q115/154.652276s/0RESET; first4paid126, inputpeak139721; continuekeyL5unchangeddeadline.
+
+- Task38 L531/Q113.319/368.856439s/0RESET; 119.77smodelturn/actioncachemiss observed, softyieldroutechanged; continueL6.
+
+- Task38 sixgoals215paid/0RESET/1482.657593s/official9levelpartial46.666667; NOTES1039B vs230192inputpeak exposesunfinishedcognitionprojection; sealpending.
+
+- Task38 correctedofficialscore46.666667 (9levels, target6); naturalexit0/217SDKreplay/ownedcleanup, finalnotes984B/inputpeak235052.
+
+- Task38 final1908manifest3cebc44d independentREADY/ownedcleanup; userdirectsNOTES richerprimarycognition/contextprojection, designinvestigationonly.

@@ -101,3 +101,52 @@ L1 SDK goal2026-10-09T16:49:01.713588Z，21paid/Q100/0RESET。相同版本Task36
 用户指出[arc-skill 的SKILL.md](https://github.com/pbshgthm/arc-skill/blob/main/skills/arc-skill/SKILL.md)提供ACTION1/2/3/4方向、5交互、6点击坐标、7撤销的“接口先验，非保证”，且可用动作会改变。当前build_autonomous_prompt只给ACTION6坐标格式及依据反馈判断动作含义，没有完整标准映射。prompt.py旧legacy提示有standard ARC mapping，但不能用未启用提示推断本轮模型已收到。独立复核确认installed13484B主prompt、initialcontext、genesis/两次workspace修订及TS工具schema均无完整映射；available_actions只有编号列表，action_labels是模型可自行提交判断，不是预注入先验。
 
 当前判断：接口惯例是合法的领域接口信息，适合P7领域研究说明/领域数据元信息，不进入Prime通用层。提供可证伪先验、保留实际反馈修订，比让模型从匿名编号重建控制用途更合理；未知游戏效果（自动上升、可清地形、目标）仍需研究。不能把本轮ACTION7、点10/5三个探针直接从21步扣除，或者声称加先验必然18步/115。本轮无源码更改，尚未实现或验证该方向。
+
+## Task38：接口先验六关冷测，目标已完成
+
+生产8e2e8a29仅补actualautonomousprompt482B（总13966B）接口先验：ACTION1–4方向、5交互、6点击、7常见撤销/范围不保证，RESET重开、GAME_OVER只能RESET，availability及反馈修正。既有控制/收费/策略/goal合同不变，无BP35路线。29PythonPASS/独立代码APPROVE/Ruff/docs/diff通过，新wheel3856d7067e9b3a36bca3fa9affc52b462562fc9f54a7c5a1328c1d27625052dd的570源/588安装、actual13966Bprompt/resourcea799/3tools已核；TS79PASS/6externalskips→Python29PASS→fullpromotion25PASS/provider0顺序完成，完整providerfreepreflight独立READY。
+
+用户新增授权coldBP35L1–L6，Solmedium/seed0/freshhistory/5400+180，自然target6，无Task37的L1stopper或19门槛。root在完整preflightREADY后唯一GO，mint2026-10-09T17:16:19.701698UTC/fixeddeadline18:46:19.701698+180，runp7-live-20261009171620-311170eff0ea47adb3250524/unit83df5c7d，这是启动阶段记录，现已达到六关目标并自然退出。重点比较同版Task37的L121/Q100/161.361755s、控制交互探针和模型是否实际采用先验，同时记录每关分数/付费动作/RESET/时间/normalized与raw/cachetokens。两次不同prompt单轨迹不能证明因果稳定性，成功步数19内均顶格115，无需追求更低步数。
+
+Task38 L1已结算19paid/Q115/0RESET，SDKgoal17:19:07.648820UTC，mint至goal167.947122秒（receipt167.943193）。对Task37少2步、快慢差+6.585367秒；goal17completedusage input612979/out4310/peak51687，对Task37 16usage562112/4100/49872。实际采用左右/点击/撤销接口说法，无ACTION7用途探针；三次无效点击分别检验远处/邻格/地形，不能自动判为重复同一假说。seq5点击14→10后明确“障碍可能不是收集目标、胜利条件未知”，选择通道，早期清除x33后被用于上升路线。seq14估5步恰保115、seq17余2步实际通关。信息采用和满分结果已发生，不是两次隔离变量因果证明。自然继续L2，仍未完成六关。
+
+Task38 L2已结算48paid/Q100/0死亡RESET，关时239.182609秒；Task29为42/Q115/202.926513秒，不能由零死亡断言更优。开局回读白15内部标记并选绕行，之后上浮出现新白形挡路；seq44一次点击检验可删，seq45无效后NOTES比较余18/22与绕行约16及已付26步重来的成本，停止探针，单次ACTION7核回退后再3次撤销恢复停靠，后续换路完成。撤销是实际纠错，不是用途盲试，仍增加4paid且需要绕行。seq61提交2执行1到62、suffix1 softyield；seq63提交4执行3到66、suffix1 softyield；模型均用新plan/currentref重报剩动作，未自动续后缀。实际交回已证，但未见这两次边界触发宏观路线修订。继续自然L3。
+
+L2四次撤销的必要性：逐帧排除HUD，seq46与44/45地图相同（撤45无效白块点击），47地图完整恢复43（撤44左移及上浮），48恢复42（撤43左移），49恢复41且30像素差恢复屏幕(21,3)紫块（撤42清块）。若采用“恢复这块停靠点”的方案，1–3次尚未到达目标，第四次才恢复；50/51重新左移停到低处并52起右绕成功。只是该纠错方案的回退链可追溯，不证明全局最优需要4次：无效白块probe增加了待撤输入，47/48处另走或提前保留42停靠块均未实跑验证。具体成本来自提前清掉随后需要的停靠块，不能把全部撤销称无效重复。
+
+Task38 L3结算36paid/Q115/0RESET/139.206047秒，与Task29/28同36步；goal55completedusage cumulativeinput3839917/output14567/peak116878、raw1883437/cache1956480。继续L4，本轮未调整代码或追加actor提示。
+
+Task38 L4结算23paid/Q115/0RESET/154.652276秒（Task29 24、Task28 23）。8圆块反向运动时由破墙假说修订重力切换，随后按反馈绕墙和白形完成；输出仍百字grid/1000字动画，未重复65536B整帧输出。goal69usage cumulativeinput5655225/output18444/peak139721、raw2762169/cache2893056；context532149B/providerprefix517800B（字节非tokens）。继续L5，峰值历史增长尚未修复，不能由界面先验或小单次stdout推断上下文问题解决。
+
+Task38 L5结算31paid/Q113.3194589/0RESET/368.856439秒；Task28同31/164.246441秒，Task29为30/Q115/260.610008秒，耗时回退显著。模型发现8列后修grid，回读geometry、完整局部patches，保留原分类。seq138计划关开关+翻重力+右移，执行2步softyield保留3后缀；seq140自行改为关闭另一列开关、左绕，实际有后续方向修订。seq147估10步且承认超115仍保100，实际6+4完成。
+
+L5请求81的可见turn_start→message_end119.773354秒（接收/生命周期区间非纯推理或HTTP），raw139650/cache19584/norm159234/output2956，retry0；前request80为17.962秒/raw1705/cache154112。providerJSON569653→583312B，LCP530290/旧569653B、194/201旧items，snapshot24889→24686B；system/tools/cachekey变化0。可定位actionupdate边界旧prefix末端变化，纯计算request82cache159104恢复；仍有530290B共同prefix，不能仅此解释cache只19584，无wire/provider缓存内部证据，不可把全部长响应归因token。当前L6，累计157paid/0死亡RESET。
+
+### 未完成边界：NOTES 尚未成为主要工作认知
+
+用户明确指出原先理解为NOTES是主要交给LLM的认知。当前autonomous实现只替换state snapshot中的有效笔记，保留Pi完整研究交互历史、由原生压缩管理；与“笔记凝练认知、历史按需取证”的目标存在未完成边界。不能把20万token的增长称为长程推理必需，或仅靠更短NOTES/小stdout声称解决。完整档案应保留以便复核重放，模型工作上下文应以有效NOTES、当前观察、目标、未解决问题和必要近期证据为主；其余按ref回读。Prime负责投影/原档/引用保障，P7研究维护稳定认识与未解决边界，P7数据提供可回读真实帧/转移。具体安全投影/恢复合同尚未设计实现、不可宣称完成；本轮不改actor历史以保比较。
+
+### Task38 六关实测结果
+
+| 关卡 | baseline / 115门槛 | 本轮付费动作 | 单关分 | 关时（秒） | Task29付费动作 |
+| --- | --- | ---: | ---: | ---: | ---: |
+| L1 | 21 / 19 | 19 | 115 | 167.947122 | 25 |
+| L2 | 48 / 44 | 48 | 100 | 239.182609 | 42 |
+| L3 | 44 / 41 | 36 | 115 | 139.206047 | 36 |
+| L4 | 38 / 35 | 23 | 115 | 154.652276 | 24 |
+| L5 | 33 / 30 | 31 | 113.319459 | 368.856439 | 30 |
+| L6 | 87 / 81 | 58 | 115 | 412.813100 | 54 |
+
+215paid、0死亡/自愿RESET；初始化2RESET单列，不计费。SDKgoal17:41:02.359291UTC，严格mint至goal1482.657593秒（24分42.66秒），实际game.win_levels=9，九关权重/完成率cap下官方partial_game_score=46.666667；完成六关是本次评估目标，不是九关全通。另按N=6归一化可得100仅是前六关比较口径，不是实际整局分。对Task29 211paid/1548.246660秒，本轮多4paid、快65.589067秒；较最早最好1023.279883秒仍慢459.377710秒（44.89%），不能称耗时已恢复。L1恢复19/Q115，L2动作/分数回退，L3/L4步数持平或少1，L5仅多1但耗时长，L6多4但Q115。顶格后不用更少步衡量得分改进。
+
+L6先保留本关7列，修正向上/下停靠中心偏移，避免旧采样漏形状；后段发现返回下降需要之前未关闭的27列停靠块，NOTES182明确比较余56/62与额外11步，4次A7恢复视图再补停靠。这属于往返路径规划的补救成本，不能称按钮用途探针或机制必需；是否可事先保留需另做路线证据验证。本轮A7共8（L2/L6各4），无RESET。开关恢复与重力翻转是不同操作，不能把“恢复”措辞都算低效。
+
+Goal109completedusage normalizedinput13005592/output38017/peak230192；本轮当前NOTES1039UTF8字节、acceptedrevision12。目标边界被动采样110context峰904379B/providerprefix883991B（字节），采样时点不等于严格goal请求。现有lifecycle未见compaction事件，不能证明Pi不会压缩。简短NOTES与庞大输入并存，证实当前模型工作历史没有由NOTES主导收拢；仍不能仅凭总量判定每项旧证据无用或全部时延根因。
+
+自然exit0/217SDK完整回放/215known事务通过，cleanupwall1516.691354752秒；ownedhost/guest/auth/envgone、console保留，最终1908manifest bytes/SHA/coverage独立READY，SHA3cebc44d83c9834a08b5a0208b747e2981d5ddd81de27701a93070394e6aa747；本轮结束后不续L7、不自动另跑或修改模型历史。
+
+Final收尾111completedusage normalizedinput13474659/output38569/peak235052、raw7785571/cache5689088/cachewrite0，context111峰907892B/累计49878933B、providerprefix887407B。Goal前12acceptedNOTES/1039B，final13/984B；收尾2请求不可计入解题goal用量。可见生命周期无retry/compaction，不证明不存在任何内部事件；旁路1oversized line未保存，不能声称零诊断遗漏。
+
+Independentanalysis：36纯计算继发请求保留旧provider items/除结尾括号外全部旧字节，weightedcache98.9237%；plan组15.5375%、workspace17.0739%。不支持纯计算前缀回退重现，动作/快照边界与保留历史是不同问题。37viewcandidate=23末步+3自然yield+11显式optout；L5yield后有方向修订，另两次L2继续同路线。Finalcontext907892B=assistant281105+toolresults580547+currentsnapshot24575+other21665；大头在保留交互，NOTES984B并未收拢工作上下文。不能把所有历史都称垃圾，摘要/投影必须保留未解决反例、解释修订与有效来源。
+
+最终独立READY：217完整SDK replay/215known事务/330trace seal/110研究链及全部file refs/111metrics、21frozen launch文件一致；1908manifest全量hash/coverage/containment通过。Trial `.asterion-private/p7-task38-cold-bp35-20261010/trial/` 冻结不改写，所有ownedhost/observer/guest/auth/env清理、console52024:56659保留。用户明确下一方向：NOTES承担更丰富有效游戏认知、工作历史明显过多，进入具体投影设计调查，尚未改上下文源码。

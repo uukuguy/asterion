@@ -84,10 +84,12 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - Task29：[动态观察边界实现与评审](../reviews/2026-10-09-p7-observation-boundary-review.md)：模型可选控制边界、数据候选、RESET与反馈容量缺陷修复、验证边界。
 
-- 最新实测：[2026-10-09 Task29 BP35 冷测](../reviews/2026-10-09-p7-bp35-task29-evaluation.md)：零死亡、L1得分退步、用时增加44.70%，自然软边界未触发；完整回放封存独立READY。
+- 历史实测：[2026-10-09 Task29 BP35 冷测](../reviews/2026-10-09-p7-bp35-task29-evaluation.md)：零死亡、L1得分退步、用时增加44.70%，自然软边界未触发；完整回放封存独立READY。
 
 - Task30设计实施：[动态资源权衡设计](../superpowers/specs/2026-10-09-prime-resource-aware-research-design.md)、[实现计划](../superpowers/plans/2026-10-09-prime-resource-aware-research.md)：带采样时间的宿主事实、条件评分、模型自主策略，Task30实现与打包验证完成，未做新BP35；Task31直接115/100剩余与超额评分空间已实现，独立小关部署验证。
 
 - Task30实施评审：[动态资源事实实现与验证](../reviews/2026-10-09-prime-resource-aware-research-review.md)：模型自主权衡、边界修复、代码APPROVE/191tests/promotion/r11l部署独立READY；模型采用和BP35策略效果未验证。
 
 - Task32中止实测：[BP35 L1与策略记录缺口](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)：Task32 L1 22步/Q91.12与Task34 L1 19步/Q115，均L2中止死亡1次并封存；追加Task35 L1 20步/Q110.25和Task36 L1 24步/Q76.5625；开局理由可读、目标关联不足与整动画输出膨胀已发现；追加同版Task37 L1 21步/Q100/161.36秒，无RESET；轨迹波动与当前接口先验缺口，动作差异/时延/策略采用边界。
+
+- 最新 Task38：[接口先验 BP35 六关冷测及 NOTES 未完成边界](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)：215步/零RESET/1482.66秒，官方九关部分整局分46.67；L1恢复19/Q115，L2回退、L5变慢。NOTES984B仍伴235k输入峰，主要认知投影尚未实现；动作撤销与停靠开关成本区分。

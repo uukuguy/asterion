@@ -290,5 +290,7 @@ Userauthorized singleBP35L1 repeat, no productionchanges: same94dabe66/wheelbbf1
 
 - [x] Add focused prompt-delivery test for all7actions, revisable prior, ACTION7/RESET distinction and GAME_OVER boundary; observe missing-content failure.
 - [x] Add short mapping paragraph to `build_autonomous_prompt()` in `src/asterion/applications/prime/p7/prompt.py`; run `uv run python -m unittest -v tests.test_prime_p7_autonomous_interface`, Ruff/diff and independent changed-code review.
-- [ ] Commit source and documentation; run `make promotion-check` and freshwheel installed prompt probe, checking source/prompt/resource/tools match.
-- [ ] Record implemented vs provider-free verified vs model-quality untested boundaries; close checkpoint. User subsequently authorized fresh BP35 L1–L6: exactSolmedium/seed0/native6/5400+180, preflightREADY/rootGO, no inheritedknowledge orL1stopper/19gate; prioritize L1 comparison and monitor each level.
+- [x] Commit source and documentation; run `make promotion-check` and freshwheel installed prompt probe, checking source/prompt/resource/tools match.
+- [x] Record implemented vs provider-free verified vs model-quality untested boundaries; close checkpoint. User subsequently authorized fresh BP35 L1–L6: exactSolmedium/seed0/native6/5400+180, preflightREADY/rootGO, no inheritedknowledge orL1stopper/19gate; prioritize L1 comparison and monitor each level.
+
+Task38CLOSED: source8e2e8a29/packagingverified; freshBP35target6 naturalexit0/215paid/zeroRESET/1482.657593s, actualofficial9levelpartialscore46.666667. Final1908manifest3cebc44d independentlyREADY/217SDKreplay/ownedcleanup. Evaluation containsL1interfaceadoption, L2/L6undocorrection, L5time/cache and goalvsfinalusage. NewNOTES-primarydesigninvestigation followsuserexplicit cognition/history concern; no newmodel trial orcontextsourcechanges.
