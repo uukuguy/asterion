@@ -4517,3 +4517,7 @@
 - 2026-10-09 Scope fullpromotion failed unchanged Rust process group; isolated12PASS, cause unproven; fullrerun13902 before restart.
 - 2026-10-09 Scope fullpromotion rerunPASS25/provider0; Task25 installedREADY, rootGO fresh BP35bc8f3f23 Solmedium under original controls.
 - 2026-10-09 Task25 launched05:36:11Z/bc8f3f23/Solmedium, fixed07:06:11Z+180; fresh cold BP35 outcome pending.
+- 2026-10-09 e8171c38 records interrupted evidence and fresh restart to preserve audit and recovery boundaries.
+- 2026-10-09 Task25 L1/L2/L3=20/43/41paid,139.312/130.544/197.453seconds;2deathRESET,L4active; performance attribution unproven.
+- 2026-10-09 Task25 sixlevels206paid/2deathRESET/1764.232seconds; owner fullreplay/cleanupPASS, slower thanTask23/best; independent finalaudit pending.
+- 2026-10-09 Task25 independent finalaudit READY1848/1848/208SDK/allframes/206actions/source/cleanup; six-level verification complete, time optimization unachieved.
