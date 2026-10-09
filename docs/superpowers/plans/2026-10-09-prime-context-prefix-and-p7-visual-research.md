@@ -37,15 +37,17 @@ Root owns bundledresource/spec/plan/canonicalworklist/checkpoint. Review owns re
 
 - [x] Sync bundledresource ifTSchanges via existing npm sync-resource.
 - [x] Independentreview checks source-binding, noaction sideeffects, roles/pairing/history/currentstate, domainseparation and diagnosticfailures; fix importantfindings.
-- [ ] Run TS tests thenrelated Python tests, lint/docs and `RUST_TEST_THREADS=1 make promotion-check`; record exactcommands and externallylimitedcoverage. Commit reviewed implementation and sourcefreeze.
+- [x] Run TS tests thenrelated Python tests, lint/docs and `RUST_TEST_THREADS=1 make promotion-check`; record exactcommands and externallylimitedcoverage. Commit reviewed implementation and sourcefreeze.
 
 ## Task4: Packaged deployment and user-authorized cold evaluation
 
 Deployment owns installation/run/monitor/replay/seal/cleanup; root interprets perlevel; review independently verifiesfinalevidence.
 
-- [ ] One finite `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`, exactwheel/resource/allowlist, freshstate and existing900+180controls. Verify actualnewdata helper, identity and replay/cleanup beforeBP35.
+- [x] One finite `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`, exactwheel/resource/allowlist, freshstate and existing900+180controls. Verify actualnewdata helper, identity and replay/cleanup beforeBP35.
 - [ ] Fresh BP35L1–L6 with operator.env model/effort, original5400+180/6levels/1000paid/1024model/4096toolpreset, no priornotes/routes or externalhints, preservconsole52024/56659.
 - [ ] Track perlevelpaid/success/score/RESET/time, chronologicalinput/context/cache and passive macrochain; score usesallpaid with115cap. Nozero-deathacceptance or rewardbelowcap.
 - [ ] Fullreplay/seal/cleanup and independentmanifest/source/resource audit; commit evidence and recoveryboundary. Single-runefficiency/cache/risk differences remain observations rather than statisticalcausality.
 
 Final source review APPROVE: P7 patch/prompt and numericFD integration plus anchoredprojection/providerhook reviewed; uncertainty throughNOTESread and partialeventregistration defects repaired. FinalTS78PASS/6external skips, actualPi1.0 conversion/serializer/eventPASS(provider0), Python85PASS includingofficialinstalled, lint/docsPASS. Promotion running on these unchanged bytes; provider deployment/effect not yet verified.
+
+Deployment witness independently READY:105entrymanifest24b499e70f34f6e3cd2a0a5cc8022be05cf04af558936981c36f17d3f3de820a; r11lL1sixpaid/75.605709s goal/97.572436s cleanup; full8main/replay/6committedtx/trace20/seal/source569/install587/metrics/chain/cleanup. Actual prefix10samples/zero unmeasurable, purecompute7/7and19/19items preserved; not token/cache-benefit proof. r.patches not used by this witnessactor; installedAPI+boundedreadtests verified. Root GO issued for one fresh BP35 cold run on sameproductiona8ee6035/wheel416c7/resource2262.
