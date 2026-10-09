@@ -4626,3 +4626,5 @@
 - 594fd176: Published independently sealed BP35 evaluation and recovery state to distinguish zero deaths from unproven yield efficacy and time regression.
 
 - Refined L1 interpretation: extra exploration is not inherently wrong; dynamic information/progress tradeoffs under remaining resources need assessment.
+
+- 6d87e2b9: Qualified L1 exploration judgments and recorded resource-sensitive strategy direction without changing prompts or claiming verified policy improvements.
