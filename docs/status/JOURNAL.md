@@ -4697,3 +4697,5 @@
 
 - Task36 finalL124Q76.5625/247.167053s,L2none; 280manifest460fe independentREADY/ownedcleanup;20wasstaleearlystopdetection.
 - Task36 directprint5frameanimation65536Btruncated; nextinput30946→86730; unverifiedclearall-goal link remains, no newfix/trial.
+
+- 2ab00194: Preserved the failed trial, early-stop delay and animation-driven context growth for evidence-based follow-up.

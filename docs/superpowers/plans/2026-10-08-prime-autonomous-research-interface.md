@@ -271,3 +271,9 @@ User authorizes design+implementation after dynamic active/conservative strategy
 Task32 cold BP35 stopped by user afterL1:22paid/Q91.1157/167.713005s, L2partial16paid/deathRESET1, total38paid; fullSDKreplay/seal/cleanup and395manifest independentREADY. [Analysis](../../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md) separates concrete route changes, risk nonapplication, model timing and causality limits.
 
 Task33 user requires initial and materially changed game strategy reports plus concise action/group reasons. Implemented P7prompt using existing NOTES and goal; changedcodeAPPROVE/root35tests/lint/docs, no hostgate/schema/generic or data additions. Source-only verified, not new live adherence/effect; no further run authorized. Sameresource-aware [spec](../specs/2026-10-09-prime-resource-aware-research-design.md) and [plan](2026-10-09-prime-resource-aware-research.md) amendments.
+
+## Task35/36 — Scarcity and opening strategy, closed with negative quality result
+
+Task35 b2d1a453 explicitlyprioritizes informedprogressunderscarce score/time: coldL120paid/Q110.25, resources referencedinactualgoal, authorizedearlystop/final304manifestREADY. Task36 latestproduction94dabe66 adds initialroute/exploration judgmentbefore paidprobe: 23tests/APPROVE thenfresh packagedcoldBP35L124paid/Q76.5625/247.167053s,L2none;26SDKreplay/280manifestindependentREADY/ownedcleanup. Initialdecisionreported butclearall14notlinkedtoobjective; wholeanimationprint65536B causednextinput30946→86730. [Evaluation](../../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md) includesexactstop/usage/cache boundaries.
+
+Task36CLOSED: recordcontractsimplemented/deployed, qualitynotimproved. Noactiveactor orautomaticnexttrial. Furthergoal-causality/outputorganization work remainsdesign-only; Primegeneric/P7research/P7data responsibilities mustremainseparate. FollowcurrentRESUME fornewuserintent, notolderTask33/35 runauthorization.
