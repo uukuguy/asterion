@@ -97,3 +97,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task39 进行中：[NOTES 主要工作认知设计](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md)：普通笔记直接承接工作上下文、重要错误反例记录、按引用专项回读、三层执行/恢复保障；设计实现与后续BP35已获授权，尚未验证。
 
 - 后续统一整改：`DECISIONS.md` D-2026-10-10-02，Prime 标准应用入口与私有 Pi/RPC、P1–P7 接线/见证差异及默认专用压缩缺口；用户暂缓，先完成 P7 NOTES 解题验证。
+
+- 后续专用压缩验证：D-2026-10-10-02 与工作清单补充低阈值 P7 实战触发测试；先接通专用摘要，再验证真实调用与内核/认知连续性，本轮 BP35 不变。

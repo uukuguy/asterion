@@ -4768,3 +4768,9 @@
 - f9f4b512: Recorded Prime-private backend and P1–P7 entry gaps to prevent reuse while prioritizing the current NOTES solving experiment.
 
 - Task39 r11l sealed READY:7paid/Q115/128.14s; NOTES retired0→2→4→7 groups, input61073→21105; BP35 preparation resumes without code changes.
+
+- 1046624f: Recorded actual NOTES retirement and r11l action/time regression so BP35 evaluation starts with verified mechanisms and limits.
+
+- Task39 cold BP35 launched19:02:42Z/Solmedium/native6, deadline20:32:42Z;首NOTES报告19/21余量及1步机制探针，继续跟踪不改源码。
+
+- User requested future low-threshold P7 live test of dedicated compaction; record as unverified, leaving active BP35 unchanged.

@@ -316,3 +316,5 @@ User explicitlyauthorizes implementation/simple review/coldBP35. [Design](../spe
 - [ ] fresh wheel 与真实打包小关验证同一扩展及工具版本，再按已授权 Solmedium/seed0/native6/5400+180 冷测 BP35，持续跟踪分数、动作、RESET、时间、NOTES epoch及输入tokens。
 
 Task39 current scope: NOTES-only source2930fbd8, restored TS88 PASS/6external skips and actualinstalledPi provider0 PASS; resource13bfee. Simple scope reviewAPPROVE. Broad backend migration and specializedcompaction draft safely isolated, not included in currentbuild. FocusedPython/promotion/packagedwitness/BP35 pending.
+
+Deferred specialized-compaction live test (user requested): after implementation, run a finite P7 preset with a deliberately lower threshold so actual selected-model summarization occurs. Verify the specialized request, usage/cancellation boundaries, kernel generation and variable/function reuse, NOTES/counterexamples, and continued solving. Do not substitute an ordinary Pi summary or offline fixture. No threshold/source change during active Task39 BP35.

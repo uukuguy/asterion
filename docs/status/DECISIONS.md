@@ -43,6 +43,8 @@
 | D-2026-10-06-02 | 🟢 active | Every continuation retains per-level cognition through explicit provenance, including live replay |
 | D-2026-10-06-03 | 🟢 active | Prepare saved replay projections during export and load only the selected level |
 
+| D-2026-10-10-02 | 🟢 active (implementation deferred) | Prime standard application entry owns private Pi/RPC; unify P1–P7 later and verify dedicated compaction in low-threshold P7 |
+
 ## D-2026-10-01-01 — Certificate-gated same-game simulator
 
 - Status: 🟡 amended by D-2026-10-05-01; retained DSL implementation remains internally certificate-gated
@@ -1188,5 +1190,6 @@
 - Verified source facts: P7 binding builds RPC/extension objects and passes them to AsterionPrimeSession; P1 operator similarly constructs RPC and injects PrimeSessionBackend. P2 uses local worker/context services. Current P3–P6 witness paths explicitly avoid real Pi and use mechanism-specific hosts. Standard runtime identity alone therefore does not prove a unified application backend or real long-running LLM research.
 - Related gap: old Prime fork specialized native summary generation; the current entry lacks that rewrite. Existing custom material/witness and P1 manual instructions must not be called default specialized automatic compaction. D-2026-09-16-01 remains pending.
 - Follow-up: audit and unify P1–P7 application entries and backend ownership, clarify real-agent versus mechanism-witness boundaries, and restore default specialized compaction without changing native triggering/preparation/persistence. Current P7 injection is a known legacy gap; do not copy it into new applications.
+- Future live test: user explicitly requests a lower compaction threshold in the P7 environment after specialized summary wiring exists. Force a real selected-model summary within finite controls; verify actual prompt routing, provider usage, persistent kernel generation, variable/function reuse, NOTES/counterexamples and continued solving. Provider-free fixtures or a native generic summary do not establish dedicated live compaction. Default high threshold remains separate from this test preset.
 - Current scope: defer this consolidation by user instruction. Complete reviewed NOTES-primary source2930fbd8 packaged witness and authorized BP35 evaluation first. No source migration or capability claim follows from this record.
 - Reference: [architecture](../architecture/agent-framework.md#asterion-prime-positioning), [active design and deferred scope](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md).

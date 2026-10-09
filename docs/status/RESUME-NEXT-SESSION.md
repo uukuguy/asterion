@@ -1,8 +1,12 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-10: active session checkpoint; Task39 NOTES core ready for package checks. Full Prime backend migration deferred by user. Task39 r11l sealed; fresh BP35 preparation active, not launched.
+Updated: 2026-10-10: active session checkpoint; Task39 NOTES core ready for package checks. Full Prime backend migration deferred by user. Task39 r11l sealed; fresh BP35 cold run active under original finite deadline.
 
 ## Active Task39: NOTES-primary BP35 validation
+
+Actual GO issued. Run p7-live-20261009190243-2748a9d086a6d077c0aeba73, unit asterion-p7-e5b47f928d7f4344947617fe37515cb7.service, private .asterion-private/p7-task39-cold-bp35-20261010/trial. Mint2026-10-09T19:02:42.396297Z, deadline20:32:42.396297Z plus180cleanup; never renew. Owned supervisor50540/launcher50543/caffeinate50542/observer50665; preserve console52024:56659. Source2930fbd8/wheela6ad5593/resource13bfee, Solmedium/seed0/native6. No inheritednotes/routes/hints/sourceedit/19gate/L1stopper. Verify actual process/receipt before continuing; do not launch a duplicate.
+
+Latest passive checkpoint: completedL1–4 paid20/68/34/23, Q110.25/49.82698962/115/115, times148.369237/308.256073/189.407939/171.997174; cumulative818.030423s, oneL2deathRESET. L2success segment40 and corrected route reused inL3. L5active at875.73s/5paid, NOTES11 self-detects missing8thcolumn and scrolling gridcenters; inputpeak65361/contextpeak183097B. These are in-flight readings, not final outcome or performancePASS.
 
 User explicitly narrowed scope: complete broad Pi migration later; now prioritize P7 solving and NOTES/context problems. Root coordinates; context_impl TS core, deployment package/live, review independent audit. Preserve user console PID52024/port56659.
 
@@ -10,11 +14,13 @@ User explicitly narrowed scope: complete broad Pi migration later; now prioritiz
 - Restored exact core reverified: TS88 PASS/6external skips; actual installedPi1.0/provider0 PASS. dist/resource SHA13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b, TSsource/test/resource equal2930fbd8. Logs /tmp/asterion-task39-notes-restored-ts.log and installed.log. Three unfinished TS compaction draft files isolated in named Git stash; no new Python migration source written.
 - Review approves NOTES-only package. Native auto-compaction still uses current default summary, highthreshold unchanged. If actual compaction occurs, current rawlineage recovery can preserve larger epoch; dedicated summary/scope efficiency remains unimplemented. Do not mix deferred draft into build or claim specializedcompression default.
 - Completed: Python48 PASS/promotion25 PASS/provider0; freshr11l7paid/Q115/128.140348s/0RESETundo. NOTES actualprimary4epochs/retired0→2→4→7, input61073→21105. Animation39247B inflated earlier68422peak; ~23KBduplicateinstructions remains. FullSDK9/tx7/trace24/chain12/cleanup/final138manifest0f4e4418 independentREADY. Archive not actorused, no nativecompaction/rawcacheunknown/Pi原始会话未持久化.
-- Next: authorizedfreshBP35 Solmedium/seed0/native6/5400+180 after rootGO/preflightREADY, unchangedsource2930fbd8/wheela6ad5593/resource13bfee. Root paused to diagnose4→7, then resumed preparation: extra3 from fourthoccupiedendpoint selection and routeadjustment, not retirementfailure; performancebenefitstillunverified. No inheritedNOTES/routes/hints, no19gate/L1stopper. Track per-levelscore/paid/RESET/time, ordinaryNOTES retirement/readability andinputpeak/raw/cache; fullreplay/seal/cleanup/finalREADY.
+- Next: continuously track active BP35 and complete replay/seal/cleanup/finalaudit; original authority and identity above. Root paused to diagnose4→7, then resumed preparation: extra3 from fourthoccupiedendpoint selection and routeadjustment, not retirementfailure; performancebenefitstillunverified. No inheritedNOTES/routes/hints, no19gate/L1stopper. Track per-levelscore/paid/RESET/time, ordinaryNOTES retirement/readability andinputpeak/raw/cache; fullreplay/seal/cleanup/finalREADY.
 
 ## Deferred Prime backend consolidation
 
 User requires P7 -> AsterionPrime -> Pi for all backend dependencies. Current solve already uses AsterionPrimeSession, but app-owned backendconfig/launch/profile/RPCconstruction and narrator still need unifiedPrime entry. Enumerated scope and approveddesign are in canonicalTask39 supplement and spec. User postponed implementation because scope too large; no autonomous continuation of that migration now.
+
+User records dedicated compaction as not live-verified; after wiring, use a lower-threshold finite P7 experiment to force actual summary and verify specialized semantics, kernel variables/functions, cognition and continued solving. Do not change current BP35 threshold.
 
 OldPrime fork modified native buildSummarizationPrompt with persistentkernel semantics; fd962a66 removed its dependency injection. CurrentactualPi loader/build/bundle lacks active specializedsummary rewrite. Existing ownmaterial is quote/witness; P1manualkernelinstructions separate. D09-16-01 takeover pending. Desired default specialization keeps native trigger/preparation/persistence and actual selectedmodel/auth, honors finite budgets and usage. Specializedcompaction must not resurrect summarizedhistory; full design held for later, not required to claim currentNOTES-only experimental result.
 
