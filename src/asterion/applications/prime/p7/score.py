@@ -5,6 +5,7 @@ from __future__ import annotations
 from hashlib import sha256
 import json
 from decimal import Decimal, ROUND_HALF_UP
+from math import isqrt
 from typing import Iterable, Protocol
 
 from .game import ArcGameContract, DEFAULT_GAME, P7GameSelection
@@ -62,6 +63,8 @@ def score_planning_facts(game: P7GameSelection | ArcGameContract, transitions: I
 
     A dispatched but unsettled action remains charged in the surrounding budget;
     its unknown level/result cannot supply a made-up score or current-level count.
+    Current conditional scores describe completion at the given paid count, not
+    an earned score or an execution limit. Unknown baselines stay unknown.
     """
     baselines = game.baseline_actions if type(game) is P7GameSelection else None
     facts = {
@@ -96,6 +99,21 @@ def score_planning_facts(game: P7GameSelection | ArcGameContract, transitions: I
             or previous_sequence != primitive_actions or completed != levels_completed
             or not 0 <= completed <= game.win_levels):
         return facts
+    current_level = None
+    if completed < game.win_levels:
+        paid = primitive_actions - previous_completion
+        baseline = baselines[completed] if baselines is not None else None
+        threshold = isqrt((20 * baseline * baseline) // 23) if baseline is not None else None
+        current_level = {
+            "level": completed + 1,
+            "paid_actions": paid,
+            "baseline": baseline,
+            "level_score_at_current_paid": (_format_score(_level_score(baseline, paid))
+                                             if baseline is not None and paid > 0 else None),
+            "max_paid_actions_for_115": threshold,
+            "additional_paid_actions_preserving_115": (max(0, threshold - paid)
+                                                      if threshold is not None else None),
+        }
     facts.update(
         accounting_status="settled",
         completed_levels=[{"level": index + 1, "paid_actions": count,
@@ -103,9 +121,7 @@ def score_planning_facts(game: P7GameSelection | ArcGameContract, transitions: I
                            "level_score": _format_score(_level_score(baselines[index], count))
                                           if baselines is not None else None}
                           for index, count in enumerate(counts)],
-        current_level=({"level": completed + 1, "paid_actions": primitive_actions - previous_completion,
-                        "baseline": baselines[completed] if baselines is not None else None}
-                       if completed < game.win_levels else None),
+        current_level=current_level,
         full_game_score=(_format_score(_cumulative_score(tuple(counts), baselines, game.win_levels))
                          if baselines is not None else None),
         completed_score_cap=_format_score(_completion_cap(completed, game.win_levels)),

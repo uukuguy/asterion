@@ -86,6 +86,7 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['observation']['frame'], [board])
         self.assertNotIn('frame', historical['observation'])
         self.assertTrue(all(item['view_change']['measurement_fields_omitted'] > 0 for item in result['feedback']))
+        self.assertNotIn('host_resource_snapshot', result)
         self.assertLessEqual(len(canonical_bytes(host.solver._plan_projection(
             host.solver._plans['bounded-optout']['result']))), 60 * 1024)
 
@@ -145,6 +146,8 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result['status'], 'ok')
                 self.assertTrue(result.get('environment_result_unknown'))
                 self.assertEqual(result.get('processing_blocked'), current['processing_blocked'])
+                self.assertTrue(result['host_resource_snapshot']['environment_result_unknown'])
+                self.assertIsNone(result['host_resource_snapshot']['current_level'])
                 snapshot = json.loads(result['context_memory']['content'].split('\n\n', 1)[1])
                 self.assertTrue(snapshot['environment_result_unknown'])
                 self.assertNotIn('tool_state_view', result)
@@ -220,8 +223,14 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
                 budget = context['budget']
                 self.assertEqual(budget['scope'], EXPECTED_BUDGET_SCOPE)
                 self.assertEqual(set(budget), set(expected))
-                self.assertEqual({k: v for k, v in budget.items() if k != 'wall_time_remaining_seconds'},
-                                 {k: v for k, v in expected.items() if k != 'wall_time_remaining_seconds'})
+                dated = {'wall_time_remaining_seconds', 'time_snapshot'}
+                self.assertEqual({k: v for k, v in budget.items() if k not in dated},
+                                 {k: v for k, v in expected.items() if k not in dated})
+                self.assertEqual(budget['time_snapshot']['deadline_monotonic'],
+                                 expected['time_snapshot']['deadline_monotonic'])
+                self.assertGreater(budget['time_snapshot']['sampled_at_monotonic'], 0)
+                self.assertLessEqual(budget['time_snapshot']['sampled_at_monotonic'],
+                                     budget['time_snapshot']['deadline_monotonic'])
                 self.assertGreaterEqual(budget['wall_time_remaining_seconds'], 0)
         self.assertEqual(self.engine.calls, [])
         self.host.solver.learner_profile = 'autonomous'

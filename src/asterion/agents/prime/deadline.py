@@ -35,19 +35,31 @@ class TaskDeadline:
     def deadline_epoch(self) -> float:
         return self._deadline_epoch
 
-    def remaining_seconds(self) -> float:
+    def snapshot(self) -> dict:
+        """Sample both clocks once; observing never renews a sticky deadline."""
         with self._lock:
-            if self._expired:
-                return 0.0
-            readings = (self._monotonic_clock(), self._wall_clock())
-            if any(type(value) not in (int, float) or not math.isfinite(value) for value in readings):
+            try:
+                readings = (self._monotonic_clock(), self._wall_clock())
+                available = all(type(value) in (int, float) and math.isfinite(value)
+                                for value in readings)
+            except Exception:
+                readings, available = (None, None), False
+            remaining = 0.0
+            if not available:
                 self._expired = True
-                return 0.0
-            remaining = min(self._deadline_monotonic - readings[0], self._deadline_epoch - readings[1])
-            if remaining <= 0:
-                self._expired = True
-                return 0.0
-            return remaining
+            elif not self._expired:
+                remaining = max(0.0, min(self._deadline_monotonic - readings[0],
+                                         self._deadline_epoch - readings[1]))
+                self._expired = remaining == 0.0
+            return {'status': 'available' if available else 'unavailable',
+                    'sampled_at_monotonic': float(readings[0]) if available else None,
+                    'sampled_at_epoch': float(readings[1]) if available else None,
+                    'deadline_monotonic': self._deadline_monotonic,
+                    'deadline_epoch': self._deadline_epoch,
+                    'remaining_seconds': remaining}
+
+    def remaining_seconds(self) -> float:
+        return self.snapshot()['remaining_seconds']
 
     def expired(self) -> bool:
         return self.remaining_seconds() == 0.0

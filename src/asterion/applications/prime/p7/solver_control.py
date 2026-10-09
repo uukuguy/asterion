@@ -155,10 +155,26 @@ class SolverControl:
     def budget_snapshot(self) -> dict:
         """Expose wall time separately from the closed lifecycle contract."""
         with self._lock:
-            remaining = max(0.0, self._deadline - self._clock())
+            try:
+                reading = self._clock()
+                available = type(reading) in (int, float) and math.isfinite(reading)
+            except Exception:
+                reading, available = None, False
+            remaining = max(0.0, self._deadline - reading) if available else 0.0
             if self._task_deadline is not None:
-                remaining = min(remaining, self._task_deadline.remaining_seconds())
-            return {'wall_time_remaining_seconds': remaining}
+                sample = self._task_deadline.snapshot()
+                remaining = min(sample['remaining_seconds'], remaining)
+                sample['control_deadline_monotonic'] = self._deadline
+                sample['control_sampled_at_monotonic'] = float(reading) if available else None
+                if not available:
+                    sample['status'] = 'unavailable'
+                sample['remaining_seconds'] = remaining
+            else:
+                sample = {'status': 'available' if available else 'unavailable',
+                          'sampled_at_monotonic': float(reading) if available else None,
+                          'sampled_at_epoch': None, 'deadline_monotonic': self._deadline,
+                          'deadline_epoch': None, 'remaining_seconds': remaining}
+            return {'wall_time_remaining_seconds': remaining, 'time_snapshot': sample}
 
     def request(self, operation: str, command_id: str) -> dict:
         with self._lock:

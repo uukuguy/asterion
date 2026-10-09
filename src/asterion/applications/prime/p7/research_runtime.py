@@ -23,7 +23,9 @@ from .research_bridge import ResearchReadServer
 from .research_chain import P7ResearchChain
 from .solver import Solver
 from .solver_control import SolverControl
-from asterion.agents.prime.continuation import AUTONOMOUS_RESEARCH_GUIDANCE
+from asterion.agents.prime.continuation import (
+    AUTONOMOUS_RESEARCH_GUIDANCE, RESOURCE_AWARE_RESEARCH_GUIDANCE,
+)
 
 
 class _EvidenceBroker:
@@ -360,7 +362,56 @@ class P7ResearchRuntime:
         # settled tool response during pause so that it cannot dispatch the
         # next model turn before the application admits it.
         await self.admit_round(0, signal)
-        return result
+        return self._cell_resource_result(result)
+
+    def _host_resource_snapshot(self, context=None):
+        """Small current host facts; no workspace, pixels or policy decision."""
+        if context is None:
+            context = self.solver.current_context()
+        if any(type(context[key]) is not bool for key in ('environment_result_unknown', 'processing_blocked')):
+            raise ValueError('current resource certainty unavailable')
+        budget = context['budget']
+        scoring = budget['scoring']
+        level = scoring['current_level']
+        snapshot = {
+            'origin': 'application-host',
+            'observation_ref': context['observation_ref'],
+            'environment_result_unknown': context['environment_result_unknown'],
+            'processing_blocked': context['processing_blocked'],
+            **{key: budget[key] for key in ('action_cap', 'primitive_actions', 'actions_remaining', 'target_level')},
+            'levels_completed': context['observation']['levels_completed'],
+            'win_levels': scoring['win_levels'],
+            'time_snapshot': budget['time_snapshot'],
+            'current_level': None if level is None else {key: level[key] for key in (
+                'level', 'paid_actions', 'baseline', 'level_score_at_current_paid',
+                'max_paid_actions_for_115', 'additional_paid_actions_preserving_115')},
+        }
+        # Copy through the same finite JSON representation used on the bridge.
+        text = json.dumps(snapshot, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+        return json.loads(text) if len(text.encode('utf-8')) <= 2048 else None
+
+    def _cell_resource_result(self, result):
+        """Enrich only the trusted first envelope when the original cap permits."""
+        try:
+            first = result.content[0]
+            if first.get('type') != 'text':
+                return result
+            metadata = json.loads(first['text'])
+            if (type(metadata) is not dict
+                    or not {'execution_status', 'generation', 'stdout', 'kernel_exports'} <= metadata.keys()):
+                return result
+            snapshot = self._host_resource_snapshot()
+            if snapshot is None:
+                return result
+            metadata['host_resource_snapshot'] = snapshot
+            text = json.dumps(metadata, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
+            if len(text.encode('utf-8')) > self._limits.max_output_bytes:
+                return result
+            return PrimeToolResult(result.call_id, result.status,
+                                   ({**first, 'text': text}, *result.content[1:]))
+        except Exception:
+            # Optional sampling must never erase a settled computation or error.
+            return result
 
     def method_call(self, method, params, signal):
         while not self._closed and not signal.cancelled:
@@ -392,23 +443,43 @@ class P7ResearchRuntime:
         projected = project_actor_result(method, params, result)
         request = params.get('request', params) if isinstance(params, Mapping) else {}
         commit = method == 'workspace' and request.get('op') == 'notes' and result.get('status') == 'noted'
+        try:
+            current = self.solver.current_context()
+        except Exception:
+            current = None
         if result.get('status') != 'rejected':
             try:
-                memory = self._context_memory(commit=commit)
+                # Reuse a successful capture. If it failed, the independently
+                # available optional memory view may still retain valid evidence.
+                memory = self._context_memory(commit=commit, context=current)
             except Exception:
                 memory = None  # An optional view failure cannot fence an accepted result.
             if memory is not None:
                 projected['context_memory'] = memory
             try:
-                current = self.solver.current_context()
                 certainty = {key: current[key] for key in ('environment_result_unknown', 'processing_blocked')}
                 if any(type(value) is not bool for value in certainty.values()):
                     raise ValueError('current certainty unavailable')
             except Exception:
                 certainty = {'environment_result_unknown': True, 'processing_blocked': True}
             # These are current solver facts, including after historical NOTES reads.
-            # Keep an already built snapshot even if the separate certainty read fails.
+            # A successful capture is shared by memory, certainty and resources.
             projected.update(certainty)
+        if current is not None:
+            try:
+                snapshot = self._host_resource_snapshot(current)
+                if snapshot is not None:
+                    # The original plan projection's cap still owns its space.
+                    # Enrichment is lowest priority; never trim recorded evidence.
+                    candidates = ({**result, 'host_resource_snapshot': snapshot},
+                                  {key: value for key, value in projected.items() if key != 'context_memory'}
+                                  | {'host_resource_snapshot': snapshot})
+                    if all(len(json.dumps(value, ensure_ascii=False, allow_nan=False,
+                                          separators=(',', ':')).encode('utf-8')) <= 60 * 1024
+                           for value in candidates):
+                        projected['host_resource_snapshot'] = snapshot
+            except Exception:
+                pass
         state_view = self._tool_state_view(method, projected)
         if state_view is not None:
             projected['tool_state_view'] = state_view
@@ -464,11 +535,11 @@ class P7ResearchRuntime:
             raise ValueError('research memory instructions unavailable')
         self._memory_instructions = prompt
 
-    def _context_memory(self, *, commit):
+    def _context_memory(self, *, commit, context=None):
         if self._memory_instructions is None:
             return None
         try:
-            context = self.actor_context()
+            context = self.actor_context() if context is None else project_actor_context(context)
             notes = context.get('notes')
             if commit and notes is None:
                 return None
@@ -540,7 +611,8 @@ class P7ResearchRuntime:
             "Use actual feedback and current research notes to choose your own next hypothesis, experiment, optional computation or useful action. "
             "A partial model or no-route search does not prove the task impossible. Retain useful free-form findings, assumptions and open questions in existing workspace revisions or accepted exports. "
             "Submit real actions only with p7_execute_plan. "
-            + AUTONOMOUS_RESEARCH_GUIDANCE + " " + ACTOR_FRAME_INSTRUCTION + "\n"
+            + AUTONOMOUS_RESEARCH_GUIDANCE + " " + RESOURCE_AWARE_RESEARCH_GUIDANCE
+            + " " + ACTOR_FRAME_INSTRUCTION + "\n"
             + json.dumps(self.actor_context(), ensure_ascii=False, separators=(",", ":"))
         )
 

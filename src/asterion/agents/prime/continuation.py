@@ -15,6 +15,13 @@ AUTONOMOUS_RESEARCH_GUIDANCE = (
     "application's supported workspace so natural continuation can resume from evidence."
 )
 
+RESOURCE_AWARE_RESEARCH_GUIDANCE = (
+    "Both progress and investigation can provide useful information. As resources "
+    "and evidence change, weigh the expected value of a next decision against its "
+    "research, failure, reversal and opportunity costs. Choose your own balance "
+    "using dated resource facts and actual feedback; unknown work costs remain unknown."
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PrimeContinuationBudget:
@@ -59,6 +66,7 @@ class PrimeContinuationController:
 
 __all__ = (
     "AUTONOMOUS_RESEARCH_GUIDANCE",
+    "RESOURCE_AWARE_RESEARCH_GUIDANCE",
     "PrimeContinuationBudget",
     "PrimeContinuationController",
 )

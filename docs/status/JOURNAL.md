@@ -4632,3 +4632,9 @@
 - 4e848873: Designed dated host resources and conditional P7 score facts to support autonomous dynamic research/action tradeoffs without strategy gates.
 
 - Task30 design APPROVE: new resource metadata is lowest priority; near-cap original computation evidence remains exact, optional facts may be omitted.
+
+- 66d7c954: Preserved active ownership and reviewed metadata capacity rules so resource freshness never displaces settled research evidence.
+
+- Task30 scoring RED→17PASS and independentPASS; TS79PASS/6external skips. Generic/resource integration finalreview and tests pending.
+
+- Task30 final191PythonPASS/79TS+6externalskip/lint/docs/diff/independentAPPROVE; memory/flag regressions fixed; sourcefreeze and packaged deployment pending.

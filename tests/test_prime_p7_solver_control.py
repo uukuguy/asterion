@@ -11,6 +11,17 @@ from asterion.applications.prime.p7.solver_control import (
 
 
 class TestP7SolverControl(unittest.TestCase):
+    def test_budget_dates_the_monotonic_only_sample_without_inventing_wall_origin(self):
+        self.now = 3.
+        budget = self.control.budget_snapshot()
+        self.assertEqual(budget['wall_time_remaining_seconds'], 7.)
+        sample = budget['time_snapshot']
+        self.assertEqual(sample['sampled_at_monotonic'], 3.)
+        self.assertEqual(sample['deadline_monotonic'], 10.)
+        self.assertIsNone(sample['sampled_at_epoch'])
+        self.assertIsNone(sample['deadline_epoch'])
+        self.assertEqual(sample['remaining_seconds'], 7.)
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

@@ -175,7 +175,10 @@ class TestWitnessDeadline(unittest.TestCase):
             root.mkdir()
             now = [125.0]
             control = SolverControl(root, root.name, 1000.0, clock=lambda: now[0])
-            self.assertEqual(control.budget_snapshot(), {'wall_time_remaining_seconds': 875.0})
+            budget = control.budget_snapshot()
+            self.assertEqual(budget['wall_time_remaining_seconds'], 875.0)
+            self.assertEqual(budget['time_snapshot']['sampled_at_monotonic'], 125.0)
+            self.assertEqual(budget['time_snapshot']['deadline_monotonic'], 1000.0)
             control.request('pause', 'pause')
             now[0] = 995.0
             self.assertEqual(control.budget_snapshot()['wall_time_remaining_seconds'], 5.0)

@@ -105,7 +105,16 @@ class TestP7ToolStateView(unittest.TestCase):
     def test_certainty_read_failure_preserves_accepted_result_and_memory(self):
         def fail():
             raise RuntimeError('private certainty read failed')
-        for reader in (fail, lambda: {}, lambda: {'environment_result_unknown': False, 'processing_blocked': 0}):
+        invalid_complete = {
+            'environment_result_unknown': False, 'processing_blocked': 0,
+            'observation_ref': self.response()['observation_ref'],
+            'observation': {'levels_completed': 0},
+            'budget': {'action_cap': 100, 'primitive_actions': 1, 'actions_remaining': 99,
+                       'target_level': None, 'scoring': {'current_level': None, 'win_levels': 7},
+                       'time_snapshot': {'remaining_seconds': 1.}},
+        }
+        for reader in (fail, lambda: {}, lambda: {'environment_result_unknown': False, 'processing_blocked': 0},
+                       lambda: copy.deepcopy(invalid_complete)):
             with self.subTest(reader=reader):
                 response = self.response()
                 original = copy.deepcopy(response)
@@ -124,4 +133,5 @@ class TestP7ToolStateView(unittest.TestCase):
                 self.assertEqual(delivered['feedback'], original['feedback'])
                 self.assertEqual(delivered['observation'], original['observation'])
                 self.assertNotIn('tool_state_view', delivered)
+                self.assertNotIn('host_resource_snapshot', delivered)
                 self.assertEqual(response, original)

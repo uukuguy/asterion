@@ -2,6 +2,8 @@
 
 import json
 
+from asterion.agents.prime.continuation import RESOURCE_AWARE_RESEARCH_GUIDANCE
+
 from .actor_projection import ACTOR_FRAME_INSTRUCTION
 
 P7_ACTION_PRECONDITIONS_INSTRUCTION = """每步可选 before:{cells:[{x,y,value}]}，对执行该步之前的真实 settled 画面断言1–128个不重复位置的字面像素值。x 是当前屏幕列、y 是当前屏幕行；自建模型坐标必须先由你映射到当前屏幕，画面或视角改变后重新核实。整段语法先校验，每步行动前再核对 before；失配返回 precondition_feedback 中的真实 observation_ref 与 differences，stop_reason='precondition-mismatch'，当前步和后缀未执行、不新增动作计费，已经执行的前缀仍计费。stop_on_mismatch:false 只影响行动后的 expect 预测，不能绕过 before。before 匹配只确认当前像素，不保证动作后的安全，也不视为行动后的预测成功；未提供 before 的行为保持原样。"""
@@ -35,7 +37,7 @@ def build_autonomous_prompt() -> str:
     """P7 supplies evidence and execution authority; the actor owns research."""
     return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
 
-计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
+计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。current_level.level_score_at_current_paid 是以当前累计付费动作结束该关时的条件分，当前关未完成时没有已得贡献；0动作或baseline未知时为null。max_paid_actions_for_115 是保持115分的累计付费动作整数阈值；additional_paid_actions_preserving_115 是该阈值内尚余的付费动作数。这些是评分空间，与宿主动作额度分别计算，不构成动作授权或执行停止条件。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
 
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r
@@ -58,8 +60,9 @@ p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:
 计划默认 stop_on_view_change:true：已确认动作前后的真实像素出现有支持的平移候选时，保留该步 feedback.view_change，在下一步前返回 stop_reason='observation-boundary'、observation_boundary 和未执行后缀。候选只表示像素对应，不是相机真值、世界坐标或危险判断；未检出也不证明安全。可设 stop_on_view_change:false 关闭这项软停止，或给任一步设置 observe_after:true 主动取得观察后再决定后续；这些开关不绕过上述硬停止。分析异常会标明不可用，默认停止后缀，已确认动作仍计费且结果不变为未知。r.view_change(before_sequence,after_sequence=None) 可只读比较真实历史画面。返回观察边界后，自行判断、修订剩余计划，用新 plan_id 和最新 observation_ref 提交；原 plan_id 只返回原结果，不自动续执行或重派。
 观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
 budget.scope 区分宿主运行的动作/时间额度与游戏内部资源；actions_remaining 不是游戏内剩余额度。撤销或恢复不退还已计费的宿主和关卡评分动作；环境资源标记 not-reported-by-adapter 表示适配器未提供结构化读数，不表示无限或零。游戏内资源及恢复的影响依据实际观察判断。
+工具结果可附 host_resource_snapshot，其中 time_snapshot.status 和 sampled_at_monotonic / sampled_at_epoch 标明时间采样是否可用；null表示该字段未报告。remaining_seconds 在 unavailable 时保守显示0，不是真实时间余量的观测值，也不改变宿主执行控制。最新有效采样用于当前权衡，旧快照和历史动作结果的 budget 保留历史含义。字段缺失表示未收到新读数，不表示资源无限；可沿用已有带采样时刻的信息，自主按需读取当前研究状态。当前 observation_ref 与宿主执行控制仍决定动作是否可执行，快照不延长额度或期限。
 固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。
-""" + "\n" + P7_ACTION_PRECONDITIONS_INSTRUCTION + "\n" + ACTOR_FRAME_INSTRUCTION
+""" + "\n" + RESOURCE_AWARE_RESEARCH_GUIDANCE + "\n" + P7_ACTION_PRECONDITIONS_INSTRUCTION + "\n" + ACTOR_FRAME_INSTRUCTION
 
 
 def initial_research_prompt(host, instructions: str) -> str:
