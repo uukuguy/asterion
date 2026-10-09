@@ -265,3 +265,9 @@ Task29 subsequent user-authorized cold BP35 evaluation CLOSED:211paid/zero death
 ## Task30 — Resource-aware autonomous research
 
 User authorizes design+implementation after dynamic active/conservative strategy clarification. [Design](../specs/2026-10-09-prime-resource-aware-research-design.md), [plan](2026-10-09-prime-resource-aware-research.md), freeze4e848873. Genericdateddeadlinefacts+guidance, P7conditionalscorefacts, trustedfirstJSONtoolcompletionresources withoutmovingfullmemoryprefix. No fixedstrategy/scoregate/origininference/newFD. CLOSED: source26250c0e,191Python/79TS/fullpromotion25PASS, fresh packagedr11lL1 4paid0RESET67.896532s, independentREADY. ActualPi receipt/adoption and BP35strategy effect unknown. Task31 direct115/100remaining/exceeded facts implementedba51c62e/48tests/fullpromotion/newr11l6paid0RESET94.471582s; final115manifest independentREADY, CLOSED; no newBP35authorized.
+
+## Task32/33 — Interrupted comparison and contemporaneous decision records
+
+Task32 cold BP35 stopped by user afterL1:22paid/Q91.1157/167.713005s, L2partial16paid/deathRESET1, total38paid; fullSDKreplay/seal/cleanup and395manifest independentREADY. [Analysis](../../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md) separates concrete route changes, risk nonapplication, model timing and causality limits.
+
+Task33 user requires initial and materially changed game strategy reports plus concise action/group reasons. Implemented P7prompt using existing NOTES and goal; changedcodeAPPROVE/root35tests/lint/docs, no hostgate/schema/generic or data additions. Source-only verified, not new live adherence/effect; no further run authorized. Sameresource-aware [spec](../specs/2026-10-09-prime-resource-aware-research-design.md) and [plan](2026-10-09-prime-resource-aware-research.md) amendments.

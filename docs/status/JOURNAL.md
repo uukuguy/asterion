@@ -4657,3 +4657,18 @@
 - d8385276: Recorded independent packaged verification and uncertainty boundaries so future evaluations distinguish deployment from strategy benefits.
 
 - Task32 userauthorized fresh BP35L1-L6 Solmedium/sourceba51c62e; same5400+180, no inherited cognition/hints, providerfreeprepare beforeGO.
+
+- 5535fc5b: Recorded authorized BP35 comparison and frozen-source boundaries to prevent inherited guidance or uncontrolled continuation.
+
+- Task32 frozenpreflight independentREADY:ba51/wheel2d4126/source570/install588/archive1685/scalartransparent17fixture; actualGO onceBP35L1-L6.
+
+- Task32 actuallaunch15:21:15.370016UTC/deadline16:51:15.369230+180, run579d87b7/unit8a5e2ed0, ownedhost16852/16854/16853.
+
+- Task32 userstopped15:26:16.950010UTC afterL1 22paid91.1157/167.713005s; L2paid13/total35knownsettled, cleanup/seal pending.
+
+- Task32 stopfinal correction:38paid=22L1+16partialL2, old35snapshot stale; allSDKtimestampsbeforeuserstop,0poststoppaid; cleanup303.864487s.
+
+- Task32 stopped/sealed395manifest d978independentREADY; L1strategyintent unknown, L2recognizedrisk unused, allownedcleanup; noresume.
+- Task33 userrequires liveinitial/changedstrategy+concise perplanreason; P7prompt NOTES/goal implemented,35PythonPASS/lint/docs/independentreviewAPPROVE; notrerun.
+
+- Task34 userauthorized directfreshBP35 afterTask33 simpleAPPROVE/35tests; validateinitialstrategy/perplangoal live, samefinitecoldboundary.

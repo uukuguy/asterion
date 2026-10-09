@@ -39,6 +39,29 @@ class TestAutonomousResearchInterface(unittest.TestCase):
         self.assertIn('stop_on_mismatch', text)
         self.assertNotIn('needs_revision=true', text)
 
+    def test_prompt_requests_strategy_reports_before_paid_actions_and_on_changes(self):
+        text = prompt.build_autonomous_prompt()
+        for fragment in ('开局可先免费观察或计算', '在首个付费动作前',
+                         '选择的游戏策略、依据、预期付费动作代价及主要不确定性',
+                         '无法估计时写未知及原因', '实质改变时，在下一批行动前',
+                         '策略未变不重复报告', '不改变宿主动作准入或额度',
+                         'p7_workspace({op:\'notes\''):
+            with self.subTest(requirement=fragment):
+                self.assertTrue(fragment in text, f'missing strategy-report requirement: {fragment}')
+        self.assertNotIn('写笔记不是行动前置条件', text)
+        self.assertIn('策略和表述形式由你选择', text)
+        self.assertIn('日常笔记更新时机由你决定', text)
+
+    def test_prompt_uses_existing_goal_for_concise_action_group_reason(self):
+        text = prompt.build_autonomous_prompt()
+        for fragment in ('每次提交 p7_execute_plan', 'goal 字段用1–2个短句',
+                         '做什么、为何选择这组动作', '实际观察或预期效果',
+                         '不为每步重复说明，不额外调用 NOTES',
+                         "goal:'这组动作的目的和选择依据'", '主动句', '每句一个判断'):
+            with self.subTest(requirement=fragment):
+                self.assertTrue(fragment in text, f'missing action-reason requirement: {fragment}')
+        self.assertNotIn('80%', text)
+
 
 class TestOperatorTaskBudget(unittest.TestCase):
     def test_guest_wall_origin_expires_despite_stalled_monotonic_clock(self):

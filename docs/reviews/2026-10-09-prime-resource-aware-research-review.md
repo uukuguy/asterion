@@ -59,3 +59,11 @@ Task30封存版本26250c0e落实用户提出的方向：策略随证据、剩余
 新r11l L1（同Solmedium，独立900+180）：6计费动作、0计费RESET、Q115；2setupRESET另计，目标94.471582秒，收口含清理129.638564825秒。8个SDK反馈完整回放，6事务、22trace/seal一致。目标阶段9usage input250278/output1852/peak36803；最终12usage input372244/output2517/peak41943；12context峰值135169/累计1058923字节；12prefix峰值129754字节，0identityflags；11研究记录=4compute/6experiment/1acceptedNOTES，0omitted/unknown。
 
 与Task30小关4动作/67.896532秒相比，多2动作/+26.575050秒；此为部署检查，不构成同种子独立重复策略实验，不能归因字段变化或推断BP35退步/改进。实际Pi资源正文仍未持久留存，收取/模型采用unknown；真实worker返回证据与策略效果分列。本次进程/auth/env清理，用户console保留。私有 `.asterion-private/p7-task31-witness-20261009/trial/`；独立最终部署审计READY：115manifest项bytes/SHA/fullcoverage通过，SHA6c6dbf7e6aa0c78d81767d2157178d6d9de4e3a8179719f7a07e6080ff8c4b0a。
+
+## Task33：实时策略与行动理由
+
+用户明确要求开局先报告策略，策略实质改变后再报告一次；每次动作或动作组说明原因。P7主prompt复用已有NOTES与plan.goal：首paid前可先免费观察/计算；总代价未知则明确未知，无需为了估数追加研究。改变后下一批行动前更新，未变不机械重报；goal用1–2短句说明行动意图与当前观察依据/预期效果。简明中文采用STE式短句、常用词、主动表达、明确对象和单一判断原则，未声称80%量化认证。
+
+仅prompt与两个focused接口测试变更，增加935UTF8字节；无新tool/schema/hostgate，Prime通用层与P7数据层未改。已有NOTES与提出/执行计划事件、submitted_plan研究链保存外显选择理由，不要求内部思考展开。协议goal仍可省略，研究提示要求填写；直接行动无NOTES的宿主边界测试仍通过。
+
+独立changed-code APPROVE/接口5PASS；root35相关Python PASS1.678秒，lint/docs/diff通过。**已实现提示合同，未新实跑或新版本打包见证；模型遵从、理由质量和效率改善尚未验证。** Task32封存中无这些新要求，不能把后加说明当成当时依据。

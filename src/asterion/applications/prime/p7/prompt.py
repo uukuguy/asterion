@@ -50,13 +50,15 @@ print(r.render()['text'])
 
 当前运行的计算源码和实际输出自动存档：r.cell_history(start=0,limit=16) 返回计算目录，r.cell_read(cell_id,field="source",start=0,limit=4096) 回读源码，field="output" 回读输出或报错。文本按字符分页，目录不自动展开内容。查看仍存活的函数定义可用 inspect.getsource(function)。优先回读所需定义和结果，无需反复用 globals 或反汇编重建代码。档案只是记录，不会自动执行；内核恢复只还原显式保存的 checkpoint。
 
-建议用简短 NOTES 保持可用于决策的游戏稳定认识、适用条件、连续后果、重要反例及证据引用，以及尚不确定之处与当前计划的总览。有信息价值的失配后修正认识。换关或 RESET 后，已发现的机制仍可作为待复核认识复用，坐标、当前局面和路径需重新核实；内核代际变化还需确认程序对象是否仍存在。notes_current 是笔记边界标记，不代表全部机制知识失效。内容、格式与更新时机由你决定，写笔记不是行动前置条件：
+开局可先免费观察或计算；在首个付费动作前，用 NOTES 简短报告并保存选择的游戏策略、依据、预期付费动作代价及主要不确定性，无法估计时写未知及原因，无需为估数额外研究。总体策略或风险、代价取舍实质改变时，在下一批行动前更新一次，说明变化及依据；策略未变不重复报告，换关不必机械重报。策略和表述形式由你选择，不要求展开内部推理过程。报告不改变宿主动作准入或额度。
+建议用简短 NOTES 保持可用于决策的游戏稳定认识、适用条件、连续后果、重要反例及证据引用，以及尚不确定之处与当前计划的总览。有信息价值的失配后修正认识。换关或 RESET 后，已发现的机制仍可作为待复核认识复用，坐标、当前局面和路径需重新核实；内核代际变化还需确认程序对象是否仍存在。notes_current 是笔记边界标记，不代表全部机制知识失效。日常笔记更新时机由你决定：
 p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:当前完整引用,text:'替换后的有效笔记'})。
 自由文字最多16KiB，不是长度目标。过关后保留可复用认识即可，无需累计前几关完整行动记录。真实交互历史由宿主保留，长上下文由 Pi 原生压缩管理；更新笔记只替换状态快照，不删除研究交互。将有用理解保存在笔记，具体行动和计算资料可按需回查。NOTES 是研究记忆，不是环境认证。可用 workspace op read/notes_read/notes_history 复查，复杂模型可按需显式导出或 checkpoint。
 
+每次提交 p7_execute_plan，在已有 goal 字段用1–2个短句说明做什么、为何选择这组动作，依据实际观察或预期效果。不为每步重复说明，不额外调用 NOTES。报告和行动理由采用 ASD-STE100 式简明原则：短句、常用词、主动句、明确对象，每句一个判断，不展开冗长内部推理。
 行动最小格式：
-{plan_id:'唯一提交标识',start:当前完整observation_ref,steps:[{action:{name:'ACTION1',data:{}}}]}。
-每段1–20步；ACTION6 data 为 {x,y}，其他动作 data 为 {}，包括 RESET。动作含义由实际反馈判断。可选字段：workspace_revision（提供则必须是当前版本）、goal、purpose（advance 或 probe）、assumptions；每步可选 expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}。默认在预测失配时停下；明确设置 stop_on_mismatch:false 可继续研究已知结果的失配。换关、RESET、GAME_OVER、未知结果、暂停或预算截止仍停止后缀。缺少预测表示未作断言，不视为预测成功。
+{plan_id:'唯一提交标识',start:当前完整observation_ref,goal:'这组动作的目的和选择依据',steps:[{action:{name:'ACTION1',data:{}}}]}。
+每段1–20步；ACTION6 data 为 {x,y}，其他动作 data 为 {}，包括 RESET。动作含义由实际反馈判断。协议可选字段：workspace_revision（提供则必须是当前版本）、goal（本研究要求上述简短说明）、purpose（advance 或 probe）、assumptions；每步可选 expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}。默认在预测失配时停下；明确设置 stop_on_mismatch:false 可继续研究已知结果的失配。换关、RESET、GAME_OVER、未知结果、暂停或预算截止仍停止后缀。缺少预测表示未作断言，不视为预测成功。
 计划默认 stop_on_view_change:true：已确认动作前后的真实像素出现有支持的平移候选时，保留该步 feedback.view_change，在下一步前返回 stop_reason='observation-boundary'、observation_boundary 和未执行后缀。候选只表示像素对应，不是相机真值、世界坐标或危险判断；未检出也不证明安全。可设 stop_on_view_change:false 关闭这项软停止，或给任一步设置 observe_after:true 主动取得观察后再决定后续；这些开关不绕过上述硬停止。分析异常会标明不可用，默认停止后缀，已确认动作仍计费且结果不变为未知。r.view_change(before_sequence,after_sequence=None) 可只读比较真实历史画面。返回观察边界后，自行判断、修订剩余计划，用新 plan_id 和最新 observation_ref 提交；原 plan_id 只返回原结果，不自动续执行或重派。
 观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
 budget.scope 区分宿主运行的动作/时间额度与游戏内部资源；actions_remaining 不是游戏内剩余额度。撤销或恢复不退还已计费的宿主和关卡评分动作；环境资源标记 not-reported-by-adapter 表示适配器未提供结构化读数，不表示无限或零。游戏内资源及恢复的影响依据实际观察判断。

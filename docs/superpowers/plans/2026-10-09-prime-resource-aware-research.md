@@ -50,3 +50,14 @@ User requests direct115/100remaining steps instead of conditional score. Same sp
 - [x] Update state with exact verification boundary; noBP35.
 
 Task31 sourceba51c62e/48PythonPASS/79TS+6skip/APPROVE/fullpromotion25PASS/newr11l6paid0paidRESET94.471582s. Finalmanifest115entries independentREADY, state closed; actualPi fact receipt/adoption unknown, noBP35.
+
+## Task33 — Contemporaneous strategy and action reasons
+
+User explicitly requests live initial/changed strategy reporting, plus concise reasons per action/group. P7prompt/associated focusedtest ownedcontext_impl; Astra review; root docs/commit. No source changes in Prime/data/tool registration. Preserve sealedTask32 evidence.
+
+- [x] Reuse NOTES for initial/changed strategy, allow unknown costs, no fixedstrategy taxonomy/hostgate.
+- [x] Reuse goal for1–2shortsentences perplan; no perstepprose/extraNOTEScall, concise STE-style Chinese.
+- [x] Focused source contract tests + existing noNOTES-admission regression, independentchangedcode review, lint/docs/diff.
+- [x] Commit and close source state; new live adherence and strategy-effect untested, no further trial.
+
+Task33 source reviewAPPROVE/root35PythonPASS1.678s/lint/docs/diff; prompt935B additional, no new tool/runtime/data changes. Implemented guidance only; live adherence/deployment/effect not rerun.
