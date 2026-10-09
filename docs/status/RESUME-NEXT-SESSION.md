@@ -12,7 +12,9 @@ Next provider-free candidate: generic current snapshot sits before history; plan
 
 ## Active implementation checkpoint
 
-User now authorizes Task26 implementation: context_impl TS snapshot placement/metrics; chain_impl Python passive research chain; root metrics FD/P7 operator/resource/docs; Astra review. No code had landed before daemon restart; final implementation now complete in the worktree, Astra APPROVE, TS68PASS/6external skips, focusedPython46PASS, lint/docsPASS. Final-source promotion and packaged witness pending. Existing Task25 CLOSED remains baseline. Required finite packaged r11l witness follows source review/TS/Python/promotion; no new BP35 launched.
+User authorizes Task26 implementation. Main source5b97bb86 adds generic snapshot placement/context metrics and passive research relationships. Astra source review approved; full promotion subsequently FAILED4401tests/2failures/10errors/4skips, so deployment remains NOT verified. Corrective changes now isolate optional research observer initialization/callback/journal/summary faults; add2generic modules tocore-onlyallowlist; never close unvalidated/non-regularmetricsFD; official fakePi nowinheritsnewFD. Actual NodeSIGABRT debug supports production ownership+fixture omission cause. Final focused TS68PASS/6external skips, Python51PASS, core-only4PASS, fresh installed official1PASS, lintPASS, AstrarepairAPPROVE. Next: commit repairs, fresh final fullpromotion, then rootGO finite packagedr11lL1 witness. No BP35/model run started.
+
+Witness prepared `.asterion-private/p7-task26-witness-20261009/trial`, runp7-live-20261009084522-1f702e1ef4c24b0d8739a881; auth absent/rootGO pending. Previous frozen sourcearchive5b97 retained as historical intermediate and must be refrozen afterrepaircommit. Existing Task25 CLOSED baseline remains unchanged. Userconsole52024/56659preserved.
 
 ## Verified facts
 

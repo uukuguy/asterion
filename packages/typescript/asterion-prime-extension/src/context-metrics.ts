@@ -72,7 +72,9 @@ export function contextViewMetricsFromEnvironment(): ContextViewMetricsSink | un
     closed = true;
     try {closeSync(descriptor);} catch {}
   };
-  try {if (!fstatSync(descriptor).isFile()) {close(); return;}} catch {close(); return;}
+  // A missing inherited FD can be reused for a native pipe/socket before this
+  // hook runs. Rejection does not establish ownership of that descriptor.
+  try {if (!fstatSync(descriptor).isFile()) return;} catch {return;}
   const samples: ContextViewNumbers[] = [];
   const sink = (numbers: ContextViewNumbers): void => {
     if (closed) return;

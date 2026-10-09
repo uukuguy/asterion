@@ -12,6 +12,34 @@ from tests.test_prime_p7_research_runtime import _Signal, _TraceClient
 
 
 class TestP7ResearchChain(unittest.IsolatedAsyncioTestCase):
+    async def test_optional_chain_constructor_failure_preserves_notes_computation_and_actions(self):
+        from unittest.mock import patch
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name) / 'observer-fault'
+        root.mkdir()
+        broker = ArcBroker(engine=_Engine())
+        broker.bind_history(root.name)
+        with patch('asterion.applications.prime.p7.research_runtime.P7ResearchChain',
+                   side_effect=RuntimeError('private indexing failure')):
+            host = P7ResearchRuntime(broker=broker, trace_client=_TraceClient(), run_root=root,
+                run_id=root.name, deadline_seconds=30, event_sink=lambda *_: None,
+                learner_profile='autonomous')
+        self.addAsyncCleanup(host.close)
+        current = host.current_context()
+        note = host.method_call('workspace', {'op': 'notes', 'base_revision': current['workspace_revision'],
+            'observation_ref': current['observation_ref'], 'text': 'Research continues.'}, _Signal())
+        self.assertEqual(note['status'], 'noted')
+        computed = await host.execute('cell-after-fault', 'print(7)', _Signal())
+        self.assertEqual(computed.status, 'ok')
+        action = host.method_call('execute_plan', {'plan_id': 'action-after-fault',
+            'start': host.current_context()['observation_ref'],
+            'steps': [{'action': {'name': 'ACTION1', 'data': {}},
+                       'expect': {'cells': [{'x': 0, 'y': 0, 'value': 1}]}}]}, _Signal())
+        self.assertEqual(action['applied_count'], 1, action)
+        self.assertEqual(len(broker.journal), 1)
+        self.assertEqual(host.research_chain_summary()['unavailable_record_count'], 1)
+
     async def test_notes_program_counterexample_and_revision_are_private_real_evidence(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

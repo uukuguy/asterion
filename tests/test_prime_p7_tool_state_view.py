@@ -82,3 +82,19 @@ class TestP7ToolStateView(unittest.TestCase):
                 self.assertNotIn('tool_state_view', result)
                 self.assertEqual(result['feedback'], response['feedback'])
                 self.assertEqual(result['observation'], response['observation'])
+
+    def test_research_observer_failure_preserves_accepted_solver_response(self):
+        def fail(*args):
+            raise RuntimeError('private observer failed')
+        for method in ('workspace', 'execute_plan'):
+            with self.subTest(method=method):
+                response = self.response()
+                host = self.host(response)
+                host._broker = SimpleNamespace(journal=[])
+                host._research_chain = SimpleNamespace(workspace_result=fail, experiment=fail, summary=fail)
+                with patch('asterion.applications.prime.p7.research_runtime.project_actor_result',
+                           side_effect=lambda *args: copy.deepcopy(args[-1])):
+                    delivered = host.method_call(method, {'request': {'op': 'notes'}}, SimpleNamespace(cancelled=False))
+                self.assertEqual(delivered['feedback'], response['feedback'])
+                self.assertEqual(delivered['observation_ref'], response['observation_ref'])
+                self.assertEqual(host.research_chain_summary()['unavailable_record_count'], 1)

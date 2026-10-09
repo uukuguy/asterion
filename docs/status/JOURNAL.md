@@ -4532,3 +4532,9 @@
 2026-10-09 — d5c67186 clarified capped scoring, audited context/cache and research/reset evidence to guide targeted optimization.
 
 2026-10-09 — User approved Task26 implementation; resumed disjoint context and passive-chain work after server restart.
+
+2026-10-09 — 5b97bb86 implemented cache-compatible snapshots, bounded context metrics and passive research evidence for traceable autonomous work.
+
+2026-10-09 — Intermediate promotion stopped before completion because source advanced; final frozen5b97bb86 promotion running, no stale PASS claim.
+
+2026-10-09 — Promotion exposed optional observer isolation, module allowlist and unowned-FD closure defects; repaired and focused checks passed.

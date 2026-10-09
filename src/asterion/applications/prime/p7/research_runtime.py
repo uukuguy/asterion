@@ -156,7 +156,13 @@ class P7ResearchRuntime:
                 diagnostics=getattr(trace_client, 'processing_diagnostics', None),
                 learner_profile=learner_profile,
             )
-            self._research_chain = P7ResearchChain(run_root=run_root, workspace=self.solver._workspace)
+            self._research_chain = None
+            self._research_chain_faults = 0
+            try:
+                self._research_chain = P7ResearchChain(run_root=run_root, workspace=self.solver._workspace)
+            except Exception:
+                # Optional evidence indexing cannot prevent a research run.
+                self._research_chain_faults += 1
             if experience is not None:
                 experience.bind(run_root, self.solver.experience_event)
             self.poll()
@@ -325,13 +331,13 @@ class P7ResearchRuntime:
             generation = self.kernel.generation
             try:
                 history_start = self.kernel.cell_history()['total']
-            except (ValueError, TypeError, KeyError, OSError):
+            except Exception:
                 history_start = None
             self._cell_archive.started(call_id, generation, code)
             try:
                 result = await self.kernel.execute(call_id, code, combined)
             finally:
-                self._research_chain.computation(self.kernel, history_start)
+                self._observe_research('computation', self.kernel, history_start)
             export_ids = []
             for content in result.content:
                 if content.get("type") == "text":
@@ -369,12 +375,12 @@ class P7ResearchRuntime:
         if method == "workspace" and isinstance(params, Mapping):
             request = params.get("request", params)
             result = self.solver.workspace(request)
-            self._research_chain.workspace_result(result)
+            self._observe_research('workspace_result', result)
         elif method == "execute_plan" and isinstance(params, Mapping):
             plan = params.get("plan", params)
-            journal_start = len(self._broker.journal)
+            journal_start = self._research_journal_position()
             result = self.solver.execute_plan(plan)
-            self._research_chain.experiment(plan, result, self._broker.journal[journal_start:])
+            self._observe_experiment(plan, result, journal_start)
         else:
             raise ValueError("research method unavailable")
         while not self._closed and not signal.cancelled:
@@ -469,7 +475,43 @@ class P7ResearchRuntime:
 
     def research_chain_summary(self):
         """Numeric coverage only; private research content stays under the run root."""
-        return self._research_chain.summary()
+        faults = getattr(self, '_research_chain_faults', 0)
+        chain = getattr(self, '_research_chain', None)
+        if chain is not None:
+            try:
+                value = chain.summary()
+                return {**value, 'unavailable_record_count': value['unavailable_record_count'] + faults}
+            except Exception:
+                faults = max(1, faults)
+        return {'record_count': 0, 'omitted_record_count': 0,
+                'omitted_reference_count': 0, 'unavailable_record_count': max(1, faults)}
+
+    def _observe_research(self, method, *args):
+        chain = getattr(self, '_research_chain', None)
+        if chain is None:
+            return
+        try:
+            getattr(chain, method)(*args)
+        except Exception:
+            self._research_chain_faults = getattr(self, '_research_chain_faults', 0) + 1
+
+    def _research_journal_position(self):
+        if getattr(self, '_research_chain', None) is None:
+            return None
+        try:
+            return len(self._broker.journal)
+        except Exception:
+            self._research_chain_faults = getattr(self, '_research_chain_faults', 0) + 1
+            return None
+
+    def _observe_experiment(self, plan, result, journal_start):
+        if getattr(self, '_research_chain', None) is None:
+            return
+        try:
+            transitions = self._broker.journal[journal_start:] if journal_start is not None else ()
+            self._observe_research('experiment', plan, result, transitions)
+        except Exception:
+            self._research_chain_faults = getattr(self, '_research_chain_faults', 0) + 1
 
     def actor_context(self):
         return project_actor_context(self.current_context())

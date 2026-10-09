@@ -129,8 +129,9 @@ if (result.applied_count !== 13 || result.observation.levels_completed !== 1)
                 completed = subprocess.run(
                     (node, "--input-type=module", "--eval", SCRIPT, loader),
                     close_fds=True, env=dict(os.environ),
-                    pass_fds=(int(os.environ["ASTERION_PRIME_IPYTHON_FD"]),
-                              int(os.environ["ASTERION_PI_EXTENSION_SOURCE_FD"])),
+                    pass_fds=tuple(int(os.environ[name]) for name in (
+                        "ASTERION_PRIME_IPYTHON_FD", "ASTERION_PI_EXTENSION_SOURCE_FD",
+                        "ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD") if name in os.environ),
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                     timeout=30,
                 )

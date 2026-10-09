@@ -364,22 +364,25 @@ test("metrics descriptor is overwritten with bounded numeric samples without lea
   }
 });
 
-test("metrics descriptor rejects missing invalid or non-file targets without writing diagnostics", () => {
+test("metrics descriptor rejects non-file targets without closing unowned descriptors", () => {
   const environment="ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
   const previous=process.env[environment];
   const lines=[]; const stderr=console.error; console.error=value=>lines.push(value);
+  let rejectedDescriptor;
   try {
     for(const value of [undefined,"0","2","PRIVATE_INVALID_FD","999999999999999999999"]) {
       if(value===undefined) delete process.env[environment]; else process.env[environment]=value;
       assert.equal(extension.contextViewMetricsFromEnvironment(),undefined);
       assert.equal(process.env[environment],undefined);
     }
-    const descriptor=openSync(tmpdir(),"r");
-    process.env[environment]=String(descriptor);
+    rejectedDescriptor=openSync(tmpdir(),"r");
+    process.env[environment]=String(rejectedDescriptor);
     assert.equal(extension.contextViewMetricsFromEnvironment(),undefined);
     assert.equal(process.env[environment],undefined);
+    assert.ok(fstatSync(rejectedDescriptor).isDirectory(),"non-file descriptor remains owned by its original host");
     assert.deepEqual(lines,[]);
   } finally {
+    if(rejectedDescriptor!==undefined) try {closeSync(rejectedDescriptor);} catch {}
     console.error=stderr;
     if(previous===undefined) delete process.env[environment]; else process.env[environment]=previous;
   }
