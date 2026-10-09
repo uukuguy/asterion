@@ -4512,3 +4512,8 @@
 - 2026-10-09 User stops Task24; trusted cancellation05:14:43Z issued, cleanup pending; root-cause review precedes repair and fresh trial.
 - 2026-10-09 Cancelled Task24 seals4levels/229paid/2deathRESET+1voluntaryRESET; budget-scope omission identified, minimal P7 data/prompt repair authorized.
 - 2026-10-09 Minimal scope repair Python40PASS/AstraREADY/lint/docsPASS; unchanged numerical controls, fullpromotion running before cold restart.
+- 2026-10-09 bc8f3f23 distinguishes host budgets and unreported environment resources to remove misleading allowance scope.
+- 2026-10-09 Independent Task24 audit READY1778/1778/231SDK/229committed/seal/cleanup; interrupted four-level result, no L6 completion claim.
+- 2026-10-09 Scope fullpromotion failed unchanged Rust process group; isolated12PASS, cause unproven; fullrerun13902 before restart.
+- 2026-10-09 Scope fullpromotion rerunPASS25/provider0; Task25 installedREADY, rootGO fresh BP35bc8f3f23 Solmedium under original controls.
+- 2026-10-09 Task25 launched05:36:11Z/bc8f3f23/Solmedium, fixed07:06:11Z+180; fresh cold BP35 outcome pending.
