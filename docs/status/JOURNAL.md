@@ -4622,3 +4622,7 @@
 - Task29 cold target6:211paid/zero deathsRESET/1548.246660s; Q70.56+five115, zero softyield; replay and ownercleanup verified, independent seal pending.
 
 - Task29 cold CLOSED:1836entry independentREADY;211paid/0deathRESET/1548.246660s,0softyield, replay/identity/cleanup verified; no newrun.
+
+- 594fd176: Published independently sealed BP35 evaluation and recovery state to distinguish zero deaths from unproven yield efficacy and time regression.
+
+- Refined L1 interpretation: extra exploration is not inherently wrong; dynamic information/progress tradeoffs under remaining resources need assessment.
