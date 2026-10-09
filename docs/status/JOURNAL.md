@@ -4524,3 +4524,7 @@
 - 2026-10-09 8b49e079 records audited Task25 results and unresolved speed regression for accurate recovery.
 - 2026-10-09 Offline Task25 diagnosis locates extraL4/L6 interactions andL5 longresponses; data loss not established, no production change.
 - 2026-10-09 Independent conclusionreview READY afterBFS wording correction; timing/trajectory evidence separates observedmechanisms from unproven causality.
+- 2026-10-09 2ff6161b records offline research-cost conclusions to avoid unsupported prompt/context causal fixes.
+- 2026-10-09 User sets115capped evaluation andpre-death avoidability; Task25 gradualtoken growth andexternal macrochain independently documented.
+
+2026-10-09 — Corrected batch-feedback interpretation; recorded cache-layout candidate with counterexample and independent review.

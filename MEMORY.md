@@ -404,3 +404,8 @@
 User steering2026-10-06: the remaining BP35/LF52/SK48/WA30 games must not just be abandoned after two failures. Keep the per-round finite boundary, inspect observed transitions, model revisions, actual computations and tool rejections, repair demonstrated defects or choose an evidence-based discriminating experiment, then retry. Retain cumulative experience, saved prefixes and certificates. A zero-dispatch rejection is not an environment counterexample; a tested infrastructure repair is not proof of level completion.
 
 Follow-up user feedback: when a previously identified defect resurfaces, reconcile the earlier findings and fix the related known issues together. Do not silently defer an already demonstrated defect or spend another live attempt rediscovering it. Report which earlier findings are repaired, remain unresolved, or were only hypotheses; keep that technical reconciliation in the decision/status files rather than collaboration memory.
+
+
+### feedback — score cap and macro research review (2026-10-09)
+
+The user wants evaluation against baseline and the115 per-level cap, rather than rewarding ever-shorter successful routes. They want chronological context-token growth watched and the task's observable macro research chain recorded. Death RESET should be assessed for clear avoidability from prior evidence, not treated as failure merely because it occurred; human exploration also includes deaths. Technical criteria and evidence live in D-2026-10-09-02 and the canonical BP35 review.
