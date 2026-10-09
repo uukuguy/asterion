@@ -1,6 +1,10 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09 Task30/31 design, implementation and packaged verification closed. Session remains active; not final handoff.
+Updated: 2026-10-09 Task32 BP35 cold comparison authorized, preparation active; Task30/31 closed. Session remains active; not final handoff.
+
+## Active Task32 cold BP35 comparison
+
+Userauthorized “开始实测 BP35”. Fresh targetL6/seed0/current.envSolmedium, sourceba51c62e/wheel2d412628/resourcea799 exact; same5400+180 absolute budget, no renewal/no priorNOTES/routes/no outsidehints/no sourcechanges. Deployment prepares fresh .asterion-private/p7-task32-cold-bp35-20261009/trial and waitsrootGO after providerfreepreflight; reviewer independent identities/budget/evidence; root tracksperlevel/score/context/reasoning and docs. No modelstarted yet. Preserveconsole52024:56659. CompareTask29 211paid0RESET1548.246660s/perlevel25/42/36/24/30/54 andTask28 236paid2RESET1069.976586s; official115threshold19/44/41/35/30/81, baseline21/48/44/38/33/87. FinishL6 then fullSDKreplay/seal/cleanup/independentREADY; noL7 oradditionaltrial authority.
 
 ## Task31 completed / next boundary
 

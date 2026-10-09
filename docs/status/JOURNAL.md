@@ -4653,3 +4653,7 @@
 - Task31 fullpromotionPASS25/provider0; fresh canonicalwheel2d412628 onepackagedr11lL1 authorizedGO, original900+180.
 
 - Task31 packagedr11l6paid/0paidRESET/Q115/94.471582s; SDK8replay/identities/cleanup/115manifest independentREADY; actualPi field adoption unknown.
+
+- d8385276: Recorded independent packaged verification and uncertainty boundaries so future evaluations distinguish deployment from strategy benefits.
+
+- Task32 userauthorized fresh BP35L1-L6 Solmedium/sourceba51c62e; same5400+180, no inherited cognition/hints, providerfreeprepare beforeGO.
