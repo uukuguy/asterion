@@ -4538,3 +4538,9 @@
 2026-10-09 — Intermediate promotion stopped before completion because source advanced; final frozen5b97bb86 promotion running, no stale PASS claim.
 
 2026-10-09 — Promotion exposed optional observer isolation, module allowlist and unowned-FD closure defects; repaired and focused checks passed.
+
+2026-10-09 — a919b496 isolated passive observer failures and preserved unowned FDs to prevent telemetry disrupting Prime execution.
+
+2026-10-09 — Finala919b496 fullpromotion PASS25/provider0; rootGO issued once for packaged fresh r11lL1 witness900+180.
+
+2026-10-09 — Task26 packagedr11lL1 ACTIVE09:11:34Z/sourcea919b496/Solmedium, one900+180 bounded witness, noBP35.

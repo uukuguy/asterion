@@ -220,7 +220,7 @@ Task25 target achieved within original controls: sixlevels206paid/2deathRESET/17
 
 ## Task26 — Approved cache-compatible context and passive research records
 
-Status: IMPLEMENTED / deployment pending after user explicit “继续完成实现”; no repeat approval gate. Design follows the canonical Task25 analysis and D-2026-10-09-02. No cold BP35 is launched by this task.
+Status: CLOSED / implemented and packaged deployment verified after user explicit “继续完成实现”; no repeat approval gate. Design follows the canonical Task25 analysis and D-2026-10-09-02. No cold BP35 is launched by this task.
 
 Architecture: Prime owns opaque latest-state placement, numerical context accounting and evidence relationships. P7 research passively interprets real notes/program/plan/feedback milestones; P7 data supplies actual observation and transition references. No forced cognition, invented thoughts, strategy hint or altered scoring rule.
 
@@ -228,8 +228,10 @@ Architecture: Prime owns opaque latest-state placement, numerical context accoun
 - [x] TS owner: count four categories of model-bearing message JSON UTF8 bytes after owned context projections, with latest/peak/cumulative and at most1024 chronological samples. Report this as extension-hook bytes, not provider wire or token counts. Inject `ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD` through the existing exact extension binding; use a private regular file, never stdout/stderr or the closed compaction witness channel. Failure leaves model messages/actions unchanged.
 - [x] Root: generic Python owned metrics file, numeric closed-shape validation and finite read; P7 operator explicitly creates/injects/closes it and includes safe validated private summary. Cover redaction, invalid body, bounds and descriptor lifecycle with unittest before implementation.
 - [x] Python owner: minimal generic private evidence-link recorder and passive P7 research milestone adapter, referring to existing source/output/notes/plan/observation evidence. Mark model statements versus behavior; causal meaning unknown unless explicitly supported. Capacity/failure visible, no duplicated raw log or mandatory model reporting. Cover source binding, failure/unknown outcomes and side-effect isolation.
-- [ ] Independent Astra changed-code review; resolve findings before deployment. Root syncs bundled extension; execute TS tests, focused Python tests, lint/docs and full promotion. Keep unchanged Rust historical failures distinct if encountered.
-- [ ] Commit reviewed implementation then one actual packaged finite `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` using operator.env Sol/medium, fresh state and existing900+180 controls. Verify wheel/resource/allowlist identity, passive artifacts, replay/seal/cleanup and user-console preservation. This is deployment verification, not BP35 speed or death-rate proof.
-- [ ] Commit evidence/state; retain outstanding full BP35 comparison and causal speed benefit explicitly unverified.
+- [x] Independent Astra changed-code review; resolve findings before deployment. Root syncs bundled extension; execute TS tests, focused Python tests, lint/docs and full promotion. Keep unchanged Rust historical failures distinct if encountered.
+- [x] Commit reviewed implementation then one actual packaged finite `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` using operator.env Sol/medium, fresh state and existing900+180 controls. Verify wheel/resource/allowlist identity, passive artifacts, replay/seal/cleanup and user-console preservation. This is deployment verification, not BP35 speed or death-rate proof.
+- [x] Commit evidence/state; retain outstanding full BP35 comparison and causal speed benefit explicitly unverified.
 
 Ownership: context_impl owns TS source/tests; chain_impl owns generic/P7 chain Python modules/tests; root owns metrics-file Python, operator integration, bundled resource and docs; review is read-only. Workers do not revert one another. No protocol/manifest/tool registration changes.
+
+Task26 final: sourcea919b496, promotion25PASS/provider0, fresh packagedr11lL1 fivepaid/zero deathRESET/79.490224s. Context8samples/86309Bpeak, chain7records including1acceptedNOTES (postgoal). Fullreplay/source569/install587/seal/cleanup verified; independent final manifest audit recorded in canonical comparison. No BP35 performance claim or new BP35 launch.

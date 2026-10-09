@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09 after Task25 completed, independent audit and offline analysis. Session active; not final handoff.
+Updated: 2026-10-09 after Task26 implementation and packaged deployment verification. Session active; not final handoff.
 
 ## Current intent and boundary
 
@@ -8,13 +8,17 @@ Task25 is CLOSED: sourcebc8f3f23, gpt-6.1-sol/medium, fresh BP35 L1–L6, 206pai
 
 Latest user evaluation: 115 is capped target; fewer successful steps after cap receive no extra reward. Distinguish model returns, tool execution and end-to-end Prime cycle. Tokens grew gradually6965→160061goal/167176final, without >200k spike this round; still substantial history accumulation. Offline macrochain separates explicit NOTES, program/action evidence and analyst reconstruction. Death22 is first new hazard;69 is a stronger avoidable hypothesis-gap candidate, not proven stochastic or a known complete-rule violation. Repeated wall hits120/121 and191/192 are precommitted batches, not feedback ignored between model decisions.
 
-Next provider-free candidate: generic current snapshot sits before history; plan/workspace cache ratios4.542/2.064percent vs cell98.994percent support checking cache-compatible layout. High-cache #91 still79.883s prevents a total-latency causal claim; old rawcache unavailable. Astra reviewed snapshot-at-tail candidate with original user role, message pairing/archive and latest state completeness preserved. Validate actual Pi-converted prefix with recovery/compaction before implementation; no production change/new provider trial in this analysis turn. Other candidate: bounded final-model-view composition metrics and P7 representation/model counterexample checks. Preserve Prime generic + P7 research + P7 data boundaries; no mandatory cognition, BFS or zero-death gate.
+## Task26 completed implementation and deployment
 
-## Active implementation checkpoint
+Task26 CLOSED. Source5b97bb86 implemented latest snapshot at native-history tail, bounded numerical context-view telemetry and passive research evidence relationships; a919b496 repaired optional observer isolation and descriptor ownership. Prime generic layer owns placement/accounting/opaque temporal records; P7 research maps real notes/programs/experiments, and P7 data supplies actual observations/transitions. No mandatory cognition, additional model logging calls or scoring changes.
 
-User authorizes Task26 implementation. Main source5b97bb86 adds generic snapshot placement/context metrics and passive research relationships. Astra source review approved; full promotion subsequently FAILED4401tests/2failures/10errors/4skips, so deployment remains NOT verified. Corrective changes now isolate optional research observer initialization/callback/journal/summary faults; add2generic modules tocore-onlyallowlist; never close unvalidated/non-regularmetricsFD; official fakePi nowinheritsnewFD. Actual NodeSIGABRT debug supports production ownership+fixture omission cause. Final focused TS68PASS/6external skips, Python51PASS, core-only4PASS, fresh installed official1PASS, lintPASS, AstrarepairAPPROVE. Next: commit repairs, fresh final fullpromotion, then rootGO finite packagedr11lL1 witness. No BP35/model run started.
+Final TypeScript68PASS/6 external harness skips, Python51PASS, core-only4PASS, official installed1PASS, lint/docsPASS; `RUST_TEST_THREADS=1 make promotion-check` PASS25/provider0. Earlier promotion FAILED4401tests/2failures/10errors/4skips remains historical, not PASS. Astra code/repair review approved.
 
-Witness prepared `.asterion-private/p7-task26-witness-20261009/trial`, runp7-live-20261009084522-1f702e1ef4c24b0d8739a881; auth absent/rootGO pending. Previous frozen sourcearchive5b97 retained as historical intermediate and must be refrozen afterrepaircommit. Existing Task25 CLOSED baseline remains unchanged. Userconsole52024/56659preserved.
+Fresh actual packaged r11lL1 witness: Solmedium, sourcea919b496, five paid actions/zero deathRESET, 79.490224s host→SDKgoal, cleanup99.577399s within original900+180 controls. Seven main and seven replay SDK responses (two initialization RESETs plus five actions), full payload/frame equivalence except guid; trace/seal/source569/install587 verified. Context8samples/86309JSONUTF8Bpeak/474244cumulative/zero unmeasurable. Usage8/inputsum189668/output1912/inputpeak31617tokens; cache split unavailable. Research7records=2computations+4experiments+1acceptedNOTES, no omissions/unavailable; NOTES is postgoal, not evidence of prior guidance.
+
+Evidence `.asterion-private/p7-task26-witness-20261009/trial/`; final manifest98entries, SHA256ea72428de59b7f5e767d57e30fe8bd952a6b482d731864c9108a92354a3edbbe. Runp7-live-20261009084522-1f702e1ef4c24b0d8739a881. All owned host/guest processes stopped and staged credentials removed; userconsole52024/56659 preserved. No active Task26 trial, no BP35 launched. Prior intermediate freeze5b97 retained separately.
+
+Next unresolved evaluation is a controlled cold BP35 comparison of elapsed time, capped official score, paid actions/death RESET and chronological input/context composition, using the prior baselines. Cache benefit, stable efficiency, avoidable-death reduction and cross-domain capability remain unverified; do not infer them from r11l or unit tests.
 
 ## Verified facts
 
