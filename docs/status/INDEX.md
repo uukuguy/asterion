@@ -85,3 +85,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task29：[动态观察边界实现与评审](../reviews/2026-10-09-p7-observation-boundary-review.md)：模型可选控制边界、数据候选、RESET与反馈容量缺陷修复、验证边界。
 
 - 最新实测：[2026-10-09 Task29 BP35 冷测](../reviews/2026-10-09-p7-bp35-task29-evaluation.md)：零死亡、L1得分退步、用时增加44.70%，自然软边界未触发；完整回放封存独立READY。
+
+- Task30设计实施：[动态资源权衡设计](../superpowers/specs/2026-10-09-prime-resource-aware-research-design.md)、[实现计划](../superpowers/plans/2026-10-09-prime-resource-aware-research.md)：带采样时间的宿主事实、条件评分、模型自主策略，尚在实现，未做新BP35。

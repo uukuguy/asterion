@@ -4628,3 +4628,7 @@
 - Refined L1 interpretation: extra exploration is not inherently wrong; dynamic information/progress tradeoffs under remaining resources need assessment.
 
 - 6d87e2b9: Qualified L1 exploration judgments and recorded resource-sensitive strategy direction without changing prompts or claiming verified policy improvements.
+
+- 4e848873: Designed dated host resources and conditional P7 score facts to support autonomous dynamic research/action tradeoffs without strategy gates.
+
+- Task30 design APPROVE: new resource metadata is lowest priority; near-cap original computation evidence remains exact, optional facts may be omitted.

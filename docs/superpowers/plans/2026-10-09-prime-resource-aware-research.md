@@ -17,7 +17,7 @@ Ownership: agents/prime/deadline.py and continuation.py; P7 solver_control.py/re
 - [ ] Write RED for TaskDeadline.snapshot and dated sample after clock advancement/sticky expiry, boolean/nonfinite rejection and copied results.
 - [ ] Add one sampled generic snapshot; share clock sampling with remaining_seconds, no new authority or allowance origins. Add resource-aware guidance constant/export; integrate natural continuation through existing guidance.
 - [ ] Write RED for purecell metadata resource refresh (firstJSONtext), error/stdout spoof preservation, near-cap payload, failed optional capture, historical plan read and stable prior input prefix.
-- [ ] Integrate SolverControl dated budget and P7 host_resource_snapshot at post-admission tool completion. IPython FIRSTmetadata must remain valid JSON; preserve execution_status, exports and original outcome. Compact snapshot<=2KiB. Reuse captured currentcontext without mutating raw results/history. No fullmemory refresh on purecell.
+- [ ] Integrate SolverControl dated budget and P7 host_resource_snapshot at post-admission tool completion. IPython FIRSTmetadata must remain valid JSON; preserve execution_status, exports and original outcome. Compact snapshot<=2KiB; if a legal original result is near its existing cap, omit newfacts and preserve original content exactly (no old evidence truncation or cap increase). Reuse captured currentcontext without mutating raw results/history. No fullmemory refresh on purecell.
 - [ ] Run focused unittest and send diff+RED/GREEN evidence to root/review.
 
 ## Task2 — P7 scoring facts and primary guidance (deployment)

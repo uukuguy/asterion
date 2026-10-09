@@ -1,8 +1,14 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09T13:25:00Z. Session active; not final handoff.
+Updated: 2026-10-09 Task30 design+implementation active. Session active; not final handoff.
 
-## Active task
+## Active Task30 implementation
+
+User authorizes “设计与实现” resource-sensitive dynamic strategy. Spec/plan4e848873: docs/superpowers/specs/2026-10-09-prime-resource-aware-research-design.md and matching plan. Context_impl owns genericdeadline.snapshot/guidance, P7control/runtimefirstJSONhost resource delivery and focusedtests; deployment owns score/prompt/tests then requiredpackageddeployment afterrootGO; review independently challenges design and changedcode. Root docs/commits/integration. Workers preserve shared edits.
+
+Chosen minimal dated tool-completion facts, not newFD/percontextread/origin inference. Preserve anchoredmemory/cellprefix, nativeexecution/error/firsttextbridge/unknownboundaries. Current scoringconditional/115threshold/remaining scoringroom are facts nothardgates. Allcode/deploymentverification pending. No current model/game process; no newBP35authorized. AfterREDGREEN/review runTS→Python→promotion→sourcefreeze→oneactualpackagedr11lL1(original900+180), seal/cleanup/independentREADY then docsclose. Userconsole remains.
+
+## Prior Task29 closed evaluation
 
 User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fresh run reached target6; actor and supervisor ended exit0; final independent seal audit READY; no inherited NOTES, routes or outside hints. Do not edit production or inject actor guidance. Goal achieved at1548.246660s; owner213SDK replay/211committed source+install/cleanup verified. All1836manifest files bytes/SHA/fullcoverage independentlyREADY; root submits final report/state. No required run work remains. Do not start L7, renew budget or start another run.
 
