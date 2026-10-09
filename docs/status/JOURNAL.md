@@ -4499,3 +4499,10 @@
 - 2026-10-09 Layered fixes verified: Python71/TS59PASS+6external skips; astraREADY; stateview/socket integration PASS; deployment pending.
 - 2026-10-09 Promotion full4389tests: one existing console descendant-cleanup failure; source71/TS59 remainPASS; isolated diagnosis pending, no providerGO.
 - 2026-10-09 Cleanup failure not reproduced: three isolatedPASS plus matchingextrasPASS; fullpromotion rerun underway, cause unproven.
+- 2026-10-09 687c6fac implements trusted stale-state projection and optional screen assertions; deployment waits fullpromotion rerun.
+- 2026-10-09 Secondpromotion passesPython thenfails unchangedRust service; isolatedRust5PASS; fullrerun serializesRust test scheduling, timeouts unchanged.
+- 2026-10-09 Promotion fullPASS25/provider0 under serialRust test scheduling; source687c6fac actualMake r11lL1 witnessGO issued.
+- 2026-10-09 Witness actualMake launched04:39:37Z; progressL1/5actions, terminalverification pending; BP35notstarted.
+
+- 2026-10-09 Task24 packaged r11l witness 5paid/0RESET/57.440seconds; owner replay/identity/cleanup PASS, independent final audit pending.
+- 2026-10-09 Independent witness audit READY104/104/replay/seal/cleanup; frozen Task24 cold BP35 L1-L6 rootGO issued.

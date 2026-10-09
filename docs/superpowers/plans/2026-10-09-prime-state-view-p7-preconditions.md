@@ -31,14 +31,19 @@ Ownership: p7_preconditions_impl. Files: solver.py, prompt.py, TypeScript step s
 ## Task3 — Independent review and deployment
 
 - [x] Root reviews diffs, astra audits generic trust/pairing and P7 prefix semantics. Resolve material issues beforedeployment.
-- [ ] Run extension tests, related Python suites, make lint/docs-check/promotion-check; commit source/resource/design/state.
-- [ ] Actual packaged make asterion-prime-p7-level-witness GAME=r11l LEVEL=1, exact install/resource/allowlist/config and full replay/cleanup. This verifies deployment, not BP35 improvement.
+- [x] Run extension tests, related Python suites, make lint/docs-check/promotion-check; commit source/resource/design/state.
+- [x] Actual packaged make asterion-prime-p7-level-witness GAME=r11l LEVEL=1, exact install/resource/allowlist/config and full replay/cleanup. This verifies deployment, not BP35 improvement.
 
 ## Task4 — Task24 cold comparison
 
-- [ ] Freeze source/install/wheel and root GO after witness cleanup; trialowner fresh BP35 target6, no inheritednotes/routes or hints, original finite controls plus bounded receive-clock observer.
+- [x] Freeze source/install/wheel and root GO after witness cleanup; trialowner fresh BP35 target6, no inheritednotes/routes or hints, original finite controls plus bounded receive-clock observer.
 - [ ] Track perlevel paid/success/RESET/time/quality, actual guard adoption and stale-view behavior. Full replay/source/seal/cleanup independent audit.
 - [ ] Canonical comparison and corestate update, focused commits and journal/checkpoint. Report achieved contracts separately from observed model performance and unresolved unknown hazards.
 
 
 Implementation verification: Task2 RED7expected failures/schema+promptRED, GREEN12newtests; combinedrootPython71PASS. Generic7stateview tests andreal socketbridge Chinese/floattext→admission→nativebranch hook independentlyPASS; fullTS59PASS/6externalPi skips. P7marker3tests includeunknown andoptionalserializationfailure. Replacementcounters useexisting4KiBdiagnostics budget. Ruff/compileall/docs/diffPASS. Independentastra finalREADY/no findings. Resource rebuilt afterbothworkers. Promotion andactualpackagedwitness pending; no BP35 abilityclaim.
+
+
+Promotion: thirdfullrun RUST_TEST_THREADS=1 make promotion-check PASS commands25/provider_operations0/full_datasetno. Firstfullrun4389Python hadoneunchangedconsolecleanupfailure (3isolated+matchingextrasPASS); second passedPythonthenunchangedRustservicefailed (isolated5PASS). Causeunproven; recordfailures, no relaxedassertions/timeouts orunrelatedcodechange. Source687c6faccommitted; actualMake r11lL1 GO2026-10-09 afterpromotionPASS, trialownerwaitinglaunchreceipt. BP35notyetstarted.
+
+Task24 deployment witness: source687c6fac, exact Make wheel d8e0acacb70dde3a9f03ebb51fab667cececf3e5615f0b718ceab262e63494b6; r11l L1 5paid/0RESET/57.439579s. Owner reports full replay, source566/install584, seal and cleanup PASS. Independent final manifest audit READY:104/104 SHA/bytes, replay/seal/cleanup; root cold BP35 GO issued. State-view actual receipts replace four older results/13364bytes. Input peak66592 reflects a large research output; this small witness does not establish token reduction. Standalone installed no-prompt get_state verifies Solmedium/message0 in a separate instance.
