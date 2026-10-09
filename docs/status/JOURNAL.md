@@ -4586,3 +4586,5 @@
 - Task28 CLOSED:1069.976586s/236paid/2death; independent1909entryREADY/fullreplay/cleanup. Computeprefix/cache recovered; mixedscore and historicalrisk reuse remain explicit.
 
 - 0a3349ca: Closed Task28 evaluation and recovery state to preserve verified results, score tradeoffs and remaining research limits.
+
+- f33d3ab6: Added standalone Chinese Task28 evaluation so this run’s results, judgments and limits are directly readable.
