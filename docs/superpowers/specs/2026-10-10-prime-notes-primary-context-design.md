@@ -55,6 +55,14 @@ host只验证本次分支、完整组顺序、原档可读、exact refs/版本�
 3. 修改通用 `MemoryContextController/projectMemoryContext` 及相关tool-state投影：只使用可信receipt选择工作epoch，保持完整toolpairs/未知保护、最新NOTES与真实状态。P7 runtime提供notes/data绑定，不能把游戏策略写进genericcontroller。
 4. 修改P7主提示：NOTES承担有效认知与重要反例，历史按需读取，普通NOTES建立基线及回读方式说明清楚，不以更多提示替代投影。
 
+## Prime 专用代码压缩不可省略
+
+用户明确持久IPython的代码语义压缩是必需，区别于普通文本摘要。normalNOTES需要承接仍有用的变量/函数名字、用途/调用约定、状态/已知模型适用范围、source/data refs与kernel generation；不要因为旧cells退休重新定义仍存活对象。保留名字不表示对象真实存活，实际generation及回读/显式checkpoint恢复仍是依据。
+
+调查已证：本机Pi自动压缩默认enabled=true，reserve16384，keepRecent20000；Task38模型contextWindow272000，阈值255616，最大完整usage235122未达阈值，未见事件不能说关闭。源码发现P1显式private custominstructions引用、P7未发现同路径引用；这不足以证明专用摘要替换未生效。用户指出已替换原生，D-2026-09-16-01与c21d0dae/f1b08c1f须结合实际Pi入口/当前hook/providerrequest核对。compact_events=True只是RPC事件投影。
+
+Task39须保持正确的通用层代码压缩接入，先核验已实现的替换机制，暂停新增压缩机制设计，不以普通任务prompt里提一句kernel就宣称专用压缩已用。不新造provider调用/runner、不绕授权预算，复用现有Prime摘要材料及合法Pi hook/runtime接口；需核清自动触发接入API后定最小实现。NOTES是日常主要决策认知，专用压缩是大上下文/恢复时的语义保障，不能拿默认高阈值当日常认知组织。实际自动路径与marker/witness证据、变量/函数连续性分别验证，未触发不声称模型摘要实测。
+
 ## 历史方案区别
 
 曾经的NOTES即时cut已校验可信receipt/完整siblings，不能将其描述为未经配对检查的盲切。之后96/48KiB滚动删减也已撤回。本次实质补足可用的全文检索、程序连续性、近期反例保护、unknown持续钉住、用户约束及compaction/branch合同，使普通NOTES更新真正在这些保障下承接认知。原档不删，工作视图可逆回读；不是恢复旧字节窗口。

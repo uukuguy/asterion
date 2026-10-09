@@ -81,3 +81,11 @@ Task36 frozen94dabe66独立打包/安装身份检查通过并完成一轮freshBP
 Independent review APPROVE: only `build_autonomous_prompt()` and focused prompt-delivery test. Adds482UTF8bytes (13484→13966), fullrevisableACTION1–7 interfacepriors; ACTION7 normalundo vsRESETrestart, GAME_OVERonlyRESET, feedback/currentavailability and existing paidcost boundaries retained. NoPrimegeneric/data/tool/schema/route/gate changes. Worker observed15missingcontent RED before implementation; root29focusedPythonPASS1.561s (`tests.test_prime_p7_autonomous_interface`, `tests.test_prime_p7_autonomous_solver`, `tests.test_prime_p7_score_planning`). Sourcecontract approved, packagedactualdelivery and BP35quality pending.
 
 Task38 packageddeliveryverified: TS79PASS/6externalskips→focusedPython29PASS→fullpromotion25PASS/provider0 in requiredorder. Source8e2e8a29/wheel3856d706/source570/install588/actualprompt13966B/resourcea799/exact3tools/archive1686/launch21 independentlypreflightREADY; coldBP35target6 naturalcompletion1482.657593s/215paid/0RESET, with217fullSDKreplay andcleanup. Actualinterfaceadoptionobserved, stablecausalqualitybenefitunproven. Final1908manifest3cebc44d independentlyREADY; thispromptfixdoesnotimplementNOTES-primarycontextprojection.
+
+## Task39：正常 NOTES 主认知源码评审
+
+Prime 通用层以真实会话完整工具组建立 NOTES epoch，保留当前约束、近期反馈、重要错误及未知执行结果；旧明细按引用读取。P7 研究层提供正常 NOTES 与必要当前事实，数据层保留完整反馈。无需另加模型 checkpoint。独立设计、Python 与 TypeScript changed-code review 均 APPROVE。
+
+源码验证：`npm --prefix packages/typescript/asterion-prime-extension test` 88 PASS / 6 external skips；installed Pi provider-free probe 验证正常 NOTES、archive、完整工具组、压缩与重载；相关 Python 48 PASS。`sync-resource` 构建通过，打包扩展 SHA256 `13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b`。未做本版本 promotion、付费打包见证或 BP35，不能据此宣称解题改善。
+
+专用代码压缩另有底层接入缺口：历史 Prime fork 有 kernel 专用默认提示；Task38 实际 operator-owned Pi bundle 自动路径仍用原生提示，没有接入自有摘要材料。D-2026-09-16-01 接管实现仍 pending。默认开启、较高触发阈值与专用语义是独立要求；NOTES 主认知不能替代专用代码压缩。本轮 Task38 未观察到压缩触发，不能评估其效果。后续在 Prime 通用层修复，应用层不负责配置。

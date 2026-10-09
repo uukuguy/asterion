@@ -947,7 +947,7 @@ test("research workspace accepts direct actor action labels with closed confiden
   assert.equal(Check(P7_WORKSPACE_PARAMETERS, []), false);
   assert.equal(IsSchema(P7_WORKSPACE_PARAMETERS), true);
   assert.equal(IsSchema(P7_EXECUTE_PLAN_PARAMETERS), true);
-  assert.deepEqual(P7_WORKSPACE_PARAMETERS.anyOf.map(s => s.properties.op.const), ["read", "publish", "checkpoint", "focus", "revise", "notes", "notes_read", "notes_history"]);
+  assert.deepEqual(P7_WORKSPACE_PARAMETERS.anyOf.map(s => s.properties.op.const), ["read", "publish", "checkpoint", "focus", "revise", "notes", "notes_read", "notes_history", "context_archive_list", "context_archive_read"]);
   assert.equal(P7_EXECUTE_PLAN_PARAMETERS.properties.steps.maxItems, 20);
   assert.ok(P7_EXECUTE_PLAN_PARAMETERS.properties.steps.items.properties.expect.properties.cells);
   const request = {op: "read"};

@@ -4,13 +4,15 @@ import { normalizeFunctionParameters } from "./tool-schema.js";
 export { normalizeFunctionParameters } from "./tool-schema.js";
 import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment, type ContextWitness } from "./context-witness.js";
 import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
+import {nativeContextArchive,createContextCheckpoint,contextArchiveOperation} from './context-archive.js';
+export {nativeContextArchive,createContextCheckpoint,contextArchiveOperation} from './context-archive.js';
 import { ContextViewTelemetry, contextViewMetricsFromEnvironment, type ContextViewNumbers, type ContextViewMetricsSink } from "./context-metrics.js";
 export { ContextViewTelemetry, contextViewMetricsFromEnvironment } from "./context-metrics.js";
 import {providerPrefixMetricsFromEnvironment, registerProviderPrefixMetrics, type ProviderPrefixMetricsSink} from "./provider-prefix-metrics.js";
 export {ProviderPrefixTelemetry, providerPrefixMetricsFromEnvironment, registerProviderPrefixMetrics} from "./provider-prefix-metrics.js";
 import { admitToolStateView, projectToolStateViewContext } from "./tool-state-view.js";
 export { TOOL_STATE_VIEW_VERSION, admitToolStateView, projectToolStateViews, projectToolStateViewContext } from "./tool-state-view.js";
-export { CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
+export { CONTEXT_MEMORY_VERSION, PRIMARY_CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
 export { registerContextWitness, ContextWitness, composeSummarizationRequest, summarizeInstruction } from "./context-witness.js";
 export { canonicalJson, projectPrimeContext, countRebuiltContext } from "./context-counter.js";
 import {
@@ -60,7 +62,8 @@ interface ExecuteResult {
 
 export interface IpythonToolResult {
   content: Array<{ type: "text"; text: string }>;
-  details: Record<string, never>;
+  details: Record<string, unknown>;
+  isError?: boolean;
 }
 
 export type ToolExecutionMode = "sequential" | "parallel";
@@ -235,7 +238,7 @@ export class IpythonBridge {
       };
     } catch {
       if (possiblyDispatched) this.#poison();
-      throw unavailable();
+      throw Object.assign(unavailable(),{context_effect:possiblyDispatched?'unknown':'settled'});
     } finally {
       this.#active = false;
     }
@@ -316,9 +319,9 @@ export class IpythonBridge {
       }
       return parsed;
     } catch (error) {
-      if (applicationError !== undefined) throw applicationError;
+      if (applicationError !== undefined) throw Object.assign(applicationError,{context_effect:'settled'});
       if (waitingForPrevious || possiblyDispatched) this.#poison();
-      throw unavailable();
+      throw Object.assign(unavailable(),{context_effect:possiblyDispatched?'unknown':'settled'});
     } finally {
       release();
     }
@@ -488,12 +491,15 @@ interface MethodTool {
     id: string,
     input: unknown,
     signal?: AbortSignal,
+    onUpdate?: unknown,
+    context?: unknown,
   ): Promise<AppToolResult>;
 }
 
 interface AppToolResult {
   content: Array<{ type: "text"; text: string }>;
   details: unknown;
+  isError?: boolean;
 }
 
 interface AppToolSpec {
@@ -734,6 +740,9 @@ export const P7_WORKSPACE_PARAMETERS = TypeUnion([
   TypeObject({op: TypeLiteral("notes_read"),revision: TypeOptional(EXPORT_ID)}, {additionalProperties:false}),
   TypeObject({op: TypeLiteral("notes_history"),start: TypeOptional(TypeInteger({minimum:0})),
     limit: TypeOptional(TypeInteger({minimum:1,maximum:32}))}, {additionalProperties:false}),
+  TypeObject({op:TypeLiteral('context_archive_list'),start:TypeOptional(TypeInteger({minimum:0})),limit:TypeOptional(TypeInteger({minimum:1,maximum:32}))},{additionalProperties:false}),
+  TypeObject({op:TypeLiteral('context_archive_read'),ref:TypeObject({session_id:TypeString({minLength:1,maxLength:256}),entry_id:TypeString({minLength:1,maxLength:256})},{additionalProperties:false}),
+    start:TypeOptional(TypeInteger({minimum:0})),limit:TypeOptional(TypeInteger({minimum:1,maximum:16384}))},{additionalProperties:false}),
 ]);
 const ACTION_PARAMETERS = TypeUnion([
   TypeObject({ name: TypeUnion([TypeLiteral("RESET"), TypeLiteral("ACTION1"), TypeLiteral("ACTION2"), TypeLiteral("ACTION3"), TypeLiteral("ACTION4"), TypeLiteral("ACTION5"), TypeLiteral("ACTION7")]),
@@ -768,7 +777,7 @@ export const P7_EXECUTE_PLAN_PARAMETERS = TypeObject({
 const P7_FRAME_DELIVERY_DESCRIPTION = " Boards may use the lossless palette-row-dictionary/v1 encoding: row_ids selects rows and each row character selects its literal numeric pixel through symbols and palette; shape preserves the singleton frame layer if present. Numeric frames with frame_delivery.encoding=raw are already decoded. For optional research in IPython, use import p7_research as r. Read the current exact raw 2D settled board with r.frame(), or a historical board with r.frame(sequence). r.render(), r.geometry(), and r.diff(before_sequence) provide read-only observation helpers; r.patches(windows,sequence) returns exact local pixels, and r.view_change(before_sequence,after_sequence) compares bounded literal pixel translation candidates with historical sequence/hash references. These candidates do not identify game objects, world coordinates, camera truth or safety. Choose whichever investigation is useful. settled_frame_sha256 identifies the pixel grid, separately from observation_sha256.";
 const P7_TOOL_SPECS: readonly AppToolSpec[] = Object.freeze([
   { name: "p7_workspace", method: "workspace", parameters: P7_WORKSPACE_PARAMETERS,
-    description: "Optionally use op notes with the exact current base_revision and observation_ref to replace your freeform research NOTES (at most 16 KiB UTF-8). Select useful observations, hypotheses, counterexamples, questions and plans yourself; no required headings, WorldMap, task or action labels. Notes are an external memory aid, not an action prerequisite. A notes update replaces only the current state snapshot and preserves conversation history; Pi's native compaction manages the context window. Read accepted notes with notes_read (optional revision), or page newest-first accepted notes_history (optional start, limit 1–32). Optional revise/publish retains prior program/report evidence and never certifies new prose. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Write success returns an acknowledgement with current refs and controls; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
+    description: "Optionally use op notes with the exact current base_revision and observation_ref to replace your freeform research NOTES (at most 16 KiB UTF-8). Select useful observations, hypotheses, counterexamples, questions and plans yourself; no required headings, WorldMap, task or action labels. Notes are an external memory aid, not an action prerequisite. Accepted autonomous NOTES establish the primary working-memory epoch: summarized older completed interactions leave the working view but remain readable; recent correction evidence, unknown effects and user constraints stay protected. This does not certify the notes or authorize actions. Use context_archive_list (start, limit 1–32) for this selected native session's opaque message refs, and context_archive_read (ref, start, limit 1–16384 characters) for paged original actor-visible text, calls and errors. Archive reads do not execute saved programs or actions. If projection or archive admission is unavailable, full history stays visible and primary retirement is not established. Read accepted notes with notes_read (optional revision), or page newest-first accepted notes_history (optional start, limit 1–32). Optional revise/publish retains prior program/report evidence and never certifies new prose. Also read current/historical revisions, focus a task, publish an IPython draft or checkpoint source/JSON exports. Publishing never dispatches actions. Write success returns an acknowledgement with current refs and controls; op read returns the complete selected workspace and current board." + P7_FRAME_DELIVERY_DESCRIPTION },
   { name: "p7_execute_plan", method: "execute_plan", parameters: P7_EXECUTE_PLAN_PARAMETERS,
     description: "Submit a short ordered plan with plan_id, start equal to the current observation_ref, and 1–20 action steps. Notes, WorldMap and program models are optional research aids. workspace_revision, goal, purpose, assumptions and each step's expect prediction may be omitted; a supplied workspace_revision must match the current workspace. Optional step.before={cells:[{x,y,value}]} checks 1–128 distinct literal pixels on the actual settled screen immediately before that step. x is the current screen column and y the row; map your model coordinates to the current screen yourself and recheck after view changes. The entire plan syntax validates before dispatch. A before mismatch returns precondition_feedback with the observed reference and differences, stops the current step and suffix without executing or charging them, and preserves the executed prefix. A matched before is not a post-action prediction or a safety guarantee. Predictions can test key cells, a complete frame, state or progress; an omitted prediction is not a confirmed match. stop_on_mismatch defaults to true; explicitly false allows continuing known post-action prediction misses but never bypasses before. The unique Broker executes sequentially; unknown effects, pause, RESET, game-over, level changes, budget and cancellation stop the suffix. stop_on_view_change defaults to true: after a known committed step, a bounded pixel-translation candidate can return control before executing the suffix. This is not confirmed camera movement or a safety judgment. Set stop_on_view_change=false for a plan whose view changes your model already covers; this cannot bypass hard stops or preconditions. Optional step.observe_after=true requests an observation checkpoint even when the soft view policy is disabled. With a remaining suffix these boundaries return stop_reason observation-boundary, explanatory evidence, the actual current observation and unexecuted steps. No suffix is automatically resumed; decide whether to continue, adjust or investigate, then submit a new plan_id and current start. Returns actual feedback and unexecuted steps. Reuse an identical plan_id only to retrieve its recorded result; never replay an uncertain action." + P7_FRAME_DELIVERY_DESCRIPTION },
 ]);
@@ -795,14 +804,41 @@ function makeMethodTool(
       id: string,
       input: unknown,
       signal?: AbortSignal,
+      _onUpdate?: unknown,
+      context?: unknown,
     ): Promise<AppToolResult> => {
       const params = inputKey
         ? (input as Record<string, unknown> | null | undefined)?.[inputKey] ?? null
         : input;
-      const result = await bridge.callMethod(id, method, params, signal);
+      if(method==='workspace' && ['context_archive_list','context_archive_read'].includes(String(memoryRecord(params)?.op))) {
+        const archive=nativeContextArchive(context);
+        const result=contextArchiveOperation(archive,params);
+        const latest=archive?.entries.map(entry=>memoryRecord(entry.message)).reverse().find(message=>{
+          const details=memoryRecord(message?.details);return typeof details?.environment_result_unknown==='boolean' && typeof details.processing_blocked==='boolean';
+        });
+        const details=memoryRecord(latest?.details);
+        if(details) Object.assign(result,{environment_result_unknown:details.environment_result_unknown,processing_blocked:details.processing_blocked});
+        if(result.status==='rejected') result.context_interaction={version:'asterion.prime-context-interaction/v1',effect:'settled',feedback:'negative'};
+        return {content:[{type:'text',text:JSON.stringify(Object.fromEntries(Object.entries(result).filter(([key])=>key!=='context_interaction')))}],details:result};
+      }
+      let result:unknown;
+      try {result=await bridge.callMethod(id,method,params,signal);}
+      catch(error) {
+        const known=memoryRecord(error)?.context_effect==='settled';
+        return {content:[{type:'text',text:known && error instanceof Error?error.message:unavailable().message}],isError:true,
+          details:{context_interaction:{version:'asterion.prime-context-interaction/v1',effect:known?'settled':'unknown',feedback:'negative'}}};
+      }
       let record = memoryRecord(result);
       let visibleResult = result;
       let details = result;
+      let interaction:unknown;
+      if(record && Object.hasOwn(record,'context_interaction')) {
+        const {context_interaction,...publicResult}=record;
+        const marker=memoryRecord(context_interaction);
+        if(marker && Object.keys(marker).sort().join(',')==='effect,feedback,version' && marker.version==='asterion.prime-context-interaction/v1'
+          && ['unknown','settled'].includes(String(marker.effect)) && ['negative','ordinary'].includes(String(marker.feedback))) interaction=marker;
+        record=publicResult;visibleResult=publicResult;details=publicResult;
+      }
       // A private application proposal is not model content. Bind its admitted
       // form only after constructing the exact visible text below.
       let stateProposal: unknown;
@@ -825,7 +861,12 @@ function makeMethodTool(
         // Merely completing this callback does not establish a model cut.
         details = trusted ? {...publicResult,context_memory:envelope,
           ...(envelope.commit ? {context_memory_anchor:id} : {})} : publicResult;
+        if(trusted && envelope.version==='asterion.prime-context-memory/v3' && envelope.commit) {
+          const receipt=createContextCheckpoint(nativeContextArchive(context),id,envelope.revision!);
+          if(receipt) details={...memoryRecord(details),context_checkpoint:receipt};
+        }
       }
+      if(interaction) details={...memoryRecord(details),context_interaction:interaction};
       let text: string;
       try {
         const serialized = JSON.stringify(visibleResult);
@@ -900,7 +941,7 @@ export function recoverP7MemoryContext(controller: MemoryContextController, entr
       && !Object.hasOwn(details,"uncertain_step")
       && !["unknown","environment-result-unknown","processing-failed"].includes(String(details.stop_reason))
       && !["unknown","uncertain","rejected","cancelled","lost","processing-blocked"].includes(String(details.status));
-    controller.accept(message.toolCallId,envelope,stableSource);
+    controller.accept(message.toolCallId,envelope,stableSource,details.context_checkpoint);
   }
 }
 
@@ -954,8 +995,9 @@ export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: Conte
         const entry = memoryRecord(raw);
         return entry?.type === "message" ? [entry.message] : [];
       });
-      const stateView = projectToolStateViewContext(event.messages,branchMessages);
-      const projected = controller.project(stateView.messages);
+      const stateView = controller.primaryMode ? {messages:event.messages,outcome:{replaced_results:0,replaced_bytes:0}}
+        : projectToolStateViewContext(event.messages,branchMessages);
+      const projected = controller.project(stateView.messages,nativeContextArchive(rawContext));
       const safeOutcome = JSON.stringify({...projected.outcome,state_view:stateView.outcome});
       if ((projected.outcome.status !== "inactive" || stateView.outcome.replaced_results > 0) && safeOutcome !== lastOutcome) {
         emitMemoryDiagnostic("[prime-context-memory] " + safeOutcome);
@@ -986,10 +1028,20 @@ export function createIpythonTool(bridge: IpythonBridge) {
       input: IpythonInput,
       signal?: AbortSignal,
     ): Promise<IpythonToolResult> => {
+      if(!input || typeof input.code!=='string') throw unavailable();
       try {
-        return await bridge.execute(id, input.code, signal);
-      } catch {
-        throw unavailable();
+        const result=await bridge.execute(id,input.code,signal);
+        let metadata:Record<string,unknown>|undefined;
+        try {metadata=memoryRecord(JSON.parse(result.content[0]?.text??''));} catch {}
+        if(metadata && ['python-error','interrupted','lost'].includes(String(metadata.execution_status))
+          && typeof metadata.generation==='string' && typeof metadata.stdout==='string' && Array.isArray(metadata.kernel_exports)) {
+          return {...result,details:{...result.details,context_interaction:{version:'asterion.prime-context-interaction/v1',
+            effect:metadata.execution_status==='python-error'?'settled':'unknown',feedback:'negative'}}};
+        }
+        return result;
+      } catch(error) {
+        return {content:[{type:'text',text:unavailable().message}],isError:true,details:{context_interaction:{version:'asterion.prime-context-interaction/v1',
+          effect:memoryRecord(error)?.context_effect==='settled'?'settled':'unknown',feedback:'negative'}}};
       }
     },
   };

@@ -4739,3 +4739,11 @@
 - 658e5417: Closed the six-level trial and recorded the NOTES/context mismatch so the next design addresses actual architecture.
 
 - Task39 userauthorized normalNOTESprimary+richerrors/refutations/selectivereads implementation/review/BP35; three-layercontracts preparing, no newmodelyet.
+
+- c2b54e38: Defined normal NOTES as primary cognition with selective evidence retrieval so implementation corrects the observed history accumulation.
+
+- Task39 Pythonbindings48PASS/source-reviewpending; TSnormalnotesepochs/archive/compactionimplementationactive, no newmodeltrial.
+
+- Task39 userrequirescode-awarekernelcompaction; Pi defaulton/255616threshold, Task38below; P7customkernelnoteunwired, APIintegrationauditongoing.
+
+- Task39 withdrewmissing-compression inference; userstatesexistingreplacement, actualentry/historyaudit beforeanynewsummarymechanism; coreNOTESAPPROVE.

@@ -1,5 +1,7 @@
 /** Snapshot-only model view; Pi owns conversation history and compaction. */
+import {parseContextCheckpoint,primaryContextHistory,type ContextCheckpointReceipt,type NativeContextArchive} from './context-archive.js';
 export const CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v2";
+export const PRIMARY_CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v3";
 const LEGACY_VERSION = "asterion.prime-context-memory/v1";
 const SNAPSHOT_BYTE_CAP = 128 * 1024;
 const REVISION = /^sha256:[0-9a-f]{64}$(?![\s\S])/;
@@ -8,7 +10,7 @@ const CUSTOM_TYPE = "asterion_context_memory";
 
 type RecordValue = Record<string, unknown>;
 export interface MemoryEnvelope {
-  readonly version: typeof CONTEXT_MEMORY_VERSION | typeof LEGACY_VERSION;
+  readonly version: typeof CONTEXT_MEMORY_VERSION | typeof LEGACY_VERSION | typeof PRIMARY_CONTEXT_MEMORY_VERSION;
   readonly revision: string | null;
   readonly content: string;
   readonly commit: boolean;
@@ -29,7 +31,9 @@ interface MemoryMessage {
   timestamp: number;
 }
 export interface MemoryProjectionOutcome {
-  readonly status: "inactive" | "retained" | "unsafe-boundary";
+  readonly status: "inactive" | "retained" | "unsafe-boundary" | "primary" | "primary-unavailable";
+  readonly retired_complete_groups?: number;
+  readonly protected_complete_groups?: number;
   readonly removed_messages: number;
   readonly retained_messages: number;
   readonly history_bytes: number | null;
@@ -49,15 +53,15 @@ export function memoryRecord(value: unknown): RecordValue | undefined {
 export function parseMemoryEnvelope(value: unknown): MemoryEnvelope | undefined {
   const record = memoryRecord(value);
   if (!record || Object.keys(record).sort().join(",") !== "commit,content,revision,version"
-    || (record.version !== CONTEXT_MEMORY_VERSION && record.version !== LEGACY_VERSION)
+    || ![CONTEXT_MEMORY_VERSION,LEGACY_VERSION,PRIMARY_CONTEXT_MEMORY_VERSION].includes(String(record.version))
     || typeof record.commit !== "boolean"
     || (record.revision === null
-      ? record.version !== CONTEXT_MEMORY_VERSION || record.commit
+      ? record.version === LEGACY_VERSION || record.commit
       : typeof record.revision !== "string" || !REVISION.test(record.revision))
     || typeof record.content !== "string" || !record.content.trim()
     || Buffer.byteLength(record.content,"utf8") > SNAPSHOT_BYTE_CAP
     || Buffer.from(record.content,"utf8").toString("utf8") !== record.content) return undefined;
-  return {version:record.version,revision:record.revision as string | null,content:record.content,commit:record.commit};
+  return {version:record.version as MemoryEnvelope['version'],revision:record.revision as string | null,content:record.content,commit:record.commit};
 }
 
 function synthetic(value: unknown): boolean {
@@ -190,27 +194,53 @@ export function projectMemoryContext<T>(messages: readonly T[], checkpoint?: Mem
 /** Only native trusted application results may admit snapshots. */
 export class MemoryContextController {
   #checkpoint: MemoryCheckpoint | undefined;
+  #epoch: {receipt:ContextCheckpointReceipt|undefined; checkpoint:MemoryCheckpoint} | undefined;
+  #primaryMode = false;
 
-  accept(toolCallId: string, value: unknown, stableSource = true): boolean {
+  get primaryMode(): boolean {return this.#primaryMode;}
+
+  accept(toolCallId: string, value: unknown, stableSource = true, receipt?:unknown): boolean {
     const envelope = parseMemoryEnvelope(value);
     if (!envelope || !CALL_ID.test(toolCallId)) return false;
+    this.#primaryMode ||= envelope.version===PRIMARY_CONTEXT_MEMORY_VERSION;
     if (envelope.commit) {
       this.#checkpoint = {revision:envelope.revision,anchorToolCallId:toolCallId,stateToolCallId:stableSource ? toolCallId : undefined,content:envelope.content};
+      this.#epoch = envelope.version===PRIMARY_CONTEXT_MEMORY_VERSION
+        ? {receipt:stableSource ? parseContextCheckpoint(receipt) : undefined,checkpoint:this.#checkpoint} : undefined;
       return true;
     }
+    // The admitted note's as-of baseline stays immutable throughout its epoch.
+    // Fresh state and uncertain results remain in subsequent native interactions.
+    if(this.#epoch) return true;
+    if(envelope.version===PRIMARY_CONTEXT_MEMORY_VERSION && envelope.revision===null) return true;
     if (!this.#checkpoint) {
-      if (envelope.version !== CONTEXT_MEMORY_VERSION) return false;
+      if (envelope.version === LEGACY_VERSION) return false;
       this.#checkpoint = {revision:envelope.revision,stateToolCallId:stableSource ? toolCallId : undefined,content:envelope.content};
       return true;
     }
     // V2 is an authoritative current-state snapshot and can repair a withheld
     // note acknowledgement. V1 retains its original revision-bound refresh rule.
-    if (envelope.version !== CONTEXT_MEMORY_VERSION && this.#checkpoint.revision !== envelope.revision) return false;
+    if (envelope.version === LEGACY_VERSION && this.#checkpoint.revision !== envelope.revision) return false;
     this.#checkpoint = {...this.#checkpoint,revision:envelope.revision,stateToolCallId:stableSource ? toolCallId : undefined,content:envelope.content};
     return true;
   }
 
-  project<T>(messages: readonly T[]): MemoryProjection<T> {
+  project<T>(messages: readonly T[],archive?:NativeContextArchive): MemoryProjection<T> {
+    if(this.#epoch) {
+      const {checkpoint,receipt}=this.#epoch;
+      const selected=receipt && receipt.source_tool_call_id===checkpoint.anchorToolCallId && receipt.notes_revision===checkpoint.revision
+        ? primaryContextHistory(messages,archive,receipt) : undefined;
+      if(!selected) {
+        const fallback=projectMemoryContext(messages,checkpoint);
+        return {...fallback,outcome:{...fallback.outcome,status:'primary-unavailable'}};
+      }
+      const memory:MemoryMessage={role:'custom',customType:CUSTOM_TYPE,content:checkpoint.content+'\n\n'+selected.catalog,display:false,timestamp:0};
+      const projected=[...selected.messages] as Array<T|MemoryMessage>;
+      projected.splice(selected.insertion,0,memory);
+      return {messages:projected,outcome:{status:'primary',removed_messages:Math.max(0,messages.length-selected.messages.length),
+        retained_messages:selected.messages.length,history_bytes:historyBytes(messages),retained_history_bytes:historyBytes(selected.messages),
+        snapshot_bytes:Buffer.byteLength(memory.content,'utf8'),retired_complete_groups:selected.retired,protected_complete_groups:selected.protectedGroups}};
+    }
     return projectMemoryContext(messages,this.#checkpoint);
   }
 }

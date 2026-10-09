@@ -484,7 +484,37 @@ class P7ResearchRuntime:
         state_view = self._tool_state_view(method, projected)
         if state_view is not None:
             projected['tool_state_view'] = state_view
+        if (getattr(self.solver, 'learner_profile', None) == 'autonomous'
+                and not (method == 'workspace' and request.get('op') in {
+                    'context_archive_list', 'context_archive_read'})):
+            # Private adapter facts: native Prime binds these to the real tool
+            # group and removes them from model text. No Pi cursor is invented.
+            projected['context_interaction'] = self._context_interaction(result, current)
         return projected
+
+    @staticmethod
+    def _context_interaction(result, context):
+        """Describe settled evidence, without interpreting game meaning or text."""
+        unknown = (not isinstance(context, Mapping)
+                   or any(type(context.get(key)) is not bool or context[key]
+                          for key in ('environment_result_unknown', 'processing_blocked'))
+                   or any(result.get(key) is True
+                          for key in ('environment_result_unknown', 'processing_blocked'))
+                   or 'uncertain_step' in result
+                   or result.get('stop_reason') in {'unknown', 'environment-result-unknown'})
+        negative = (result.get('status') == 'rejected'
+                    or result.get('stop_reason') in {
+                        'prediction-mismatch', 'precondition-mismatch', 'processing-failed'})
+        feedback = result.get('feedback')
+        preconditions = result.get('precondition_feedback')
+        negative = negative or any(
+            isinstance(row, Mapping) and isinstance(row.get('differences'), list)
+            and bool(row['differences']) for row in (feedback if type(feedback) is list else ())
+        ) or any(isinstance(row, Mapping) and row.get('status') == 'mismatch'
+                 for row in (preconditions if type(preconditions) is list else ()))
+        return {'version': 'asterion.prime-context-interaction/v1',
+                'effect': 'unknown' if unknown else 'settled',
+                'feedback': 'negative' if negative else 'ordinary'}
 
     @staticmethod
     def _tool_state_view(method, projected):
@@ -541,6 +571,16 @@ class P7ResearchRuntime:
             return None
         try:
             context = self.actor_context() if context is None else project_actor_context(context)
+            autonomous = context.get('learner_profile') == 'autonomous'
+            if autonomous:
+                # Complete workspace/model/history stay readable on demand.
+                # The working baseline carries current facts, not legacy model
+                # structures or an execution-log substitute for the notes.
+                fields = {'workspace_revision', 'notes', 'notes_current', 'notes_boundary',
+                          'learner_profile', 'observation', 'observation_ref', 'budget',
+                          'lifecycle', 'environment_result_unknown', 'processing_blocked',
+                          'checkpoint'}
+                context = {key: value for key, value in context.items() if key in fields}
             notes = context.get('notes')
             if commit and notes is None:
                 return None
@@ -548,7 +588,8 @@ class P7ResearchRuntime:
                 context, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
             if len(content.encode('utf-8')) > 128 * 1024:
                 return None
-            return {'version': 'asterion.prime-context-memory/v2',
+            return {'version': ('asterion.prime-context-memory/v3' if autonomous
+                                else 'asterion.prime-context-memory/v2'),
                     'revision': None if notes is None else notes['revision'], 'content': content, 'commit': commit}
         except (ValueError, TypeError, KeyError, OSError):
             # A failed view refresh cannot change the committed note or hide an

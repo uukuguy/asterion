@@ -44,9 +44,9 @@ interface ExtensionAPI {
 
 const registeredTool: ToolDefinition<
   typeof IPYTHON_PARAMETERS,
-  Record<string, never>
+  Record<string, unknown>
 > = createIpythonTool(bridge);
-const registeredResult: AgentToolResult<Record<string, never>> =
+const registeredResult: AgentToolResult<Record<string, unknown>> =
   {} as IpythonToolResult;
 const extensionFactory: (pi: ExtensionAPI) => void = register;
 const workspaceRead: Static<typeof P7_WORKSPACE_PARAMETERS> = { op: "read" };

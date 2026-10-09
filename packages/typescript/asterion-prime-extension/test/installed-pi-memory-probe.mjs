@@ -174,6 +174,75 @@ const otherView=await otherRunner.emitContext(otherSource);
 assert.deepEqual(otherView,otherSource);
 assert.doesNotMatch(JSON.stringify(otherView),/CURRENT_CHAPTER_5_BOARD/);
 assert.deepEqual(session.getBranch(),rawBefore);
+// Normal NOTES v3 through the installed native tool wrapper and selected-session archive.
+const primaryRuntime=native.createExtensionRuntime();
+const primaryFactory=await loadExtensionFromFactory(pi=>{
+  registerP7MemoryContext(pi);
+  for(const tool of createAppLevelTools({callMethod:async(id,method,params)=>{
+    const commit=method==="workspace" && params.op==="notes";
+    return {status:commit?"noted":"recorded",...(commit?{notes_revision:revision}:{}),
+      environment_result_unknown:false,processing_blocked:false,actual_feedback:"ACTUAL_"+id,
+      context_interaction:{version:"asterion.prime-context-interaction/v1",effect:"settled",feedback:"ordinary"},
+      context_memory:{version:"asterion.prime-context-memory/v3",revision,commit,content:commit?"PRIMARY_TASK_AND_NOTES_AS_OF_BOARD":"NEW_STATE_PROPOSAL"}};
+  }})) pi.registerTool(tool);
+},process.cwd(),native.createEventBus(),primaryRuntime,"<asterion-primary-probe>");
+const primarySession=native.SessionManager.inMemory(process.cwd());
+primarySession.appendMessage({role:"system",content:"NATIVE_PRIMARY_SYSTEM",toolsAdded:[{name:"p7_workspace",description:"workspace",parameters:{type:"object"}}],timestamp:0});
+primarySession.appendMessage(user("PRIMARY_EXACT_USER_CONSTRAINT"));
+for(let index=0;index<7;index++) {
+  const id="old-primary-"+index;
+  primarySession.appendMessage(assistant(call(id,"p7_execute_plan")));
+  primarySession.appendMessage(toolResult(id,"p7_execute_plan",{content:[{type:"text",text:"PRIMARY_RAW_"+index}],details:{}}));
+}
+const primaryRunner=new native.ExtensionRunner([primaryFactory],primaryRuntime,process.cwd(),primarySession,{});
+const primaryErrors=[];primaryRunner.onError(error=>primaryErrors.push(error));
+const primaryWorkspace=native.wrapRegisteredTool(primaryFactory.tools.get("p7_workspace"),primaryRunner);
+const noteRequest={op:"notes",base_revision:revision,observation_ref:minimal.start,text:"Corrected useful findings"};
+const primaryNoteCall=call("primary-note","p7_workspace",noteRequest);
+primarySession.appendMessage(assistant(primaryNoteCall,call("primary-sibling","ipython",{code:"2+2"})));
+const primaryNote=await primaryWorkspace.execute(primaryNoteCall.id,ai.validateToolArguments(primaryWorkspace,primaryNoteCall));
+assert.equal(primaryNote.details.context_memory.version,"asterion.prime-context-memory/v3");
+assert.equal(primaryNote.details.context_checkpoint.version,"asterion.prime-context-checkpoint/v1");
+assert.doesNotMatch(primaryNote.content[0].text,/context_interaction|context_memory/);
+primarySession.appendMessage(toolResult(primaryNoteCall.id,primaryNoteCall.name,primaryNote));
+primarySession.appendMessage(toolResult("primary-sibling","ipython",{content:[{type:"text",text:"4"}],details:{}}));
+let primaryView=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.doesNotMatch(JSON.stringify(primaryView),/PRIMARY_RAW_0|PRIMARY_RAW_4/);
+assert.match(JSON.stringify(primaryView),/PRIMARY_RAW_5|PRIMARY_RAW_6|PRIMARY_EXACT_USER_CONSTRAINT|PRIMARY_TASK_AND_NOTES/);
+assert.equal(primaryView.filter(message=>message.role==="system").length,1);
+const nativeListCall=call("primary-list","p7_workspace",{op:"context_archive_list",limit:32});
+primarySession.appendMessage(assistant(nativeListCall));
+const nativeList=await primaryWorkspace.execute(nativeListCall.id,ai.validateToolArguments(primaryWorkspace,nativeListCall));
+const listing=JSON.parse(nativeList.content[0].text);
+assert.equal(listing.status,"ok");
+const oldRef=listing.items.find(item=>item.role==="toolResult").ref;
+primarySession.appendMessage(toolResult(nativeListCall.id,nativeListCall.name,nativeList));
+const nativeReadCall=call("primary-read","p7_workspace",{op:"context_archive_read",ref:oldRef,limit:16384});
+primarySession.appendMessage(assistant(nativeReadCall));
+const nativeRead=await primaryWorkspace.execute(nativeReadCall.id,ai.validateToolArguments(primaryWorkspace,nativeReadCall));
+assert.match(JSON.parse(nativeRead.content[0].text).text,/PRIMARY_RAW_0/);
+primarySession.appendMessage(toolResult(nativeReadCall.id,nativeReadCall.name,nativeRead));
+primaryView=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+const epochProviderInput=providerInput(primaryView);
+const primaryPlanTool=native.wrapRegisteredTool(primaryFactory.tools.get("p7_execute_plan"),primaryRunner);
+const advancingCall=call("primary-advance","p7_execute_plan",minimal);
+primarySession.appendMessage(assistant(advancingCall));
+const advancing=await primaryPlanTool.execute(advancingCall.id,ai.validateToolArguments(primaryPlanTool,advancingCall));
+primarySession.appendMessage(toolResult(advancingCall.id,advancingCall.name,advancing));
+const advancingView=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.deepEqual(providerInput(advancingView).slice(0,epochProviderInput.length),epochProviderInput);
+assert.doesNotMatch(JSON.stringify(providerInput(advancingView)),/NEW_STATE_PROPOSAL/);
+const beforePrimaryCompaction=primarySession.getBranch();
+primarySession.appendCompaction("MIXED_NATIVE_PRIOR_RESEARCH",beforePrimaryCompaction.at(-1).id,100);
+const compactedPrimary=primarySession.buildSessionContext().messages;
+const rebuiltPrimary=await primaryRunner.emitContext(compactedPrimary);
+assert.doesNotMatch(JSON.stringify(rebuiltPrimary),/MIXED_NATIVE_PRIOR_RESEARCH/);
+assert.match(JSON.stringify(rebuiltPrimary),/PRIMARY_EXACT_USER_CONSTRAINT|PRIMARY_TASK_AND_NOTES|ACTUAL_primary-advance|primary-sibling/);
+const reloadedPrimarySession=native.SessionManager.inMemory(process.cwd(),undefined,
+  JSON.parse(JSON.stringify([primarySession.getHeader(),...primarySession.getEntries()])));
+const reloadedPrimaryRunner=new native.ExtensionRunner([primaryFactory],primaryRuntime,process.cwd(),reloadedPrimarySession,{});
+assert.deepEqual(await reloadedPrimaryRunner.emitContext(reloadedPrimarySession.buildSessionContext().messages),rebuiltPrimary);
+assert.deepEqual(primaryErrors,[]);
 const manifest = JSON.parse(readFileSync(resolve(packageRoot,"package.json"),"utf8"));
 console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest.version,provider_calls:0,
   raw_messages:source.length,model_messages:modelView.length,state_before_notes:true,minimal_plan_validated:true,
@@ -182,4 +251,4 @@ console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest
   complete_sibling_group:true,system_and_tools_preserved:true,raw_branch_unchanged:true,restart_after_compaction:true,
   snapshot_after_state_group:true,snapshot_fixed_across_computation:true,
   actual_provider_event_numeric_observation:true,actual_provider_input_append_prefix:true,snapshot_native_user_conversion:true,selected_branch_isolated:true,
-  final_extension_view_numeric_telemetry:true}));
+  normal_notes_v3_primary:true,native_archive_read:true,primary_actual_plan_append_prefix:true,primary_compaction_reload:true,final_extension_view_numeric_telemetry:true}));

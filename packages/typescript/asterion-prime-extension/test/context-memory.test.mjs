@@ -522,3 +522,158 @@ test("notes reads after unknown actions retain current uncertainty and never re-
   assert.deepEqual(projected.messages.slice(0,-1),source);assert.deepEqual(source,original);
   assert.equal(notes.details.environment_result_unknown,true);assert.equal(notes.details.processing_blocked,true);
 });
+
+const primaryEnvelope = (content="TASK\nNOTES: corrected mechanism and next route",commit=true) => envelope(commit,revision,content,"asterion.prime-context-memory/v3");
+const primaryFixture = () => {
+  const messages=[user("EXACT_USER_CONSTRAINT"),...Array.from({length:7},(_,index)=>[
+    {...assistant("prior-"+index),content:[{type:"text",text:"research "+index},...assistant("prior-"+index).content]},
+    result("prior-"+index,"FULL_EVIDENCE_"+index)
+  ]).flat(),{...assistant("note","note-sibling"),content:assistant("note","note-sibling").content.map(c=>({...c,name:"p7_workspace"}))},
+  {...result("note"),toolName:"p7_workspace",details:{status:"noted",notes_revision:revision,context_memory:primaryEnvelope(),context_memory_anchor:"note"}},
+  {...result("note-sibling"),toolName:"p7_workspace"}];
+  const entries=messages.map((message,index)=>({type:"message",id:"entry-"+index,parentId:index?"entry-"+(index-1):null,message}));
+  const manager={getSessionId:()=>"selected-session",getBranch:()=>entries};
+  return {messages,entries,manager};
+};
+const admitPrimary = fixture => {
+  const archive=extension.nativeContextArchive({sessionManager:fixture.manager});
+  const receipt=extension.createContextCheckpoint(archive,"note",revision);
+  fixture.entries.find(entry=>entry.message.toolCallId==="note").message.details.context_checkpoint=receipt;
+  const controller=new extension.MemoryContextController();
+  assert.equal(controller.accept("note",primaryEnvelope(),true,receipt),true);
+  return {archive,receipt,controller};
+};
+
+test("normal v3 notes establish a primary epoch with exact readable complete-group retirement",()=>{
+  assert.equal(typeof extension.nativeContextArchive,"function");
+  const fixture=primaryFixture(), original=structuredClone(fixture.messages);
+  const {controller,archive}=admitPrimary(fixture);
+  const view=controller.project(fixture.messages,archive);
+  assert.equal(view.outcome.status,"primary");
+  assert.equal(view.outcome.retired_complete_groups,5);
+  assert.match(JSON.stringify(view.messages),/EXACT_USER_CONSTRAINT|FULL_EVIDENCE_5|FULL_EVIDENCE_6|note-sibling/);
+  assert.doesNotMatch(JSON.stringify(view.messages),/FULL_EVIDENCE_0|FULL_EVIDENCE_4/);
+  assert.match(snapshotOf(view).content,/context_archive_read|selected-session/);
+  assert.deepEqual(fixture.messages.map(message=>message.content),original.map(message=>message.content));
+  const directory=extension.contextArchiveOperation(archive,{op:"context_archive_list",start:0,limit:32});
+  const item=directory.items.find(item=>item.ref.entry_id==="entry-2");
+  const full=extension.contextArchiveOperation(archive,{op:"context_archive_read",ref:item.ref,start:0,limit:16384});
+  assert.match(full.text,/FULL_EVIDENCE_0/);
+});
+
+test("primary epoch pins recent structured errors all unknown groups and native user constraints",()=>{
+  assert.equal(typeof extension.nativeContextArchive,"function");
+  const fixture=primaryFixture();
+  fixture.entries.find(entry=>entry.message.toolCallId==="prior-1").message.details={context_interaction:{version:"asterion.prime-context-interaction/v1",effect:"unknown",feedback:"ordinary"}};
+  fixture.entries.find(entry=>entry.message.toolCallId==="prior-2").message.details={context_interaction:{version:"asterion.prime-context-interaction/v1",effect:"settled",feedback:"negative"}};
+  const {controller,archive}=admitPrimary(fixture);
+  const view=controller.project(fixture.messages,archive);
+  assert.equal(view.outcome.status,"primary");
+  assert.match(JSON.stringify(view.messages),/FULL_EVIDENCE_1|FULL_EVIDENCE_2|EXACT_USER_CONSTRAINT/);
+  assert.doesNotMatch(JSON.stringify(view.messages),/FULL_EVIDENCE_0|FULL_EVIDENCE_3|FULL_EVIDENCE_4/);
+  const calls=view.messages.flatMap(message=>message.role==="assistant"?message.content.filter(block=>block.type==="toolCall").map(block=>block.id):[]);
+  assert.deepEqual(calls,view.messages.filter(message=>message.role==="toolResult").map(message=>message.toolCallId));
+});
+
+test("primary retirement waits for notes siblings and rejects foreign or unreadable lineage",()=>{
+  assert.equal(typeof extension.nativeContextArchive,"function");
+  for(const mode of ["pending","foreign","unreadable"]) {
+    const fixture=primaryFixture(),{controller,archive}=admitPrimary(fixture);
+    if(mode==="pending") {fixture.messages.pop();fixture.entries.pop();}
+    if(mode==="foreign") archive.sessionId="other-session";
+    if(mode==="unreadable") fixture.entries[2].message.content=[{type:"unrecognized-private-block",secret:"SECRET"}];
+    const view=controller.project(fixture.messages,archive);
+    assert.equal(view.outcome.status,"primary-unavailable",mode);
+    assert.deepEqual(view.messages.filter(message=>message.customType!=="asterion_context_memory"),fixture.messages);
+    assert.match(snapshotOf(view).content,/NOTES: corrected/);
+  }
+});
+
+test("epoch appends actual feedback and ignores current snapshot migration until new notes",()=>{
+  assert.equal(typeof extension.nativeContextArchive,"function");
+  const fixture=primaryFixture(),{controller,archive}=admitPrimary(fixture);
+  const first=controller.project(fixture.messages,archive).messages;
+  const appended=[assistant("new-plan"),result("new-plan","CURRENT_BOARD_AND_TRUE_FEEDBACK")];
+  for(const message of appended) fixture.entries.push({type:"message",id:"entry-"+fixture.entries.length,parentId:fixture.entries.at(-1).id,message});
+  controller.accept("new-plan",primaryEnvelope("MIGRATING_NEW_BOARD",false));
+  const next=controller.project([...fixture.messages,...appended],archive).messages;
+  assert.deepEqual(next.slice(0,first.length),first);
+  assert.deepEqual(next.slice(first.length),appended);
+  assert.doesNotMatch(JSON.stringify(next),/MIGRATING_NEW_BOARD/);
+});
+
+test("archive pages expose actor text calls and errors without private or hidden model fields",()=>{
+  assert.equal(typeof extension.nativeContextArchive,"function");
+  const fixture=primaryFixture();
+  fixture.entries[1].message.content.unshift({type:"thinking",thinking:"HIDDEN_THOUGHT",thinkingSignature:"PROVIDER_SECRET"});
+  fixture.entries[2].message.details={path:"PRIVATE_PATH",authorization:"HEADER_SECRET"};
+  fixture.entries[2].message.isError=true;
+  const archive=extension.nativeContextArchive({sessionManager:fixture.manager});
+  const dir=extension.contextArchiveOperation(archive,{op:"context_archive_list",limit:32});
+  for(const item of dir.items) {
+    const page=extension.contextArchiveOperation(archive,{op:"context_archive_read",ref:item.ref,limit:16384});
+    assert.doesNotMatch(page.text,/HIDDEN_THOUGHT|PROVIDER_SECRET|PRIVATE_PATH|HEADER_SECRET/);
+  }
+  const page=extension.contextArchiveOperation(archive,{op:"context_archive_read",ref:{session_id:"selected-session",entry_id:"entry-2"},limit:16384});
+  assert.equal(JSON.parse(page.text).isError,true);
+  assert.equal(extension.contextArchiveOperation(archive,{op:"context_archive_read",ref:{session_id:"other-session",entry_id:"entry-2"}}).status,"rejected");
+});
+
+test("native compaction rebuilds only epoch protected evidence with complete notes siblings",()=>{
+  const fixture=primaryFixture(),{controller,archive}=admitPrimary(fixture);
+  const last=fixture.entries.at(-1);
+  fixture.entries.push({type:"compaction",id:"compaction",parentId:last.id,firstKeptEntryId:last.id,summary:"MIXED_OLD_RESEARCH_SUMMARY"});
+  const compacted=[{role:"compactionSummary",summary:"MIXED_OLD_RESEARCH_SUMMARY"}];
+  const view=controller.project(compacted,archive);
+  assert.equal(view.outcome.status,"primary");
+  assert.match(JSON.stringify(view.messages),/EXACT_USER_CONSTRAINT|FULL_EVIDENCE_5|FULL_EVIDENCE_6|note-sibling/);
+  assert.doesNotMatch(JSON.stringify(view.messages),/MIXED_OLD_RESEARCH_SUMMARY|FULL_EVIDENCE_0/);
+  assert.equal(view.messages.filter(message=>message.toolCallId==="note-sibling").length,1);
+  assert.equal(view.messages.filter(message=>message.role==="assistant" && message.content.some(block=>block.id==="note-sibling")).length,1);
+  // A summary not bound to this raw lineage cannot authorize retirement/rebuild.
+  const unbound=controller.project([{role:"compactionSummary",summary:"FOREIGN_SUMMARY"}],archive);
+  assert.equal(unbound.outcome.status,"primary-unavailable");
+  assert.match(JSON.stringify(unbound.messages),/FOREIGN_SUMMARY/);
+});
+
+test("existing workspace native archive route returns paged evidence without bridge dispatch",async()=>{
+  const fixture=primaryFixture();let dispatches=0;
+  const workspace=extension.createAppLevelTools({callMethod:async()=>{dispatches++;return {};}}).find(tool=>tool.name==="p7_workspace");
+  const context={sessionManager:fixture.manager};
+  const response=await workspace.execute("list-native",{op:"context_archive_list",limit:32},undefined,undefined,context);
+  const listing=JSON.parse(response.content[0].text);
+  assert.equal(listing.status,"ok");
+  const ref=listing.items[2].ref;
+  const first=JSON.parse((await workspace.execute("read-native",{op:"context_archive_read",ref,limit:7},undefined,undefined,context)).content[0].text);
+  assert.equal(first.text.length,7);
+  let full=first.text,next=first.next_start;
+  while(next!==null) {const page=JSON.parse((await workspace.execute("read-native",{op:"context_archive_read",ref,start:next,limit:7},undefined,undefined,context)).content[0].text);full+=page.text;next=page.next_start;}
+  assert.match(full,/FULL_EVIDENCE_0/);
+  assert.equal(dispatches,0);
+  assert.equal(Check(extension.P7_WORKSPACE_PARAMETERS,{op:"context_archive_read",ref,limit:16384}),true);
+  assert.equal(Check(extension.P7_WORKSPACE_PARAMETERS,{op:"context_archive_read",ref,limit:16385}),false);
+});
+
+test("primary retirement preserves native system constraints and archives superseded standalone prose",()=>{
+  const fixture=primaryFixture();
+  fixture.messages.unshift({role:"system",content:"EXACT_NATIVE_SYSTEM",toolsAdded:[{name:"document_note"}],timestamp:0});
+  fixture.messages.splice(4,0,{role:"assistant",content:[{type:"text",text:"SUPERSEDED_LONG_PROSE"}],stopReason:"stop",timestamp:2});
+  fixture.entries.splice(0,fixture.entries.length,...fixture.messages.map((message,index)=>({type:"message",id:"entry-"+index,parentId:index?"entry-"+(index-1):null,message})));
+  const {controller,archive}=admitPrimary(fixture),view=controller.project(fixture.messages,archive);
+  assert.equal(view.outcome.status,"primary");
+  assert.deepEqual(view.messages.find(message=>message.role==="system"),fixture.messages[0]);
+  assert.doesNotMatch(JSON.stringify(view.messages),/SUPERSEDED_LONG_PROSE/);
+});
+
+test("trusted IPython error metadata and transport unknown receipts protect original computations",async()=>{
+  for(const execution_status of ["python-error","interrupted","lost"]) {
+    const tool=extension.createIpythonTool({execute:async()=>({content:[{type:"text",text:JSON.stringify({execution_status,generation:"g1",stdout:"not a marker",kernel_exports:[]})}],details:{}})});
+    const result=await tool.execute("error-cell",{code:"raise ValueError()"});
+    assert.deepEqual(result.details.context_interaction,{version:"asterion.prime-context-interaction/v1",effect:execution_status==="python-error"?"settled":"unknown",feedback:"negative"});
+  }
+  const tool=extension.createIpythonTool({execute:async()=>{throw new Error("PRIVATE_HOST_PATH");}});
+  const result=await tool.execute("uncertain-cell",{code:"mutate()"}).catch(()=>({missing_receipt:true}));
+  assert.equal(result.isError,true);
+  assert.equal(result.details.context_interaction.effect,"unknown");
+  assert.doesNotMatch(JSON.stringify(result),/PRIVATE_HOST_PATH/);
+});

@@ -428,6 +428,11 @@ class Solver:
                 if type(value) is not dict or "op" not in value:
                     raise ValueError
                 op = value["op"]
+                if op in {'context_archive_list', 'context_archive_read'}:
+                    # Native session entries exist only in the selected Pi
+                    # adapter. Direct Python RPC cannot discover other sessions
+                    # or synthesize their cursors; this path has no side effects.
+                    return {'status': 'rejected', 'reason': 'native-session-required'}
                 if op == "read" and set(value) <= {"op", "revision"}:
                     current = self.current_context()
                     if "revision" in value:
