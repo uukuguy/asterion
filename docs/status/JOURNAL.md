@@ -4548,3 +4548,15 @@
 2026-10-09 — b575eb2f recorded independently audited Task26 deployment evidence and recovery boundary; BP35 performance remains unverified.
 
 2026-10-09 — User authorized Task27 fresh BP35 L1–L6 to evaluate context layout and passive research mechanisms.
+
+2026-10-09 — b6d9f6b0 recorded Task27 authorized cold comparison controls and recovery state before launch.
+
+2026-10-09 — Task27 BP35 ACTIVE09:25:24Z/Solmedium; exact installation verified, original absolute deadline preserved after preexecution repair.
+
+2026-10-09 — User caught L2 observer scoring error; cumulative paid49 yields95.959, production scoring unchanged and correct.
+
+2026-10-09 — Exact Decimal recalculation corrects L2 score to95.960016659725; previous95.959 shorthand was inaccurate.
+
+2026-10-09 — Task27 reached L6 with203paid/one deathRESET/1644.981503s; final independent evidence audit pending.
+
+2026-10-09 — Task27 independent1824-entry audit READY; cache regression and visible-risk-cue omission recorded without causal overclaim.
