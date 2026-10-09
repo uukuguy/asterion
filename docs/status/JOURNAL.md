@@ -4544,3 +4544,7 @@
 2026-10-09 — Finala919b496 fullpromotion PASS25/provider0; rootGO issued once for packaged fresh r11lL1 witness900+180.
 
 2026-10-09 — Task26 packagedr11lL1 ACTIVE09:11:34Z/sourcea919b496/Solmedium, one900+180 bounded witness, noBP35.
+
+2026-10-09 — b575eb2f recorded independently audited Task26 deployment evidence and recovery boundary; BP35 performance remains unverified.
+
+2026-10-09 — User authorized Task27 fresh BP35 L1–L6 to evaluate context layout and passive research mechanisms.

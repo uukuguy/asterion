@@ -235,3 +235,10 @@ Architecture: Prime owns opaque latest-state placement, numerical context accoun
 Ownership: context_impl owns TS source/tests; chain_impl owns generic/P7 chain Python modules/tests; root owns metrics-file Python, operator integration, bundled resource and docs; review is read-only. Workers do not revert one another. No protocol/manifest/tool registration changes.
 
 Task26 final: sourcea919b496, promotion25PASS/provider0, fresh packagedr11lL1 fivepaid/zero deathRESET/79.490224s. Context8samples/86309Bpeak, chain7records including1acceptedNOTES (postgoal). Fullreplay/source569/install587/seal/cleanup verified; independent final manifest audit recorded in canonical comparison. No BP35 performance claim or new BP35 launch.
+
+
+## Task27 — Latest context layout and passive research BP35 cold evaluation
+
+User explicitly authorizes “开始实测”. One fresh BP35 L1–L6 using unchanged productiona919b496 and operator-owned.env model/effort. Deployment owner installs exact matching wheel and confirms resource/allowlist/runtime identity before launch; prior Task26 fullpromotion and r11l verification stand, no redundant provider trial. Original finite5400seconds plus180cleanup, sixlevels/1000paid/1024model/4096tool; no deadline renewal, inherited NOTES/routes, external solve hints or midrun source edits. Preserve user console52024/56659.
+
+Track each level paid/successful actions, official capped score, death RESET, launch→goal time, chronological normalized input and extension-hook byte composition. Compare Task25 206paid/2RESET/1764.232393s and best17minute 221paid/2RESET/1023.279883s; successful steps below115 cap are not extra benefit. Macrochain separates actual model statements/program/action evidence; death assessment uses information available beforehand. Single-run differences do not prove caching causality or stable death-rate improvement. Private root `.asterion-private/p7-task27-context-sol-medium-bp35-20261009/trial/`; launch identifiers pending owner.

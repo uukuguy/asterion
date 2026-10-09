@@ -20,6 +20,10 @@ Evidence `.asterion-private/p7-task26-witness-20261009/trial/`; final manifest98
 
 Next unresolved evaluation is a controlled cold BP35 comparison of elapsed time, capped official score, paid actions/death RESET and chronological input/context composition, using the prior baselines. Cache benefit, stable efficiency, avoidable-death reduction and cross-domain capability remain unverified; do not infer them from r11l or unit tests.
 
+## Task27 active evaluation preparation
+
+User authorizes one new BP35 L1–L6 cold evaluation (“开始实测”). Productiona919b496 unchanged; docsheadb575eb2f. Deployment owner prepares fresh exact installation and operator.env identity, then launches existing5400+180 finite preset with6levels/1000paid/1024model/4096tool. No inherited knowledge, outside hints, source changes or deadline extension. No repeat promotion/r11l needed. Track per-level score/paid/success/RESET/time and new chronological context metrics plus normalized input. Trial `.asterion-private/p7-task27-context-sol-medium-bp35-20261009/trial/`; actual launch/run/unit/PIDs/deadline pending. Preserve console52024/56659.
+
 ## Verified facts
 
 - Prime positioning: autonomous long-horizon, open-ended, falsifiable computational research for work requiring substantial human effort; generic infrastructure + domain research + domain data. Output is an externalized, human-understandable, machine-verifiable, evidence-traceable and replayable research record. Cross-domain capability is a target, not verified. README.md, README.zh-CN.md, AGENTS.md, core architecture, DECISIONS and MEMORY intent index agree.
