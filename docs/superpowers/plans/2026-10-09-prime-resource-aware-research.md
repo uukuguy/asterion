@@ -45,6 +45,8 @@ User requests direct115/100remaining steps instead of conditional score. Same sp
 
 - [x] RED→GREEN exact115/100remaining/exceeded facts; unknown/reset/threshold edges; remove conditional score.
 - [x] Synchronize smallhost projection and factual prompt; retain allresource/cap/prefix/error boundaries.
-- [ ] Independent changed-code review, focusedintegration/TS/lint/docs/diff.
-- [ ] Freeze reviewed source, fullpromotion and fresh r11lL1 original900+180; source/install/tool identities, replay/seal/cleanup and independentREADY.
-- [ ] Update state with exact verification boundary; noBP35.
+- [x] Independent changed-code review, focusedintegration/TS/lint/docs/diff.
+- [x] Freeze reviewed source, fullpromotion and fresh r11lL1 original900+180; source/install/tool identities, replay/seal/cleanup and independentREADY.
+- [x] Update state with exact verification boundary; noBP35.
+
+Task31 sourceba51c62e/48PythonPASS/79TS+6skip/APPROVE/fullpromotion25PASS/newr11l6paid0paidRESET94.471582s. Finalmanifest115entries independentREADY, state closed; actualPi fact receipt/adoption unknown, noBP35.

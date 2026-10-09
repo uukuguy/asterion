@@ -4647,3 +4647,9 @@
 - Task31 user replaces conditionalscore with direct115/100remaining/exceeded facts; domain data/research adjustment, generic Prime unchanged.
 
 - Task31 direct115/100room source reviewedAPPROVE; root48PythonPASS/79TS+6skip/lint/docs/diff; new packaged closure pending.
+
+- ba51c62e: Replaced hypothetical scores with direct115/100remaining and exceeded actions for clearer autonomous planning.
+
+- Task31 fullpromotionPASS25/provider0; fresh canonicalwheel2d412628 onepackagedr11lL1 authorizedGO, original900+180.
+
+- Task31 packagedr11l6paid/0paidRESET/Q115/94.471582s; SDK8replay/identities/cleanup/115manifest independentREADY; actualPi field adoption unknown.

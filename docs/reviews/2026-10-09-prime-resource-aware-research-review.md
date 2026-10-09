@@ -1,6 +1,6 @@
 # Task30：动态资源权衡的设计、实现与验证
 
-本轮落实用户提出的方向：策略随证据、剩余时间和动作成本变化；积极推进与保守探索由LLM自主选择。没有固定策略模式、强制推理步骤或baseline硬截止。
+Task30封存版本26250c0e落实用户提出的方向：策略随证据、剩余时间和动作成本变化；积极推进与保守探索由LLM自主选择。没有固定策略模式、强制推理步骤或baseline硬截止。
 
 ## 三层实现
 
@@ -50,4 +50,12 @@
 
 用户要求去掉条件分，直接给出115满分与baseline100的剩余步数。数据层删除条件分，新增100阈值/剩余/超额及115超额；研究层同步host小投影和prompt，Prime通用层未改。阈值相等时remaining/exceeded均0，超出时exceeded正数，未知null。实际未完成贡献、累计计费和执行硬边界保持。
 
-独立changed-code APPROVE；评分17与runtime31各RED→GREEN；root联合48tests PASS15.933秒，TS79PASS/6external skips，lint/docs/diff通过。Astra另跑最大20step/60KiB合法反馈回归PASS，新增字段不裁旧证据。新源码冻结/promotion/新的packaged见证待完成，本节不能继承Task30部署证据。
+独立changed-code APPROVE；评分17与runtime31各RED→GREEN；root联合48tests PASS15.933秒，TS79PASS/6external skips，lint/docs/diff通过。Astra另跑最大20step/60KiB合法反馈回归PASS，新增字段不裁旧证据。新源码冻结ba51c62e，完整promotion25PASS/provider0。独立fresh packaged见证结果见下，未继承Task30部署证据。
+
+### Task31 新版本打包见证
+
+新wheel 2d4126285354026be93d17f554f0d7c6f9bbc776ad697eb1cf2988640d016ba3；生产570/安装588/归档1685与ba51c62e一致，扩展a79956和三工具不变。真实installed Runtime/worker首JSON六直接评分字段验证（paid0、恰好、超额、未知null），旧条件分不存在，错误/spoof/时间同capture测试通过；provider-free。
+
+新r11l L1（同Solmedium，独立900+180）：6计费动作、0计费RESET、Q115；2setupRESET另计，目标94.471582秒，收口含清理129.638564825秒。8个SDK反馈完整回放，6事务、22trace/seal一致。目标阶段9usage input250278/output1852/peak36803；最终12usage input372244/output2517/peak41943；12context峰值135169/累计1058923字节；12prefix峰值129754字节，0identityflags；11研究记录=4compute/6experiment/1acceptedNOTES，0omitted/unknown。
+
+与Task30小关4动作/67.896532秒相比，多2动作/+26.575050秒；此为部署检查，不构成同种子独立重复策略实验，不能归因字段变化或推断BP35退步/改进。实际Pi资源正文仍未持久留存，收取/模型采用unknown；真实worker返回证据与策略效果分列。本次进程/auth/env清理，用户console保留。私有 `.asterion-private/p7-task31-witness-20261009/trial/`；独立最终部署审计READY：115manifest项bytes/SHA/fullcoverage通过，SHA6c6dbf7e6aa0c78d81767d2157178d6d9de4e3a8179719f7a07e6080ff8c4b0a。

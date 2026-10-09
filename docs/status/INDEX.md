@@ -86,6 +86,6 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - 最新实测：[2026-10-09 Task29 BP35 冷测](../reviews/2026-10-09-p7-bp35-task29-evaluation.md)：零死亡、L1得分退步、用时增加44.70%，自然软边界未触发；完整回放封存独立READY。
 
-- Task30设计实施：[动态资源权衡设计](../superpowers/specs/2026-10-09-prime-resource-aware-research-design.md)、[实现计划](../superpowers/plans/2026-10-09-prime-resource-aware-research.md)：带采样时间的宿主事实、条件评分、模型自主策略，Task30实现与打包验证完成，未做新BP35；Task31直接评分空间调整中。
+- Task30设计实施：[动态资源权衡设计](../superpowers/specs/2026-10-09-prime-resource-aware-research-design.md)、[实现计划](../superpowers/plans/2026-10-09-prime-resource-aware-research.md)：带采样时间的宿主事实、条件评分、模型自主策略，Task30实现与打包验证完成，未做新BP35；Task31直接115/100剩余与超额评分空间已实现，独立小关部署验证。
 
 - Task30实施评审：[动态资源事实实现与验证](../reviews/2026-10-09-prime-resource-aware-research-review.md)：模型自主权衡、边界修复、代码APPROVE/191tests/promotion/r11l部署独立READY；模型采用和BP35策略效果未验证。
