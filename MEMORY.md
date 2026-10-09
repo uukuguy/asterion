@@ -25,7 +25,7 @@
 | feedback | ✅ verified-active | Take a contract's key set from its producer, not from a fixture |
 | feedback | ✅ verified-active | A state-machine bug fix in one layer is not done — find every place that checks the same key set |
 | feedback | ✅ verified-active | Verify the producer side independently before assigning blame (direct RPC probe over the same wire format) |
-| project | ✅ verified-active | P7 temporarily initializes its own Pi; defer a shared Asterion Pi base until a later architecture discussion |
+| project | ✅ verified-active | Prime must own private Pi; application entry consolidation is recorded and deferred while P7 solving is studied |
 | feedback | ✅ verified-active | The "倒数第 2-3 个 hook 位置挂几十秒" pattern points at the last synchronous hook, not the first slow one |
 | feedback | ✅ verified-active | Global hook audit: keep only hooks whose project-condition (lwm JOURNAL.md / gsd .planning/config.json / adr .adr-config.yaml / rtk) actually matches the project under CLAUDE_PROJECT_DIR; verify both settings reference AND script file are gone |
 | feedback | 🔴 superseded | The 2026-07-26 claim that Pi, `.env`, and basic resources were absent |
@@ -343,11 +343,8 @@
 
 ## 🟠 Current Judgments
 
-- **2026-09-27 handoff boundary:** P7 currently initializes its own Pi from
-  operator-injected entry/profile/provider/model configuration. Pi ownership is
-  still distributed across the generic runtime, Prime session, P1/native,
-  P7, and legacy Prime-agent paths; do not consolidate these paths during the
-  current P7 work. The shared Asterion Pi base is a later architecture topic.
+- **2026-10-10 user scope:** Prime must own private Pi behind its standard application entry. User explicitly postponed broad consolidation to finish P7 NOTES/solving first. Do not copy the earlier temporary app-owned Pi setup into new applications; architecture details live in `docs/status/DECISIONS.md` D-2026-10-10-02. The user also requests a future lower-threshold P7 live test after specialized compaction is wired. Latest measured outcome and next work are in `docs/status/RESUME-NEXT-SESSION.md`.
+- User values exploratory autonomous completion without outer corrections; every level need not reach max score. Useful errors/counterexamples must inform NOTES and later decisions. Complete objective facts and visible concise action/strategy reasons are preferred over extra prescriptive workflows.
 
 - The 2026-09-22 architecture remediation is committed on `codex/review-implementation-20260922` and awaits integration into `main`. Read `docs/status/CURRENT-STATE.md` and `RESUME-NEXT-SESSION.md` for current evidence. The 2026-09-19 “7 of 7 complete” statement is historical implementation evidence, not a current end-to-end claim. Technical decisions and verification limits live in `docs/status/DECISIONS.md` and the review report.
 

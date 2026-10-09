@@ -4780,3 +4780,7 @@
 - f2e117ec: Journaled deferred compaction verification to preserve the requested future test boundary.
 
 - Task39 sealed independent READY: six levels242paid/oneRESET/1605.84s; NOTES reduces input, score/time regress;2037manifest736c1fcf.
+
+- f0760ab8: Recorded sealed BP35 comparison to distinguish proven context reduction from regressed solving quality.
+
+- 03:40 Final handoff preserves Task39 evidence, deferred compaction test and private-backend scope; owned processes cleared, console preserved.

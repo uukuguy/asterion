@@ -1,111 +1,71 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-Updated: 2026-10-10: active session checkpoint; Task39 NOTES core ready for package checks. Full Prime backend migration deferred by user. Task39 r11l sealed; fresh BP35 reached six-level goal; sealed independent READY.
+> Updated: 2026-10-10 03:40 CST. 本会话已结束；无本会话遗留实测进程。用户控制台保留。
 
-## Active Task39: NOTES-primary BP35 validation
+## 恢复摘要
 
-Actual GO issued. Run p7-live-20261009190243-2748a9d086a6d077c0aeba73, unit asterion-p7-e5b47f928d7f4344947617fe37515cb7.service, private .asterion-private/p7-task39-cold-bp35-20261010/trial. Mint2026-10-09T19:02:42.396297Z, deadline20:32:42.396297Z plus180cleanup; never renew. Owned supervisor50540/launcher50543/caffeinate50542/observer50665; preserve console52024:56659. Source2930fbd8/wheela6ad5593/resource13bfee, Solmedium/seed0/native6. No inheritednotes/routes/hints/sourceedit/19gate/L1stopper. Verify actual process/receipt before continuing; do not launch a duplicate.
+- 分支 `feat/prime-research-notes`；managed，唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39 NOTES核心实现、打包、r11l与BP35六关验证均已收口；性能结论是输入减少、解题质量回退。
+- 下一动作：先读[Task39实际评估](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)末尾，围绕L2危险停点误判、L5局部观察过早扩展成全局结论、长epoch研究组织形成具体改进设计。保持Prime通用层/P7研究层/P7数据层定位；不要直接追加泛化提醒或游戏路线提示。新方案/新付费运行尚未开始。
+- 全部Pi接入迁移与默认专用摘要由用户暂缓；先完成P7解题研究。以后接通专用摘要后，在P7中用较低阈值强制真实压缩实测，不能以离线探针替代。
 
-Completed and sealed: paid20/68/34/23/46/51=242; Q110.25/49.82698962/115/115/51.46502836/115; times148.369237/308.256073/189.407939/171.997174/496.445278/291.360703. Strictmint→goal1605.836404s, oneL2deathRESET; L5six/L6fourundo. Final127usage input4699481/output42803/peak73098/raw637785/cache4061696. NOTES16/1387B, contextpeak237717B. 244fullSDK/242knownTx/125chain/127metrics ownerPASS; cleanup1621.535325s/ownedempty/authenvgone/consolepreserved. Final2037manifest SHA736c1fcf4bc8ddc1a9c1a68005e230e2c0c0f2b0361bcc77b573b923b1bdde29 independentREADY; do not restart or resumeL7. Source unchanged.
+## 已验证事实
 
-User explicitly narrowed scope: complete broad Pi migration later; now prioritize P7 solving and NOTES/context problems. Root coordinates; context_impl TS core, deployment package/live, review independent audit. Preserve user console PID52024/port56659.
+生产实现 `2930fbd8`：普通接受的NOTES建立可信工作epoch，旧明细按引用读取，近期反馈、有效用户约束、重要错误及未知执行结果受保护，无额外模型checkpoint流程。P7研究prompt自由组织有效认识、反例、未决问题和程序引用；数据层保留实际反馈。轮包SHA `a6ad55934e4104a67ad978fd8694197c2bb9e7b0c9094208ef4963966706e863`，扩展SHA `13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b`。
 
-- Core source2930fbd8, planning8839f477. Normal NOTES establish trusted working epochs, old actor-visible details readable by reference, recent errors/user constraints/unknown effects protected. Rich cognition prompt remains P7 research responsibility. Independent core design/TS/Python APPROVE.
-- Restored exact core reverified: TS88 PASS/6external skips; actual installedPi1.0/provider0 PASS. dist/resource SHA13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b, TSsource/test/resource equal2930fbd8. Logs /tmp/asterion-task39-notes-restored-ts.log and installed.log. Three unfinished TS compaction draft files isolated in named Git stash; no new Python migration source written.
-- Review approves NOTES-only package. Native auto-compaction still uses current default summary, highthreshold unchanged. If actual compaction occurs, current rawlineage recovery can preserve larger epoch; dedicated summary/scope efficiency remains unimplemented. Do not mix deferred draft into build or claim specializedcompression default.
-- Completed: Python48 PASS/promotion25 PASS/provider0; freshr11l7paid/Q115/128.140348s/0RESETundo. NOTES actualprimary4epochs/retired0→2→4→7, input61073→21105. Animation39247B inflated earlier68422peak; ~23KBduplicateinstructions remains. FullSDK9/tx7/trace24/chain12/cleanup/final138manifest0f4e4418 independentREADY. Archive not actorused, no nativecompaction/rawcacheunknown/Pi原始会话未持久化.
-- Next: use the completed Task39 analysis to assess L2/L5 inference errors and long-epoch research organization; no new implementation/trial authorized by this checkpoint. Dedicated compaction low-threshold test remains deferred until wiring exists. Original identity above. Root paused to diagnose4→7, then resumed preparation: extra3 from fourthoccupiedendpoint selection and routeadjustment, not retirementfailure; performancebenefitstillunverified. No inheritedNOTES/routes/hints, no19gate/L1stopper. Track per-levelscore/paid/RESET/time, ordinaryNOTES retirement/readability andinputpeak/raw/cache; fullreplay/seal/cleanup/finalREADY.
+验证：TS88 PASS/6外部skip、相关Python48 PASS、promotion25 PASS/provider0、实际安装Pi离线探针通过。真实r11l L1为7paid/Q115/128.140348秒，无RESET或undo；4次NOTES实际退休0→2→4→7完整组，输入61073→21105tokens。与历史4步相比回退3步，主要为局部点击判断；单次轨迹不能证明NOTES导致回退。
 
-## Deferred Prime backend consolidation
+### Task39 BP35冷测
 
-User requires P7 -> AsterionPrime -> Pi for all backend dependencies. Current solve already uses AsterionPrimeSession, but app-owned backendconfig/launch/profile/RPCconstruction and narrator still need unifiedPrime entry. Enumerated scope and approveddesign are in canonicalTask39 supplement and spec. User postponed implementation because scope too large; no autonomous continuation of that migration now.
+Sol `gpt-6.1-sol / medium`，seed0，原生目标6，5400+180有限预算；无继承笔记/路线，无外围提示/代码修订。run `p7-live-20261009190243-2748a9d086a6d077c0aeba73`。严格mint19:02:42.396297Z至SDKgoal19:29:28.232701Z为1605.836404秒；receipt自身started口径1605.835612秒，相差0.000792秒。
 
-User records dedicated compaction as not live-verified; after wiring, use a lower-threshold finite P7 experiment to force actual summary and verify specialized semantics, kernel variables/functions, cognition and continued solving. Do not change current BP35 threshold.
+| 关 | 全部paid / 成功段 | 单关分 | 秒 |
+| --- | ---: | ---: | ---: |
+| L1 | 20 / 20 | 110.25 | 148.369237 |
+| L2 | 68 / 40 | 49.826990 | 308.256073 |
+| L3 | 34 / 34 | 115 | 189.407939 |
+| L4 | 23 / 23 | 115 | 171.997174 |
+| L5 | 46 / 46 | 51.465028 | 496.445278 |
+| L6 | 51 / 51 | 115 | 291.360703 |
 
-OldPrime fork modified native buildSummarizationPrompt with persistentkernel semantics; fd962a66 removed its dependency injection. CurrentactualPi loader/build/bundle lacks active specializedsummary rewrite. Existing ownmaterial is quote/witness; P1manualkernelinstructions separate. D09-16-01 takeover pending. Desired default specialization keeps native trigger/preparation/persistence and actual selectedmodel/auth, honors finite budgets and usage. Specializedcompaction must not resurrect summarizedhistory; full design held for later, not required to claim currentNOTES-only experimental result.
+合计242paid、一次L2死亡RESET；L5六/L6四次ACTION7均计费。初始化2RESET单列。官方九关partial43.605092；六关比较归一化93.439482不是官方整局分。baseline21/48/44/38/33/87，115门槛19/44/41/35/30/81；q=min(115,100*(baseline/allpaid)^2)，失败和RESET不退款。115顶格后更少步不增加得分；用户认可探索性一次过关不必每关满分。
 
-## Task38 completed / independent READY
+Task38为215paid/0死亡RESET/1482.657593秒/九关partial46.666667，本轮多27步、慢123.178811秒。历史最好17分钟版1023.279883秒/221paid/2RESET，版本不同不作单一因果对照。原arc-skill为6of9/271paid/3RESET，19/48/34/23/45/102，约56分钟含自然续跑/宿主恢复；不能误称九关全通。
 
-Latestproduction8e2e8a29 adds482B actualP7autonomousACTION1–7revisableinterfacepriors/undo-vsRESET/GAME_OVERonlyRESET; noPrimegeneric/data/schema/tool/route/gatechanges. 29PythonPASS/sourceAPPROVE/rootRuff/docs/diff, TS79PASS/6externalskips→Python29PASS→fullpromotion25PASS/provider0; canonicalwheel3856d7067e9b3a36bca3fa9affc52b462562fc9f54a7c5a1328c1d27625052dd/source570/install588/prompt13966B/resourcea799/archive1686/launch21 independentlypreflightREADY.
+Goal126请求input4639960/output42760；final127 input4699481/output42803/raw637785/cacheRead4061696/cacheWrite0，峰73098tokens。相比Task38 final13474659/峰235052分别减少65.12%/68.90%。NOTES16次/final1387B，context峰237717B/累计14864874B。L5同epoch查询和动作累积后，L6新NOTES将237717B收拢至87802B；字节不等于tokens。37纯计算继发请求完整保留前次serializedinput前缀；compute加权cache92.8861%、plan89.4950%、workspace44.5688%。
 
-UserauthorizedcoldBP35target6/Solmedium/seed0/native6/5400+180/noinheritedknowledge/routehints/19gate/L1stopper. UniqueGO/mint17:16:19.701698UTC/fixeddeadline18:46:19.701698+180/no renewal; runp7-live-20261009171620-311170eff0ea47adb3250524/unit83df5c7d76404b2ab9ccb112ff6c3b2c. Goal17:41:02.359291UTC/mint1482.657593s, naturalexit0/cleanup1516.691354752s. Sixpaid19/48/36/23/31/58=215, successidentical, zero death/voluntaryRESET/setup2 separate. Q115/100/115/115/113.319459/115; actualofficialgame9levels partialscore46.666667, NOTwholegame100. Correctedearlierchatclaim; N6normalization100onlycomparison.
+244完整SDK逐data除guid回放、242known事务、373trace及seal、125研究链和69文件引用、127双metrics通过。最终2037项manifest逐bytes/hash/五roots覆盖独立READY，SHA `736c1fcf4bc8ddc1a9c1a68005e230e2c0c0f2b0361bcc77b573b923b1bdde29`。源码570/wheel和20launch冻结身份一致；570source/588install核验。独立analysis SHA `e7059ee2aaa7da14f313411aa7860bbd8d91c3fc93ebee288d3d1c94ee4ffa2e`。
 
-L1restores19Q115/noA7probe/167.947122s vsTask37samepriorbaseline21Q100/161.361755s, interfaceadopted butroutechanged/causalityunproven. L2 48Q100/239.182609s worseTask29 42Q115; fourundochaincorrectsremovedstoppingblock, firstwithdrawsineffectivewhiteprobe, notgloballyoptimalproof. L336Q115/139.206047s; L423Q115/154.652276s; L531Q113.319/368.856439s (long119.77s modelturn/actionprefixboundary/cachemiss); L658Q115/412.813100s incl4undoextrasforreturnstoppingpoint. A7byLevel0/4/0/0/0/4; toggles/gravitycontrolnotautomaticallywaste. 37candidate23laststep/3yield/11optout; L5yieldfollowedactualdirectionrevision.
+私有trial `.asterion-private/p7-task39-cold-bp35-20261010/trial` 已封存，不改写、续L7或重新执行。r11l在 `.asterion-private/p7-task39-witness-20261010/trial`，138manifest SHA `0f4e44188e4977da6edfdb29e67bcb23a53e7b654f1bc7daf6624f6530f8d201`。只读原档检索不等于新执行授权。
 
-Goal109completedusage norm13005592/out38017/peak230192; final111 norm13474659/out38569/peak235052/raw7785571/cache5689088. GoalNOTES12/1039B, final13/984B. Context111peak907892B/cum49878933B/prefix887407B, componentsassistant281105/toolresults580547/snapshot24575/other21665.36purecompute successors preserveprefix/weightedcache98.9237%; plan15.5375%/workspace17.0739%. Noobservableretry/compaction, notproofnoneinternally;1oversizeddiagnosticline omitted.
+## 当前判断
 
-217fullSDKreplay/215knowntransactions/research/metrics passed; owned92157/92159/92158/observer92357/guest gone/authenvgone, console52024:56659preserved. Private .asterion-private/p7-task38-cold-bp35-20261010/trial final1908manifestSHA3cebc44d83c9834a08b5a0208b747e2981d5ddd81de27701a93070394e6aa747 independentfinalREADY (217SDK/215tx/330trace/110chain/111metrics/21launch identities). Neverresume/rewrite/launchL7ornewtrial.
+- L2已怀疑15危险，却以远程点击无效及“无其它出口”削弱危险判断，删除停点死亡。自主回看后找到横向通道并40步成功；是可避免推理失误候选，不宜笼统称随机或必要探索费。
+- L5自主修正漏第8列、滚屏格心问题，随后把局部未见返程8推成路线不可行。撤销6步试直行，实际被8挡，重新下降才见新8并成功；不能称最初点8已证明多余。NOTES记住反例，没有重复遗忘同一已知失误。
+- L6补返程停点后反转/分段返回实际成功；4undo理由明确但未证明全部必要或最优。上下文机制奏效不等于策略质量改善，也不能把所有耗时归于tokens。
 
-**Important user expectation / unfinished architecture:** NOTES intendedasprimaryLLMcognition; currentautonomous keepsfullnativeinteractionhistory alongsidecurrentNOTES/Picompression. That Task38 gap is now addressed by Task39 normal-NOTES epoch projection; retain this paragraph only as Task38 historical diagnosis. Fullarchiveforreplay isnecessary; continuouslyexpandingworkingcontextisnot. Needconcretedesign Primeprojection/archival/provenance/recovery, P7researchstablebeliefs/openissues, P7datareadableevidence. DontpretendshortNOTESsolvesthis oralloldhistoryuseless. Rootacknowledgedmismatch; no contextfiximplemented ortrialinputmutated. User nowconfirmedNOTEScoreunderused/historyexcessandNOTESshouldcarrymoregamecognition. Root/context_impl/review investigaterealprojectionhooks/contracts/designonly, no sourcechange/modelrun. Notesmustcarryusefulgoal/route/returnconditions/mechanics/representation/risk/refutations/openquestions/programrefs, freeorganization/no lengthmin orfixedstrategy. Nextconcreteprojectioncontract, notmorestrategypromptclauses orautorun. Cumulativeevaluationandcanonicalworklistcarryevidence; no activeownedmodel.
+## 历史归档与不要重走的路径
 
-## Task37 completed / next boundary
+- Task38“NOTES短但全部原生历史仍累积”是Task39前的真实诊断；不能继续写成当前尚未实现。历史评估保留在原分析，不装入恢复上下文全文。
+- 小窗口盲切、额外强制模型checkpoint、细碎认知门禁不是当前方向。提供完整客观信息及可追溯证据，让模型自主推理。
+- P7当前确实通过AsterionPrimeSession执行，但应用仍构造底层RPC/扩展接线；不代表统一私有Prime入口已完成，也不是绕过Prime的独立解题器。D-2026-10-10-02替代旧D-2026-09-27-01临时许可。私有Pi不意味着所有会话共享一个进程。
 
-Userauthorized unchanged-version BP35L1 repeat completed: sameproduction94dabe66/wheelbbf153/Solmedium/seed0/freshhistory/no hints. Nativetarget6/5400+180 actorinputs retained, externalownedwatcher stops after knownL1goal/no19gate. L121paid/Q100/0RESET/mint161.361755s, L2paid0; versus Task36sameversion24/Q76.5625/247.167053s. Goal16:49:01.713588UTC, signal16:49:02.485563UTC/latency0.771975s, no poststoppaid. Launch16:46:20.352679/fixeddeadline18:16:20.351833+180, runp7-live-20261009164621-25fc1ea27660f463f166457c/unitdf68970e249641c3957be65913bcabf6. Observerprebindingerror retained; restartedobserver only, actor/budget notrenewed.
+## 未完成边界
 
-Earlierseq7 mechanismrevision/onlyrouteblockingcircles, vsTask36seq3clearall. 6click+14horizontal+1ACTION7 vs13+10+1. InitialNOTES returned6.014978s beforefirstpaid; actualgoalscite12/14 then3/5room, choose5stepfinishforbaseline100. Stillthreeineffectiveinteractionprobes; no19step115. Animationprintlimited1800chars/output1970B instead65536B. Two trajectoriesprovevariation, notrandomdistribution orpromptcausality; no sourcefix implemented.
+- 原生Pi正文未持久化；stderr前14条primary及退休0→4→12可直接审计，此后diagnostics-suppressed，完整FD指标不能替代全程逐组正文审计。另有1oversize旁路省略，原字节完整转发。native context_archive是否实际调用未知（17workspace中16NOTES、另一次op/body未保存）；已有cell/history/frame/patches实际回读。
+- 未观察到native compaction，不验证专用摘要。旧Prime fork确实改写原生摘要生成，当前迁移启动链未接通该改写；默认高阈值约255616与专用语义是两件事。未来低阈值验证需真实选定模型摘要、usage/预算、持久kernel变量/函数/generation、NOTES/反例以及继续正确解题。
+- 全部Pi启动/配置/扩展/RPC及默认专用摘要应归Prime私有接入。P1与P7仍有应用侧接线；P2是本地worker/context，P3–P6当前是机制见证，不能假定都完成真实长程agent。迁移由用户延期，无新实施。
+- 专用摘要未完成初稿隔离在stash `30ec751b8219f52c55e265e94ca965f65c0c85f7`（3个TS文件）；保留，不自动apply或删除。没有新的Python迁移源码。约23KB重复初始指令/快照及大stdout仍有开销，未修复。
+- 跨领域能力、稳定成功率、压缩后重放范围、评分/时延的稳定改进未证明。六关目标不是BP35九关全通。
 
-Goal/final16completedusage norm562112/out4100/peak49872/raw228032/cache334080; hook17cancelusageunknown. Context169505B/prefix165488B,14chain=2compute10experiment2notes,12plan calls incl2unpaiderrors(causeunknown),10acceptedgoals,14actualfactsdeliveries. 23SDKfullreplay/21knowntx/40trace/17closedmetrics/258manifest SHAfd2d6ae8871719a5a2b6e522610d54c4e62a3c31bb1f392c5fa9e535472efe2b independentREADY. Private .asterion-private/p7-task37-repeat-bp35-l1-20261010/trial sealedneverrewrite. Owned71099/71101/71100/watcher71222/observer71563/guest stopped/authenvgone; console52024:56659preserved. Cleanup163.815961838s.
+## 清理与恢复命令
 
-Latestuserquestion: arc-skill interfacepriors mayreducecontroltesting. Independentlyconfirmed currentactual13484B autonomousprompt/initialcontext/toolschemas lackfullACTION1–7mapping; oldlegacy standardmappingnotdelivered. Revisableinterfacepriors belongP7domaininterface/research, notPrimegeneric; game-specificeffectsstillneedtest. Task37closure directionwasunimplemented; supersededbyactiveTask38 source/explicitnewtrialauthorization above. Cannotdeductallthreeprobesorclaim18stepwithouttest. Cumulativeevaluation docs/reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md includesTask37/sourceboundary.
+Ownedhost50540/50542/50543、observer50665消失，guestunit notfound/cgroupempty，auth/env已移除；cleanup1621.535325秒。用户console PID52024/port56659保留；不要停止。无正在运行的本会话实测。
 
-## Task36 completed / unresolved quality
+```bash
+git status --short
+git log --oneline -6
+rg -n 'Task39|D-2026-10-10-0[12]' docs/status/DECISIONS.md docs/reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md
+git stash list
+```
 
-Latestproduction94dabe66, P7initialNOTES uses initialboard/goal/115100room to choose route/exploration; no defaultprobe, probe must explain limitedstep value androute-changingoutcome. Strategy/goal concise STE-style, no hostgate/newtool/Primegeneric/data changes. Source23PythonPASS/APPROVE/lint/docs; actualwheelbbf1533844965e5392858dce3e0ccc26b9cf9f1c20129deec3709e88337679c2/source570/install588/resourcea799/probe+preflight independentlyREADY. Mainprompt13484B.
-
-ActualcoldBP35L1-L6 attempt earlystoppedbyquality: finalL124paid/Q76.5625/0RESET/247.167053s, L2paid0. Detection20uncompleted then26s signal latency permitted4more settledpaid; goal16:25:23.791205UTC, SIGTERM16:25:24.678381UTC,0postsignalpaid. Do notwritefinal20/unpassed; don'tclaimstrict19testcap. 26SDKfullreplay/24known tx/trace47/chain20=6compute11experiment3NOTES/metrics21 verified. 20completedusage norm1580569/out5481/peak110272/raw897817/cache682752, request21inflightusageunknown. Ownedhost62613/62615/62614/observer/guestunitb56b stopped/authenvgone; console52024:56659preserved. Cleanup249.963477135s. Private .asterion-private/p7-task36-cold-bp35-20261010/trial final280manifest SHA460fe039a76eae4b05f6cdf07fd01fb7fa48d3a3f65ff1d93029bf2733bbfe59 independentREADY. Runp7-live-20261009162117-1a4d15f6798edbf38d2ed39e, sealedneverrewrite/resume.
-
-InitialNOTES hadrealconditionaladvance/probechoice, butseq3clearall14 justifiedonlyvisibleclearance, wingoalunknown. Costlyfiveclicks+otherprobes beforephysicsmodel, laterexplicitremaining-use can'trecover earlycost. Cell1print whole5frameanimation produced65536Btruncatedstdout; request6input30946→86730/providerJSON78834→146305B; largehistorypersisted, actioncacheReadplateau19456. Purecomputeprefix intact; don'tattributeall latency/token tothisoneprint. These concretely callfor goalcausalevidence and researchoutput organization, notmorepromptclauses. Proposedthree-layer direction only: Prime evidence/projection/limits; P7data actualframes/diffs; P7research compute/usefulsummaries. No suchfiximplemented, no nexttrialstarted. Ask/actonusernextspecificwork, no autorun.
-
-Evaluation docs/reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md now containsTask32/34/35/36, score/time/decision/context plusexactsealboundaries. Task35b2d1a453 L120Q110.25/197.061843s,L2partial5,304manifestf303READY; Task34e943 L119Q115/203.925307s,L2unfinished55death1,648manifestbc2eREADY; Task32ba51 L122Q91.12/167.713005s,L2unfinished16death1,395manifestd978READY. These aredifferent prompts/singlepartials, notcausalreplication orfullsixlevelPASS. Bestolder17minfullrun not replaced. No ownedmodel/game process remains.
-
-## Task31 completed / next boundary
-
-User requests direct115fullscore and baseline100 remaining actions instead of conditional score. Source ba51c62e: P7data deletes conditional score, provides max_paid_actions_for_115/100, additional_paid_actions_preserving_115/100 and paid_actions_exceeding_115/100. Exact115integerthreshold/100baseline, unknownnull, paidRESETnorefund, nonnegative remaining/exceeded, nohardcap. Primegeneric dated resource facts/guidance unchanged; P7research hostprojection andprimaryprompt consume directfacts. Spec/plan/review share existing2026-10-09 resource-aware files. Independentchanged-codeAPPROVE/root48PythonPASS/79TS+6externalskip/lint/docs/fullpromotion25PASS/provider0.
-
-Separatefresh packagedr11lL1 currentSolmedium 900+180 verified: goal94.471582s/6paid/0paidRESET/Q115(baseline22), 2setupRESET separate; cleanup129.638564825s. Goal9usage input250278/output1852/peak36803; final12usage372244/2517/41943. Context12peak135169/cumulative1058923bytes; prefix12peak129754/0identityflags; purecompute successors preserve earlieritems. Researchchain11=4compute/6experiment/1acceptedNOTES,0omittedunknown. SDK8fullpayloadreplay/6tx/22trace/source570/install588/archive1685 verified. Canonicalwheel2d4126285354026be93d17f554f0d7c6f9bbc776ad697eb1cf2988640d016ba3/resourcea79956 exact. IndependentfinalREADY 115manifest SHA6c6dbf7e6aa0c78d81767d2157178d6d9de4e3a8179719f7a07e6080ff8c4b0a. Trial .asterion-private/p7-task31-witness-20261009/trial sealed; run p7-live-20261009144726-e51ae3d6eac64857a738f9b7. Ownedhost99249/99252/99251 andguest/cgroup gone/authenvgone, userconsole52024:56659preserved.
-
-Installed realRuntime/worker firstJSON directsixfields/date/errors/spoof verified. ActualPi resourcebody is notpersisted, so actualreceipt/adoption unknown. NoBP35run forTask30/31, no causalpolicybenefit proven. Task31six vsTask30fourpaid is small deployment variation, notstrategy effect. Next onlyuserauthorizedBP35comparison or other requested work; neverlaunch fromcheckpoint alone. No current ownedmodel/game work remains.
-
-Task30 source26250c0e sealed priorversion:191Python/79TS/fullpromotion25PASS/freshr11l4paid0paidRESETQ11567.896532s, cleanup86.545788s. Source570/install588/archive1685/wheelfc6d064b/resourcea79956/SDK6tx4trace17/9usage/8researchrecords independentlyREADY. Original101manifest SHAaefaf300d353d77860b6647401049d92dc438fa78b45a4bebf3c72f78b557ccc, .asterion-private/p7-task30-witness-20261009/trial untouched. It containsoldconditionalscore and does notverify Task31.
-
-## Prior Task29 closed evaluation
-
-User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fresh run reached target6; actor and supervisor ended exit0; final independent seal audit READY; no inherited NOTES, routes or outside hints. Do not edit production or inject actor guidance. Goal achieved at1548.246660s; owner213SDK replay/211committed source+install/cleanup verified. All1836manifest files bytes/SHA/fullcoverage independentlyREADY; root submits final report/state. No required run work remains. Do not start L7, renew budget or start another run.
-
-- Production freeze `9557ad63`; docs close `06c3f4a9`; branch `feat/prime-research-notes`.
-- `.env` selected `gpt-6.1-sol`, `medium`; seed0; three tools ipython/p7_execute_plan/p7_workspace.
-- Wheel `3aed093f21d8f7ed9b1d67430fc6daf3828008aedf062b8873322c24e8e02327`; extension `a799561245c1d8ba7b6a1156f7d1954d44cc6072e05feaa831404b73c641d140`; source570/install588/archive1679 identities verified.
-- Evidence `.asterion-private/p7-task29-cold-bp35-20261009/trial/`.
-- Actual host launch `2026-10-09T12:52:25.072668Z`; deadline `2026-10-09T14:22:25.071746Z`, original5400+180 cleanup, never renewed.
-- Run `p7-live-20261009125226-984bb04c164deb226e93dcff`; unit `asterion-p7-d8c65996a7b6499ab2f6a4d8eff0ba87.service`.
-- Former owned host supervisor97099/launcher97101/caffeinate97100/observer97409 and guest operator329096/Pi329121 are gone; unit/cgroup stopped/empty, auth/env removed. User console52024/56659 preserved. Deployment+independentreview complete; root owns final state/docs/commits.
-
-## Completed evaluation: independent READY
-
-Allpaid25/42/36/24/30/54=211, successful identical, zero GAME_OVER/paid death or voluntaryRESET. Q70.56/115/115/115/115/115; goal1548.246660s, ownercleanup1599.664214s. ComparedTask28 time+44.699116%, paid-25 and deaths-2; L1regresses, otherfivecap115. No natural soft observation-boundary:36candidates,26laststep/10suffixalloptout,9optoutplans/0checkpoints; independent parameter accounting no missed default yield. L6 jointly rereads170/173/176, trials undo177then178–180, prepares27column blocker181, goesaround182–183 then flip184–189 and returns190–193 withoutdeath; finalNOTES links offscreenrisk/preplacedblockers (model statement, not optimality proof).
-
-Final97usage (onezero-token nativeerror/retry), input8821521/output29171/peak170448; computeweightedcache98.9118975%/plan18.6500954%/workspace16.4102564%. Context97/peak670788/cumulative33182919UTF8bytes; providerprefix97/peak652058/flags0. Chain95=30compute62experiment3notes/0omittedunknown. Lifecycle776scalar/0suppressedunparsed but2oversizedlines notsaved; plaintext forwarding and full97usage independentmatch preserved. L4 oneWebSocketclosed1000 retry; L6 long142.90s modelresponse not an RPC error. WholecgroupCPU61.930038s; detector-only/requestHTTPtiming unavailable. Source unchanged; console preserved; no new game/model run. Finalmanifest1836entries/SHAe5d936b2e62a47b7a97174998486c5dd936f3dc06466a7e06d65e923e23fc2df independentlyREADY;213fullSDKreplay/211tx/312trace/source570/install588/cleanup verified. Standalone reader report docs/reviews/2026-10-09-p7-bp35-task29-evaluation.md independently checked. No authorized new trial or code change; nextwork requires user instruction and should address efficiency/route cost without claiming automaticyield efficacy.
-
-## Verified implementation and deployment
-
-Task29 adds P7 research default `stop_on_view_change=true`, optional per-step `observe_after`; settled pixel translation candidates yield before remaining suffix. Candidate is derived measurement, not camera truth or danger semantics. LLM owns the next hypothesis and new plan; no automatic suffix resumption. Prime generic execution/evidence boundaries unchanged. Read-only P7 data helper `r.view_change` retains exact historical references/hashes.
-
-Related defects repaired: RESET hard stop cannot be bypassed by `stop_on_mismatch=false`; legal20-step postcommit actor feedback projection remains within60KiB with explicit omissions and full raw evidence retained. Independent source review APPROVE; Python142PASS, TS79PASS/6external skips, fullpromotion25PASS/provider0. Actual packaged r11lL1 witness6paid/zero paidRESET/104.040866s, complete replay/seal/cleanup and110entry independentREADY. Live witness did not naturally trigger boundary; installed synthetic proof did. Latest BP35 outcome is reported above: zero deaths, time regression, L1 low score, no naturalyield; stable improvement remains unverified.
-
-## Comparison and assessment rules
-
-Official per-level q=min(115,100*(baseline/allpaid)^2); all failed actions and paid RESET count. Baselines L1–6 21/48/44/38/33/87;115 thresholds19/44/41/35/30/81. No reward for fewer steps beyond115 cap. Record successful segment separately; count RESET also in unfinished current level.
-
-Task28 same Solmedium cold:1069.976586s/236paid/2deathRESET; paid18/62/36/23/31/66, successful18/40/36/23/31/42; q115/59.937565/115/115/113.319459/115; times126.292592/162.671734/129.642557/146.983780/164.246441/340.139482. L2 death inside precommitted cross-view batch; L6 historical danger coordinate reuse. Avoid treating all deaths as defects; distinguish newly observed uncertainty, avoidable omission, and unsupported randomness. Best prior cold1023.279883s/221paid/2RESET; arc-skill271paid/3RESET,19/48/34/23/45/102, about56minutes including natural continuation and host recovery. Mature old P7 full100 route is warm accumulated research, not cold discovery baseline.
-
-Track dynamic boundary occurrence/reasons, discarded suffix and next new plan behavior, macro research chain, actual input token peak/cumulative, context/prefix/cache. UTF8 byte counts are not tokens. One trajectory cannot isolate causality or prove stable death reduction/cross-domain capability. Do not print credentials or full provider payloads.
-
-## Reader entries
-
-- [Latest Task29 cold evaluation](../reviews/2026-10-09-p7-bp35-task29-evaluation.md).
-
-- [Task29 implementation, review and packaged proof](../reviews/2026-10-09-p7-observation-boundary-review.md).
-- [Task28 standalone cold evaluation](../reviews/2026-10-09-p7-bp35-task28-evaluation.md).
-- [Canonical worklist and historical comparisons](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
-- [Three-layer design](../superpowers/specs/2026-10-09-p7-observation-boundary-design.md).
-- Journal is append-only. This checkpoint supersedes the accumulated prior baton; historical evidence remains in linked reports and private sealed trials.
+已提交核心2930fbd8、r11l1046624f、架构记录f9f4b512、低阈值验证0fb15c7c、最终评估f0760ab8；没有执行push/merge。此交接依仓库AGENTS handoff合同直接保存，下一会话 `project-state resume` 后先核对状态，再按明确的后续任务继续。
