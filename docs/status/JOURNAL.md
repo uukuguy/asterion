@@ -4747,3 +4747,10 @@
 - Task39 userrequirescode-awarekernelcompaction; Pi defaulton/255616threshold, Task38below; P7customkernelnoteunwired, APIintegrationauditongoing.
 
 - Task39 withdrewmissing-compression inference; userstatesexistingreplacement, actualentry/historyaudit beforeanynewsummarymechanism; coreNOTESAPPROVE.
+
+- 2930fbd8: Implemented normal NOTES primary cognition and selective archives to prevent repeated execution-history accumulation; dedicated compression integration remains pending.
+
+- Compression audit: old Prime fork modified native buildSummarizationPrompt with persistent-kernel note, retaining Pi compaction machinery.
+- Current loader history: fd962a66 removed old dependency injection; current source/bundle audit found no active native-summary rewrite. New integration paused pending confirmation.
+
+- User authorized complete P7 backend migration behind Prime; dedicated native-summary semantics and NOTES-safe compaction design approved, implementation underway.

@@ -13,13 +13,15 @@
 
 ## Active Task39 implementation
 
-Userauthorized normalNOTES-primary cognition with richer goal/route/mechanism/error/counterexample/openissue understanding, detailedhistoryreadonly-by-ref, implementation/simple review/freshBP35. [Approveddesign](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md) andD-2026-10-10-01 bindnormalnotes toworkingepoch, noadditionalmodelhandoff. Pythonnewbindingsfocused48PASS; genericTSarchivereader/epochprojection/compactionrecovery inprogress. Sourcejointreview/package/witness/BP35pending, no newownedmodelrun. Thiscorrectsthe unfinishedcontextgoalbelow; partialPythonimplementationnotcapabilityPASS.
+正常 NOTES 主认知核心已提交 2930fbd8，独立源码评审 APPROVE，TS88 PASS/6外部跳过、相关Python48 PASS、实际安装Pi无provider探针通过。普通笔记建立工作epoch，旧证据按引用专项读取。尚未完成本版本打包见证或 BP35。
+
+用户明确 P7 全部底层 Pi 依赖需通过 Prime；默认专用代码压缩由 Prime 统一保证。旧 Prime fork 的原生摘要改写真实存在，当前迁移后的启动链未保留该接入。正在补齐通用 Prime 启动/会话/配置/扩展/事件与专用摘要能力，P7 保留领域工具、目标与证据映射。专用摘要实际运行和解题收益均未验证。
 
 ## Latest scoped comparison
 
 Task38 production8e2e8a29 adds revisable ACTION1–7 interface priors to P7 autonomous prompt; source29Python/APPROVE/TS79+6external skips/fullpromotion25/provider0/freshinstalled13966B prompt verified. Cold BP35 target6 reached naturally:19/48/36/23/31/58=215paid, zero death/voluntaryRESET, Q115/100/115/115/113.319459/115, strictgoal1482.657593s. Official game has9levels; actualpartialscore46.666667, not whole-game100. ComparedTask29 211paid/1548.246660s, more4paid/faster65.589067s; bestolder1023.279883s time not recovered. L1 interfaceadopted/noA7probe/19Q115, but singletrials don't isolate causalbenefit. Naturalexit0/217SDKfullreplay/215tx/ownedcleanup verified; final1908manifest 3cebc44d independentlyREADY.
 
-**Unfinished architecture boundary:** NOTES was intended as primary working cognition. Actual autonomous context retains full native research interactions alongside current NOTES and delegates compression to Pi. GoalNOTES1039B/12revisions versusinputpeak230192tokens, final984B/13 versus235052peak proves short notes coexist with large working history; archive growth is needed for replay, continually expanding modelinput is not. Fix needs Prime archive/projection/provenance guarantees, domainresearch effective beliefs/open issues, domaindata readable evidence. No suchcontextfix implemented; don't declare capability done from NOTES existence. [Evaluation](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md).
+**Unfinished architecture boundary:** NOTES was intended as primary working cognition. Actual autonomous context retains full native research interactions alongside current NOTES and delegates compression to Pi. GoalNOTES1039B/12revisions versusinputpeak230192tokens, final984B/13 versus235052peak proves short notes coexist with large working history; archive growth is needed for replay, continually expanding modelinput is not. Fix needs Prime archive/projection/provenance guarantees, domainresearch effective beliefs/open issues, domaindata readable evidence. NOTES 主认知源码已实现并局部验证，打包和解题效果尚未验证；不能只凭 NOTES 存在宣称能力完成。 [Evaluation](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md).
 
 Task37 unchanged94dabe66 repeat L121/Q100/161.361755s vsTask36 24/Q76.5625/247.167053s, bothzeroRESET, finalsealREADY. Sameversion trajectoriesvary; unknownrandomdistribution/promptcausality. Historicalinterfacegap found then is fixedbyTask38 source, distinctfrom unresolvedcognitionprojection.
 

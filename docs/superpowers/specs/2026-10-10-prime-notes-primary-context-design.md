@@ -1,6 +1,6 @@
 # NOTES 主导的研究工作上下文
 
-状态：独立设计APPROVE，用户授权实现/简单评审/实测；Task39实施进行中，尚未完成或启动新模型。Task38保持封存。
+状态：NOTES 核心源码已提交 2930fbd8，独立评审通过；通用 Prime 接入与默认专用压缩补齐中。用户授权实现、评审及实测；尚未启动本版本模型。Task38 保持封存。
 
 ## 问题与目标
 
@@ -59,9 +59,15 @@ host只验证本次分支、完整组顺序、原档可读、exact refs/版本�
 
 用户明确持久IPython的代码语义压缩是必需，区别于普通文本摘要。normalNOTES需要承接仍有用的变量/函数名字、用途/调用约定、状态/已知模型适用范围、source/data refs与kernel generation；不要因为旧cells退休重新定义仍存活对象。保留名字不表示对象真实存活，实际generation及回读/显式checkpoint恢复仍是依据。
 
-调查已证：本机Pi自动压缩默认enabled=true，reserve16384，keepRecent20000；Task38模型contextWindow272000，阈值255616，最大完整usage235122未达阈值，未见事件不能说关闭。源码发现P1显式private custominstructions引用、P7未发现同路径引用；这不足以证明专用摘要替换未生效。用户指出已替换原生，D-2026-09-16-01与c21d0dae/f1b08c1f须结合实际Pi入口/当前hook/providerrequest核对。compact_events=True只是RPC事件投影。
+调查已证：Pi 自动压缩默认 enabled=true、reserve16384、keepRecent20000。Task38 模型 contextWindow272000，阈值255616，完整usage峰235122，未观察到自动压缩触发。compact_events=True 只是 RPC 事件投影。
 
-Task39须保持正确的通用层代码压缩接入，先核验已实现的替换机制，暂停新增压缩机制设计，不以普通任务prompt里提一句kernel就宣称专用压缩已用。不新造provider调用/runner、不绕授权预算，复用现有Prime摘要材料及合法Pi hook/runtime接口；需核清自动触发接入API后定最小实现。NOTES是日常主要决策认知，专用压缩是大上下文/恢复时的语义保障，不能拿默认高阈值当日常认知组织。实际自动路径与marker/witness证据、变量/函数连续性分别验证，未触发不声称模型摘要实测。
+旧 Prime fork 确实改写了原生 buildSummarizationPrompt，追加持久内核说明，未替换整个 Pi 压缩流程。历史依赖 loader 曾引入该实现；fd962a66 删除该通道。当前源码、loader、构建脚本及 Task38 实际 rpc-entry/bundle 审计均未找到仍生效的专用摘要改写。现有自有材料进入报价/见证，不等于实际摘要请求；P1 手动 customInstructions 是独立已实现路径。D-2026-09-16-01 的扩展接管仍未完成。
+
+用户明确 P7 的全部底层 Pi 依赖应转为基于 Prime，不能只修压缩。通用 Prime 拥有启动命令、模型配置落实、profile/entry 与扩展加载、RPC 会话和原生事件处理、默认专用摘要与用量/取消边界。P7 注入游戏接口、工具、完成判定、研究续跑内容和领域证据转换，不操作 Pi 内部对象。operator-owned 环境仍由获授权的应用集成读取，通用框架不直接读 .env。
+
+实现沿合法 session_before_compact 接管摘要生成，保留 Pi 触发阈值、preparation 切分和持久化；实际摘要使用 Prime 自有代码语义材料和选定 provider/model/auth。每次实际摘要调用须遵守现有 callback/deadline 及已设置的 token/cost 预算并记录真实 usage；失败/取消不得偷偷回落再调用一遍原生摘要。无新 runner/provider，未设置的预算不虚构为必须新增价格系统。P1 旧手动见证保持显式兼容边界，不能双 hook。
+
+NOTES 的日常主认知与高阈值专用压缩同时成立。可信摘要范围只能覆盖真实可压缩历史；未知效果、用户约束及必要近期错误原文继续保护。压缩后不能恢复全部已覆盖 raw 历史使压缩失效，不能凭 summary 文本猜游标。实际 provider-free hook、entry 持久化及重载需验证；真实运行未触发压缩则不声称模型摘要质量验证。
 
 ## 历史方案区别
 
@@ -73,4 +79,4 @@ Task39须保持正确的通用层代码压缩接入，先核验已实现的替�
 
 按TS→相关Python→promotion顺序验证，新的真实打包小关见证确认同wheel/resources/tools，记录是否实际发生checkpoint与回读；局部源码或fixture不算NOTE主认知能力完成。正式BP35对照需用户授权，跟踪各关动作/得分/RESET/时间、当时认知承接、peak/cumulative/raw/cachetokens。如果实跑普通NOTES接受后历史仍未收拢，不能宣称主认知目标实现；稳定效率改进也需实测。
 
-当前设计已获独立APPROVE，TS/Python实施进行中，无新运行，代码与能力尚未验证。
+NOTES 核心设计与源码独立 APPROVE，TS88 PASS/6外部跳过、相关Python48 PASS、实际安装Pi无provider探针通过。通用接入补齐仍需设计/源码评审及打包闭环，未进行本版本 BP35；不能宣称解题能力或效率改善。

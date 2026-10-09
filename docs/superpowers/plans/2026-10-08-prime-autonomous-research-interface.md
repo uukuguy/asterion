@@ -299,8 +299,18 @@ Task38CLOSED: source8e2e8a29/packagingverified; freshBP35target6 naturalexit0/21
 
 User explicitlyauthorizes implementation/simple review/coldBP35. [Design](../specs/2026-10-10-prime-notes-primary-context-design.md) changes ordinaryacceptedNOTES toprimaryworkingbaseline, noadditionalmodelcheckpointswitch. Prime TSworker owns genericarchive-reader/selection/completegroupcursor/v3receipt/projection/compaction+cache; Pythonworker owns genericenvelope/domainbindings/P7cognitionprompt/workspacemetadata; root integration/docs, independent review beforepackage/GO. No productioncodeuntildesignAPPROVE.
 
-- [ ] Agree Python/TS v3 envelope and appworkspace native-read contract; addfocused RED tests foractualselectedbranch reads/unknown/group/sibling boundaries andordinarynotesepochs.
-- [ ] Implement read-by-ref first, thennotesautomaticepoch projection, preserveactualcurrentfacts/programgeneration/userconstraints/errors/refutations/unknowns; epochappend andcompaction/reload semantics. No blindbytewindow ornewtool.
-- [ ] Explain richerfreeNOTES andimportantcounterexamples inactualP7prompt; syncschema/registration/allowlist/buildresource/bridge, focusedtests+simplechanged-codeAPPROVE.
+- [x] Agree Python/TS v3 envelope and appworkspace native-read contract; addfocused RED tests foractualselectedbranch reads/unknown/group/sibling boundaries andordinarynotesepochs.
+- [x] Implement read-by-ref first, thennotesautomaticepoch projection, preserveactualcurrentfacts/programgeneration/userconstraints/errors/refutations/unknowns; epochappend andcompaction/reload semantics. No blindbytewindow ornewtool.
+- [x] Explain richerfreeNOTES andimportantcounterexamples inactualP7prompt; syncschema/registration/allowlist/buildresource/bridge, focusedtests+simplechanged-codeAPPROVE.
 - [ ] Sourcecommit; TS→relevantPython→promotion→necessaryrealpackagedsmallwitness forapptoolchanges; independentlypreflightREADY freshBP35/Solmedium/seed0/native6/5400+180, rootactualGO.
 - [ ] Trackeachlevelpoints/paid/deathRESET/time, acceptednoteepoch/inputpeak/rawcache/refretrieval/programcontinuity; fullSDKreplay/seal/cleanup/finalREADY. Don'tpromote optionalAPIorunittest toNOTES-primary ability.
+
+### Task39 补齐：Prime 统一接入与默认专用摘要
+
+用户继续授权，并明确覆盖 P7 全部 Pi 依赖。NOTES 核心提交2930fbd8；本补齐完成后统一打包验证，不先启动旧接入版本。
+
+- [ ] deployment 列出 P7 live/operator/runtime_binding/official_operator/run_story 内全部底层启动、配置、profile/entry、RPC、extension、事件依赖；迁移到 agents/prime 的真实通用接口，领域完成判定和证据转换保留 P7。
+- [ ] context_impl 与 deployment 对齐默认 session_before_compact 摘要、有限调用授权/结算、失败/取消、持久化范围及 P1 兼容合同；review 独立设计 gate。沿 Pi 阈值/preparation/persist，不修改外部 Pi，不新增 runner/provider。
+- [ ] TS focused RED→GREEN 验证实际选定 registry 请求使用自有代码语义材料、最多 main/prefix 两调用、信号与真实 usage、未知/错误保护、NOTES 范围与压缩重载。Python focused RED→GREEN 验证 callback/deadline、实际usage不双记、P7只调用Prime接口、错误与清理。
+- [ ] 简单独立 changed-code review，通过后同步打包扩展并提交；按 TS→Python→promotion 顺序验证，记录跳过及未实测边界。
+- [ ] fresh wheel 与真实打包小关验证同一扩展及工具版本，再按已授权 Solmedium/seed0/native6/5400+180 冷测 BP35，持续跟踪分数、动作、RESET、时间、NOTES epoch及输入tokens。

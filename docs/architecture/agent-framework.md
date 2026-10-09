@@ -66,6 +66,22 @@ adapts those layers without importing its semantics into generic framework
 modules. These application responsibilities do not introduce another runner
 or change the existing provider, assembly, runtime or host-service contracts.
 
+The intended backend dependency is `P7 -> Asterion Prime -> Pi`. Prime owns
+backend launch, model/profile resolution from injected operator configuration,
+extension loading, RPC sessions, native event handling and default code-aware
+compaction. P7 supplies domain tools, goal/continuation content and mappings
+from framework events to game evidence. Naming a Pi transport with a neutral
+alias does not transfer that ownership. The current migration and its
+verification boundary are recorded in the active worklist.
+
+For a persistent IPython kernel, compaction must retain useful identifiers,
+function interfaces, computational state, counterexamples and evidence
+references. Prime supplies these summarization semantics by default;
+applications do not select summary prompts. Pi continues to own compaction
+triggering, source preparation and persistence. Normal research NOTES remain
+the model's primary cognition; specialized compaction is a separate continuity
+safeguard. Both capabilities require implementation and named verification.
+
 The research chain records externalized hypotheses and assumptions, computation
 source and outputs, experiments and actual observations, counterexamples,
 revisions, and the evidence supporting conclusions. It is a reconstructable
