@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09T13:09:43Z. Session active; not final handoff.
+Updated: 2026-10-09T13:25:00Z. Session active; not final handoff.
 
 ## Active task
 
-User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fresh run ACTIVE; no inherited NOTES, routes or outside hints. Do not edit production or inject actor guidance. Track through target6 or original finite boundary, then replay/seal/cleanup/independent audit. Do not start L7, renew budget or start another run.
+User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fresh run reached target6; actor and supervisor ended exit0; final independent seal audit READY; no inherited NOTES, routes or outside hints. Do not edit production or inject actor guidance. Goal achieved at1548.246660s; owner213SDK replay/211committed source+install/cleanup verified. All1836manifest files bytes/SHA/fullcoverage independentlyREADY; root submits final report/state. No required run work remains. Do not start L7, renew budget or start another run.
 
 - Production freeze `9557ad63`; docs close `06c3f4a9`; branch `feat/prime-research-notes`.
 - `.env` selected `gpt-6.1-sol`, `medium`; seed0; three tools ipython/p7_execute_plan/p7_workspace.
@@ -12,17 +12,19 @@ User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fre
 - Evidence `.asterion-private/p7-task29-cold-bp35-20261009/trial/`.
 - Actual host launch `2026-10-09T12:52:25.072668Z`; deadline `2026-10-09T14:22:25.071746Z`, original5400+180 cleanup, never renewed.
 - Run `p7-live-20261009125226-984bb04c164deb226e93dcff`; unit `asterion-p7-d8c65996a7b6499ab2f6a4d8eff0ba87.service`.
-- Owned host supervisor97099/launcher97101/caffeinate97100; guest operator329096/Pi329121. Preserve user console52024/56659. Deployment agent owns run, observer, replay, final cleanup and manifest; review agent independently observes and audits. Root owns state/docs/commits.
+- Former owned host supervisor97099/launcher97101/caffeinate97100/observer97409 and guest operator329096/Pi329121 are gone; unit/cgroup stopped/empty, auth/env removed. User console52024/56659 preserved. Deployment+independentreview complete; root owns final state/docs/commits.
 
-## Live checkpoint: five levels complete, L6 active
+## Completed evaluation: independent READY
 
-L1–5 paid25/42/36/24/30, successful identical, zero death/RESET, Q70.56/115/115/115/115. Durations155.550215/202.926513/158.378798/261.128070/260.610008s; host cumulative1038.593604s,157paid. L1 extra7 clicks regressed route; L2 avoids death but slower; L3 same paid but slower; L4 repairs role-relative sampling/shape representation at substantial time cost; L5 reuses it and achieves30step cap. Inputpeak128414 at L5 goal. No soft observation-boundary yet: translation candidates mostly at plan end or explicit optout. Model used read-only r.view_change once in L1; candidate/policy/hardstop accounting independently verified through L4. Midrun pure-computation weighted cache98.8786%, no Task27-style cache regression; precise per-request latency/detector CPU unmeasured. L6 active; continue unchanged, no hints/source edits/budget renewal.
+Allpaid25/42/36/24/30/54=211, successful identical, zero GAME_OVER/paid death or voluntaryRESET. Q70.56/115/115/115/115/115; goal1548.246660s, ownercleanup1599.664214s. ComparedTask28 time+44.699116%, paid-25 and deaths-2; L1regresses, otherfivecap115. No natural soft observation-boundary:36candidates,26laststep/10suffixalloptout,9optoutplans/0checkpoints; independent parameter accounting no missed default yield. L6 jointly rereads170/173/176, trials undo177then178–180, prepares27column blocker181, goesaround182–183 then flip184–189 and returns190–193 withoutdeath; finalNOTES links offscreenrisk/preplacedblockers (model statement, not optimality proof).
+
+Final97usage (onezero-token nativeerror/retry), input8821521/output29171/peak170448; computeweightedcache98.9118975%/plan18.6500954%/workspace16.4102564%. Context97/peak670788/cumulative33182919UTF8bytes; providerprefix97/peak652058/flags0. Chain95=30compute62experiment3notes/0omittedunknown. Lifecycle776scalar/0suppressedunparsed but2oversizedlines notsaved; plaintext forwarding and full97usage independentmatch preserved. L4 oneWebSocketclosed1000 retry; L6 long142.90s modelresponse not an RPC error. WholecgroupCPU61.930038s; detector-only/requestHTTPtiming unavailable. Source unchanged; console preserved; no new game/model run. Finalmanifest1836entries/SHAe5d936b2e62a47b7a97174998486c5dd936f3dc06466a7e06d65e923e23fc2df independentlyREADY;213fullSDKreplay/211tx/312trace/source570/install588/cleanup verified. Standalone reader report docs/reviews/2026-10-09-p7-bp35-task29-evaluation.md independently checked. No authorized new trial or code change; nextwork requires user instruction and should address efficiency/route cost without claiming automaticyield efficacy.
 
 ## Verified implementation and deployment
 
 Task29 adds P7 research default `stop_on_view_change=true`, optional per-step `observe_after`; settled pixel translation candidates yield before remaining suffix. Candidate is derived measurement, not camera truth or danger semantics. LLM owns the next hypothesis and new plan; no automatic suffix resumption. Prime generic execution/evidence boundaries unchanged. Read-only P7 data helper `r.view_change` retains exact historical references/hashes.
 
-Related defects repaired: RESET hard stop cannot be bypassed by `stop_on_mismatch=false`; legal20-step postcommit actor feedback projection remains within60KiB with explicit omissions and full raw evidence retained. Independent source review APPROVE; Python142PASS, TS79PASS/6external skips, fullpromotion25PASS/provider0. Actual packaged r11lL1 witness6paid/zero paidRESET/104.040866s, complete replay/seal/cleanup and110entry independentREADY. Live witness did not naturally trigger boundary; installed synthetic proof did. BP35 improvement remains unverified until current run finishes.
+Related defects repaired: RESET hard stop cannot be bypassed by `stop_on_mismatch=false`; legal20-step postcommit actor feedback projection remains within60KiB with explicit omissions and full raw evidence retained. Independent source review APPROVE; Python142PASS, TS79PASS/6external skips, fullpromotion25PASS/provider0. Actual packaged r11lL1 witness6paid/zero paidRESET/104.040866s, complete replay/seal/cleanup and110entry independentREADY. Live witness did not naturally trigger boundary; installed synthetic proof did. Latest BP35 outcome is reported above: zero deaths, time regression, L1 low score, no naturalyield; stable improvement remains unverified.
 
 ## Comparison and assessment rules
 
@@ -33,6 +35,8 @@ Task28 same Solmedium cold:1069.976586s/236paid/2deathRESET; paid18/62/36/23/31/
 Track dynamic boundary occurrence/reasons, discarded suffix and next new plan behavior, macro research chain, actual input token peak/cumulative, context/prefix/cache. UTF8 byte counts are not tokens. One trajectory cannot isolate causality or prove stable death reduction/cross-domain capability. Do not print credentials or full provider payloads.
 
 ## Reader entries
+
+- [Latest Task29 cold evaluation](../reviews/2026-10-09-p7-bp35-task29-evaluation.md).
 
 - [Task29 implementation, review and packaged proof](../reviews/2026-10-09-p7-observation-boundary-review.md).
 - [Task28 standalone cold evaluation](../reviews/2026-10-09-p7-bp35-task28-evaluation.md).

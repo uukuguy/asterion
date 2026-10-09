@@ -4616,3 +4616,9 @@
 - Task29 cold L4:24paid/zeroRESET/261.128070s/Q115; representation revised; no softyield, substantial time regression.
 
 - Task29 cold L5:30paid/zeroRESET/260.610008s/Q115; cumulative157paid/1038.593604s; computation caching retained, L6 now active.
+
+- fc79c245: Checkpointed five completed levels and live L6 ownership to preserve measured score, timing and unverified mechanism boundaries.
+
+- Task29 cold target6:211paid/zero deathsRESET/1548.246660s; Q70.56+five115, zero softyield; replay and ownercleanup verified, independent seal pending.
+
+- Task29 cold CLOSED:1836entry independentREADY;211paid/0deathRESET/1548.246660s,0softyield, replay/identity/cleanup verified; no newrun.

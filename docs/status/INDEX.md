@@ -24,7 +24,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Live checkpoint: BP35 trial ended2levels/166actions, cleanup verified; logging/source-retrieval issues remain unimplemented. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Latest Task29 cold evaluation CLOSED:211paid/zero deathsRESET/1548.246660s, independent seal READY; no natural softyield or new trial authority. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -83,3 +83,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - 本轮独立评估：[2026-10-09 Task28 BP35 冷测](../reviews/2026-10-09-p7-bp35-task28-evaluation.md)：逐关评分、过程证据、修复效果及未解决边界。
 
 - Task29：[动态观察边界实现与评审](../reviews/2026-10-09-p7-observation-boundary-review.md)：模型可选控制边界、数据候选、RESET与反馈容量缺陷修复、验证边界。
+
+- 最新实测：[2026-10-09 Task29 BP35 冷测](../reviews/2026-10-09-p7-bp35-task29-evaluation.md)：零死亡、L1得分退步、用时增加44.70%，自然软边界未触发；完整回放封存独立READY。
