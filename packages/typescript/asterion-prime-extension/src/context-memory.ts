@@ -18,6 +18,8 @@ export interface MemoryCheckpoint {
   readonly content: string;
   /** Historical receipt identity, never a window boundary. */
   readonly anchorToolCallId?: string;
+  /** Latest admitted current-state source, independent of the historical note receipt. */
+  readonly stateToolCallId?: string | undefined;
 }
 interface MemoryMessage {
   role: "custom";
@@ -111,6 +113,62 @@ function unchanged<T>(messages: readonly T[], status: "inactive" | "unsafe-bound
     history_bytes:bytes,retained_history_bytes:bytes,snapshot_bytes:0}};
 }
 
+/** Insert after a complete, uniquely paired source group; never interrupt native siblings. */
+function snapshotInsertion(messages: readonly unknown[], stateToolCallId?: string): number {
+  if (!stateToolCallId || !CALL_ID.test(stateToolCallId)) return messages.length;
+  const sourceResults: number[] = [];
+  const sourceCalls: number[] = [];
+  messages.forEach((raw,index) => {
+    const message = memoryRecord(raw);
+    if (message?.role === "toolResult" && message.toolCallId === stateToolCallId) sourceResults.push(index);
+    if (message?.role === "assistant" && Array.isArray(message.content)) {
+      for (const block of message.content) if (memoryRecord(block)?.type === "toolCall"
+        && memoryRecord(block)?.id === stateToolCallId) sourceCalls.push(index);
+    }
+  });
+  if (sourceResults.length === 0 && sourceCalls.length === 0) {
+    // Pi compaction can omit the source from the visible view while the selected
+    // raw branch still admits it. Leading native summaries form a stable boundary.
+    let index = 0;
+    while (memoryRecord(messages[index])?.role === "system") index += 1;
+    const start = index;
+    while (["compactionSummary","branchSummary"].includes(String(memoryRecord(messages[index])?.role))) index += 1;
+    return index > start ? index : messages.length;
+  }
+  if (sourceResults.length !== 1 || sourceCalls.length !== 1 || sourceCalls[0]! >= sourceResults[0]!) return messages.length;
+  const assistant = memoryRecord(messages[sourceCalls[0]!])!;
+  if (assistant.stopReason === "error" || assistant.stopReason === "aborted") return messages.length;
+  const calls = (assistant.content as unknown[]).map(memoryRecord).filter(block => block?.type === "toolCall");
+  const expected = new Map<string,string>();
+  for (const call of calls) {
+    if (!call || typeof call.id !== "string" || !CALL_ID.test(call.id) || typeof call.name !== "string"
+      || expected.has(call.id)) return messages.length;
+    expected.set(call.id,call.name);
+  }
+  // Duplicated calls/results anywhere in the view cannot authorize an insertion.
+  for (const [id] of expected) {
+    let callCount = 0, resultCount = 0;
+    for (const raw of messages) {
+      const message = memoryRecord(raw);
+      if (message?.role === "assistant" && Array.isArray(message.content))
+        callCount += message.content.filter(block => memoryRecord(block)?.type === "toolCall" && memoryRecord(block)?.id === id).length;
+      if (message?.role === "toolResult" && message.toolCallId === id) resultCount += 1;
+    }
+    if (callCount !== 1 || resultCount !== 1) return messages.length;
+  }
+  const completed = new Set<string>();
+  for (let index = sourceCalls[0]!+1; index < messages.length; index += 1) {
+    const message = memoryRecord(messages[index]);
+    if (message?.role === "system") continue;
+    if (message?.role !== "toolResult" || typeof message.toolCallId !== "string"
+      || expected.get(message.toolCallId) !== message.toolName || completed.has(message.toolCallId)) return messages.length;
+    if (message.toolCallId === stateToolCallId && message.isError !== false) return messages.length;
+    completed.add(message.toolCallId);
+    if (completed.size === expected.size) return index+1;
+  }
+  return messages.length;
+}
+
 /** Replace only our own snapshot; retain all native history in its original order. */
 export function projectMemoryContext<T>(messages: readonly T[], checkpoint?: MemoryCheckpoint): MemoryProjection<T> {
   if (!checkpoint) return unchanged(messages,"inactive");
@@ -120,9 +178,10 @@ export function projectMemoryContext<T>(messages: readonly T[], checkpoint?: Mem
   const visible = messages.filter(message => !synthetic(message));
   const bytes = historyBytes(visible);
   const memory: MemoryMessage = {role:"custom",customType:CUSTOM_TYPE,content:checkpoint.content,display:false,timestamp:0};
-  // Dynamic state follows native history, keeping the stable history prefix in
-  // its original order. Pi converts this owned custom message to a user role.
-  const projected: Array<T | MemoryMessage> = [...visible,memory];
+  // A stable state source keeps its snapshot before later computations. Pi owns
+  // custom-to-user conversion; no synthetic message is added to the raw archive.
+  const projected: Array<T | MemoryMessage> = [...visible];
+  projected.splice(snapshotInsertion(visible,checkpoint.stateToolCallId),0,memory);
   return {messages:projected,outcome:{status:"retained",removed_messages:0,
     retained_messages:visible.length,history_bytes:bytes,retained_history_bytes:bytes,
     snapshot_bytes:Buffer.byteLength(checkpoint.content,"utf8")}};
@@ -132,22 +191,22 @@ export function projectMemoryContext<T>(messages: readonly T[], checkpoint?: Mem
 export class MemoryContextController {
   #checkpoint: MemoryCheckpoint | undefined;
 
-  accept(toolCallId: string, value: unknown): boolean {
+  accept(toolCallId: string, value: unknown, stableSource = true): boolean {
     const envelope = parseMemoryEnvelope(value);
     if (!envelope || !CALL_ID.test(toolCallId)) return false;
     if (envelope.commit) {
-      this.#checkpoint = {revision:envelope.revision,anchorToolCallId:toolCallId,content:envelope.content};
+      this.#checkpoint = {revision:envelope.revision,anchorToolCallId:toolCallId,stateToolCallId:stableSource ? toolCallId : undefined,content:envelope.content};
       return true;
     }
     if (!this.#checkpoint) {
       if (envelope.version !== CONTEXT_MEMORY_VERSION) return false;
-      this.#checkpoint = {revision:envelope.revision,content:envelope.content};
+      this.#checkpoint = {revision:envelope.revision,stateToolCallId:stableSource ? toolCallId : undefined,content:envelope.content};
       return true;
     }
     // V2 is an authoritative current-state snapshot and can repair a withheld
     // note acknowledgement. V1 retains its original revision-bound refresh rule.
     if (envelope.version !== CONTEXT_MEMORY_VERSION && this.#checkpoint.revision !== envelope.revision) return false;
-    this.#checkpoint = {...this.#checkpoint,revision:envelope.revision,content:envelope.content};
+    this.#checkpoint = {...this.#checkpoint,revision:envelope.revision,stateToolCallId:stableSource ? toolCallId : undefined,content:envelope.content};
     return true;
   }
 

@@ -6,6 +6,8 @@ import { discardContextWitnessEnvironment, registerContextWitnessFromEnvironment
 import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
 import { ContextViewTelemetry, contextViewMetricsFromEnvironment, type ContextViewNumbers, type ContextViewMetricsSink } from "./context-metrics.js";
 export { ContextViewTelemetry, contextViewMetricsFromEnvironment } from "./context-metrics.js";
+import {providerPrefixMetricsFromEnvironment, registerProviderPrefixMetrics, type ProviderPrefixMetricsSink} from "./provider-prefix-metrics.js";
+export {ProviderPrefixTelemetry, providerPrefixMetricsFromEnvironment, registerProviderPrefixMetrics} from "./provider-prefix-metrics.js";
 import { admitToolStateView, projectToolStateViewContext } from "./tool-state-view.js";
 export { TOOL_STATE_VIEW_VERSION, admitToolStateView, projectToolStateViews, projectToolStateViewContext } from "./tool-state-view.js";
 export { CONTEXT_MEMORY_VERSION, MemoryContextController, projectMemoryContext } from "./context-memory.js";
@@ -890,7 +892,13 @@ export function recoverP7MemoryContext(controller: MemoryContextController, entr
     if (!envelope || !details) continue;
     if (envelope.commit && (message.toolName !== "p7_workspace" || details.status !== "noted"
       || details.notes_revision !== envelope.revision || details.context_memory_anchor !== message.toolCallId)) continue;
-    controller.accept(message.toolCallId,envelope);
+    // Unknown application effects remain model-visible, but cannot promise a
+    // stable state boundary merely because the native transport settled.
+    const stableSource = details.environment_result_unknown !== true && details.processing_blocked !== true
+      && !Object.hasOwn(details,"uncertain_step")
+      && !["unknown","environment-result-unknown","processing-failed"].includes(String(details.stop_reason))
+      && !["unknown","uncertain","rejected","cancelled","lost","processing-blocked"].includes(String(details.status));
+    controller.accept(message.toolCallId,envelope,stableSource);
   }
 }
 
@@ -993,13 +1001,16 @@ export function register(pi: ExtensionApi, dependencies?: unknown): void {
   let descriptor: number | undefined;
   let witness: ContextWitness | undefined;
   let metrics: ContextViewMetricsSink | undefined;
+  let prefixMetrics: ProviderPrefixMetricsSink | undefined;
   try {
     metrics = contextViewMetricsFromEnvironment();
+    prefixMetrics = providerPrefixMetricsFromEnvironment();
     descriptor = descriptorFromEnvironment();
     if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") throw unavailable();
     const bridge = createIpythonBridge(descriptor);
     witness = registerContextWitnessFromEnvironment(pi, dependencies);
     if (!registerP7MemoryContext(pi, metrics)) metrics?.close();
+    if (prefixMetrics && !registerProviderPrefixMetrics(pi,prefixMetrics)) prefixMetrics.close();
     if (metrics && typeof memoryRecord(pi)?.on === "function") {
       try {
         (pi as ExtensionApi & {on(event: string, handler: () => void): unknown})
@@ -1016,6 +1027,7 @@ export function register(pi: ExtensionApi, dependencies?: unknown): void {
   } catch {
     witness?.close();
     metrics?.close();
+    prefixMetrics?.close();
     discardContextWitnessEnvironment();
     try {
       if (descriptor !== undefined) closeSync(descriptor);

@@ -22,7 +22,7 @@ from typing import cast
 from asterion.applications.prime._console_logging import configure_console_logging
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.agents.prime.deadline import TaskDeadline
-from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile
+from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile, ProviderPrefixMetricsFile
 from .action_journal import ActionJournal
 from .run_story.storage import write_atomic_file
 from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
@@ -3522,6 +3522,7 @@ class P7OperatorResources:
     _bridge: _IpythonBridgeServer
     _prediction_client: _P7BrokerClient | None = None
     _context_metrics: ContextViewMetricsFile | None = None
+    _prefix_metrics: ProviderPrefixMetricsFile | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -3537,6 +3538,10 @@ class P7OperatorResources:
     def context_view_metrics(self) -> dict:
         """Private body-free extension-hook accounting, independent of stderr."""
         return self._context_metrics.read() if self._context_metrics is not None else {"status": "unavailable"}
+
+    def provider_prefix_metrics(self) -> dict:
+        """Private numeric prefix observation; never provider body or token positions."""
+        return self._prefix_metrics.read() if self._prefix_metrics is not None else {"status": "unavailable"}
 
     async def close(self) -> None:
         """Boundedly release all resources retained by the operator."""
@@ -3564,8 +3569,12 @@ class P7OperatorResources:
                     try:
                         launch.extension_lease.close()
                     finally:
-                        if self._context_metrics is not None:
-                            self._context_metrics.close()
+                        try:
+                            if self._context_metrics is not None:
+                                self._context_metrics.close()
+                        finally:
+                            if self._prefix_metrics is not None:
+                                self._prefix_metrics.close()
 
 
 def resolve_pi_provider(
@@ -3833,6 +3842,7 @@ def build_p7_operator_resources(
     trace: PrimeTraceRecorder | None = None
     bridge: _IpythonBridgeServer | None = None
     context_metrics: ContextViewMetricsFile | None = None
+    prefix_metrics: ProviderPrefixMetricsFile | None = None
     try:
         configured_command = apply_pi_effort(pi_base_command, environment)
         variant = _resolve_history_variant(environment, game)
@@ -3874,6 +3884,7 @@ def build_p7_operator_resources(
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
         provider_environment.pop("ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD", None)
+        provider_environment.pop("ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD", None)
         if not research_mode:
             provider_environment["ASTERION_PRIME_P7_TOOL_MODE"] = "legacy"
         if environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT") == "1":
@@ -3914,9 +3925,13 @@ def build_p7_operator_resources(
         descriptor = child.fileno()
         if research_mode:
             context_metrics = ContextViewMetricsFile(private_trace_root.parent / "context-view-metrics.json")
-        metrics_fds = () if context_metrics is None else (context_metrics.descriptor,)
-        metrics_environment = {} if context_metrics is None else {
-            "ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD": str(context_metrics.descriptor)}
+            prefix_metrics = ProviderPrefixMetricsFile(private_trace_root.parent / "provider-prefix-metrics.json")
+        metrics_fds = tuple(item.descriptor for item in (context_metrics, prefix_metrics) if item is not None)
+        metrics_environment = {}
+        if context_metrics is not None:
+            metrics_environment["ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD"] = str(context_metrics.descriptor)
+        if prefix_metrics is not None:
+            metrics_environment["ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD"] = str(prefix_metrics.descriptor)
         binding = ExtensionBinding(
             extension_id="prime.ipython",
             path=extension_path,
@@ -4046,6 +4061,7 @@ def build_p7_operator_resources(
             _bridge=bridge,
             _prediction_client=prediction_client,
             _context_metrics=context_metrics,
+            _prefix_metrics=prefix_metrics,
         )
     except Exception as error:
         print(
@@ -4068,8 +4084,12 @@ def build_p7_operator_resources(
             parent.close()
         if lease is not None:
             lease.close()
-        if context_metrics is not None:
-            context_metrics.close()
+        try:
+            if context_metrics is not None:
+                context_metrics.close()
+        finally:
+            if prefix_metrics is not None:
+                prefix_metrics.close()
         raise P7OperatorError("P7 host services are unavailable") from None
 
 
@@ -5398,6 +5418,9 @@ async def run_live(
             metrics_reader = getattr(resources_, "context_view_metrics", None)
             if callable(metrics_reader):
                 diagnostics["context_view_metrics"] = metrics_reader()
+            prefix_reader = getattr(resources_, "provider_prefix_metrics", None)
+            if callable(prefix_reader):
+                diagnostics["provider_prefix_metrics"] = prefix_reader()
             research_host = resources_.host_services.get("prime.ipython") if research_mode else None
             chain_reader = getattr(research_host, "research_chain_summary", None)
             if callable(chain_reader):

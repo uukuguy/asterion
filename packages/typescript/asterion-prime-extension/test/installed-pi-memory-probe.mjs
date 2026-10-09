@@ -3,12 +3,13 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
-import {createAppLevelTools,registerP7MemoryContext} from "../dist/ipython-extension.mjs";
+import {createAppLevelTools,registerP7MemoryContext,registerProviderPrefixMetrics} from "../dist/ipython-extension.mjs";
 
 const packageRoot = resolve(process.env.ASTERION_TEST_PI_PACKAGE_ROOT
   ?? "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent");
 const native = await import(pathToFileURL(resolve(packageRoot,"dist/index.js")).href);
 const ai = await import(pathToFileURL(resolve(packageRoot,"node_modules/@earendil-works/pi-ai/dist/index.js")).href);
+const {convertResponsesMessages}=await import(pathToFileURL(resolve(packageRoot,"node_modules/@earendil-works/pi-ai/dist/api/openai-responses-shared.js")).href);
 const {loadExtensionFromFactory} = await import(pathToFileURL(resolve(packageRoot,"dist/core/extensions/loader.js")).href);
 const revision = "sha256:" + "a".repeat(64);
 const user = text => ({role:"user",content:text,timestamp:1});
@@ -20,10 +21,12 @@ const toolResult = (id,name,value) => ({role:"toolResult",toolCallId:id,toolName
 const current = "IMMUTABLE_DOCUMENT_RESEARCH_INSTRUCTIONS\nCURRENT_CHAPTER_5_BOARD";
 const calls = [];
 const telemetry = [];
+const providerTelemetry = [];
 let hasNotes = false;
 const runtime = native.createExtensionRuntime();
 const factory = await loadExtensionFromFactory(pi => {
   assert.equal(registerP7MemoryContext(pi,numbers => telemetry.push(numbers)),true);
+  assert.equal(registerProviderPrefixMetrics(pi,numbers => providerTelemetry.push(numbers)),true);
   for (const tool of createAppLevelTools({callMethod:async (id,method,params) => {
     calls.push({id,method,params});
     const commit = method === "workspace" && params.op === "notes";
@@ -55,6 +58,29 @@ session.appendMessage(toolResult(readCall.id,readCall.name,read));
 let source = session.buildSessionContext().messages;
 let projected = await runner.emitContext(source);
 assert.match(JSON.stringify(native.convertToLlm(projected)),/No notes saved|CURRENT_CHAPTER_5_BOARD/);
+
+// Same accepted state and appended cells must extend the entire previous provider input.
+const prefixModel={id:"probe",provider:"openai",api:"openai-responses",reasoning:true,input:["text"]};
+const providerInput=messages=>convertResponsesMessages(prefixModel,{messages:native.convertToLlm(messages)},new Set(["openai"]),
+  {supportsMidConvoSystemMessages:false});
+const previousProvider=providerInput(projected);
+const previousPayload={model:"probe",input:previousProvider,prompt_cache_key:"provider-free-session"};
+assert.equal(await runner.emitBeforeProviderRequest(previousPayload),previousPayload);
+const cellCall=call("prefix-cell","ipython",{code:"1+1"});
+session.appendMessage(assistant(cellCall));
+session.appendMessage(toolResult(cellCall.id,cellCall.name,{content:[{type:"text",text:"2"}],details:{}}));
+const afterCellSource=session.buildSessionContext().messages;
+const afterCellView=await runner.emitContext(afterCellSource);
+const afterCellProvider=providerInput(afterCellView);
+assert.deepEqual(afterCellProvider.slice(0,previousProvider.length),previousProvider,
+  "fixed state snapshot preserves the complete serialized provider input across a cell");
+const nextPayload={...previousPayload,input:afterCellProvider};
+assert.equal(await runner.emitBeforeProviderRequest(nextPayload),nextPayload);
+assert.equal(providerTelemetry.length,2);
+assert.equal(providerTelemetry[1].common_prefix_items,previousProvider.length);
+assert.equal(providerTelemetry[1].common_prefix_bytes,Buffer.byteLength(JSON.stringify(previousProvider),"utf8")-1);
+assert.equal(providerTelemetry[1].cache_key_changed,0);
+assert.equal(providerTelemetry[1].tools_changed,0);
 
 // Installed Pi's argument validator and native tool wrapper accept the minimal plan.
 const minimal = {plan_id:"minimal-plan",start:{run_id:"run",attempt_id:"attempt",level:1,
@@ -115,10 +141,11 @@ for (const text of ["PI_OWNED_SYSTEM_PROMPT","OPERATOR_TASK_INSTRUCTIONS","LATER
 for (const text of ["RAW_CHAPTER_1","RAW_CHAPTER_4","BEFORE_NOTES_RESEARCH_0 ","LARGE_EVIDENCE_0 "])
   assert.ok(serialized.includes(text),text);
 assert.deepEqual(projected.filter(message => message.customType !== "asterion_context_memory"),source);
-assert.equal(projected.at(-1).customType,"asterion_context_memory");
-assert.equal(modelView.at(-1).role,"user","Pi keeps its native custom-to-user conversion");
-assert.match(JSON.stringify(modelView.at(-1)),/CURRENT_CHAPTER_5_BOARD/);
-assert.equal(modelView.at(-2).content,"PENDING_CURRENT_QUESTION");
+const snapshotIndex=projected.findIndex(message=>message.customType==="asterion_context_memory");
+assert.equal(projected[snapshotIndex-1].toolCallId,"sibling","snapshot follows the complete admitted source group");
+assert.equal(modelView[snapshotIndex].role,"user","Pi keeps its native custom-to-user conversion");
+assert.match(JSON.stringify(modelView[snapshotIndex]),/CURRENT_CHAPTER_5_BOARD/);
+assert.equal(modelView.at(-1).content,"PENDING_CURRENT_QUESTION");
 assert.ok(telemetry.at(-1).current_snapshot_bytes>0);
 assert.equal(telemetry.at(-1).requests,telemetry.length);
 assert.deepEqual(projected[0].toolsAdded,source[0].toolsAdded);
@@ -136,8 +163,8 @@ assert.match(JSON.stringify(recovered),/CURRENT_CHAPTER_5_BOARD/);
 assert.match(JSON.stringify(recovered),/NATIVE_RETAINED_SUMMARY/);
 assert.match(JSON.stringify(recovered),/NATIVE_BRANCH_RESEARCH|LARGE_EVIDENCE_0 /);
 assert.equal(restoredView.filter(message => message.customType === "asterion_context_memory").length,1);
-assert.equal(restoredView.at(-1).customType,"asterion_context_memory");
-assert.equal(recovered.at(-1).role,"user");
+assert.equal(restoredView[3].customType,"asterion_context_memory");
+assert.equal(recovered[3].role,"user");
 // Navigating to a branch without trusted state must not inherit another branch's snapshot.
 const otherSession=native.SessionManager.inMemory(process.cwd());
 otherSession.appendMessage(user("OTHER_BRANCH_OPERATOR"));
@@ -153,5 +180,6 @@ console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest
   research_without_notes_retained:true,research_with_notes_retained:true,native_compaction_research_retained:true,
   user_corrections_retained:true,
   complete_sibling_group:true,system_and_tools_preserved:true,raw_branch_unchanged:true,restart_after_compaction:true,
-  snapshot_at_history_end:true,snapshot_native_user_conversion:true,selected_branch_isolated:true,
+  snapshot_after_state_group:true,snapshot_fixed_across_computation:true,
+  actual_provider_event_numeric_observation:true,actual_provider_input_append_prefix:true,snapshot_native_user_conversion:true,selected_branch_isolated:true,
   final_extension_view_numeric_telemetry:true}));

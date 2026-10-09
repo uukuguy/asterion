@@ -17,8 +17,8 @@ No domain imports in generic modules, hidden engine rules, color meaning, grid/o
 Owner context_impl. Read `context-memory.ts`, `tool-state-view.ts`, `ipython-extension.ts` and installed Pi conversion/serializer. Construct consecutivecell/action/notes/retry and branch/compaction fixtures with actual conversion. Locate first differing model-bearing field; fixed17280cache is not a root-cause proof. Selected repair: stateToolCallId anchors current snapshot after its complete native sibling group, retaining note receipt identity and safe compaction/tail fallback. Add numeric actual-provider-input LCP through the public before_provider_request event and independent private FD; root owns Python closed-shape validation/operator integration. Do not cut unclassified native history or silently redefine arbitrary model text as instructions.
 
 - [x] Demonstrate expected stable-prefix failure and document actual boundary.
-- [ ] Implement reviewed minimal generic change, preserving raw archive, current evidence, tool pairs, originalroles, branch isolation and unknown effects.
-- [ ] Run `npm --prefix packages/typescript/asterion-prime-extension test` and installedPi provider-free probe; report external skips separately.
+- [x] Implement reviewed minimal generic change, preserving raw archive, current evidence, tool pairs, originalroles, branch isolation and unknown effects.
+- [x] Run `npm --prefix packages/typescript/asterion-prime-extension test` and installedPi provider-free probe; report external skips separately.
 
 ## Task2: Exact P7 patches and research principles
 
@@ -35,8 +35,8 @@ Consumed interface: existing `_frame(sequence)` reads immutable actual pixels; `
 
 Root owns bundledresource/spec/plan/canonicalworklist/checkpoint. Review owns readonly changedcode audit; workers are not alone and must preserve others'changes.
 
-- [ ] Sync bundledresource ifTSchanges via existing npm sync-resource.
-- [ ] Independentreview checks source-binding, noaction sideeffects, roles/pairing/history/currentstate, domainseparation and diagnosticfailures; fix importantfindings.
+- [x] Sync bundledresource ifTSchanges via existing npm sync-resource.
+- [x] Independentreview checks source-binding, noaction sideeffects, roles/pairing/history/currentstate, domainseparation and diagnosticfailures; fix importantfindings.
 - [ ] Run TS tests thenrelated Python tests, lint/docs and `RUST_TEST_THREADS=1 make promotion-check`; record exactcommands and externallylimitedcoverage. Commit reviewed implementation and sourcefreeze.
 
 ## Task4: Packaged deployment and user-authorized cold evaluation
@@ -47,3 +47,5 @@ Deployment owns installation/run/monitor/replay/seal/cleanup; root interprets pe
 - [ ] Fresh BP35L1–L6 with operator.env model/effort, original5400+180/6levels/1000paid/1024model/4096toolpreset, no priornotes/routes or externalhints, preservconsole52024/56659.
 - [ ] Track perlevelpaid/success/score/RESET/time, chronologicalinput/context/cache and passive macrochain; score usesallpaid with115cap. Nozero-deathacceptance or rewardbelowcap.
 - [ ] Fullreplay/seal/cleanup and independentmanifest/source/resource audit; commit evidence and recoveryboundary. Single-runefficiency/cache/risk differences remain observations rather than statisticalcausality.
+
+Final source review APPROVE: P7 patch/prompt and numericFD integration plus anchoredprojection/providerhook reviewed; uncertainty throughNOTESread and partialeventregistration defects repaired. FinalTS78PASS/6external skips, actualPi1.0 conversion/serializer/eventPASS(provider0), Python85PASS includingofficialinstalled, lint/docsPASS. Promotion running on these unchanged bytes; provider deployment/effect not yet verified.

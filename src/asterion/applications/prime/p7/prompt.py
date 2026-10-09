@@ -40,11 +40,11 @@ def build_autonomous_prompt() -> str:
 工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。IPython 是持久 Python 研究空间。直接运行：
 import p7_research as r
 print(r.render()['text'])
-这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态。r.render(sequence=None,x0=0,y0=0,x1=None,y1=None,max_cells=4096) 显示带坐标的原始像素，可选半开窗口；r.geometry(sequence=None,colors=None,limit=40) 返回颜色计数与连通区域；r.diff(before_sequence,after_sequence=None,limit=80) 返回变化总数和有界变化坐标，after_sequence 缺省为当前。输出会标明省略范围。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块没有预设游戏含义。此研究接口只读。
+这里 r.frame() 返回当前完整二维数值像素；r.frame(sequence) 读历史画面；r.current() 读当前研究状态。r.render(sequence=None,x0=0,y0=0,x1=None,y1=None,max_cells=4096) 显示带坐标的原始像素，可选半开窗口；r.geometry(sequence=None,colors=None,limit=40) 返回颜色计数与连通区域；r.patches(windows,sequence=None) 按输入顺序返回局部完整 pixels、颜色 counts 与 window，以及所读 sequence 和完整画面 shape。windows 为1–64个半开 [x0,y0,x1,y1] 区域，必须完全在画面内，合计最多4096像素（重叠重复计数），超限拒绝，不裁剪。r.diff(before_sequence,after_sequence=None,limit=80) 返回变化总数和有界变化坐标，after_sequence 缺省为当前。render/geometry/diff 输出会标明省略范围。r.history(start,limit) 按页读真实行动记录，limit 至多32。坐标 x 为列、y 为行；所有颜色原样保留，连通块和局部区域没有预设游戏含义。此研究接口只读。
 
 已有付费动作后，r.transition(sequence) 联合返回该动作与参数、before_observation_ref、after_observation_ref、实际 state/levels_completed 和 after_animation_ref。sequence 是本次运行的已提交动作序号，从1开始。用 r.frame(t['before_observation_ref']['sequence']) 与 r.frame(t['after_observation_ref']['sequence']) 读前后终态；r.animation(t['after_observation_ref'],start=0,limit=32) 按页读该动作的 SDK 返回帧，after_animation_ref['frame_count'] 是记录帧数。它不补造 SDK 未记录的过程。
 
-可自由写程序表示状态、推演转移或搜索，再用真实历史转移检验假说。自建表示是解释，保留仍需区分的原始类别、形状和坐标对应；未知保持未知。一次动作可能触发连续变化，研究其后果时考虑实际停留状态及途中变化，不只直接输入后的第一步。模型适用范围和未覆盖区域由你判断，自主选择回读、实验、计算或行动。
+可自由写程序表示状态、推演转移或搜索，再用真实历史转移检验假说。自建表示是解释，保留仍需区分的原始类别、形状和坐标对应；需要区分形状或核对坐标时，可用完整局部像素检查压缩表示，视图或阶段变化后也可重新核对。未知保持未知。一次动作可能触发连续变化，研究其后果时考虑实际停留状态及途中变化，不只直接输入后的第一步。明显不同的新形状或内部颜色标记，即使尚无致命反例，也可作为待研究的风险线索；结合已知运动与连续后果、信息价值、失败或逆转及绕行代价、可用替代行动作判断。未知标记不自动等于危险，也无需消除所有未知才继续。模型适用范围和未覆盖区域由你判断，自主选择回读、实验、计算或行动。
 
 当前运行的计算源码和实际输出自动存档：r.cell_history(start=0,limit=16) 返回计算目录，r.cell_read(cell_id,field="source",start=0,limit=4096) 回读源码，field="output" 回读输出或报错。文本按字符分页，目录不自动展开内容。查看仍存活的函数定义可用 inspect.getsource(function)。优先回读所需定义和结果，无需反复用 globals 或反汇编重建代码。档案只是记录，不会自动执行；内核恢复只还原显式保存的 checkpoint。
 

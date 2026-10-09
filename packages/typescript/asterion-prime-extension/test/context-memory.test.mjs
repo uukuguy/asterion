@@ -458,3 +458,67 @@ test("unwritable metrics descriptor disables collection silently and leaves cont
     rmSync(directory,{recursive:true,force:true});
   }
 });
+
+
+test("trusted state snapshot stays after its complete sibling group while calculations append", () => {
+  const controller=new extension.MemoryContextController();controller.accept("note",envelope());
+  const messages=history();const projected=controller.project(messages);
+  assert.equal(projected.messages[6].customType,"asterion_context_memory");
+  assert.deepEqual(projected.messages.filter(message=>message.customType!=="asterion_context_memory"),messages);
+  const expanded=[...messages,assistant("cell"),result("cell","calculation")];
+  assert.deepEqual(controller.project(expanded).messages.slice(0,projected.messages.length),projected.messages);
+  controller.accept("cell",envelope(false,revision,"REFRESHED_STATE"));
+  assert.equal(snapshotOf(controller.project(expanded)).content,"REFRESHED_STATE");
+  assert.equal(controller.project(expanded).messages.at(-1).customType,"asterion_context_memory");
+});
+
+test("compacted state snapshot has a stable summary fallback while unsafe groups stay at tail", () => {
+  const controller=new extension.MemoryContextController();controller.accept("read",envelope(false,null,"CURRENT_STATE"));
+  const compacted=[{role:"system",content:"system"},{role:"compactionSummary",summary:"summary"},
+    {role:"branchSummary",summary:"branch"},user("retained task"),assistant("cell"),result("cell")];
+  assert.equal(controller.project(compacted).messages[3].customType,"asterion_context_memory");
+  for(const messages of [
+    [assistant("read","pending"),result("read")],
+    [assistant("read"),result("read"),result("read")],
+    [assistant("read"),user("interrupt"),result("read")],
+    [assistant("read"),{...result("read"),toolName:"wrong"}],
+  ]){
+    const projected=controller.project(messages);assert.equal(projected.messages.at(-1).customType,"asterion_context_memory");
+    assert.deepEqual(projected.messages.slice(0,-1),messages);
+  }
+});
+
+
+test("unknown application outcomes remain visible but cannot establish a stable state anchor", () => {
+  for(const flags of [{environment_result_unknown:true},{processing_blocked:true},{uncertain_step:{}},
+    {stop_reason:"environment-result-unknown"},{status:"uncertain"}]) {
+    const controller=new extension.MemoryContextController();
+    const messages=[{role:"assistant",content:[{type:"toolCall",id:"read",name:"p7_execute_plan",arguments:{}}]},
+      {...result("read"),toolName:"p7_execute_plan",details:{status:"recorded",...flags,
+        context_memory:envelope(false,null,"UNKNOWN_STATE")}},user("later computation")];
+    extension.recoverP7MemoryContext(controller,messages.map(message=>({type:"message",message})));
+    const projected=controller.project(messages);
+    assert.equal(projected.messages.at(-1).customType,"asterion_context_memory");
+    assert.equal(projected.messages.at(-1).content,"UNKNOWN_STATE");
+    assert.deepEqual(projected.messages.slice(0,-1),messages);
+  }
+});
+
+
+test("notes reads after unknown actions retain current uncertainty and never re-establish a stable anchor", async () => {
+  const tools=extension.createAppLevelTools({callMethod:async (_id,method)=>({status:method==="execute_plan" ? "recorded" : "ok",
+    environment_result_unknown:true,processing_blocked:true,
+    context_memory:envelope(false,null,method==="execute_plan" ? "UNKNOWN_ACTION_STATE" : "CURRENT_UNKNOWN_NOTES_STATE")})});
+  const plan=await tools.find(tool=>tool.name==="p7_execute_plan").execute("unknown-plan",{});
+  const notes=await tools.find(tool=>tool.name==="p7_workspace").execute("notes-read",{op:"notes_read"});
+  const source=[{role:"assistant",content:[{type:"toolCall",id:"unknown-plan",name:"p7_execute_plan",arguments:{}}]},
+    {...result("unknown-plan"),toolName:"p7_execute_plan",...plan},
+    {role:"assistant",content:[{type:"toolCall",id:"notes-read",name:"p7_workspace",arguments:{op:"notes_read"}}]},
+    {...result("notes-read"),toolName:"p7_workspace",...notes},user("later computation")];
+  const original=structuredClone(source);const controller=new extension.MemoryContextController();
+  extension.recoverP7MemoryContext(controller,source.map(message=>({type:"message",message})));
+  const projected=controller.project(source);
+  assert.equal(projected.messages.at(-1).content,"CURRENT_UNKNOWN_NOTES_STATE");
+  assert.deepEqual(projected.messages.slice(0,-1),source);assert.deepEqual(source,original);
+  assert.equal(notes.details.environment_result_unknown,true);assert.equal(notes.details.processing_blocked,true);
+});

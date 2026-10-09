@@ -313,6 +313,36 @@ class TestP7Research(P7SolverFixture):
         self.assertEqual(calls, [(0, 16)])
         self.assertEqual(self.engine.calls, [])
 
+    def test_patches_wire_resolves_current_once_and_reads_exact_history(self):
+        calls = []
+        def context():
+            calls.append('context')
+            return {'observation_ref': {'sequence': 1}}
+        def frame(sequence):
+            calls.append(('frame', sequence))
+            return [[[0, 255], [9, 15]], [[15, 9], [255, 0]]][sequence]
+        server = ResearchReadServer(context=context, history=lambda *a: [],
+                                    frame=frame, artifact=lambda *a: {})
+        self.addCleanup(server.close)
+        module = {}
+        exec(server.start(), module)
+        self.assertIn('patches', module)
+        current = module['patches']([[0, 0, 2, 2]])
+        self.assertEqual(current, {'sequence': 1, 'shape': [2, 2], 'patches': [
+            {'window': [0, 0, 2, 2], 'pixels': [[15, 9], [255, 0]],
+             'counts': {'0': 1, '9': 1, '15': 1, '255': 1}}]})
+        self.assertEqual(calls, ['context', ('frame', 1)])
+        calls.clear()
+        historical = module['patches'](((0, 0, 1, 1),), sequence=0)
+        self.assertEqual(historical['sequence'], 0)
+        self.assertEqual(historical['patches'][0]['pixels'], [[0]])
+        self.assertEqual(calls, [('frame', 0)])
+        for args in ([[], 0], [[[0, 0, 1, 1]], True], [[[0, 0, 1, 1]], -1],
+                     [[[0, 0, 1, 1]]], [[[0, 0, 1, 1]], 0, 'extra']):
+            with self.subTest(args=args):
+                self.assertEqual(server.dispatch({'method': 'patches', 'args': args})['status'], 'rejected')
+        self.assertEqual(self.engine.calls, [])
+
     def test_read_wire_caps_complete_response_and_surfaces_safe_diagnostic(self):
         server = ResearchReadServer(context=lambda: {'body': 'x' * (1024 * 1024)},
                                     history=lambda *a: [], frame=lambda *a: [], artifact=lambda *a: {})

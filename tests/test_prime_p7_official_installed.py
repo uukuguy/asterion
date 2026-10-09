@@ -131,7 +131,8 @@ if (result.applied_count !== 13 || result.observation.levels_completed !== 1)
                     close_fds=True, env=dict(os.environ),
                     pass_fds=tuple(int(os.environ[name]) for name in (
                         "ASTERION_PRIME_IPYTHON_FD", "ASTERION_PI_EXTENSION_SOURCE_FD",
-                        "ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD") if name in os.environ),
+                        "ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD",
+                        "ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD") if name in os.environ),
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                     timeout=30,
                 )

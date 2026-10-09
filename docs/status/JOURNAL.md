@@ -4564,3 +4564,7 @@
 2026-10-09 — 3395b86c closed independently audited BP35 trial and recorded cache, representation and risk-cue findings for next investigation.
 
 2026-10-09 — User authorized Task28 design, implementation, independent review and fresh BP35 evaluation of identified mechanisms.
+
+2026-10-09 — 00846c03 specified reproducible state anchoring, numeric prefix evidence and exact P7 patches before integrated evaluation.
+
+2026-10-09 — Task28 independent code review APPROVE; finalTS78/Python85/actualPi checks passed, fullpromotion still running.

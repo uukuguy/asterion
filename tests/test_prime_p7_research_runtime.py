@@ -37,6 +37,34 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_unknown_action_remains_top_level_unknown_after_notes_reads(self):
+        self.host.solver.learner_profile = 'autonomous'
+        self.host.set_memory_instructions('trusted research')
+        before = self.host.current_context()
+        self.host.method_call('workspace', {'op': 'notes',
+            'base_revision': before['workspace_revision'], 'observation_ref': before['observation_ref'],
+            'text': 'retain known facts'}, _Signal())
+        self.engine.raises_on = 1
+        action = self.host.method_call('execute_plan', {'plan_id': 'unknown-effect',
+            'start': before['observation_ref'], 'steps': [{'action': {'name': 'ACTION1', 'data': {}},
+            'expect': {'cells': [{'x': 0, 'y': 0, 'value': 1}]}}]}, _Signal())
+        self.assertEqual(action['stop_reason'], 'environment-result-unknown')
+        current = self.host.current_context()
+        self.assertTrue(current['environment_result_unknown'])
+        # Isolate reply projection from the runtime stop requested by the unknown action.
+        # The solver's read-only NOTES operations still expose real accepted records.
+        self.host.poll = lambda: {'state': 'running'}
+        for op in ('notes_read', 'notes_history'):
+            with self.subTest(op=op):
+                result = self.host.method_call('workspace', {'op': op}, _Signal())
+                self.assertEqual(result['status'], 'ok')
+                self.assertTrue(result.get('environment_result_unknown'))
+                self.assertEqual(result.get('processing_blocked'), current['processing_blocked'])
+                snapshot = json.loads(result['context_memory']['content'].split('\n\n', 1)[1])
+                self.assertTrue(snapshot['environment_result_unknown'])
+                self.assertNotIn('tool_state_view', result)
+        self.assertEqual(len(self.engine.calls), 1)
+
     async def test_notes_receipt_uses_real_kernel_identity_and_refreshes_current_board(self):
         self.host.solver.learner_profile = 'notes'
         self.host.set_memory_instructions('trusted immutable instruction sentinel')

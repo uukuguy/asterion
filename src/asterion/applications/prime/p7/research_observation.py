@@ -91,6 +91,32 @@ def geometry(frame, *, colors=None, limit=40) -> dict:
             'components': components, 'components_omitted': total-len(components)}
 
 
+def patches(frame, windows) -> dict:
+    """Copy bounded exact pixel regions in input order, without interpretation."""
+    board = grid(frame)
+    height, width = len(board), len(board[0])
+    if type(windows) not in (list, tuple) or not 1 <= len(windows) <= 64:
+        raise ValueError('observation patch windows unavailable')
+    cells = 0
+    for window in windows:
+        if (type(window) not in (list, tuple) or len(window) != 4
+                or any(type(value) is not int for value in window)):
+            raise ValueError('observation patch window unavailable')
+        x0, y0, x1, y1 = window
+        if not 0 <= x0 < x1 <= width or not 0 <= y0 < y1 <= height:
+            raise ValueError('observation patch window unavailable')
+        cells += (x1 - x0) * (y1 - y0)
+        if cells > 4096:
+            raise ValueError('observation patch budget unavailable')
+    result = []
+    for x0, y0, x1, y1 in windows:
+        pixels = [row[x0:x1] for row in board[y0:y1]]
+        counts = Counter(value for row in pixels for value in row)
+        result.append({'window': [x0, y0, x1, y1], 'pixels': pixels,
+                       'counts': dict(sorted(counts.items()))})
+    return {'shape': [height, width], 'patches': result}
+
+
 def diff(before, after, *, limit=80) -> dict:
     """Return exact change counts and bounded changed cells, including shape edges."""
     previous, current = grid(before), grid(after)

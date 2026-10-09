@@ -35,7 +35,7 @@ class ResearchReadServer:
                 if not callable(callback):
                     raise ValueError("research readers unavailable")
                 callbacks[name] = callback
-        callbacks.update(render=self._render, geometry=self._geometry, diff=self._diff)
+        callbacks.update(render=self._render, geometry=self._geometry, patches=self._patches, diff=self._diff)
         self._readers = callbacks
         self._server = None
         self._thread = None
@@ -57,6 +57,12 @@ class ResearchReadServer:
     def _geometry(self, sequence, colors, limit):
         from .research_observation import geometry
         return geometry(self._frame(sequence), colors=colors, limit=limit)
+
+    def _patches(self, windows, sequence):
+        from .research_observation import patches
+        if sequence is None:
+            sequence = self._readers['context']()['observation_ref']['sequence']
+        return {'sequence': sequence, **patches(self._frame(sequence), windows)}
 
     def _diff(self, before_sequence, after_sequence, limit):
         from .research_observation import diff
@@ -117,6 +123,9 @@ class ResearchReadServer:
                     raise ValueError
             elif method in {'render', 'geometry', 'diff'}:
                 if len(args) != (6 if method == 'render' else 3):
+                    raise ValueError
+            elif method == 'patches':
+                if len(args) != 2:
                     raise ValueError
             elif method == 'animation':
                 if (len(args) != 3 or type(args[0]) is not dict
@@ -218,6 +227,9 @@ def render(sequence=None, *, x0=0, y0=0, x1=None, y1=None, max_cells=4096):
 def geometry(sequence=None, *, colors=None, limit=40):
     """Counts and 4-connected components; all colors unless explicitly filtered."""
     return _read("geometry", [sequence, colors, limit])
+def patches(windows, sequence=None):
+    """Exact pixels and counts for 1–64 half-open windows, at most 4096 pixels total."""
+    return _read("patches", [windows, sequence])
 def diff(before_sequence, after_sequence=None, *, limit=80):
     """Exact count and bounded changed cells, before versus current by default."""
     return _read("diff", [before_sequence, after_sequence, limit])

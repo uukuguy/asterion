@@ -393,9 +393,22 @@ class P7ResearchRuntime:
         request = params.get('request', params) if isinstance(params, Mapping) else {}
         commit = method == 'workspace' and request.get('op') == 'notes' and result.get('status') == 'noted'
         if result.get('status') != 'rejected':
-            memory = self._context_memory(commit=commit)
+            try:
+                memory = self._context_memory(commit=commit)
+            except Exception:
+                memory = None  # An optional view failure cannot fence an accepted result.
             if memory is not None:
                 projected['context_memory'] = memory
+            try:
+                current = self.solver.current_context()
+                certainty = {key: current[key] for key in ('environment_result_unknown', 'processing_blocked')}
+                if any(type(value) is not bool for value in certainty.values()):
+                    raise ValueError('current certainty unavailable')
+            except Exception:
+                certainty = {'environment_result_unknown': True, 'processing_blocked': True}
+            # These are current solver facts, including after historical NOTES reads.
+            # Keep an already built snapshot even if the separate certainty read fails.
+            projected.update(certainty)
         state_view = self._tool_state_view(method, projected)
         if state_view is not None:
             projected['tool_state_view'] = state_view
