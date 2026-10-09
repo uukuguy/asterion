@@ -4560,3 +4560,7 @@
 2026-10-09 — Task27 reached L6 with203paid/one deathRESET/1644.981503s; final independent evidence audit pending.
 
 2026-10-09 — Task27 independent1824-entry audit READY; cache regression and visible-risk-cue omission recorded without causal overclaim.
+
+2026-10-09 — 3395b86c closed independently audited BP35 trial and recorded cache, representation and risk-cue findings for next investigation.
+
+2026-10-09 — User authorized Task28 design, implementation, independent review and fresh BP35 evaluation of identified mechanisms.
