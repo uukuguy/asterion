@@ -281,3 +281,14 @@ Task36CLOSED: recordcontractsimplemented/deployed, qualitynotimproved. Noactivea
 ## Task37 — Unchanged-version L1 repeat
 
 Userauthorized singleBP35L1 repeat, no productionchanges: same94dabe66/wheelbbf153/Solmedium/seed0/freshhistory/native6/5400+180 actorinputs. External private identity-checked watcher stops after knownL1goal, no19gate. Result21paid/Q100/0RESET/161.361755s, L2paid0; Task36sameversion24/Q76.5625/247.167053s. Earlier route-related mechanism update and bounded animation output differ; two trials demonstrate variability, not promptcausality orstability. 23SDK replay/21knowntransactions/40trace/14researchrecords verified; final258manifest fd2d6ae8 independentREADY/ownedcleanup. Task37CLOSED. Usernewquestion revealedactual autonomousinterface lacksstandardACTION1–7 priors (legacy mappingnotdelivered). Domaininterface/research improvementremainsnotimplemented; noadditionalrun authority.
+
+## Task38 — Revisable action interface priors
+
+**Goal:** Deliver known ARC interface conventions to the actual autonomous actor, keeping hidden game mechanics model-owned.
+
+**Architecture:** Only P7 research prompt; Prime generic services and P7 data/contracts remain unchanged. No game route or forced probe. Design is the Task38 section in the existing resource-aware research spec.
+
+- [x] Add focused prompt-delivery test for all7actions, revisable prior, ACTION7/RESET distinction and GAME_OVER boundary; observe missing-content failure.
+- [x] Add short mapping paragraph to `build_autonomous_prompt()` in `src/asterion/applications/prime/p7/prompt.py`; run `uv run python -m unittest -v tests.test_prime_p7_autonomous_interface`, Ruff/diff and independent changed-code review.
+- [ ] Commit source and documentation; run `make promotion-check` and freshwheel installed prompt probe, checking source/prompt/resource/tools match.
+- [ ] Record implemented vs provider-free verified vs model-quality untested boundaries; close checkpoint. User subsequently authorized fresh BP35 L1–L6: exactSolmedium/seed0/native6/5400+180, preflightREADY/rootGO, no inheritedknowledge orL1stopper/19gate; prioritize L1 comparison and monitor each level.

@@ -39,6 +39,18 @@ class TestAutonomousResearchInterface(unittest.TestCase):
         self.assertIn('stop_on_mismatch', text)
         self.assertNotIn('needs_revision=true', text)
 
+    def test_prompt_delivers_action_interface_prior_with_observation_and_reset_limits(self):
+        text = prompt.build_autonomous_prompt()
+        for fragment in ('接口先验（不是游戏机制保证）',
+                         'ACTION1=上', 'ACTION2=下', 'ACTION3=左', 'ACTION4=右',
+                         'ACTION5 通常用于交互、选择等', 'ACTION6 为点击', 'x 是列、y 是行',
+                         'ACTION7 为撤销', '通常回退最近一步或此前可撤销状态',
+                         '用于修错，不保证精确回退范围', 'RESET 重新开始当前关，与撤销不同',
+                         'GAME_OVER 后只能 RESET', '以当前观察的 available_actions 为准',
+                         '具体效果用实际反馈修正', '撤销与 RESET 均计费', '不退还已计费'):
+            with self.subTest(interface_fact=fragment):
+                self.assertTrue(fragment in text, f'missing action-interface fact: {fragment}')
+
     def test_prompt_requests_strategy_reports_before_paid_actions_and_on_changes(self):
         text = prompt.build_autonomous_prompt()
         for fragment in ('开局先依据自动提供的初始画面、目标和115/100剩余评分空间',

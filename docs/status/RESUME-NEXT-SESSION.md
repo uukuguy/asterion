@@ -1,6 +1,10 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-10 local / 2026-10-09 UTC: Task37 same-version BP35L1 repeat closed / independent READY; no active owned trial. Session active, not final handoff.
+Updated: 2026-10-10 local / 2026-10-09 UTC: Task38 interface-prior implementation active; Task37 closed / independent READY; no active owned model trial. Session active, not final handoff.
+
+## Active Task38 implementation
+
+Userapproved continue afterundo clarification. P7autonomousprompt only getsrevisableACTION1–7interfacepriors/undo-vsRESET/GAME_OVERonlyRESET; existingcosttruth retained. context_impl ownsprompt+focusedtest, rootexistingdesign/plan/status, reviewindependentchangedcode, deploymentproviderfreepromotion/freshwheelprobeaftercommit. NoPrimegeneric/data/schema/tool changes, nofixedundoone-stepguarantee orBP35route/forcedprobe. User subsequentlyauthorized freshBP35L1–L6, sameSolmedium/seed0/native6/5400+180/no19gate/noL1stopper; requireAPPROVE/packaging/preflightREADY/rootGO. No modelyet. Approval alreadygiven; finishimplementation/review thenrun/track/close.
 
 ## Task37 completed / next boundary
 

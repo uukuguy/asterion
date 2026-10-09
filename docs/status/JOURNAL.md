@@ -4707,3 +4707,9 @@
 - Task37 launch16:46:20.352679UTC/deadline18:16:20.351833+180; run25fc1ea2/unitdf68970e/owned71099,71101,71100/watcher71222; samewheelbbf153.
 
 - Task37 L121/Q100/161.361755s, sameversionvariation; 258manifestfd2d independentREADY/ownedcleanup, autonomousACTIONpriorsmissing confirmed; no sourcefix.
+
+- d557247f: Recorded same-version L1 variability and missing interface priors to guide evidence-based domain improvements.
+
+- Task38 userapproved revisableACTION1–7priors/undo-reset distinction; P7prompt-only implementation/review/providerfreepackaging, no paidrun.
+
+- Task38 useradded BP35coldL1–L6 authority afterreview/package/preflightREADY; sameSolmedium/seed0/native6/5400+180, no hints/19gate.
