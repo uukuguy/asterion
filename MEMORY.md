@@ -9,6 +9,7 @@
 | Type | Status | Entry |
 |---|---|---|
 | feedback | ✅ verified-active | Let the LLM own reasoning; Asterion supplies strong harness, tools and execution constraints |
+| feedback | ✅ verified-active | Prime targets autonomous long-horizon, open-ended, falsifiable computational research beyond games |
 | feedback | ✅ verified-active | `handoff` means a fast, complete cross-session closeout |
 | feedback | ✅ verified-active | P7 learning must be visible during play and evaluated through improving game understanding |
 | feedback | ✅ verified-active | Remaining-game failures require diagnosis and a concrete intervention before another round |
@@ -47,6 +48,10 @@
 - User wants complete replay and research history preserved privately for future study, including failed experience. Keep the raw archive out of public GitHub submissions; the public code/result write-up and readonly replay console provide the shared view.
 - Vercel is for observation and replay, with slower remote updates acceptable. Push local projections outward; do not make the remote site depend on connecting back to the local host. Free storage capacity matters; no paid upgrade is authorized.
 - Historical research used at most four bounded parallel games,900seconds per level attempt. Explicit restarts reset the round-local two-failure count without erasing experience. This is a retained scheduling preference, not a currently running campaign.
+
+### feedback — Prime architectural purpose
+
+- User defines asterion-prime for autonomous solving of problems that consume substantial human time and effort. The aim is long-horizon, open-ended, falsifiable computational research and a human-understandable, machine-verifiable, evidence-traceable, replayable research record. Games are one reference domain, not the scope. Preserve model autonomy while supplying complete objective facts and reliable execution/evidence. The technical ownership decision lives in docs/status/DECISIONS.md D-2026-10-09-01 and docs/architecture/agent-framework.md; this memory records the user's intent, not verified cross-domain ability.
 
 ### feedback — P7 cognition and visible play
 

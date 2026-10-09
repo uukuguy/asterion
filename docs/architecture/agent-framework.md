@@ -45,6 +45,46 @@ The original DCI implementation used by the parent development workspace is an
 external comparison baseline, not a runtime dependency, compatibility module,
 or distribution input.
 
+## Asterion Prime positioning
+
+Asterion Prime is for agents that autonomously solve problems requiring
+substantial human time and effort. Its purpose is long-horizon, open-ended,
+falsifiable computational research, with a research chain that humans can
+understand, machines can check, evidence can trace, and conclusions can replay.
+Games are one application domain; they do not define Prime's scope.
+
+The application structure separates three responsibilities:
+
+| Layer | Responsibility |
+|---|---|
+| Prime infrastructure | Persistent computation, tool execution, memory and continuity, source/result archives, and execution authority, budgets and recovery boundaries. |
+| Domain research | Problem goals, objective rules and available research methods; the LLM owns hypotheses, representations, programs, experiments, interpretation and next actions. |
+| Domain data | Exact observations, authorized actions and actual results, with source-bound evidence that the research process can inspect. |
+
+P7 supplies the ARC-specific research and data layers over Prime. A new domain
+adapts those layers without importing its semantics into generic framework
+modules. These application responsibilities do not introduce another runner
+or change the existing provider, assembly, runtime or host-service contracts.
+
+The research chain records externalized hypotheses and assumptions, computation
+source and outputs, experiments and actual observations, counterexamples,
+revisions, and the evidence supporting conclusions. It is a reconstructable
+research record, not a claim to capture every internal model thought. A
+hypothesis remains open to contradiction by new evidence; execution success
+alone does not verify a model's interpretation. Replay targets recorded inputs,
+programs, execution conditions and result checks, rather than identical future
+LLM generations. Required evidence and replay scope depend on the domain.
+
+Research organization remains model-owned. The harness supplies reliable facts
+and hard execution boundaries; it does not require a complete world model,
+fixed reasoning sequence, mandatory note form or per-step prediction before
+allowing useful research. Negative results and revised conclusions belong in
+the record alongside successful results.
+
+This is Prime's architectural objective. P7 provides named interface and solving
+evidence at its tested boundaries; cross-domain research effectiveness and
+complete replay coverage must be established separately for each application.
+
 ## Optional long-running control plane
 
 Long-running agent systems add a control layer above existing applications;

@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-09-01 | 🟢 active | Position Prime as autonomous, long-horizon, open-ended, falsifiable computational research with a verifiable research chain |
 | D-2026-10-07-04 | 🟢 active | Bounded reusable research implemented; cold target6 failed5/213, actual ARC process audit informs layered candidates |
 | D-2026-10-07-03 | 🟢 active | Distinguish observed model autonomy from outer Codex research and code assistance |
 | D-2026-10-06-08 | 🟢 active | Complete source ancestry, explicit capacity errors and reconciliation of earlier defects |
@@ -1149,3 +1150,14 @@
 - Frozen BP35 trial remains unchanged through its original target/deadline. This decision records user intent and future redesign criteria, not an implemented fix or improved end-to-end capability. See [actual process comparison](../reviews/2026-10-08-p7-notes-bp35-comparison.md).
 
 - Implementation follow-through: `959fcb0c`/`6ca76ca4` implement optional notes/predictions and remove heuristic action gates in the modern P7 profile, capacity-driven generic context retention, discoverable P7 evidence helpers, generic dual clocks and P7 durable pending effects. [Current contract](../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md) and [implementation evidence](../reviews/2026-10-08-prime-autonomous-research-interface.md) supersede the former mandatory-note/cut behavior. Source tests and final-source full promotion pass. After a preserved private-observer pre-action failure, the corrected observer and replacement packaged r11l L1 witness pass:3paid/0NOTES/64.865s with replay/seal/cleanup verified. No BP35 improvement is yet established.
+
+
+## D-2026-10-09-01 — Prime autonomous computational research positioning
+
+- Authority: user explicitly defines asterion-prime as autonomous problem-solving for work consuming substantial human time and effort, with long-horizon, open-ended, falsifiable computational research and a human-understandable, machine-verifiable, evidence-traceable, replayable research chain.
+- Decision: Prime supplies domain-neutral computation, memory, tool/effect reliability and hard execution boundaries. Each application supplies domain research and domain data layers. The LLM owns research organization, models, experiments and decisions; ARC/P7 is the first practical reference, not the architectural scope.
+- Research record: preserve externalized assumptions/hypotheses, programs and outputs, experiments and observations, counterexamples/revisions, and conclusion-to-evidence relationships. This is not a promise to expose internal model thought or reproduce identical future model generations. Replay claims name their inputs, programs, conditions and result-verification boundary.
+- Rationale: useful autonomous research requires reliable evidence and room to revise an incomplete model. More execution logs or prescribed cognitive steps do not establish a better causal understanding.
+- Compatibility: existing protocol, provider/assembly/runner direction and domain-neutral framework invariants remain. No new workflow gate, mandatory note schema, semantic safety classifier or duplicate runner follows from this positioning.
+- Evidence boundary: user-confirmed architectural objective, not a new implemented capability claim. Task22 verifies the P7 transition interface and packaged r11lL1; Task21 verifies a prior cold BP35 six-level run. Neither establishes cross-domain effectiveness or complete research-chain replay in all domains.
+- Reference: [Core architecture](../architecture/agent-framework.md#asterion-prime-positioning); [current comparison and implementation evidence](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
