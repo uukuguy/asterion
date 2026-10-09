@@ -4521,3 +4521,6 @@
 - 2026-10-09 Task25 L1/L2/L3=20/43/41paid,139.312/130.544/197.453seconds;2deathRESET,L4active; performance attribution unproven.
 - 2026-10-09 Task25 sixlevels206paid/2deathRESET/1764.232seconds; owner fullreplay/cleanupPASS, slower thanTask23/best; independent finalaudit pending.
 - 2026-10-09 Task25 independent finalaudit READY1848/1848/208SDK/allframes/206actions/source/cleanup; six-level verification complete, time optimization unachieved.
+- 2026-10-09 8b49e079 records audited Task25 results and unresolved speed regression for accurate recovery.
+- 2026-10-09 Offline Task25 diagnosis locates extraL4/L6 interactions andL5 longresponses; data loss not established, no production change.
+- 2026-10-09 Independent conclusionreview READY afterBFS wording correction; timing/trajectory evidence separates observedmechanisms from unproven causality.

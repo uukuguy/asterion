@@ -455,3 +455,42 @@ Compared withTask23:206vs203paid,+1RESET,24.166percent slower. Successful segmen
 101usage/input8640525/output43533/peak167176;38cells37ok1AttributeError, actual compute1049milliseconds. Inputpeak20.172percent belowTask23's209419, yet time increases; neither token count nor compute alone explains latency. Pi assistant receive-spans total1649.562049seconds (includes errors/retries/postgoal), not HTTP request or pure reasoning clocks. Two observednative retries success1,12.019729/20.444678seconds; no HTTPstatus or provider root-cause claim. NOTES5writes1197–2321B; lastposttarget does not implyL7actions.10observedbefore steps allmatched,0mismatch; optionalguard use is proven, prevention of deaths is not.18retainedstateviewdiagnostics latest11oldresults/29842bytes then existing4KiB suppression, subsequent totalunknown. Observer809events/243504B/oneoversizedline: event absence is not exhaustive proof.
 
 Owner reports208SDKrows/fullframes and206trace/journal actions exactreplay, sealed/knownclosed/source566/install584/cleanupPASS; independent1848-entry finalaudit READY, allframes/source/cleanup verified. GoalSDK06:05:35.808541Z from05:36:11.576714Z launch. Finalownedcleanup1827.321794wall/1827.312384mono; noL7, auth/envremoved and originalconsole preserved. Private evidence .asterion-private/p7-task25-scope-sol-medium-bp35-20261009/trial/ final-report.md/public-final-metadata.json/final-manifest.json; manifestSHA57cffde8287138b41641239a7adc35c0f51af4cc8015e1c24bc5c0108da92140. No further trial or production change started.
+
+
+## Task25 结论深化：成功路线接近，研究效率仍不稳定
+
+本节只读已封存记录；没有新增模型调用、游戏动作或生产代码修改。独立计量报告位于 `.asterion-private/p7-task25-time-context-20261009/REPORT.md`，复现脚本 `analyze.py` 已核对三轮 usage 总量、cell task绑定和已观察计划长度；轨迹报告位于 `.asterion-private/p7-task25-research-analysis-20261009/REPORT.md`。
+
+### 已验证事实
+
+本轮206付费动作分为196成功段动作和10失败/RESET动作。成功段20/40/34/25/33/44；旧成熟路线组合193是经过长期外围开发的暖路线，不能等同冷启动成本；17分钟冷测成功段190。当前成功路线没有随时间整体崩坏，耗时瓶颈必须单独分析。所有单关q>=100，但L1=110.25与L5=100未达到115封顶；六关阶段汇总上限仍46.666667。
+
+对Task23，慢343.368秒，其中329.876秒（96.07%）集中在L4–L6；对17分钟版，慢740.953秒，其中669.683秒（90.38%）在这三关。
+
+| 关卡 | Task23秒 / usage | Task25秒 / usage | 每周期秒：Task23→25 | 可验证差异 |
+| --- | ---: | ---: | ---: | --- |
+| L4 | 238.434 / 14 | 305.642 / 18 | 17.031→16.980 | 更多研究往返，平均周期未变慢 |
+| L5 | 308.373 / 20 | 479.134 / 14 | 15.419→34.224 | 往返更少，长响应明显 |
+| L6 | 420.240 / 17 | 512.147 / 22 | 24.720→23.279 | 更多研究往返，平均周期反而更短 |
+
+usage是阶段已记录返回计量；墙钟/usage只是描述性周期，不能当HTTP时延或修改的因果效应。目标前模型回合接收边界1737.414秒，占1764.232秒的98.48%；工具边界20.679秒，其他6.140秒。模型回合边界包括适配、传输、服务等待、生成等，不是纯思考。Python仅1.049秒。两次native重试窗口合计32.464秒，与模型回合重叠，不能重复计时，不能解释大部分新增时间。
+
+相对17分钟版，完整usage83→101（过关前82→99），报告输出25816→43533（+68.62%），累计normalized输入8918146→8640525（−3.11%），峰193870→167176。相对Task23，平均输入降低21.73%，输出增加38.54%。峰值降低不能保证提速，输出量增长也不能直接命名为隐藏思考量。L5两次最长assistant接收跨度135.912/82.588秒，占该关45.60%时间，随后分别提交9步/4步、均无before。保存动作数组仅299/130B，但未保存完整native arguments和正文，不能将其余tokens归为某一类。
+
+**L4实际研究**：8cells对比Task23的5和17分钟版4。三次研究动作109的44帧运动过程，另外查看不同对象；不是检索失败或忘了helper。seq120/121两次向右严格仅HUD变化，25动作与Task23一致，比17分钟版多2。研究更细，路线收益没有同等增长。
+
+**L5实际研究**：5cells，不是更多编程造成慢。seq138点击实际15、seq139撤销均仅HUD变化；程序cell27明确保留y15/y21两层14，笔记自述误折一层是概念误读，不能指控程序或宿主丢行。收尾避免Task23的先点墙错误，37→33步，但生成计划前的长响应成为主要时间位置。
+
+**L6实际研究**：本轮10显示/几何cells，17分钟版7个tiles显示cells，两者都没有BFS。去HUD稳定画面全路线对齐，本轮只插入191/192两次撞墙：191朝向4像素变化，192严格HUD-only。44与42动作差异不能解释512与301秒差异。Task23曾做局部DOWN settle+BFS并将20步输出用于真实过关，证明计算研究可形成可执行路线；没有BFS仍可更快完成，因此不能仅凭未用BFS解释慢或强制搜索。
+
+**L3死亡**：12色块首次出现时中心采样把实形/虚形都记为C，属于自建表示的信息不足；真实完整像素未丢。NOTES68已意识到形态区别但可穿性未知，69左移死亡；不能单因归责采样标签。复位后先把顶层虚态切实心再横移。scope只澄清计费，不能发现未知阻挡/持续浮动机制。
+
+**before的边界**：10项全matched，L2一项/L5一项/L6八项；没有mismatch。L6seq189检查匹配后仍发生191/192撞墙，匹配不认证后续动力学，也没有证据证明减少死亡。笔记5次写入、相应研究认识有更新，没有忘记helper后重建的证据；更多笔记不等于更快。
+
+### 当前判断与下一步
+
+当前最有支持的判断是：自主六关能力已表现出来，研究往返的单位收益与长响应仍不稳定。预算scope是必要事实澄清，不是已证性能修复；上下文投影实际工作，但仍未证明哪类保留历史导致耗时。不能把全部回退归于评分段、guard、token峰、effort或网络，也不宜继续靠单轮完整冷测逐句调prompt。
+
+下一步优先两个可证伪、provider-free工作：一是P7研究层，用定义时已经可读的transition/frame/animation检验自编表示/转移模型，保存函数版本、适用范围和首个既有反例；只有renderer时明确无法检验转移预测。二是Prime通用层，给最终模型视图增加有界字节构成聚合，按助手消息、当前快照、工具结果与native摘要分类，保留峰值/累计且不保存正文、不改消息；先定位重复载荷，再设计最小去重。P7数据层继续提供完整原始形态、引用及明确预算scope，不预置BP35机制或资源阈值。
+
+这些是下一步设计建议，尚未实施；不新增强制NOTES、BFS、逐步guard、固定认知流程或自动RESET。目标是减少同一路线的低收益研究往返，支持自主模型用已有反例校验认识；最终改善仍需受控对照，不把单样本相关性写成因果。
