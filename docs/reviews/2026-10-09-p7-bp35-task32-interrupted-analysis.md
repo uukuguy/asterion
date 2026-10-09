@@ -150,3 +150,31 @@ Final收尾111completedusage normalizedinput13474659/output38569/peak235052、ra
 Independentanalysis：36纯计算继发请求保留旧provider items/除结尾括号外全部旧字节，weightedcache98.9237%；plan组15.5375%、workspace17.0739%。不支持纯计算前缀回退重现，动作/快照边界与保留历史是不同问题。37viewcandidate=23末步+3自然yield+11显式optout；L5yield后有方向修订，另两次L2继续同路线。Finalcontext907892B=assistant281105+toolresults580547+currentsnapshot24575+other21665；大头在保留交互，NOTES984B并未收拢工作上下文。不能把所有历史都称垃圾，摘要/投影必须保留未解决反例、解释修订与有效来源。
 
 最终独立READY：217完整SDK replay/215known事务/330trace seal/110研究链及全部file refs/111metrics、21frozen launch文件一致；1908manifest全量hash/coverage/containment通过。Trial `.asterion-private/p7-task38-cold-bp35-20261010/trial/` 冻结不改写，所有ownedhost/observer/guest/auth/env清理、console52024:56659保留。用户明确下一方向：NOTES承担更丰富有效游戏认知、工作历史明显过多，进入具体投影设计调查，尚未改上下文源码。
+
+
+### Task39：NOTES 主认知，本轮 BP35 六关实测
+
+生产2930fbd8、Sol medium、seed0，独立冷启动，无继承笔记/路线、无外围提示或代码修订。普通NOTES直接建立工作epoch；不是专用代码压缩实测。目标仍为九关游戏的前六关。
+
+| 关卡 | Task38步数 | Task39全部付费 / 成功段 | 单关分 | Task39关时（秒） |
+| --- | ---: | ---: | ---: | ---: |
+| L1 | 19 | 20 / 20 | 110.25 | 148.369237 |
+| L2 | 48 | 68 / 40 | 49.826990 | 308.256073 |
+| L3 | 36 | 34 / 34 | 115 | 189.407939 |
+| L4 | 23 | 23 / 23 | 115 | 171.997174 |
+| L5 | 31 | 46 / 46 | 51.465028 | 496.445278 |
+| L6 | 58 | 51 / 51 | 115 | 291.360703 |
+
+全部242paid，L2一次死亡RESET；L5六次、L6四次ACTION7全部计费。严格mint2026-10-09T19:02:42.396297Z至SDKgoal19:29:28.232701Z为1605.836404秒（26分45.84秒）；receipt自身started口径1605.835612秒，差0.000792秒。较Task38多27步、慢123.178811秒，较历史最好1023.279883秒慢582.556521秒。实际九关partial43.605092，Task38为46.666667；六关归一化93.439482仅供比较，不是官方整局分。顶格115后不以更少步认定得分改善。
+
+**本轮具体推理表现。** L1无效背景点击已进入NOTES并没有重复。L2先识别15标识可能危险，却把远程点击无效推成可能普通障碍，再以“没有其它出口”为依据删除最后停点而死亡。自主回看旧帧和程序后发现横向通道，NOTES明确修正，RESET后40步成功；27次失败动作+RESET1+成功40均计入68。已有危险怀疑与实际替代路线，使其成为可避免推理失误候选，不能笼统归因随机死亡，也不证明事前最优路线已知。
+
+L3复用死亡反例、停点模型及蓝块切换程序。L4实际反馈修正“点8开墙”为重力反转。L5自主发现compact漏第8列和滚屏格心偏移，修正表示；随后把局部未见返程8块过早推成路线不可行，6次撤销后试直行。实际直行被8挡，故不能称最初点8已证明多余。模型将直行反例记入NOTES，再下降后确实看到新8并完成返程，证伪此前局部推断；本关46步的主要可见返工就在这里。L6看到顶部8后推演返程风险，撤销4步补停点，反转与分段返回实际成功；理由明确但未证明4次撤销均必要或最优。没有外部Codex修正。
+
+**上下文机制与能力分开评价。** Goal126请求累计normalized input4,639,960/output42,760；final127 input4,699,481/output42,803，raw637,785/cacheRead4,061,696/cacheWrite0，峰73,098tokens。相比Task38 final input13,474,659/峰235,052，分别降65.12%/68.90%。按前一工具边界加权cache比例：compute37次92.8861%、plan72次89.4950%、workspace17次44.5688%。这是实际请求统计，不能把cacheRead当新输入、把字节当tokens，或把全部时延归因token。
+
+本轮16次NOTES保留重要反例与程序引用，正常更新后工作上下文实际收缩；L5同epoch多次查询/动作使context峰237,717B，L6新NOTES后87,802B。说明旧epoch不再全部堆叠，但长epoch内部细节仍会增长。stderr3944B未截断却明确diagnostics-suppressed，只有前14条primary、退休0→4→12可直接审计；后续全程FD指标和NOTES/输入变化支持实际收拢，不能声称逐组原生正文全程持久化审计。observer另有1条oversize旁路省略，但原字节完整转发；不能声称零诊断遗漏。原生Pi正文未持久化；实际使用已有cell/history/frame/patches接口；native context_archive是否调用及原文交付未获直接证明（17workspace回传中16次NOTES、另一次op/body未保存）；没有观察到native compaction，本轮不验证专用摘要。
+
+**结论与下一边界。** 主认知与上下文成本问题取得实际改善，自主错误修订和跨关知识复用真实发生；本轮解题时间、动作和得分整体回退，不能宣称NOTES已提高解题质量。下一分析应检查局部观察被扩展成全局判断、往返路线依赖和模型自写表示的适用边界，分别归入P7研究层认知与P7数据层证据；Prime通用层保持笔记/原档/引用/未知结果保障，不新增关卡路线提示或细碎强制推理流程。专用压缩与统一私有Pi接入仍按用户要求延期。
+
+Owner验证244完整SDK回放/242known事务/125研究链（37compute、72experiment、16NOTES）/127双metrics通过。cleanup1621.535325秒，owned进程及auth/env已清理、console52024:56659保留；独立最终READY：2037项manifest SHA736c1fcf4bc8ddc1a9c1a68005e230e2c0c0f2b0361bcc77b573b923b1bdde29，全量bytes/hash/五roots覆盖通过；244SDK/373trace及seal/242known事务/125研究链与69文件引用/127双metrics核对一致。570source与wheel、20launch冻结身份一致。Trial封存不改写，不续L7或自动重测。

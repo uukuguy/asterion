@@ -99,3 +99,10 @@ Prime 通用层以真实会话完整工具组建立 NOTES epoch，保留当前�
 Task30四步与本轮前三次付费点击相同。Task30第四次点击(39,25)完成；本轮第四次点已占端点(39,21)，只切换选择，再用三步调整两端完成，净增三步。Task31曾六步/94.471582秒，Task30四步/67.896532秒。本轮动作及时间回退真实存在，但没有证据归因于NOTES失效；也未证明整体解题收益。
 
 9份完整SDK回放（仅guid排除）、7known事务、24trace/seal、12研究链及13metrics通过，owned进程/auth/env清理，console52024:56659保留。138项最终manifest SHA0f4e44188e4977da6edfdb29e67bcb23a53e7b654f1bc7daf6624f6530f8d201，独立READY。actualMake未启scalarobserver，rawcache未知；未自然调用archive专项回读，未触发nativecompaction，不验证专用压缩。本轮证明正常NOTES实际退休；随后授权BP35比较尚未启动。
+
+
+### Task39 BP35最终实测评审
+
+已完成独立封存审计：2037项manifest SHA736c1fcf4bc8ddc1a9c1a68005e230e2c0c0f2b0361bcc77b573b923b1bdde29，244完整SDK/242known事务/373trace及seal/125研究链与69引用/127双metrics/570source-wheel及20launch身份通过；owned进程和凭据清理、console保留。源码2930fbd8未运行中修改。
+
+六关20/68/34/23/46/51=242paid，一次L2死亡RESET，1605.836404秒。NOTES主认知实际收拢输入：final4699481/peak73098，16NOTES/1387B；已有错误反例跨关复用，L5局部无资源的过早全局推断修正后自主完成，L6返程停点计划落地。较Task38动作/时间/得分回退，不能宣称解题质量提升。前14条primary直接证据与全程FD指标分开；原生archive调用unknown，专用代码压缩未实测。具体本轮评估见[Task39实测段](2026-10-09-p7-bp35-task32-interrupted-analysis.md)。此前“尚未启动”均属当时历史边界。

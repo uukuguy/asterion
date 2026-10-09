@@ -302,8 +302,8 @@ User explicitlyauthorizes implementation/simple review/coldBP35. [Design](../spe
 - [x] Agree Python/TS v3 envelope and appworkspace native-read contract; addfocused RED tests foractualselectedbranch reads/unknown/group/sibling boundaries andordinarynotesepochs.
 - [x] Implement read-by-ref first, thennotesautomaticepoch projection, preserveactualcurrentfacts/programgeneration/userconstraints/errors/refutations/unknowns; epochappend andcompaction/reload semantics. No blindbytewindow ornewtool.
 - [x] Explain richerfreeNOTES andimportantcounterexamples inactualP7prompt; syncschema/registration/allowlist/buildresource/bridge, focusedtests+simplechanged-codeAPPROVE.
-- [ ] Sourcecommit; TS→relevantPython→promotion→necessaryrealpackagedsmallwitness forapptoolchanges; independentlypreflightREADY freshBP35/Solmedium/seed0/native6/5400+180, rootactualGO.
-- [ ] Trackeachlevelpoints/paid/deathRESET/time, acceptednoteepoch/inputpeak/rawcache/refretrieval/programcontinuity; fullSDKreplay/seal/cleanup/finalREADY. Don'tpromote optionalAPIorunittest toNOTES-primary ability.
+- [x] Sourcecommit; TS→relevantPython→promotion→necessaryrealpackagedsmallwitness forapptoolchanges; independentlypreflightREADY freshBP35/Solmedium/seed0/native6/5400+180, rootactualGO.
+- [x] Trackeachlevelpoints/paid/deathRESET/time, acceptednoteepoch/inputpeak/rawcache/refretrieval/programcontinuity; fullSDKreplay/seal/cleanup/finalREADY. Don'tpromote optionalAPIorunittest toNOTES-primary ability.
 
 ### Task39 补齐：Prime 统一接入与默认专用摘要
 
@@ -315,6 +315,6 @@ User explicitlyauthorizes implementation/simple review/coldBP35. [Design](../spe
 - [ ] 简单独立 changed-code review，通过后同步打包扩展并提交；按 TS→Python→promotion 顺序验证，记录跳过及未实测边界。
 - [ ] fresh wheel 与真实打包小关验证同一扩展及工具版本，再按已授权 Solmedium/seed0/native6/5400+180 冷测 BP35，持续跟踪分数、动作、RESET、时间、NOTES epoch及输入tokens。
 
-Task39 current scope: NOTES-only source2930fbd8, restored TS88 PASS/6external skips and actualinstalledPi provider0 PASS; resource13bfee. Simple scope reviewAPPROVE. Broad backend migration and specializedcompaction draft safely isolated, not included in currentbuild. FocusedPython/promotion/packagedwitness/BP35 pending.
+Task39 current scope: NOTES-only source2930fbd8, restored TS88 PASS/6external skips and actualinstalledPi provider0 PASS; resource13bfee. Simple scope reviewAPPROVE. Broad backend migration and specializedcompaction draft safely isolated, not included in currentbuild. FocusedPython48/promotion25/provider0/packagedr11l verified; coldBP35 native6 complete242paid/oneRESET/1605.836404s. Final2037manifest736c1fcf independentlyREADY. Input4699481/peak73098 reduced, solving score/time/actions regressed versusTask38; no stable quality gain claim.
 
 Deferred specialized-compaction live test (user requested): after implementation, run a finite P7 preset with a deliberately lower threshold so actual selected-model summarization occurs. Verify the specialized request, usage/cancellation boundaries, kernel generation and variable/function reuse, NOTES/counterexamples, and continued solving. Do not substitute an ordinary Pi summary or offline fixture. No threshold/source change during active Task39 BP35.

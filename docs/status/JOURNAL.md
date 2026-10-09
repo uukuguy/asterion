@@ -4776,3 +4776,7 @@
 - User requested future low-threshold P7 live test of dedicated compaction; record as unverified, leaving active BP35 unchanged.
 
 - 0fb15c7c: Recorded unverified dedicated compaction and future low-threshold P7 test; preserved active BP35 configuration.
+
+- f2e117ec: Journaled deferred compaction verification to preserve the requested future test boundary.
+
+- Task39 sealed independent READY: six levels242paid/oneRESET/1605.84s; NOTES reduces input, score/time regress;2037manifest736c1fcf.
