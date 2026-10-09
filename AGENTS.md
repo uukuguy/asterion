@@ -74,6 +74,10 @@ Runners receive a resolved plan, runtime, implementations, cancellation signal, 
 
 Host services are operator-owned and explicitly injected. `executor.controlled` does not itself authorize commands. The Rust executor applies trusted policy, direct invocation, cleared environments, deadlines, output caps, and cancellation; it is not an OS sandbox.
 
+### Prime 应用入口与私有底层
+
+应用使用 Prime 标准入口，Pi、RPC、扩展加载及会话构造由 Prime 内部管理；应用提供领域目标、工具、数据与完成/续跑条件，不自行创建 Pi/RPC 对象注入 Prime。现有 P1/P7 仍有此类接线，是待整改的历史缺口，不能作为新应用模板；P2–P6 的机制见证也不能当作统一真实智能体后端已验证。统一整改见 D-2026-10-10-02。用户已明确暂缓大迁移，当前先完成 P7 NOTES 与解题实测，不据此规则扩张本轮代码范围。
+
 ### Prime 应用级工具（当前以 P7 验证）
 
 应用级工具注册是 Prime 应用的通用机制：打包的 Pi 扩展由 TypeScript 源码中的 `register(pi)` 调用 `registerTool`，构建产物是 `src/asterion/applications/prime/resources/ipython-extension.mjs`。当前仅在 P7 中完成实用验证；P7 的 Python operator 负责工具元数据与 bridge dispatch，将已注册工具映射到 `P7ClientFacade`（`p7_mechanics_prior` 对应 `mechanics_prior`）。不要用 prompt 伪造注册，也不要在通用 runtime 另造一套注册机制；改工具时同步更新 TypeScript、打包资源、对应应用 bridge 和测试。

@@ -24,7 +24,7 @@
 | D-2026-09-14-01 | 🟢 active | Keep the application layer free of implementation references; the runtime seam carries plain data |
 | D-2026-09-14-02 | 🟢 active | Supply research-preset external engines as operator-owned roots plus wheels, never as checkout-relative paths |
 | D-2026-09-14-03 | 🟢 active | Inject the Pi runtime as an operator-owned entry path, satisfied by an independently installed upstream Pi |
-| D-2026-09-27-01 | 🟢 active (interim) | Let P7 initialize its own Pi; defer consolidation of scattered Pi ownership into a shared Asterion base |
+| D-2026-09-27-01 | 🔴 superseded | Historical P7-owned Pi initialization; D-2026-10-10-02 defines the target boundary |
 | D-2026-09-17-01 | 🟢 active | Denominate the compaction reservation in tokens and convert at the call site |
 | D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
 | D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
@@ -361,7 +361,7 @@
 
 ## D-2026-09-27-01 — Temporary P7-owned Pi initialization
 
-- Status: 🟢 active (interim)
+- Status: 🔴 superseded by D-2026-10-10-02; existing implementation remains a deferred gap, not an application template.
 - Context: The current code contains several Pi ownership paths: the generic
   `pi.reference` runtime, the Prime `AsterionPrimeSession` transport, P1/native
   backend construction, P7 launch construction, and legacy Prime-agent local
@@ -1180,3 +1180,13 @@
 - Evidence: Task38 current notes984B coexists with235052 input-token peak and907892B modelcontext; existing native-history-preserving projection did not implement primary cognition. Earlier cut/rolling-window failures do not authorize unbounded working history or skipping source/read/unknown guarantees.
 - Boundary: design and implementation now active, capability unverified until real accepted-note epochs narrow inputs with retrievable evidence and cold BP35 quality recorded. Task38 remains sealed; no input changes or rerun grants inferred from archive existence.
 - Reference: [Concrete NOTES-primary design](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md).
+
+## D-2026-10-10-02 — Prime owns its private backend; unify application entry later
+
+- Authority: user requires applications to use Asterion Prime, with Pi private to Prime, and asks to record the inconsistent P1–P7 paths for later unified treatment. User explicitly prioritizes completing P7 solving/NOTES now; no broad migration in this experiment.
+- Decision: application provider/assembly selects Prime through the standard runtime entry. Prime owns session creation, Pi/RPC objects, extension loading, launch/configuration integration and default code-aware compaction. Applications supply domain goals, tools, data and completion/continuation semantics with authorized execution limits. A neutral alias or a publicly exported session constructor does not establish this encapsulation. Private ownership does not require all sessions to share one Pi process. Operator configuration and credentials remain explicitly injected; generic framework modules do not read .env.
+- Verified source facts: P7 binding builds RPC/extension objects and passes them to AsterionPrimeSession; P1 operator similarly constructs RPC and injects PrimeSessionBackend. P2 uses local worker/context services. Current P3–P6 witness paths explicitly avoid real Pi and use mechanism-specific hosts. Standard runtime identity alone therefore does not prove a unified application backend or real long-running LLM research.
+- Related gap: old Prime fork specialized native summary generation; the current entry lacks that rewrite. Existing custom material/witness and P1 manual instructions must not be called default specialized automatic compaction. D-2026-09-16-01 remains pending.
+- Follow-up: audit and unify P1–P7 application entries and backend ownership, clarify real-agent versus mechanism-witness boundaries, and restore default specialized compaction without changing native triggering/preparation/persistence. Current P7 injection is a known legacy gap; do not copy it into new applications.
+- Current scope: defer this consolidation by user instruction. Complete reviewed NOTES-primary source2930fbd8 packaged witness and authorized BP35 evaluation first. No source migration or capability claim follows from this record.
+- Reference: [architecture](../architecture/agent-framework.md#asterion-prime-positioning), [active design and deferred scope](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md).

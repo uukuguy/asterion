@@ -4758,3 +4758,9 @@
 - 8839f477: Defined Prime-owned backend integration and default code-aware compaction to remove P7 transport ownership and migration gaps.
 
 - User deferred broad Prime/Pi migration; restored exact NOTES core passes TS88 and installed-Pi probes, with compaction draft isolated.
+
+- 8e22bcaf: Deferred broad backend migration and isolated draft so NOTES-only P7 evaluation can proceed with exact reviewed source.
+
+- User clarified Pi must remain Prime-private; existing P7 RPC-object injection is a deferred ownership gap, not the target architecture.
+
+- Recorded Prime-private backend and inconsistent P1–P7 entries for later consolidation; user prioritizes finishing P7 NOTES solving now.
