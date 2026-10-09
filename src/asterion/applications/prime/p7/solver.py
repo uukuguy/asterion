@@ -273,6 +273,12 @@ class Solver:
             "action_cap": self.broker.game.action_cap,
             "scoring": score_planning_facts(self.broker.game, self.broker.journal,
                 primitive_actions=status.primitive_actions, levels_completed=status.levels_completed),
+            "scope": {
+                "execution_controls": "host-run",
+                "scoring_costs": "level-cumulative-including-resets",
+                "state_restore_refunds_paid_actions": False,
+                "environment_resources": "not-reported-by-adapter",
+            },
             **(wall_budget() if callable(wall_budget) else {}),
         }
 

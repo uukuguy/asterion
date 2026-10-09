@@ -9,6 +9,13 @@ from asterion.applications.prime.p7.score import partial_game_score
 from tests.test_prime_p7_solver import P7SolverFixture
 from tests.test_prime_p7_native_broker import _Engine
 
+EXPECTED_BUDGET_SCOPE = {
+    'execution_controls': 'host-run',
+    'scoring_costs': 'level-cumulative-including-resets',
+    'state_restore_refunds_paid_actions': False,
+    'environment_resources': 'not-reported-by-adapter',
+}
+
 
 def game(target=6, levels=9):
     return P7GameSelection('ls20-9607627b', 0, target,
@@ -21,6 +28,21 @@ class _ScoreEngine(_Engine):
         value = super().observe()
         value['available_actions'].append('ACTION7')
         return value
+
+
+class _RestoreScoreEngine(_ScoreEngine):
+    """This fixture alone gives ACTION7 and RESET an earlier pixel state."""
+    restored = False
+
+    def observe(self):
+        value = super().observe()
+        if self.restored:
+            value['frame'][0][0][0] = 0
+        return value
+
+    def step(self, action):
+        self.restored = action in {'ACTION7', 'RESET'}
+        return super().step(action)
 
 
 class TestP7ScorePlanning(P7SolverFixture):
@@ -40,6 +62,59 @@ class TestP7ScorePlanning(P7SolverFixture):
         budget = self.solver.current_context()['budget']
         self.assertIn('scoring', budget)
         return budget['scoring']
+
+    def test_budget_scope_is_exact_fresh_and_leaves_known_numbers_unchanged(self):
+        budget = self.solver.current_context()['budget']
+        self.assertEqual(budget.get('scope'), EXPECTED_BUDGET_SCOPE)
+        status = self.broker.status()
+        self.assertEqual(budget['primitive_actions'], status.primitive_actions)
+        self.assertEqual(budget['actions_remaining'], status.actions_remaining)
+        self.assertEqual(budget['action_cap'], self.broker.game.action_cap)
+        self.assertEqual(budget['target_level'], self.broker.game.target_level)
+        self.assertEqual(budget['scoring']['current_level']['paid_actions'], 0)
+        self.assertEqual(set(budget), {'actions_remaining', 'primitive_actions', 'terminal_reason',
+                                     'target_level', 'action_cap', 'scoring', 'scope'})
+        budget['scope']['environment_resources'] = 'invented-balance'
+        self.assertEqual(self.solver.current_context()['budget']['scope'], EXPECTED_BUDGET_SCOPE)
+        self.assertEqual(self.engine.calls, [])
+
+    def test_restored_pixels_do_not_refund_host_or_score_and_guard_adds_no_charge(self):
+        self.engine = _RestoreScoreEngine(win_levels=9)
+        self.broker = ArcBroker(engine=self.engine, game=game(), action_profile='autonomous')
+        self.broker.bind_history('run-1')
+        self.solver.broker = self.broker
+        cap = self.solver.current_context()['budget']['action_cap']
+        for paid, action in enumerate(('ACTION1', 'ACTION7', 'RESET'), start=1):
+            with self.subTest(action=action):
+                result = self.solver.execute_plan(self.minimal(action, steps=[{
+                    'action': {'name': action, 'data': {}},
+                }]))
+                self.assertEqual(result['applied_count'], 1)
+                budget = result['budget']
+                self.assertEqual(budget.get('scope'), EXPECTED_BUDGET_SCOPE)
+                self.assertEqual(budget['primitive_actions'], paid)
+                self.assertEqual(budget['actions_remaining'], cap - paid)
+                self.assertEqual(budget['scoring']['current_level']['paid_actions'], paid)
+                self.assertEqual(result['observation']['frame'][0][0][0], 1 if paid == 1 else 0)
+        result = self.solver.execute_plan(self.minimal('guarded', steps=[{
+            'action': {'name': 'ACTION1', 'data': {}},
+            'before': {'cells': [{'x': 0, 'y': 0, 'value': 99}]},
+        }]))
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'precondition-mismatch'))
+        self.assertEqual(result['budget'].get('scope'), EXPECTED_BUDGET_SCOPE)
+        self.assertEqual(result['budget']['primitive_actions'], 3)
+        self.assertEqual(result['budget']['actions_remaining'], cap - 3)
+        self.assertEqual(result['budget']['scoring']['current_level']['paid_actions'], 3)
+        self.assertEqual(self.engine.calls, ['ACTION1', 'ACTION7', 'RESET'])
+
+    def test_prompt_explains_budget_scope_without_game_resource_threshold(self):
+        text = build_autonomous_prompt()
+        for fragment in ('budget.scope', '宿主运行', '游戏内部资源', '撤销或恢复',
+                         '不退还', '实际观察', 'not-reported-by-adapter'):
+            with self.subTest(fragment=fragment):
+                self.assertTrue(fragment in text, f'missing scope explanation: {fragment}')
+        for fragment in ('64步', '64 步', 'ACTION7 是撤销', '所有游戏都有计时器'):
+            self.assertNotIn(fragment, text)
 
     def test_full_game_objective_and_all_baselines_do_not_extend_stop_boundary(self):
         facts = self.scoring()

@@ -4506,3 +4506,9 @@
 
 - 2026-10-09 Task24 packaged r11l witness 5paid/0RESET/57.440seconds; owner replay/identity/cleanup PASS, independent final audit pending.
 - 2026-10-09 Independent witness audit READY104/104/replay/seal/cleanup; frozen Task24 cold BP35 L1-L6 rootGO issued.
+- 2026-10-09 58448bae records verified deployment and cold authorization to preserve the recovery boundary.
+- 2026-10-09 Task24 cold BP35 launched04:55:31Z, frozen687c6fac Solmedium; fixed06:25:31Z deadline plus180settlement, outcome pending.
+- 2026-10-09 Task24 L1=36paid/203.439seconds; L2=108paid/2deathRESET/401.070seconds, successful40; guard unused, L3 running.
+- 2026-10-09 User stops Task24; trusted cancellation05:14:43Z issued, cleanup pending; root-cause review precedes repair and fresh trial.
+- 2026-10-09 Cancelled Task24 seals4levels/229paid/2deathRESET+1voluntaryRESET; budget-scope omission identified, minimal P7 data/prompt repair authorized.
+- 2026-10-09 Minimal scope repair Python40PASS/AstraREADY/lint/docsPASS; unchanged numerical controls, fullpromotion running before cold restart.

@@ -84,9 +84,11 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
 
     async def test_initial_actor_v2_snapshot_and_continuation_deliver_score_facts(self):
         from asterion.applications.prime.p7.prompt import build_autonomous_prompt, initial_research_prompt
+        from tests.test_prime_p7_score_planning import EXPECTED_BUDGET_SCOPE
         instructions = build_autonomous_prompt()
         initial = initial_research_prompt(self.host, instructions)
         expected = self.host.current_context()['budget']
+        self.assertEqual(expected.get('scope'), EXPECTED_BUDGET_SCOPE)
         self.assertIn('scoring', expected)
         self.assertIn('budget.scoring', instructions)
         self.assertNotIn('整局满分100', instructions)
@@ -103,11 +105,26 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
                               ('v2-memory', snapshot), ('continuation', continuation)):
             with self.subTest(surface=name):
                 budget = context['budget']
+                self.assertEqual(budget['scope'], EXPECTED_BUDGET_SCOPE)
                 self.assertEqual(set(budget), set(expected))
                 self.assertEqual({k: v for k, v in budget.items() if k != 'wall_time_remaining_seconds'},
                                  {k: v for k, v in expected.items() if k != 'wall_time_remaining_seconds'})
                 self.assertGreaterEqual(budget['wall_time_remaining_seconds'], 0)
         self.assertEqual(self.engine.calls, [])
+        self.host.solver.learner_profile = 'autonomous'
+        plan = {'plan_id': 'scope-action', 'start': actor['observation_ref'],
+                'steps': [{'action': {'name': 'ACTION1', 'data': {}},
+                           'expect': {'cells': [{'x': 0, 'y': 0, 'value': 1}]}}]}
+        feedback = self.host.method_call('execute_plan', plan, _Signal())
+        self.assertEqual(feedback['applied_count'], 1)
+        refreshed = json.loads(feedback['context_memory']['content'][len(instructions) + 2:])
+        continuation_after = json.loads(self.host.continuation_prompt(2).split('\n', 1)[1])
+        for name, context in (('feedback', feedback), ('refreshed-memory', refreshed),
+                              ('continuation-after', continuation_after)):
+            with self.subTest(surface=name):
+                self.assertEqual(context['budget']['scope'], EXPECTED_BUDGET_SCOPE)
+                self.assertEqual(context['budget']['primitive_actions'], 1)
+                self.assertEqual(context['budget']['scoring']['current_level']['paid_actions'], 1)
 
     async def test_cancel_after_durable_note_keeps_archive_without_cut_receipt(self):
         from unittest.mock import patch
