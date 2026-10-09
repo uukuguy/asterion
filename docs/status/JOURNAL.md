@@ -4598,3 +4598,7 @@
 - Task29 fullpromotion25PASS/provider0; singlepackagedr11lL1sixpaid goal observed, preciseauditpending. Source9557ad63 unchanged; noBP35.
 
 - Task29 CLOSED: fullpromotion25PASS, actualr11lL1sixpaid/104.040866s, installedboundaryprobe and110entryauditREADY; noBP35effectclaim.
+
+- 06c3f4a9: Closed Task29 deployment evidence and recovery state after independent audit; BP35 effectiveness remains unverified.
+
+- Task29 BP35 cold launched12:52:25Z: Solmedium/frozen9557ad63; fresh5400+180, target6, no hints; installed588 identities verified.
