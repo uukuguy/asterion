@@ -4774,3 +4774,5 @@
 - Task39 cold BP35 launched19:02:42Z/Solmedium/native6, deadline20:32:42Z;首NOTES报告19/21余量及1步机制探针，继续跟踪不改源码。
 
 - User requested future low-threshold P7 live test of dedicated compaction; record as unverified, leaving active BP35 unchanged.
+
+- 0fb15c7c: Recorded unverified dedicated compaction and future low-threshold P7 test; preserved active BP35 configuration.
