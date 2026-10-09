@@ -4610,3 +4610,9 @@
 - Task29 cold L2:42paid/zeroRESET/202.926513s/Q115; no softyield; score improves, time increases versus Task28.
 
 - Task29 cold L3:36paid/zeroRESET/158.378798s/Q115; cumulative103paid/516.855526s; inputpeak86635, no softyield.
+
+- 67573863: Preserved first-three-level cold results and boundary optout evidence for recovery without altering the active actor.
+
+- Task29 cold L4:24paid/zeroRESET/261.128070s/Q115; representation revised; no softyield, substantial time regression.
+
+- Task29 cold L5:30paid/zeroRESET/260.610008s/Q115; cumulative157paid/1038.593604s; computation caching retained, L6 now active.

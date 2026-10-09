@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09T13:01:17Z. Session active; not final handoff.
+Updated: 2026-10-09T13:09:43Z. Session active; not final handoff.
 
 ## Active task
 
@@ -14,9 +14,9 @@ User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fre
 - Run `p7-live-20261009125226-984bb04c164deb226e93dcff`; unit `asterion-p7-d8c65996a7b6499ab2f6a4d8eff0ba87.service`.
 - Owned host supervisor97099/launcher97101/caffeinate97100; guest operator329096/Pi329121. Preserve user console52024/56659. Deployment agent owns run, observer, replay, final cleanup and manifest; review agent independently observes and audits. Root owns state/docs/commits.
 
-## Live checkpoint: three levels complete
+## Live checkpoint: five levels complete, L6 active
 
-L1–3 paid25/42/36, successful identical, zero death/RESET, Q70.56/115/115. Durations155.550215/202.926513/158.378798s; host cumulative516.855526s. L1 extra7 clicks regressed route; L2 avoids death but slower, L3 same paid but slower than Task28. Inputpeak86635; no soft observation-boundary yet. Translation candidates mostly at plan end; L2 final plan explicitly opts out before seq66 candidate then seq67 hard level advance. Model has used read-only r.view_change once in L1. L4 now active; no actor guidance or source changes.
+L1–5 paid25/42/36/24/30, successful identical, zero death/RESET, Q70.56/115/115/115/115. Durations155.550215/202.926513/158.378798/261.128070/260.610008s; host cumulative1038.593604s,157paid. L1 extra7 clicks regressed route; L2 avoids death but slower; L3 same paid but slower; L4 repairs role-relative sampling/shape representation at substantial time cost; L5 reuses it and achieves30step cap. Inputpeak128414 at L5 goal. No soft observation-boundary yet: translation candidates mostly at plan end or explicit optout. Model used read-only r.view_change once in L1; candidate/policy/hardstop accounting independently verified through L4. Midrun pure-computation weighted cache98.8786%, no Task27-style cache regression; precise per-request latency/detector CPU unmeasured. L6 active; continue unchanged, no hints/source edits/budget renewal.
 
 ## Verified implementation and deployment
 
