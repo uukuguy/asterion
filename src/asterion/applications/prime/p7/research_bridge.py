@@ -35,7 +35,8 @@ class ResearchReadServer:
                 if not callable(callback):
                     raise ValueError("research readers unavailable")
                 callbacks[name] = callback
-        callbacks.update(render=self._render, geometry=self._geometry, patches=self._patches, diff=self._diff)
+        callbacks.update(render=self._render, geometry=self._geometry, patches=self._patches,
+                         diff=self._diff, view_change=self._view_change)
         self._readers = callbacks
         self._server = None
         self._thread = None
@@ -67,6 +68,35 @@ class ResearchReadServer:
     def _diff(self, before_sequence, after_sequence, limit):
         from .research_observation import diff
         return diff(self._frame(before_sequence), self._frame(after_sequence), limit=limit)
+
+    def _view_change(self, before_sequence, after_sequence):
+        from .view_change import view_change
+        context = self._readers['context']()
+        current = context['observation_ref']
+        latest = current['sequence']
+        after_sequence = latest if after_sequence is None else after_sequence
+        if before_sequence > latest or after_sequence > latest:
+            raise ValueError('view observation unavailable')
+        transitions = {}
+
+        def reference(sequence):
+            if not latest:
+                ref = current
+            else:
+                transition_sequence = sequence or 1
+                if transition_sequence not in transitions:
+                    transitions[transition_sequence] = self._readers['transition'](transition_sequence)
+                key = 'after_observation_ref' if sequence else 'before_observation_ref'
+                ref = transitions[transition_sequence][key]
+            if (ref['sequence'] != sequence or ref['run_id'] != current['run_id']
+                    or ref['attempt_id'] != current['attempt_id']):
+                raise ValueError('view observation unavailable')
+            return dict(ref)
+
+        before_ref, after_ref = reference(before_sequence), reference(after_sequence)
+        result = view_change(self._frame(before_sequence), self._frame(after_sequence))
+        return {**result, 'before_sequence': before_sequence, 'after_sequence': after_sequence,
+                'before_observation_ref': before_ref, 'after_observation_ref': after_ref}
 
     def _rejection(self, code, *, observed=None):
         diagnostic = public_diagnostic(dict(
@@ -126,6 +156,10 @@ class ResearchReadServer:
                     raise ValueError
             elif method == 'patches':
                 if len(args) != 2:
+                    raise ValueError
+            elif method == 'view_change':
+                if (len(args) != 2 or type(args[0]) is not int or args[0] < 0
+                        or (args[1] is not None and (type(args[1]) is not int or args[1] < 0))):
                     raise ValueError
             elif method == 'animation':
                 if (len(args) != 3 or type(args[0]) is not dict
@@ -233,6 +267,9 @@ def patches(windows, sequence=None):
 def diff(before_sequence, after_sequence=None, *, limit=80):
     """Exact count and bounded changed cells, before versus current by default."""
     return _read("diff", [before_sequence, after_sequence, limit])
+def view_change(before_sequence, after_sequence=None):
+    """Bounded pixel translation evidence with exact committed refs; not camera truth or safety."""
+    return _read("view_change", [before_sequence, after_sequence])
 def animation(observation_ref, start=0, limit=32):
     """Read animation pages for one exact committed current-run observation."""
     return _read("animation", [observation_ref, start, limit])

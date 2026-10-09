@@ -4588,3 +4588,7 @@
 - 0a3349ca: Closed Task28 evaluation and recovery state to preserve verified results, score tradeoffs and remaining research limits.
 
 - f33d3ab6: Added standalone Chinese Task28 evaluation so this run’s results, judgments and limits are directly readable.
+
+- 2e393dbf: Designed dynamic observation boundaries and RESET hard-stop repair to return control before unobserved batch consequences.
+
+- Task29 typedtools: RED strictoptionalfieldfailure→79PASS/6external skips; independentAPPROVE, bundledresourcea7995612. Python implementation pending.

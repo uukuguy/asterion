@@ -16,12 +16,12 @@ User approves design+implementation plus related execution defects. No new BP35.
 
 Files: new `src/asterion/applications/prime/p7/view_change.py`; `research_bridge.py`; new `tests/test_prime_p7_view_change.py`; existing `tests/test_prime_p7_research.py`.
 
-Interface `view_change(before,after)->dict` is exact boundedcandidate/unsupported/ambiguous/no-change output, <=2KiB; no colorsymbolsemantics. `r.view_change(before_sequence,after_sequence=None)` resolves once and reads immutableframes/refs through existingbridge, noactions. Use `grid()` for accepted raw shape but check <=4096 before costlycomparison. Search0 andaxes±32; threshold/cap rules exactspec.
+Interface `view_change(before,after)->dict` is exact boundedcandidate/unsupported/ambiguous/no-candidate output, <=2KiB; no colorsymbolsemantics. `r.view_change(before_sequence,after_sequence=None)` resolves once and reads immutableframes/refs through existingbridge, noactions. Use `grid()` for accepted raw shape but check <=4096 before costlycomparison. Search0 andaxes±32; threshold/cap rules exactspec.
 
-- [ ] Write and run failing truevertical/horizontal shifts, flat/repeating/static/player-only/bounds/history/read-only/immutability tests (unittest).
-- [ ] Implement boundedliteral detector; include numericmeasurement uncertainty and <=2newwindows, ensure no externaldependency.
-- [ ] Bridge dispatch and module API accept exactlytwo refs and return actual sequences.
-- [ ] Run `uv run python -m unittest -v tests.test_prime_p7_view_change tests.test_prime_p7_research`; record RED/GREEN. Offline existingTask28 pairs are optional diagnostic, notnewengine experiment.
+- [x] Write and run failing truevertical/horizontal shifts, flat/repeating/static/player-only/bounds/history/read-only/immutability tests (unittest).
+- [x] Implement boundedliteral detector; include numericmeasurement uncertainty and <=2newwindows, ensure no externaldependency.
+- [x] Bridge dispatch and module API accept exactlytwo refs and return actual sequences.
+- [x] Run `uv run python -m unittest -v tests.test_prime_p7_view_change tests.test_prime_p7_research`; record RED/GREEN. Offline existingTask28 pairs are optional diagnostic, notnewengine experiment.
 
 ## Task2 — Sequential boundary and hardstops (context_impl)
 
@@ -29,21 +29,21 @@ Files: `solver.py`, `prompt.py`; new `tests/test_prime_p7_observation_boundary.p
 
 Consume datafunction above; no otherworker files. Publicautonomous fields `stop_on_view_change: bool=True`, step`observe_after:bool=False`; pureoptional defaults preserve single-step plans. `stop_reason='observation-boundary'` holds count/ref/result+unexecuted_steps, explanatorytop-levelsummary andperstepfacts. Insert policyoutsideactiontry/finally and onlyknownsettledsteps, hardstopswin; no blockingkernel/newSDKcalls/LLMcall. Sameidread-only, noauto resumption. Immutablebeforeframe/refcaptured beforedispatch.
 
-- [ ] RED criticalRESET wrongexpect+stop_on_mismatchfalse suffix and terminalpriority; record currentunsafeextra dispatch.
-- [ ] RED shiftprefix/suffix boundary, optout, checkpoint, malformedwholeplan, duplicate/newplan, unknown/cancel/budget and detectorerrorisolation; use realBrokerfixture.
-- [ ] Implement strictdefaults/validation, per-step boundedfacts and postcommitsoftyield; handle detectorfault outside actiontransaction handling, retainknownfacts.
-- [ ] Correct hardstoppriority usingactualstate/progress/RESET independentlyofnative mismatch. Preserve mismatches asfeedback.
-- [ ] Prompt explains objectivecandidate/no cameratruth/no safetyproof, modelchoices andresubmission; noBP35physicsguidance.
-- [ ] Verify runtimeprojection/stateview preserve addedfacts andcertainty; run focusedboundary+solver+runtime suites.
+- [x] RED criticalRESET wrongexpect+stop_on_mismatchfalse suffix and terminalpriority; record currentunsafeextra dispatch.
+- [x] RED shiftprefix/suffix boundary, optout, checkpoint, malformedwholeplan, duplicate/newplan, unknown/cancel/budget and detectorerrorisolation; use realBrokerfixture.
+- [x] Implement strictdefaults/validation, per-step boundedfacts and postcommitsoftyield; handle detectorfault outside actiontransaction handling, retainknownfacts.
+- [x] Correct hardstoppriority usingactualstate/progress/RESET independentlyofnative mismatch. Preserve mismatches asfeedback.
+- [x] Prompt explains objectivecandidate/no cameratruth/no safetyproof, modelchoices andresubmission; noBP35physicsguidance.
+- [x] Verify runtimeprojection/stateview preserve addedfacts andcertainty; run focusedboundary+solver+runtime suites.
 
 ## Task3 — Typed tools/resources and integration (root)
 
 Files: `packages/typescript/asterion-prime-extension/src/ipython-extension.ts`, correspondingextension tests, bundled`resources/ipython-extension.mjs`; docs/status plus worklist.
 
-- [ ] RED TypeBoxvalidation boolonly/unknownkeys and descriptions; add onlytwooptionalfields toexistingclosedparameters; toolsremainipython,p7_execute_plan,p7_workspace.
-- [ ] Explainyield doesnotmeanterminal/unsafe, pending suffixneedsnewid/currentref, softpolicyfalsecannotbypasshardstops.
+- [x] RED TypeBoxvalidation boolonly/unknownkeys and descriptions; add onlytwooptionalfields toexistingclosedparameters; toolsremainipython,p7_execute_plan,p7_workspace.
+- [x] Explainyield doesnotmeanterminal/unsafe, pending suffixneedsnewid/currentref, softpolicyfalsecannotbypasshardstops.
 - [ ] Syncresource, run `npm --prefix packages/typescript/asterion-prime-extension test`, relatedPython, lint/docs and `RUST_TEST_THREADS=1 make promotion-check`.
-- [ ] Astra independentdesign/spec/code review; fiximportantfindings. Rootfreeze reviewedimplementationcommit.
+- [x] Astra independentdesign/spec/code review; fiximportantfindings. Rootfreeze reviewedimplementationcommit.
 
 ## Task4 — Packaged deployment and truthful close (deployment/review/root)
 

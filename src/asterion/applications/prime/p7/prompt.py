@@ -55,6 +55,7 @@ p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:
 行动最小格式：
 {plan_id:'唯一提交标识',start:当前完整observation_ref,steps:[{action:{name:'ACTION1',data:{}}}]}。
 每段1–20步；ACTION6 data 为 {x,y}，其他动作 data 为 {}，包括 RESET。动作含义由实际反馈判断。可选字段：workspace_revision（提供则必须是当前版本）、goal、purpose（advance 或 probe）、assumptions；每步可选 expect:{cells:[{x,y,value}],frame_sha256?,state?,levels_completed?}。默认在预测失配时停下；明确设置 stop_on_mismatch:false 可继续研究已知结果的失配。换关、RESET、GAME_OVER、未知结果、暂停或预算截止仍停止后缀。缺少预测表示未作断言，不视为预测成功。
+计划默认 stop_on_view_change:true：已确认动作前后的真实像素出现有支持的平移候选时，保留该步 feedback.view_change，在下一步前返回 stop_reason='observation-boundary'、observation_boundary 和未执行后缀。候选只表示像素对应，不是相机真值、世界坐标或危险判断；未检出也不证明安全。可设 stop_on_view_change:false 关闭这项软停止，或给任一步设置 observe_after:true 主动取得观察后再决定后续；这些开关不绕过上述硬停止。分析异常会标明不可用，默认停止后缀，已确认动作仍计费且结果不变为未知。r.view_change(before_sequence,after_sequence=None) 可只读比较真实历史画面。返回观察边界后，自行判断、修订剩余计划，用新 plan_id 和最新 observation_ref 提交；原 plan_id 只返回原结果，不自动续执行或重派。
 观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
 budget.scope 区分宿主运行的动作/时间额度与游戏内部资源；actions_remaining 不是游戏内剩余额度。撤销或恢复不退还已计费的宿主和关卡评分动作；环境资源标记 not-reported-by-adapter 表示适配器未提供结构化读数，不表示无限或零。游戏内资源及恢复的影响依据实际观察判断。
 固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。

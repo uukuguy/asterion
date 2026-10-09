@@ -81,3 +81,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Completed medium/low/high comparison and score-awareness implementation: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
 
 - 本轮独立评估：[2026-10-09 Task28 BP35 冷测](../reviews/2026-10-09-p7-bp35-task28-evaluation.md)：逐关评分、过程证据、修复效果及未解决边界。
+
+- Task29：[动态观察边界实现与评审](../reviews/2026-10-09-p7-observation-boundary-review.md)：模型可选控制边界、数据候选、RESET与反馈容量缺陷修复、验证边界。

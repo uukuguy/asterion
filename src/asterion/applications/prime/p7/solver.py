@@ -13,6 +13,7 @@ from .solver_events import build_solver_payload
 from .verified_history import validate_prediction
 from .dynamic_evidence import EvidenceProcessingError
 from .processing_diagnostics import DiagnosticLog
+from .view_change import view_change
 
 
 class Solver:
@@ -242,6 +243,37 @@ class Solver:
             if len(before_cells) > 8:
                 step["before"]["cells"] = before_cells[:8]
                 step["before_cells_omitted"] = len(before_cells) - 8
+        if len(canonical_bytes(projected)) > 60 * 1024:
+            # Compact only the model-facing copy. Full measurements remain in
+            # the recorded plan and can be recomputed from these exact frames.
+            measurement_fields = {'origin', 'status', 'dx', 'dy', 'exposed_windows',
+                                  'interpretation', 'before_observation_ref', 'after_observation_ref'}
+            for feedback in projected['feedback']:
+                measurement = feedback.get('view_change')
+                if measurement is None:
+                    continue
+                compact = {key: value for key, value in measurement.items() if key in measurement_fields}
+                compact['measurement_fields_omitted'] = len(measurement) - len(compact)
+                compact['measurement_read'] = {
+                    'read_api': 'p7_research.view_change',
+                    'before_sequence': measurement['before_observation_ref']['sequence'],
+                    'after_sequence': measurement['after_observation_ref']['sequence'],
+                }
+                feedback['view_change'] = compact
+        if len(canonical_bytes(projected)) > 60 * 1024:
+            # A long legal run ID, full predictions and before assertions can
+            # still fill the response. Keep one representative assertion/diff
+            # with cumulative omission counts; never trim committed references.
+            for feedback in [*projected['feedback'], *projected.get('precondition_feedback', [])]:
+                cells = feedback['expected'].get('cells', [])
+                if len(cells) > 1:
+                    omitted_key = 'before_cells_omitted' if 'status' in feedback else 'expect_cells_omitted'
+                    feedback[omitted_key] = feedback.get(omitted_key, 0) + len(cells) - 1
+                    feedback['expected']['cells'] = cells[:1]
+                differences = feedback.get('differences', [])
+                if len(differences) > 1:
+                    feedback['differences_omitted'] = feedback.get('differences_omitted', 0) + len(differences) - 1
+                    feedback['differences'] = differences[:1]
         if len(canonical_bytes(projected)) > 60 * 1024:
             projected["observation"] = {
                 key: value
@@ -673,7 +705,7 @@ class Solver:
             "steps",
         }
         if self.learner_profile == 'autonomous':
-            fields.add('stop_on_mismatch')
+            fields.update({'stop_on_mismatch', 'stop_on_view_change'})
         if set(plan) != fields:
             raise ValueError
         identifier(plan["plan_id"])
@@ -714,10 +746,17 @@ class Solver:
         autonomous = self.learner_profile == 'autonomous'
         if autonomous and type(plan['stop_on_mismatch']) is not bool:
             raise ValueError
+        if autonomous and type(plan['stop_on_view_change']) is not bool:
+            raise ValueError
         current_levels = context["observation"]["levels_completed"]
         for step in plan["steps"]:
+            step_fields = {'action', 'expect', 'before'}
+            if autonomous:
+                step_fields.add('observe_after')
             if (type(step) is not dict or not {"action", "expect"} <= set(step)
-                    or not set(step) <= {"action", "expect", "before"}):
+                    or not set(step) <= step_fields):
+                raise ValueError
+            if 'observe_after' in step and type(step['observe_after']) is not bool:
                 raise ValueError
             if "before" in step:
                 before = step["before"]
@@ -860,7 +899,7 @@ class Solver:
                 if self.learner_profile == 'autonomous':
                     if not {'plan_id', 'start', 'steps'} <= set(value) <= {
                         'plan_id', 'start', 'steps', 'workspace_revision', 'goal',
-                        'purpose', 'assumptions', 'stop_on_mismatch',
+                        'purpose', 'assumptions', 'stop_on_mismatch', 'stop_on_view_change',
                     }:
                         raise ValueError
                     value.setdefault('workspace_revision', self._workspace.revision)
@@ -868,6 +907,7 @@ class Solver:
                     value.setdefault('purpose', 'advance')
                     value.setdefault('assumptions', [])
                     value.setdefault('stop_on_mismatch', True)
+                    value.setdefault('stop_on_view_change', True)
                     if type(value['steps']) is not list:
                         raise ValueError
                     for step in value['steps']:
@@ -954,7 +994,10 @@ class Solver:
                     stop_reason = self.control.snapshot().get("state", "stopped")
                     break
                 before_levels = observation["levels_completed"]
+                before_observation, before_reference = observation, copy_json(reference)
                 reply_received = False
+                step_settled = False
+                count = 0
                 dispatch_start = getattr(self.broker, "actions_dispatched", None)
                 journal_start = len(self.broker.journal)
                 try:
@@ -1014,14 +1057,14 @@ class Solver:
                         counterexample_sequence=feedback["counterexample_sequence"],
                     )
                     continue_mismatch = self.learner_profile == 'autonomous' and not value['stop_on_mismatch']
-                    if differences and self.learner_profile != 'autonomous':
-                        stop_reason = 'prediction-mismatch'
-                    elif observation["state"] in {"WIN", "GAME_OVER"}:
+                    if observation["state"] in {"WIN", "GAME_OVER"}:
                         stop_reason = (
                             "win" if observation["state"] == "WIN" else "game-over"
                         )
                     elif observation["levels_completed"] > before_levels:
                         stop_reason = "level-advanced"
+                    elif count and native["action"]["name"] == "RESET":
+                        stop_reason = "reset-applied"
                     elif differences and not continue_mismatch:
                         stop_reason = "prediction-mismatch"
                     elif native_reason not in {'matched', 'executed'} and not (
@@ -1046,6 +1089,7 @@ class Solver:
                     )
                     if stop_reason == "matched" and not self.control.action_allowed():
                         stop_reason = self.control.snapshot().get("state", "stopped")
+                    step_settled = True
                 except EvidenceProcessingError as error:
                     # Derived work can fail after the broker durably committed
                     # its transition. Reconcile that one exact committed action;
@@ -1134,6 +1178,43 @@ class Solver:
                     )
                 finally:
                     self.control.leave("action")
+                if self.learner_profile == 'autonomous' and step_settled and count == 1:
+                    # Analysis is outside the action exception boundary: a failed
+                    # measurement cannot turn a committed environment result unknown.
+                    try:
+                        measurement = view_change(before_observation['frame'][-1], observation['frame'][-1])
+                        if (type(measurement) is not dict
+                                or measurement.get('status') not in {'candidate', 'no-candidate', 'ambiguous', 'unsupported'}
+                                or len(canonical_bytes(measurement)) > 2048):
+                            raise ValueError('view measurement unavailable')
+                    except Exception:
+                        measurement = {'status': 'unavailable', 'reason': 'observation-analysis-unavailable'}
+                    if measurement['status'] in {'candidate', 'unavailable'}:
+                        feedback['view_change'] = {
+                            **copy_json(measurement),
+                            'origin': 'derived-pixel-measurement',
+                            'before_observation_ref': before_reference,
+                            'after_observation_ref': copy_json(reference),
+                        }
+                    # Poll again after releasing the action and doing analysis;
+                    # operator controls and all native hard stops take priority.
+                    self.control.poll(reference['sequence'], reference['observation_sha256'])
+                    if stop_reason == 'matched' and not self.control.action_allowed():
+                        stop_reason = self.control.snapshot().get('state', 'stopped')
+                    if stop_reason == 'matched' and index + 1 < len(translated):
+                        boundary_reason = (
+                            'actor-checkpoint' if value['steps'][index].get('observe_after', False)
+                            else 'view-change-candidate' if value['stop_on_view_change'] and measurement['status'] == 'candidate'
+                            else 'observation-analysis-unavailable' if value['stop_on_view_change'] and measurement['status'] == 'unavailable'
+                            else None
+                        )
+                        if boundary_reason is not None:
+                            stop_reason = 'observation-boundary'
+                            result['observation_boundary'] = {
+                                'origin': 'application-policy',
+                                'reason': boundary_reason, 'step_index': index,
+                                'observation_ref': copy_json(reference),
+                            }
                 if stop_reason != "matched":
                     break
             result.update(

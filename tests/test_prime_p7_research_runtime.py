@@ -37,6 +37,91 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_maximal_observation_measurements_fit_runtime_and_historical_projection(self):
+        import copy
+        import random
+        from unittest.mock import patch
+        from tests.test_prime_p7_observation_boundary import DETECTOR, LIVE_RUN_ID
+        from asterion.applications.prime.p7.score import canonical_bytes
+        from asterion.applications.prime.p7.view_change import view_change
+        rng = random.Random(29)
+        board = [[rng.randrange(256) for _ in range(64)] for _ in range(64)]
+        shifted = [[rng.randrange(256) for _ in range(64)] for _ in range(4)] + copy.deepcopy(board[:-4])
+        measurement = view_change(board, shifted)
+        class Engine(_Engine):
+            def observe(self):
+                value = super().observe()
+                value['frame'] = [copy.deepcopy(board)]
+                return value
+        engine = Engine()
+        broker = ArcBroker(engine=engine, action_profile='autonomous')
+        run_id = LIVE_RUN_ID
+        broker.bind_history(run_id)
+        run_root = self.root / run_id
+        run_root.mkdir()
+        trace = _TraceClient()
+        host = P7ResearchRuntime(broker=broker, trace_client=trace, run_root=run_root,
+            run_id=run_id, deadline_seconds=30, event_sink=lambda *_: None, learner_profile='autonomous')
+        self.addAsyncCleanup(host.close)
+        cells = [{'x': x, 'y': y, 'value': (board[y][x] + 1) % 256}
+                 for y in range(2) for x in range(64)]
+        guards = [{'x': x, 'y': y, 'value': board[y][x]}
+                  for y in range(2) for x in range(64)]
+        plan = {'plan_id': 'bounded-optout', 'start': host.current_context()['observation_ref'],
+                'steps': [{'action': {'name': 'ACTION1', 'data': {}}, 'before': {'cells': guards},
+                           'expect': {'cells': cells, 'frame_sha256': 'sha256:' + '0' * 64,
+                                      'state': 'NOT_FINISHED', 'levels_completed': 0}}
+                          for _ in range(20)], 'stop_on_mismatch': False, 'stop_on_view_change': False}
+        with patch(DETECTOR, return_value=measurement):
+            result = host.method_call('execute_plan', plan, _Signal())
+        self.assertEqual((result['applied_count'], result['stop_reason']), (20, 'executed'))
+        self.assertEqual(len(trace.transitions), 20)
+        self.assertFalse(result['environment_result_unknown'])
+        self.assertFalse(result['processing_blocked'])
+        historical = json.loads(result['tool_state_view']['replacement_text'])
+        self.assertEqual(historical['feedback'], result['feedback'])
+        self.assertEqual(historical['precondition_feedback'], result['precondition_feedback'])
+        self.assertEqual(historical['budget']['primitive_actions'], 20)
+        self.assertEqual(historical['observation_ref']['sequence'], 20)
+        self.assertEqual(result['observation']['frame'], [board])
+        self.assertNotIn('frame', historical['observation'])
+        self.assertTrue(all(item['view_change']['measurement_fields_omitted'] > 0 for item in result['feedback']))
+        self.assertLessEqual(len(canonical_bytes(host.solver._plan_projection(
+            host.solver._plans['bounded-optout']['result']))), 60 * 1024)
+
+    async def test_observation_boundary_and_pixel_facts_survive_actor_and_historical_views(self):
+        from unittest.mock import patch
+        from tests.test_prime_p7_observation_boundary import CANDIDATE, DETECTOR
+        from asterion.applications.prime.p7.actor_projection import decode_actor_frame
+        self.host.solver.learner_profile = 'autonomous'
+        self.host.set_memory_instructions('trusted research instruction')
+        initial = self.host.current_context()
+        plan = {'plan_id': 'view-boundary', 'start': initial['observation_ref'],
+                'steps': [{'action': {'name': 'ACTION1', 'data': {}},
+                           'expect': {'cells': [{'x': 0, 'y': 0, 'value': 1}]}},
+                          {'action': {'name': 'ACTION1', 'data': {}},
+                           'expect': {'cells': [{'x': 0, 'y': 0, 'value': 2}]}}]}
+        with patch(DETECTOR, return_value=CANDIDATE):
+            result = self.host.method_call('execute_plan', plan, _Signal())
+        self.assertEqual((result['applied_count'], result['stop_reason']), (1, 'observation-boundary'))
+        self.assertFalse(result['environment_result_unknown'])
+        self.assertFalse(result['processing_blocked'])
+        frame = result['observation']['frame']
+        self.assertEqual(decode_actor_frame(frame) if isinstance(frame, dict) else frame, [[[1, 1]]])
+        self.assertEqual(len(self.trace.transitions), 1)
+        self.assertEqual(self.broker.frame_at(1), [[1, 1]])
+        archived_view = json.loads(result['tool_state_view']['replacement_text'])
+        for name, value in (('actor', result), ('historical', archived_view)):
+            with self.subTest(view=name):
+                self.assertEqual(value['observation_boundary'], result['observation_boundary'])
+                self.assertEqual(value['feedback'], result['feedback'])
+                self.assertEqual(value['observation_ref']['sequence'], 1)
+                self.assertEqual(value['budget']['primitive_actions'], 1)
+                self.assertEqual(len(value['unexecuted_steps']), 1)
+                self.assertEqual(value['feedback'][0]['view_change'].get('origin'), 'derived-pixel-measurement')
+        self.assertNotIn('frame', archived_view['observation'])
+        self.assertEqual(len(self.engine.calls), 1)
+
     async def test_unknown_action_remains_top_level_unknown_after_notes_reads(self):
         self.host.solver.learner_profile = 'autonomous'
         self.host.set_memory_instructions('trusted research')

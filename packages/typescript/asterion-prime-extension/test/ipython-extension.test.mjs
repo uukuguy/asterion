@@ -994,3 +994,28 @@ test("Prime normalizes object-only function schemas without changing application
   assert.equal(normalizeFunctionParameters({allOf: [{type: "object"}, {required: ["x"]}]}).type, "object");
   assert.equal(P7_WORKSPACE_PARAMETERS.type, undefined, "application union remains unchanged");
 });
+
+
+test("P7 observation boundary options are optional strict booleans with actor control", () => {
+  const start = {run_id:"run-1",attempt_id:"attempt-1",level:1,sequence:0,
+    observation_sha256:"sha256:"+"0".repeat(64)};
+  const action = {name:"ACTION1",data:{}};
+  const base = {plan_id:"plan-1",start,steps:[{action}]};
+  assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,base),true);
+  for (const flag of [true,false]) {
+    assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,{...base,stop_on_view_change:flag}),true);
+    assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,{...base,steps:[{action,observe_after:flag}]}),true);
+  }
+  for (const flag of [0,1,"false",null,[],{}]) {
+    assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,{...base,stop_on_view_change:flag}),false);
+    assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,{...base,steps:[{action,observe_after:flag}]}),false);
+  }
+  assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,{...base,view_shift:{dy:6}}),false);
+  assert.equal(Check(P7_EXECUTE_PLAN_PARAMETERS,{...base,steps:[{action,observe_after:true,unsafe:false}]}),false);
+  const tool=createAppLevelTools({callMethod:async()=>({status:"recorded"})})
+    .find(item=>item.name==="p7_execute_plan");
+  for (const text of ["stop_on_view_change","observe_after","observation-boundary","candidate","new plan_id"])
+    assert.ok(tool.description.includes(text),text);
+  assert.match(tool.description,/not.*safety/);
+  assert.deepEqual(toolNames(),["ipython","p7_execute_plan","p7_workspace"]);
+});
