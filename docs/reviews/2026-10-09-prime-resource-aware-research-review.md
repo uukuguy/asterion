@@ -89,3 +89,13 @@ Prime 通用层以真实会话完整工具组建立 NOTES epoch，保留当前�
 源码验证：`npm --prefix packages/typescript/asterion-prime-extension test` 88 PASS / 6 external skips；installed Pi provider-free probe 验证正常 NOTES、archive、完整工具组、压缩与重载；相关 Python 48 PASS。`sync-resource` 构建通过，打包扩展 SHA256 `13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b`。未做本版本 promotion、付费打包见证或 BP35，不能据此宣称解题改善。
 
 专用代码压缩另有底层接入缺口：历史 Prime fork 有 kernel 专用默认提示；Task38 实际 operator-owned Pi bundle 自动路径仍用原生提示，没有接入自有摘要材料。D-2026-09-16-01 接管实现仍 pending。默认开启、较高触发阈值与专用语义是独立要求；NOTES 主认知不能替代专用代码压缩。本轮 Task38 未观察到压缩触发，不能评估其效果。后续在 Prime 通用层修复，应用层不负责配置。
+
+### Task39 NOTES-only 打包见证
+
+用户暂缓全部 Pi 接入迁移，先完成 P7 NOTES 与过关。专用摘要初稿隔离，生产精确2930fbd8，轮包 a6ad55934e4104a67ad978fd8694197c2bb9e7b0c9094208ef4963966706e863，扩展13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b。TS88 PASS/6外部skip、相关Python48 PASS、完整promotion25 PASS/provider0按序完成；570源码、588安装文件及真实Pi离线探针独立核验。
+
+实际 r11l L1：7paid/Q115，mint→SDKgoal128.140348秒，最终清理132.482697秒；0actor RESET/0undo，另2初始化RESET。goal12usage input395627/output3571/peak68422，final13usage input425412/output3599。4次正常NOTES更新均进入primary，退休完整组0→2→4→7；本轮3049B诊断未截断，11次覆盖request3–13。第三次NOTES后输入61073→21105tokens。实际动画整份print产生39247B，是此前峰值的大项；约23KB初始任务与snapshot重复也是尚存开销。NOTES562–714B。不能把日志字节叫tokens，不能从诊断计数重建未持久化的Pi原始会话全文。
+
+Task30四步与本轮前三次付费点击相同。Task30第四次点击(39,25)完成；本轮第四次点已占端点(39,21)，只切换选择，再用三步调整两端完成，净增三步。Task31曾六步/94.471582秒，Task30四步/67.896532秒。本轮动作及时间回退真实存在，但没有证据归因于NOTES失效；也未证明整体解题收益。
+
+9份完整SDK回放（仅guid排除）、7known事务、24trace/seal、12研究链及13metrics通过，owned进程/auth/env清理，console52024:56659保留。138项最终manifest SHA0f4e44188e4977da6edfdb29e67bcb23a53e7b654f1bc7daf6624f6530f8d201，独立READY。actualMake未启scalarobserver，rawcache未知；未自然调用archive专项回读，未触发nativecompaction，不验证专用压缩。本轮证明正常NOTES实际退休；随后授权BP35比较尚未启动。

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-10: active session checkpoint; Task39 NOTES core ready for package checks. Full Prime backend migration deferred by user. No new model/game run.
+Updated: 2026-10-10: active session checkpoint; Task39 NOTES core ready for package checks. Full Prime backend migration deferred by user. Task39 r11l sealed; fresh BP35 preparation active, not launched.
 
 ## Active Task39: NOTES-primary BP35 validation
 
@@ -9,7 +9,8 @@ User explicitly narrowed scope: complete broad Pi migration later; now prioritiz
 - Core source2930fbd8, planning8839f477. Normal NOTES establish trusted working epochs, old actor-visible details readable by reference, recent errors/user constraints/unknown effects protected. Rich cognition prompt remains P7 research responsibility. Independent core design/TS/Python APPROVE.
 - Restored exact core reverified: TS88 PASS/6external skips; actual installedPi1.0/provider0 PASS. dist/resource SHA13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b, TSsource/test/resource equal2930fbd8. Logs /tmp/asterion-task39-notes-restored-ts.log and installed.log. Three unfinished TS compaction draft files isolated in named Git stash; no new Python migration source written.
 - Review approves NOTES-only package. Native auto-compaction still uses current default summary, highthreshold unchanged. If actual compaction occurs, current rawlineage recovery can preserve larger epoch; dedicated summary/scope efficiency remains unimplemented. Do not mix deferred draft into build or claim specializedcompression default.
-- Next: deployment focusedPython thenpromotion, freeze matchingwheel/resource/source; fresh real packagedr11l900+180, then authorizedfreshBP35 Solmedium/seed0/native6/5400+180 after rootGO/preflightREADY. No inheritedNOTES/routes/hints, no19gate/L1stopper. Track per-levelscore/paid/RESET/time, ordinaryNOTES retirement/readability andinputpeak/raw/cache; fullreplay/seal/cleanup/finalREADY.
+- Completed: Python48 PASS/promotion25 PASS/provider0; freshr11l7paid/Q115/128.140348s/0RESETundo. NOTES actualprimary4epochs/retired0→2→4→7, input61073→21105. Animation39247B inflated earlier68422peak; ~23KBduplicateinstructions remains. FullSDK9/tx7/trace24/chain12/cleanup/final138manifest0f4e4418 independentREADY. Archive not actorused, no nativecompaction/rawcacheunknown/Pi原始会话未持久化.
+- Next: authorizedfreshBP35 Solmedium/seed0/native6/5400+180 after rootGO/preflightREADY, unchangedsource2930fbd8/wheela6ad5593/resource13bfee. Root paused to diagnose4→7, then resumed preparation: extra3 from fourthoccupiedendpoint selection and routeadjustment, not retirementfailure; performancebenefitstillunverified. No inheritedNOTES/routes/hints, no19gate/L1stopper. Track per-levelscore/paid/RESET/time, ordinaryNOTES retirement/readability andinputpeak/raw/cache; fullreplay/seal/cleanup/finalREADY.
 
 ## Deferred Prime backend consolidation
 

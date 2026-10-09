@@ -13,7 +13,7 @@
 
 ## Active Task39 implementation
 
-正常 NOTES 主认知核心已提交 2930fbd8，独立源码评审 APPROVE，TS88 PASS/6外部跳过、相关Python48 PASS、实际安装Pi无provider探针通过。普通笔记建立工作epoch，旧证据按引用专项读取。尚未完成本版本打包见证或 BP35。
+正常 NOTES 主认知核心已提交 2930fbd8，独立源码评审 APPROVE，TS88 PASS/6外部跳过、相关Python48 PASS、实际安装Pi无provider探针通过。普通笔记建立工作epoch，旧证据按引用专项读取。本版本打包见证已完成：r11l7paid/Q115/128.140348秒，4次正常NOTES实际退休完整组0→2→4→7；输入61073→21105tokens。新版本 BP35 尚未启动，解题收益未验证。
 
 用户明确 P7 全部底层 Pi 依赖需通过 Prime；默认专用代码压缩由 Prime 统一保证。旧 Prime fork 的原生摘要改写真实存在，当前迁移后的启动链未保留该接入。完整迁移已记录并由用户暂缓；当前优先验证 NOTES 主认知及 P7 过关。P7 主会话已通过 AsterionPrimeSession，部分应用级底层接入尚待迁移。专用摘要实际运行和解题收益均未验证。
 

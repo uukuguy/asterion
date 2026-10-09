@@ -4764,3 +4764,7 @@
 - User clarified Pi must remain Prime-private; existing P7 RPC-object injection is a deferred ownership gap, not the target architecture.
 
 - Recorded Prime-private backend and inconsistent P1–P7 entries for later consolidation; user prioritizes finishing P7 NOTES solving now.
+
+- f9f4b512: Recorded Prime-private backend and P1–P7 entry gaps to prevent reuse while prioritizing the current NOTES solving experiment.
+
+- Task39 r11l sealed READY:7paid/Q115/128.14s; NOTES retired0→2→4→7 groups, input61073→21105; BP35 preparation resumes without code changes.
