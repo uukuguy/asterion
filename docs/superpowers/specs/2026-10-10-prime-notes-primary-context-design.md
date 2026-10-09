@@ -1,6 +1,6 @@
 # NOTES 主导的研究工作上下文
 
-状态：NOTES 核心源码已提交 2930fbd8，独立评审通过；通用 Prime 接入与默认专用压缩补齐中。用户授权实现、评审及实测；尚未启动本版本模型。Task38 保持封存。
+状态：NOTES 核心源码已提交 2930fbd8，独立评审通过；通用 Prime 接入与默认专用压缩迁移由用户暂缓；当前进行 NOTES 核心打包和过关验证。用户授权实现、评审及实测；尚未启动本版本模型。Task38 保持封存。
 
 ## 问题与目标
 
@@ -65,7 +65,7 @@ host只验证本次分支、完整组顺序、原档可读、exact refs/版本�
 
 用户明确 P7 的全部底层 Pi 依赖应转为基于 Prime，不能只修压缩。通用 Prime 拥有启动命令、模型配置落实、profile/entry 与扩展加载、RPC 会话和原生事件处理、默认专用摘要与用量/取消边界。P7 注入游戏接口、工具、完成判定、研究续跑内容和领域证据转换，不操作 Pi 内部对象。operator-owned 环境仍由获授权的应用集成读取，通用框架不直接读 .env。
 
-实现沿合法 session_before_compact 接管摘要生成，保留 Pi 触发阈值、preparation 切分和持久化；实际摘要使用 Prime 自有代码语义材料和选定 provider/model/auth。每次实际摘要调用须遵守现有 callback/deadline 及已设置的 token/cost 预算并记录真实 usage；失败/取消不得偷偷回落再调用一遍原生摘要。无新 runner/provider，未设置的预算不虚构为必须新增价格系统。P1 旧手动见证保持显式兼容边界，不能双 hook。
+以下完整迁移设计暂缓实施，不混入当前 NOTES 实测版本。后续沿合法 session_before_compact 接管摘要生成，保留 Pi 触发阈值、preparation 切分和持久化；实际摘要使用 Prime 自有代码语义材料和选定 provider/model/auth。每次实际摘要调用须遵守现有 callback/deadline 及已设置的 token/cost 预算并记录真实 usage；失败/取消不得偷偷回落再调用一遍原生摘要。无新 runner/provider，未设置的预算不虚构为必须新增价格系统。P1 旧手动见证保持显式兼容边界，不能双 hook。
 
 NOTES 的日常主认知与高阈值专用压缩同时成立。可信摘要范围只能覆盖真实可压缩历史；未知效果、用户约束及必要近期错误原文继续保护。压缩后不能恢复全部已覆盖 raw 历史使压缩失效，不能凭 summary 文本猜游标。实际 provider-free hook、entry 持久化及重载需验证；真实运行未触发压缩则不声称模型摘要质量验证。
 

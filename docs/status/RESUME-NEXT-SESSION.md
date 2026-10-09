@@ -1,16 +1,21 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-10: active session checkpoint; Task39 NOTES core committed, Prime unified backend migration underway. No new owned model/game run.
+Updated: 2026-10-10: active session checkpoint; Task39 NOTES core ready for package checks. Full Prime backend migration deferred by user. No new model/game run.
 
-## Active Task39: Prime ownership and NOTES cognition
+## Active Task39: NOTES-primary BP35 validation
 
-User authorizes implementation, simple review and BP35; latest scope explicitly moves all P7 low-level Pi dependencies behind Asterion Prime, not merely compression. Root coordinates; context_impl owns TS, deployment owns Python and eventual package/live, review independently reviews. Preserve user console PID52024/port56659.
+User explicitly narrowed scope: complete broad Pi migration later; now prioritize P7 solving and NOTES/context problems. Root coordinates; context_impl TS core, deployment package/live, review independent audit. Preserve user console PID52024/port56659.
 
-- Core source commit2930fbd8 implements normal NOTES primary epochs and selective archive retrieval. Independent design/TS/Python APPROVE; TS88 PASS/6external skips, focused Python48 PASS, actual installed Pi provider-free probe PASS; resource13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b. No promotion/paid witness/BP35 for this version yet.
-- Audit confirmed historical Prime fork really modified native buildSummarizationPrompt to append persistent-kernel semantics. Old dependency injection was removed byfd962a66. Current loader/build/actualTask38rpc-entry bundle do not retain this modification. Current own summary materials drive quote/witness, not automatic provider summary; P1 manual custominstructions is separate. Do not say dedicated compression currently default.
-- User says default specialized code compression belongsPrime, application should not configure it. Approved minimal design: Pi retains threshold/preparation/persistence, genericPrime before_compact generates own coding summary through selected registry/auth; each actualcall obeys existing callback/deadline/any configured budgets and records usage, no duplicate fallback/provider/retry. P1 legacy lane explicit. NOTES certified compaction range must not resurrect covered rawhistory; protected unknown/user/errors remain.
-- Scope now includeslive.py backend flags/profile/entry/model_selection; operator native launch/settings; runtime_binding RPC/extension; official_operator; run_story narrator directPi. Deployment enumerates owners and migrates real implementation into agents/prime; mere native_rpc reexport aliases are insufficient. Domain tools/goals/continuations/evidence projections remainP7. Review must verify allsurfaces before package.
-- Next: complete exact private authorization/persist contract and Prime factory migration design, focused RED→GREEN, independent changed-code review, resource sync/sourcecommit. Then TS→relatedPython→promotion→fresh packagedr11l witness→authorizedcoldBP35 Solmedium/seed0/native6/5400+180. Root actualGO required after fresh preflight, no repeated userapproval. No inherited NOTES/routes/hints, no19gate/L1stopper.
+- Core source2930fbd8, planning8839f477. Normal NOTES establish trusted working epochs, old actor-visible details readable by reference, recent errors/user constraints/unknown effects protected. Rich cognition prompt remains P7 research responsibility. Independent core design/TS/Python APPROVE.
+- Restored exact core reverified: TS88 PASS/6external skips; actual installedPi1.0/provider0 PASS. dist/resource SHA13bfee2e2990b7556950ea9a440f610263ab3f03f82a0ffe1f7f1ea54329272b, TSsource/test/resource equal2930fbd8. Logs /tmp/asterion-task39-notes-restored-ts.log and installed.log. Three unfinished TS compaction draft files isolated in named Git stash; no new Python migration source written.
+- Review approves NOTES-only package. Native auto-compaction still uses current default summary, highthreshold unchanged. If actual compaction occurs, current rawlineage recovery can preserve larger epoch; dedicated summary/scope efficiency remains unimplemented. Do not mix deferred draft into build or claim specializedcompression default.
+- Next: deployment focusedPython thenpromotion, freeze matchingwheel/resource/source; fresh real packagedr11l900+180, then authorizedfreshBP35 Solmedium/seed0/native6/5400+180 after rootGO/preflightREADY. No inheritedNOTES/routes/hints, no19gate/L1stopper. Track per-levelscore/paid/RESET/time, ordinaryNOTES retirement/readability andinputpeak/raw/cache; fullreplay/seal/cleanup/finalREADY.
+
+## Deferred Prime backend consolidation
+
+User requires P7 -> AsterionPrime -> Pi for all backend dependencies. Current solve already uses AsterionPrimeSession, but app-owned backendconfig/launch/profile/RPCconstruction and narrator still need unifiedPrime entry. Enumerated scope and approveddesign are in canonicalTask39 supplement and spec. User postponed implementation because scope too large; no autonomous continuation of that migration now.
+
+OldPrime fork modified native buildSummarizationPrompt with persistentkernel semantics; fd962a66 removed its dependency injection. CurrentactualPi loader/build/bundle lacks active specializedsummary rewrite. Existing ownmaterial is quote/witness; P1manualkernelinstructions separate. D09-16-01 takeover pending. Desired default specialization keeps native trigger/preparation/persistence and actual selectedmodel/auth, honors finite budgets and usage. Specializedcompaction must not resurrect summarizedhistory; full design held for later, not required to claim currentNOTES-only experimental result.
 
 ## Task38 completed / independent READY
 

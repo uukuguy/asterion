@@ -4754,3 +4754,7 @@
 - Current loader history: fd962a66 removed old dependency injection; current source/bundle audit found no active native-summary rewrite. New integration paused pending confirmation.
 
 - User authorized complete P7 backend migration behind Prime; dedicated native-summary semantics and NOTES-safe compaction design approved, implementation underway.
+
+- 8839f477: Defined Prime-owned backend integration and default code-aware compaction to remove P7 transport ownership and migration gaps.
+
+- User deferred broad Prime/Pi migration; restored exact NOTES core passes TS88 and installed-Pi probes, with compaction draft isolated.
