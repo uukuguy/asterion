@@ -4576,3 +4576,11 @@
 2026-10-09 — Task28 packagedr11l witness ACTIVE10:49:53Z/Solmedium; new prefix metrics recorded, cold BP35 awaits independent deployment audit.
 
 2026-10-09 — Task28 packaged witness independently READY; complete replay/prefix artifacts/cleanup verified, fresh BP35 GO issued.
+
+2026-10-09 — 67a7f8bc recorded independently verified anchored deployment and authorized cold BP35 recovery boundary.
+
+2026-10-09 — Task28 fresh BP35 ACTIVE10:58:34Z/Solmedium/a8ee6035; exact installation verified,5400+180deadline fixed and passive tracking enabled.
+
+- Task28 live: L1–L5 complete, L5 improves35→31paid and452→164s; L2laterdeath raisespaid49→62. L6seconddeath under readonlyhistorical-coordinate review; no actor intervention.
+
+- Task28 CLOSED:1069.976586s/236paid/2death; independent1909entryREADY/fullreplay/cleanup. Computeprefix/cache recovered; mixedscore and historicalrisk reuse remain explicit.
