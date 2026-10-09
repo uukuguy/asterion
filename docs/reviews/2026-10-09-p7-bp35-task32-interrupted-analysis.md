@@ -41,3 +41,15 @@ Task32当前请求12的context140178/provider136221字节，对Task29请求15的
 ## 封存证据
 
 私有 `.asterion-private/p7-task32-cold-bp35-20261009/trial/`，run `p7-live-20261009152116-579d87b789b153d9bc4aa792`。源码570/安装588/归档1685、wheel2d412628/resourcea799及冻结启动身份一致。最终395manifest全量bytes/SHA/coverage独立READY：d9787d879dfe752154a703995f7799858207671cd2c4b5e335269758988de3ca。旧450d为中间封存；最终仅用d978。实际21条资源交付被观测，模型采用仍unknown；单次中止运行不能证明策略改进因果或跨场景能力。
+
+## Task34：实时理由试验，已由用户中止
+
+生产e943f233增加开局/变更NOTES及每plan短goal，没有本节之后的明确紧迫性指导。冷BP35L1达到19paid/Q115、0RESET。预算mint到SDKgoal203.925307秒；launchreceipt到goal203.924637秒，两起点差0.000670秒，不能混用。比Task32少3步，但慢36.211632秒；goal19usage input697459/out4244/peak53742，不能由改善分数推断全局更优。
+
+首策略NOTES早于首paid5.640871秒，明确先用1步横向探针，再据反馈选短路、整关代价未知。seq9实质修订为打开上行短路、横移接入、避免无关圆块，下一段预计5步；计划确实按5步执行。临近115门槛，start14/15/17对应剩余5/4/2步，选择推进到出口，19步恰好耗尽空间。但是公开理由未明确引用评分空间，无法判断紧迫性是否导致了策略切换，单次波动与提示因果仍不可区分。
+
+L2公开理由展示更清楚的风险链：seq24NOTES保留15内部11/0，远程点击试验不可删后选择绕行；start39时关内paid20、115余24/100余28，并不紧迫，却清27y33挡板后左移进入危险上浮列，seq42死亡。NOTES42随后承认挡板删除错误、需检查完整自动上浮路径；尝试用ACTION7撤销死亡被GAME_OVER硬边界拒绝，applied0未收费，RESET43后重走。不能把这次死亡解释为资源紧逼冒险。
+
+用户于15:53:02.710672UTC停止：74knownpaid=L119+L2unfinished55，死亡RESET1，重置后31步。76SDK完整回放，112trace/74tx/35研究记录=8compute23experiment4notes一致。23/23plan有goal、4acceptedNOTES，外显说明真实可读，但可读不等于选择正确。35completedusage input1856539/out9138/peak89364，raw1430683/cache425856；hook36取消在途usage未知。36context峰313561/累计6206654字节，prefix峰306273。35资源交付正确，最后L2已超115门槛11步、100门槛7步，未通关没有该关已得贡献。
+
+owned进程/unit/auth/env均清理，用户console保留；收口423.170680046秒。私有Task34trial封存648manifest独立READY，SHA bc2e99b5ed08fcfcecb857cf276488aa11d44b6cb0cad5d88c0b1633e8a15f6d。用户要求将紧迫性指导写得明确再测，允许完整L1–L6，但L1不理想可先中止。新Task35提示及实测不能回填为本次决策依据。

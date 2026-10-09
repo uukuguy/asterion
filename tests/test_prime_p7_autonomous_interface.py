@@ -62,6 +62,23 @@ class TestAutonomousResearchInterface(unittest.TestCase):
                 self.assertTrue(fragment in text, f'missing action-reason requirement: {fragment}')
         self.assertNotIn('80%', text)
 
+    def test_prompt_compares_scoring_room_to_probe_and_progress_cost_without_a_gate(self):
+        text = prompt.build_autonomous_prompt()
+        for fragment in ('每组付费动作前，对照当前关 additional_paid_actions_preserving_115 和 additional_paid_actions_preserving_100',
+                         '已有证据支持的剩余路线估计', '路线代价未知就保持未知',
+                         '不为填写估计数字追加查询或计算', '预计接近或超过某条评分空间时',
+                         '付费探针能改进后续选择的信息收益', '已知推进、失败或逆转的动作代价',
+                         '评分空间或最新有效时间采样显示余量变紧',
+                         '已有证据足以支持有价值行动时，优先积极推进',
+                         '减少不会改变路线选择的付费试探',
+                         '能改变路线选择或避免高代价失败、逆转的必要验证仍可做',
+                         '无需消除全部未知后才行动',
+                         '评分空间紧不自动要求冒险或低风险方案',
+                         '两条余量均为0或已超额时，仍以取得实际得分和通关为目标',
+                         '评分空间实质影响本次选择时', '未影响时无需重复两条步数'):
+            with self.subTest(requirement=fragment):
+                self.assertTrue(fragment in text, f'missing scoring-tradeoff requirement: {fragment}')
+
 
 class TestOperatorTaskBudget(unittest.TestCase):
     def test_guest_wall_origin_expires_despite_stalled_monotonic_clock(self):

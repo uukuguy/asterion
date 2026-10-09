@@ -4672,3 +4672,12 @@
 - Task33 userrequires liveinitial/changedstrategy+concise perplanreason; P7prompt NOTES/goal implemented,35PythonPASS/lint/docs/independentreviewAPPROVE; notrerun.
 
 - Task34 userauthorized directfreshBP35 afterTask33 simpleAPPROVE/35tests; validateinitialstrategy/perplangoal live, samefinitecoldboundary.
+
+- e943f233: Added contemporaneous strategy and concise action reasons so real choices remain auditable without extra tools or gates.
+
+- Task34 continuing userauthorized freshBP35 preparation/e943f233; decision explanations visible via plan.goal timeline and NOTES evidence.
+
+- Task34 preflightREADY thenlaunch15:46:02.843325UTC/deadline17:16:02.842655+180; sourcee943/wheeld71f/runbc49b477/unit8d77e34a.
+
+- Task34 userstopped74paid/L119Q115+unfinishedL255death1; 648manifestbc2e independentREADY, allownedcleanup, noresume.
+- Task35 explicitscarcity/adequateevidence→preferprogress P7prompt,43PythonPASS/lint/docs/APPROVE; fullBP35authorized withL1earlystop discretion.

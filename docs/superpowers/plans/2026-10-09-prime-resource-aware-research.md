@@ -61,3 +61,12 @@ User explicitly requests live initial/changed strategy reporting, plus concise r
 - [x] Commit and close source state; new live adherence and strategy-effect untested, no further trial.
 
 Task33 source reviewAPPROVE/root35PythonPASS1.678s/lint/docs/diff; prompt935B additional, no new tool/runtime/data changes. Implemented guidance only; live adherence/deployment/effect not rerun.
+
+## Task35 — Explicit scarcity and progress preference
+
+P7prompt+focusedtest context_impl; Astra simplechangedcodeAPPROVE; root43PythonPASS/lint/docs/diff. No generic/data/tool edits. User authorizes newcoldBP35L1-L6 same5400+180, L1poorquality permits earlystop. Rootcommitfreeze→freshwheel/preflight→onceGO; noextra smalltest.
+
+- [x] Explicit scarce score/time plus adequate evidence favorsprogress; necessary valuableprobe stillallowed, noforcedunknownresolution/threshold/gate.
+- [x] Concisegoal onlywhen resource materially changes choice; noextra notes/query ororacle.
+- [ ] Freeze/preflight/newcoldrun; monitorL1threshold19 and repeated/no-effect choices with actualreasons, stopifpoor orcontinueL6.
+- [ ] SDKreplay/seal/ownedcleanup/independentREADY and truthful state; strategy adoption/cause onlyif supported.
