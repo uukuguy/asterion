@@ -636,6 +636,8 @@ L5/L6 independent process comparison: L5 current35paid/11cells/10plans versus Ta
 
 ## Task28 implementation and deployed boundary
 
+本轮独立中文评估：[Task28 BP35 实测结果、关键过程与结论](2026-10-09-p7-bp35-task28-evaluation.md)。
+
 User authorizes design→implementation→review→freshtest. [Specification](../superpowers/specs/2026-10-09-prime-context-prefix-and-p7-visual-research-design.md) and [plan](../superpowers/plans/2026-10-09-prime-context-prefix-and-p7-visual-research.md) define three-layer changes. Sourcea8ee6035 anchors the current unique custom→user snapshot after latest trusted complete state-tool siblinggroup, keeping rawhistory/pairing and historicalNOTESreceipt; unsafe or unknown source retains tail. Native branch reconstruction and compaction remain. Optional P7 patches returns explicit bounded fullregions/allcolors/actualsequence without grid/camera/object/risk inference. Current researchprinciples address visual anomaly risk clues and self-written representation checks without mandatoryforms or extraactions.
 
 Public Pi before_provider_request records numeric actualResponses input byte/itemprefix and changed flags for system/tools/cachekey in a separate ownedFD/file; no payload/hash output, zero mutation, boundedmemory/sample/file, unknownmeasurementresetsbaseline. Currentstateflags also propagate throughNOTESread/history so uncertainresults cannot create a stableanchor; partialeventregistration disables residualcallbacks.

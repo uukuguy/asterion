@@ -4584,3 +4584,5 @@
 - Task28 live: L1–L5 complete, L5 improves35→31paid and452→164s; L2laterdeath raisespaid49→62. L6seconddeath under readonlyhistorical-coordinate review; no actor intervention.
 
 - Task28 CLOSED:1069.976586s/236paid/2death; independent1909entryREADY/fullreplay/cleanup. Computeprefix/cache recovered; mixedscore and historicalrisk reuse remain explicit.
+
+- 0a3349ca: Closed Task28 evaluation and recovery state to preserve verified results, score tradeoffs and remaining research limits.

@@ -79,3 +79,5 @@ If you want to record a **finding/lesson** that's a long-lived project fact → 
 Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-08-prime-research-notes.md).
 
 - Completed medium/low/high comparison and score-awareness implementation: [Task7 repair review and medium BP35](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
+
+- 本轮独立评估：[2026-10-09 Task28 BP35 冷测](../reviews/2026-10-09-p7-bp35-task28-evaluation.md)：逐关评分、过程证据、修复效果及未解决边界。
