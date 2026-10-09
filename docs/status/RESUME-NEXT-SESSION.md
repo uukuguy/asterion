@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09T12:52:25Z. Session active; not final handoff.
+Updated: 2026-10-09T13:01:17Z. Session active; not final handoff.
 
 ## Active task
 
@@ -13,6 +13,10 @@ User authorized latest Task29 cold BP35 L1–L6 (“开始实测”). Single fre
 - Actual host launch `2026-10-09T12:52:25.072668Z`; deadline `2026-10-09T14:22:25.071746Z`, original5400+180 cleanup, never renewed.
 - Run `p7-live-20261009125226-984bb04c164deb226e93dcff`; unit `asterion-p7-d8c65996a7b6499ab2f6a4d8eff0ba87.service`.
 - Owned host supervisor97099/launcher97101/caffeinate97100; guest operator329096/Pi329121. Preserve user console52024/56659. Deployment agent owns run, observer, replay, final cleanup and manifest; review agent independently observes and audits. Root owns state/docs/commits.
+
+## Live checkpoint: three levels complete
+
+L1–3 paid25/42/36, successful identical, zero death/RESET, Q70.56/115/115. Durations155.550215/202.926513/158.378798s; host cumulative516.855526s. L1 extra7 clicks regressed route; L2 avoids death but slower, L3 same paid but slower than Task28. Inputpeak86635; no soft observation-boundary yet. Translation candidates mostly at plan end; L2 final plan explicitly opts out before seq66 candidate then seq67 hard level advance. Model has used read-only r.view_change once in L1. L4 now active; no actor guidance or source changes.
 
 ## Verified implementation and deployment
 

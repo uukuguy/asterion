@@ -4602,3 +4602,11 @@
 - 06c3f4a9: Closed Task29 deployment evidence and recovery state after independent audit; BP35 effectiveness remains unverified.
 
 - Task29 BP35 cold launched12:52:25Z: Solmedium/frozen9557ad63; fresh5400+180, target6, no hints; installed588 identities verified.
+
+- 36c370ef: Recorded authorized cold BP35 launch and compact recovery checkpoint to preserve ownership, budget and comparison boundaries.
+
+- Task29 cold L1:25paid/zeroRESET/155.550215s/Q70.56; no soft observation boundary. Route efficiency regressed versus Task28.
+
+- Task29 cold L2:42paid/zeroRESET/202.926513s/Q115; no softyield; score improves, time increases versus Task28.
+
+- Task29 cold L3:36paid/zeroRESET/158.378798s/Q115; cumulative103paid/516.855526s; inputpeak86635, no softyield.
