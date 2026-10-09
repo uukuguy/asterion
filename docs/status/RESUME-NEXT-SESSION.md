@@ -1,69 +1,34 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-09 at Task23 cold-trial launch. Session remains active; this is not a final handoff.
+Updated: 2026-10-09 after Task23 cold verification and independent audit. Session remains active; this is not a final handoff.
 
-## Current intent and next action
+## Current intent and boundary
 
-User approved implementation after the concrete layered design. Task22 adds read-only r.transition(sequence) and P7 research/NOTES descriptions. Generic Prime facilities and registered tools unchanged. Source implementation/review and61Python tests PASS; TS50PASS/6externalPi skips, lint/docsPASS. Promotion fullPASS commands25/provider_operations0; the required fresh packaged r11lL1 deployment witness completed7paid/0RESET/70.642472seconds, replay/source/cleanupPASS; user now authorizes Task23 cold BP35 L1–L6; track through target or original finite limits. Design [transition research spec](../superpowers/specs/2026-10-08-p7-transition-research-design.md); canonical worklist Task23. Avoid mandatory cognitive forms, every-step prediction gates or game-specific known-route hints.
+User requested overall Prime positioning recorded in README/AGENTS, P7 first for experimentation/stabilization, then prepared cold verification. All complete: documentation commit abf3f428; source remains ecd20b2f. No further source repair or trial authorized. Next discussion should assess the mixed efficiency result and remaining L2/L5 issues using the canonical comparison, without injecting known game routes or mandatory cognitive gates.
 
-## Current source and configuration
+## Verified facts
 
-- Branch feat/prime-research-notes; current productionecd20b2f; Task21 frozen1a22dc33. Task21 adds only factual scoring paragraph and budget.scoring, preserving the original actor goal/behavior from9b62d2c2. score.py unchanged;49 focused tests passed. Generic schema/RPC/config repairs remain.
-- Operator.env openai-codex/gpt-6.1-sol/medium, ASTERION_PRIME_EFFORT takes precedence. Preserve credentials; do not print whole.env.
-- Task23 active; exact process/unit/deadline are recorded below. Previous Task22 owned processes/auth cleared and consolepreserved. Task21 owned host/guest processes and temporary auth/environment removed, exact unit7a6e9c2a4fd947d2800595330a3dc376 stopped. User console52024/56659 preserved.
-- Task21 state/report commit84df08e3; Task22 approved spec4c65f470, source commit ecd20b2f. JOURNAL append-only. Canonical worklist [research interface plan](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
+- Prime positioning: autonomous long-horizon, open-ended, falsifiable computational research for work requiring substantial human effort; generic infrastructure + domain research + domain data. Output is an externalized, human-understandable, machine-verifiable, evidence-traceable and replayable research record. Cross-domain capability is a target, not verified. README.md, README.zh-CN.md, AGENTS.md, core architecture, DECISIONS and MEMORY intent index agree.
+- Current source ecd20b2f adds committed read-only r.transition(sequence) with exact observation references and SDK animation descriptors; P7 optional executable models/NOTES descriptions. Generic Prime code, registered tools and extension unchanged.61Python/TS50 tests (6 externalPi skips), lint/docs and promotion25 PASS. Task22 actual packaged r11l L1 witness7paid/0RESET/70.642472s; full replay/source/install/cleanup PASS.
+- Task23 cold BP35 L1–L6, current operator.env gpt-6.1-sol/medium. ASTERION_PRIME_EFFORT takes precedence. No inherited NOTES/routes, outside solve hints or source edits. One natural round completed, no continuation needed, no L7 actions.
+- Host launch2026-10-09T03:27:12.949955Z → SDK goal03:50:53.813907Z:1420.864428s.203paid/1deathRESET; perlevel21/43/36/25/37/41, success21/40/36/25/37/41. Quality100/115/115/115/79.547114/115. Six-of-nine progress cap46.666667, not fullgame100.
+- L6 independently built a12-block map and settle+BFS, searched29,954states, output20steps matched actual final20 action types and passed. Models downward phase after direction flip, not full engine.32cellsallok, L6 computation337ms/BFS136ms. L2 only death; L5 wrong screen height wasted6steps.
+- All203paid/205SDK responses and2223paid returnedframes exact replay;203knowncommitted continuousjournal/303trace entries andseal match.566source/584installed match wheel. Independent finalaudit READY/no findings. All1794manifest files byte/SHA match, manifestSHA2058c351f596b7a734fac8d185e85453ea8a923fe168c35fb14a35bfd29ce15f.
+- Unit e4749fe01fa84944a462674521e1dc86 stopped; ownedhost/guest processes and temporaryauth/operator.env removed. UserconsolePID52024/port56659 preserved. Cleanup1475.033173wall/1475.018913mono; original5400+180 controls not extended.
+- Usage96/input10492278/output31424/peak209419. NOTES861/1245/2383UTF8B, last postgoal. Four recovered diagnostics (3fetch failed/1unknown), no precise request clocks. Cannot attribute latency solely to cognition or subtract provider failures.
 
-## Task21 verified facts
+## Comparisons and current judgment
 
-Run p7-live-20261008150326-fee42292ed274268646133a2, cold BP35 L1–L6, no inherited NOTES/routes or outer hints/edits. Started15:03:26.614283Z; sixth pass15:25:03.433270Z.221paid/3deathRESET/1296.819519seconds. Perlevel19/43/41/38/31/49; RESET0/1/1/1/0/0; times105.879669/128.983589/170.686295/242.417207/188.725361/460.127398seconds.
+Task21 objective-only:221paid/3RESET/1296.819519s, perlevel19/43/41/38/31/49. Task23 saves18paid/2RESET but takes9.56percent longer; successful segment200vs198. Best cold17minute source9b62:221paid/2RESET/1023.279883s, successful190; Task23 is38.85percent slower. Failure savings do not prove better successful routes. L5 quality regresses to79.547114. Task19 full score behavioral guidance234paid/3RESET/2103.806813s; different single-run trajectories do not isolate prompt causality.
 
-q115/115/115/100/113.319459/115. Formula q=min(115,100*(baseline/paid)^2), baselines21/48/44/38/33/87/86/131/163, N9/W45. Six completed levels cap fullgame score at46.666667; receipt reaches that cap, not fullgame100. All failed/noop/undo/RESET costs included; two initialization RESET rows uncharged.
+Arc-skill original Sol/high:271paid/3RESET,19/48/34/23/45/102, about56minutes including natural continuation and host recovery; no skill source edits/outer solve hints. Small NOTES did not prevent220388 context peak. Mature old P7 full100 route front six193 is a warm accumulated route, not cold discovery cost.
 
-Full221trace/221knowncommitted journal and223SDK/replay rows independently exact, including allframes. Seal/source566/install584/extension/cleanup PASS. Cleanup1337.083092wall/1337.078490mono.35cells allok;99usage reported input11087866/output28764/peak207778. NOTES662→754→969→1058B, last postgoal. One naturalround index0 completed; no continuation receipt. Native128tail showed no retry, not whole-run guarantee; no failure-sink file.
+Current judgment: evidence API and autonomous executable modeling are demonstrated; stable death-rate reduction, prompt causality and cross-domain generalization remain unproven. Preserve generic evidence/compute/effect controls, P7 research ownership of mechanism and coordinate models, and P7 data accuracy. Do not turn observed safe routes into harness rules.
 
-Private evidence .asterion-private/p7-objective-only-sol-medium-bp35-20261008/trial/,1906file manifest SHA132ba40891733435f1a9aa5f36e7bfc25362a879d36c9f863c72fea3286f33dd.
+## Recovery references
 
-## Death analysis: facts and proposed improvements
-
-All3 deaths concern automatic vertical movement after an action, not Python errors or demonstrated engine randomness.
-
-- L2: seq20/21 same-plan two-hit probe removed ceiling then floated into hazard; hazard visible but lethal semantics not yet established.2failed+RESET+40success.
-- L3: after seq67, cell10 marked hazard15 as!, then independent seq68 moved left into an unsealed upward path. NOTES still called12 unknown; view collapsed purple open/closed states intoX.6failed+RESET+34success; retry first closed three upper slots.
-- L4: seq108 showed hazard above x21; lower camera at114 showed path to viewport edge. cell15 read current stand/phase, independent115 flipped gravity at x21 and died.12failed+RESET+25success; retry first stood atx33, then same switch safely.
-- ARC also died in L2. Actual events e73–75 explicitly build safe roof in L3; e115 explicitly flip from protected position in L4. Evidence .asterion-private/arc-skill-bp35-l5-trial-20261007T111904Z/evidence/stage2-target6/arc-state/events.jsonl.
-- L6 extra7steps vsold42:4left+3right before remotely clicking a visible gravity ball. new178=old185, new186=old186; subsequent frames187–221 match. No late-room convergence failure or RESET.
-
-Current judgment: improve joint representation and application of action→automatic motion→final stop, preserving cross-view paths/unknown bounds and purple-state distinction. Generic layer owns real evidence/readback/versions/effect safety; P7 actor owns game mechanisms, representation, probes and optional computation. No hard safety-semantic gate or forced BFS. These are proposals, not implemented/verified ability improvements.
-
-## Comparison anchors and limits
-
-- Best coldSolmedium/source9b62:221paid/2RESET/1023.279883seconds,21/71/34/23/30/42. FullreplayPASS. Task21 samepaid but26.73percent slower; death costs23vs31, successful198vs190. Medium remains best elapsed-time sample.
-- Full score behavioral guidance Task19/source766d71e0:234paid/3RESET/2103.806813seconds,24/51/47/25/44/43, stagegame43.286656. FullreplayPASS. Task21 is38.36percent faster and has better quality, but one sample cannot isolate score-guidance causality or provider latency.
-- Task20 no-score/sourcecfc46c63: user-stopped after4levels151completed+10unfinishedL5=161total;21/72/34/24, first4elapsed622.235seconds. Full161replay/cleanupPASS. Actual actor had neitherbaseline nor scoring; legacyfacade visibility claim corrected. No L5/L6 performance conclusion.
-- ARC originalSolhigh:6levels271paid/3RESET,19/48/34/23/45/102, naturalcontinuation/hostrecovery; around56minutes including stages. No outer solve hints or skill edits. NOTES small does not mean total context small; actual context peak220388.
-- Mature old P7 full100 winner:19/40/34/25/32/43/53/46/70,362total/frontsix193. Resumed292prefix+70L9, not coldresearch cost or an official scorecard claim.
-- Low231/1968.197seconds; secondhigh262/4409.249seconds. DeepSeek Flash/Pro BP35 user-stopped inL1; no later-level ability conclusion. PackagedFlash r11lL1 witness10paid/0RESET/fullreplayPASS.
-
-## Previously verified framework repairs
-
-Generic object-root tool schema normalization, bounded private RPC diagnostics, once-per-run exact same-session recovery under original budget; P7 only injects effect facts/storage/deadline. TS50/Python165/promotion25PASS. Recovery code is not a claim all errors prevented or live transient recovery proven. Effort.env shared launcher/guest configuration156related tests(one skip), Make fix49(one skip), promotion25PASS. Current trial required no registry change or repeated r11l.
-
-
-## Task22 packaged witness CLOSED
-
-Privatebase .asterion-private/p7-transition-witness-20261008/trial/, unit34881721826a4524810e7c3bd30836f5/runp7-live-20261008154616-e22ad3cb0cf24d009afd24d3. ActualMake GAME=r11l LEVEL=1 coldSolmedium:15:58:07.351552Z→SDK15:59:17.994021Z=70.642472seconds,7paid/0RESET/1level. Target1noL2actions. Full7paid/9SDKframesreplay/seal/source566/install584/cleanupPASS. Cleanup177.418283wall/177.417295mono, allowned/authremoved, console52024/56659preserved.
-
-Wheelce5f8f222a2230527c496999395decc74f316b56d87bf46adecbd9ffa6a16199/resource7aeb06 unchanged/three-tools. Installedconfiguration noPromptPigetstateSolmedium/messageCount0; actualargv titleoverwritten, identityboundbyselectedconfig+installedcode. Installedrealworker synthetictransition/3frameprobePASS with0SDK/provider. Actualsuccessfulsecondcelltop-levelr.transition(1) called bymodel;2cellsok/10usage/input226011/output1896/peak35950. Interfaceanddeploymentverified, NOTBP35deathimprovement. FinalindependentauditPASS;127filemanifest SHA804c9c8a519e8b3973e356135541304229181679120e593429e39e7cf7be5e17. Task22complete. No newBP35 authorized. Rootsourceecd20b2funchanged; currentnextboundaryisuserdecisiononfurthercoldcomparison.
-
-
-## User-confirmed Prime positioning
-
-D-2026-10-09-01 defines Prime for autonomous long-horizon, open-ended, falsifiable computational research on work requiring substantial human time/effort. Generic infrastructure + domain research + domain data; P7 is a reference application, not the scope. Output is a human-understandable, machine-verifiable, evidence-traceable, replayable externalized research record, including counterexamples and revisions. Core architecture and MEMORY intent index updated. This is positioning, not new runtime capability or cross-domain verification; Task22 remains completed; the subsequent explicit user request authorizes Task23 cold BP35.
-
-
-## Latest intent — Task23 prepared cold BP35 authorized
-
-User now requests README/AGENTS reflect overallPrimeguidance, firstP7researchstabilization, thenpreparedcoldverification. Update README/README.zh-CN/AGENTS beforelaunch, productionecd20b2funchanged; docscheckonly(no repeatpromotion/r11l). Trialownerpreparing .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/. FreshSolmedium/.env/target6of9/original5400+180/6round/1000paid/1024model/4096tool/noNOTES-routeinheritance/noactorhints. GOafterdoccommit. Comparepaid,time,perlevelscore,deathRESETmechanisms toTask21and17minutebest. Preserveconsole52024/56659. Actualunit/run/clockspendinglaunchreceipt.
-
-
-Task23 ACTIVE exactrunp7-live-20261009032713-41edfbb078eaa7de208c454f/unit e4749fe01fa84944a462674521e1dc86. Hoststart2026-10-09T03:27:12.949955Z, fixeddeadline04:57:12.949479Z+180cleanup;mono2223267.9618925. Supervisor81001/launcher81003/caffeinate81002/session59224. SourceECD20b2f/HEADabf3f428/wheelce5f8f22/566source584installed3tools/current.env+installednoPromptPigetstateSolmediumverified. Trialowner notes_bp35_trial, read-onlyreviewer prime_effort_config. Preserveconsole52024/56659. No source/env/actorhints duringtrial. Privatebase .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/; directcoldtarget6. Do notinfercompletedresultfromlaunch.
+- [Canonical comparison and detailed per-level analysis](../reviews/2026-10-08-p7-continuity-bp35-comparison.md).
+- [Canonical worklist, Task23 CLOSED](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md).
+- [Transition research specification](../superpowers/specs/2026-10-08-p7-transition-research-design.md).
+- Private Task23 evidence .asterion-private/p7-transition-sol-medium-bp35-20261009/trial/: final-report.md, public-final-metadata.json, final-manifest.json. Run p7-live-20261009032713-41edfbb078eaa7de208c454f. Exact source freezeECD/docheadabf3/wheelce5f8f222a2230527c496999395decc74f316b56d87bf46adecbd9ffa6a16199.
+- Branch feat/prime-research-notes. JOURNAL append-only; no further backend calls. Never print whole.env or credentials.

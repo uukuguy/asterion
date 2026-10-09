@@ -4490,3 +4490,6 @@
 - 2026-10-09 — 32d98ece checkpoints completed transition deployment so later sessions retain the correct verification boundary.
 - 2026-10-09 — a5d8d57c establishes Prime autonomous computational research positioning and traceable research-record goals beyond games.
 - 2026-10-09 — abf3f428 aligns README and agent guidance with Prime purpose and records the authorized latest cold BP35 comparison.
+- 2026-10-09 — 8305a19a checkpoints the exact active cold trial and deadline to support uninterrupted outcome comparison.
+
+- 2026-10-09 Task23 verified: sixlevels203paid/1RESET/1420.864428s; fullreplay/source/cleanup/manifest independent PASS; L6 autonomous settle+BFS executed20-step route.
