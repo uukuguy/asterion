@@ -203,3 +203,8 @@ Task23 ACTIVE2026-10-09T03:27:12.949955Z, exactrunp7-live-20261009032713-41edfbb
 
 
 Task23 CLOSED: six levels203paid/1deathRESET/1420.864428seconds; perlevel21/43/36/25/37/41. Full203paid/205SDK replay, frozen source/install/seal and cleanup independently PASS. L6 authored settle+BFS,29,954states/20-step output exactly matched final actual actions. Fewer failures but slower than Task21 and best17minute; L5 score79.547114 remains regression. Canonical comparison records all boundaries; no further trial or source fix authorized.
+
+
+## Task24 — Authorized discovered-problem fixes and cold verification
+
+User requests design, implementation and verification with three-layer positioning. [Design](../specs/2026-10-09-prime-state-view-p7-action-preconditions-design.md), [implementation plan](2026-10-09-prime-state-view-p7-preconditions.md). Generic trusted stale-state model projection, P7 board-only replacement adapter, optional literal before.cells. L2 unknown hazard remains a measured research gap. Task24 private preparation ready, no provider GO until implementation/review/checks/packaged witness complete.

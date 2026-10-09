@@ -4,7 +4,7 @@ Updated: 2026-10-09 after Task23 cold verification, independent audit and result
 
 ## Current intent and boundary
 
-User requested overall Prime positioning recorded in README/AGENTS, P7 first for experimentation/stabilization, then prepared cold verification. All complete: documentation commit abf3f428; source remains ecd20b2f. No further source repair or trial authorized. Next discussion should assess the mixed efficiency result and remaining L2/L5 issues using the canonical comparison, without injecting known game routes or mandatory cognitive gates.
+User now authorizes discovered-problem design, implementation and cold verification. Design f2469d16: generic stale-state model view, P7 optional before.cells guard, no game rules or mandatory cognition. Source stillECD while workers implement; no trial GO. Task24 private prep .asterion-private/p7-task24-cold-bp35-20261009/trial/, finite original controls/current.env Solmedium and payload-free Pi receive-clock observer provider-free proof passed. Next: implement/review/test/package witness then frozen cold BP35. L2 unknown hazard is not promised solved.
 
 ## Verified facts
 
