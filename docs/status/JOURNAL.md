@@ -4493,3 +4493,4 @@
 - 2026-10-09 — 8305a19a checkpoints the exact active cold trial and deadline to support uninterrupted outcome comparison.
 
 - 2026-10-09 Task23 verified: sixlevels203paid/1RESET/1420.864428s; fullreplay/source/cleanup/manifest independent PASS; L6 autonomous settle+BFS executed20-step route.
+- 2026-10-09 378a7d80 records Task23 audited cold results and remaining limits for reproducible research recovery.
