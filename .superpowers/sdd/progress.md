@@ -26,3 +26,7 @@
 - Task 2: complete (6fe51d20 + 5cc50b56; both Important findings fixed, Astra re-review approved; 67 tests/Ruff pass).
 - Task 3: complete (fc225adb; Astra review approved without findings; TS 93 pass/6 external-limited, focused Python/build/installed checks pass).
 - Task 4: active; Astra owns persistent runtime/bridge/workspace and P7 migration, optional transport identity check delegated within task.
+- Task 4: implemented 865eea25; focused subsets pass, single broad run findings fixed in affected subsets (broad not rerun); independent Astra review pending.
+- Task 4 review: NEEDS FIXES (public generic-worker injection; workspace close blocked behind active cell). Implementer fixing both with private test seam and independent worker stop/reap.
+- Task 4: complete (865eea25 + 61856505; both ownership findings fixed, Astra re-review approved without findings; 60 targeted tests pass).
+- Tasks 5/6: active in approved parallel wave; Task5 owns shared core/durable P1/narrator, Task6 owns P3/P4/P5 consumers.

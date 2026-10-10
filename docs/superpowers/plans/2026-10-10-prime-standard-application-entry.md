@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–3 完成，Task 4 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–4 完成，Task 5/6 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -217,7 +217,7 @@ Task 3 完成：`fc225adb`；Astra 独立复审无发现。TS 93 PASS/6 External
 实施补充范围：`runtime/pi_rpc.py` 可选成对 expected provider/model，首次 prompt 前核对实际 state，未配置时保留原合同；同步 transport 与 research-runtime 测试。services 保留既有领域 params/缺省区别；workspace 使用现有 sources/data/signal 恢复合同。
 **Interfaces:** `runtime(services, limits, hooks)` 返回现有 runtime client；`PrimeApplicationServices` 提供领域执行方法；workspace owner 返回现有 `PersistentIpythonHost` 窄执行视图。
 
-- [ ] 先扩展 provider 的 no-start、lease-failure、exact registry、bounds 测试：应用输入只有数据/services，Prime private launch 被调用一次；错误 profile/identity/allowlist 在 Pi 前拒绝。
+- [x] 先扩展 provider 的 no-start、lease-failure、exact registry、bounds 测试：应用输入只有数据/services，Prime private launch 被调用一次；错误 profile/identity/allowlist 在 Pi 前拒绝。
 
 ```python
 runtime = app.runtime(services=domain_services, limits=limits, hooks=hooks)
@@ -227,21 +227,23 @@ self.assertEqual(events[0].type, 'run.started')
 self.assertEqual(private_launch.call_count, 1)
 ```
 
-- [ ] RED：`uv run python -m unittest -v tests.test_prime_application_entry tests.test_prime_p7_native_provider tests.test_prime_p7_bridge_dispatch`；失败必须指向 owner/注册/关闭边界。
-- [ ] 从 `_IpythonBridgeServer` 提取 socket/thread/loop/envelope/read-write/close 到 `_tool_bridge.py`；method 名、缺 params 的领域兼容、P7 日志和 `_dispatch_method_call` 留 `tool_dispatch.py`，core 只调用 services。
-- [ ] Prime `_launch` 接管 `socketpair`、metrics FD、ExtensionBinding/preflight、精确 command args、build_rpc_session、资源失败回收；只使用 spec.tools.path 显式 artifact，不在 core 按应用 ID 找资源。内置应用由各自包装从同 wheel 取资源，外部应用可提供已授权的自有打包产物。
-- [ ] 将 `live.pi_base_command` 的固定 flags/effort 拼装搬入 `_launch`；P7/official preflight 只返回 executable/entry/model/effort 等数据。移除 `PrimeLaunch` 应用构造与 binding 内 RPC/Session 创建。
-- [ ] P7 model_selection 的旧 gpt-6-sol 默认改为本轮 exact `openai-codex/gpt-6.1-sol`；solving/gameplay/official operator 使用同一选择，配置冲突或运行 state 不一致执行前拒绝，不转 fallback。
-- [ ] 分离 P7 直接业务入口与旧 provider 包装：operator 用应用本地 identity、tool artifact、services 和 hooks 构造 owner；运行调用不经过中央 inventory/runtime factory lookup。旧 provider/runtime binding 委托同一业务函数并附加原 exact identity 校验，不复制求解循环。给 P7 直接入口加禁用中央 lookup 的替身测试。
-- [ ] 保持现有 host service key/manifest；`prime.launch` 可内部承载 `PrimeApplication` handle，禁止泄露旧 lease/command 字段。runtime factory 校验 app/version/runtime/options 与 handle 身份一致，再请求 `runtime()`。
-- [ ] 内部使用 `AsterionPrimeSession` 与同一 `PrimeExecutionKernel`；原 `_p7_terminal/_p7_gameplay_terminal`、continuation、round admission、event projector 和 diagnostics 保持在 P7。
-- [ ] `_workspace_owner` 构造现有通用 `SubprocessPythonWorker`；P7ResearchRuntime 提供 `KernelBootstrap` 和 limits，移除其 worker_factory/default constructor。operator 当前先建旧 worker 再按 isinstance 替换的 4956/4032/4033 接线一并移除；core 只接收 Python executable 和 typed bootstrap，不能 import p7.live。
-- [ ] 正常续跑复用 current generation；丢失后的 `restore_workspace` 使用既有 source/JSON checkpoint 与 provenance，禁止对象复活/动作 cell 重放；旧 P7 领域 executor 保持窄服务注入，由 owner 接管 close。
-- [ ] P7OperatorResources 只持领域 trace/broker 与 Prime handle，metrics/accounting 通过窄只读访问；close 调用 owner，再收领域 trace；保留独立进程 reap，不能被活动 command lock 阻塞。
-- [ ] 加 `test_pause_does_not_reset_owner_budget`、`test_unknown_action_blocks_prompt_recovery`、`test_explicit_workspace_restore_advances_generation`，复用现有 control/action-journal/恢复 fixture，不建新模拟协议。
-- [ ] 加独立未注册 persistent 应用测试：临时 artifact bundle `registerPrime+example_lookup`，提供其 registry、services 和有限授权，直接 `app.runtime(...).run(...)`；禁用 provider/catalog lookup，fake backend 下通过真实 pin/preflight 与 registerTool 校验。断言工具仅 ipython+example_lookup、无 P7 hook；digest 或 registry 不匹配在模型效果前失败，不改 core app 列表。
-- [ ] GREEN：先重复 RED 命令，再 `uv run python -m unittest -v tests.test_prime_p7_live_command tests.test_prime_p7_official_operator`；只运行一次 broad P7 文件集。
-- [ ] 提交列出的实现与测试：`git commit -m "refactor(prime): own persistent P7 runtime resources"`。
+- [x] RED：`uv run python -m unittest -v tests.test_prime_application_entry tests.test_prime_p7_native_provider tests.test_prime_p7_bridge_dispatch`；失败必须指向 owner/注册/关闭边界。
+- [x] 从 `_IpythonBridgeServer` 提取 socket/thread/loop/envelope/read-write/close 到 `_tool_bridge.py`；method 名、缺 params 的领域兼容、P7 日志和 `_dispatch_method_call` 留 `tool_dispatch.py`，core 只调用 services。
+- [x] Prime `_launch` 接管 `socketpair`、metrics FD、ExtensionBinding/preflight、精确 command args、build_rpc_session、资源失败回收；只使用 spec.tools.path 显式 artifact，不在 core 按应用 ID 找资源。内置应用由各自包装从同 wheel 取资源，外部应用可提供已授权的自有打包产物。
+- [x] 将 `live.pi_base_command` 的固定 flags/effort 拼装搬入 `_launch`；P7/official preflight 只返回 executable/entry/model/effort 等数据。移除 `PrimeLaunch` 应用构造与 binding 内 RPC/Session 创建。
+- [x] P7 model_selection 的旧 gpt-6-sol 默认改为本轮 exact `openai-codex/gpt-6.1-sol`；solving/gameplay/official operator 使用同一选择，配置冲突或运行 state 不一致执行前拒绝，不转 fallback。
+- [x] 分离 P7 直接业务入口与旧 provider 包装：operator 用应用本地 identity、tool artifact、services 和 hooks 构造 owner；运行调用不经过中央 inventory/runtime factory lookup。旧 provider/runtime binding 委托同一业务函数并附加原 exact identity 校验，不复制求解循环。给 P7 直接入口加禁用中央 lookup 的替身测试。
+- [x] 保持现有 host service key/manifest；`prime.launch` 可内部承载 `PrimeApplication` handle，禁止泄露旧 lease/command 字段。runtime factory 校验 app/version/runtime/options 与 handle 身份一致，再请求 `runtime()`。
+- [x] 内部使用 `AsterionPrimeSession` 与同一 `PrimeExecutionKernel`；原 `_p7_terminal/_p7_gameplay_terminal`、continuation、round admission、event projector 和 diagnostics 保持在 P7。
+- [x] `_workspace_owner` 构造现有通用 `SubprocessPythonWorker`；P7ResearchRuntime 提供 `KernelBootstrap` 和 limits，移除其 worker_factory/default constructor。operator 当前先建旧 worker 再按 isinstance 替换的 4956/4032/4033 接线一并移除；core 只接收 Python executable 和 typed bootstrap，不能 import p7.live。
+- [x] 正常续跑复用 current generation；丢失后的 `restore_workspace` 使用既有 source/JSON checkpoint 与 provenance，禁止对象复活/动作 cell 重放；旧 P7 领域 executor 保持窄服务注入，由 owner 接管 close。
+- [x] P7OperatorResources 只持领域 trace/broker 与 Prime handle，metrics/accounting 通过窄只读访问；close 调用 owner，再收领域 trace；保留独立进程 reap，不能被活动 command lock 阻塞。
+- [x] 加 `test_pause_does_not_reset_owner_budget`、`test_unknown_action_blocks_prompt_recovery`、`test_explicit_workspace_restore_advances_generation`，复用现有 control/action-journal/恢复 fixture，不建新模拟协议。
+- [x] 加独立未注册 persistent 应用测试：临时 artifact bundle `registerPrime+example_lookup`，提供其 registry、services 和有限授权，直接 `app.runtime(...).run(...)`；禁用 provider/catalog lookup，fake backend 下通过真实 pin/preflight 与 registerTool 校验。断言工具仅 ipython+example_lookup、无 P7 hook；digest 或 registry 不匹配在模型效果前失败，不改 core app 列表。
+- [x] GREEN：先重复 RED 命令，再 `uv run python -m unittest -v tests.test_prime_p7_live_command tests.test_prime_p7_official_operator`；只运行一次 broad P7 文件集。
+- [x] 提交列出的实现与测试：`git commit -m "refactor(prime): own persistent P7 runtime resources"`。
+
+Task 4 完成：`865eea25` + `61856505`，Astra 复审通过；公开 worker 注入与活动 cell 阻塞关闭均已修复，60 项定向测试通过。首次 P7 广跑未整体重跑，失败对应子集已通过；最终部署验收仍待 Task 8。
 
 ## Task 5：P1 durable owner 与 P7 narrator 接入
 

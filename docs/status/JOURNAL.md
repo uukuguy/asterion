@@ -4813,3 +4813,11 @@
 - fc225adb 拆分核心与应用工具产物，精确注册表随资源固定加载，核心不再导入P7。
 - Task3 Astra复审通过，无发现；三资源安装检查已有证据，最终promotion与真实见证待整合；Task4继续P7所有权迁移。
 - 3d0f7355 记录入口与工具模块已复审，固定 Task4 恢复位置，避免重复迁移与误报验收。
+- e778cbe4 固定下游迁移清理、成本与恢复身份边界，同步决策索引为实施中；文档检查通过。
+- 只读内置模型核对：Pi shipped catalog 精确包含 Flash/Sol；隔离 profile 不丢模型元数据，OAuth 可用性仍待实测。
+- 865eea25 Prime接管P7持久runtime、bridge与workspace，固定Sol身份并保留恢复、期限与清理边界。
+- Task4复审要求移除公开worker注入并独立终止活动工作区；修复中，未记所有权迁移完成。
+- 61856505 移除通用worker注入，Prime独立停止并回收活动工作区，关闭不再受cell锁阻塞。
+
+- 2026-10-10 `19eb7ee0`: Added immutable owner identity/usage projections so text consumers preserve known cost and unknown-effect fencing.
+- Task4两项所有权缺口经61856505修复并通过Astra复审；Task5/6并行迁移获GO，保持共享核心单一owner。
