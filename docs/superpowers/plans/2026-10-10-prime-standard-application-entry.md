@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–7 完成并复审；Task 8 清理已提交，最终关闭边界已复审，打包实跑待验）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，Tasks 1–8 完成并复审，最终打包与有限真实P7部署验收通过。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -364,11 +364,11 @@ git diff --check
 
 - [x] 上述是最终整合复核；Task 4–7 已通过且未再次修改的领域测试不再重复。只因新变更/失败扩大检查；所有结果按实际范围记录。
 - [x] 独立 Sol 复审整体所有权与领域语义，关键预算/attachment/unknown effect 合同交 Astra；复审发现先修再重跑相关检查。
-- [ ] 按执行时已有授权核实有限 r11l preset：`make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`。若实际 game catalogue 要完整 ID，用该预设已解析的 r11l 精确 ID；不改预算或启动新 BP35。
-- [ ] 在执行前读取 Make recipe 确认既有 900 秒 witness、动作限额和 fresh run/evidence root；不借用旧结果，不从 model prompt 传 knobs。若缺授权/外部条件，记录精确未完成项，不伪造 PASS。
-- [ ] 检查本次证据的 wheel/resource fingerprint、registered tool set/allowlist、runtime身份、总 deadline、终止与进程清理；不以解题失败自动认定接线失败，也不把接线成功当跨领域能力完成。
-- [ ] 状态文档分别记录 implemented、provider-free verified、packaged/live evidence；P2 和确定性 witness 原分类保留，专用压缩仍写未完成；不覆盖既有历史证据。
-- [ ] 提交代码/测试与状态文档的最终小批次，记录每步真实命令：`git commit -m "docs(prime): record standard entry migration and packaged evidence"`；最后 `git status --short` 无本任务遗漏。
+- [x] 按执行时已有授权核实有限 r11l preset：`make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`。若实际 game catalogue 要完整 ID，用该预设已解析的 r11l 精确 ID；不改预算或启动新 BP35。
+- [x] 在执行前读取 Make recipe 确认既有 900 秒 witness、动作限额和 fresh run/evidence root；不借用旧结果，不从 model prompt 传 knobs。若缺授权/外部条件，记录精确未完成项，不伪造 PASS。
+- [x] 检查本次证据的 wheel/resource fingerprint、registered tool set/allowlist、runtime身份、总 deadline、终止与进程清理；不以解题失败自动认定接线失败，也不把接线成功当跨领域能力完成。
+- [x] 状态文档分别记录 implemented、provider-free verified、packaged/live evidence；P2 和确定性 witness 原分类保留，专用压缩仍写未完成；不覆盖既有历史证据。
+- [x] 提交代码/测试与状态文档的最终小批次，记录每步真实命令：`git commit -m "docs(prime): record standard entry migration and packaged evidence"`；最后 `git status --short` 无本任务遗漏。
 
 ## 复审与执行交接
 
@@ -376,3 +376,5 @@ git diff --check
 Task 1–3 核心类型、Task 4 persistent owner 和 Task 5 attachment 是合并前合同检查点。
 不能把 temporary wrapper 合并后直接标记整个 Task 40 完成；最终以 Task 8 的旁路清单和证据为准。
 本计划不重跑模型，不开始生产实现；执行以批准设计、AGENTS.md 和执行时持续有效的授权为准。
+
+Task40 最终验收：TS 93 PASS/6既有外部跳过；相关Python155 PASS；promotion full PASS（25命令、provider_operations=0）；lint与docs-check通过。新wheel真实 `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` 退出0：run `p7-live-20261010121949-382b0155f3024254a2e37e1b`，`openai-codex/gpt-6.1-sol`，首关完成、4个primitive actions，receipt PASS/replay_verified/sealed_trace/cleanup_complete均成立。900秒总期限+180秒清理；结束后guest unit inactive/dead、MainPID=0、ControlGroup空，四个观察到的进程均消失。wheel SHA `319936b1c77942c36da78b1a2ff23f7508f8cdf25b3c21de68339be333c9306d`；运行扩展SHA `a859ff5532124625feabd143b2c6ae2babe86dd5e9a515f251aab9bcc471e8a7` 与wheel一致，工具为 `ipython/p7_execute_plan/p7_workspace`。receipt SHA `fdb3830f9447383672ffa3c7f4c464274265e14527b58b610d9deaf0aaa0ccf2`。证据保存在私有 `.asterion-private/p7-task40-entry-witness-20261010-195033/`。这证明迁移部署闭环，不证明跨领域能力、稳定成功率或专用摘要接通。

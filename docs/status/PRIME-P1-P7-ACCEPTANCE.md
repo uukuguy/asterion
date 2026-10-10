@@ -1,12 +1,14 @@
 # Asterion Prime P1–P7 验收指南
 
-> Updated: 2026-10-10. Task40 标准入口源码已迁移，最终资源清理复审已通过，打包/实跑验收进行中。P3–P6 默认 `-run` 是有界真实模型应用运行；确定性路径为 `-witness`。
+> Updated: 2026-10-10. Task40 标准入口源码已迁移，最终资源清理复审已通过，打包及有限P7实跑验收通过。P3–P6 默认 `-run` 是有界真实模型应用运行；确定性路径为 `-witness`。
 > 这份文档给"想要快速理解每个应用在做什么、跑得通什么、还有哪些没验证"
 > 的人看。
 
 2026-09-24 本地已安装 wheel 实跑：P3 两个独立 Pi 会话完成子任务与汇合；P4 两个独立进程完成固定任务状态的提交与恢复；P5 模型首轮候选通过语义校验（0 次修复）；P6 模型候选经独立 holdout 改进检查并在项目范围促升。四者都只有一次固定小任务成功，不是稳定率、通用编码能力或完整论文复现。以下旧章节中的 deterministic 结果仅指各自 `-witness` 和 `-run-limits` 路径。
 
-2026-10-10 Task40：P1、P3–P7 的已有 live 路径（含 P7 narrator）使用 Prime 标准 owner；Prime 管理 Pi/RPC、扩展、workspace 与会话回收，operator 解析配置并注入上下文。独立应用直接使用库，不需要中央注册。P1–P6 的模型目标为 `deepseek/deepseek-flash`，P7 全部模型路径为 `openai-codex/gpt-6.1-sol`。P2 当前无模型调用，自主检索能力补全另列。当前定向测试和源码复审只证明迁移合同；最终打包与真实运行证据见当前 checkpoint，不把旧实跑归为本次版本的结果。P4 的历史启动/绑定指纹不匹配会在模型前拒绝，不隐式转换检查点。专用代码摘要接通仍未完成。
+2026-10-10 Task40：P1、P3–P7 的已有 live 路径（含 P7 narrator）使用 Prime 标准 owner；Prime 管理 Pi/RPC、扩展、workspace 与会话回收，operator 解析配置并注入上下文。独立应用直接使用库，不需要中央注册。P1–P6 的模型目标为 `deepseek/deepseek-flash`，P7 全部模型路径为 `openai-codex/gpt-6.1-sol`。P2 当前无模型调用，自主检索能力补全另列。本次源码复审、完整打包检查及P7首关部署见证均通过；详见下列验收记录，不把旧实跑归为本次版本的结果。P4 的历史启动/绑定指纹不匹配会在模型前拒绝，不隐式转换检查点。专用代码摘要接通仍未完成。
+
+Task40 最终验收：TS 93 PASS/6既有外部跳过；相关Python155 PASS；promotion full PASS（25命令、provider_operations=0）；lint与docs-check通过。新wheel真实 `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` 退出0：run `p7-live-20261010121949-382b0155f3024254a2e37e1b`，`openai-codex/gpt-6.1-sol`，首关完成、4个primitive actions，receipt PASS/replay_verified/sealed_trace/cleanup_complete均成立。900秒总期限+180秒清理；结束后guest unit inactive/dead、MainPID=0、ControlGroup空，四个观察到的进程均消失。wheel SHA `319936b1c77942c36da78b1a2ff23f7508f8cdf25b3c21de68339be333c9306d`；运行扩展SHA `a859ff5532124625feabd143b2c6ae2babe86dd5e9a515f251aab9bcc471e8a7` 与wheel一致，工具为 `ipython/p7_execute_plan/p7_workspace`。receipt SHA `fdb3830f9447383672ffa3c7f4c464274265e14527b58b610d9deaf0aaa0ccf2`。证据保存在私有 `.asterion-private/p7-task40-entry-witness-20261010-195033/`。这证明迁移部署闭环，不证明跨领域能力、稳定成功率或专用摘要接通。
 
 ## 文档怎么读
 

@@ -44,3 +44,5 @@
 - Full promotion first4562tests/4skips/one inventory omission failure. Fixed3d3f9f10;4core-only tests PASS including no-deps wheel imports. Full promotion rerun active; source reviews remain approved.
 
 - Final source acceptance: Sol domain/Astra contracts approved; TS93PASS/6external,Python155PASS,promotion full25commands/provider0,lint/docs PASS. Task8 finite real r11l L1 witness next; not complete until deployment evidence.
+
+- Task8/Task40 complete: fresh-wheel r11l L1 PASS, exact Sol,1level/4actions, replay/seal/cleanup PASS;610source/wheel/resources audited independently PASS. No owned live processes; dedicated-summary behavior remains separate.

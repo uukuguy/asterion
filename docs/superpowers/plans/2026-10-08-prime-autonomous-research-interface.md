@@ -322,7 +322,7 @@ Deferred specialized-compaction live test (user requested): after implementation
 
 ## Task40 — Stable Prime standard application entry
 
-Status: written design approved by user; implementation active: plan Tasks 1–7 complete and reviewed; Task8 wrapper cleanup committed, cancellation-safe shutdown fixed and reviewed, final packaged/live acceptance in progress. [Design](../specs/2026-10-10-prime-standard-application-entry-design.md); D-2026-10-10-03 records the user agreement. This is the active successor to the closed Task39 experiment.
+Status: written design approved by user; implementation complete: Tasks 1–8 reviewed; final provider-free packaged gates and finite r11l L1 live deployment witness passed. [Design](../specs/2026-10-10-prime-standard-application-entry-design.md); D-2026-10-10-03 records the user agreement. Task40 is closed; the dedicated-summary behavior remains separate.
 
 Unify backend entry and resource ownership for existing P7/P1/P3–P6 real-model paths, preserving Prime as the stable domain-neutral foundation. Reuse the current execution kernel, session and durable backend. Applications supply goals/tools/data/domain completion and evidence; operator supplies finite authority/configuration; Prime owns its private Pi/RPC, extension/tool assembly and session lifecycle. P2 remains the current local retrieval witness; this task records its future standard-entry target without adding model-driven retrieval.
 
@@ -332,6 +332,6 @@ User clarifications: independent applications must run through the Prime library
 - [x] Write and independently review the contract, migration order and completion criteria; resolve configuration, recovery-generation and P2 documentation findings.
 - [x] User approved the written design; proceed to implementation planning.
 - [x] Create and self-review the [bounded implementation plan](2026-10-10-prime-standard-application-entry.md), including independent apps, CLI scope, model policy and migration compatibility.
-- [ ] Execute implementation Tasks 1–8; record code, packaged verification and live evidence separately.
+- [x] Execute implementation Tasks 1–8; record code, packaged verification and live evidence separately.
 
 The default dedicated-summary gap is real but is a separate behavior change. Preserve the requested future lower-threshold P7 validation and the isolated draft stash. No new BP35 run, broad capability rebuild or model-quality improvement is authorized or claimed by this design record. Existing public protocols, runner responsibilities, operator authority and packaged-resource verification requirements remain in force.

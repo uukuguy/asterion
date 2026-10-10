@@ -4849,3 +4849,8 @@
 - 3d3f9f10 adds the five generic Prime entry modules to the core import inventory; focused boundary and installed-wheel checks pass.
 - promotion首次完整4562项/361秒，唯一失败为核心清单漏五新模块；3d3f9f10补清单，四项无依赖安装检查PASS，完整promotion重跑中。
 - Task40最终promotion full PASS：25commands/provider0/full_dataset=no；TS93PASS/6external、Python155PASS、lint/docs通过，准备有限r11l L1真实打包见证。
+- 最终源码gates已提交，开始固定r11l L1部署验收；不继承Task39预算或改专用摘要接线。
+- 5af3b1f1 固定源码复审与无模型gates证据，恢复边界转为有限真实部署见证。
+
+- Task40真实r11l首关PASS，Sol模型、4动作、重放/封存/清理通过；观察进程全部回收。
+- 独立最终证据审计PASS：610源码、wheel三资源、Sol/三工具、13条sealed trace一致；docs313/229通过。

@@ -1,13 +1,14 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-10 20:19 CST. Session remains active — not a final handoff. Task40源码及最终无模型gates已完成，下一步新wheel有限r11l L1实跑和最终证据提交。
+> Updated: 2026-10-10 20:30 CST. Session remains active — not a final handoff. Task40全部迁移、复审、打包及有限真实P7验收完成。
 
 ## 恢复摘要
 
 - 分支 `feat/prime-research-notes`；managed，唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md) Task40。用户已同意先统一已有真实模型路径的标准接入和资源所有权，保持 Prime 稳定底层；P2 本轮记录目标与边界，自主检索能力补全另列。
-- 当前产物：[标准入口设计](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)和[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)。Tasks1–7 已实现并独立复审：入口 d5668e8c/ae185b25；text owner 6fe51d20/5cc50b56；三工具模块 fc225adb；P7 persistent owner 865eea25/61856505；P1/narrator 19eb7ee0/f6a2506d/9dcc2978/61370a0e；P3/P4/P5 3d23decc；P6 8607fd0a。Task8 移除过渡包装4d489f0d，162项定向测试通过；最终 Sol 领域复审 PASS/APPROVE。
+- 当前产物：[标准入口设计](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)和[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)。Tasks1–7 已实现并独立复审：入口 d5668e8c/ae185b25；text owner 6fe51d20/5cc50b56；三工具模块 fc225adb；P7 persistent owner 865eea25/61856505；P1/narrator 19eb7ee0/f6a2506d/9dcc2978/61370a0e；P3/P4/P5 3d23decc；P6 8607fd0a。Task8 已完成（含最终真实部署验收）；移除过渡包装4d489f0d，162项定向测试通过；最终 Sol 领域复审 PASS/APPROVE。
 - 最终源码复审：Sol领域PASS/APPROVE；Astra合同R1由37b6ab71修复并定向复审PASS/APPROVE，107定向测试通过。f1252307隔离legacy安装fixture的各target证据根，Sol增量复审通过；3d3f9f10补齐五个core模块，四项无依赖wheel导入检查通过。最终TS93PASS/6既有外部跳过；Python155项全PASS；promotion full PASS commands=25/provider_operations=0/full_dataset=no；lint/docs-check通过（313文件/229本地链接）。首次promotion全仓库4562项的唯一核心清单失败已修复，不把首跑记PASS。
-- 下一动作：`make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`，现有900秒总期限+180秒清理，不改预算。新run/evidence；记录wheel三资源SHA、真实Pi model/tool allowlist、deadline、goal/receipt/replay及cgroup清理。私有收集根 `.asterion-private/p7-task40-entry-witness-20261010-195033/` 当前仅准备目录，尚未启动模型。源码HEAD3d3f9f10；随后文档checkpoint提交不改变wheel源码。日志 /tmp/prime-entry-final-{ts,python-rerun,promotion-rerun,lint,docs}.log。
+- Task40 最终验收：TS 93 PASS/6既有外部跳过；相关Python155 PASS；promotion full PASS（25命令、provider_operations=0）；lint与docs-check通过。新wheel真实 `make asterion-prime-p7-level-witness GAME=r11l LEVEL=1` 退出0：run `p7-live-20261010121949-382b0155f3024254a2e37e1b`，`openai-codex/gpt-6.1-sol`，首关完成、4个primitive actions，receipt PASS/replay_verified/sealed_trace/cleanup_complete均成立。900秒总期限+180秒清理；结束后guest unit inactive/dead、MainPID=0、ControlGroup空，四个观察到的进程均消失。wheel SHA `319936b1c77942c36da78b1a2ff23f7508f8cdf25b3c21de68339be333c9306d`；运行扩展SHA `a859ff5532124625feabd143b2c6ae2babe86dd5e9a515f251aab9bcc471e8a7` 与wheel一致，工具为 `ipython/p7_execute_plan/p7_workspace`。receipt SHA `fdb3830f9447383672ffa3c7f4c464274265e14527b58b610d9deaf0aaa0ccf2`。证据保存在私有 `.asterion-private/p7-task40-entry-witness-20261010-195033/`。这证明迁移部署闭环，不证明跨领域能力、稳定成功率或专用摘要接通。
+- 下一动作：Task40已完成。专用摘要接通和低阈值解题验证是独立后续行为变更；不自动应用stash或开启BP35。
 - P4 历史启动/绑定指纹不匹配在模型前拒绝，不隐式转换。首次1278项P7广跑失败对应子集已通过；最终promotion已运行全仓库suite，首跑唯一失败为核心清单，修复后full gate已PASS。P1隔离settings-only profile与DeepSeek环境preflight保留；核心不读取operator认证/profile。
 - 用户补充：P1–P7 是独立应用，直接使用 Prime 标准接口，不需要中央注册；CLI 定位待定，本轮不设计统一应用管理 CLI。不得以 DCI/Native 的用途推导 Prime CLI 需求。现存 provider/assembly 仅保留兼容。工具注册与应用登记分开。
 - 模型要求：P1–P6 精确使用 `deepseek-flash`，P7 全部模型路径（含 narrator）使用 `gpt-6.1-sol`。P2 当前无模型调用；不得以改模型要求扩张检索能力。计划移除必填 provider 身份和核心应用分派，并验收未登记外部应用。
@@ -55,19 +56,19 @@ Goal126请求input4639960/output42760；final127 input4699481/output42803/raw637
 
 - Task38“NOTES短但全部原生历史仍累积”是Task39前的真实诊断；不能继续写成当前尚未实现。历史评估保留在原分析，不装入恢复上下文全文。
 - 小窗口盲切、额外强制模型checkpoint、细碎认知门禁不是当前方向。提供完整客观信息及可追溯证据，让模型自主推理。
-- 迁移前P7已通过AsterionPrimeSession执行，但应用构造底层RPC/扩展，是Task40修复的历史缺口。当前消费者源码已迁入标准owner；打包实跑单独验收。D-2026-10-10-02替代旧D-2026-09-27-01临时许可。私有Pi不意味着所有会话共享一个进程。
+- 迁移前P7已通过AsterionPrimeSession执行，但应用构造底层RPC/扩展，是Task40修复的历史缺口。当前消费者源码已迁入标准owner；打包实跑已完成独立验收。D-2026-10-10-02替代旧D-2026-09-27-01临时许可。私有Pi不意味着所有会话共享一个进程。
 
 ## 未完成边界
 
 - 原生Pi正文未持久化；stderr前14条primary及退休0→4→12可直接审计，此后diagnostics-suppressed，完整FD指标不能替代全程逐组正文审计。另有1oversize旁路省略，原字节完整转发。native context_archive是否实际调用未知（17workspace中16NOTES、另一次op/body未保存）；已有cell/history/frame/patches实际回读。
 - 未观察到native compaction，不验证专用摘要。旧Prime fork确实改写原生摘要生成，当前迁移启动链未接通该改写；默认高阈值约255616与专用语义是两件事。未来低阈值验证需真实选定模型摘要、usage/预算、持久kernel变量/函数/generation、NOTES/反例以及继续正确解题。
-- Pi启动/扩展/RPC归Prime私有owner，operator负责配置解析；P1/P3–P7消费者迁移源码已实现，P2本地检索不新增模型。Task40最终源码/无模型打包检查已完成，真实打包见证尚未完成，统一真实长程agent能力未验证；默认专用摘要仍单列未完成。
-- 专用摘要未完成初稿隔离在stash `30ec751b8219f52c55e265e94ca965f65c0c85f7`（3个TS文件）；保留，不自动apply或删除。Task40新增入口、文本owner与消费者源码已提交，最终验收进行中。约23KB重复初始指令/快照及大stdout仍有开销，未修复。
+- Pi启动/扩展/RPC归Prime私有owner，operator负责配置解析；P1/P3–P7消费者迁移源码已实现，P2本地检索不新增模型。Task40最终源码/无模型打包检查已完成，真实打包首关见证已通过，统一真实长程agent能力未验证；默认专用摘要仍单列未完成。
+- 专用摘要未完成初稿隔离在stash `30ec751b8219f52c55e265e94ca965f65c0c85f7`（3个TS文件）；保留，不自动apply或删除。Task40新增入口、文本owner与消费者源码已提交，最终验收已通过。约23KB重复初始指令/快照及大stdout仍有开销，未修复。
 - 跨领域能力、稳定成功率、压缩后重放范围、评分/时延的稳定改进未证明。六关目标不是BP35九关全通。
 
 ## 清理与恢复命令
 
-Ownedhost50540/50542/50543、observer50665消失，guestunit notfound/cgroupempty，auth/env已移除；cleanup1621.535325秒。用户console PID52024/port56659保留；不要停止。无正在运行的本会话实测。
+Ownedhost50540/50542/50543、observer50665消失，guestunit notfound/cgroupempty，auth/env已移除；cleanup1621.535325秒。用户console PID52024/port56659保留；不要停止。无正在运行的本会话实测。Task40 guest unit inactive/dead、cgroup空；Make退出0，观察PID358519/358561/358593/358608全部消失。
 
 ```bash
 git status --short
