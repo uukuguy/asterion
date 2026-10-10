@@ -219,10 +219,12 @@ class PrimeBackendSpec:
                 or OPAQUE_ID.fullmatch(self.session_id) is None):
             _invalid()
         for value in (self.generation, self.aggregate_tokens, self.cost_micros):
-            if type(value) is not int or value <= 0:
+            if type(value) is not int or not 1 <= value <= (1 << 53) - 1:
                 _invalid()
         _path(self.private_root)
-        _identifier(self.continuation_policy_id)
+        if (type(self.continuation_policy_id) is not str
+                or OPAQUE_ID.fullmatch(self.continuation_policy_id) is None):
+            _invalid()
         if type(self.limits) is not AsterionPrimeLimits:
             _invalid()
         if self.model_price is not None and type(self.model_price) is not ModelPrice:
@@ -233,7 +235,14 @@ class PrimeBackendSpec:
             ):
                 _invalid()
         if self.compaction_instructions is not None:
-            object.__setattr__(self, 'compaction_instructions', _strings(self.compaction_instructions))
+            if not isinstance(self.compaction_instructions, Mapping):
+                _invalid()
+            instructions = dict(self.compaction_instructions)
+            if any(type(key) is not str or OPAQUE_ID.fullmatch(key) is None
+                   or type(text) is not str or not text
+                   for key, text in instructions.items()):
+                _invalid()
+            object.__setattr__(self, 'compaction_instructions', MappingProxyType(instructions))
 
     def __repr__(self) -> str:
         return '<PrimeBackendSpec redacted>'

@@ -166,6 +166,22 @@ class TestPrimeApplicationEntry(unittest.TestCase):
         self.assertNotIn(str(self.root), repr(spec))
         with self.assertRaises(ProtocolError):
             replace(spec, generation=0)
+        compatible = replace(
+            spec, continuation_policy_id='Continuation:One',
+            generation=(1 << 53) - 1, aggregate_tokens=(1 << 53) - 1,
+            cost_micros=(1 << 53) - 1,
+            compaction_instructions={'Manual:One': 'private-sentinel'},
+        )
+        self.assertEqual(compatible.continuation_policy_id, 'Continuation:One')
+        for changes in (
+            dict(generation=1 << 53), dict(aggregate_tokens=1 << 53),
+            dict(cost_micros=1 << 53), dict(continuation_policy_id='invalid handle'),
+            dict(compaction_instructions={'invalid handle': 'private-sentinel'}),
+            dict(compaction_instructions={'Manual:One': ''}),
+        ):
+            with self.subTest(changes=tuple(changes)):
+                with self.assertRaises(ProtocolError):
+                    replace(spec, **changes)
 
 
 if __name__ == '__main__':
