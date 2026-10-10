@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–7 完成并复审；Task 8 清理已提交，最终关闭边界修复及打包实跑待验）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–7 完成并复审；Task 8 清理已提交，最终关闭边界已复审，打包实跑待验）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -243,7 +243,7 @@ self.assertEqual(private_launch.call_count, 1)
 - [x] GREEN：先重复 RED 命令，再 `uv run python -m unittest -v tests.test_prime_p7_live_command tests.test_prime_p7_official_operator`；只运行一次 broad P7 文件集。
 - [x] 提交列出的实现与测试：`git commit -m "refactor(prime): own persistent P7 runtime resources"`。
 
-Task 4 完成：`865eea25` + `61856505`，Astra 复审通过；公开 worker 注入与活动 cell 阻塞关闭均已修复，60 项定向测试通过。首次 P7 广跑未整体重跑，失败对应子集已通过；最终部署验收仍待 Task 8。
+Task 4 完成：`865eea25` + `61856505`，Astra 复审通过；公开 worker 注入与活动 cell 阻塞关闭均已修复，60 项定向测试通过。首次 P7 广跑失败对应子集已通过；Task8最终隔离full promotion已通过，真实部署证据单列。
 
 ## Task 5：P1 durable owner 与 P7 narrator 接入
 
@@ -351,7 +351,7 @@ rg -n 'asterion\.applications|dotenv|load_operator_environment' src/asterion/age
 ```
 
 - [x] 每条命中分类：禁止的真实模型构造消除；保留的 operator 配置解析/领域 executor 必须说明；不以改名 alias 或启动 callback 绕过检查。
-- [ ] 最终 focused 顺序：
+- [x] 最终 focused 顺序：
 
 ```bash
 npm --prefix packages/typescript/asterion-prime-extension test
@@ -362,8 +362,8 @@ make docs-check
 git diff --check
 ```
 
-- [ ] 上述是最终整合复核；Task 4–7 已通过且未再次修改的领域测试不再重复。只因新变更/失败扩大检查；所有结果按实际范围记录。
-- [ ] 独立 Sol 复审整体所有权与领域语义，关键预算/attachment/unknown effect 合同交 Astra；复审发现先修再重跑相关检查。
+- [x] 上述是最终整合复核；Task 4–7 已通过且未再次修改的领域测试不再重复。只因新变更/失败扩大检查；所有结果按实际范围记录。
+- [x] 独立 Sol 复审整体所有权与领域语义，关键预算/attachment/unknown effect 合同交 Astra；复审发现先修再重跑相关检查。
 - [ ] 按执行时已有授权核实有限 r11l preset：`make asterion-prime-p7-level-witness GAME=r11l LEVEL=1`。若实际 game catalogue 要完整 ID，用该预设已解析的 r11l 精确 ID；不改预算或启动新 BP35。
 - [ ] 在执行前读取 Make recipe 确认既有 900 秒 witness、动作限额和 fresh run/evidence root；不借用旧结果，不从 model prompt 传 knobs。若缺授权/外部条件，记录精确未完成项，不伪造 PASS。
 - [ ] 检查本次证据的 wheel/resource fingerprint、registered tool set/allowlist、runtime身份、总 deadline、终止与进程清理；不以解题失败自动认定接线失败，也不把接线成功当跨领域能力完成。

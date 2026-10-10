@@ -4840,3 +4840,12 @@
 
 - Task7 Sol复审通过；Task8移除旁路/162测试通过，最终领域复审通过；合同复审定位取消关闭会漏bridge/descriptor，修复中。
 - Task40最终TS检查99项：93通过/6既有外部跳过；无provider调用，尚未运行真实见证。
+- 50cd9fed 同步独立应用、精确模型与消费者迁移状态，记录最终清理修复和部署待验边界。
+- 19:53 Prime owner starts independent cleanup to prevent cancellation skipping Pi, bridge and descriptors; 107 focused tests passed. [37b6ab71]
+- 37b6ab71经Astra定向复审PASS/APPROVE；最终Python155项中legacy安装版target2/7失败，153通过，定位中，未进入promotion/live。
+- 更正最终Python计数：Ran155，两个失败均属同一legacy安装用例的子案例，不能按失败数推断153个用例通过。
+- 19:57 Isolated installed legacy fixture run roots to preserve exclusive evidence ownership; all target levels passed. [f1252307]
+- f1252307隔离legacy fixture各target证据根，保留多关断言；最终Python155项重跑全PASS，promotion进行中。
+- 3d3f9f10 adds the five generic Prime entry modules to the core import inventory; focused boundary and installed-wheel checks pass.
+- promotion首次完整4562项/361秒，唯一失败为核心清单漏五新模块；3d3f9f10补清单，四项无依赖安装检查PASS，完整promotion重跑中。
+- Task40最终promotion full PASS：25commands/provider0/full_dataset=no；TS93PASS/6external、Python155PASS、lint/docs通过，准备有限r11l L1真实打包见证。

@@ -36,3 +36,11 @@
 - Task 7: complete8607fd0a,61focused tests pass; Sol independent spec PASS/quality APPROVE.
 
 - Task 8: cleanup4d489f0d complete,162focused tests pass; final domain spec PASS/quality APPROVE. Astra final contract review R1 requires cancellation-safe non-durable cleanup; fixing before final Python/promotion/live gates. TS final93 PASS/6 External-limited.
+
+- Final contract R1 fixed37b6ab71,107focused tests PASS; Astra re-review spec PASS/quality APPROVE. Final Python155:two subTest failures in one installed legacy case(target2/7); fixture shared metrics/evidence root collision confirmed, fixing; promotion/live not started.
+
+- Installed fixture collision fixedf1252307; final155 Python integration tests PASS after rerun. Promotion in progress, then lint/docs/live witness.
+
+- Full promotion first4562tests/4skips/one inventory omission failure. Fixed3d3f9f10;4core-only tests PASS including no-deps wheel imports. Full promotion rerun active; source reviews remain approved.
+
+- Final source acceptance: Sol domain/Astra contracts approved; TS93PASS/6external,Python155PASS,promotion full25commands/provider0,lint/docs PASS. Task8 finite real r11l L1 witness next; not complete until deployment evidence.
