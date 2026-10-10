@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import asdict
 from pathlib import Path
 import unittest
@@ -151,6 +152,92 @@ class RecordingP6Host:
 
 
 class PrimeP6ComposedExecutionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_generation_emits_one_terminal_event(self):
+        from asterion.applications.prime.p6 import operator
+        from asterion.applications.prime.p6.oracle import P6Oracle
+        from asterion.applications.prime.p6.runtime_binding import _P6RuntimeSession
+        from asterion.control.harness import HarnessScope, MemoryHarnessPrivateRevisionStore
+        from asterion.runtime.host import RunRequest
+
+        resources = operator._OperatorResources(
+            "live", Path("/unused"), "p6-generation-cancelled",
+            HarnessScope.project("prime.continual-improvement"), False, P6Oracle(),
+        )
+        loop, coordinator = await operator._open_candidate_store_for_run(
+            scope=resources.scope, global_activation_approved=False,
+            private_store=MemoryHarnessPrivateRevisionStore(),
+        )
+
+        async def cancelled_generation(*args, **kwargs):
+            raise asyncio.CancelledError()
+
+        host = operator._ComposedCandidateHost(
+            resources, loop, coordinator, workflow=cancelled_generation,
+        )
+        runtime = _P6RuntimeSession(
+            session_backend=host, candidate_store=loop,
+            oracle=resources.p6_oracle, private_trace=None,
+        )
+        observed = []
+        try:
+            async for event in runtime.run(
+                RunRequest(resources.root_run_id, "fixed-continual-improvement", (), 120_000),
+            ):
+                observed.append(event)
+        except asyncio.CancelledError:
+            pass
+        self.assertEqual([event.type for event in observed], ["run.started", "run.completed"])
+        self.assertEqual(observed[-1].payload, {"status": "cancelled"})
+        self.assertEqual(host.effects_state, "unchanged")
+        self.assertEqual(coordinator.history(), ())
+
+    async def test_started_precedes_generation_and_pre_cancel_skips_workflow(self):
+        from asterion.applications.prime.p6 import operator
+        from asterion.applications.prime.p6.oracle import P6Oracle
+        from asterion.applications.prime.p6.runtime_binding import _P6RuntimeSession
+        from asterion.control.harness import HarnessScope, MemoryHarnessPrivateRevisionStore
+        from asterion.runtime.host import RunRequest
+
+        for cancelled in (False, True):
+            with self.subTest(cancelled=cancelled):
+                resources = operator._OperatorResources(
+                    "preserved", Path("/unused"), "p6-ordering",
+                    HarnessScope.project("prime.continual-improvement"), False, P6Oracle(),
+                )
+                loop, coordinator = await operator._open_candidate_store_for_run(
+                    scope=resources.scope, global_activation_approved=False,
+                    private_store=MemoryHarnessPrivateRevisionStore(),
+                )
+                observed, generation_calls = [], []
+
+                async def workflow(resources, loop, coordinator, signal, **kwargs):
+                    self.assertIn("run.started", observed)
+                    self.assertFalse(signal.cancelled)
+                    generation_calls.append(resources.root_run_id)
+                    return await operator._execute_candidate_workflow(
+                        resources, loop, coordinator, signal, **kwargs,
+                    )
+
+                host = operator._ComposedCandidateHost(
+                    resources, loop, coordinator, workflow=workflow,
+                )
+                runtime = _P6RuntimeSession(
+                    session_backend=host, candidate_store=loop,
+                    oracle=resources.p6_oracle, private_trace=None,
+                )
+                signal = Signal()
+                signal.cancelled = cancelled
+                async for event in runtime.run(
+                    RunRequest("p6-ordering", "fixed-continual-improvement", (), 120_000),
+                    signal=signal,
+                ):
+                    observed.append(event.type)
+                self.assertEqual(len(generation_calls), 0 if cancelled else 1)
+                if cancelled:
+                    self.assertEqual(coordinator.history(), ())
+                    self.assertEqual(host.effects_state, "not-started")
+                    self.assertEqual(observed, ["run.started", "run.completed"])
+
     async def test_success_invokes_host_and_returns_receipt(self):
         from asterion.applications.prime.provider import (
             create_prime_continual_improvement_provider,

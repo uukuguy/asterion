@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from datetime import datetime, timezone
 from hashlib import sha256
 import json
@@ -12,12 +12,19 @@ from pathlib import Path
 import secrets
 import sys
 import tempfile
-from typing import Callable, Mapping
+import time
+from typing import Mapping
 
+from asterion.agents.prime.application import (
+    PrimeApplication,
+    PrimeApplicationSpec,
+    PrimeTextLimits,
+    prepare_prime_application,
+)
+from asterion.agents.prime.deadline import TaskDeadline
 from asterion.applications.prime.live_model import (
-    LiveModelReply,
-    LiveModelSession,
-    resolve_live_model_launch,
+    bounded_text_limits,
+    resolve_live_model_context,
 )
 from asterion.applications.prime.p6.host import (
     P6AdmittedProposal,
@@ -223,17 +230,35 @@ async def _run_workflow(
 
 async def run_live_candidate(
     *,
-    session_factory: Callable[[], LiveModelSession],
+    prime: PrimeApplication,
     root_run_id: str,
     private_root: Path,
+    limits: PrimeTextLimits | None = None,
     signal: CancellationSignal | None = None,
 ) -> P6LivePublicResult:
-    """Propose on task A, independently test task B, then compose the P6 run."""
+    """Generate, admit and independently evaluate within one composed P6 run."""
 
-    from asterion.applications.provider import compose_installed_provider
-    from asterion.applications.prime.provider import (
-        create_prime_continual_improvement_provider,
-    )
+    try:
+        return await _run_owned_candidate(
+            prime=prime, root_run_id=root_run_id, private_root=private_root,
+            limits=bounded_text_limits() if limits is None else limits,
+            signal=signal if signal is not None else _NeverCancelled(),
+        )
+    except asyncio.CancelledError:
+        raise asyncio.CancelledError() from None
+    except Exception:
+        raise P6OperatorError() from None
+    finally:
+        async with asyncio.timeout(5):
+            cleanup = await prime.close()
+        if not cleanup.complete:
+            raise P6OperatorError()
+
+
+async def _run_owned_candidate(
+    *, prime: PrimeApplication, root_run_id: str, private_root: Path,
+    limits: PrimeTextLimits, signal: CancellationSignal,
+) -> P6LivePublicResult:
     from asterion.applications.prime.p6.runtime_binding import (
         P6_RUNTIME_OPTIONS,
         build_p6_runtime,
@@ -241,42 +266,35 @@ async def run_live_candidate(
     from asterion.capabilities.prime_continual_improvement_native.provider import (
         create_prime_continual_improvement_native_package,
     )
-    from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+    from asterion.assembly.protocol import resolve_assembly
+    from asterion.capabilities.catalog import discover_capabilities
+    from asterion.runtime.factory import RuntimeFactoryContext
     from asterion.runner.composed import run_composed_application
 
     if (
-        type(root_run_id) is not str
-        or not root_run_id
+        type(root_run_id) is not str or not root_run_id
         or not isinstance(private_root, Path)
+        or prime.identity[2:] != ("deepseek", "deepseek-flash")
+        or prime.task_deadline is None
+        or type(limits) is not PrimeTextLimits
     ):
         raise P6OperatorError()
-    active_signal = signal or _NeverCancelled()
-    session = None
-    try:
-        session = session_factory()
-        await session.open(signal=active_signal)
-        reply: LiveModelReply = await session.prompt(
-            _TASK_A_PROMPT, signal=active_signal
-        )
-        candidate = parse_candidate(reply.text)
-    except BaseException as error:
-        if isinstance(
-            error,
-            (asyncio.CancelledError, KeyboardInterrupt, SystemExit, GeneratorExit),
-        ):
-            raise
-        raise P6OperatorError() from None
-    finally:
-        if session is not None:
-            await session.close()
+    # Runtime compatibility ceilings do not grant text-model authority.
+    preset = bounded_text_limits()
+    for field in fields(preset):
+        value, ceiling = getattr(limits, field.name), getattr(preset, field.name)
+        if field.name == "price":
+            exceeds_preset = value != ceiling
+        else:
+            exceeds_preset = ceiling is not None and (value is None or value > ceiling)
+        if exceeds_preset:
+            raise P6OperatorError()
+    initial_usage = prime._text_usage_summary()
+    if initial_usage.prompts or initial_usage.blocked or initial_usage.unknown_effect:
+        raise P6OperatorError()
+    model = prime.text_model(key="candidate", limits=limits)
 
     root = private_root.resolve()
-    root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    body_path = root / "candidate.json"
-    descriptor = os.open(body_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(candidate.body)
-    train_sha = task_a_evidence(candidate)
     scope = HarnessScope.project("prime.continual-improvement")
     resources = _OperatorResources(
         mode="live",
@@ -292,17 +310,22 @@ async def run_live_candidate(
             edit.replacement for edit in proposal.edits if edit.replacement is not None
         )
         model_effect = proposal.proposal_id == "candidate-1"
+        # Prime owns the ledger. This receipt projects its usage once into
+        # candidate evidence; promotion/rollback neither charge nor grant it.
+        usage = prime._text_usage_summary()
+        if usage.blocked or usage.unknown_effect or usage.prompts != 1:
+            raise P6OperatorError()
         return HarnessEffectReceipt.succeeded(
             proposal,
             effect_digest=harness_effect_digest(proposal),
             result_entries=changed,
             usage={
                 "aggregate_tokens": (
-                    reply.usage.input_tokens + reply.usage.output_tokens
+                    usage.input_tokens + usage.output_tokens
                     if model_effect
                     else 0
                 ),
-                "cost_micros": reply.usage.cost_micros if model_effect else 0,
+                "cost_micros": usage.cost_micros if model_effect else 0,
                 "model_credential_reads": 1 if model_effect else 0,
                 "provider_operations": 1 if model_effect else 0,
             },
@@ -316,6 +339,24 @@ async def run_live_candidate(
     )
 
     async def workflow(resources, loop, coordinator, signal, *, non_regressing):
+        try:
+            reply = await model.prompt(_TASK_A_PROMPT, signal=signal)
+        finally:
+            async with asyncio.timeout(5):
+                cleanup = await prime.close()
+            if not cleanup.complete:
+                raise P6OperatorError()
+        if signal.cancelled:
+            raise asyncio.CancelledError()
+        candidate = parse_candidate(reply.text)
+        train_sha = task_a_evidence(candidate)
+        resources.private_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+        descriptor = os.open(
+            resources.private_root / "candidate.json",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600,
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(candidate.body)
         return await _run_workflow(
             resources,
             loop,
@@ -326,14 +367,12 @@ async def run_live_candidate(
             train_sha=train_sha,
         )
 
-    host = _ComposedCandidateHost(resources, loop, coordinator, workflow=workflow)
-    package = create_prime_continual_improvement_native_package()
-    provider = compose_installed_provider(
-        create_prime_continual_improvement_provider(),
-        runtime_factories=RuntimeFactoryRegistry(()),
-        installed_packages=(package,),
+    host = _ComposedCandidateHost(
+        resources, loop, coordinator, workflow=workflow, task_deadline=prime.task_deadline,
     )
-    plan = provider.applications[0].assemblies[0].plan
+    package = create_prime_continual_improvement_native_package()
+    assembly_path = (Path(__file__).resolve().parent.parent
+                     / "assemblies/prime-continual-improvement.json")
     services = {
         "prime.candidate-store": loop,
         "prime.session-backend": host,
@@ -347,11 +386,15 @@ async def run_live_candidate(
             application_id="prime.continual-improvement",
             application_version="1.0.0",
             runtime_id="asterion.prime",
-            assembly_path=Path(__file__).resolve().parent.parent
-            / "assemblies/prime-continual-improvement.json",
+            assembly_path=assembly_path,
             options=P6_RUNTIME_OPTIONS,
             host_services=services,
         )
+    )
+    plan = resolve_assembly(
+        json.loads(assembly_path.read_text()),
+        catalog=discover_capabilities(package.catalog_roots),
+        runtime_manifest=runtime.manifest.to_mapping(),
     )
     try:
         result = await run_composed_application(
@@ -364,7 +407,7 @@ async def run_live_candidate(
             run_id=root_run_id,
             input_text="fixed-continual-improvement",
             host_services=services,
-            signal=active_signal,
+            signal=signal,
         )
         if (
             host.receipt is None
@@ -379,13 +422,14 @@ async def run_live_candidate(
             raise P6OperatorError() from None
         status = "refused"
     evidence_sha = sha256((root / "holdout-evidence.json").read_bytes()).hexdigest()
+    usage = prime._text_usage_summary()
     return P6LivePublicResult(
         status=status,
         **asdict(host.receipt),
-        model_call_count=1,
-        input_tokens=reply.usage.input_tokens,
-        output_tokens=reply.usage.output_tokens,
-        cost_micros=reply.usage.cost_micros,
+        model_call_count=usage.prompts,
+        input_tokens=usage.input_tokens,
+        output_tokens=usage.output_tokens,
+        cost_micros=usage.cost_micros,
         private_evidence_sha256=evidence_sha,
     )
 
@@ -398,17 +442,24 @@ def run_operator_live(environment: Mapping[str, str]) -> int:
         private_value = environment.get("ASTERION_PRIME_P6_PRIVATE_ROOT", "")
         if not operator_value or not private_value:
             raise P6OperatorError()
-        launch = resolve_live_model_launch(Path(operator_value), environment)
+        limits = bounded_text_limits()
+        deadline = TaskDeadline(
+            deadline_monotonic=time.monotonic() + limits.deadline_seconds,
+            deadline_epoch=time.time() + limits.deadline_seconds,
+        )
+        context = resolve_live_model_context(
+            Path(operator_value), environment, task_deadline=deadline,
+        )
         private_base = Path(private_value).resolve()
         private_base.mkdir(parents=True, exist_ok=True, mode=0o700)
         child = Path(tempfile.mkdtemp(prefix="live-", dir=private_base))
+        prime = prepare_prime_application(
+            PrimeApplicationSpec("prime.continual-improvement", "1.0.0", "text-only"),
+            context, authorization=limits,
+        )
         result = asyncio.run(
             run_live_candidate(
-                session_factory=lambda: LiveModelSession(
-                    command=launch.command,
-                    environment=launch.environment,
-                    cwd=launch.cwd,
-                ),
+                prime=prime,
                 root_run_id="p6-live-" + secrets.token_hex(8),
                 private_root=child,
             )

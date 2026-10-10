@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator, Mapping
 from types import MappingProxyType
 
+from asterion.agents.prime.deadline import TaskDeadline
 from asterion.applications.prime.p6.host import P6RuntimeHost
 from asterion.applications.prime.p6.oracle import P6Oracle
 from asterion.applications.prime.p6.receipt import (
@@ -46,6 +47,15 @@ class _NeverCancelled:
     cancelled = False
 
 
+class _DeadlineSignal:
+    def __init__(self, signal, deadline: TaskDeadline):
+        self._signal, self._deadline = signal, deadline
+
+    @property
+    def cancelled(self):
+        return self._signal.cancelled or self._deadline.expired()
+
+
 class _P6RuntimeSession:
     def __init__(
         self,
@@ -54,11 +64,15 @@ class _P6RuntimeSession:
         candidate_store: CandidateStoreLoop,
         oracle: P6Oracle,
         private_trace: object | None,
+        task_deadline: TaskDeadline | None = None,
     ) -> None:
         self._session_backend = session_backend
         self._candidate_store = candidate_store
         self._oracle = oracle
         self._private_trace = private_trace
+        if task_deadline is not None and type(task_deadline) is not TaskDeadline:
+            raise RuntimeFactoryError(_ERROR)
+        self._task_deadline = task_deadline
         self._active = False
         self._consumed = False
 
@@ -96,7 +110,13 @@ class _P6RuntimeSession:
                     request.run_id, 2, "run.completed", {"status": "cancelled"}
                 )
                 return
-            async with asyncio.timeout(request.deadline_ms / 1000):
+            remaining = request.deadline_ms / 1000
+            if self._task_deadline is not None:
+                remaining = min(remaining, self._task_deadline.remaining_seconds())
+                if remaining <= 0:
+                    raise TimeoutError()
+                signal = _DeadlineSignal(signal, self._task_deadline)
+            async with asyncio.timeout(remaining):
                 receipt = await self.run_candidate(
                     root_run_id=request.run_id, signal=signal
                 )
@@ -128,6 +148,10 @@ class _P6RuntimeSession:
                 },
             )
             yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+        except asyncio.CancelledError:
+            yield RunEvent(
+                request.run_id, 2, "run.completed", {"status": "cancelled"}
+            )
         except Exception:
             yield RunEvent(
                 request.run_id,
@@ -176,6 +200,7 @@ def build_p6_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
             candidate_store=candidate_store_value,
             oracle=oracle_value,
             private_trace=host_services.get("prime.private-trace"),
+            task_deadline=getattr(service, "task_deadline", None),
         )
         # Eagerly validate the 5-tuple so a malformed host-services
         # shape is rejected before the runtime is handed to callers.

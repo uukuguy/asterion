@@ -778,13 +778,15 @@ async def _execute_candidate_workflow(
 
 class _ComposedCandidateHost:
     def __init__(
-        self, resources, loop, coordinator, *, non_regressing=True, workflow=None
+        self, resources, loop, coordinator, *, non_regressing=True, workflow=None,
+        task_deadline=None,
     ):
         self.resources = resources
         self.loop = loop
         self.coordinator = coordinator
         self.non_regressing = non_regressing
         self.workflow = workflow or _execute_candidate_workflow
+        self.task_deadline = task_deadline
         self.receipt = None
         self.effects_state = "not-started"
 
@@ -843,10 +845,8 @@ class _ComposedCandidateHost:
 
 
 async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult:
-    from asterion.applications.provider import compose_installed_provider
-    from asterion.applications.prime.provider import (
-        create_prime_continual_improvement_provider,
-    )
+    from asterion.assembly.protocol import resolve_assembly
+    from asterion.capabilities.catalog import discover_capabilities
     from asterion.applications.prime.p6.runtime_binding import (
         build_p6_runtime,
         P6_RUNTIME_OPTIONS,
@@ -854,7 +854,7 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
     from asterion.capabilities.prime_continual_improvement_native.provider import (
         create_prime_continual_improvement_native_package,
     )
-    from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+    from asterion.runtime.factory import RuntimeFactoryContext
     from asterion.runner.composed import run_composed_application
 
     loop, coordinator = await _open_candidate_store_for_run(
@@ -864,12 +864,8 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
     )
     host = _ComposedCandidateHost(resources, loop, coordinator)
     package = create_prime_continual_improvement_native_package()
-    provider = compose_installed_provider(
-        create_prime_continual_improvement_provider(),
-        runtime_factories=RuntimeFactoryRegistry(()),
-        installed_packages=(package,),
-    )
-    plan = provider.applications[0].assemblies[0].plan
+    assembly_path = (Path(__file__).resolve().parent.parent
+                     / "assemblies/prime-continual-improvement.json")
     services = {
         "prime.candidate-store": loop,
         "prime.session-backend": host,
@@ -883,11 +879,15 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
             application_id="prime.continual-improvement",
             application_version="1.0.0",
             runtime_id="asterion.prime",
-            assembly_path=Path(__file__).resolve().parent.parent
-            / "assemblies/prime-continual-improvement.json",
+            assembly_path=assembly_path,
             options=P6_RUNTIME_OPTIONS,
             host_services=services,
         )
+    )
+    plan = resolve_assembly(
+        json.loads(assembly_path.read_text()),
+        catalog=discover_capabilities(package.catalog_roots),
+        runtime_manifest=runtime.manifest.to_mapping(),
     )
     result = await run_composed_application(
         plan,
