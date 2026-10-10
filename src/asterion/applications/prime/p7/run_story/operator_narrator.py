@@ -4,23 +4,26 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
-from asterion.applications.prime.operator_config import load_operator_environment
-from asterion.runtime.native_rpc import build_rpc_session
+from asterion.agents.prime.application import (
+    PrimeApplicationSpec,
+    PrimeOperatorContext,
+    PrimeTextLimits,
+    prepare_prime_application,
+)
+from asterion.agents.prime.deadline import TaskDeadline
+from asterion.applications.prime.operator_config import resolve_pi_effort
+from asterion.applications.prime.p7 import live
+from asterion.applications.prime.p7.model_selection import resolve_model_selection
 
 from .analysis import RunStoryNarrationRequest
 from .model import RunStoryError, canonical_json
 
 
 _DEADLINE_SECONDS = 300.0
-_MODEL_ENV = "ASTERION_PRIME_EXPERIMENT_MODEL"
-_PROVIDERS = {
-    "deepseek-flash": "deepseek",
-    "deepseek-v4-flash": "deepseek",
-    "deepseek-v4-flash-0731": "deepseek",
-}
 
 
 class _NeverCancelled:
@@ -138,46 +141,56 @@ class RunStoryNarrator:
         return _normalize_candidate(_parse_object(self._invoke(prompt)))
 
 
-def load_operator_narrator(repo_root: Path) -> RunStoryNarrator:
-    """Resolve the fixed application preset from operator-owned configuration."""
+def load_operator_narrator(
+    repo_root: Path, *, task_deadline: TaskDeadline | None = None,
+) -> RunStoryNarrator:
+    """Prepare the exact P7 text preset without creating a model effect."""
 
-    root = repo_root.resolve(strict=True)
-    environment = load_operator_environment(root)
-    model = environment.get(_MODEL_ENV, "").strip()
-    provider = _PROVIDERS.get(model)
-    if provider is None or not environment.get("DEEPSEEK_API_KEY", "").strip():
-        raise RunStoryError("narrator-unavailable")
-    command = (
-        "pi",
-        "--mode",
-        "rpc",
-        "--print",
-        "--no-tools",
-        "--no-session",
-        "--no-extensions",
-        "--no-skills",
-        "--no-prompt-templates",
-        "--no-themes",
-        "--no-context-files",
-        "--provider",
-        provider,
-        "--model",
-        model,
-    )
+    try:
+        if task_deadline is None:
+            task_deadline = TaskDeadline(
+                deadline_monotonic=time.monotonic() + _DEADLINE_SECONDS,
+                deadline_epoch=time.time() + _DEADLINE_SECONDS,
+            )
+        root = repo_root.resolve(strict=True)
+        environment = dict(live.load_operator_environment(root))
+        selection = resolve_model_selection(environment)
+        executable = live.resolve_node(environment)
+        entry = live.resolve_pi_entry(environment)
+        profile = live.resolve_pi_agent_dir(environment)
+        environment["PI_CODING_AGENT_DIR"] = str(profile)
+        limits = PrimeTextLimits(deadline_seconds=_DEADLINE_SECONDS)
+        application = prepare_prime_application(
+            PrimeApplicationSpec("prime.arc-agi-3-run-story", "1.0.0", "text-only"),
+            PrimeOperatorContext(
+                executable=executable, entry=entry, cwd=root,
+                provider=selection.provider, model=selection.model,
+                effort=resolve_pi_effort(environment, default="medium"),
+                environment=environment, task_deadline=task_deadline,
+            ),
+            authorization=limits,
+        )
+    except Exception:
+        raise RunStoryError("narrator-unavailable") from None
+
+    async def text_once(prompt: str) -> str:
+        try:
+            reply = await application.text_once(
+                key="narrator", text=prompt, limits=limits, signal=_NeverCancelled(),
+            )
+            return reply.text
+        finally:
+            receipt = await application.close()
+            if getattr(receipt, "complete", None) is not True:
+                raise RunStoryError("narrator-unavailable")
 
     def invoke(prompt: str) -> str:
-        session = build_rpc_session(
-            command=command,
-            cwd=root,
-            environment=environment,
-            deadline_seconds=_DEADLINE_SECONDS,
-            compact_events=True,
-        )
-        return asyncio.run(
-            session.run(prompt, signal=_NeverCancelled(), on_event=lambda _event: None)
-        ).final_text
+        try:
+            return asyncio.run(text_once(prompt))
+        except Exception:
+            raise RunStoryError("narrator-unavailable") from None
 
-    return RunStoryNarrator(model_id=model, invoke=invoke)
+    return RunStoryNarrator(model_id=selection.model, invoke=invoke)
 
 
 __all__ = ("RunStoryNarrator", "load_operator_narrator")

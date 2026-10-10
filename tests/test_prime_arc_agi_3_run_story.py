@@ -599,58 +599,190 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         self.assertEqual(rejected.story["kind"], "factual-fallback")
         self.assertNotEqual(accepted.analysis_id, rejected.analysis_id)
 
-    def test_operator_narrator_accepts_only_approved_flash_names(self) -> None:
+    def _write_narrator_operator(self, root: Path) -> Path:
+        profile = root / "profile"
+        profile.mkdir()
+        (profile / "models-store.json").write_text(
+            json.dumps({"openai-codex": {}}), encoding="utf-8"
+        )
+        (profile / "auth.json").write_text(
+            json.dumps({"openai-codex": {"access": "sentinel-oauth-secret"}}),
+            encoding="utf-8",
+        )
+        executable = root / "fake-executable"
+        executable.write_text("#!/bin/sh\nexit 1\n", encoding="utf-8")
+        executable.chmod(0o700)
+        (root / ".env").write_text(
+            f"ASTERION_PRIME_NODE={executable}\n"
+            f"ASTERION_PRIME_PI_ENTRY={executable}\n"
+            f"ASTERION_PRIME_PI_AGENT_DIR={profile}\n"
+            "ASTERION_PRIME_PROVIDER=openai-codex\n"
+            "ASTERION_PRIME_MODEL=gpt-6.1-sol\n"
+            "ASTERION_PRIME_EFFORT=high\n"
+            "ASTERION_PRIME_EXPERIMENT_MODEL=deepseek-v4-flash\n",
+            encoding="utf-8",
+        )
+        return profile
+
+    def test_operator_narrator_uses_exact_p7_owner_without_launch_or_new_quotas(self) -> None:
         from types import SimpleNamespace
         from unittest.mock import AsyncMock, patch
         from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
 
-        for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-flash-0731"):
-            with self.subTest(model=model), tempfile.TemporaryDirectory() as directory:
-                root = Path(directory)
-                (root / ".env").write_text(
-                    f"ASTERION_PRIME_EXPERIMENT_MODEL={model}\nDEEPSEEK_API_KEY=sentinel-private-key\n",
-                    encoding="utf-8",
-                )
-                session = SimpleNamespace(run=AsyncMock(return_value=SimpleNamespace(final_text="{}")))
-                with patch.dict(os.environ, {}, clear=True), patch(
-                    "asterion.applications.prime.p7.run_story.operator_narrator.build_rpc_session",
-                    return_value=session,
-                ) as build:
-                    try:
-                        narrator = load_operator_narrator(root)
-                    except RunStoryError:
-                        self.fail(f"approved Flash model {model} was rejected")
-                    build.assert_not_called()
-                    self.assertEqual(narrator.model_id, model)
-                    self.assertNotIn("sentinel-private-key", repr(narrator))
-                    self.assertEqual(narrator._invoke("fixture prompt"), "{}")
-                    config = build.call_args.kwargs
-                    command = config["command"]
-                    self.assertEqual(command[-4:], ("--provider", "deepseek", "--model", model))
-                    self.assertEqual(config["deadline_seconds"], 300)
-                    for flag in ("--no-tools", "--no-session", "--no-extensions", "--no-skills", "--no-context-files"):
-                        self.assertIn(flag, command)
-                    self.assertNotIn("sentinel-private-key", repr(command))
-                    session.run.assert_awaited_once()
+        profile = self._write_narrator_operator(self.root)
+        owner = SimpleNamespace(
+            text_once=AsyncMock(return_value=SimpleNamespace(text="{}")),
+            close=AsyncMock(return_value=SimpleNamespace(complete=True)),
+        )
+        module = "asterion.applications.prime.p7.run_story.operator_narrator"
+        with patch.dict(os.environ, {
+            "ASTERION_PRIME_PROVIDER": "deepseek",
+            "ASTERION_PRIME_MODEL": "deepseek-flash",
+            "PI_CODING_AGENT_DIR": "stale-profile",
+        }, clear=True), patch(
+            module + ".prepare_prime_application", return_value=owner
+        ) as prepare:
+            try:
+                narrator = load_operator_narrator(self.root)
+            except RunStoryError:
+                self.fail("exact P7 model configuration was rejected")
+            owner.text_once.assert_not_awaited()
+            owner.close.assert_not_awaited()
+            self.assertEqual(narrator.model_id, "gpt-6.1-sol")
+            self.assertNotIn("sentinel-oauth-secret", repr(narrator))
+            spec, operator = prepare.call_args.args
+            limits = prepare.call_args.kwargs["authorization"]
+            self.assertEqual(spec.profile, "text-only")
+            self.assertEqual((operator.provider, operator.model), ("openai-codex", "gpt-6.1-sol"))
+            self.assertEqual(operator.effort, "high")
+            self.assertEqual(operator.environment["PI_CODING_AGENT_DIR"], str(profile))
+            self.assertEqual(limits.deadline_seconds, 300)
+            for name in ("max_prompts", "max_input_bytes", "max_output_bytes",
+                         "max_input_tokens", "max_output_tokens", "max_cost_micros",
+                         "provider_output_tokens", "price"):
+                with self.subTest(limit=name):
+                    self.assertIsNone(getattr(limits, name))
+            self.assertLessEqual(operator.task_deadline.remaining_seconds(), 300)
+            self.assertGreater(operator.task_deadline.remaining_seconds(), 290)
+            self.assertEqual(narrator._invoke("fixture prompt"), "{}")
+            owner.text_once.assert_awaited_once()
+            owner.close.assert_awaited_once()
+            self.assertIs(owner.text_once.call_args.kwargs["limits"], limits)
+            self.assertEqual(owner.text_once.call_args.kwargs["text"], "fixture prompt")
 
-    def test_operator_narrator_rejects_unapproved_model_or_missing_key(self) -> None:
+    def test_operator_narrator_real_owner_preserves_profile_and_uncapped_reply(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, Mock, patch
+        from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
+
+        profile = self._write_narrator_operator(self.root)
+        rpc = SimpleNamespace(open=AsyncMock(), stop=Mock(), process=None,
+                              next_id=lambda: "state", send=Mock())
+        rpc.read_json_line = lambda **kwargs: {
+            "type": "response", "id": "state", "command": "get_state", "success": True,
+            "data": {"model": {"provider": "openai-codex", "id": "gpt-6.1-sol"}},
+        }
+        reply = json.dumps(_valid_story(), ensure_ascii=False)
+
+        async def prompt(text: str, *, signal: object, on_event: object) -> object:
+            on_event(SimpleNamespace(type="message_end", payload={"message": {
+                "role": "assistant", "usage": {"input": 100, "output": 1024,
+                                                "cacheRead": 0, "cacheWrite": 0},
+            }}))
+            return SimpleNamespace(final_text=reply)
+
+        rpc.prompt = prompt
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "asterion.agents.prime._launch.text_rpc", return_value=rpc
+        ) as launch:
+            narrator = load_operator_narrator(self.root)
+            launch.assert_not_called()
+            self.assertEqual(narrator._invoke("fixture prompt"), reply)
+            config = launch.call_args.args[0]
+            self.assertEqual(config.environment["PI_CODING_AGENT_DIR"], str(profile))
+            self.assertEqual(config.command[-4:], ("--provider", "openai-codex", "--model", "gpt-6.1-sol"))
+            self.assertLessEqual(config.deadline_seconds, 300)
+            rpc.stop.assert_called_once()
+
+    def test_operator_narrator_preflight_rejects_unusable_p7_configuration(self) -> None:
         from unittest.mock import patch
         from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
 
-        for model, key in (("deepseek-pro", "sentinel-private-key"), ("deepseek-flash", "")):
-            with self.subTest(model=model, key_present=bool(key)), tempfile.TemporaryDirectory() as directory:
+        for field, value in (
+            ("ASTERION_PRIME_PROVIDER", "deepseek"),
+            ("ASTERION_PRIME_MODEL", "deepseek-flash"),
+            ("ASTERION_PRIME_EFFORT", "unsupported"),
+            ("ASTERION_PRIME_NODE", "/missing/node"),
+            ("ASTERION_PRIME_PI_ENTRY", "/missing/pi"),
+            ("ASTERION_PRIME_PI_AGENT_DIR", "/missing/profile"),
+            ("auth", "{}"),
+        ):
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                (root / ".env").write_text(
-                    f"ASTERION_PRIME_EXPERIMENT_MODEL={model}\nDEEPSEEK_API_KEY={key}\n",
-                    encoding="utf-8",
-                )
+                profile = self._write_narrator_operator(root)
+                if field == "auth":
+                    (profile / "auth.json").write_text(value, encoding="utf-8")
+                else:
+                    with (root / ".env").open("a", encoding="utf-8") as stream:
+                        stream.write(f"{field}={value}\n")
                 with patch.dict(os.environ, {}, clear=True), patch(
-                    "asterion.applications.prime.p7.run_story.operator_narrator.build_rpc_session"
-                ) as build:
+                    "asterion.applications.prime.p7.run_story.operator_narrator.prepare_prime_application",
+                ) as prepare:
                     with self.assertRaises(RunStoryError) as error:
                         load_operator_narrator(root)
                     self.assertEqual(str(error.exception), "narrator-unavailable")
-                    build.assert_not_called()
+                    self.assertNotIn("sentinel-oauth-secret", str(error.exception))
+                    prepare.assert_not_called()
+
+    def test_operator_narrator_reuses_injected_task_deadline(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from asterion.agents.prime.deadline import TaskDeadline
+        from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
+
+        self._write_narrator_operator(self.root)
+        deadline = TaskDeadline(deadline_monotonic=50, deadline_epoch=50,
+                                monotonic_clock=lambda: 20, wall_clock=lambda: 20)
+        owner = SimpleNamespace(text_once=AsyncMock(return_value=SimpleNamespace(text="{}")),
+                                close=AsyncMock(return_value=SimpleNamespace(complete=True)))
+        with patch.dict(os.environ, {}, clear=True), patch(
+            "asterion.applications.prime.p7.run_story.operator_narrator.prepare_prime_application",
+            return_value=owner,
+        ) as prepare:
+            narrator = load_operator_narrator(self.root, task_deadline=deadline)
+            self.assertIs(prepare.call_args.args[1].task_deadline, deadline)
+            self.assertEqual(narrator._invoke("fixture prompt"), "{}")
+            self.assertEqual(deadline.remaining_seconds(), 30)
+
+    def test_operator_narrator_closes_owner_and_rejects_incomplete_receipt(self) -> None:
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock, patch
+        from asterion.applications.prime.p7.run_story.operator_narrator import load_operator_narrator
+
+        for prompt_error, receipt in (
+            (None, SimpleNamespace(complete=False)),
+            (None, SimpleNamespace(complete=1)),
+            (None, SimpleNamespace()),
+            (RuntimeError("sentinel-private-payload"), SimpleNamespace(complete=True)),
+        ):
+            with self.subTest(prompt_error=prompt_error is not None, receipt=repr(receipt)), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self._write_narrator_operator(root)
+                owner = SimpleNamespace(
+                    text_once=AsyncMock(return_value=SimpleNamespace(text="{}"), side_effect=prompt_error),
+                    close=AsyncMock(return_value=receipt),
+                )
+                with patch.dict(os.environ, {}, clear=True), patch(
+                    "asterion.applications.prime.p7.run_story.operator_narrator.prepare_prime_application",
+                    return_value=owner,
+                ):
+                    narrator = load_operator_narrator(root)
+                    with self.assertRaises(RunStoryError) as error:
+                        narrator._invoke("fixture prompt")
+                    self.assertEqual(str(error.exception), "narrator-unavailable")
+                    self.assertNotIn("sentinel-private-payload", str(error.exception))
+                    owner.close.assert_awaited_once()
 
     def test_pi_narrator_accepts_one_json_response_without_exposing_config(self) -> None:
         calls: list[str] = []
