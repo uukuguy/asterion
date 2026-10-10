@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1 完成，Task 2/3 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–3 完成，Task 4 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -149,10 +149,12 @@ self.assertNotIn('private-sentinel', repr(app))
 
 ## Task 2：提取真实 text-only 会话并收回模型启动
 
+完成：`6fe51d20`、`5cc50b56`；67 项 focused/旧调用方测试与 Ruff 通过，Astra 复审通过。修复 core 读取 profile 和共享用量耗尽后多发一次请求的问题。
+
 **Files:** Create `src/asterion/agents/prime/_launch.py`、`_text_model.py`；Modify `application.py`、`src/asterion/applications/prime/live_model.py`、`src/asterion/applications/prime/operator_config.py`、`tests/test_prime_live_model.py`、`tests/test_prime_application_entry.py`。
 **Interfaces:** `PrimeTextLimits`、`PrimeModelView`、`text_model/text_once/close`；新增 resolver 返回 `PrimeOperatorContext`；旧 resolver 返回形状在消费者迁完前保持兼容。
 
-- [ ] 添加 `test_text_view_has_no_launch_handles` 与 `test_text_once_reaps_before_return`；改既有 fake RPC fixture 到新的私有 `_launch` seam，应用 fixture 只提供数据。
+- [x] 添加 `test_text_view_has_no_launch_handles` 与 `test_text_once_reaps_before_return`；改既有 fake RPC fixture 到新的私有 `_launch` seam，应用 fixture 只提供数据。
 
 ```python
 view = app.text_model(key='candidate', limits=bounded_limits)
@@ -163,23 +165,24 @@ self.assertEqual(reply.text, 'private output')
 self.assertTrue(fake_rpc.closed)
 ```
 
-- [ ] RED：`uv run python -m unittest -v tests.test_prime_application_entry tests.test_prime_live_model`；预期缺失 view 行为/owner 关闭断言失败。
-- [ ] 按符号搬移 `LiveModelUsage/Reply`、`LiveModelSession.__init__/_verify_model_cap/open/prompt/close` 至 `_text_model.py`；保留 usage normalizer、cache token 计量、取消异常和配置目录清理。
-- [ ] bounded-live 数量上限保持 120 秒、4 prompts、8192/32768 bytes、16000/8000 tokens、3000 cost_micros、provider maxTokens 512；exact model 改为 deepseek-flash，配置/get_state 两端一致。本地 Pi exact model metadata 的 input/output 为每百万 0.3/1.2 USD，对应 300000/1200000 micros；旧 140000/280000 不适用。operator 注入匹配价格，缓存继续按全价输入保守计量；未知价格在 effect 前拒绝，不能用 v4-flash 名称或价格猜映射。
-- [ ] `_launch.py` 以 executable/entry/provider/model/effort、profile 和固定 flags 组装 Pi 命令；保留 text-only `--no-tools --no-session --no-extensions` 及其余 isolation flags，禁止把任意 flags 作为应用入参。
-- [ ] 新增 `resolve_live_model_context`，保留 operator 配置/安装/路径预检。旧 `resolve_live_model_launch`、`LiveModelLaunch.command` 和旧 session 构造形状暂保留给 Task 6/7 未迁移调用方；兼容层委托 Prime 私有命令构造与 session engine，不复制实现。此阶段不得把旧返回值直接换成没有 `.command` 的 context；Task 8 才移除过渡面。
-- [ ] owner 延迟 open、跟踪每 key 的真实 session 与已消耗额度，重取视图不续期；`text_once` 使用 try/finally 关闭且关闭失败不返回成功；总体 close 汇总并重试既有 reap 兜底。
-- [ ] 复用 `tests.test_prime_live_model` 全部 cap/usage/cache/cancel 测试，不复制第二套；新增两个 key 的独立对话与同 authority 不因视图重置的断言。
-- [ ] 增加 `test_unlisted_application_runs_without_provider_lookup`：对本地 `example.independent` spec 调 `prepare_prime_application(text_spec, operator, authorization=bounded_limits)` 与 text_once，provider/inventory 入口 patch 为抛错仍成功；检查新 key 消耗累计、关闭 key 拒绝重开、deadline 不从第二调用重新计时。
-- [ ] GREEN：同 RED 命令，另跑 `uv run python -m unittest -v tests.test_prime_p3_live tests.test_prime_p4_live tests.test_prime_p5_live tests.test_prime_p6_live` 证明未迁移消费者仍工作；缺配置 public-safe、框架不读 `.env`。
-- [ ] 提交上述精确文件：`git commit -m "refactor(prime): own bounded text model sessions"`。
+- [x] RED：`uv run python -m unittest -v tests.test_prime_application_entry tests.test_prime_live_model`；预期缺失 view 行为/owner 关闭断言失败。
+- [x] 按符号搬移 `LiveModelUsage/Reply`、`LiveModelSession.__init__/_verify_model_cap/open/prompt/close` 至 `_text_model.py`；保留 usage normalizer、cache token 计量、取消异常和配置目录清理。
+- [x] bounded-live 数量上限保持 120 秒、4 prompts、8192/32768 bytes、16000/8000 tokens、3000 cost_micros、provider maxTokens 512；exact model 改为 deepseek-flash，配置/get_state 两端一致。本地 Pi exact model metadata 的 input/output 为每百万 0.3/1.2 USD，对应 300000/1200000 micros；旧 140000/280000 不适用。operator 注入匹配价格，缓存继续按全价输入保守计量；未知价格在 effect 前拒绝，不能用 v4-flash 名称或价格猜映射。
+- [x] `_launch.py` 以 executable/entry/provider/model/effort、profile 和固定 flags 组装 Pi 命令；保留 text-only `--no-tools --no-session --no-extensions` 及其余 isolation flags，禁止把任意 flags 作为应用入参。
+- [x] 新增 `resolve_live_model_context`，保留 operator 配置/安装/路径预检。旧 `resolve_live_model_launch`、`LiveModelLaunch.command` 和旧 session 构造形状暂保留给 Task 6/7 未迁移调用方；兼容层委托 Prime 私有命令构造与 session engine，不复制实现。此阶段不得把旧返回值直接换成没有 `.command` 的 context；Task 8 才移除过渡面。
+- [x] owner 延迟 open、跟踪每 key 的真实 session 与已消耗额度，重取视图不续期；`text_once` 使用 try/finally 关闭且关闭失败不返回成功；总体 close 汇总并重试既有 reap 兜底。
+- [x] 复用 `tests.test_prime_live_model` 全部 cap/usage/cache/cancel 测试，不复制第二套；新增两个 key 的独立对话与同 authority 不因视图重置的断言。
+- [x] 增加 `test_unlisted_application_runs_without_provider_lookup`：对本地 `example.independent` spec 调 `prepare_prime_application(text_spec, operator, authorization=bounded_limits)` 与 text_once，provider/inventory 入口 patch 为抛错仍成功；检查新 key 消耗累计、关闭 key 拒绝重开、deadline 不从第二调用重新计时。
+- [x] GREEN：同 RED 命令，另跑 `uv run python -m unittest -v tests.test_prime_p3_live tests.test_prime_p4_live tests.test_prime_p5_live tests.test_prime_p6_live` 证明未迁移消费者仍工作；缺配置 public-safe、框架不读 `.env`。
+- [x] 提交上述精确文件：`git commit -m "refactor(prime): own bounded text model sessions"`。
 
 ## Task 3：核心扩展与应用模块分离
 
 **Files:** Create `packages/typescript/asterion-prime-extension/src/tool-bridge.ts`、`p7-tools.ts`、`p7-research-extension.ts`、`p7-legacy-extension.ts`；Modify 该包 `src/ipython-extension.ts`、`package.json`、`scripts/sync-runtime-resource.mjs`、`test/ipython-extension.test.mjs`，`src/asterion/agents/prime/tool_registry.py`，P1 `operator.py`，P7 `operator.py`、`live.py`、`official_operator.py`，`tests/test_prime_extension_tool_contract.py`。生成同 wheel 资源 `applications/prime/resources/ipython-extension.mjs`、`p7-research-extension.mjs`、`p7-legacy-extension.mjs`，必要时同步根 `pyproject.toml` 的资源包含规则。
+实施补充范围：`hatch_build.py`、`pyproject.toml` 和 `tests/test_prime_extension_build.py` 同步三资源构建/安装证明；`src/asterion/runtime/pinned_extension.py` 窄支持合法 ESM default export-list，保持 node-only imports/digest/pin 边界。外部应用使用普通构建产物，无需专用导出重写。
 **Interfaces:** 应用传 `PrimeToolModuleArtifact(path, registry)`；artifact 自包含并导出 `default register(pi, dependencies)`。核心导出 `registerPrime(pi, dependencies, module)`，没有 app selector switch、目录查询或 P7 import。
 
-- [ ] 在现有 TS 测试增加 core-only 不注册 P7 hook/tool、P7 两个显式入口工具集不变、外部自定义 module 无需编辑核心即可注册；模块身份/完整工具名与 injected registry 不符在任何注册前拒绝。
+- [x] 在现有 TS 测试增加 core-only 不注册 P7 hook/tool、P7 两个显式入口工具集不变、外部自定义 module 无需编辑核心即可注册；模块身份/完整工具名与 injected registry 不符在任何注册前拒绝。
 
 ```typescript
 // module只描述领域工具和context hook；不能接管RPC或进程生命周期。
@@ -194,21 +197,24 @@ export default function register(pi: ExtensionApi, dependencies: unknown) {
 }
 ```
 
-- [ ] RED：`npm --prefix packages/typescript/asterion-prime-extension test`；预期新 core 分离断言失败，因为当前 register 总安装 P7 memory。
-- [ ] 将当前 bridge/type 168–422、`createIpythonTool` 的通用依赖搬入 `tool-bridge.ts`；P7 specs 513–784、`makeMethodTool`、research/legacy 工具创建与 P7 memory hook 搬入 `p7-tools.ts`。
-- [ ] `ipython-extension.ts` 只保留核心 registerPrime、context witness/telemetry 与 core-only module；`context-memory/archive/projection` 通用模块不搬进 P7。p7-tools 导出 research/legacy 模块，由两个应用 entry 静态选择，核心不接受 P7 枚举。
-- [ ] 模块 artifact 在构建时 bundle 核心注册函数+应用 module；沿用现有固定源码仅允许 node import 的限制，禁止运行时 import 外部路径/npm 包。外部应用可在构建时使用 wheel 中已导出的通用 registerPrime bundle，不需要编辑框架源码或登记应用。
-- [ ] 本 Task 生成的 core-only `ipython-extension.mjs` 保留 named export `registerPrime`，同时有供 P1 使用的 default register；构建脚本改为按 entry 的真实导出生成资源，不能重复追加 default footer。外部 fixture 只从隔离安装 wheel 的 importlib.resources 获取该 bundle 作构建输入，再 esbuild 合入应用 module，禁止引用仓库邻接 TS 源码或假设存在尚未发布的 npm SDK。
-- [ ] Prime 私有绑定注入期望 registry（module/capability/完整 names），registerPrime 读取后清除环境值，逐项核对 artifact 内的 registry；P7 research/legacy 的 module/capability 相同，完整 names 仍必须精确。
-- [ ] 本提交同步旧 P1/P7 producer：P1 选择 core-only artifact；P7 research/legacy 在应用层选择对应 artifact，official 随 P7 producer；三者均注入期望 registry。不要等 Task 4 才改 producer，也不能依赖缺配置默认 P7。过渡期旧 producer 仍拥有 lease，Task 4/5 再原子移入 Prime owner。
-- [ ] 为现有测试保留必要 re-export；这些导出不触发默认 P7 注册。不得修改 P7 描述、schema、NOTES retirement、frame/state 可见逻辑。
-- [ ] GREEN：先 `npm --prefix packages/typescript/asterion-prime-extension test`，再 `uv run python -m unittest -v tests.test_prime_extension_tool_contract tests.test_prime_p7_tool_registry tests.test_prime_p7_native_provider tests.test_asterion_prime_p1_operator`；验证此时尚未迁 owner 的 producer 也能加载新 artifact。
-- [ ] 用 package 既有命令同步并检查：`npm --prefix packages/typescript/asterion-prime-extension run sync-resource`；`npm --prefix packages/typescript/asterion-prime-extension run check-resource`。
-- [ ] 提交 TS、registry、测试和生成 `.mjs`：`git commit -m "refactor(prime): select application tools through existing extension"`。
+- [x] RED：`npm --prefix packages/typescript/asterion-prime-extension test`；预期新 core 分离断言失败，因为当前 register 总安装 P7 memory。
+- [x] 将当前 bridge/type 168–422、`createIpythonTool` 的通用依赖搬入 `tool-bridge.ts`；P7 specs 513–784、`makeMethodTool`、research/legacy 工具创建与 P7 memory hook 搬入 `p7-tools.ts`。
+- [x] `ipython-extension.ts` 只保留核心 registerPrime、context witness/telemetry 与 core-only module；`context-memory/archive/projection` 通用模块不搬进 P7。p7-tools 导出 research/legacy 模块，由两个应用 entry 静态选择，核心不接受 P7 枚举。
+- [x] 模块 artifact 在构建时 bundle 核心注册函数+应用 module；沿用现有固定源码仅允许 node import 的限制，禁止运行时 import 外部路径/npm 包。外部应用可在构建时使用 wheel 中已导出的通用 registerPrime bundle，不需要编辑框架源码或登记应用。
+- [x] 本 Task 生成的 core-only `ipython-extension.mjs` 保留 named export `registerPrime`，同时有供 P1 使用的 default register；构建脚本改为按 entry 的真实导出生成资源，不能重复追加 default footer。外部 fixture 只从隔离安装 wheel 的 importlib.resources 获取该 bundle 作构建输入，再 esbuild 合入应用 module，禁止引用仓库邻接 TS 源码或假设存在尚未发布的 npm SDK。
+- [x] Prime 私有绑定注入期望 registry（module/capability/完整 names），registerPrime 读取后清除环境值，逐项核对 artifact 内的 registry；P7 research/legacy 的 module/capability 相同，完整 names 仍必须精确。
+- [x] 本提交同步旧 P1/P7 producer：P1 选择 core-only artifact；P7 research/legacy 在应用层选择对应 artifact，official 随 P7 producer；三者均注入期望 registry。不要等 Task 4 才改 producer，也不能依赖缺配置默认 P7。过渡期旧 producer 仍拥有 lease，Task 4/5 再原子移入 Prime owner。
+- [x] 为现有测试保留必要 re-export；这些导出不触发默认 P7 注册。不得修改 P7 描述、schema、NOTES retirement、frame/state 可见逻辑。
+- [x] GREEN：先 `npm --prefix packages/typescript/asterion-prime-extension test`，再 `uv run python -m unittest -v tests.test_prime_extension_tool_contract tests.test_prime_p7_tool_registry tests.test_prime_p7_native_provider tests.test_asterion_prime_p1_operator`；验证此时尚未迁 owner 的 producer 也能加载新 artifact。
+- [x] 用 package 既有命令同步并检查：`npm --prefix packages/typescript/asterion-prime-extension run sync-resource`；`npm --prefix packages/typescript/asterion-prime-extension run check-resource`。
+- [x] 提交 TS、registry、测试和生成 `.mjs`：`git commit -m "refactor(prime): select application tools through existing extension"`。
+
+Task 3 完成：`fc225adb`；Astra 独立复审无发现。TS 93 PASS/6 External-limited；Python 工具/安装/三资源构建检查通过。最终 promotion 与真实部署见证仍待 Task 8。
 
 ## Task 4：Prime 持有 persistent runtime、bridge 与 workspace
 
 **Files:** Create `src/asterion/agents/prime/_tool_bridge.py`、`_workspace_owner.py`、`src/asterion/applications/prime/p7/tool_dispatch.py`；Modify `application.py`、`_launch.py`、`src/asterion/applications/prime/p7/operator.py`、`runtime_binding.py`、`research_runtime.py`、`live.py`、`official_operator.py`、`model_selection.py`；Test `tests/test_prime_application_entry.py`、`tests/test_prime_p7_bridge_dispatch.py`、`tests/test_prime_p7_native_provider.py`、`tests/test_prime_p7_live_command.py`、`tests/test_prime_p7_official_operator.py`。
+实施补充范围：`runtime/pi_rpc.py` 可选成对 expected provider/model，首次 prompt 前核对实际 state，未配置时保留原合同；同步 transport 与 research-runtime 测试。services 保留既有领域 params/缺省区别；workspace 使用现有 sources/data/signal 恢复合同。
 **Interfaces:** `runtime(services, limits, hooks)` 返回现有 runtime client；`PrimeApplicationServices` 提供领域执行方法；workspace owner 返回现有 `PersistentIpythonHost` 窄执行视图。
 
 - [ ] 先扩展 provider 的 no-start、lease-failure、exact registry、bounds 测试：应用输入只有数据/services，Prime private launch 被调用一次；错误 profile/identity/allowlist 在 Pi 前拒绝。

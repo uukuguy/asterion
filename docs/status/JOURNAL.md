@@ -4805,3 +4805,10 @@
 - d5668e8c 定义无效果 Prime 应用 owner 与不可变输入，供后续独立接入共享授权；8项边界测试通过。
 - Task40入口Task1独立Astra复审通过，输入验证兼容小修进行中；Task3按既定文件边界拆分通用扩展与应用模块。
 - ae185b25 对齐 Prime backend 输入校验，保留既有标识与预算合同；8tests/Ruff通过，根核对修复；Task2/3实施中。
+- 38e44685 记录入口边界完成与Task2/3实施中，保存恢复位置和精确模型计量依据。
+- 2026-10-10 17:54 6fe51d20 Prime owns bounded text sessions to share key budgets and prevent renewal; 66 focused tests passed.
+- Task2复审定位配置越界读取与耗尽后重复调用，修复进行中；未记迁移完成或模型实测通过。
+- 17:59 Preserved operator profiles and blocked exhausted text RPC effects; 67 focused tests passed. [5cc50b56]
+- Task2 Astra复审通过：profile所有权与共享耗尽前拒绝修复已核对；67项测试通过，仍无真实模型调用。
+- fc225adb 拆分核心与应用工具产物，精确注册表随资源固定加载，核心不再导入P7。
+- Task3 Astra复审通过，无发现；三资源安装检查已有证据，最终promotion与真实见证待整合；Task4继续P7所有权迁移。

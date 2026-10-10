@@ -22,3 +22,7 @@
 - Task 3: extension/module split in progress; disjoint ownership from Task 1 validator fix. Task 2 starts after that fix.
 - Task 1: complete (405feea5..ae185b25; Astra review approved, minor fix checked by root; 8 focused tests/Ruff pass).
 - Task 2: active, owns application.py/private text engine/operator resolver tests. Task 3 owns disjoint TS and P1/P7 artifact producers.
+- Task 2: 6fe51d20 implemented, 66 tests/Ruff pass; Astra review NEEDS FIXES: core profile file reads and pre-dispatch shared token/cost exhaustion. Implementer fixing; not complete.
+- Task 2: complete (6fe51d20 + 5cc50b56; both Important findings fixed, Astra re-review approved; 67 tests/Ruff pass).
+- Task 3: complete (fc225adb; Astra review approved without findings; TS 93 pass/6 external-limited, focused Python/build/installed checks pass).
+- Task 4: active; Astra owns persistent runtime/bridge/workspace and P7 migration, optional transport identity check delegated within task.
