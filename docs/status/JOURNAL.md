@@ -4792,3 +4792,10 @@
 - 16:47 User approved standard-entry scope: migrate existing live backend ownership first; P2 capability separate; no implementation or new trial.
 - 16:47 Source inventory: P3–P6 have real Pi live paths; P2 is local retrieval; dedicated automatic summary remains unwired.
 - 16:50 Task40 design independently APPROVE; configuration/generation/P2 wording corrected; docs-check312files/221links and diff-check PASS; user written review pending.
+- 16:50 Standard-entry design committed to preserve approved ownership scope and corrected live-path inventory. [407de7b6]
+- 17:02 User approved Task40 written design; implementation planning begins with existing subagent ownership and finite verification boundaries.
+- 17:04 Planning preserves stricter text-model caps and moves P6 generation under composed execution without renewed budget or duplicate usage.
+
+- 17:31 用户明确独立 Prime 应用无需注册；CLI 定位待定，勿混入 DCI/Native；P1–P6 Flash，P7 全路径 Sol。
+- 17:36 Task40实施计划完成自审：独立入口、精确模型、CLI待定、过渡兼容与预算边界；源码尚未迁移。
+- 17:36 文档验证：docs-check313文件/228链接通过，diff-check通过；未运行模型或代码测试。

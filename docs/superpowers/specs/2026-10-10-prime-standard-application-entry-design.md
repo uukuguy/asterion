@@ -2,7 +2,7 @@
 
 日期：2026-10-10
 
-状态：范围与方向已批准；设计自审及独立合同复审通过，待用户审阅书面设计；实现尚未开始。
+状态：书面设计已获用户批准；本文纳入随后明确的独立应用、模型及 CLI 边界，供实施计划复审；实现尚未开始。
 
 本设计落实 [DECISIONS.md](../../status/DECISIONS.md) D-2026-10-10-02 的入口边界，新增范围由 D-2026-10-10-03 记录。
 实施工作归入 [canonical worklist](../plans/2026-10-08-prime-autonomous-research-interface.md) 的 Task 40，不另建并行任务体系。
@@ -11,17 +11,23 @@
 ## 1. 目标与批准范围
 
 应用以目标、领域工具、数据服务及完成/续跑条件使用 Prime。
+P1–P7 是各自独立的应用；按 Prime 标准构造即可直接运行，不要求登记 provider、assembly、inventory 或 CLI 命令。
+CLI 定位仍待定；现存 CLI/provider/assembly 仅作为兼容适配，本轮不设计统一 CLI，也不借 DCI/Native 推导其定位。
 Prime 在内部管理模型进程、Pi/RPC、扩展装载、会话与适用的执行保障。
 operator 解析本地配置并显式注入授权；通用层只使用注入的私有配置，不自行发现或读取 `.env`、凭据文件及邻接项目。
 
 这次变更保持现有 Prime 稳定基础：复用执行内核、会话、持久后端和通用 runner。
 不创建第二套编排器，不扩展四个已关闭协议，不把私有启动数据写入 manifest。
-所有新增模块继续由根 `pyproject.toml` 定义的同一个 wheel 交付，不拆独立 SDK 或包。
+框架新增模块继续由根 `pyproject.toml` 定义的同一个 wheel 交付，不拆独立 SDK 或包；独立应用可以另行打包自己的领域代码和工具 artifact。
 
 批准范围覆盖 P7 solving/gameplay、official operator、run-story narrator、P1 和 P3–P6 live。
 确定性机制 witness 保留自己的任务与实现；真实模型调用统一进入 Prime。
 范围批准不等于新增基准、官方提交或付费实测授权，也不授权新一轮 BP35。
 专用自动压缩归属 Prime，但恢复其行为接线与真实验证是后续独立变更。
+本轮应用配置固定 P1–P6 为 `deepseek/deepseek-flash`，P7 全部模型路径含 narrator 为 `openai-codex/gpt-6.1-sol`。
+当前本地 metadata 支持这些精确 ID；尚无 `deepseek-flash` 与 `deepseek-v4-flash` 等价证据，禁止猜别名或静默 fallback。
+core 不按 P 编号选择模型；应用 operator 注入精确选择、已核实价格及已有上限，缺少匹配配置在执行前拒绝。
+P2 仍只记录目标模型与边界，不因此增加模型执行；机制 witness 继续无模型。
 
 ## 2. 已验证源码事实
 
@@ -33,7 +39,7 @@ operator 解析本地配置并显式注入授权；通用层只使用注入的�
 | `src/asterion/agents/prime/session.py:54,118` | 公共构造参数接收 RPC/lease；内部使用 `PrimeExecutionKernel` | 收回构造所有权，保留内核 |
 | `src/asterion/agents/prime/backend.py:257,319,405` | 持久后端使用同一内核；attach 校验同一活资源 | 保留 attachment 与未知结果隔离语义 |
 | `src/asterion/runtimes/asterion_prime.py:31` | runtime 适配器转发 session 的 `run()` | runtime identity 不能证明后端已经统一 |
-| `src/asterion/applications/prime/runtime_binding.py:44` | 按精确应用 ID 分派 P1–P7 | 继续显式选择，不增加扫描或隐式发现 |
+| `src/asterion/applications/prime/runtime_binding.py:44` | 现有 provider 路径按精确应用 ID 分派 P1–P7 | 保留兼容适配，直接入口不能依赖此分派 |
 | `src/asterion/applications/prime/p7/operator.py:3924` | 创建 socket、扩展 lease、环境和 Pi argv | 迁到 Prime 私有启动/桥接设施 |
 | `src/asterion/applications/prime/p7/runtime_binding.py:602,616,642` | 构造 binding、RPC 和 Prime session | 应用改为提供领域描述与服务 |
 | `src/asterion/applications/prime/p1/operator.py:1105,1119` | operator 创建 RPC 并注入持久 backend | operator 只保留配置和授权解析 |
@@ -54,10 +60,10 @@ P3–P6 的确定性 witness 与 live 必须分别标注；存在 witness 不代
 
 | 角色 | 所有者与内容 | 不得承担 |
 | --- | --- | --- |
-| `PrimeApplicationSpec` | 应用：精确身份、目标、执行形态、领域工具模块、完成与续跑回调 | Pi 对象、argv、fd、模型进程创建 |
+| `PrimeApplicationSpec` | 应用：本地 application ID/version、目标、执行形态、领域工具 artifact | 注册前置条件、Pi 对象、argv、fd、模型进程创建 |
 | `PrimeOperatorContext` | operator：经预检的配置、授权上限、工作根、私有诊断/证据服务 | 以配置或缓存自行授予执行权 |
 | `PrimeApplicationServices` | 应用/host：数据查询、工具 dispatch、结果与未知 effect 状态 | 启停 RPC、注册私有传输、重置预算 |
-| `create_prime_runtime(...)` | Prime：校验并接管资源，返回现有 `AgentRuntimeClient` | 另造 composer/runner 或隐式发现应用 |
+| `prepare_prime_application(...)` | Prime：校验并接管资源，提供 runtime/model/backend 窄视图 | 查询目录、另造 composer/runner 或隐式发现应用 |
 | 私有 session owner | Prime：进程、lease、桥接、适用会话和清理顺序 | 将私有 owner 暴露给应用去拼装 |
 
 应用数据与回调可以包含私有领域材料，但只能进入显式私有通道。
@@ -68,13 +74,14 @@ operator 注入的凭据保持不可公开表示；错误与公开事件沿用�
 目标调用方向：
 
 ```text
-CLI/operator → selected provider/assembly → Prime runtime factory
-             → Prime 私有 session/backend → 既有执行内核/RPC
-application → 目标、领域工具/数据、完成与续跑条件
-runner      → 已解析 plan、runtime、implementation、只读 host services
+独立 application + operator 注入 → prepare_prime_application
+                                → Prime 私有 session/backend → 既有执行内核/RPC
+现存 CLI/provider/assembly 适配 → 同一直接入口（可选兼容路径）
+既有 runner → 已解析 plan、runtime、implementation、只读 host services
 ```
 
-这保留 CLI/host → provider → assembly → exact implementation → runner 的现有架构。
+直接构造不查询应用目录、不要求 provider_id；本地 application ID/version 用于 trace 与资源身份。
+现有装配路径仍维持其依赖方向和 runner 合同；独立使用 Prime 无需采用这条集成路径。
 Prime 入口只集中后端资源与运行职责；应用目标、证据解释和研究策略仍由领域层提供。
 
 ## 4. 两种执行形态与保障范围
@@ -82,7 +89,7 @@ Prime 入口只集中后端资源与运行职责；应用目标、证据解释�
 ### Text-only model
 
 用于 P3–P6 已有 live 回调和 run-story narrator 等只需要模型输出的任务。
-保留现有无工具/无扩展策略、提示次数、输入输出限制、成本和截止时间约束。
+保留现有无工具/无扩展策略、提示次数、输入输出限制、成本和截止时间约束；模型按第 1 节明确要求更新。
 Prime 接管 RPC、计量、取消与关闭；应用提供目标文本和领域结果解析。
 这是真实模型执行，但不因此声称具有持久 Python 状态、长程研究或进程恢复能力。
 需要多次模型调用的任务仍由已有领域工作流组织，Prime 统一资源与额度入口。
@@ -107,11 +114,16 @@ P7 现有 retained-process 恢复继续检查 ledger 和领域 effect guard。
 继续使用打包 TypeScript 扩展的 `register(pi)`/`registerTool` 通道。
 Prime 核心扩展承担 IPython 桥接、归档/投影、计量和适用的压缩机制。
 应用以显式选定的 typed tool module 提供工具定义、描述、schema 与领域 dispatch。
+应用将该 module 与 Prime 通用注册函数在构建时合为一个自包含 `.mjs` artifact，提供路径及既有工具注册表。
+Prime 使用现有 ExtensionBinding/Lease 固定文件描述符和 digest，仍由既有 loader 调用 `default register(pi, dependencies)`。
+模块身份与完整工具名在注册前和 Python 期望值核对；不新增 wire protocol、插件扫描或核心应用列表。
+当前固定源码只允许 `node:` import，故第三方依赖必须构建时 bundle，不放宽运行时路径/包 import。
 Python 注册表、Pi allowlist、TypeScript 注册和实际 bridge 必须来自同一选择。
 不依靠 prompt 假装注册工具，也不在 runtime 下另造第二套注册机制。
 
 P7 专用 memory hook 和工具组按 P7 模块显式装入。
 通用 Prime core 不默认安装 P7 策略、游戏状态结构或领域约束。
+research/legacy 选择属于 P7 自己的打包入口；core 不维护 P7 selector switch，独立应用增加工具不需要修改框架。
 应用必需的状态注入继续走现有上下文机制；只读回调与执行动作维持原有区别。
 第一阶段保持 P7 工具名字、schema、描述及可见状态行为一致。
 解耦注册位置时不得顺便改变 NOTES 淘汰策略、领域提示或动作执行语义。
@@ -160,7 +172,10 @@ P1 手工 `custom_instructions` 不能作为默认专用自动压缩已经完成
 按现有路径登记配置来源、授权、资源所有者、公开产物和执行形态。
 增加小型 Python 入口，将资源创建集中到 Prime，保留现有执行实现。
 完成标准：可用替身验证两种形态的创建/执行/关闭；创建本身无模型效果。
+未登记的临时独立应用能够直接运行 fake-backend text 与自带 artifact 的 persistent 工具路径；禁用 provider/catalog lookup 仍成功。
 检查应用边界不再要求 RPC/lease 对象，generic runtime/runner 没有领域导入。
+过渡期保持旧消费者可用：先添加新 resolver/view，再迁移调用方；旧 `.command`/factory 适配至全部消费者迁完后删除。
+扩展拆分时在同一提交修改 P1/P7 的 artifact/identity producer，不能先切资源再等待后续应用迁移。
 
 ### 阶段 B：先迁移 P7 全部真实路径
 
@@ -209,6 +224,7 @@ P2 仅记录未来可接入的应用目标、工具/数据和保障边界，不�
 - 历史归档：P7 应用自行组织 Pi 初始化可以作为迁移基线，不能作为新应用模板。
 - 未完成边界：本设计尚未实现；统一 backend、默认专用压缩和跨应用恢复能力均未新增验证。
 
-下一步是复审书面设计并在 Task 40 下形成实现计划；此文不构成已实现或已部署声明。
+下一步是按最新明确边界复审 Task 40 实施计划；此文不构成已实现或已部署声明。
 
 复审记录（2026-10-10）：独立 Sol 合同评审 APPROVE；自审补清注入配置与内核 generation 恢复语义。同步更正 P2 验收指南的语料格式和公开收据字段。`make docs-check` 通过（312 Markdown 文件、221 个本地链接），`git diff --check` 通过；无运行代码变更或模型实测。
+后续修订记录：依用户明确要求补入独立直接入口、精确模型和 CLI 定位待定；上述历史复审结果不自动覆盖本次新增文字，本次没有生产实现或模型实测。

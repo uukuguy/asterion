@@ -343,6 +343,7 @@
 
 ## 🟠 Current Judgments
 
+- **2026-10-10 user correction:** Keep Prime CLI purpose explicitly undecided. Do not conflate DCI/Native with Prime or turn optional CLI discovery into required application registration. P1–P7 are independent applications using a stable Prime library. User requests exact models: P1–P6 `deepseek-flash`; P7 (including narrator) `gpt-6.1-sol`. Follow D-2026-10-10-03 rather than reopening this distinction on resume.
 - **2026-10-10 user scope:** After Task39, the user agreed to first unify existing real-model application entry and resource ownership, keeping Prime a stable foundation. P2's autonomous retrieval capability is separate; this round records its target and boundary. The earlier consolidation deferral is superseded for design by D-2026-10-10-03 in `docs/status/DECISIONS.md`. A future lower-threshold P7 live test remains requested after specialized compaction is wired. Latest measured outcome and next work are in `docs/status/RESUME-NEXT-SESSION.md`.
 - User values exploratory autonomous completion without outer corrections; every level need not reach max score. Useful errors/counterexamples must inform NOTES and later decisions. Complete objective facts and visible concise action/strategy reasons are preferred over extra prescriptive workflows.
 

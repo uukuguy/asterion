@@ -12,6 +12,22 @@ through public contracts, portable across supported runtimes, safe at trust
 boundaries, and verifiable without hidden source-tree dependencies. Strict
 paper reproduction is optional evidence, not a framework prerequisite.
 
+## Prime applications and CLI scope
+
+P1–P7 are independent applications of Asterion Prime. The standard-entry
+migration targets direct library use: an application supplies its domain goals,
+tools, data and completion conditions, while Prime owns private Pi/session
+resources. Central application registration, provider discovery and CLI
+dispatch are not prerequisites of that target interface. Existing wiring has
+not yet completed this migration.
+
+The purpose and scope of a Prime CLI remain **undecided**. Task40 does not
+design a unified application-management CLI. Existing Asterion CLI and
+provider/assembly integrations remain compatibility surfaces; applications
+may have their own commands or consoles. DCI belongs to the Native line, not
+to the Prime application set, and does not establish a need for a Prime CLI.
+See [D-2026-10-10-03](../status/DECISIONS.md#d-2026-10-10-03--stable-prime-application-entry-migrate-existing-live-paths-first).
+
 ## Layers
 
 1. **Runtime Protocol** — versioned lifecycle, capabilities, events, artifacts,
