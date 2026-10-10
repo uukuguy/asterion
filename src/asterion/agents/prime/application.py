@@ -675,32 +675,55 @@ class PrimeApplication:
             self._services.request_stop()
         except Exception:
             effects = False
-        workspace = await self._workspace_owner.close()
-        try:
-            await self._services.close()
-        except Exception:
-            workspace = False
-        try:
-            await _launch.force_close_rpc(resource.rpc)
-        except Exception:
-            model = False
-        try:
-            await asyncio.to_thread(resource.bridge.close)
-        except Exception:
-            bridge = False
+        # Descriptors and process reap have no dependency on a domain close.
+        # Start them before the first await so outer cancellation cannot skip
+        # the independent owners when the domain ignores cancellation.
         try:
             if resource.witness is not None:
                 resource.witness.close()
             resource.close_descriptors()
         except Exception:
             extension = False
+        model_task = asyncio.create_task(_launch.force_close_rpc(resource.rpc))
+        model_task.add_done_callback(_consume_cleanup_result)
+
+        async def close_domain():
+            # Retain the workspace-before-domain order within this branch.
+            closed = await self._workspace_owner.close()
+            await self._services.close()
+            return closed
+
+        domain_task = asyncio.create_task(close_domain())
+        domain_task.add_done_callback(_consume_cleanup_result)
+        try:
+            await asyncio.wait((model_task, domain_task), timeout=5.0)
+        except asyncio.CancelledError:
+            # The outer P1 shutdown deadline revoked waiting, not the already
+            # started independent process reap. Never await resistant cancel.
+            effects = False
+        if not domain_task.done():
+            domain_task.cancel()
+        model = _cleanup_succeeded(model_task)
+        workspace = _cleanup_succeeded(domain_task) and domain_task.result() is True
+        bridge_task = asyncio.create_task(asyncio.to_thread(resource.bridge.close))
+        bridge_task.add_done_callback(_consume_cleanup_result)
+        try:
+            await asyncio.wait((bridge_task,), timeout=0.1)
+        except asyncio.CancelledError:
+            effects = False
+        bridge = _cleanup_succeeded(bridge_task)
+        if not bridge_task.done():
+            bridge_task.cancel()
         # A stuck backend cannot prevent the independent reap above. Its task
         # remains cancelled/fenced and no successful cleanup receipt is issued.
         if self._backend is not None:
             task = asyncio.create_task(self._backend.close())
             task.add_done_callback(_consume_cleanup_result)
-            done, _ = await asyncio.wait((task,), timeout=0.1)
-            if task not in done:
+            try:
+                await asyncio.wait((task,), timeout=0.1)
+            except asyncio.CancelledError:
+                effects = False
+            if not task.done():
                 task.cancel()
                 effects = False
             else:
@@ -775,6 +798,12 @@ class PrimeApplication:
         if self._cleanup.complete:
             self._state = 'closed'
         return self._cleanup
+
+
+def _cleanup_succeeded(task):
+    if not task.done() or task.cancelled():
+        return False
+    return task.exception() is None
 
 
 def _consume_cleanup_result(task):

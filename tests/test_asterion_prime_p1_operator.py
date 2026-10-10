@@ -502,6 +502,50 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(resources.private_root.exists())
         self.assertNotIn("runner.terminal", trace)
 
+    async def test_blocked_domain_close_cannot_skip_pi_reap_at_outer_deadline(self):
+        from asterion.applications.prime.p1 import operator
+
+        resources, _, _ = await self.fixture()
+        material = resources.application._persistent
+        real_rpc = PiRpcSession(PiRpcConfig(
+            command=(sys.executable, '-I', '-c', 'import time; time.sleep(30)'),
+            cwd=resources.private_root, environment={}, deadline_seconds=1))
+        real_rpc.start()
+        process = real_rpc.process
+        material.rpc = real_rpc
+        services = resources.application.services
+        original_close = services.close
+        entered, released = asyncio.Event(), asyncio.Event()
+
+        async def wait_blocked():
+            entered.set()
+            while not released.is_set():
+                try:
+                    await released.wait()
+                except asyncio.CancelledError:
+                    pass
+            await original_close()
+
+        async def blocked_close():
+            await services._on_loop(wait_blocked())
+
+        try:
+            services.close = blocked_close
+            start = time.monotonic()
+            with patch.object(operator, '_CLEANUP_SECONDS', 0.2):
+                receipt = await resources.close_in_owner_order()
+            self.assertTrue(entered.is_set())
+            self.assertLess(time.monotonic() - start, 0.8)
+            self.assertFalse(receipt.complete)
+            self.assertIsNotNone(process.poll(), 'Pi process was not independently reaped')
+            self.assertIsNone(real_rpc.process)
+            self.assertTrue(material.lease.closed)
+        finally:
+            services.close = original_close
+            released.set()
+            await resources.application.close()
+            real_rpc.stop()
+
     async def test_unresponsive_cleanup_and_runner_never_make_unbounded_awaits(self):
         from asterion.applications.prime.p1 import operator
 
