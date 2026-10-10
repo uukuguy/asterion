@@ -1,4 +1,8 @@
-"""Asterion-owned Prime-style agent implementation."""
+"""Asterion-owned Prime-style agent implementation.
+
+Independent application ownership is exposed by ``agents.prime.application``.
+The session exports below remain available for compatibility and mechanism tests.
+"""
 
 from asterion.agents.prime.session import (
     ASTERION_PRIME_CAPABILITIES,
