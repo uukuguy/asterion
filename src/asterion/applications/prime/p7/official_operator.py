@@ -156,7 +156,7 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
                 pi_entry=live.resolve_pi_entry(environment),
                 environment=environment,
             ),
-            live.extension_path(),
+            live.extension_path(research_mode=True),
             api_key,
         )
     except Exception:

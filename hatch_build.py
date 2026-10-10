@@ -1,4 +1,4 @@
-"""Bundle IPython and private context observers into one installed Pi extension."""
+"""Bundle core and application tool modules into explicit installed Pi extensions."""
 
 from __future__ import annotations
 
@@ -14,6 +14,8 @@ from hatchling.builders.hooks.plugin.interface import BuildHookInterface
 
 _PACKAGE = "packages/typescript/asterion-prime-extension"
 _BUNDLE = "src/asterion/applications/prime/resources/ipython-extension.mjs"
+_BUNDLES = (_BUNDLE, "src/asterion/applications/prime/resources/p7-research-extension.mjs",
+            "src/asterion/applications/prime/resources/p7-legacy-extension.mjs")
 _ATTESTATION = ".asterion-prime-extension-build.json"
 _INPUTS = tuple(sorted((
     "hatch_build.py",
@@ -21,8 +23,11 @@ _INPUTS = tuple(sorted((
     *(f"{_PACKAGE}/{name}" for name in (
         "package.json", "package-lock.json", "tsconfig.json",
         "tsconfig.contract.json", "test/pi-contract.ts",
-        "src/ipython-extension.ts", "src/context-counter.ts",
-        "src/context-projection.ts", "src/context-witness.ts",
+        "scripts/build.mjs", "src/ipython-extension.ts", "src/tool-bridge.ts",
+        "src/p7-tools.ts", "src/p7-research-extension.ts", "src/p7-legacy-extension.ts",
+        "src/context-counter.ts", "src/context-projection.ts", "src/context-witness.ts",
+        "src/context-memory.ts", "src/context-archive.ts", "src/context-metrics.ts",
+        "src/tool-state-view.ts", "src/tool-schema.ts", "src/provider-prefix-metrics.ts",
     )),
 )))
 
@@ -46,16 +51,18 @@ def _input_digests(root: Path) -> list[dict[str, str]]:
 
 def _attestation(
     root: Path,
-    bundle: bytes | None = None,
+    bundles: dict[str, bytes] | None = None,
     inputs: list[dict[str, str]] | None = None,
 ) -> bytes:
     value = {
         "contract": "asterion.prime-extension-build/v1",
         "inputs": _input_digests(root) if inputs is None else inputs,
-        "output": {
-            "path": _BUNDLE,
-            "sha256": hashlib.sha256(_read(root, _BUNDLE) if bundle is None else bundle).hexdigest(),
-        },
+        "outputs": [
+            {"path": name, "sha256": hashlib.sha256(
+                _read(root, name) if bundles is None else bundles[name]
+            ).hexdigest()}
+            for name in _BUNDLES
+        ],
     }
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
@@ -103,15 +110,17 @@ class CustomBuildHook(BuildHookInterface):
             )
             if inputs != _input_digests(root):
                 raise ValueError("extension build closure is invalid")
-            attestation.write_bytes(_attestation(root, bundle.read_bytes(), inputs))
+            compiled = {name: (staging / Path(name).name).read_bytes() for name in _BUNDLES}
+            attestation.write_bytes(_attestation(root, compiled, inputs))
             force_include = build_data.setdefault("force_include", {})
             if not isinstance(force_include, dict):
                 raise ValueError("extension build closure is invalid")
+            for name in _BUNDLES:
+                force_include[str(staging / Path(name).name)] = (
+                    name if self.target_name == "sdist" else name.removeprefix("src/")
+                )
             if self.target_name == "sdist":
-                force_include[str(bundle)] = _BUNDLE
                 force_include[str(attestation)] = _ATTESTATION
-            else:
-                force_include[str(bundle)] = _BUNDLE.removeprefix("src/")
         except BaseException:
             self.finalize("", {}, "")
             raise

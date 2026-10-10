@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import asdict, dataclass
+from importlib import resources as importlib_resources
 import json
 import os
 from pathlib import Path
@@ -33,6 +34,7 @@ from asterion.agents.prime.execution import AsterionPrimeLimits
 from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
 from asterion.agents.prime.summarization import compaction_custom_instructions
+from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY, TOOL_REGISTRY_ENV
 from asterion.applications.first_party_packages import (
     create_prime_ipython_coding_native_package,
 )
@@ -963,6 +965,17 @@ class _Preflight:
     extension_path: Path
 
 
+def _extension_path() -> Path:
+    """Resolve P1's core-only artifact from the installed wheel."""
+    resource = importlib_resources.files("asterion.applications.prime").joinpath(
+        "resources/ipython-extension.mjs"
+    )
+    path = Path(str(resource))
+    if not path.is_file():
+        raise P1OperatorError()
+    return path.resolve(strict=True)
+
+
 def _preflight(environment: Mapping[str, str]) -> _Preflight:
     """Refuse source execution, then resolve every operator-owned input.
 
@@ -1016,7 +1029,10 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
             node=live.resolve_node(resolved), pi_entry=live.resolve_pi_entry(resolved),
             environment=resolved,
         )
-        extension = live.extension_path()
+        command = list(pi_base_command)
+        command[command.index("--tools") + 1] = ",".join(CORE_TOOL_REGISTRY.tool_names)
+        pi_base_command = tuple(command)
+        extension = _extension_path()
     except live.P7LiveSolveError:
         raise P1OperatorError() from None
     # Bound the two compaction callbacks before any model process can start.
@@ -1048,6 +1064,7 @@ async def _build_resources(preflight: _Preflight) -> P1OperatorResources:
             ("prime.tool.ipython",),
             descriptors,
             {
+                TOOL_REGISTRY_ENV: CORE_TOOL_REGISTRY.environment_value(),
                 "ASTERION_PRIME_IPYTHON_FD": str(bridge_pi.fileno()),
                 "ASTERION_PRIME_IPYTHON_CONTEXT_FD": str(witness_pi.fileno()),
                 "ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE": nonce,

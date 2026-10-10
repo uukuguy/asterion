@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "tsc -p tsconfig.contract.json",
-    "build": "npm run typecheck && esbuild src/ipython-extension.ts --bundle --platform=node --format=esm --target=node20 --supported:template-literal=false --outfile=dist/ipython-extension.mjs --legal-comments=none --minify-syntax --minify-whitespace --footer:js=\"export default register;\"",
+    "build": "npm run typecheck && node scripts/build.mjs",
     "test": "npm run build && node --test test/ipython-extension.test.mjs test/context-witness.test.mjs test/context-memory.test.mjs test/tool-state-view.test.mjs test/provider-prefix-metrics.test.mjs",
     "test:installed-pi": "npm run build && node test/installed-pi-memory-probe.mjs",
     "sync-resource": "npm run build && node scripts/sync-runtime-resource.mjs --write",

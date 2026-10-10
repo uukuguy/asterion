@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 
 from asterion.agents.prime import PrimeApplicationToolRegistry
@@ -7,6 +8,18 @@ from asterion.runtime.protocol import ProtocolError
 
 
 class TestPrimeApplicationToolRegistry(unittest.TestCase):
+    def test_core_registry_serializes_the_complete_expected_registration(self) -> None:
+        from asterion.agents.prime import tool_registry
+
+        registry = getattr(tool_registry, "CORE_TOOL_REGISTRY", None)
+        self.assertIsInstance(registry, PrimeApplicationToolRegistry)
+        self.assertEqual(tool_registry.TOOL_REGISTRY_ENV, "ASTERION_PRIME_IPYTHON_TOOL_REGISTRY")
+        self.assertEqual(json.loads(registry.environment_value()), {
+            "module_id": "prime.ipython",
+            "capability_id": "prime.tool.ipython",
+            "tool_names": ["ipython"],
+        })
+
     def test_accepts_sorted_unique_names_and_freezes_input(self) -> None:
         registry = PrimeApplicationToolRegistry(
             "prime.example.tools", "prime.tool.example", ("ipython", "tool.z")

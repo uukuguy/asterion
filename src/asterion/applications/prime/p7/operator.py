@@ -105,6 +105,7 @@ from asterion.applications.prime.p7.prompt import (
 )
 from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
 from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY, P7_LEGACY_TOOL_REGISTRY
+from asterion.agents.prime.tool_registry import TOOL_REGISTRY_ENV
 from asterion.applications.prime.p7.console_events import ConsoleEventWriter, public_narrative, public_text
 from asterion.applications.provider import InstalledApplication, resolve_installed_provider
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
@@ -3870,6 +3871,8 @@ def build_p7_operator_resources(
                              deadline=task_deadline if task_deadline is not None else (
                                  None if deadline_ms is None else time.monotonic() + deadline_ms / 1000))
         research_mode = variant == "verified" and not cognition_mode
+        selected_tools = P7_TOOL_REGISTRY if research_mode else P7_LEGACY_TOOL_REGISTRY
+        extension_path = live.select_extension_path(extension_path, research_mode=research_mode)
         # The ARC credential belongs only to the SDK session. The Pi model
         # subprocess needs the model host key, never the scorecard key.
         provider_environment = {
@@ -3883,10 +3886,9 @@ def build_p7_operator_resources(
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
+        provider_environment.pop(TOOL_REGISTRY_ENV, None)
         provider_environment.pop("ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD", None)
         provider_environment.pop("ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD", None)
-        if not research_mode:
-            provider_environment["ASTERION_PRIME_P7_TOOL_MODE"] = "legacy"
         if environment.get("ASTERION_PRIME_DEBUG_TRANSCRIPT") == "1":
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT"] = "1"
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH"] = str(
@@ -3937,7 +3939,11 @@ def build_p7_operator_resources(
             path=extension_path,
             capabilities=("prime.tool.ipython",),
             inherited_fds=tuple(sorted((descriptor, *metrics_fds))),
-            environment={"ASTERION_PRIME_IPYTHON_FD": str(descriptor), **metrics_environment},
+            environment={
+                "ASTERION_PRIME_IPYTHON_FD": str(descriptor),
+                TOOL_REGISTRY_ENV: selected_tools.environment_value(),
+                **metrics_environment,
+            },
         )
         lease = binding.preflight()
         child.close()
@@ -3947,7 +3953,6 @@ def build_p7_operator_resources(
         approved_environment = {**provider_environment, **dict(lease.environment)}
         # The installed Pi command and runtime registry must expose the same
         # exact tool set. Historical cognition uses its explicit legacy set.
-        selected_tools = P7_TOOL_REGISTRY if research_mode else P7_LEGACY_TOOL_REGISTRY
         base_command = list(configured_command)
         if "--tools" in base_command:
             base_command[base_command.index("--tools") + 1] = ",".join(selected_tools.tool_names)
@@ -4465,6 +4470,11 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             resolved["ASTERION_PRIME_P7_RUN_MODE"] = "sweep"
             resolved["OPERATION_MODE"] = "offline"
         arc_root = live.resolve_arc_root(resolved)
+        game = _select_game_for_mode(environment, resolved, arc_root)
+        research_mode = (
+            _resolve_history_variant(resolved, game) == "verified"
+            and environment.get("ASTERION_PRIME_P7_RUN_MODE") != "cognition"
+        )
         return P7Invocation(
             operator_root=root,
             environment=resolved,
@@ -4474,8 +4484,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
                 pi_entry=live.resolve_pi_entry(resolved),
                 environment=resolved,
             ),
-            extension_path=live.extension_path(),
-            game=_select_game_for_mode(environment, resolved, arc_root),
+            extension_path=live.extension_path(research_mode=research_mode),
+            game=game,
             sweep_mode=environment.get("ASTERION_PRIME_P7_RUN_MODE") == "sweep",
             resume_run_id=resume_run_id,
             fresh_target_policy=fresh_target_policy,

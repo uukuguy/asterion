@@ -14,7 +14,7 @@ import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 FAKE_PI = ROOT / "tests/fixtures/asterion_prime/fake_pi_rpc.py"
-EXTENSION = "asterion/applications/prime/resources/ipython-extension.mjs"
+EXTENSION = "asterion/applications/prime/resources/p7-legacy-extension.mjs"
 LOADER = "asterion/runtimes/resources/asterion_pi_extension_loader.mjs"
 
 
@@ -182,7 +182,7 @@ async def main():
     assert witness.target_level == 1
     target_level = int(__import__("os").environ["P7_TEST_TARGET_LEVEL"])
     trace = root / f"trace-{target_level}"; trace.mkdir()
-    extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/ipython-extension.mjs"))).resolve()
+    extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/p7-legacy-extension.mjs"))).resolve()
     worker = Worker()
     worker.target_level = target_level
     engine = Engine()

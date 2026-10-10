@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {readFileSync} from "node:fs";
 import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
-import {createAppLevelTools,registerP7MemoryContext,registerProviderPrefixMetrics} from "../dist/ipython-extension.mjs";
+import {createAppLevelTools,registerP7MemoryContext,registerProviderPrefixMetrics} from "../dist/p7-research-extension.mjs";
 
 const packageRoot = resolve(process.env.ASTERION_TEST_PI_PACKAGE_ROOT
   ?? "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent");

@@ -4,7 +4,7 @@ import {mkdtempSync,openSync,readFileSync,writeFileSync,rmSync,closeSync,fstatSy
 import {tmpdir} from "node:os";
 import {join} from "node:path";
 import {Check} from "typebox/value";
-import * as extension from "../dist/ipython-extension.mjs";
+import * as extension from "../dist/p7-research-extension.mjs";
 
 const revision = "sha256:" + "a".repeat(64);
 const nextRevision = "sha256:" + "b".repeat(64);
@@ -219,7 +219,7 @@ test("raw branch recovery retains current note refresh through native compaction
 });
 
 test("registered context hooks share a 4 KiB diagnostic budget without changing projections or error fallback", async () => {
-  const bounded = await import("../dist/ipython-extension.mjs?diagnostic-budget");
+  const bounded = await import("../dist/p7-research-extension.mjs?diagnostic-budget");
   const hooks = [];
   for (let index=0;index<2;index++) {
     assert.equal(bounded.registerP7MemoryContext({on:(event,handler) => {
@@ -420,6 +420,7 @@ test("successful extension registration releases metrics descriptor on native se
     process.env.ASTERION_PRIME_IPYTHON_FD=String(bridgeDescriptor);
     process.env[environment]=String(descriptor);
     const hooks=new Map();
+    process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(extension.p7ResearchModule.registry);
     extension.register({registerTool:()=>{},on:(event,handler)=>hooks.set(event,handler)});
     assert.equal(process.env[environment],undefined);
     assert.ok(fstatSync(descriptor).isFile());

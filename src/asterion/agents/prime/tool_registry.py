@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import re
 
 from asterion.runtime.protocol import IDENTIFIER, ProtocolError
+
+
+TOOL_REGISTRY_ENV = "ASTERION_PRIME_IPYTHON_TOOL_REGISTRY"
 
 
 _TOOL_NAME = re.compile(r"^[a-z][a-z0-9_.:-]{0,255}$")
@@ -39,6 +43,17 @@ class PrimeApplicationToolRegistry:
     def allowed_tool_names(self) -> tuple[str, ...]:
         return self.tool_names
 
+    def environment_value(self) -> str:
+        """Serialize the complete expected module registration for its artifact."""
+        return json.dumps(
+            {
+                "module_id": self.module_id,
+                "capability_id": self.capability_id,
+                "tool_names": self.tool_names,
+            },
+            separators=(",", ":"),
+        )
+
     def matches(self, module_id: str, capability_id: str) -> bool:
         return (
             type(module_id) is str
@@ -48,4 +63,9 @@ class PrimeApplicationToolRegistry:
         )
 
 
-__all__ = ("PrimeApplicationToolRegistry",)
+CORE_TOOL_REGISTRY = PrimeApplicationToolRegistry(
+    "prime.ipython", "prime.tool.ipython", ("ipython",)
+)
+
+
+__all__ = ("CORE_TOOL_REGISTRY", "PrimeApplicationToolRegistry", "TOOL_REGISTRY_ENV")

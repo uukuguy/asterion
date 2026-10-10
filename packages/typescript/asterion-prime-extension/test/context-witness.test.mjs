@@ -175,24 +175,26 @@ test("failed environment or tool registration closes the context descriptor", as
       const sockets=await pair();
       try{
         const source=`
-          import register from ${JSON.stringify(artifact)};
+          import register, {coreOnlyModule} from ${JSON.stringify(artifact)};
           import {fstatSync} from 'node:fs';
           const kind=process.argv[1];
+          process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY=JSON.stringify(coreOnlyModule.registry);
           const deps=Object.freeze({buildSessionContext(){return {messages:[]};},convertToLlm(){return [];},serializeConversation(){return "";}});
           if(kind!=='missing-ipython-fd')process.env.ASTERION_PRIME_IPYTHON_FD='999998';
           process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD=kind==='closed-descriptor'?'999999':'3';
           if(kind!=='missing-nonce')process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE=${JSON.stringify(launch)};
-          let message=null;
-          try{register(kind==='invalid-api'?null:{on(){},registerTool(){throw new Error(${JSON.stringify(secret)})}},deps)}catch(error){message=error.message}
+          let message=null,toolReached=false;
+          try{register(kind==='invalid-api'?null:{on(){},registerTool(){toolReached=true;throw new Error(${JSON.stringify(secret)})}},deps)}catch(error){message=error.message}
           await new Promise(done=>setImmediate(done));
           let closed=false;try{fstatSync(kind==='closed-descriptor'?999999:3)}catch{closed=true}
-          process.stdout.write(JSON.stringify({closed,message,removed:process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD===undefined}));
+          process.stdout.write(JSON.stringify({closed,message,toolReached,removed:process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD===undefined}));
           process.exit(0);
         `;
         const child=spawnSync(process.execPath,["--input-type=module","-e",source,kind],{stdio:["ignore","pipe","pipe",sockets.client._handle.fd],encoding:"utf8",timeout:3000});
         assert.equal(child.status,0);assert.equal(child.stderr,"");
         const result=JSON.parse(child.stdout);
         assert.equal(result.closed,true);assert.equal(result.removed,true);
+        assert.equal(result.toolReached,kind==="registration-failure");
         assert.equal(result.message,"Asterion ipython bridge is unavailable");
       }finally{sockets.close();}
     });

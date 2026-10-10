@@ -66,7 +66,8 @@ ARC_ROOT_ENV = "ASTERION_PRIME_ARC_ROOT"
 NODE_ENV = "ASTERION_PRIME_NODE"
 PI_ENTRY_ENV = "ASTERION_PRIME_PI_ENTRY"
 PI_AGENT_DIR_ENV = "ASTERION_PRIME_PI_AGENT_DIR"
-_EXTENSION_RESOURCE = "resources/ipython-extension.mjs"
+_RESEARCH_EXTENSION_RESOURCE = "resources/p7-research-extension.mjs"
+_LEGACY_EXTENSION_RESOURCE = "resources/p7-legacy-extension.mjs"
 # The fixed Pi RPC contract this application launches. It is the same mode
 # surface the intact run-story narrator uses; only the tool exposure differs,
 # because the solve reaches the game through the packaged IPython extension.
@@ -1196,24 +1197,28 @@ def pi_base_command(
         raise P7LiveSolveError("Prime reasoning effort is invalid") from None
 
 
-def extension_path() -> Path:
-    """Resolve the packaged Pi extension the runtime pins.
+def _extension_resource_path(resource: str) -> Path:
+    return Path(str(importlib_resources.files("asterion.applications.prime").joinpath(resource)))
 
-    The installed resource is the only source. The removed driver fell back to
-    a path inside the repository's TypeScript tree, which an installed wheel
-    cannot reach and a released application must not depend on.
-    """
 
-    installed = Path(
-        str(
-            importlib_resources.files("asterion.applications.prime").joinpath(
-                _EXTENSION_RESOURCE
-            )
-        )
-    )
+def extension_path(*, research_mode: bool = True) -> Path:
+    """Resolve P7's explicit application artifact from the installed wheel."""
+    resource = _RESEARCH_EXTENSION_RESOURCE if research_mode else _LEGACY_EXTENSION_RESOURCE
+    installed = _extension_resource_path(resource)
     if installed.is_file():
         return installed.resolve(strict=True)
     raise P7LiveSolveError("P7 extension is unavailable")
+
+
+def select_extension_path(path: Path, *, research_mode: bool) -> Path:
+    """Switch packaged P7 artifacts while preserving explicit injected artifacts."""
+    installed_paths = (
+        _extension_resource_path(_RESEARCH_EXTENSION_RESOURCE),
+        _extension_resource_path(_LEGACY_EXTENSION_RESOURCE),
+    )
+    if path in installed_paths:
+        return extension_path(research_mode=research_mode)
+    return path
 
 
 def private_root(operator_root: Path, run_id: str) -> Path:
@@ -1433,6 +1438,7 @@ __all__ = (
     "client_module_source",
     "compare_if_available",
     "extension_path",
+    "select_extension_path",
     "find_baseline_trace",
     "load_operator_environment",
     "pi_base_command",

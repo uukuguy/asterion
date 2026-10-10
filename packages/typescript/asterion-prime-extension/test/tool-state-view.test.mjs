@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
 import test from "node:test";
-import * as extension from "../dist/ipython-extension.mjs";
+import * as extension from "../dist/p7-research-extension.mjs";
 
 const version = "asterion.prime-tool-state-view/v1";
 const proposal = replacement_text => ({version,state_key:"document.current-board",replacement_text});

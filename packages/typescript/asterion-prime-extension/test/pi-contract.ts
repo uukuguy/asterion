@@ -2,13 +2,13 @@ import type { Static, TSchema } from "typebox";
 
 import {
   IPYTHON_PARAMETERS,
-  P7_WORKSPACE_PARAMETERS,
-  P7_EXECUTE_PLAN_PARAMETERS,
   createIpythonTool,
   register,
   type IpythonBridge,
   type IpythonToolResult,
 } from "../src/ipython-extension.js";
+
+import { P7_WORKSPACE_PARAMETERS, P7_EXECUTE_PLAN_PARAMETERS } from "../src/p7-tools.js";
 
 declare const bridge: IpythonBridge;
 

@@ -20,6 +20,8 @@ from zipfile import ZipFile
 PROJECT = Path(__file__).resolve().parents[1]
 PACKAGE = "packages/typescript/asterion-prime-extension"
 BUNDLE = "src/asterion/applications/prime/resources/ipython-extension.mjs"
+BUNDLES = (BUNDLE, "src/asterion/applications/prime/resources/p7-research-extension.mjs",
+           "src/asterion/applications/prime/resources/p7-legacy-extension.mjs")
 ATTESTATION = ".asterion-prime-extension-build.json"
 INPUTS = tuple(sorted((
     "hatch_build.py",
@@ -27,8 +29,11 @@ INPUTS = tuple(sorted((
     *(f"{PACKAGE}/{name}" for name in (
         "package.json", "package-lock.json", "tsconfig.json",
         "tsconfig.contract.json", "test/pi-contract.ts",
-        "src/ipython-extension.ts", "src/context-counter.ts",
-        "src/context-projection.ts", "src/context-witness.ts",
+        "scripts/build.mjs", "src/ipython-extension.ts", "src/tool-bridge.ts",
+        "src/p7-tools.ts", "src/p7-research-extension.ts", "src/p7-legacy-extension.ts",
+        "src/context-counter.ts", "src/context-projection.ts", "src/context-witness.ts",
+        "src/context-memory.ts", "src/context-archive.ts", "src/context-metrics.ts",
+        "src/tool-state-view.ts", "src/tool-schema.ts", "src/provider-prefix-metrics.ts",
     )),
 )))
 
@@ -60,10 +65,12 @@ def _expected_attestation(root: Path, bundle: bytes | None = None) -> bytes:
             {"path": name, "sha256": hashlib.sha256((root / name).read_bytes()).hexdigest()}
             for name in INPUTS
         ],
-        "output": {
-            "path": BUNDLE,
-            "sha256": hashlib.sha256((root / BUNDLE).read_bytes() if bundle is None else bundle).hexdigest(),
-        },
+        "outputs": [
+            {"path": name, "sha256": hashlib.sha256(
+                (root / name).read_bytes() if bundle is None else bundle
+            ).hexdigest()}
+            for name in BUNDLES
+        ],
     })
 
 
@@ -88,11 +95,13 @@ class TestPrimeExtensionBuild(unittest.TestCase):
             if len(command) > 3 else self.root / PACKAGE / "dist/ipython-extension.mjs"
         )
         source.parent.mkdir(parents=True, exist_ok=True)
-        source.write_bytes(self.compiled)
+        for name in BUNDLES:
+            (source.parent / Path(name).name).write_bytes(self.compiled)
 
     def _sdist(self) -> None:
         (self.root / "PKG-INFO").write_text("Metadata-Version: 2.4\nName: asterion\nVersion: 0.1.0\n")
-        self.bundle.write_bytes(self.compiled)
+        for name in BUNDLES:
+            (self.root / name).write_bytes(self.compiled)
         (self.root / ATTESTATION).write_bytes(_expected_attestation(self.root))
 
     def test_source_targets_compile_and_attest_before_collection(self) -> None:
@@ -112,6 +121,16 @@ class TestPrimeExtensionBuild(unittest.TestCase):
                 hook.finalize("standard", {}, "unused")
                 self.assertFalse(bundle.exists())
                 self.assertFalse((self.root / ATTESTATION).exists())
+
+    def test_source_build_stages_all_explicit_application_artifacts(self) -> None:
+        hook = _hook(self.root, "wheel")
+        self.addCleanup(hook.finalize, "standard", {}, "unused")
+        data = {}
+        with patch("subprocess.run", side_effect=self._compile):
+            hook.initialize("standard", data)
+        for name in ("ipython-extension.mjs", "p7-research-extension.mjs", "p7-legacy-extension.mjs"):
+            artifact = self._mapped(data, "asterion/applications/prime/resources/" + name)
+            self.assertEqual(artifact.read_bytes(), self.compiled)
 
     def _mapped(self, data, destination: str) -> Path:
         self.assertIn("force_include", data, "build must stage forced resources")
@@ -205,7 +224,7 @@ class TestPrimeExtensionBuild(unittest.TestCase):
                         marker.unlink()
 
     def test_sdist_missing_or_drifted_closure_fails_before_subprocess(self) -> None:
-        for damage in ("bundle-missing", "attestation-missing", "bundle-drift",
+        for damage in ("bundle-missing", "app-bundle-missing", "app-bundle-drift", "attestation-missing", "bundle-drift",
                        "attestation-drift", "input-drift", "noncanonical",
                        "output-path", "digest-type", "extra-input"):
             with self.subTest(damage=damage):
@@ -213,6 +232,10 @@ class TestPrimeExtensionBuild(unittest.TestCase):
                 attestation = self.root / ATTESTATION
                 if damage == "bundle-missing":
                     self.bundle.unlink()
+                elif damage == "app-bundle-missing":
+                    (self.root / BUNDLES[1]).unlink()
+                elif damage == "app-bundle-drift":
+                    (self.root / BUNDLES[2]).write_bytes(b"different-version")
                 elif damage == "attestation-missing":
                     attestation.unlink()
                 elif damage == "bundle-drift":
@@ -228,9 +251,9 @@ class TestPrimeExtensionBuild(unittest.TestCase):
                 else:
                     value = json.loads(attestation.read_bytes())
                     if damage == "output-path":
-                        value["output"]["path"] = "../outside.mjs"
+                        value["outputs"][0]["path"] = "../outside.mjs"
                     elif damage == "digest-type":
-                        value["output"]["sha256"] = [value["output"]["sha256"]]
+                        value["outputs"][0]["sha256"] = [value["outputs"][0]["sha256"]]
                     else:
                         value["inputs"].append({"path": "extra.ts", "sha256": "0" * 64})
                     attestation.write_bytes(_canonical(value))
@@ -263,8 +286,8 @@ class TestPrimeExtensionBuildDistribution(unittest.TestCase):
                 archive.extractall(root)
             extracted = root / prefix
             attestation = json.loads((extracted / ATTESTATION).read_bytes())
-            bundle = (extracted / BUNDLE).read_bytes()
-            self.assertEqual(attestation["output"]["sha256"], hashlib.sha256(bundle).hexdigest())
+            for output in attestation["outputs"]:
+                self.assertEqual(output["sha256"], hashlib.sha256((extracted / output["path"]).read_bytes()).hexdigest())
             no_commands = root / "no-commands"
             no_commands.mkdir()
             wheel_build = subprocess.run(
@@ -284,10 +307,10 @@ class TestPrimeExtensionBuildDistribution(unittest.TestCase):
                 builds = tuple(pool.map(direct_build, ("direct-one", "direct-two")))
             for build in builds:
                 self.assertEqual(build.returncode, 0, build.stderr)
-            wheel_resource = BUNDLE.removeprefix("src/")
             for target in ("rebuilt", "direct-one", "direct-two"):
                 with ZipFile(next((root / target).glob("*.whl"))) as archive:
-                    self.assertEqual(archive.read(wheel_resource), bundle)
+                    for name in BUNDLES:
+                        self.assertEqual(archive.read(name.removeprefix("src/")), (extracted / name).read_bytes())
 
 
 if __name__ == "__main__":

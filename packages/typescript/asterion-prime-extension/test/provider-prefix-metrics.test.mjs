@@ -109,6 +109,7 @@ test("prefix descriptor ownership covers registration failure shutdown and silen
     const bridge=openSync(join(root,"bridge"),"w+",0o600);descriptors.push(bridge);
     const active=openSync(join(root,"active.json"),"w+",0o600);descriptors.push(active);
     process.env[environment]=String(active);process.env.ASTERION_PRIME_IPYTHON_FD=String(bridge);
+    process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY=JSON.stringify(extension.coreOnlyModule.registry);
     const handlers=new Map();extension.register({registerTool:()=>{},on:(event,fn)=>handlers.set(event,fn)});
     const request=payload();assert.equal(handlers.get("before_provider_request")({type:"before_provider_request",payload:request}),undefined);
     handlers.get("session_shutdown")();assert.throws(()=>fstatSync(active),{code:"EBADF"});

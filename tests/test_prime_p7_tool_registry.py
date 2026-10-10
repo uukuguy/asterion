@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 from asterion.applications.prime.p7.tool_registry import (
@@ -13,6 +15,22 @@ from asterion.runtime.protocol import ProtocolError
 
 
 class TestP7ToolRegistry(unittest.TestCase):
+    def test_live_selects_explicit_application_artifacts(self) -> None:
+        from asterion.applications.prime.p7 import live
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            resources = root / "resources"
+            resources.mkdir()
+            for name in ("ipython-extension", "p7-research-extension", "p7-legacy-extension"):
+                (resources / (name + ".mjs")).write_text("export default function register() {}")
+            with patch.object(live.importlib_resources, "files", return_value=root):
+                self.assertEqual(live.extension_path().name, "p7-research-extension.mjs")
+                self.assertEqual(live.extension_path(research_mode=False).name, "p7-legacy-extension.mjs")
+                (resources / "p7-research-extension.mjs").unlink()
+                with self.assertRaises(live.P7LiveSolveError):
+                    live.extension_path()
+
     def test_registry_has_exact_identity_and_canonical_names(self) -> None:
         self.assertEqual(P7_TOOL_MODULE_ID, "prime.p7.application-tools")
         self.assertEqual(P7_TOOL_CAPABILITY_ID, "prime.tool.p7")

@@ -18,7 +18,8 @@ import test from "node:test";
 import { IsSchema } from "typebox";
 import { Check } from "typebox/value";
 
-import register, {
+import register, { registerPrime, coreOnlyModule } from "../dist/ipython-extension.mjs";
+import registerResearch, {
   PROTOCOL,
   canonicalJson,
   composeSummarizationRequest,
@@ -32,7 +33,9 @@ import register, {
   summarizeInstruction,
   toolNames,
   registerP7MemoryContext,
-} from "../dist/ipython-extension.mjs";
+  p7ResearchModule, p7LegacyModule,
+} from "../dist/p7-research-extension.mjs";
+import registerLegacy, { toolNames as legacyToolNames } from "../dist/p7-legacy-extension.mjs";
 
 const artifactPath = resolve("dist/ipython-extension.mjs");
 // The native side owns the prompt material and delivers it on the arm frame.
@@ -226,10 +229,107 @@ function readJsonLine(socket) {
   });
 }
 
+test("core-only registration installs no P7 tools or memory context hook", () => {
+  const tools = [], hooks = [];
+  process.env.ASTERION_PRIME_IPYTHON_FD = "7";
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify({
+    module_id: "prime.ipython", capability_id: "prime.tool.ipython", tool_names: ["ipython"],
+  });
+  register({registerTool: tool => tools.push(tool), on: event => hooks.push(event)});
+  assert.deepEqual(tools.map(tool => tool.name), ["ipython"]);
+  assert.equal(hooks.includes("context"), false);
+  assert.equal(process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY, undefined);
+});
+
+test("explicit legacy artifact preserves its complete historical tool set", () => {
+  const names = [], hooks = [];
+  process.env.ASTERION_PRIME_IPYTHON_FD = "77";
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(p7LegacyModule.registry);
+  registerLegacy({registerTool: tool => names.push(tool.name), on: event => hooks.push(event)});
+  assert.deepEqual(names, [...p7LegacyModule.registry.tool_names]);
+  assert.deepEqual(legacyToolNames(), names);
+  assert.equal(hooks.includes("context"), true);
+  assert.equal(names.includes("p7_workspace"), false);
+});
+
+test("an external typed application module registers without a core application selector", () => {
+  const tools = [], hooks = [];
+  const registry = {module_id: "external.application-tools", capability_id: "external.tool.demo",
+    tool_names: ["external_query", "ipython"]};
+  const module = {
+    registry,
+    createTools: () => [{name: "external_query", label: "query", description: "Query the application.",
+      parameters: {type: "object", properties: {}, additionalProperties: false},
+      execute: async () => ({content: [{type: "text", text: "ok"}], details: {}})}],
+    registerContextHooks: () => hooks.push("external-context"),
+  };
+  process.env.ASTERION_PRIME_IPYTHON_FD = "77";
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(registry);
+  registerPrime({registerTool: tool => tools.push(tool.name)}, undefined, module);
+  assert.deepEqual(tools.sort(), registry.tool_names);
+  assert.deepEqual(hooks, ["external-context"]);
+});
+
+test("registry and complete emitted names mismatch rejects before any hook or tool registration", () => {
+  for (const registry of [undefined, "invalid-json", {},
+    {...p7ResearchModule.registry, module_id: "foreign.module"},
+    {...p7ResearchModule.registry, capability_id: "foreign.capability"},
+    p7LegacyModule.registry,
+    {...p7ResearchModule.registry, tool_names: ["ipython", "p7_workspace"]},
+    {...p7ResearchModule.registry, tool_names: ["p7_workspace", "ipython", "p7_execute_plan"]},
+    {...p7ResearchModule.registry, tool_names: ["ipython", "ipython"]},
+    {...p7ResearchModule.registry, tool_names: ["ipython", "p7_execute_plan\n", "p7_workspace"]},
+    {...p7ResearchModule.registry, unexpected: "PRIVATE_SENTINEL"},
+  ]) {
+    const registrations = [];
+    process.env.ASTERION_PRIME_IPYTHON_FD = "77";
+    if (registry === undefined) delete process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY;
+    else process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = typeof registry === "string" ? registry : JSON.stringify(registry);
+    assert.throws(() => registerResearch({registerTool: () => registrations.push("tool"),
+      on: () => registrations.push("hook")}), {message: "Asterion ipython bridge is unavailable"});
+    assert.deepEqual(registrations, []);
+    assert.equal(process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY, undefined);
+  }
+  for (const module_id of ["Prime.invalid", "prime_invalid", "prime:invalid", "prime.invalid\n"]) {
+    const registrations = [];
+    const registry = {...coreOnlyModule.registry, module_id};
+    process.env.ASTERION_PRIME_IPYTHON_FD = "77";
+    process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(registry);
+    assert.throws(() => registerPrime({registerTool: () => registrations.push("tool")}, undefined,
+      {...coreOnlyModule, registry}), /bridge is unavailable/);
+    assert.deepEqual(registrations, []);
+  }
+  const registrations = [];
+  process.env.ASTERION_PRIME_IPYTHON_FD = "77";
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(coreOnlyModule.registry);
+  assert.throws(() => registerPrime({registerTool: () => registrations.push("tool")}, undefined,
+    {...coreOnlyModule, createTools: () => [{name: "surprise"}],
+      registerContextHooks: () => registrations.push("hook")}), /bridge is unavailable/);
+  assert.deepEqual(registrations, []);
+});
+
+test("tool construction cannot change the registry admitted by the host", () => {
+  const tools = [], hooks = [];
+  const registry = {...coreOnlyModule.registry, tool_names: ["ipython"]};
+  process.env.ASTERION_PRIME_IPYTHON_FD = "77";
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(registry);
+  assert.throws(() => registerPrime({registerTool: tool => tools.push(tool.name)}, undefined, {
+    registry,
+    createTools() {
+      registry.tool_names.push("surprise");
+      return [{name:"surprise"}];
+    },
+    registerContextHooks: () => hooks.push("context"),
+  }), /bridge is unavailable/);
+  assert.deepEqual(tools, []);
+  assert.deepEqual(hooks, []);
+});
+
 test("registers the ipython and P7 application tools", async () => {
   const registered = [];
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
-  register({ registerTool: (tool) => registered.push(tool) });
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(p7ResearchModule.registry);
+  registerResearch({ registerTool: (tool) => registered.push(tool) });
   const expectedNames = ["ipython", "p7_execute_plan", "p7_workspace"];
   assert.deepEqual(toolNames(), expectedNames);
   assert.deepEqual(registered.map((tool) => tool.name), expectedNames);
@@ -695,6 +795,7 @@ test("built artifact is comment-free and loads through the pinned loader", async
     .update(source)
     .digest("hex");
   process.env.ASTERION_PRIME_IPYTHON_FD = "7";
+  process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(coreOnlyModule.registry);
   const registered = [];
   try {
     // The loader takes the host package from the host's own resolver. Copying
@@ -721,7 +822,7 @@ test("built artifact is comment-free and loads through the pinned loader", async
     writeFileSync(loaderCopy, readFileSync(loaderPath));
     const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
     await loader.default({ registerTool: (tool) => registered.push(tool) });
-    assert.deepEqual(registered.map((tool) => tool.name), ["ipython", "p7_execute_plan", "p7_workspace"]);
+    assert.deepEqual(registered.map((tool) => tool.name), ["ipython"]);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

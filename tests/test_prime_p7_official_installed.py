@@ -14,7 +14,7 @@ import zipfile
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXTENSION = "asterion/applications/prime/resources/ipython-extension.mjs"
+EXTENSION = "asterion/applications/prime/resources/p7-research-extension.mjs"
 GAMEPLAY_ASSEMBLY = "asterion/applications/prime/assemblies/prime-arc-agi-3-gameplay.json"
 
 
@@ -208,7 +208,7 @@ _RUNNER = textwrap.dedent(
         evidence = root / "evidence"
         evidence.mkdir()
         extension = Path(str(resources.files("asterion.applications.prime").joinpath(
-            "resources/ipython-extension.mjs"
+            "resources/p7-research-extension.mjs"
         ))).resolve()
         invocation = OfficialInvocation(
             root,

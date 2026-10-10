@@ -7,6 +7,7 @@ import asyncio
 import tempfile
 import tomllib
 import unittest
+from unittest.mock import patch
 from importlib import metadata
 from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
@@ -748,6 +749,59 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 finally:
                     launch.extension_lease.close()
                     trace.close()
+
+    def test_operator_selects_explicit_artifact_and_injects_exact_registry(self) -> None:
+        from asterion.applications.prime.p7 import live
+        from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
+
+        for variant, cognition, expected_name, registry in (
+            ("verified", False, "p7-research-extension.mjs", P7_TOOL_REGISTRY),
+            ("legacy", False, "p7-legacy-extension.mjs", P7_LEGACY_TOOL_REGISTRY),
+            ("verified", True, "p7-legacy-extension.mjs", P7_LEGACY_TOOL_REGISTRY),
+        ):
+            with self.subTest(variant=variant, cognition=cognition), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                resource_root = root / "resources"
+                resource_root.mkdir()
+                for name in ("p7-research-extension.mjs", "p7-legacy-extension.mjs"):
+                    (resource_root / name).write_text("export default function register() {}")
+                trace_root = root / "trace"
+                trace_root.mkdir()
+                worker = _Worker()
+                with patch.object(live.importlib_resources, "files", return_value=root):
+                    resources = build_p7_operator_resources(
+                        environment={
+                            "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
+                            "ASTERION_PRIME_PROVIDER": "openai-codex",
+                            "ASTERION_PRIME_MODEL": "gpt-6-sol",
+                            "ASTERION_PRIME_P7_HISTORY_VARIANT": variant,
+                            "ASTERION_PRIME_P7_TOOL_MODE": "injected-stale-selector",
+                            "ASTERION_PRIME_IPYTHON_TOOL_REGISTRY": "injected-stale-registry",
+                        },
+                        pi_base_command=("/usr/bin/pi", "--mode", "rpc", "--tools", "stale"),
+                        extension_path=resource_root / "p7-research-extension.mjs",
+                        working_directory=root,
+                        worker=worker,
+                        engine=_Engine(),
+                        private_trace_root=trace_root,
+                        cognition_mode=cognition,
+                    )
+                try:
+                    launch = resources.host_services["prime.launch"]
+                    self.assertEqual(launch.extension_path.name, expected_name)
+                    expected = {
+                        "module_id": registry.module_id,
+                        "capability_id": registry.capability_id,
+                        "tool_names": list(registry.tool_names),
+                    }
+                    self.assertEqual(json.loads(launch.binding_environment.get("ASTERION_PRIME_IPYTHON_TOOL_REGISTRY", "null")), expected)
+                    self.assertEqual(json.loads(launch.approved_environment.get("ASTERION_PRIME_IPYTHON_TOOL_REGISTRY", "null")), expected)
+                    self.assertNotIn("ASTERION_PRIME_P7_TOOL_MODE", launch.approved_environment)
+                    command = launch.approved_command
+                    self.assertEqual(command[command.index("--tools") + 1], ",".join(registry.tool_names))
+                    self.assertEqual(worker.starts, 0)
+                finally:
+                    asyncio.run(resources.close())
 
     def test_operator_builds_composed_native_runtime_without_starting_edges(
         self,

@@ -797,6 +797,48 @@ class TestP1LaunchPreflight(unittest.TestCase):
     fixed public status without starting a process.
     """
 
+    def test_preflight_selects_core_artifact_and_ipython_allowlist(self) -> None:
+        import asterion
+        from asterion.applications.prime.p1 import operator
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            installed = base / "site-packages" / "asterion" / "__init__.py"
+            installed.parent.mkdir(parents=True)
+            installed.write_text("")
+            root = base / "operator"
+            root.mkdir()
+            with (
+                patch.object(asterion, "__file__", str(installed)),
+                patch.object(operator.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"", b"")),
+                patch.object(operator.live, "load_operator_environment", return_value={}),
+                patch.object(operator.live, "resolve_node", return_value=Path("/usr/bin/node")),
+                patch.object(operator.live, "resolve_pi_entry", return_value=base / "pi.mjs"),
+            ):
+                preflight = operator._preflight({operator.live.OPERATOR_ROOT_ENV: str(root)})
+            self.assertEqual(preflight.extension_path.name, "ipython-extension.mjs")
+            self.assertEqual(preflight.pi_base_command[preflight.pi_base_command.index("--tools") + 1], "ipython")
+
+    def test_resource_binding_injects_core_registry_before_any_worker(self) -> None:
+        from asterion.applications.prime.p1 import operator
+
+        captured = []
+        def reject(binding):
+            captured.append(binding)
+            raise ValueError("stop before worker effects")
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            extension = root / "ipython-extension.mjs"
+            extension.write_text("export default function register() {}")
+            preflight = operator._Preflight(root, {"ASTERION_PRIME_IPYTHON_TOOL_REGISTRY": "stale"}, root, ("pi",), extension)
+            with patch.object(operator.ExtensionBinding, "preflight", reject), self.assertRaises(operator.P1OperatorError):
+                asyncio.run(operator._build_resources(preflight))
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(json.loads(captured[0].environment.get("ASTERION_PRIME_IPYTHON_TOOL_REGISTRY", "null")), {
+            "module_id": "prime.ipython", "capability_id": "prime.tool.ipython", "tool_names": ["ipython"],
+        })
+
     def test_fixed_preset_values_agree_with_the_runtime_factory(self) -> None:
         from asterion.applications.prime.p1 import operator
         from asterion.applications.prime.p1.runtime_binding import P1_RUNTIME_OPTIONS

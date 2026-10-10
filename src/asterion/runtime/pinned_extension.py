@@ -383,15 +383,48 @@ def _validate_source(name: str, source: bytes) -> None:
         raise ValueError
     tokens = _javascript_tokens(text)
     _validate_javascript_dependencies(tokens)
-    if not any(
-        token.kind == "identifier"
-        and token.value == "export"
-        and index + 1 < len(tokens)
-        and tokens[index + 1].kind == "identifier"
-        and tokens[index + 1].value == "default"
-        for index, token in enumerate(tokens)
-    ):
+    if not _has_javascript_default_export(tokens):
         raise ValueError
+
+
+def _has_javascript_default_export(tokens: tuple[_JavaScriptToken, ...]) -> bool:
+    for index, token in enumerate(tokens):
+        if token.kind != "identifier" or token.value != "export":
+            continue
+        if index > 0 and tokens[index - 1].value == ".":
+            continue
+        if index + 1 >= len(tokens):
+            continue
+        following = tokens[index + 1]
+        if following.kind == "identifier" and following.value == "default":
+            return True
+        if following.value != "{":
+            continue
+        closing = _matching_javascript_brace(tokens, index + 1)
+        # esbuild preserves genuine default exports in a compact local export
+        # list. Admit its identifier aliases, without admitting re-exports or
+        # mistaking literal words for a default. Dependencies were checked above.
+        specifications: list[list[_JavaScriptToken]] = [[]]
+        for item in tokens[index + 2:closing]:
+            if item.value == ",":
+                specifications.append([])
+            else:
+                specifications[-1].append(item)
+        if not specifications[-1]:
+            specifications.pop()  # A trailing comma is valid JavaScript.
+        has_default = False
+        for specification in specifications:
+            if not all(item.kind == "identifier" for item in specification):
+                break
+            if len(specification) == 1:
+                continue
+            if len(specification) != 3 or specification[1].value != "as":
+                break
+            has_default = has_default or specification[2].value == "default"
+        else:
+            if has_default:
+                return True
+    return False
 
 
 def _javascript_tokens(source: str) -> tuple[_JavaScriptToken, ...]:

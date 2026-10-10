@@ -17,6 +17,29 @@ from asterion.applications.prime.p7.operator import p7_runtime_options, resolve_
 
 
 class TestOfficialOperator(unittest.TestCase):
+    def test_model_preflight_selects_the_explicit_research_artifact(self) -> None:
+        from asterion.applications.prime.p7 import live, official_operator
+
+        with TemporaryDirectory() as directory:
+            base = Path(directory).resolve()
+            package = base / "site-packages" / "asterion" / "__init__.py"
+            package.parent.mkdir(parents=True)
+            package.write_text("")
+            root = base / "operator"
+            root.mkdir()
+            extension = base / "p7-research-extension.mjs"
+            with (
+                mock.patch("asterion.__file__", str(package)),
+                mock.patch.object(live, "load_operator_environment", return_value={"ARC_API_KEY": "PRIVATE-KEY"}),
+                mock.patch.object(live, "resolve_node", return_value=base / "node"),
+                mock.patch.object(live, "resolve_pi_entry", return_value=base / "pi.mjs"),
+                mock.patch.object(live, "pi_base_command", return_value=("pi",)),
+                mock.patch.object(live, "extension_path", return_value=extension) as resolve_extension,
+            ):
+                invocation = official_operator._preflight({live.OPERATOR_ROOT_ENV: str(root)})
+            resolve_extension.assert_called_once_with(research_mode=True)
+            self.assertEqual(invocation.extension_path, extension)
+
     def test_full_roster_saved_submission_makes_all_25_once_without_extra_actions(self) -> None:
         from asterion.applications.prime.p7.official import prepare_session
         from asterion.applications.prime.p7.official_operator import _submit_saved
