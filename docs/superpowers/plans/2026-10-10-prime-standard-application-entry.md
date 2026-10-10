@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–4 完成，Task 5/6 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–4/6 完成，Task 5/7 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -280,7 +280,7 @@ self.assertFalse(executor.closed)
 **Files:** Modify `src/asterion/applications/prime/p3/live.py`、`operator.py`、`live_entry.py`；`src/asterion/applications/prime/p4/live.py`、`operator.py`、`live_entry.py`；`src/asterion/applications/prime/p5/live.py`、`operator.py`；Test `tests/test_prime_p3_live.py`、`tests/test_prime_p4_live.py`、`tests/test_prime_p5_live.py`、`tests/test_prime_p3_composed_runtime.py`、`tests/test_prime_p5_p6_composed_execution.py`。
 **Interfaces:** 去掉 session_factory 参数，改为 PrimeApplication owner/PrimeModelView；回调只能请求领域模型操作，不能自建/open/close 模型。
 
-- [ ] 将现有 fake session factory fixture 改为 private owner seam；保留原领域断言，并加 view 接口没有 process/open/close 的断言。
+- [x] 将现有 fake session factory fixture 改为 private owner seam；保留原领域断言，并加 view 接口没有 process/open/close 的断言。
 
 ```python
 # P3LiveHost._prompt: child admission 已通过，再使用各自独立 key。
@@ -290,17 +290,19 @@ reply = await prime.text_once(key=role, text=prompt,
 work = _CandidateWork(prime.text_model(key='candidate', limits=live_limits), run_id)
 ```
 
-- [ ] RED：`uv run python -m unittest -v tests.test_prime_p3_live tests.test_prime_p4_live tests.test_prime_p5_live`；验证 factory 泄漏/生命周期新断言确实失败。
-- [ ] P3/P4/P5 的直接 live 入口从本地应用描述构造 owner，不调用中央应用目录；需要 composed 执行时继续用本地精确 assembly/已解析 plan 和原 runner，不能为了绕过注册复制执行器。旧 provider 包装委托相同领域函数。直接入口测试禁用中央 inventory/provider lookup，保留原领域断言。
-- [ ] P3 `run_live_verification`、`P3LiveHost._prompt` 使用 child/root 独立 model key；首次效果必须在 child admission 后；root 仅消费已验证 child JSON，保留成本记录与 child cap。
-- [ ] P3/P4/P5 resolver、usage/get_state 和 fake fixture 都使用 exact deepseek-flash；消费者在本提交切到新 context/view，旧兼容入口继续给尚未迁移的 P6 使用。
-- [ ] P3 原 command/binding 哈希用途逐项保留，改取 owner 的私有身份摘要；应用不能自行拼 argv 算哈希，公开 surfaces 不输出私有配置。
-- [ ] P4 `run_live_round/P4LiveHost.commit_checkpoint` 用 `text_once`，仅在 prompt 与 close 都成功后 seal；保留 prior generation lock、disk JSON 恢复和 retry 合同，不换成 backend.attach。旧检查点的启动/绑定指纹若与新实现不符必须拒绝，不改写旧身份或放宽相等校验。
-- [ ] P5 `_CandidateWork._ask/propose/verify/repair` 只用 model view；`_open_bounded_autonomy_loop` 与 `_run_composed_loop` 保留领域编排，operator finally 关闭 Prime owner。
-- [ ] 消除应用 finalize=session.close 的模型生命周期回调；已有领域 finalize 行为保留，但模型 reap 由 Prime owner 的 execution scope 保证。P5 原 wait_finalization 必须在成功终态前检查 owner cleanup.complete；P3 清理故障不丢失已知成本，未知效果保留原 admission fence。
-- [ ] GREEN：同 RED 命令，再 `uv run python -m unittest -v tests.test_prime_p3_composed_runtime tests.test_prime_p5_p6_composed_execution`。
-- [ ] 重点检查 P3 admission refusal 零模型、child budget 阻断 root，P4 close failure 不 seal，P5 malformed artifact/cancel 均 reap；不要把名为 real_candidate 的 fake-model 测试写成 live 验证。
-- [ ] 提交：`git commit -m "refactor(prime): route P3 P4 P5 live model operations through owner"`。
+- [x] RED：`uv run python -m unittest -v tests.test_prime_p3_live tests.test_prime_p4_live tests.test_prime_p5_live`；验证 factory 泄漏/生命周期新断言确实失败。
+- [x] P3/P4/P5 的直接 live 入口从本地应用描述构造 owner，不调用中央应用目录；需要 composed 执行时继续用本地精确 assembly/已解析 plan 和原 runner，不能为了绕过注册复制执行器。旧 provider 包装委托相同领域函数。直接入口测试禁用中央 inventory/provider lookup，保留原领域断言。
+- [x] P3 `run_live_verification`、`P3LiveHost._prompt` 使用 child/root 独立 model key；首次效果必须在 child admission 后；root 仅消费已验证 child JSON，保留成本记录与 child cap。
+- [x] P3/P4/P5 resolver、usage/get_state 和 fake fixture 都使用 exact deepseek-flash；消费者在本提交切到新 context/view，旧兼容入口继续给尚未迁移的 P6 使用。
+- [x] P3 原 command/binding 哈希用途逐项保留，改取 owner 的私有身份摘要；应用不能自行拼 argv 算哈希，公开 surfaces 不输出私有配置。
+- [x] P4 `run_live_round/P4LiveHost.commit_checkpoint` 用 `text_once`，仅在 prompt 与 close 都成功后 seal；保留 prior generation lock、disk JSON 恢复和 retry 合同，不换成 backend.attach。旧检查点的启动/绑定指纹若与新实现不符必须拒绝，不改写旧身份或放宽相等校验。
+- [x] P5 `_CandidateWork._ask/propose/verify/repair` 只用 model view；`_open_bounded_autonomy_loop` 与 `_run_composed_loop` 保留领域编排，operator finally 关闭 Prime owner。
+- [x] 消除应用 finalize=session.close 的模型生命周期回调；已有领域 finalize 行为保留，但模型 reap 由 Prime owner 的 execution scope 保证。P5 原 wait_finalization 必须在成功终态前检查 owner cleanup.complete；P3 清理故障不丢失已知成本，未知效果保留原 admission fence。
+- [x] GREEN：同 RED 命令，再 `uv run python -m unittest -v tests.test_prime_p3_composed_runtime tests.test_prime_p5_p6_composed_execution`。
+- [x] 重点检查 P3 admission refusal 零模型、child budget 阻断 root，P4 close failure 不 seal，P5 malformed artifact/cancel 均 reap；不要把名为 real_candidate 的 fake-model 测试写成 live 验证。
+- [x] 提交：`git commit -m "refactor(prime): route P3 P4 P5 live model operations through owner"`。
+
+Task 6 完成：`3d23decc`；51 项定向测试通过，Sol 独立复审无发现。P4 旧检查点不匹配启动/绑定指纹时，在模型效果前拒绝，不隐式转换。
 
 ## Task 7：把 P6 候选效果移入既有 composed 执行阶段
 

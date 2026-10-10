@@ -322,7 +322,7 @@ Deferred specialized-compaction live test (user requested): after implementation
 
 ## Task40 — Stable Prime standard application entry
 
-Status: written design approved by user; implementation active: plan Tasks 1–4 complete and reviewed; Tasks 5/6 migrate P1/narrator and P3/P4/P5 consumers. [Design](../specs/2026-10-10-prime-standard-application-entry-design.md); D-2026-10-10-03 records the user agreement. This is the active successor to the closed Task39 experiment.
+Status: written design approved by user; implementation active: plan Tasks 1–4/6 complete and reviewed; Task5 fixes durable cleanup review findings, Task7 migrates P6 effect ordering. [Design](../specs/2026-10-10-prime-standard-application-entry-design.md); D-2026-10-10-03 records the user agreement. This is the active successor to the closed Task39 experiment.
 
 Unify backend entry and resource ownership for existing P7/P1/P3–P6 real-model paths, preserving Prime as the stable domain-neutral foundation. Reuse the current execution kernel, session and durable backend. Applications supply goals/tools/data/domain completion and evidence; operator supplies finite authority/configuration; Prime owns its private Pi/RPC, extension/tool assembly and session lifecycle. P2 remains the current local retrieval witness; this task records its future standard-entry target without adding model-driven retrieval.
 

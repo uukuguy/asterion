@@ -24,7 +24,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Task40 live checkpoint: standard-entry Tasks 1–4 reviewed, Tasks 5/6 active, independent applications and CLI scope recorded; sealed Task39 evidence and dedicated-compaction limits retained. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Task40 live checkpoint: standard-entry Tasks 1–4/6 reviewed, Tasks 5/7 active, independent applications and CLI scope recorded; sealed Task39 evidence and dedicated-compaction limits retained. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -96,6 +96,6 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - Task39 已封存：[NOTES 主要工作认知设计](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md)：普通笔记直接承接工作上下文、重要错误反例记录、按引用专项回读、三层执行/恢复保障；源码、打包见证和BP35六关已验证；输入明显收拢，动作/时间/得分回退，2037项manifest独立READY。
 
-- Task40 标准接入设计：[Prime 标准应用入口](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)。D-2026-10-10-03 确认先迁移 P7/P1/P3–P6 已有真实模型路径的入口与资源所有权；P2 本轮记录目标与边界。书面设计已确认；独立应用无需注册，CLI 定位待定，P1–P6 Flash/P7 Sol 模型要求纳入；[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)Tasks 1–4 已实现并复审，Task 5/6 实施中；最终部署验收未完成。P3–P6 live 与确定性 witness 并存；专用摘要接通另作行为变更验证。
+- Task40 标准接入设计：[Prime 标准应用入口](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)。D-2026-10-10-03 确认先迁移 P7/P1/P3–P6 已有真实模型路径的入口与资源所有权；P2 本轮记录目标与边界。书面设计已确认；独立应用无需注册，CLI 定位待定，P1–P6 Flash/P7 Sol 模型要求纳入；[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)Tasks 1–4/6 已实现并复审，Task 5/7 实施中；最终部署验收未完成。P3–P6 live 与确定性 witness 并存；专用摘要接通另作行为变更验证。
 
 - 后续专用压缩验证：D-2026-10-10-02 与工作清单补充低阈值 P7 实战触发测试；先接通专用摘要，再验证真实调用与内核/认知连续性，本轮 BP35 不变。

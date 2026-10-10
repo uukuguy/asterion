@@ -4821,3 +4821,11 @@
 
 - 2026-10-10 `19eb7ee0`: Added immutable owner identity/usage projections so text consumers preserve known cost and unknown-effect fencing.
 - Task4两项所有权缺口经61856505修复并通过Astra复审；Task5/6并行迁移获GO，保持共享核心单一owner。
+- 948ca9e2 记录P7所有权复审完成与Task5/6实施位置，保留广跑未重跑和部署待验边界。
+
+- 2026-10-10 `f6a2506d`: Narrator uses exact P7 Prime owner with shared deadline and strict cleanup instead of direct RPC.
+- 2026-10-10 `3d23decc`: Routes P3–P5 through Prime owner to preserve cleanup, cost, and checkpoint boundaries.
+- Task6独立复审通过：P3成本与unknown fence、P4清理后封存、P5成功前清理均保留；Task7开始P6效果顺序迁移。
+
+- 2026-10-10 `9dcc2978`: Moves P1 durable resources into Prime owner while preserving attachment recovery, finite budgets, and independent reap.
+- Task5复审定位domain close阻塞会跳过独立Pi/lease回收，修复中；其余身份、预算与narrator边界已核对。

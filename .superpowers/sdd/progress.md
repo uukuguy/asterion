@@ -30,3 +30,5 @@
 - Task 4 review: NEEDS FIXES (public generic-worker injection; workspace close blocked behind active cell). Implementer fixing both with private test seam and independent worker stop/reap.
 - Task 4: complete (865eea25 + 61856505; both ownership findings fixed, Astra re-review approved without findings; 60 targeted tests pass).
 - Tasks 5/6: active in approved parallel wave; Task5 owns shared core/durable P1/narrator, Task6 owns P3/P4/P5 consumers.
+- Task 6: complete (3d23decc; Sol independent spec PASS/quality APPROVE without findings; 51 focused tests pass). Task 7 active, Task 5 continues.
+- Task 5 implemented (19eb7ee0/f6a2506d/9dcc2978), 155 focused tests pass; Astra review NEEDS FIX: blocked services.close can prevent durable independent Pi/lease cleanup. Fix in progress.
