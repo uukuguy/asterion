@@ -1,20 +1,18 @@
-"""Transitional application adapter to Prime's private bounded text engine.
+"""Operator context resolution and data exports for Prime text applications.
 
-Only this operator integration resolves checkout configuration. Core receives
-preflighted data; old launch/factory shapes remain until consumers migrate.
+Only this application integration resolves checkout configuration. Core receives
+preflighted operator data and owns all model startup and session resources.
 """
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
 import os
 from pathlib import Path
 
-from asterion.agents.prime import _launch
 from asterion.agents.prime._text_model import (
-    LiveModelError, LiveModelReply, LiveModelSession as _PrimeTextSession, LiveModelUsage,
+    LiveModelError, LiveModelReply, LiveModelUsage,
 )
-from asterion.agents.prime.application import PrimeApplicationSpec, PrimeOperatorContext, PrimeTextLimits
+from asterion.agents.prime.application import PrimeOperatorContext, PrimeTextLimits
 from asterion.agents.prime.compaction_budget import ModelPrice
 from asterion.agents.prime.deadline import TaskDeadline
 from asterion.applications.prime.operator_config import load_operator_environment, resolve_pi_effort
@@ -24,23 +22,6 @@ def bounded_text_limits() -> PrimeTextLimits:
     """The existing operator-approved bounded live preset and exact catalog price."""
     return PrimeTextLimits(120.0, 4, 8192, 32768, 16000, 8000, 3000, 512,
                            ModelPrice(300000, 1200000))
-
-
-class LiveModelSession(_PrimeTextSession):
-    """Preserve unmigrated application factories without a second session engine."""
-    def __init__(self, *, command: tuple[str, ...], environment: Mapping[str, str], cwd: Path):
-        super().__init__(command=command, environment=environment, cwd=cwd,
-                         limits=bounded_text_limits(), provider='deepseek', model='deepseek-flash')
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class LiveModelLaunch:
-    command: tuple[str, ...]
-    environment: Mapping[str, str]
-    cwd: Path
-
-    def __repr__(self) -> str:
-        return '<LiveModelLaunch redacted>'
 
 
 def resolve_live_model_context(
@@ -97,15 +78,7 @@ def resolve_live_model_context(
     except Exception:
         raise LiveModelError() from None
 
-
-
-def resolve_live_model_launch(operator_root: Path, environment: Mapping[str, str]) -> LiveModelLaunch:
-    operator = resolve_live_model_context(operator_root, environment)
-    spec = PrimeApplicationSpec('prime.compat.text', '1.0.0', 'text-only')
-    return LiveModelLaunch(_launch.text_command(operator, spec), operator.environment, operator.cwd)
-
-
 __all__ = (
-    'LiveModelError', 'LiveModelLaunch', 'LiveModelReply', 'LiveModelSession', 'LiveModelUsage',
-    'bounded_text_limits', 'resolve_live_model_context', 'resolve_live_model_launch',
+    'LiveModelError', 'LiveModelReply', 'LiveModelUsage',
+    'bounded_text_limits', 'resolve_live_model_context',
 )

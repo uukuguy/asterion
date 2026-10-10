@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import fields
 import ast
 from pathlib import Path
 import unittest
+import tempfile
+import time
 
 from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY
 
@@ -25,11 +26,26 @@ class TestPrimeRuntimeDependencyDirection(unittest.TestCase):
         ]
         self.assertEqual(eager_p7_imports, [])
 
-    def test_p7_launch_carries_the_concrete_registry(self) -> None:
-        from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
+    def test_p7_owner_carries_the_concrete_artifact_registry(self) -> None:
+        from asterion.agents.prime.application import (
+            PrimeApplicationSpec, PrimeOperatorContext, PrimeToolModuleArtifact,
+            prepare_prime_application,
+        )
+        from asterion.agents.prime.deadline import TaskDeadline
+        from asterion.agents.prime.execution import AsterionPrimeLimits
 
-        self.assertIn("tool_registry", {field.name for field in fields(PrimeLaunch)})
-        self.assertEqual(P7_TOOL_REGISTRY.module_id, "prime.p7.application-tools")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            artifact = PrimeToolModuleArtifact(root / 'p7-tools.mjs', P7_TOOL_REGISTRY)
+            spec = PrimeApplicationSpec('test.p7', '1.0.0', 'persistent-code-tools', tools=artifact)
+            operator = PrimeOperatorContext(
+                executable=root / 'node', entry=None, cwd=root, provider='openai-codex',
+                model='gpt-6.1-sol', effort='medium', environment={},
+                task_deadline=TaskDeadline(deadline_monotonic=time.monotonic() + 30, deadline_epoch=time.time() + 30))
+            owner = prepare_prime_application(spec, operator, authorization=AsterionPrimeLimits(1, 1, 30000))
+            self.assertIs(owner.tool_registry, artifact.registry)
+            self.assertIs(owner.tool_registry, P7_TOOL_REGISTRY)
+            self.assertEqual(owner.tool_registry.module_id, "prime.p7.application-tools")
 
 
 if __name__ == "__main__":

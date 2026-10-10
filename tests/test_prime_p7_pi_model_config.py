@@ -58,12 +58,13 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
             with self.assertRaisesRegex(P7LiveSolveError, "unavailable"):
                 resolve_pi_agent_dir({"ASTERION_PRIME_PI_AGENT_DIR": str(alias)})
 
-    def test_pi_base_command_isolated_and_medium_reasoning(self) -> None:
-        from asterion.applications.prime.p7.live import pi_base_command
+    def test_prime_owned_command_isolated_and_medium_reasoning(self) -> None:
+        from asterion.agents.prime._launch import persistent_base_command
+        from asterion.applications.prime.p7.tool_registry import P7_APPLICATION_TOOL_NAMES
 
-        command = pi_base_command(
-            node=Path("/usr/bin/node"),
-            pi_entry=Path("/opt/pi/rpc-entry.js"),
+        command = persistent_base_command(
+            Path("/usr/bin/node"), Path("/opt/pi/rpc-entry.js"),
+            "medium", P7_APPLICATION_TOOL_NAMES,
         )
         self.assertIn("--no-extensions", command)
         self.assertIn("--no-context-files", command)
@@ -71,18 +72,20 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
         self.assertEqual(tools, ["ipython", "p7_execute_plan", "p7_workspace"])
         self.assertEqual(command[command.index("--thinking") + 1], "medium")
 
-    def test_pi_base_command_uses_prime_effort_and_rejects_invalid_configuration(self) -> None:
-        from asterion.applications.prime.p7.live import P7LiveSolveError, pi_base_command
+    def test_prime_owned_command_uses_validated_operator_effort(self) -> None:
+        from asterion.agents.prime._launch import persistent_base_command
+        from asterion.applications.prime.operator_config import resolve_pi_effort
+        from asterion.applications.prime.p7.tool_registry import P7_APPLICATION_TOOL_NAMES
 
         for effort in ("off", "low", "high", "max"):
             with self.subTest(effort=effort):
-                command = pi_base_command(node=Path("/usr/bin/node"), pi_entry=Path("/opt/pi/rpc-entry.js"),
-                                          environment={"ASTERION_PRIME_EFFORT": effort})
+                selected = resolve_pi_effort({"ASTERION_PRIME_EFFORT": effort}, default="medium")
+                command = persistent_base_command(Path("/usr/bin/node"), Path("/opt/pi/rpc-entry.js"),
+                                                  selected, P7_APPLICATION_TOOL_NAMES)
                 self.assertEqual(command.count("--thinking"), 1)
                 self.assertEqual(command[command.index("--thinking") + 1], effort)
-        with self.assertRaisesRegex(P7LiveSolveError, "^Prime reasoning effort is invalid$"):
-            pi_base_command(node=Path("/usr/bin/node"), pi_entry=Path("/opt/pi/rpc-entry.js"),
-                            environment={"ASTERION_PRIME_EFFORT": "SENTINELSECRET"})
+        with self.assertRaisesRegex(ValueError, "^Prime reasoning effort is invalid$"):
+            resolve_pi_effort({"ASTERION_PRIME_EFFORT": "SENTINELSECRET"}, default="medium")
 
     def test_invalid_effort_rejects_operator_resources_before_service_preflight(self) -> None:
         from unittest.mock import patch

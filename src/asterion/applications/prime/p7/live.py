@@ -1163,20 +1163,6 @@ def resolve_arc_root(environment: Mapping[str, str]) -> Path:
     return root
 
 
-def pi_base_command(
-    *, node: Path, pi_entry: Path, environment: Mapping[str, str] | None = None,
-) -> tuple[str, ...]:
-    """Temporary P1 compatibility; fixed launch flags belong to Prime."""
-    from asterion.agents.prime._launch import persistent_base_command
-    from asterion.applications.prime.operator_config import resolve_pi_effort
-    try:
-        return persistent_base_command(node, pi_entry,
-            resolve_pi_effort({} if environment is None else environment, default='medium'),
-            P7_APPLICATION_TOOL_NAMES)
-    except ValueError:
-        raise P7LiveSolveError('Prime reasoning effort is invalid') from None
-
-
 def _extension_resource_path(resource: str) -> Path:
     return Path(str(importlib_resources.files("asterion.applications.prime").joinpath(resource)))
 
@@ -1421,7 +1407,6 @@ __all__ = (
     "select_extension_path",
     "find_baseline_trace",
     "load_operator_environment",
-    "pi_base_command",
     "private_root",
     "read_trace_entries",
     "receipt_value",

@@ -1,5 +1,6 @@
 """Effect-free, immutable independent Prime application construction."""
 
+import ast
 import asyncio
 from dataclasses import FrozenInstanceError, replace
 from pathlib import Path
@@ -26,6 +27,132 @@ from asterion.agents.prime._text_model import LiveModelError
 from asterion.runtime.protocol import ProtocolError
 from tests.test_prime_live_model import _NeverCancelled, _PRODUCER
 import sys
+
+
+_MIGRATED_APPLICATION_FILES = (
+    'live_model.py', 'runtime_binding.py',
+    'p1/operator.py', 'p1/runtime_binding.py',
+    'p3/live.py', 'p3/live_entry.py', 'p3/operator.py', 'p3/runtime_binding.py',
+    'p4/live.py', 'p4/live_entry.py', 'p4/operator.py', 'p4/runtime_binding.py',
+    'p5/live.py', 'p5/operator.py', 'p5/runtime_binding.py',
+    'p6/live.py', 'p6/operator.py', 'p6/runtime_binding.py',
+    'p7/live.py', 'p7/operator.py', 'p7/official_operator.py',
+    'p7/runtime_binding.py', 'p7/research_runtime.py', 'p7/run_story/operator_narrator.py',
+)
+_FORBIDDEN_STARTUP_SYMBOLS = frozenset({
+    'PiRpcSession', 'PiRpcConfig', 'build_rpc_session',
+    'ExtensionBinding', 'ExtensionLease', 'PiExtensionBinding', 'PiExtensionLease',
+    'AsterionPrimeSession', 'PrimeSessionBackend', 'LiveModelSession',
+    'LiveModelLaunch', 'resolve_live_model_launch', 'pi_base_command',
+})
+
+
+def _startup_boundary_violations(source, *, module):
+    """Resolve imported and assigned aliases before checking startup ownership."""
+    tree = ast.parse(source)
+    aliases = {}
+    violations = []
+
+    def forbidden(name):
+        parts = name.split('.')
+        return any(part in _FORBIDDEN_STARTUP_SYMBOLS or part == '_launch' for part in parts)
+
+    def qualified(node):
+        if isinstance(node, ast.Name):
+            return aliases.get(node.id, node.id)
+        if isinstance(node, ast.Attribute):
+            return qualified(node.value) + '.' + node.attr
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'getattr' and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)):
+            return qualified(node.args[0]) + '.' + node.args[1].value
+        return ''
+
+    def record(node, name):
+        if forbidden(name):
+            violations.append(f'{node.lineno}: {name}')
+
+    # Imports alone reject renamed forbidden symbols, including unused imports.
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for item in node.names:
+                aliases[item.asname or item.name.split('.')[0]] = (
+                    item.name if item.asname else item.name.split('.')[0])
+                record(node, item.name)
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ''
+            if node.level:
+                package = module.split('.')[:-node.level]
+                base = '.'.join((*package, base)) if base else '.'.join(package)
+            for item in node.names:
+                name = base + '.' + item.name
+                aliases[item.asname or item.name] = name
+                record(node, name)
+                if item.name == '*' and base.endswith((
+                        'pi_rpc', 'native_rpc', 'pinned_extension', 'pi_extensions',
+                        'prime.session', 'prime.backend', 'prime._text_model')):
+                    violations.append(f'{node.lineno}: wildcard startup import {base}')
+
+    # Fixed point handles aliases declared before or after the referenced alias.
+    assignments = [node for node in ast.walk(tree) if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    for _ in range(len(assignments) + 1):
+        changed = False
+        for node in assignments:
+            name = qualified(node.value)
+            targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+            for target in targets:
+                if isinstance(target, ast.Name) and name and aliases.get(target.id) != name:
+                    aliases[target.id] = name
+                    changed = True
+        if not changed:
+            break
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            record(node, qualified(node.func))
+            record(node, qualified(node))
+        elif isinstance(node, ast.Attribute):
+            record(node, qualified(node))
+        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            record(node, node.name)
+    return tuple(sorted(set(violations)))
+
+
+class TestPrimeApplicationStartupBoundary(unittest.TestCase):
+    def test_migrated_applications_do_not_construct_private_startup(self):
+        root = Path(__file__).resolve().parents[1] / 'src/asterion/applications/prime'
+        violations = []
+        for relative in _MIGRATED_APPLICATION_FILES:
+            module = 'asterion.applications.prime.' + relative[:-3].replace('/', '.')
+            violations.extend(f'{relative}:{item}' for item in _startup_boundary_violations(
+                (root / relative).read_text(), module=module))
+        self.assertEqual(violations, [], '\n'.join(violations))
+
+    def test_detector_rejects_import_module_assignment_and_relative_aliases(self):
+        cases = (
+            'from asterion.runtimes.pi_rpc import PiRpcSession as Innocent',
+            'import asterion.runtimes.pi_rpc as native\nnative.PiRpcConfig()',
+            'import asterion.runtimes.pi_rpc as native\nfactory = native.PiRpcSession\nother = factory\nother()',
+            'from asterion.runtime import native_rpc as native\nbuild = native.build_rpc_session\nbuild()',
+            'from ...agents.prime import _launch as safe\nsafe.text_command(None, None)',
+            'from asterion.agents.prime._text_model import LiveModelSession as Session',
+            'import asterion.agents.prime.backend as backend\ngetattr(backend, "PrimeSessionBackend")()',
+            'from asterion.runtimes.pi_rpc import *',
+            'import asterion.runtimes.pi_rpc as native\nfactory = native.PiRpcSession\nfactory()\nfactory = innocent',
+            'import asterion.agents.prime.backend as backend\nfactory = getattr(backend, "PrimeSessionBackend")\nfactory()',
+        )
+        for source in cases:
+            with self.subTest(source=source):
+                self.assertTrue(_startup_boundary_violations(
+                    source, module='asterion.applications.prime.live_model'))
+
+    def test_detector_allows_operator_context_and_model_data_exports(self):
+        source = ("from asterion.agents.prime._text_model import LiveModelReply, LiveModelUsage\n"
+                  "from asterion.agents.prime.application import prepare_prime_application as prepare\n"
+                  "from .operator_config import load_operator_environment\n"
+                  "context = load_operator_environment(root, environment)\nprepare(spec, context, authorization=limits)")
+        self.assertEqual(_startup_boundary_violations(
+            source, module='asterion.applications.prime.live_model'), ())
 
 
 class TestPrimeApplicationEntry(unittest.TestCase):

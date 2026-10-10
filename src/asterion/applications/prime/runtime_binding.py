@@ -84,7 +84,6 @@ def __getattr__(name: str) -> object:
     """Preserve legacy P7 symbol imports without eager product imports."""
 
     if name in {
-        "PrimeLaunch",
         "_P7SolveEventProjector",
         "_p7_continuation_prompt",
         "_p7_gameplay_terminal",

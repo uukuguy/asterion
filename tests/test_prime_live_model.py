@@ -1,4 +1,4 @@
-"""Bounded application-owned Pi model session, using a local JSONL producer."""
+"""Bounded Prime-owned Pi model session, using a local JSONL producer."""
 
 import asyncio
 from dataclasses import FrozenInstanceError
@@ -10,14 +10,14 @@ import unittest
 from unittest.mock import patch
 
 import asterion
-from asterion.agents.prime.application import PrimeTextLimits
+from asterion.agents.prime import _launch
+from asterion.agents.prime.application import PrimeApplicationSpec, PrimeTextLimits
 from asterion.agents.prime._text_model import LiveModelSession as CoreTextSession
 from asterion.agents.prime.deadline import TaskDeadline
 
 from asterion.applications.prime.live_model import (
     LiveModelError,
-    LiveModelSession,
-    resolve_live_model_launch,
+    bounded_text_limits,
     resolve_live_model_context,
 )
 
@@ -78,10 +78,11 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         self.addAsyncCleanup(self._cleanup)
         script = Path(self.temp.name) / "producer.py"
         script.write_text(_PRODUCER)
-        self.session = LiveModelSession(
+        self.session = CoreTextSession(
             command=(sys.executable, "-I", str(script)),
             environment={},
-            cwd=Path(self.temp.name),
+            cwd=Path(self.temp.name), limits=bounded_text_limits(),
+            provider='deepseek', model='deepseek-flash',
         )
 
     async def _cleanup(self):
@@ -138,10 +139,11 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
     async def test_model_cap_mismatch_rejected_before_prompt(self):
         script = Path(self.temp.name) / "bad-producer.py"
         script.write_text(_PRODUCER.replace('"maxTokens": 512', '"maxTokens": 2048'))
-        other = LiveModelSession(
+        other = CoreTextSession(
             command=(sys.executable, "-I", str(script)),
             environment={"PI_CODING_AGENT_DIR": self.temp.name},
-            cwd=Path(self.temp.name),
+            cwd=Path(self.temp.name), limits=bounded_text_limits(),
+            provider='deepseek', model='deepseek-flash',
         )
         try:
             with self.assertRaises(LiveModelError):
@@ -222,7 +224,7 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(process.poll())
 
 
-class TestResolveLiveModelLaunch(unittest.TestCase):
+class TestResolveLiveModelContext(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -249,10 +251,11 @@ class TestResolveLiveModelLaunch(unittest.TestCase):
 
     def test_fixed_no_tool_launch_and_redacted_immutable_environment(self):
         with patch.object(asterion, "__file__", str(self.installed)):
-            launch = resolve_live_model_launch(self.root, self.environment)
-        self.assertEqual(launch.cwd, self.root.resolve())
+            context = resolve_live_model_context(self.root, self.environment)
+        self.assertEqual(context.cwd, self.root.resolve())
+        command = _launch.text_command(context, PrimeApplicationSpec('test.text', '1.0.0', 'text-only'))
         self.assertEqual(
-            launch.command[:2],
+            command[:2],
             (
                 str((self.root / "node").resolve()),
                 str((self.root / "pi.mjs").resolve()),
@@ -267,16 +270,16 @@ class TestResolveLiveModelLaunch(unittest.TestCase):
             "--no-context-files",
             "--no-session",
         ):
-            self.assertIn(option, launch.command)
+            self.assertIn(option, command)
         self.assertEqual(
-            launch.command[-4:],
+            command[-4:],
             ("--provider", "deepseek", "--model", "deepseek-flash"),
         )
-        self.assertEqual(launch.environment["DEEPSEEK_API_KEY"], "from-file")
-        self.assertNotIn("PI_CODING_AGENT_DIR", launch.environment)
-        self.assertNotIn("from-file", repr(launch))
+        self.assertEqual(context.environment["DEEPSEEK_API_KEY"], "from-file")
+        self.assertNotIn("PI_CODING_AGENT_DIR", context.environment)
+        self.assertNotIn("from-file", repr(context))
         with self.assertRaises(TypeError):
-            launch.environment["DEEPSEEK_API_KEY"] = "mutated"
+            context.environment["DEEPSEEK_API_KEY"] = "mutated"
 
     def test_context_preserves_existing_task_deadline_without_launch_handles(self):
         deadline = TaskDeadline(deadline_monotonic=100, deadline_epoch=100)
@@ -289,41 +292,41 @@ class TestResolveLiveModelLaunch(unittest.TestCase):
 
     def test_environment_credential_overrides_dotenv(self):
         with patch.object(asterion, "__file__", str(self.installed)):
-            launch = resolve_live_model_launch(
+            context = resolve_live_model_context(
                 self.root, {**self.environment, "DEEPSEEK_API_KEY": "from-env"}
             )
-        self.assertEqual(launch.environment["DEEPSEEK_API_KEY"], "from-env")
+        self.assertEqual(context.environment["DEEPSEEK_API_KEY"], "from-env")
 
     def test_prime_effort_overrides_bounded_launch_default(self):
         with patch.object(asterion, "__file__", str(self.installed)):
-            launch = resolve_live_model_launch(self.root, self.environment)
-            self.assertEqual(launch.command[launch.command.index("--thinking") + 1], "off")
-            launch = resolve_live_model_launch(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "low"})
-            self.assertEqual(launch.command[launch.command.index("--thinking") + 1], "low")
+            context = resolve_live_model_context(self.root, self.environment)
+            self.assertEqual(context.effort, "off")
+            context = resolve_live_model_context(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "low"})
+            self.assertEqual(context.effort, "low")
             with (self.root / ".env").open("a") as handle:
                 handle.write("ASTERION_PRIME_EFFORT=high\n")
-            launch = resolve_live_model_launch(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "low"})
-            self.assertEqual(launch.command[launch.command.index("--thinking") + 1], "high")
+            context = resolve_live_model_context(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "low"})
+            self.assertEqual(context.effort, "high")
 
     def test_invalid_effort_rejects_bounded_launch(self):
         with patch.object(asterion, "__file__", str(self.installed)), self.assertRaisesRegex(
             LiveModelError, "^Prime live model session failed$"
         ):
-            resolve_live_model_launch(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "SENTINELSECRET"})
+            resolve_live_model_context(self.root, {**self.environment, "ASTERION_PRIME_EFFORT": "SENTINELSECRET"})
 
     def test_source_checkout_is_rejected(self):
         with patch.object(
             asterion, "__file__", str(self.root / "src/asterion/__init__.py")
         ):
             with self.assertRaises(LiveModelError):
-                resolve_live_model_launch(self.root, self.environment)
+                resolve_live_model_context(self.root, self.environment)
 
     def test_missing_credential_and_non_executable_entry_are_rejected(self):
         (self.root / ".env").write_text("DEEPSEEK_API_KEY=\n")
         with patch.object(asterion, "__file__", str(self.installed)):
             with self.assertRaises(LiveModelError):
-                resolve_live_model_launch(self.root, self.environment)
+                resolve_live_model_context(self.root, self.environment)
             (self.root / ".env").write_text("DEEPSEEK_API_KEY=secret\n")
             (self.root / "pi.mjs").chmod(0o600)
             with self.assertRaises(LiveModelError):
-                resolve_live_model_launch(self.root, self.environment)
+                resolve_live_model_context(self.root, self.environment)

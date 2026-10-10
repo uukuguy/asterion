@@ -4829,3 +4829,4 @@
 
 - 2026-10-10 `9dcc2978`: Moves P1 durable resources into Prime owner while preserving attachment recovery, finite budgets, and independent reap.
 - Task5复审定位domain close阻塞会跳过独立Pi/lease回收，修复中；其余身份、预算与narrator边界已核对。
+- Task8 removed obsolete startup wrappers; alias-aware boundary scan and 162 focused tests passed; packaged deployment remains pending.

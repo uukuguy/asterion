@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from types import SimpleNamespace
 
 from asterion.applications.prime.p7.tool_registry import (
     P7_APPLICATION_TOOL_NAMES,
@@ -42,9 +43,15 @@ class TestP7ToolRegistry(unittest.TestCase):
         from asterion.applications.prime.p7 import live
 
         self.assertIs(live.P7_APPLICATION_TOOL_NAMES, P7_APPLICATION_TOOL_NAMES)
-        command = live.pi_base_command(
-            node=Path("/usr/bin/node"), pi_entry=Path("/tmp/rpc-entry.js")
-        )
+        from asterion.agents.prime._launch import persistent_command
+        from asterion.agents.prime.application import PrimeApplicationSpec, PrimeToolModuleArtifact
+
+        artifact = PrimeToolModuleArtifact(Path('/tmp/p7-tools.mjs'), P7_TOOL_REGISTRY)
+        spec = PrimeApplicationSpec('test.p7', '1.0.0', 'persistent-code-tools', tools=artifact)
+        operator = SimpleNamespace(executable=Path('/usr/bin/node'), entry=Path('/tmp/rpc-entry.js'),
+                                   effort='medium', provider='openai-codex', model='gpt-6.1-sol')
+        lease = SimpleNamespace(command_args=lambda: ('--extension', '/tmp/pinned-tools.mjs'))
+        command = persistent_command(operator, spec, lease)
         tools = command[command.index("--tools") + 1].split(",")
         self.assertEqual(tuple(tools), P7_APPLICATION_TOOL_NAMES)
 

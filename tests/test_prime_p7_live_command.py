@@ -578,8 +578,10 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
         self.assertIn("levels_completed", asyncio.run(exercise()))
 
     def test_pi_command_allows_registered_p7_application_tools(self) -> None:
-        command = live_module.pi_base_command(
-            node=Path("/usr/bin/node"), pi_entry=Path("/tmp/rpc-entry.js")
+        from asterion.agents.prime._launch import persistent_base_command
+
+        command = persistent_base_command(
+            Path("/usr/bin/node"), Path("/tmp/rpc-entry.js"), "medium", live_module.P7_APPLICATION_TOOL_NAMES
         )
         tools = command[command.index("--tools") + 1].split(",")
         self.assertEqual(tools, list(live_module.P7_APPLICATION_TOOL_NAMES))
