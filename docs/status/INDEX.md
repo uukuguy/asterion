@@ -24,7 +24,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Final Task39 handoff:242paid/oneRESET/1605.84s, independent READY; NOTES input reduction and quality regression, deferred backend/compaction test. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Task40 live checkpoint: standard-entry scope approved, written design review; sealed Task39 evidence and dedicated-compaction limits retained. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -42,7 +42,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../guides/prime-p7-community-reproduction.md` | 🟢 active | Producing-system setup, finite witness and certificate-bound official replay; no private roster bundled. |
 | `../guides/prime-p7-private-research-archive.md` | 🟢 active | Offline private snapshots, exclusions, hashes, retention and isolated restoration. |
 | `../results/arc-agi-3/README.md` | 🟢 active | Final official100 result, producing versions and scoped API-equivalent cost assumptions. |
-| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-07-03/04 distinguish outer assistance, failed cold capability and layered research candidates. Includes historical D-2026-10-08-01 memory, D-2026-10-08-02 LLM-owned research, and D-2026-10-09-01 Prime autonomous computational research positioning; D-2026-10-09-02 capped-score evaluation, macro research evidence and pre-death avoidability review. |
+| `DECISIONS.md` | 🟢 active | Native decisions, provenance and result/archive boundaries; D-2026-10-10-03 approves stable standard-entry direction and existing-live-path migration scope; earlier research, NOTES and scoring decisions retain their evidence boundaries. |
 | `../architecture/prime-p7-cognition-and-experience.md` | 🟢 active | Retained legacy cognition contract; the approved WorldMap/Prime redesign is authoritative for the default solver. |
 | `../reviews/2026-10-05-p7-worldmap-solving-design-review.md` | 🟢 active | Pinned Tycho/Retrodict code comparison supporting the approved design; static research, not capability PASS. |
 | `../reviews/2026-10-07-arc-skill-autonomy-and-bp35-comparison.md` | 🟢 active | Original arc-skill/gpt-6.1-sol r11l: WIN/6of6/108actions after one generic continuation; BP35 outer assistance and concrete code/transcript comparison. |
@@ -96,6 +96,6 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - Task39 已封存：[NOTES 主要工作认知设计](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md)：普通笔记直接承接工作上下文、重要错误反例记录、按引用专项回读、三层执行/恢复保障；源码、打包见证和BP35六关已验证；输入明显收拢，动作/时间/得分回退，2037项manifest独立READY。
 
-- 后续统一整改：`DECISIONS.md` D-2026-10-10-02，Prime 标准应用入口与私有 Pi/RPC、P1–P7 接线/见证差异及默认专用压缩缺口；用户暂缓；P7 NOTES验证已完成，后续推理改进优先。
+- Task40 标准接入设计：[Prime 标准应用入口](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)。D-2026-10-10-03 确认先迁移 P7/P1/P3–P6 已有真实模型路径的入口与资源所有权；P2 本轮记录目标与边界。书面设计待审，未实现。P3–P6 live 与确定性 witness 并存；专用摘要接通另作行为变更验证。
 
 - 后续专用压缩验证：D-2026-10-10-02 与工作清单补充低阈值 P7 实战触发测试；先接通专用摘要，再验证真实调用与内核/认知连续性，本轮 BP35 不变。

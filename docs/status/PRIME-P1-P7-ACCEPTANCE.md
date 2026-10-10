@@ -92,12 +92,12 @@ Makefile 当前默认 `tu93-0768757b`、本地 seed `0`；实跑时建议显式�
 
 ### 用它做什么
 
-让模型在**长会话里持续写 Python 代码**,而且会话撑爆 context 窗口时**自动压缩 context 但保留已执行的代码状态**。压缩后,之前定义的变量、文件、计算结果都还在——只是 context 里被替换成摘要,需要时再通过 IPython 拿回来。
+目标是让模型在长会话中持续写 Python，并在上下文压缩后继续使用存活内核中的状态。当前 P1 preset 由应用手动安排压缩与继续执行；默认专用自动摘要接入尚未完成。存活内核连续性不等于进程退出后能恢复任意 Python 对象。
 
 ### 怎么设计的
 
 - **两阶段执行**:先写文件、校验、再用 IPython 单元执行(IPython 作为受限 worker,不是完整 Python)。
-- **自有压缩逻辑**:压缩 prompt 不来自 Pi 自己的内置实现(那个会泄露 IPython 内置状态);Asterion 用 Pi 提供的扩展点 `session_before_compact` 在自己侧接管压缩,自己向 Pi 发起一次模型调用来生成摘要。
+- **当前压缩接线**:应用向 `PrimeSessionBackend` 注入自定义压缩说明，并手动请求 compact。已有专用摘要材料与预算见证不代表默认摘要生成已被接管；缺口见 `DECISIONS.md` D-2026-10-10-02/03。
 - **Oracle 验证**:最后有一个 `prime.p1-oracle` 检查所有执行结果是不是符合预期——不通过就拒收。
 
 ### Prime 能力
@@ -152,32 +152,32 @@ make asterion-prime-p1-run
 
 ### 用它做什么
 
-让模型处理**比它的 context 窗口大得多的资料**(比如一大坨代码库或文档),通过**程序化的方式**(不是直接塞 prompt 里)拿需要的片段,再根据片段回答问题。整个 corpus **不会进 prompt**——只让模型"看"它需要的部分。
+目标是让模型通过程序查询外部语料，再依据所需片段回答问题。当前实现只验证固定的本地检索、片段身份与清理机制，没有模型自主选择查询或生成答案。Task40 记录其标准接入目标；真实自主检索能力另行实现和评估。
 
 ### 怎么设计的
 
-- **外部语料作为 operator 资源**:`ASTERION_PRIME_P2_CORPUS` 指向一个目录(不绑定任何 Python 代码到 Asterion),模型通过 `prime.p2-oracle` 这个 host service 程序化检索。
-- **零知识证明**:oracle 不仅回答问题,还告诉调用方"我读到的片段摘要是 X",用来证明"我确实读了,没瞎编"。
-- **这是 P1 的超集**:P2 复用 P1 的 IPython session 和 oracle 形态,只换掉语料来源。
+- **外部语料作为 operator 资源**:`ASTERION_PRIME_P2_CORPUS` 指向包含 JSON 对象数组的语料文件；operator 创建 `P2ContextService` 与本地 `P2ContextServiceWorker`。
+- **片段身份校验**:固定流程检索片段并核对 digest；这不是零知识证明，也不证明模型理解或答案正确。
+- **当前执行方式**:没有 Pi 调用或 IPython 子进程。runtime 固定发起检索，内部 oracle 的 `answer_sha256` 复用片段摘要；公开结果只给出运行状态与收据摘要。
 
 ### Prime 能力
 
-**程序化长 Context 处理**——Prime Agent 论文强调的"用代码读写 context"能力,而不是"context 装不下就放弃"。
+**外部上下文服务机制**已实现；模型自主查询、读取、回答以及真实长上下文研究尚未验证。
 
 ### 怎么验收
 
 ```bash
-export ASTERION_PRIME_P2_CORPUS="/path/to/some/corpus"
+export ASTERION_PRIME_P2_CORPUS="/path/to/corpus.json"
 make asterion-prime-p2-run
 ```
 
-**期望**:退出码 0;输出 JSON 含 `answer` + `slice_digest`(oracle 检索到的片段摘要)。历史通过跑(receipt `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`,deterministic across host and Orb)。
+**期望**:退出码 0；公开 JSON 含 `run_id`、`status`、`receipt_sha256`。片段摘要与 `answer_sha256` 属于内部 oracle 校验材料。历史收据为 `cac924edc5e12b9cb5d1d88e17ac547bd82ac00328dbab74de5157cc7217e0e5`，本轮未重跑。
 
 ### 边界与未验证项
 
-✅ **已验证**:50 个 P2 单元测试通过;oracle 的 slice digest 一致;P1 的 102 个测试 0 回归。
-ℹ️ **fake-worker 还是真模型**:make 目标走**真 Pi 子进程**(同 P1)。
-ℹ️ **隐含约束**:语料不进 prompt——这是验证的一部分,oracle 会在 evidence digest 里记录"实际读了哪些文件",事后比对可证。
+✅ **历史验证**:曾记录 50 个 P2 单元测试与 102 个 P1 测试通过；2026-10-10 本轮仅核对源码，未重跑。
+ℹ️ **当前后端**:make 目标使用本地 context worker，输入和输出模型 token 均为零。
+ℹ️ **证据边界**:片段摘要支持检索身份核对；当前无模型 prompt，不能据此宣称已验证模型的大语料处理能力。
 
 ---
 

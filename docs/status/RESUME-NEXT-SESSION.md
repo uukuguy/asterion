@@ -1,12 +1,15 @@
-# Next-Session Handoff
+# Live Session Checkpoint
 
-> Updated: 2026-10-10 03:40 CST. 本会话已结束；无本会话遗留实测进程。用户控制台保留。
+> Updated: 2026-10-10 16:48 CST. Session remains active — not a final handoff. 本轮为标准接入设计，无新实测。
 
 ## 恢复摘要
 
-- 分支 `feat/prime-research-notes`；managed，唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39 NOTES核心实现、打包、r11l与BP35六关验证均已收口；性能结论是输入减少、解题质量回退。
-- 下一动作：先读[Task39实际评估](../reviews/2026-10-09-p7-bp35-task32-interrupted-analysis.md)末尾，围绕L2危险停点误判、L5局部观察过早扩展成全局结论、长epoch研究组织形成具体改进设计。保持Prime通用层/P7研究层/P7数据层定位；不要直接追加泛化提醒或游戏路线提示。新方案/新付费运行尚未开始。
-- 全部Pi接入迁移与默认专用摘要由用户暂缓；先完成P7解题研究。以后接通专用摘要后，在P7中用较低阈值强制真实压缩实测，不能以离线探针替代。
+- 分支 `feat/prime-research-notes`；managed，唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md) Task40。用户已同意先统一已有真实模型路径的标准接入和资源所有权，保持 Prime 稳定底层；P2 本轮记录目标与边界，自主检索能力补全另列。
+- 当前产物：[标准应用入口设计](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)，书面设计待审。设计自审及独立 Sol 合同复审 APPROVE，相关修正完成；docs-check312文件/221链接、diff-check通过。下一动作：用户审阅书面设计后形成实施计划。本轮没有修改运行代码或启动付费运行。
+- Prime 复用既有执行核心；收回 Pi/RPC、扩展加载、工具装配及会话生命周期。应用保留目标/工具/数据/领域完成条件；operator 显式注入配置和有限授权。先 P7，后 P1 与 P3–P6 live；P2 本地 witness 的行为保留。
+- 源码更正：P3–P6 已有真实 Pi 文本 live 路径，也保留确定性 witness；P2 当前无模型或 IPython 子进程。共用 runtime 名称不能证明共用 Prime 后端。P1 手动压缩说明与专用材料不代表默认专用摘要已接通。
+- Task39 已封存：NOTES 输入减少、解题质量回退。下列事实与未完成边界继续有效。P7 L2/L5 推理改进仍待研究，本轮不改变游戏策略。
+- 专用摘要接通及未来低阈值 P7 实战测试独立验证；既有 stash 保留。新 BP35 和广泛自主能力改造未开始，也不继承历史试验预算。
 
 ## 已验证事实
 
@@ -53,7 +56,7 @@ Goal126请求input4639960/output42760；final127 input4699481/output42803/raw637
 
 - 原生Pi正文未持久化；stderr前14条primary及退休0→4→12可直接审计，此后diagnostics-suppressed，完整FD指标不能替代全程逐组正文审计。另有1oversize旁路省略，原字节完整转发。native context_archive是否实际调用未知（17workspace中16NOTES、另一次op/body未保存）；已有cell/history/frame/patches实际回读。
 - 未观察到native compaction，不验证专用摘要。旧Prime fork确实改写原生摘要生成，当前迁移启动链未接通该改写；默认高阈值约255616与专用语义是两件事。未来低阈值验证需真实选定模型摘要、usage/预算、持久kernel变量/函数/generation、NOTES/反例以及继续正确解题。
-- 全部Pi启动/配置/扩展/RPC及默认专用摘要应归Prime私有接入。P1与P7仍有应用侧接线；P2是本地worker/context，P3–P6当前是机制见证，不能假定都完成真实长程agent。迁移由用户延期，无新实施。
+- 全部 Pi 启动/配置/扩展/RPC 及默认专用摘要应归 Prime 私有接入。P1/P7 仍有应用侧接线；P3–P6 live 直接创建真实 Pi 文本会话，另有确定性 witness；P2 是本地 worker/context。Task40 已确认标准接入设计范围，源码迁移尚未开始，统一真实长程 agent 能力未验证。
 - 专用摘要未完成初稿隔离在stash `30ec751b8219f52c55e265e94ca965f65c0c85f7`（3个TS文件）；保留，不自动apply或删除。没有新的Python迁移源码。约23KB重复初始指令/快照及大stdout仍有开销，未修复。
 - 跨领域能力、稳定成功率、压缩后重放范围、评分/时延的稳定改进未证明。六关目标不是BP35九关全通。
 
@@ -68,4 +71,4 @@ rg -n 'Task39|D-2026-10-10-0[12]' docs/status/DECISIONS.md docs/reviews/2026-10-
 git stash list
 ```
 
-已提交核心2930fbd8、r11l1046624f、架构记录f9f4b512、低阈值验证0fb15c7c、最终评估f0760ab8；没有执行push/merge。此交接依仓库AGENTS handoff合同直接保存，下一会话 `project-state resume` 后先核对状态，再按明确的后续任务继续。
+Task39 已提交核心2930fbd8、r11l1046624f、架构记录f9f4b512、低阈值验证0fb15c7c、最终评估f0760ab8；前次最终交接b08bc5a2、日志be028db7。本轮仅设计与状态修订，没有执行push/merge；这是活动会话 checkpoint，不是新的最终收口。

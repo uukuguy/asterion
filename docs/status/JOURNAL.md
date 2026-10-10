@@ -4786,3 +4786,9 @@
 - 03:40 Final handoff preserves Task39 evidence, deferred compaction test and private-backend scope; owned processes cleared, console preserved.
 
 - 03:42 Finalized handoff and reconciled memory/state to resume from verified evidence and deferred boundaries. [b08bc5a2]
+
+## 2026-10-10
+
+- 16:47 User approved standard-entry scope: migrate existing live backend ownership first; P2 capability separate; no implementation or new trial.
+- 16:47 Source inventory: P3–P6 have real Pi live paths; P2 is local retrieval; dedicated automatic summary remains unwired.
+- 16:50 Task40 design independently APPROVE; configuration/generation/P2 wording corrected; docs-check312files/221links and diff-check PASS; user written review pending.

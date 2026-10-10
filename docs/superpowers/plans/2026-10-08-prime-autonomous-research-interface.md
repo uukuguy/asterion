@@ -318,3 +318,17 @@ User explicitlyauthorizes implementation/simple review/coldBP35. [Design](../spe
 Task39 current scope: NOTES-only source2930fbd8, restored TS88 PASS/6external skips and actualinstalledPi provider0 PASS; resource13bfee. Simple scope reviewAPPROVE. Broad backend migration and specializedcompaction draft safely isolated, not included in currentbuild. FocusedPython48/promotion25/provider0/packagedr11l verified; coldBP35 native6 complete242paid/oneRESET/1605.836404s. Final2037manifest736c1fcf independentlyREADY. Input4699481/peak73098 reduced, solving score/time/actions regressed versusTask38; no stable quality gain claim.
 
 Deferred specialized-compaction live test (user requested): after implementation, run a finite P7 preset with a deliberately lower threshold so actual selected-model summarization occurs. Verify the specialized request, usage/cancellation boundaries, kernel generation and variable/function reuse, NOTES/counterexamples, and continued solving. Do not substitute an ordinary Pi summary or offline fixture. No threshold/source change during active Task39 BP35.
+
+
+## Task40 — Stable Prime standard application entry
+
+Status: scope/direction approved; written design review. [Design](../specs/2026-10-10-prime-standard-application-entry-design.md); D-2026-10-10-03 records the user agreement. This is the active successor to the closed Task39 experiment.
+
+Unify backend entry and resource ownership for existing P7/P1/P3–P6 real-model paths, preserving Prime as the stable domain-neutral foundation. Reuse the current execution kernel, session and durable backend. Applications supply goals/tools/data/domain completion and evidence; operator supplies finite authority/configuration; Prime owns its private Pi/RPC, extension/tool assembly and session lifecycle. P2 remains the current local retrieval witness; this task records its future standard-entry target without adding model-driven retrieval.
+
+- [x] Inventory P1–P7 actual live/witness paths and private backend ownership; correct P2 and P3–P6 documentation ambiguities.
+- [x] Write and independently review the contract, migration order and completion criteria; resolve configuration, recovery-generation and P2 documentation findings.
+- [ ] User review of the written design before implementation planning.
+- [ ] After written design review, create the bounded implementation plan; keep implementation and new live evaluation status explicit.
+
+The default dedicated-summary gap is real but is a separate behavior change. Preserve the requested future lower-threshold P7 validation and the isolated draft stash. No new BP35 run, broad capability rebuild or model-quality improvement is authorized or claimed by this design record. Existing public protocols, runner responsibilities, operator authority and packaged-resource verification requirements remain in force.
