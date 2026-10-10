@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，进入可执行状态；实现尚未开始。文档检查另记状态日志，未运行代码测试或模型调用。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1 完成，Task 2/3 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -124,10 +124,12 @@ P1 oracle executor、旧 P7 领域 worker 可按现有窄 executor 协议转交�
 
 ## Task 1：标准入口的数据与无效果边界
 
+完成：`d5668e8c`、`ae185b25`；8 项 focused tests 与 Ruff 通过，独立 Astra 复审通过，根代理核对输入校验兼容修复。此阶段正向工厂仍显式拒绝，模型能力不计为完成。
+
 **Files:** Create `src/asterion/agents/prime/application.py`；Modify `src/asterion/agents/prime/__init__.py`；Create `tests/test_prime_application_entry.py`。
 **Interfaces:** 定义上节所有数据类型与协议；实现 `PrimeOperatorContext`、`PrimeApplicationSpec` 和 `prepare_prime_application` 无效果构造。Task 2/3 在 owner 固定私有方法内接入资源，禁止将未定义类型推给后续 task。
 
-- [ ] 添加 `TestPrimeApplicationEntry.test_prepare_is_effect_free_and_profile_checked`，使用临时已预检可执行文件、sentinel 环境与 RPC/worker 构造 patch；断言 prepare 零调用，text-only 请求 runtime 在启动前失败。
+- [x] 添加 `TestPrimeApplicationEntry.test_prepare_is_effect_free_and_profile_checked`，使用临时已预检可执行文件、sentinel 环境与 RPC/worker 构造 patch；断言 prepare 零调用，text-only 请求 runtime 在启动前失败。
 
 ```python
 with patch('asterion.runtimes.pi_rpc.PiRpcSession') as rpc:
@@ -138,12 +140,12 @@ with patch('asterion.runtimes.pi_rpc.PiRpcSession') as rpc:
 self.assertNotIn('private-sentinel', repr(app))
 ```
 
-- [ ] RED：`uv run python -m unittest -v tests.test_prime_application_entry`；预期入口导入失败，确认失败原因后再实现。
-- [ ] 实现 frozen/slotted 数据、复制环境、本地身份检查、profile/tool 组合检查；构造不查询 provider/inventory、不读 `.env`、不写临时配置、不开线程或进程。加入未登记 `example.independent` 的 prepare 测试。
-- [ ] 固定 owner 状态：prepared → active → closing → closed；同 key 限额不同拒绝，closed 不再接纳效果，close 幂等。暂未装配的 profile 正向工厂由 Task 2/3 完成，禁止放任意 factory 参数。
-- [ ] 添加 `test_context_is_immutable_and_redacted`：原字典修改不影响 context；任何异常不带 provider env、prompt、cwd。
-- [ ] GREEN：同一命令；预期新增无效果/不可变/脱敏测试通过，不调用 provider。
-- [ ] 提交：`git add src/asterion/agents/prime/application.py src/asterion/agents/prime/__init__.py tests/test_prime_application_entry.py`；`git commit -m "feat(prime): define standard application owner boundary"`。
+- [x] RED：`uv run python -m unittest -v tests.test_prime_application_entry`；预期入口导入失败，确认失败原因后再实现。
+- [x] 实现 frozen/slotted 数据、复制环境、本地身份检查、profile/tool 组合检查；构造不查询 provider/inventory、不读 `.env`、不写临时配置、不开线程或进程。加入未登记 `example.independent` 的 prepare 测试。
+- [x] 固定 owner 状态：prepared → active → closing → closed；同 key 限额不同拒绝，closed 不再接纳效果，close 幂等。暂未装配的 profile 正向工厂由 Task 2/3 完成，禁止放任意 factory 参数。
+- [x] 添加 `test_context_is_immutable_and_redacted`：原字典修改不影响 context；任何异常不带 provider env、prompt、cwd。
+- [x] GREEN：同一命令；预期新增无效果/不可变/脱敏测试通过，不调用 provider。
+- [x] 提交：`git add src/asterion/agents/prime/application.py src/asterion/agents/prime/__init__.py tests/test_prime_application_entry.py`；`git commit -m "feat(prime): define standard application owner boundary"`。
 
 ## Task 2：提取真实 text-only 会话并收回模型启动
 
@@ -163,7 +165,7 @@ self.assertTrue(fake_rpc.closed)
 
 - [ ] RED：`uv run python -m unittest -v tests.test_prime_application_entry tests.test_prime_live_model`；预期缺失 view 行为/owner 关闭断言失败。
 - [ ] 按符号搬移 `LiveModelUsage/Reply`、`LiveModelSession.__init__/_verify_model_cap/open/prompt/close` 至 `_text_model.py`；保留 usage normalizer、cache token 计量、取消异常和配置目录清理。
-- [ ] bounded-live 数量上限保持 120 秒、4 prompts、8192/32768 bytes、16000/8000 tokens、3000 cost_micros、provider maxTokens 512；exact model 改为 deepseek-flash，配置/get_state 两端一致。旧 140000/280000 价格只能在 operator 已核实适用于该 exact model 后注入；未知价格在 effect 前拒绝，不能用 v4-flash 名称或价格猜映射。
+- [ ] bounded-live 数量上限保持 120 秒、4 prompts、8192/32768 bytes、16000/8000 tokens、3000 cost_micros、provider maxTokens 512；exact model 改为 deepseek-flash，配置/get_state 两端一致。本地 Pi exact model metadata 的 input/output 为每百万 0.3/1.2 USD，对应 300000/1200000 micros；旧 140000/280000 不适用。operator 注入匹配价格，缓存继续按全价输入保守计量；未知价格在 effect 前拒绝，不能用 v4-flash 名称或价格猜映射。
 - [ ] `_launch.py` 以 executable/entry/provider/model/effort、profile 和固定 flags 组装 Pi 命令；保留 text-only `--no-tools --no-session --no-extensions` 及其余 isolation flags，禁止把任意 flags 作为应用入参。
 - [ ] 新增 `resolve_live_model_context`，保留 operator 配置/安装/路径预检。旧 `resolve_live_model_launch`、`LiveModelLaunch.command` 和旧 session 构造形状暂保留给 Task 6/7 未迁移调用方；兼容层委托 Prime 私有命令构造与 session engine，不复制实现。此阶段不得把旧返回值直接换成没有 `.command` 的 context；Task 8 才移除过渡面。
 - [ ] owner 延迟 open、跟踪每 key 的真实 session 与已消耗额度，重取视图不续期；`text_once` 使用 try/finally 关闭且关闭失败不返回成功；总体 close 汇总并重试既有 reap 兜底。
