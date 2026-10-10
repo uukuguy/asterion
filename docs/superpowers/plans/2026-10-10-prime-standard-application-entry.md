@@ -247,6 +247,7 @@ self.assertEqual(private_launch.call_count, 1)
 
 **Files:** Modify `src/asterion/agents/prime/application.py`、`_launch.py`、`src/asterion/applications/prime/p1/operator.py`、`runtime_binding.py`、`src/asterion/applications/prime/p7/run_story/operator_narrator.py`；Test `tests/test_asterion_prime_backend.py`、`tests/test_asterion_prime_p1_operator.py`、`tests/test_asterion_prime_p1_runtime.py`、`tests/test_prime_arc_agi_3_run_story.py`。
 **Interfaces:** `PrimeBackendSpec/open_backend` 创建 backend/store/witness 并保留其 owner；P1 得到现有 attachment 操作，narrator 使用 `text_once`。
+实施补充范围：控制兼容工厂可接受 exact PrimeApplication 并调用 attach_backend，保留身份/授权校验；通用 bridge 保留 P1 原事件循环。共享 owner 提供私有不可变启动指纹与既有用量账本投影，区分 unknown effect 与仅清理失败；Task 5 独占共享核心文件，Task 6 只消费这些接口。
 
 - [ ] RED 测试扩展 P1 清理：close attachment 后同 owner 可 attach、kernel generation 未变；Pi close 故障时 independent reap 仍执行，构造阶段不启动模型。
 
@@ -292,9 +293,9 @@ work = _CandidateWork(prime.text_model(key='candidate', limits=live_limits), run
 - [ ] P3 `run_live_verification`、`P3LiveHost._prompt` 使用 child/root 独立 model key；首次效果必须在 child admission 后；root 仅消费已验证 child JSON，保留成本记录与 child cap。
 - [ ] P3/P4/P5 resolver、usage/get_state 和 fake fixture 都使用 exact deepseek-flash；消费者在本提交切到新 context/view，旧兼容入口继续给尚未迁移的 P6 使用。
 - [ ] P3 原 command/binding 哈希用途逐项保留，改取 owner 的私有身份摘要；应用不能自行拼 argv 算哈希，公开 surfaces 不输出私有配置。
-- [ ] P4 `run_live_round/P4LiveHost.commit_checkpoint` 用 `text_once`，仅在 prompt 与 close 都成功后 seal；保留 prior generation lock、disk JSON 恢复和 retry 合同，不换成 backend.attach。
+- [ ] P4 `run_live_round/P4LiveHost.commit_checkpoint` 用 `text_once`，仅在 prompt 与 close 都成功后 seal；保留 prior generation lock、disk JSON 恢复和 retry 合同，不换成 backend.attach。旧检查点的启动/绑定指纹若与新实现不符必须拒绝，不改写旧身份或放宽相等校验。
 - [ ] P5 `_CandidateWork._ask/propose/verify/repair` 只用 model view；`_open_bounded_autonomy_loop` 与 `_run_composed_loop` 保留领域编排，operator finally 关闭 Prime owner。
-- [ ] 消除应用 finalize=session.close 的模型生命周期回调；已有领域 finalize 行为保留，但模型 reap 由 Prime owner 的 execution scope 保证。
+- [ ] 消除应用 finalize=session.close 的模型生命周期回调；已有领域 finalize 行为保留，但模型 reap 由 Prime owner 的 execution scope 保证。P5 原 wait_finalization 必须在成功终态前检查 owner cleanup.complete；P3 清理故障不丢失已知成本，未知效果保留原 admission fence。
 - [ ] GREEN：同 RED 命令，再 `uv run python -m unittest -v tests.test_prime_p3_composed_runtime tests.test_prime_p5_p6_composed_execution`。
 - [ ] 重点检查 P3 admission refusal 零模型、child budget 阻断 root，P4 close failure 不 seal，P5 malformed artifact/cancel 均 reap；不要把名为 real_candidate 的 fake-model 测试写成 live 验证。
 - [ ] 提交：`git commit -m "refactor(prime): route P3 P4 P5 live model operations through owner"`。
