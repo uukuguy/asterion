@@ -21,7 +21,10 @@ from asterion.agents.prime.compaction_budget import ModelPrice
 from asterion.agents.prime.deadline import TaskDeadline
 from asterion.agents.prime.execution import AsterionPrimeLimits
 from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
+from asterion.agents.prime._text_model import LiveModelError
 from asterion.runtime.protocol import ProtocolError
+from tests.test_prime_live_model import _NeverCancelled, _PRODUCER
+import sys
 
 
 class TestPrimeApplicationEntry(unittest.TestCase):
@@ -137,11 +140,6 @@ class TestPrimeApplicationEntry(unittest.TestCase):
     def test_unassembled_factories_reject_without_effect_and_close_is_idempotent(self):
         app = prepare_prime_application(self.spec, self.operator, authorization=self.limits)
         with self.assertRaises(ProtocolError):
-            app.text_model(key='conversation.one', limits=self.limits)
-        with self.assertRaises(ProtocolError):
-            asyncio.run(app.text_once(key='conversation.one', text='private-sentinel',
-                                      limits=self.limits, signal=object()))
-        with self.assertRaises(ProtocolError):
             asyncio.run(app.open_backend(spec=object(), services=object()))
         receipt = asyncio.run(app.close())
         self.assertTrue(receipt.complete)
@@ -149,6 +147,124 @@ class TestPrimeApplicationEntry(unittest.TestCase):
         self.assertEqual(receipt, asyncio.run(app.close()))
         with self.assertRaises(ProtocolError):
             app._admit_text_limits('conversation.one', self.limits)
+
+    def test_text_view_has_no_launch_handles(self):
+        app = prepare_prime_application(self.spec, self.operator, authorization=self.limits)
+        view = app.text_model(key='candidate', limits=self.limits)
+        self.assertFalse(any(hasattr(view, name) for name in ('open', 'close', 'process', 'config')))
+        self.assertEqual(app.state, 'prepared')
+        asyncio.run(app.close())
+
+    def _text_app(self, limits=None, deadline=None):
+        script = self.root / 'producer.py'
+        script.write_text(_PRODUCER)
+        operator = replace(self.operator, executable=Path(sys.executable).resolve(),
+                           entry=None, task_deadline=deadline or self.deadline)
+        app = prepare_prime_application(self.spec, operator, authorization=limits or self.limits)
+        return app, (sys.executable, '-I', str(script))
+
+    def test_text_once_reaps_before_return(self):
+        app, command = self._text_app()
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                reply = await app.text_once(key='checkpoint', text='hello',
+                                            limits=self.limits, signal=_NeverCancelled())
+            self.assertEqual(reply.text, 'private answer')
+            self.assertIsNone(app._text_sessions['checkpoint'].process)
+            with self.assertRaises(ProtocolError):
+                app.text_model(key='checkpoint', limits=self.limits)
+            self.assertTrue((await app.close()).complete)
+        asyncio.run(run())
+
+    def test_unlisted_application_runs_without_provider_lookup(self):
+        app, command = self._text_app()
+        async def run():
+            with (patch('asterion.agents.prime._launch.text_command', return_value=command),
+                  patch('asterion.applications.discovery.list_application_providers',
+                        side_effect=AssertionError('provider lookup')),
+                  patch('asterion.applications.discovery.load_application_provider',
+                        side_effect=AssertionError('provider lookup')),
+                  patch('asterion.applications.prime.inventory.prime_release_application',
+                        side_effect=AssertionError('inventory lookup'))):
+                one = app.text_model(key='one', limits=self.limits)
+                two = app.text_model(key='two', limits=self.limits)
+                await one.prompt('hello', signal=_NeverCancelled())
+                await two.prompt('hello', signal=_NeverCancelled())
+                self.assertIsNot(app._text_sessions['one'], app._text_sessions['two'])
+                with self.assertRaises(LiveModelError):
+                    await app.text_once(key='three', text='hello', limits=self.limits,
+                                        signal=_NeverCancelled())
+                self.assertEqual(app._text_usage.prompts, 2)
+                self.assertTrue((await app.close()).complete)
+        asyncio.run(run())
+
+    def test_unknown_usage_blocks_other_keys(self):
+        app, command = self._text_app()
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                with self.assertRaises(LiveModelError):
+                    await app.text_once(key='one', text='missing-usage', limits=self.limits,
+                                        signal=_NeverCancelled())
+                with self.assertRaises(LiveModelError):
+                    await app.text_once(key='two', text='hello', limits=self.limits,
+                                        signal=_NeverCancelled())
+                self.assertEqual(app._text_usage.prompts, 1)
+                await app.close()
+        asyncio.run(run())
+
+    def test_task_deadline_is_shared_and_not_renewed(self):
+        clock = [0.0]
+        deadline = TaskDeadline(deadline_monotonic=10, deadline_epoch=10,
+                                monotonic_clock=lambda: clock[0], wall_clock=lambda: clock[0])
+        app, command = self._text_app(deadline=deadline)
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                await app.text_once(key='one', text='hello', limits=self.limits,
+                                    signal=_NeverCancelled())
+                clock[0] = 11
+                with self.assertRaises(LiveModelError):
+                    await app.text_once(key='two', text='hello', limits=self.limits,
+                                        signal=_NeverCancelled())
+                self.assertEqual(app._text_usage.prompts, 1)
+                await app.close()
+        asyncio.run(run())
+
+    def test_close_failure_prevents_success_and_cleanup_can_retry(self):
+        limits = replace(self.limits, max_prompts=3)
+        app, command = self._text_app(limits)
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                view = app.text_model(key='one', limits=limits)
+                await view.prompt('hello', signal=_NeverCancelled())
+                rpc = app._text_sessions['one']._rpc
+                original_stop = rpc.stop
+                with patch.object(rpc, 'stop', side_effect=RuntimeError('private-close')):
+                    with self.assertRaises(LiveModelError):
+                        await app.text_once(key='one', text='hello', limits=limits,
+                                            signal=_NeverCancelled())
+                    with self.assertRaises(LiveModelError):
+                        await app.text_once(key='two', text='hello', limits=limits,
+                                            signal=_NeverCancelled())
+                    receipt = await app.close()
+                    self.assertFalse(receipt.complete)
+                    self.assertEqual(app.state, 'closing')
+                original_stop()
+                self.assertTrue((await app.close()).complete)
+                self.assertEqual(app.state, 'closed')
+        asyncio.run(run())
+
+    def test_overlapping_keys_do_not_bypass_shared_prompt_cap(self):
+        limits = replace(self.limits, max_prompts=1)
+        app, command = self._text_app(limits)
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                replies = await asyncio.gather(*(
+                    app.text_once(key=key, text='hello', limits=limits, signal=_NeverCancelled())
+                    for key in ('one', 'two')), return_exceptions=True)
+                self.assertEqual(sum(isinstance(reply, LiveModelError) for reply in replies), 1)
+                self.assertEqual(app._text_usage.prompts, 1)
+                self.assertTrue((await app.close()).complete)
+        asyncio.run(run())
 
     def test_hooks_and_backend_inputs_are_immutable_and_checked(self):
         with self.assertRaises(ProtocolError):

@@ -13,6 +13,10 @@ from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Protocol
 
+from asterion.agents.prime import _launch
+from asterion.agents.prime._text_model import (
+    LiveModelReply, LiveModelSession, LiveModelUsage, _TextUsage,
+)
 from asterion.agents.prime.backend import PrimeAttachment
 from asterion.agents.prime.compaction_budget import ModelPrice
 from asterion.agents.prime.deadline import TaskDeadline
@@ -248,25 +252,6 @@ class PrimeBackendSpec:
         return '<PrimeBackendSpec redacted>'
 
 
-@dataclass(frozen=True, slots=True, repr=False)
-class LiveModelUsage:
-    input_tokens: int
-    output_tokens: int
-    cost_micros: int
-
-    def __repr__(self) -> str:
-        return '<LiveModelUsage redacted>'
-
-
-@dataclass(frozen=True, slots=True, repr=False)
-class LiveModelReply:
-    text: str
-    usage: LiveModelUsage
-
-    def __repr__(self) -> str:
-        return '<LiveModelReply redacted>'
-
-
 class PrimeModelView(Protocol):
     async def prompt(self, text: str, *, signal: CancellationSignal) -> LiveModelReply: ...
 
@@ -302,11 +287,25 @@ class PrimeApplicationCleanup:
         return all(getattr(self, field.name) for field in fields(self))
 
 
+class _PrimeModelView:
+    __slots__ = ('_owner', '_key')
+
+    def __init__(self, owner: PrimeApplication, key: str):
+        self._owner, self._key = owner, key
+
+    def __repr__(self) -> str:
+        return '<PrimeModelView redacted>'
+
+    async def prompt(self, text: str, *, signal: CancellationSignal) -> LiveModelReply:
+        return await self._owner._prompt_text(self._key, text, signal=signal)
+
+
 class PrimeApplication:
     """Resource owner with fixed authorization; construction never launches Pi."""
 
     __slots__ = ('_spec', '_operator', '_authorization', '_state',
-                 '_text_limits_by_key', '_cleanup')
+                 '_text_limits_by_key', '_cleanup', '_text_sessions', '_text_closed_keys',
+                 '_text_usage')
 
     def __init__(self, spec: PrimeApplicationSpec, operator: PrimeOperatorContext, *,
                  authorization: PrimeTextLimits | AsterionPrimeLimits | PrimeBackendSpec):
@@ -323,6 +322,10 @@ class PrimeApplication:
         self._state = 'prepared'
         self._text_limits_by_key: dict[str, PrimeTextLimits] = {}
         self._cleanup: PrimeApplicationCleanup | None = None
+        self._text_sessions: dict[str, LiveModelSession] = {}
+        self._text_closed_keys: set[str] = set()
+        self._text_usage = (_TextUsage(authorization, operator.task_deadline)
+                            if type(authorization) is PrimeTextLimits else None)
 
     def __repr__(self) -> str:
         return '<PrimeApplication redacted>'
@@ -372,13 +375,48 @@ class PrimeApplication:
                 _invalid()
 
     def text_model(self, *, key: str, limits: PrimeTextLimits) -> PrimeModelView:
-        self._require_available()
-        raise ProtocolError('Prime application text profile is not assembled')
+        self._admit_text_limits(key, limits)
+        if key in self._text_closed_keys:
+            raise ProtocolError('Prime application text key is closed')
+        return _PrimeModelView(self, key)
 
     async def text_once(self, *, key: str, text: str, limits: PrimeTextLimits,
                         signal: CancellationSignal) -> LiveModelReply:
-        self._require_available()
-        raise ProtocolError('Prime application text profile is not assembled')
+        view = self.text_model(key=key, limits=limits)
+        try:
+            return await view.prompt(text, signal=signal)
+        finally:
+            self._text_closed_keys.add(key)
+            session = self._text_sessions.get(key)
+            if session is not None:
+                await session.close()
+
+    async def _prompt_text(self, key: str, text: str, *, signal: CancellationSignal) -> LiveModelReply:
+        usage = self._text_usage
+        if usage is None:
+            _invalid()
+        async with usage.lock:
+            self._require_available()
+            if key in self._text_closed_keys:
+                raise ProtocolError('Prime application text key is closed')
+            limits = self._text_limits_by_key[key]
+            usage.remaining(limits)
+            session = self._text_sessions.get(key)
+            try:
+                if session is None:
+                    session = LiveModelSession(
+                        command=_launch.text_command(self._operator, self._spec),
+                        environment=self._operator.environment, cwd=self._operator.cwd,
+                        provider=self._operator.provider, model=self._operator.model,
+                        limits=limits, usage=usage,
+                    )
+                    self._text_sessions[key] = session
+                    self._activate()
+                    await session.open(signal=signal)
+                return await session.prompt(text, signal=signal)
+            except BaseException:
+                self._text_closed_keys.add(key)
+                raise
 
     def runtime(self, *, services: PrimeApplicationServices, limits: AsterionPrimeLimits,
                 hooks: PrimeRunHooks) -> AgentRuntimeClient:
@@ -391,12 +429,27 @@ class PrimeApplication:
         raise ProtocolError('Prime application backend profile is not assembled')
 
     async def close(self) -> PrimeApplicationCleanup:
-        if self._cleanup is not None:
+        if self._cleanup is not None and self._cleanup.complete:
             return self._cleanup
         self._state = 'closing'
-        # No resource can yet be acquired by this effect-free entry boundary.
-        self._cleanup = PrimeApplicationCleanup(True, True, True, True, True)
-        self._state = 'closed'
+        self._text_closed_keys.update(self._text_limits_by_key)
+        model_closed = True
+        usage = self._text_usage
+        async def close_sessions() -> None:
+            nonlocal model_closed
+            for session in self._text_sessions.values():
+                try:
+                    await session.close()
+                except Exception:
+                    model_closed = False
+        if usage is not None:
+            async with usage.lock:
+                await close_sessions()
+        else:
+            await close_sessions()
+        self._cleanup = PrimeApplicationCleanup(model_closed, model_closed, True, True, True)
+        if self._cleanup.complete:
+            self._state = 'closed'
         return self._cleanup
 
 

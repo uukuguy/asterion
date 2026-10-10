@@ -10,11 +10,15 @@ import unittest
 from unittest.mock import patch
 
 import asterion
+from asterion.agents.prime.application import PrimeTextLimits
+from asterion.agents.prime._text_model import LiveModelSession as CoreTextSession
+from asterion.agents.prime.deadline import TaskDeadline
 
 from asterion.applications.prime.live_model import (
     LiveModelError,
     LiveModelSession,
     resolve_live_model_launch,
+    resolve_live_model_context,
 )
 
 
@@ -28,7 +32,7 @@ for line in sys.stdin:
         break
     if req["type"] == "get_state":
         emit({"type": "response", "id": req["id"], "command": "get_state", "success": True,
-              "data": {"model": {"provider": "deepseek", "id": "deepseek-v4-flash", "maxTokens": 512}}})
+              "data": {"model": {"provider": "deepseek", "id": "deepseek-flash", "maxTokens": 512}}})
         continue
     if req["type"] != "prompt":
         continue
@@ -39,6 +43,8 @@ for line in sys.stdin:
         time.sleep(30)
     emit({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "private answer"}})
     usage = {"input": 1000, "output": 500}
+    if mode == "small":
+        usage = {"input": 100, "output": 50}
     if mode == "missing-usage":
         del usage["input"]
     if mode == "over-tokens":
@@ -88,7 +94,7 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(reply.text, "private answer")
         self.assertEqual(reply.usage.input_tokens, 1000)
         self.assertEqual(reply.usage.output_tokens, 500)
-        self.assertEqual(reply.usage.cost_micros, 280)
+        self.assertEqual(reply.usage.cost_micros, 900)
         with self.assertRaises(FrozenInstanceError):
             reply.usage.input_tokens = 99
         self.assertNotIn("private answer", repr(reply))
@@ -98,13 +104,34 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         model_config = json.loads((config_root / "models.json").read_text())
         self.assertEqual(
             model_config["providers"]["deepseek"]["modelOverrides"][
-                "deepseek-v4-flash"
+                "deepseek-flash"
             ]["maxTokens"],
             512,
         )
         self.assertNotIn("SECRET", (config_root / "models.json").read_text())
         await self.session.close()
         self.assertFalse(config_root.exists())
+
+    async def test_explicit_operator_profile_keeps_auth_and_isolates_settings(self):
+        profile = Path(self.temp.name) / 'profile'
+        profile.mkdir()
+        (profile / 'auth.json').write_text('{"approved": "private-auth"}')
+        (profile / 'models.json').write_text('{"providers": {}}')
+        session = CoreTextSession(command=('fake-pi',),
+                                  environment={'PI_CODING_AGENT_DIR': str(profile)},
+                                  cwd=Path(self.temp.name), limits=PrimeTextLimits(300),
+                                  provider='openai-codex', model='gpt-6.1-sol')
+        isolated = Path(session._rpc.config.environment['PI_CODING_AGENT_DIR'])
+        try:
+            self.assertNotEqual(isolated, profile)
+            self.assertEqual((isolated / 'auth.json').read_text(),
+                             (profile / 'auth.json').read_text())
+            self.assertEqual(json.loads((isolated / 'models.json').read_text()), {'providers': {}})
+            self.assertEqual((profile / 'models.json').read_text(), '{"providers": {}}')
+        finally:
+            await session.close()
+        self.assertFalse(isolated.exists())
+        self.assertTrue((profile / 'auth.json').exists())
 
     async def test_model_cap_mismatch_rejected_before_prompt(self):
         script = Path(self.temp.name) / "bad-producer.py"
@@ -134,7 +161,7 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         reply = await self.session.prompt("cached", signal=_NeverCancelled())
         self.assertEqual(reply.usage.input_tokens, 2200)
         self.assertEqual(reply.usage.output_tokens, 100)
-        self.assertEqual(reply.usage.cost_micros, 336)
+        self.assertEqual(reply.usage.cost_micros, 780)
 
     async def test_invalid_cache_usage_fails_closed(self):
         await self.session.open(signal=_NeverCancelled())
@@ -168,7 +195,7 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         await self.session.open(signal=_NeverCancelled())
         process = self.session.process
         for _ in range(4):
-            await self.session.prompt("hello", signal=_NeverCancelled())
+            await self.session.prompt("small", signal=_NeverCancelled())
         with self.assertRaises(LiveModelError):
             await self.session.prompt("hello", signal=_NeverCancelled())
         self.assertIsNotNone(process.poll())
@@ -241,13 +268,22 @@ class TestResolveLiveModelLaunch(unittest.TestCase):
             self.assertIn(option, launch.command)
         self.assertEqual(
             launch.command[-4:],
-            ("--provider", "deepseek", "--model", "deepseek-v4-flash"),
+            ("--provider", "deepseek", "--model", "deepseek-flash"),
         )
         self.assertEqual(launch.environment["DEEPSEEK_API_KEY"], "from-file")
         self.assertNotIn("PI_CODING_AGENT_DIR", launch.environment)
         self.assertNotIn("from-file", repr(launch))
         with self.assertRaises(TypeError):
             launch.environment["DEEPSEEK_API_KEY"] = "mutated"
+
+    def test_context_preserves_existing_task_deadline_without_launch_handles(self):
+        deadline = TaskDeadline(deadline_monotonic=100, deadline_epoch=100)
+        with patch.object(asterion, '__file__', str(self.installed)):
+            context = resolve_live_model_context(self.root, self.environment, task_deadline=deadline)
+        self.assertIs(context.task_deadline, deadline)
+        self.assertEqual((context.provider, context.model), ('deepseek', 'deepseek-flash'))
+        self.assertFalse(hasattr(context, 'command'))
+        self.assertNotIn('from-file', repr(context))
 
     def test_environment_credential_overrides_dotenv(self):
         with patch.object(asterion, "__file__", str(self.installed)):
