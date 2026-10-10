@@ -44,7 +44,6 @@ import time
 from asterion.agents.prime.trace import PrimeTraceEntry, validate_trace
 from asterion.applications.prime.operator_config import (
     EFFORT_ENV,
-    apply_pi_effort,
     load_operator_environment as load_prime_operator_environment,
 )
 from asterion.applications.prime.p7.game import DEFAULT_GAME, P7GameSelection
@@ -71,23 +70,7 @@ _LEGACY_EXTENSION_RESOURCE = "resources/p7-legacy-extension.mjs"
 # The fixed Pi RPC contract this application launches. It is the same mode
 # surface the intact run-story narrator uses; only the tool exposure differs,
 # because the solve reaches the game through the packaged IPython extension.
-_PI_RPC_FLAGS = (
-    "--mode",
-    "rpc",
-    "--print",
-    "--no-builtin-tools",
-    "--tools",
-    ",".join(P7_APPLICATION_TOOL_NAMES),
-    "--approve",
-    "--no-session",
-    "--no-extensions",
-    "--no-skills",
-    "--no-prompt-templates",
-    "--no-themes",
-    "--no-context-files",
-    "--thinking",
-    "medium",
-)
+
 
 
 class P7LiveSolveError(RuntimeError):
@@ -1183,18 +1166,15 @@ def resolve_arc_root(environment: Mapping[str, str]) -> Path:
 def pi_base_command(
     *, node: Path, pi_entry: Path, environment: Mapping[str, str] | None = None,
 ) -> tuple[str, ...]:
-    """Return the exact Pi base argv the application launches.
-
-    ``build_p7_operator_resources`` appends the fixed provider, model and
-    extension lease arguments, and rejects a base that already carries any of
-    them, so this function must not add them either.
-    """
-
+    """Temporary P1 compatibility; fixed launch flags belong to Prime."""
+    from asterion.agents.prime._launch import persistent_base_command
+    from asterion.applications.prime.operator_config import resolve_pi_effort
     try:
-        return apply_pi_effort((str(node), str(pi_entry), *_PI_RPC_FLAGS),
-                               {} if environment is None else environment)
+        return persistent_base_command(node, pi_entry,
+            resolve_pi_effort({} if environment is None else environment, default='medium'),
+            P7_APPLICATION_TOOL_NAMES)
     except ValueError:
-        raise P7LiveSolveError("Prime reasoning effort is invalid") from None
+        raise P7LiveSolveError('Prime reasoning effort is invalid') from None
 
 
 def _extension_resource_path(resource: str) -> Path:

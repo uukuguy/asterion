@@ -8,6 +8,7 @@ import json
 import math
 import os
 import queue
+import re
 import signal as process_signal
 import subprocess
 import threading
@@ -45,6 +46,7 @@ _PROCESS_EXIT_SECONDS = 0.25
 _PIPE_DRAIN_SECONDS = 0.25
 _POLL_SECONDS = 0.05
 _PROMPT_DRIVER_EXIT_SECONDS = 1.0
+_MODEL_IDENTITY_TIMEOUT_SECONDS = 5.0
 _STDOUT_EOF = object()
 
 
@@ -346,6 +348,8 @@ class PiRpcConfig:
     deadline_seconds: float | None
     inherited_fds: tuple[int, ...] = ()
     compact_events: bool = False
+    expected_provider: str | None = None
+    expected_model: str | None = None
 
     def __post_init__(self) -> None:
         if (
@@ -381,6 +385,14 @@ class PiRpcConfig:
             raise ValueError("Pi RPC inherited file descriptors are invalid")
         if type(self.compact_events) is not bool:
             raise ValueError("Pi RPC event projection is invalid")
+        if (self.expected_provider is None) != (self.expected_model is None) or any(
+            value is not None and (
+                type(value) is not str
+                or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}", value) is None
+            )
+            for value in (self.expected_provider, self.expected_model)
+        ):
+            raise ValueError("Pi RPC expected model identity is invalid")
         object.__setattr__(self, "command", tuple(self.command))
         object.__setattr__(self, "cwd", Path(self.cwd))
         object.__setattr__(self, "environment", MappingProxyType(environment))
@@ -662,7 +674,9 @@ class PiRpcSession:
         self._request_id += 1
         return f"py-{self._request_id}"
 
-    def start(self) -> None:
+    def start(
+        self, *, signal: CancellationSignal | threading.Event | None = None,
+    ) -> None:
         if self._state is not None:
             raise RuntimeError("RPC session already started")
         self._last_stderr = b""
@@ -689,9 +703,56 @@ class PiRpcSession:
             )
             state.stderr_thread.start()
             state.stderr_started = True
+            self._verify_expected_model(signal)
         except BaseException:
             self.stop()
             raise
+
+    def _verify_expected_model(
+        self, signal: CancellationSignal | threading.Event | None,
+    ) -> None:
+        """Check the effective native identity before the child can receive work."""
+
+        if self.config.expected_provider is None:
+            return
+        timeout = _MODEL_IDENTITY_TIMEOUT_SECONDS
+        if self.config.deadline_seconds is not None:
+            timeout = min(timeout, self.config.deadline_seconds)
+        deadline = time.monotonic() + timeout
+        if self._session_deadline is not None:
+            deadline = min(deadline, self._session_deadline)
+        try:
+            if self._is_cancelled(signal):
+                raise RuntimeError
+            request_id = self.next_id()
+            self.send({"id": request_id, "type": "get_state"})
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0 or self._is_cancelled(signal):
+                    raise RuntimeError
+                try:
+                    response = self.read_json_line(
+                        timeout_seconds=min(_POLL_SECONDS, remaining)
+                    )
+                except TimeoutError:
+                    continue
+                # Exactly one response belongs to this startup exchange. An
+                # unsolicited event cannot establish a verified idle child.
+                data = response.get("data")
+                model = data.get("model") if isinstance(data, Mapping) else None
+                if (
+                    response.get("type") != "response"
+                    or response.get("id") != request_id
+                    or response.get("command") != "get_state"
+                    or response.get("success") is not True
+                    or not isinstance(model, Mapping)
+                    or model.get("provider") != self.config.expected_provider
+                    or model.get("id") != self.config.expected_model
+                ):
+                    raise RuntimeError
+                return
+        except Exception:
+            raise RuntimeError("Pi RPC model identity verification failed") from None
 
     @staticmethod
     def _fail_output(state: _ProcessState, message: str) -> None:
@@ -1280,9 +1341,28 @@ class PiRpcSession:
                 else time.monotonic() + self.config.deadline_seconds
             )
             try:
-                self.start()
+                if self.config.expected_provider is None:
+                    self.start()
+                else:
+                    local_cancel = threading.Event()
+
+                    class StartupCancellationSignal:
+                        @property
+                        def cancelled(self) -> bool:
+                            return local_cancel.is_set() or signal.cancelled
+
+                    driver_task = asyncio.create_task(asyncio.to_thread(
+                        self.start, signal=StartupCancellationSignal(),
+                    ))
+                    await self._await_driver(
+                        driver_task, local_cancel=local_cancel,
+                        request_written=threading.Event(),
+                    )
             except BaseException:
+                self.stop()
                 self._session_deadline = None
+                if self._state is None:
+                    self._lifecycle_poisoned = False
                 raise
             self._lifecycle_open = True
             self._lifecycle_identity = object()
@@ -1594,6 +1674,8 @@ def build_rpc_session(
     deadline_seconds: float | None,
     inherited_fds: tuple[int, ...] = (),
     compact_events: bool = False,
+    expected_provider: str | None = None,
+    expected_model: str | None = None,
     diagnostics: DiagnosticSink | None = None,
     private_failure_sink: PrivateFailureSink | None = None,
 ) -> PiRpcSession:
@@ -1607,6 +1689,8 @@ def build_rpc_session(
             deadline_seconds=deadline_seconds,
             inherited_fds=inherited_fds,
             compact_events=compact_events,
+            expected_provider=expected_provider,
+            expected_model=expected_model,
         ),
         diagnostics=diagnostics,
         private_failure_sink=private_failure_sink,

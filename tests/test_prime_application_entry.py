@@ -74,6 +74,9 @@ class TestPrimeApplicationEntry(unittest.TestCase):
             self.operator.environment['SECRET'] = 'changed'
         with self.assertRaises(FrozenInstanceError):
             self.operator.model = 'changed'
+        with self.assertRaises(ProtocolError):
+            replace(self.operator, private_root=Path('relative-private-root'))
+        self.assertNotIn(str(self.root), repr(replace(self.operator, private_root=self.root)))
         for value in (self.operator, self.spec):
             self.assertNotIn(str(self.root), repr(value))
             self.assertNotIn('private-sentinel', repr(value))
@@ -338,3 +341,231 @@ class TestPrimeApplicationEntry(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class _Services:
+    identity_sha256 = 'a' * 64
+
+    def __init__(self):
+        self.closed = self.stopped = False
+
+    def validate_lifecycle(self):
+        if self.closed:
+            raise ValueError('closed')
+
+    async def execute(self, request_id, code, signal):
+        from asterion.agents.prime.tools import PrimeToolResult
+        return PrimeToolResult(request_id, 'ok', ({'type': 'text', 'text': code},))
+
+    async def call(self, request_id, method, params, signal, *, params_present=True):
+        return {'protocol': 'asterion.prime-ipython/v1', 'request_id': request_id,
+                'type': 'method_result', 'status': 'ok', 'output': '{}'}
+
+    def request_stop(self):
+        self.stopped = True
+
+    async def close(self):
+        self.closed = True
+
+
+class TestPrimePersistentOwner(unittest.TestCase):
+    setUp = TestPrimeApplicationEntry.setUp
+    def _persistent_app(self):
+        from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY
+        from importlib.resources import files
+        artifact = PrimeToolModuleArtifact(Path(str(files('asterion.applications.prime').joinpath(
+            'resources/ipython-extension.mjs'))).resolve(), CORE_TOOL_REGISTRY)
+        spec = PrimeApplicationSpec('example.unregistered', '1.0.0', 'persistent-code-tools', tools=artifact)
+        return prepare_prime_application(spec, self.operator, authorization=self.run_limits)
+
+    def test_runtime_view_is_lazy_and_cannot_regrant_limits(self):
+        app, services = self._persistent_app(), _Services()
+        hooks = PrimeRunHooks()
+        with patch.object(_launch, 'persistent_launch', create=True) as launch:
+            runtime = app.runtime(services=services, limits=self.run_limits, hooks=hooks)
+            self.assertIs(runtime, app.runtime(services=services, limits=self.run_limits, hooks=hooks))
+            launch.assert_not_called()
+            with self.assertRaises(ProtocolError):
+                app.runtime(services=_Services(), limits=self.run_limits, hooks=hooks)
+            with self.assertRaises(ProtocolError):
+                app.runtime(services=services, limits=replace(self.run_limits, model_callbacks=3), hooks=hooks)
+        self.assertTrue(asyncio.run(app.close()).complete)
+        self.assertTrue(services.stopped and services.closed)
+
+    def test_pause_does_not_reset_owner_budget(self):
+        from asterion.runtime.host import RunRequest
+        app, services = self._persistent_app(), _Services()
+        clock = [0.0]
+        deadline = TaskDeadline(deadline_monotonic=10, deadline_epoch=10,
+            monotonic_clock=lambda: clock[0], wall_clock=lambda: clock[0])
+        app._operator = replace(app._operator, task_deadline=deadline)
+        async def run():
+            paused, resume = asyncio.Event(), asyncio.Event()
+            async def admission(index, signal):
+                paused.set()
+                await resume.wait()
+                return True
+            hooks = PrimeRunHooks(round_admission=admission)
+            runtime = app.runtime(services=services, limits=self.run_limits, hooks=hooks)
+            with patch('asterion.runtimes.pi_rpc.PiRpcSession.run', new_callable=AsyncMock) as driver:
+                async def collect():
+                    return [e async for e in runtime.run(RunRequest('pause', 'hello', ('prime.tool.ipython',)), signal=_NeverCancelled())]
+                task = asyncio.create_task(collect())
+                await paused.wait()
+                self.assertIs(runtime, app.runtime(services=services, limits=self.run_limits, hooks=hooks))
+                clock[0] = 11
+                resume.set()
+                events = await task
+                self.assertEqual(events[-1].payload['status'], 'cancelled')
+                self.assertIs(app.task_deadline, deadline)
+                self.assertEqual(app.authorized_limits, self.run_limits)
+                driver.assert_not_called()
+                with self.assertRaises(ProtocolError):
+                    await collect()
+            self.assertTrue((await app.close()).complete)
+        asyncio.run(run())
+
+    def test_lease_failure_closes_owned_services_without_starting_rpc(self):
+        from asterion.runtime.host import RunRequest
+        app, services = self._persistent_app(), _Services()
+        async def run():
+            runtime = app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+            with (patch('asterion.runtime.pinned_extension.ExtensionBinding.preflight', side_effect=ValueError('unavailable')),
+                  patch('asterion.runtime.native_rpc.build_rpc_session') as rpc):
+                with self.assertRaises(ValueError):
+                    _ = [e async for e in runtime.run(RunRequest('failure', 'hello', ('prime.tool.ipython',)), signal=_NeverCancelled())]
+                rpc.assert_not_called()
+            self.assertTrue(services.closed)
+            self.assertTrue((await app.close()).complete)
+            self.assertTrue(services.closed)
+        asyncio.run(run())
+
+    def test_invalid_request_does_not_acquire_or_consume_owner(self):
+        app, services = self._persistent_app(), _Services()
+        async def run():
+            runtime = app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+            with patch.object(_launch, 'persistent_launch') as launch:
+                with self.assertRaises(ProtocolError):
+                    _ = [event async for event in runtime.run(object(), signal=_NeverCancelled())]
+                launch.assert_not_called()
+                self.assertFalse(app._run_claimed)
+            await app.close()
+        asyncio.run(run())
+
+    def test_cleanup_reaps_before_rpc_close_and_finishes_other_resources(self):
+        from types import SimpleNamespace
+        app, services = self._persistent_app(), _Services()
+        app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+        order = []
+        async def close_rpc():
+            self.assertEqual(order, ['stop'])
+            raise RuntimeError('active command close failed')
+        app._persistent = SimpleNamespace(
+            rpc=SimpleNamespace(stop=lambda: order.append('stop'), close=close_rpc),
+            bridge=SimpleNamespace(close=lambda: order.append('bridge')),
+            close_descriptors=lambda: order.append('descriptors'))
+        cleanup = asyncio.run(app.close())
+        self.assertEqual(order, ['stop', 'bridge', 'descriptors'])
+        self.assertFalse(cleanup.model_closed)
+        self.assertTrue(cleanup.bridge_closed and cleanup.extension_closed and cleanup.workspace_closed)
+        self.assertTrue(services.stopped)
+
+    def test_explicit_workspace_restore_advances_generation(self):
+        from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
+        app = self._persistent_app()
+        async def run():
+            kernel = app.create_workspace(KernelBootstrap({}, {}, self.root / 'workspace'), KernelLimits())
+            generation = kernel.generation
+            result = await kernel.execute('cell-one', "prime_workspace.export('source', 'def answer(): return 42')", _NeverCancelled())
+            self.assertEqual(result.status, 'ok')
+            # Explicit exported source/data are the existing restore inputs.
+            exports = __import__('json').loads(result.content[0]['text'])['kernel_exports']
+            source = kernel.read_export(exports[0]['export_id'])
+            restored = await app.restore_workspace(kernel, (source,), {}, _NeverCancelled())
+            self.assertNotEqual(restored.generation, generation)
+            self.assertTrue(kernel.status()['closed'])
+            self.assertTrue((await app.close()).complete)
+            self.assertTrue(restored.status()['closed'])
+        asyncio.run(run())
+
+
+class TestPrimeIndependentPersistent(unittest.IsolatedAsyncioTestCase):
+    async def test_unregistered_tools_run_through_owned_pin_and_registration(self):
+        import json
+        import shutil
+        import subprocess
+        from importlib.resources import files
+        from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcEvent, PiRpcResult
+        from asterion.runtime.host import RunRequest
+        from asterion.runtime.pinned_extension import extension_loader_path
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            core = Path(str(files('asterion.applications.prime').joinpath('resources/ipython-extension.mjs')))
+            source, bundle = root / 'tools.ts', root / 'tools.mjs'
+            source.write_text('import {registerPrime} from ' + json.dumps(str(core)) + ';\n'
+                'const module={registry:{module_id:"example.tools",capability_id:"example.lookup",'
+                'tool_names:["example_lookup","ipython"]},createTools:()=>[{name:"example_lookup",label:"Lookup",'
+                'description:"Read example state",parameters:{type:"object",properties:{}},'
+                'execute:async()=>({content:[{type:"text",text:"found"}],details:{}})}]};\n'
+                'export default function register(pi,dependencies){registerPrime(pi,dependencies,module);}')
+            esbuild = Path(__file__).resolve().parents[1] / 'packages/typescript/asterion-prime-extension/node_modules/.bin/esbuild'
+            built = subprocess.run([str(esbuild), str(source), '--bundle', '--platform=node', '--format=esm',
+                '--supported:template-literal=false', '--minify-syntax', '--minify-whitespace', '--legal-comments=none',
+                '--outfile='+str(bundle)], capture_output=True, text=True)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            # The existing loader receives deterministic host mechanics through Node's resolver.
+            stub = root / 'host.mjs'
+            stub.write_text("export const buildSessionContext=()=>({messages:[]}); export const convertToLlm=x=>x; export const serializeConversation=()=>'';")
+            resolver = root / 'resolver.mjs'
+            resolver.write_text('export async function resolve(s,c,next){if(s==="@earendil-works/pi-coding-agent")return {url:'
+                                + json.dumps(stub.as_uri()) + ',shortCircuit:true};return next(s,c);}')
+            script = 'const tools=[],hooks=[]; const m=await import('+json.dumps(extension_loader_path().as_uri())+'); await m.default({registerTool:t=>tools.push(t.name),on:n=>hooks.push(n)}); process.stdout.write(JSON.stringify({tools:tools.sort(),hooks}));'
+            seen = []
+            class Rpc:
+                def __init__(self, **kwargs):
+                    kwargs.pop('diagnostics', None)
+                    kwargs.pop('private_failure_sink', None)
+                    self.config = PiRpcConfig(**kwargs)
+                    self.stderr = b''
+                    self.last_failure = None
+                async def run(self, prompt, *, signal, on_event):
+                    result = await asyncio.to_thread(subprocess.run,
+                        [shutil.which('node'), '--loader', str(resolver), '--input-type=module', '-e', script],
+                        env={**self.config.environment, **({'ASTERION_PI_EXTENSION_SOURCE_SHA256': '0' * 64}
+                             if mismatch == 'digest' else {})}, pass_fds=self.config.inherited_fds,
+                        capture_output=True, text=True)
+                    if result.returncode:
+                        raise RuntimeError('registration rejected')
+                    seen.append(json.loads(result.stdout))
+                    events = tuple(PiRpcEvent(i+1, name, {}) for i, name in enumerate(
+                        ('agent_start', 'turn_start', 'turn_end', 'agent_end', 'agent_settled')))
+                    for event in events:
+                        on_event(event)
+                    return PiRpcResult('', events, b'')
+                def stop(self):
+                    pass
+                async def close(self):
+                    pass
+            registry = PrimeApplicationToolRegistry('example.tools', 'example.lookup', ('example_lookup', 'ipython'))
+            spec = PrimeApplicationSpec('example.unregistered', '1.0.0', 'persistent-code-tools',
+                                       tools=PrimeToolModuleArtifact(bundle, registry))
+            operator = PrimeOperatorContext(Path(shutil.which('node')), None, root, 'openai-codex',
+                'gpt-6.1-sol', 'medium', {}, TaskDeadline(deadline_monotonic=time.monotonic()+60, deadline_epoch=time.time()+60))
+            limits = AsterionPrimeLimits(2, 2, 30_000)
+            for mismatch in (False, 'registry', 'digest'):
+                with self.subTest(mismatch=mismatch):
+                    selected = replace(spec, tools=replace(spec.tools, registry=replace(registry, tool_names=('ipython',)))) if mismatch == 'registry' else spec
+                    app = prepare_prime_application(selected, operator, authorization=limits)
+                    with (patch('asterion.runtime.native_rpc.build_rpc_session', side_effect=Rpc),
+                          patch.object(_launch, 'persistent_launch', wraps=_launch.persistent_launch) as launch,
+                          patch('asterion.applications.discovery.list_application_providers', side_effect=AssertionError('lookup')),
+                          patch('asterion.applications.discovery.load_application_provider', side_effect=AssertionError('lookup')),
+                          patch('asterion.applications.prime.inventory.prime_release_application', side_effect=AssertionError('lookup'))):
+                        runtime = app.runtime(services=_Services(), limits=limits, hooks=PrimeRunHooks())
+                        self.assertEqual(launch.call_count, 0)
+                        events = [e async for e in runtime.run(RunRequest('independent', 'hello', ('prime.tool.ipython',)), signal=_NeverCancelled())]
+                        self.assertEqual(events[0].type, 'run.started')
+                        self.assertEqual(launch.call_count, 1)
+                        self.assertEqual(events[-1].type, 'run.failed' if mismatch else 'run.completed')
+                        self.assertTrue((await app.close()).complete)
+            self.assertEqual(seen, [{'tools': ['example_lookup', 'ipython'], 'hooks': []}])

@@ -50,11 +50,17 @@ def main() -> int:
         loader = arguments[arguments.index("--extension") + 1]
     except (ValueError, IndexError):
         return 2
-    if not arguments or not Path(loader).is_file() or not Path(arguments[0]).is_file():
+    node = os.environ.get("FIXTURE_NODE", "")
+    if not Path(loader).is_file() or not node or not Path(node).is_file():
         return 2
-    node = arguments[0]
+    provider = arguments[arguments.index("--provider") + 1]
+    model = arguments[arguments.index("--model") + 1]
     for line in sys.stdin:
         request = json.loads(line)
+        if request.get("type") == "get_state":
+            _emit({"id": request["id"], "type": "response", "command": "get_state",
+                   "success": True, "data": {"model": {"provider": provider, "id": model}}})
+            continue
         if request.get("type") == "prompt":
             _emit({"id": request["id"], "success": True, "type": "response"})
             _emit({"type": "agent_start"})

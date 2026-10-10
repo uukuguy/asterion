@@ -107,9 +107,9 @@ from asterion.agents.prime.trace import validate_trace
 from asterion.applications.prime.p7.game import P7GameSelection, resolve_game_selection
 from asterion.applications.prime.p7.ipython_host import IpythonWorkerResult
 from asterion.applications.prime.p7.operator import _resolve_p7_application, build_p7_operator_resources
+from asterion.applications.prime.p7.runtime_binding import build_p7_direct_runtime
 from asterion.applications.prime.p7.prompt import P7_SOLVE_PROMPT
 from asterion.runner.composed import run_composed_application
-from asterion.runtime.factory import RuntimeFactoryContext
 
 class Engine:
     game_id = "ls20-9607627b"
@@ -170,8 +170,8 @@ async def main():
     root = Path.cwd()
     profile = root / "pi-profile"
     profile.mkdir(exist_ok=True)
-    (profile / "auth.json").write_text(json.dumps({"deepseek": {"token": "fixture-only"}}))
-    (profile / "models-store.json").write_text(json.dumps({"deepseek": {"models": [{"id": "deepseek-flash"}]}}))
+    (profile / "auth.json").write_text(json.dumps({"openai-codex": {"token": "fixture-only"}}))
+    (profile / "models-store.json").write_text(json.dumps({"openai-codex": {"models": [{"id": "gpt-6.1-sol"}]}}))
     catalog = root / "arc" / "environment_files" / "zx42" / "abc123"
     catalog.mkdir(parents=True, exist_ok=True)
     (catalog / "zx42.py").write_text("# fixture source is never imported\\n")
@@ -188,13 +188,13 @@ async def main():
     engine = Engine()
     resources_ = build_p7_operator_resources(
         environment={
-            "ASTERION_PRIME_PROVIDER": "deepseek",
-            "ASTERION_PRIME_MODEL": "deepseek-flash",
+            "ASTERION_PRIME_PROVIDER": "openai-codex",
+            "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
             "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
-            "DEEPSEEK_API_KEY": "fixture-only",
+            "FIXTURE_NODE": "__NODE__",
             "ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy",
         },
-        pi_base_command=(sys.executable, str(root / "fake_pi_rpc.py"), "__NODE__"),
+        executable=Path(sys.executable), entry=root / "fake_pi_rpc.py",
         extension_path=extension,
         working_directory=root,
         worker=worker, engine=engine, private_trace_root=trace,
@@ -207,7 +207,7 @@ async def main():
     try:
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
-        runtime = assembly.runtime_binding.factory(RuntimeFactoryContext(provider_id="prime-applications", application_id="prime.arc-agi-3-solving", application_version="1.0.0", runtime_id="asterion.prime", assembly_path=assembly.path, options=resources_.runtime_options, host_services=resources_.host_services))
+        runtime = build_p7_direct_runtime(resources_.host_services, resources_.runtime_options)
         try:
             result = await run_composed_application(assembly.plan, implementations=application.implementations, runtime=runtime, run_id="p7-installed-fixture", input_text=P7_SOLVE_PROMPT, host_services=resources_.host_services)
         except Exception:

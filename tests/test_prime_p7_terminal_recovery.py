@@ -248,6 +248,8 @@ class TestTerminalWinRecovery(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             game = P7GameSelection("ls20-9607627b", 0, 7)
+            from asterion.agents.prime.application import PrimeApplication
+            owner = object.__new__(PrimeApplication)
             client = None
             def build(**kwargs: object) -> SimpleNamespace:
                 nonlocal client
@@ -256,7 +258,7 @@ class TestTerminalWinRecovery(unittest.TestCase):
                 client = _P7BrokerClient(broker, evidence.runtime_recorder, variant="legacy")
                 async def close() -> None:
                     evidence.close()
-                return SimpleNamespace(runtime_options={}, host_services={"prime.arc-broker": broker, "prime.private-trace": evidence}, close=close)
+                return SimpleNamespace(runtime_options={}, host_services={"prime.arc-broker": broker, "prime.private-trace": evidence, "prime.launch": owner}, close=close)
             async def composed(*args: object, **kwargs: object) -> None:
                 for _ in range(14):
                     client.act([{"name": "ACTION1", "data": {}}])
@@ -268,12 +270,14 @@ class TestTerminalWinRecovery(unittest.TestCase):
                 mock.patch("asterion.applications.prime.p7.operator.live.SubprocessPythonWorker", return_value=SimpleNamespace(closed=True)),
                 mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda recordings_dir, game, **_: _WinningEngine(recordings_dir=recordings_dir, game=game)),
                 mock.patch("asterion.applications.prime.p7.operator.build_p7_operator_resources", side_effect=build),
+                mock.patch("asterion.applications.prime.p7.runtime_binding.build_p7_direct_runtime", return_value=runtime),
+                mock.patch.object(PrimeApplication, "runtime_observation", return_value={"model_failed": True}),
                 mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=SimpleNamespace(assemblies=[assembly], implementations=())),
                 mock.patch("asterion.applications.prime.p7.operator.run_composed_application", side_effect=composed),
                 contextlib.redirect_stderr(io.StringIO()),
             ):
                 with self.assertRaises(P7LiveAttemptFailure) as caught:
-                    asyncio.run(run_live(P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, (), root, game), "p7-live-win-failure"))
+                    asyncio.run(run_live(P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, Path("/usr/bin/pi"), None, root, game), "p7-live-win-failure"))
             self.assertTrue(caught.exception.sealed_trace)
             self.assertTrue(caught.exception.replay_verified)
             run = root / ".asterion-private/prime-p7-live/p7-live-win-failure"

@@ -11,21 +11,16 @@ import os
 from pathlib import Path
 import re
 import signal as signal_module
-import socket
 import sys
 import tempfile
-import threading
 import time
 from types import MappingProxyType
-from typing import cast
 
 from asterion.applications.prime._console_logging import configure_console_logging
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.agents.prime.deadline import TaskDeadline
-from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile, ProviderPrefixMetricsFile
 from .action_journal import ActionJournal
 from .run_story.storage import write_atomic_file
-from asterion.applications.prime import create_prime_arc_agi_3_solving_provider
 from asterion.applications.prime.p7.broker import (
     ArcAction,
     ArcBroker,
@@ -64,7 +59,7 @@ from asterion.applications.prime.p7.ipython_host import (
     p7_client_facade,
 )
 from asterion.applications.prime.p7.mechanics_prior import build_mechanics_prior
-from asterion.applications.prime.operator_config import apply_pi_effort
+from asterion.applications.prime.operator_config import resolve_pi_effort
 from asterion.applications.prime.p7.world_model import WorldModelStore
 from asterion.applications.prime.p7 import live
 from asterion.applications.prime.p7.model_selection import (
@@ -103,20 +98,21 @@ from asterion.applications.prime.p7.prompt import (
     initial_research_prompt,
     build_strategy_prompt,
 )
-from asterion.applications.prime.p7.runtime_binding import PrimeLaunch
+from asterion.agents.prime.application import (
+    PrimeApplication, PrimeApplicationSpec, PrimeOperatorContext, PrimeToolModuleArtifact,
+    prepare_prime_application,
+)
+from asterion.agents.prime.execution import AsterionPrimeLimits
+from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
 from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY, P7_LEGACY_TOOL_REGISTRY
 from asterion.agents.prime.tool_registry import TOOL_REGISTRY_ENV
 from asterion.applications.prime.p7.console_events import ConsoleEventWriter, public_narrative, public_text
-from asterion.applications.provider import InstalledApplication, resolve_installed_provider
+from asterion.applications.provider import InstalledApplication
 from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     CAPABILITY_REF,
     PACKAGE_REF,
-    create_prime_arc_agi_3_solver_package,
 )
 from asterion.runner.composed import run_composed_application
-from asterion.runtime.defaults import default_runtime_factory_registry
-from asterion.runtime.factory import RuntimeFactoryContext
-from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
 from asterion.services.diagnostics import FailureDiagnostic
 from asterion.services.private_failure import FilePrivateFailureSink
 
@@ -369,370 +365,6 @@ class P7LiveAttemptFailure(live.P7LiveSolveError):
         self.cleanup_complete = cleanup_complete
 
 
-class _BridgeSignal:
-    def __init__(self, stop: threading.Event | None = None) -> None:
-        self._stop = stop
-
-    @property
-    def cancelled(self) -> bool:
-        return self._stop is not None and self._stop.is_set()
-
-
-class _IpythonBridgeServer:
-    """Operator-owned duplex adapter between the Pi extension and host."""
-
-    def __init__(
-        self,
-        channel: socket.socket,
-        host: PersistentIpythonHost,
-        client: object,
-    ) -> None:
-        self._channel = channel
-        self._host = host
-        from .research_runtime import P7ResearchRuntime
-        self._client = None if isinstance(host, P7ResearchRuntime) else p7_client_facade(client)
-        self._method_calls: dict[str, int] = {}
-        self._method_failures: dict[str, int] = {}
-        self._stop = threading.Event()
-        self._signal = _BridgeSignal(self._stop)
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._started = False
-        self._loop = asyncio.new_event_loop()
-        self._host_closed = False
-        self._close_error = False
-
-    def __repr__(self) -> str:
-        return "<_IpythonBridgeServer redacted>"
-
-    def private_accounting(self) -> dict[str, int]:
-        """Return bounded private counts for bridge dispatch diagnosis."""
-        return {
-            "method_calls_total": sum(self._method_calls.values()),
-            **{f"method_calls_{name}": count for name, count in self._method_calls.items()},
-            "method_failures_total": sum(self._method_failures.values()),
-            **{
-                f"method_failures_{name}": count
-                for name, count in self._method_failures.items()
-            },
-        }
-
-    def start(self) -> None:
-        self._thread.start()
-        self._started = True
-
-    def close(self) -> None:
-        self._stop.set()
-        try:
-            self._channel.shutdown(socket.SHUT_RDWR)
-        except OSError:
-            pass
-        self._channel.close()
-        if self._started:
-            self._thread.join(_BRIDGE_JOIN_SECONDS)
-        else:
-            self._close_host()
-        if self._thread.is_alive() or self._close_error:
-            raise P7OperatorError("P7 computation cleanup is incomplete")
-
-    def _close_host(self) -> None:
-        if not self._loop.is_closed():
-            try:
-                self._loop.run_until_complete(self._host.close())
-                self._host_closed = True
-            except BaseException:
-                self._close_error = True
-            finally:
-                self._loop.run_until_complete(self._loop.shutdown_asyncgens())
-                self._loop.close()
-
-    def _serve(self) -> None:
-        try:
-            self._serve_requests()
-        finally:
-            self._close_host()
-
-    def _serve_requests(self) -> None:
-        pending = bytearray()
-        while not self._stop.is_set():
-            try:
-                chunk = self._channel.recv(4096)
-            except OSError:
-                return
-            if not chunk:
-                return
-            pending.extend(chunk)
-            while b"\n" in pending:
-                raw, _, trailing = pending.partition(b"\n")
-                pending = bytearray(trailing)
-                response = self._dispatch(bytes(raw))
-                try:
-                    self._channel.sendall(response + b"\n")
-                except OSError:
-                    return
-
-    def _dispatch(self, raw: bytes) -> bytes:
-        request_id = "invalid"
-        try:
-            value = json.loads(raw.decode("utf-8", "strict"))
-            if type(value) is not dict or value.get("protocol") != _BRIDGE_PROTOCOL:
-                raise ValueError
-            request_id = value.get("request_id")
-            if type(request_id) is not str or not request_id:
-                raise ValueError
-            request_type = value.get("type")
-            if request_type == "execute":
-                if (
-                    set(value) != {"code", "protocol", "request_id", "type"}
-                    or type(value["code"]) is not str
-                    or not value["code"]
-                ):
-                    raise ValueError
-                result = self._loop.run_until_complete(
-                    self._host.execute(request_id, value["code"], self._signal)
-                )
-                output = ""
-                if result.content:
-                    candidate = result.content[0].get("text")
-                    if type(candidate) is str:
-                        output = candidate
-                response = {
-                    "output": output,
-                    "protocol": _BRIDGE_PROTOCOL,
-                    "request_id": request_id,
-                    "status": result.status,
-                    "type": "result",
-                }
-            elif request_type == "method_call":
-                if (
-                    type(value.get("method")) is not str
-                    or (
-                        "params" not in value
-                        and value.get("method")
-                        not in {"observe", "status", "mechanics_prior", "world_model", "planning_background", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status"}
-                    )
-                    or type(value["method"]) is not str
-                ):
-                    raise ValueError
-                response = self._dispatch_method_call(
-                    request_id,
-                    value["method"],
-                    value.get("params", {}),
-                )
-            else:
-                raise ValueError
-        except BaseException:
-            response = {
-                "output": "",
-                "protocol": _BRIDGE_PROTOCOL,
-                "request_id": request_id,
-                "status": "error",
-                "type": "result",
-            }
-        return json.dumps(response, ensure_ascii=False, separators=(",", ":"), sort_keys=True).encode()
-
-    def _dispatch_method_call(
-        self, request_id: str, method: str, params: object
-    ) -> dict[str, object]:
-        """Dispatch a non-code method invocation to the broker.
-
-        The TypeScript extension registers each p7_client method as its
-        own Pi tool. The model invokes the tool with JSON parameters and
-        Pi serializes the call through this bridge with ``type ==
-        "method_call"`` instead of going through the ipython cell-execution
-        path.
-        """
-        self._method_calls[method] = min(5000, self._method_calls.get(method, 0) + 1)
-
-        # The research host is an application adapter over Prime computation.
-        # Only this actor channel can publish research or submit real plans.
-        from .research_runtime import P7ResearchRuntime
-        if isinstance(getattr(self, "_host", None), P7ResearchRuntime):
-            result = self._host.method_call(method, params, self._signal)
-            return {
-                "output": json.dumps(result, allow_nan=False, ensure_ascii=False, separators=(",", ":")),
-                "protocol": _BRIDGE_PROTOCOL, "request_id": request_id,
-                "status": "ok", "type": "method_result",
-            }
-
-        def error_response() -> dict[str, object]:
-            return {
-                "output": "",
-                "protocol": _BRIDGE_PROTOCOL,
-                "request_id": request_id,
-                "status": "error",
-                "type": "method_result",
-            }
-
-        def ok_response(result: object) -> dict[str, object]:
-            try:
-                output = json.dumps(
-                    result,
-                    allow_nan=False,
-                    ensure_ascii=False,
-                    separators=(",", ":"),
-                    sort_keys=True,
-                )
-            except (TypeError, ValueError, OverflowError):
-                self._method_failures[method] = min(
-                    5000, self._method_failures.get(method, 0) + 1
-                )
-                return error_response()
-            if len(output.encode("utf-8")) > 120 * 1024:
-                self._method_failures[f"{method}_output_too_large"] = min(
-                    5000,
-                    self._method_failures.get(f"{method}_output_too_large", 0) + 1,
-                )
-            return {
-                "output": output,
-                "protocol": _BRIDGE_PROTOCOL,
-                "request_id": request_id,
-                "status": "ok",
-                "type": "method_result",
-            }
-
-        if method == "act_checked":
-            plan_summary = _p7_action_plan_names(params)
-            if plan_summary != "空计划":
-                print(
-                    f"[p7] P7动作计划：{plan_summary}。",
-                    file=sys.stderr,
-                    flush=True,
-                )
-        try:
-            facade = self._client
-            if self._first_probe_required(method):
-                blocked = {
-                    "status": "blocked",
-                    "reason": "cognition-first-probe-required",
-                    "next": "p7_cognition_update select_experiment, then p7_act_checked",
-                    "execution_authority": "none",
-                }
-                if method == "act_checked":
-                    print(
-                        f"[p7] P7动作结果：{_p7_action_result_summary(blocked)}",
-                        file=sys.stderr,
-                        flush=True,
-                    )
-                return ok_response(blocked)
-            if method in {"observe", "status", "mechanics_prior"}:
-                if params is not None and (type(params) is not dict or params):
-                    return error_response()
-                value = getattr(facade, method)()
-            elif method in {"world_model", "planning_background", "observation_state", "game_mechanics", "counterfactual_search", "cognition", "action_effects", "mechanism_candidates", "probe_plan", "simulator_status", "retrodiction_status", "model_search"}:
-                if params is not None and (type(params) is not dict or params):
-                    return error_response()
-                value = getattr(facade, method)()
-            elif method == "decision":
-                if type(params) is not dict:
-                    return error_response()
-                value = facade.decision(params)
-            elif method == "cognition_update":
-                if type(params) is not dict or type(params.get("op")) is not str:
-                    return error_response()
-                value = facade.cognition_update(params)
-            elif method == "playbook":
-                if params is not None and (type(params) is not int or params < 0):
-                    return error_response()
-                value = facade.playbook(params)
-            elif method == "record_hypothesis":
-                if (
-                    type(params) is not dict
-                    or set(params) != {"layer", "key", "value"}
-                    or type(params["layer"]) is not str
-                    or type(params["key"]) is not str
-                    or not isinstance(params["value"], dict)
-                ):
-                    return error_response()
-                value = facade.record_hypothesis(params["layer"], params["key"], params["value"])
-            elif method == "promote_hypothesis":
-                if (
-                    type(params) is not dict
-                    or set(params) != {"key", "evidence_kind"}
-                    or type(params["key"]) is not str
-                    or type(params["evidence_kind"]) is not str
-                ):
-                    return error_response()
-                value = facade.promote_hypothesis(params["key"], params["evidence_kind"])
-            elif method in {"tried_actions", "last_outcome_summary"}:
-                if params is not None and (
-                    type(params) is not int or params < 0
-                ):
-                    return error_response()
-                value = getattr(facade, method)(params)
-            elif method == "history":
-                if (
-                    type(params) is not dict
-                    or set(params) != {"start", "limit"}
-                    or type(params["start"]) is not int
-                    or params["start"] < 0
-                    or type(params["limit"]) is not int
-                    or params["limit"] < 1
-                ):
-                    return error_response()
-                value = facade.history(params["start"], params["limit"])
-            elif method == "frame_at":
-                if (
-                    type(params) is not dict
-                    or set(params) != {"sequence"}
-                    or type(params["sequence"]) is not int
-                    or params["sequence"] < 0
-                ):
-                    return error_response()
-                value = facade.frame_at(params["sequence"])
-            elif method == "act_checked":
-                if (
-                    type(params) is not dict
-                    or set(params) != {"plan"}
-                    or type(params["plan"]) is not list
-                ):
-                    return error_response()
-                value = facade.act_checked(params["plan"])
-            else:
-                return error_response()
-        except BaseException:
-            self._method_failures[method] = min(
-                5000, self._method_failures.get(method, 0) + 1
-            )
-            return error_response()
-        if method == "act_checked":
-            print(
-                f"[p7] P7动作结果：{_p7_action_result_summary(value)}",
-                file=sys.stderr,
-                flush=True,
-            )
-        return ok_response(value)
-
-    def _first_probe_required(self, method: str) -> bool:
-        """Force cognition mode to execute its first selected probe before detours."""
-        client = getattr(self._client, "_P7ClientFacade__client", None)
-        if not getattr(client, "_cognition_mode", False) or method in {
-            "observe", "status", "cognition", "planning_background", "cognition_update", "decision",
-        }:
-            return False
-        broker = getattr(client, "_broker", None)
-        if not isinstance(broker, ArcBroker):
-            return False
-        try:
-            snapshot = broker.cognition_projection().get("cognition_session")
-        except Exception:
-            return False
-        if not isinstance(snapshot, Mapping):
-            return False
-        session_snapshot = snapshot.get("session")
-        if not isinstance(session_snapshot, Mapping):
-            return False
-        blocked = (
-            session_snapshot.get("state") in {"OBSERVE", "PROPOSE"}
-            and session_snapshot.get("episode_actions") == 0
-        )
-        if blocked:
-            print(
-                "[p7-cognition] first-probe-blocked "
-                + json.dumps({"method": method, "state": session_snapshot.get("state"), "episode_actions": 0}, separators=(",", ":")),
-                file=sys.stderr,
-                flush=True,
-            )
-        return blocked
 
 
 _COGNITION_OUTPUT_BYTES = 16 * 1024
@@ -3516,66 +3148,39 @@ class P7RuntimeSelection:
 
 @dataclass(frozen=True, repr=False, slots=True)
 class P7OperatorResources:
-    """Concrete preflighted resources owned by one operator invocation."""
-
+    """Domain evidence and the one Prime resource owner."""
     host_services: Mapping[str, object]
     runtime_options: Mapping[str, str]
-    _bridge: _IpythonBridgeServer
     _prediction_client: _P7BrokerClient | None = None
-    _context_metrics: ContextViewMetricsFile | None = None
-    _prefix_metrics: ProviderPrefixMetricsFile | None = None
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "host_services", MappingProxyType(dict(self.host_services))
-        )
-        object.__setattr__(
-            self, "runtime_options", MappingProxyType(dict(self.runtime_options))
-        )
+    def __post_init__(self):
+        object.__setattr__(self, 'host_services', MappingProxyType(dict(self.host_services)))
+        object.__setattr__(self, 'runtime_options', MappingProxyType(dict(self.runtime_options)))
 
-    def __repr__(self) -> str:
-        return "<P7OperatorResources redacted>"
+    def __repr__(self):
+        return '<P7OperatorResources redacted>'
 
-    def context_view_metrics(self) -> dict:
-        """Private body-free extension-hook accounting, independent of stderr."""
-        return self._context_metrics.read() if self._context_metrics is not None else {"status": "unavailable"}
+    @property
+    def application(self):
+        return self.host_services['prime.launch']
 
-    def provider_prefix_metrics(self) -> dict:
-        """Private numeric prefix observation; never provider body or token positions."""
-        return self._prefix_metrics.read() if self._prefix_metrics is not None else {"status": "unavailable"}
+    def context_view_metrics(self):
+        return self.application.context_view_metrics()
 
-    async def close(self) -> None:
-        """Boundedly release all resources retained by the operator."""
+    def provider_prefix_metrics(self):
+        return self.application.provider_prefix_metrics()
 
-        ipython = cast(PersistentIpythonHost, self.host_services["prime.ipython"])
-        trace = self.host_services.get("prime.private-trace") or self.host_services.get("prime.arc-run-evidence")
-        launch = cast(PrimeLaunch, self.host_services["prime.launch"])
+    def private_accounting(self):
+        return self.application.services.private_accounting()
+
+    async def close(self):
+        trace = self.host_services.get('prime.private-trace') or self.host_services.get('prime.arc-run-evidence')
         try:
-            request_stop = getattr(ipython, "request_stop", None)
-            try:
-                if callable(request_stop):
-                    request_stop()
-            finally:
-                await asyncio.to_thread(self._bridge.close)
+            result = await self.application.close()
+            if not result.complete:
+                raise P7OperatorError('P7 computation cleanup is incomplete')
         finally:
-            try:
-                if not hasattr(self._bridge, "_loop"):
-                    await ipython.close()
-            finally:
-                try:
-                    if trace is None:
-                        raise P7OperatorError("P7 host services are unavailable")
-                    trace.close()
-                finally:
-                    try:
-                        launch.extension_lease.close()
-                    finally:
-                        try:
-                            if self._context_metrics is not None:
-                                self._context_metrics.close()
-                        finally:
-                            if self._prefix_metrics is not None:
-                                self._prefix_metrics.close()
+            trace.close()
 
 
 def resolve_pi_provider(
@@ -3814,10 +3419,11 @@ class _WitnessDeadlineSignal:
 def build_p7_operator_resources(
     *,
     environment: Mapping[str, str],
-    pi_base_command: tuple[str, ...],
+    executable: Path,
+    entry: Path | None = None,
     extension_path: Path,
     working_directory: Path,
-    worker: RestrictedPersistentIpythonWorker,
+    worker: RestrictedPersistentIpythonWorker | None = None,
     engine: object,
     private_trace_root: Path,
     game: P7GameSelection | ArcGameContract = DEFAULT_GAME,
@@ -3837,15 +3443,10 @@ def build_p7_operator_resources(
     if type(cognition_mode) is not bool:
         raise P7OperatorError("P7 host services are unavailable")
 
-    lease: ExtensionLease | None = None
-    parent: socket.socket | None = None
-    child: socket.socket | None = None
-    trace: PrimeTraceRecorder | None = None
-    bridge: _IpythonBridgeServer | None = None
-    context_metrics: ContextViewMetricsFile | None = None
-    prefix_metrics: ProviderPrefixMetricsFile | None = None
+    trace = None
+    application = None
+    ipython = None
     try:
-        configured_command = apply_pi_effort(pi_base_command, environment)
         variant = _resolve_history_variant(environment, game)
         research_python = _research_python(environment)
         selection = resolve_p7_runtime(environment, game)
@@ -3894,93 +3495,19 @@ def build_p7_operator_resources(
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH"] = str(
                 private_trace_root.parent / "debug-transcript.jsonl"
             )
-        if (
-            type(pi_base_command) is not tuple
-            or not pi_base_command
-            or any(
-                type(part) is not str or not part or "\x00" in part
-                for part in pi_base_command
-            )
-            or any(
-                option in pi_base_command
-                for option in ("--extension", "--model", "--provider")
-            )
-            or not isinstance(extension_path, Path)
-            or extension_path.resolve(strict=True) != extension_path
-            or not isinstance(working_directory, Path)
-            or working_directory.resolve(strict=True) != working_directory
-            or not working_directory.is_dir()
-            or not isinstance(private_trace_root, Path)
-            or private_trace_root.resolve(strict=True) != private_trace_root
-            or not private_trace_root.is_dir()
-            or any(
-                type(name) is not str
-                or not name
-                or "\x00" in name
-                or type(value) is not str
-                or "\x00" in value
-                for name, value in provider_environment.items()
-            )
-        ):
-            raise ValueError
-        parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
-        descriptor = child.fileno()
-        if research_mode:
-            context_metrics = ContextViewMetricsFile(private_trace_root.parent / "context-view-metrics.json")
-            prefix_metrics = ProviderPrefixMetricsFile(private_trace_root.parent / "provider-prefix-metrics.json")
-        metrics_fds = tuple(item.descriptor for item in (context_metrics, prefix_metrics) if item is not None)
-        metrics_environment = {}
-        if context_metrics is not None:
-            metrics_environment["ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD"] = str(context_metrics.descriptor)
-        if prefix_metrics is not None:
-            metrics_environment["ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD"] = str(prefix_metrics.descriptor)
-        binding = ExtensionBinding(
-            extension_id="prime.ipython",
-            path=extension_path,
-            capabilities=("prime.tool.ipython",),
-            inherited_fds=tuple(sorted((descriptor, *metrics_fds))),
-            environment={
-                "ASTERION_PRIME_IPYTHON_FD": str(descriptor),
-                TOOL_REGISTRY_ENV: selected_tools.environment_value(),
-                **metrics_environment,
-            },
-        )
-        lease = binding.preflight()
-        child.close()
-        child = None
-        if set(provider_environment).intersection(lease.environment):
-            raise ValueError
-        approved_environment = {**provider_environment, **dict(lease.environment)}
-        # The installed Pi command and runtime registry must expose the same
-        # exact tool set. Historical cognition uses its explicit legacy set.
-        base_command = list(configured_command)
-        if "--tools" in base_command:
-            base_command[base_command.index("--tools") + 1] = ",".join(selected_tools.tool_names)
-        command = (
-            *base_command,
-            "--provider",
-            selection.provider,
-            "--model",
-            selection.model,
-            *lease.command_args(),
-        )
-        launch = PrimeLaunch(
-            approved_command=command,
-            working_directory=working_directory,
-            extension_id=binding.extension_id,
-            extension_path=extension_path,
-            extension_capabilities=binding.capabilities,
-            binding_inherited_fds=binding.inherited_fds,
-            binding_environment=dict(binding.environment),
-            extension_lease=lease,
-            deadline_seconds=None if deadline_ms is None else deadline_ms / 1000,
-            witness_deadline_monotonic=witness_deadline,
-            autonomy_deadline_monotonic=autonomy_deadline,
-            tool_registry=selected_tools,
-            compact_events=True,
-            private_failure_sink=FilePrivateFailureSink(private_trace_root.parent / "pi-rpc-failures.jsonl"),
-            approved_environment=approved_environment,
-        )
+        limits = AsterionPrimeLimits(selection.max_callbacks,
+            None if selection.unbounded_first_round else 4096 if selection.autonomy else 500, deadline_ms)
+        official = type(game) is ArcGameContract
+        application = prepare_prime_application(
+            PrimeApplicationSpec('prime.arc-agi-3-gameplay' if official else 'prime.arc-agi-3-solving',
+                                 '1.0.0', 'persistent-code-tools',
+                                 tools=PrimeToolModuleArtifact(extension_path, selected_tools)),
+            PrimeOperatorContext(executable=executable, entry=entry, cwd=working_directory,
+                provider=selection.provider, model=selection.model,
+                effort=resolve_pi_effort(environment, default='medium'), environment=provider_environment,
+                task_deadline=execution_budget, private_root=private_trace_root.parent,
+                private_failure_sink=FilePrivateFailureSink(private_trace_root.parent / 'pi-rpc-failures.jsonl')),
+            authorization=limits)
         trace = PrimeTraceRecorder(private_trace_root)
         broker = ArcBroker(
             engine=engine,
@@ -4026,7 +3553,6 @@ def build_p7_operator_resources(
         )
         if research_mode:
             from .research_runtime import P7ResearchRuntime
-            from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
             ipython = P7ResearchRuntime(
                 broker=broker, trace_client=prediction_client,
                 run_root=private_trace_root.parent, run_id=history_run_id,
@@ -4034,40 +3560,29 @@ def build_p7_operator_resources(
                 deadline_monotonic=task_deadline,
                 task_deadline=execution_budget,
                 event_sink=prediction_client._emit_console,
-                worker=SubprocessPythonWorker(python=research_python) if isinstance(worker, live.SubprocessPythonWorker) else worker,
-                worker_factory=(lambda: SubprocessPythonWorker(python=research_python))
-                               if research_python is not None else None,
+                workspace_owner=application, python=research_python, worker=worker,
                 experience=experience,
                 learner_profile="autonomous",
             )
         else:
             prediction_client._capture_console_cognition()
             ipython = PersistentIpythonHost(
-                worker=worker,
+                worker=worker or live.SubprocessPythonWorker(root=private_trace_root.parent),
                 p7_client=p7_client_facade(prediction_client),
             )
-        bridge = _IpythonBridgeServer(parent, ipython, prediction_client)
         private_trace = (
             PrimeGameplayTrace(broker, trace, engine.guid, identities)
             if official else P7PrivateTraceReceipt(broker, trace, identities)
         )
-        bridge.start()
-        parent = None
-        return P7OperatorResources(
-            host_services={
-                "prime.arc-broker": broker,
-                "prime.ipython": ipython,
-                "prime.launch": launch,
-                (
-                    "prime.arc-run-evidence" if official else "prime.private-trace"
-                ): private_trace,
-            },
-            runtime_options=MappingProxyType(runtime_options),
-            _bridge=bridge,
-            _prediction_client=prediction_client,
-            _context_metrics=context_metrics,
-            _prefix_metrics=prefix_metrics,
-        )
+        host_services = {
+            'prime.arc-broker': broker, 'prime.ipython': ipython, 'prime.launch': application,
+            'prime.arc-run-evidence' if official else 'prime.private-trace': private_trace,
+        }
+        from .runtime_binding import build_p7_direct_runtime
+        build_p7_direct_runtime(host_services, runtime_options,
+            services=P7ToolDispatch(ipython, prediction_client, run_id=history_run_id), gameplay=official)
+        return P7OperatorResources(host_services, runtime_options, prediction_client)
+
     except Exception as error:
         print(
             "[p7-cognition] resource-failure "
@@ -4079,22 +3594,15 @@ def build_p7_operator_resources(
             file=sys.stderr,
             flush=True,
         )
-        if bridge is not None:
-            bridge.close()
+        # No model has started here. Close locally-created domain resources;
+        # generic workers are inert until their first execution.
+        if ipython is not None:
+            ipython.request_stop() if callable(getattr(ipython, 'request_stop', None)) else None
+            read_server = getattr(ipython, '_read_server', None)
+            if read_server is not None:
+                read_server.close()
         if trace is not None:
             trace.close()
-        if child is not None:
-            child.close()
-        if parent is not None:
-            parent.close()
-        if lease is not None:
-            lease.close()
-        try:
-            if context_metrics is not None:
-                context_metrics.close()
-        finally:
-            if prefix_metrics is not None:
-                prefix_metrics.close()
         raise P7OperatorError("P7 host services are unavailable") from None
 
 
@@ -4191,7 +3699,8 @@ class P7Invocation:
     operator_root: Path
     environment: Mapping[str, str]
     arc_root: Path
-    pi_base_command: tuple[str, ...]
+    executable: Path
+    entry: Path | None
     extension_path: Path
     game: P7GameSelection
     sweep_mode: bool = False
@@ -4479,11 +3988,7 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             operator_root=root,
             environment=resolved,
             arc_root=arc_root,
-            pi_base_command=live.pi_base_command(
-                node=live.resolve_node(resolved),
-                pi_entry=live.resolve_pi_entry(resolved),
-                environment=resolved,
-            ),
+            executable=live.resolve_node(resolved), entry=live.resolve_pi_entry(resolved),
             extension_path=live.extension_path(research_mode=research_mode),
             game=game,
             sweep_mode=environment.get("ASTERION_PRIME_P7_RUN_MODE") == "sweep",
@@ -4497,12 +4002,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
 def _resolve_p7_application() -> InstalledApplication:
     """Resolve only P7 against the one package this live route owns."""
 
-    provider = resolve_installed_provider(
-        create_prime_arc_agi_3_solving_provider(),
-        runtime_factories=default_runtime_factory_registry(),
-        installed_packages=(create_prime_arc_agi_3_solver_package(),),
-    )
-    return provider.applications[0]
+    from .runtime_binding import compose_p7_application
+    return compose_p7_application()
 
 
 def _sweep_game(game: P7GameSelection, prefix: object) -> P7GameSelection:
@@ -4963,7 +4464,6 @@ async def run_live(
             run_signal = _WitnessDeadlineSignal(run_signal, execution_budget)
     action_journal = ActionJournal(private / 'action-journal',
         _action_scope(run_id, invocation.game, execution_budget))
-    worker = live.SubprocessPythonWorker(root=private)
     engine = live.ArcadeEngine(
         arc_root=invocation.arc_root,
         recordings_dir=private / "recordings",
@@ -4974,10 +4474,9 @@ async def run_live(
     print(_p7_style("[asterion-prime-p7] preflight", "stage"), file=sys.stderr, flush=True)
     resources_ = build_p7_operator_resources(
         environment=invocation.environment,
-        pi_base_command=invocation.pi_base_command,
+        executable=invocation.executable, entry=invocation.entry,
         extension_path=invocation.extension_path,
         working_directory=root,
-        worker=worker,
         engine=engine,
         private_trace_root=trace_root,
         game=invocation.game,
@@ -5151,17 +4650,8 @@ async def run_live(
         application = _resolve_p7_application()
         assembly = application.assemblies[0]
         print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"factory\"}", "stage"), file=sys.stderr, flush=True)
-        runtime = assembly.runtime_binding.factory(
-            RuntimeFactoryContext(
-                provider_id="prime-applications",
-                application_id="prime.arc-agi-3-solving",
-                application_version="1.0.0",
-                runtime_id="asterion.prime",
-                assembly_path=assembly.path,
-                options=resources_.runtime_options,
-                host_services=resources_.host_services,
-            )
-        )
+        from .runtime_binding import build_p7_direct_runtime
+        runtime = build_p7_direct_runtime(resources_.host_services, resources_.runtime_options)
         print(_p7_style("[p7-cognition] runtime-stage {\"stage\":\"factory-ready\"}", "stage"), file=sys.stderr, flush=True)
         result = await run_composed_application(
             assembly.plan,
@@ -5393,37 +4883,17 @@ async def run_live(
             )
             if safe_diagnostic is not None:
                 diagnostics["failure_diagnostic"] = safe_diagnostic
-            # Keep the operator-only Pi stderr tail in private evidence. The
-            # public receipt remains body-free, but extension-registration
-            # failures otherwise collapse into an indistinguishable generic
-            # ApplicationRunError.
-            rpc_session = getattr(
-                getattr(runtime, "_session", None), "_rpc_session", None
-            )
-            stderr = getattr(rpc_session, "stderr", b"")
-            if type(stderr) is bytes:
-                diagnostics["pi_stderr"] = live.safe_stderr_summary(stderr)
-            last_failure = getattr(rpc_session, "last_failure", None)
-            if type(last_failure) is str and last_failure:
-                diagnostics["pi_last_failure"] = last_failure[:256]
-            private_diagnostics = getattr(rpc_session, "private_diagnostics", None)
-            if callable(private_diagnostics):
-                diagnostics["pi_rpc_private"] = private_diagnostics()
-            event_summary = getattr(
-                getattr(runtime, "_session", None), "native_event_summary", ()
-            )
-            if type(event_summary) is tuple:
-                diagnostics["native_event_summary"] = [
-                    dict(item) for item in event_summary if isinstance(item, Mapping)
-                ]
-            bridge = getattr(resources_, "_bridge", None)
-            bridge_accounting = getattr(bridge, "private_accounting", None)
+            owner = resources_.host_services.get('prime.launch')
+            observation = owner.runtime_observation() if type(owner) is PrimeApplication else {}
+            diagnostics['pi_stderr'] = {key: observation[key] for key in ('stderr_bytes', 'stderr_sha256')
+                                        if key in observation}
+            if observation.get('model_failed'):
+                diagnostics['pi_last_failure'] = 'Prime model transport failed'
+            diagnostics['native_event_summary'] = [dict(item) for item in observation.get('native_event_summary', ())]
+            bridge_accounting = getattr(resources_, "private_accounting", None)
             if callable(bridge_accounting):
                 diagnostics["bridge_method_failures"] = bridge_accounting()
-            route_adoption = getattr(bridge, "route_adoption", None)
-            if callable(route_adoption):
-                diagnostics["route_adoption"] = route_adoption()
-            elif isinstance(prediction_client, _P7BrokerClient):
+            if isinstance(prediction_client, _P7BrokerClient):
                 diagnostics["route_adoption"] = prediction_client.route_adoption()
             metrics_reader = getattr(resources_, "context_view_metrics", None)
             if callable(metrics_reader):
@@ -5464,11 +4934,7 @@ async def run_live(
                 if failure is None:
                     failure = error
                     reason = "P7 live solve unsuccessful"
-            computation_closed = (
-                bool(getattr(bridge, "_host_closed", False))
-                if research_mode else worker.closed
-            )
-            cleanup_complete = computation_closed and not cleanup_failed
+            cleanup_complete = not cleanup_failed
             diagnostics["failure_classification"] = classify_failure_cause(
                 failure=failure,
                 broker_status=diagnostics.get("broker_status"),

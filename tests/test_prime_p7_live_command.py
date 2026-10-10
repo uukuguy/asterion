@@ -24,7 +24,7 @@ def _sealed_trace(path: Path, *, outcome: str, action_count: int = 1) -> Path:
     trace_root = path / outcome
     trace_root.mkdir()
     recorder = PrimeTraceRecorder(trace_root)
-    identities = {"model_id": "gpt-6-sol", "reasoning_id": "asterion.prime"}
+    identities = {"model_id": "gpt-6.1-sol", "reasoning_id": "asterion.prime"}
     for index in range(action_count):
         recorder.append(
             "arc.action",
@@ -1347,7 +1347,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     broker_receipt=None, game=DEFAULT_GAME, replay_verified=False,
                     sealed_trace=False, cleanup_complete=True, comparison_report=None,
                     reason=None, failure=None, diagnostics={},
-                    experiment={"prediction_variant": variant, "model": "gpt-6-sol",
+                    experiment={"prediction_variant": variant, "model": "gpt-6.1-sol",
                                 "game_id": DEFAULT_GAME.game_id, "seed": DEFAULT_GAME.seed,
                                 "target_level": DEFAULT_GAME.target_level, "action_cap": DEFAULT_GAME.action_cap,
                                 "deadline_ms": 3600000, "stall_seconds": 300},
@@ -2424,7 +2424,6 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     close=close_resources,
                 )
             assembly = SimpleNamespace(
-                runtime_binding=SimpleNamespace(factory=lambda context: object()),
                 path=root,
                 plan=object(),
             )
@@ -2441,7 +2440,8 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC": "100.0",
                     "ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH": str(__import__("time").time()),
                 } if witness else {})},
-                pi_base_command=(),
+                executable=root / "pi",
+                entry=None,
                 extension_path=root,
             )
             with (
@@ -2452,6 +2452,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     side_effect=build_resources,
                 ),
                 mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=application),
+                mock.patch("asterion.applications.prime.p7.runtime_binding.build_p7_direct_runtime", return_value=object()),
                 mock.patch("asterion.applications.prime.p7.operator.run_composed_application", new_callable=mock.AsyncMock, side_effect=composed),
                 mock.patch("asterion.applications.prime.p7.operator.live.worker_cell_count", return_value=0),
                 mock.patch("asterion.applications.prime.p7.operator.time.monotonic", side_effect=lambda: clock[0]),
@@ -2586,12 +2587,11 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 raise RuntimeError("private model detail")
 
             assembly = SimpleNamespace(
-                runtime_binding=SimpleNamespace(factory=lambda context: object()),
                 path=root,
                 plan=object(),
             )
             application = SimpleNamespace(assemblies=[assembly], implementations=())
-            invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, (), root, game)
+            invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, root / "pi", None, root, game)
             from asterion.applications.prime.p7.replay import replay_arc_run
             certification_witness = object()
             certified = []
@@ -2619,6 +2619,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **_: Engine()),
                 mock.patch("asterion.applications.prime.p7.operator.build_p7_operator_resources", side_effect=build_resources),
                 mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=application),
+                mock.patch("asterion.applications.prime.p7.runtime_binding.build_p7_direct_runtime", return_value=object()),
                 mock.patch("asterion.applications.prime.p7.operator.run_composed_application", new_callable=mock.AsyncMock, side_effect=composed),
                 mock.patch("asterion.applications.prime.p7.operator.live.worker_cell_count", return_value=0),
                 contextlib.redirect_stderr(io.StringIO()),
@@ -2706,12 +2707,11 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                 raise asyncio.CancelledError("supervisor timeout")
 
             assembly = SimpleNamespace(
-                runtime_binding=SimpleNamespace(factory=lambda context: object()),
                 path=root,
                 plan=object(),
             )
             application = SimpleNamespace(assemblies=[assembly], implementations=())
-            invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, (), root, game)
+            invocation = P7Invocation(root, {"ASTERION_PRIME_P7_HISTORY_VARIANT": "legacy"}, root, root / "pi", None, root, game)
             with (
                 mock.patch(
                     "asterion.applications.prime.p7.operator.live.SubprocessPythonWorker",
@@ -2729,6 +2729,7 @@ class TestPrimeP7LiveCommand(unittest.TestCase):
                     "asterion.applications.prime.p7.operator._resolve_p7_application",
                     return_value=application,
                 ),
+                mock.patch("asterion.applications.prime.p7.runtime_binding.build_p7_direct_runtime", return_value=object()),
                 mock.patch(
                     "asterion.applications.prime.p7.operator.run_composed_application",
                     new_callable=mock.AsyncMock,

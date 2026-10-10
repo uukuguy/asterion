@@ -24,7 +24,7 @@ from .console_preferences import read_selection, valid_selection, write_selectio
 from .game import _read_catalog, public_game_catalog
 from .console_overview import ConsoleOverview, MODEL_ID
 from .live import load_operator_environment, safe_run_id
-from .model_selection import declared_model_selection
+from .model_selection import P7ModelMismatchError, declared_model_selection
 
 
 _RUN_ID = re.compile(r"p7-live-[0-9]{14}-[0-9a-f]{24}\Z")
@@ -345,6 +345,8 @@ class ConsoleSession:
     def _validate_model(self) -> None:
         try:
             selected = declared_model_selection(self._operator_environment_reader(self._root))
+        except P7ModelMismatchError:
+            raise ConsoleSessionError("model-mismatch") from None
         except Exception:
             raise ConsoleSessionError("model-unavailable") from None
         if selected.model != MODEL_ID:

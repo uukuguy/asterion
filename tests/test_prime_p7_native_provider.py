@@ -59,12 +59,12 @@ from asterion.capabilities.prime_arc_agi_3_solver.host import (
 )
 from asterion.capabilities.prime_arc_agi_3_solver.provider import CAPABILITY_REF
 from asterion.applications.prime.runtime_binding import (
-    PrimeLaunch,
     _P7SolveEventProjector,
     asterion_prime_runtime_binding,
 )
 from asterion.capability_packages import CapabilityPackageRef
 from asterion.applications.prime.p7.broker import ArcBroker
+from asterion.agents.prime.application import PrimeApplication
 from asterion.runtime.factory import (
     RuntimeFactoryContext,
     RuntimeFactoryError,
@@ -78,13 +78,21 @@ from asterion.runtime.host import (
     RuntimeManifest,
 )
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
-from asterion.runtimes.pi_extensions import PiExtensionBinding
 
 
 ROOT = Path(__file__).resolve().parents[1]
 ASSEMBLY = (
     ROOT / "src/asterion/applications/prime/assemblies/prime-arc-agi-3-solving.json"
 )
+
+
+def _context(**kwargs):
+    from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
+    services = kwargs.get('host_services', {})
+    owner, host = services.get('prime.launch'), services.get('prime.ipython')
+    if type(owner) is PrimeApplication and owner.services is None and host is not None:
+        owner._services = P7ToolDispatch(host, getattr(host, '_p7_client', None), run_id='fixture')
+    return RuntimeFactoryContext(**kwargs)
 
 
 class _Engine:
@@ -447,14 +455,14 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
     def test_operator_selection_is_fixed_and_runtime_options_are_immutable(
         self,
     ) -> None:
-        selection = resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"})
+        selection = resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"})
 
         self.assertEqual(
             selection,
             P7RuntimeSelection(
                 runtime_id="asterion.prime",
                 provider="openai-codex",
-                model="gpt-6-sol",
+                model="gpt-6.1-sol",
                 max_actions=500,
                 max_callbacks=128,
                 deadline_ms=3_600_000,
@@ -468,7 +476,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 "deadline_ms": "3600000",
                 "max_actions": "500",
                 "max_callbacks": "128",
-                "model": "gpt-6-sol",
+                "model": "gpt-6.1-sol",
                 "provider": "openai-codex",
             },
         )
@@ -479,7 +487,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
         from asterion.applications.prime.p7.operator import _sweep_game
         game = _sweep_game(P7GameSelection("ls20-9607627b", 0), None)
         environment = {
-            "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol",
+            "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
             "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
             "ASTERION_PRIME_P7_RUN_MODE": "sweep",
             "OPERATION_MODE": "offline",
@@ -504,7 +512,6 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
 
     def test_unbounded_operator_resources_construct_a_no_deadline_session(self) -> None:
         from asterion.applications.prime.p7.operator import _sweep_game
-        from asterion.applications.prime.runtime_binding import build_p7_runtime
         game = _sweep_game(P7GameSelection("ls20-9607627b", 0), None)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
@@ -514,32 +521,24 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             trace_root.mkdir()
             resources = build_p7_operator_resources(
                 environment={
-                    "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol",
+                    "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
                     "ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND": "1",
                     "ASTERION_PRIME_P7_RUN_MODE": "sweep",
                     "OPERATION_MODE": "offline",
                     "ASTERION_PRIME_EFFORT": "high",
                 },
-                pi_base_command=("/usr/bin/pi", "--mode", "rpc", "--thinking", "medium"),
+                executable=Path("/usr/bin/pi"),
                 extension_path=extension, working_directory=root,
                 worker=_Worker(), engine=_CompletingEngine(), private_trace_root=trace_root,
                 game=game,
             )
             try:
-                command = resources.host_services["prime.launch"].approved_command
-                self.assertEqual(command.count("--thinking"), 1)
-                self.assertEqual(command[command.index("--thinking") + 1], "high")
-                runtime = build_p7_runtime(RuntimeFactoryContext(
-                    provider_id="prime-applications", application_id="prime.arc-agi-3-solving",
-                    application_version="1.0.0", runtime_id="asterion.prime",
-                    assembly_path=ASSEMBLY, options=resources.runtime_options,
-                    host_services=resources.host_services,
-                ))
-                self.assertIsNone(runtime._session._rpc_session.config.deadline_seconds)
-                self.assertIsNone(runtime._session._limits.model_callbacks)
-                self.assertIsNone(runtime._session._limits.tool_callbacks)
-                self.assertNotIn("OPERATION_MODE", resources.host_services["prime.launch"].approved_environment)
-                runtime._session.close()
+                owner = resources.application
+                self.assertEqual(owner._operator.effort, 'high')
+                self.assertIsNone(owner.authorized_limits.deadline_ms)
+                self.assertIsNone(owner.authorized_limits.model_callbacks)
+                self.assertIsNone(owner._persistent)
+                self.assertNotIn('OPERATION_MODE', owner._operator.environment)
             finally:
                 asyncio.run(resources.close())
 
@@ -560,14 +559,14 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             ipython = PersistentIpythonHost(
                 worker=_Worker(), p7_client=p7_client_facade(broker)
             )
-            context = RuntimeFactoryContext(
+            context = _context(
                 provider_id="prime-applications",
                 application_id="prime.arc-agi-3-solving",
                 application_version="1.0.0",
                 runtime_id="asterion.prime",
                 assembly_path=ASSEMBLY.resolve(),
                 options=p7_runtime_options(
-                    resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"})
+                    resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"})
                 ),
                 host_services={
                     "prime.arc-broker": broker,
@@ -586,8 +585,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 ("prime.tool.ipython",),
             )
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
-            self.assertFalse(launch.extension_lease.closed)
-            cast(AsterionPrimeRuntimeClient, runtime)._session.close()
+            self.assertIsNone(launch._persistent)
+            asyncio.run(launch.close())
 
     def test_runtime_binding_rejects_a_launch_without_a_declared_selection(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -597,7 +596,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             ipython = PersistentIpythonHost(
                 worker=_Worker(), p7_client=p7_client_facade(broker)
             )
-            context = RuntimeFactoryContext(
+            context = _context(
                 provider_id="prime-applications",
                 application_id="prime.arc-agi-3-solving",
                 application_version="1.0.0",
@@ -616,7 +615,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
 
             with self.assertRaises(RuntimeFactoryError):
                 asterion_prime_runtime_binding().factory(context)
-            self.assertTrue(launch.extension_lease.closed)
+            self.assertIsNone(launch._persistent)
 
     def test_runtime_binding_rejects_same_identity_with_incomplete_tool_registry(self) -> None:
         from dataclasses import replace
@@ -626,18 +625,15 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             root = Path(directory).resolve()
             broker = ArcBroker(engine=_Engine())
             launch, trace = self._launch(root, broker)
-            bad_launch = replace(
-                launch,
-                tool_registry=PrimeApplicationToolRegistry(
-                    module_id=launch.tool_registry.module_id,
-                    capability_id=launch.tool_registry.capability_id,
-                    tool_names=("ipython",),
-                ),
-            )
+            bad_launch = PrimeApplication(
+                replace(launch._spec, tools=replace(launch._spec.tools,
+                    registry=PrimeApplicationToolRegistry(launch.tool_registry.module_id,
+                        launch.tool_registry.capability_id, ('ipython',)))),
+                launch._operator, authorization=launch.authorized_limits)
             ipython = PersistentIpythonHost(
                 worker=_Worker(), p7_client=p7_client_facade(broker)
             )
-            context = RuntimeFactoryContext(
+            context = _context(
                 provider_id="prime-applications",
                 application_id="prime.arc-agi-3-solving",
                 application_version="1.0.0",
@@ -647,7 +643,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                     resolve_p7_runtime({
                         "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
                         "ASTERION_PRIME_PROVIDER": "openai-codex",
-                        "ASTERION_PRIME_MODEL": "gpt-6-sol",
+                        "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
                     })
                 ),
                 host_services={
@@ -659,7 +655,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             )
             with self.assertRaises(RuntimeFactoryError):
                 build_p7_runtime(context)
-            self.assertTrue(launch.extension_lease.closed)
+            self.assertIsNone(launch._persistent)
 
     def test_runtime_factory_accepts_only_consistently_recorded_active_prefix(self) -> None:
         from dataclasses import replace
@@ -717,13 +713,13 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                     broker._actions_dispatched = game.action_cap
                 worker = _Worker()
                 ipython = PersistentIpythonHost(worker=worker, p7_client=p7_client_facade(broker))
-                context = RuntimeFactoryContext(
+                context = _context(
                     provider_id="prime-applications",
                     application_id="prime.arc-agi-3-solving",
                     application_version="1.0.0",
                     runtime_id="asterion.prime",
                     assembly_path=ASSEMBLY.resolve(),
-                    options=p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"}, game), game),
+                    options=p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"}, game), game),
                     host_services={
                         "prime.arc-broker": broker,
                         "prime.ipython": ipython,
@@ -738,16 +734,16 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                         except RuntimeFactoryError:
                             self.fail("runtime factory rejected a recorded active prefix")
                         self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
-                        cast(AsterionPrimeRuntimeClient, runtime)._session.close()
+                        asyncio.run(launch.close())
                         self.assertEqual(broker.status().primitive_actions, 1)
                         self.assertEqual(broker.status().levels_completed, 1)
                     else:
                         with self.assertRaisesRegex(RuntimeFactoryError, "configuration is invalid"):
                             asterion_prime_runtime_binding().factory(context)
-                        self.assertTrue(launch.extension_lease.closed)
+                        self.assertIsNone(launch._persistent)
                     self.assertEqual(worker.starts, 0)
                 finally:
-                    launch.extension_lease.close()
+                    asyncio.run(launch.close())
                     trace.close()
 
     def test_operator_selects_explicit_artifact_and_injects_exact_registry(self) -> None:
@@ -773,12 +769,12 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                         environment={
                             "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
                             "ASTERION_PRIME_PROVIDER": "openai-codex",
-                            "ASTERION_PRIME_MODEL": "gpt-6-sol",
+                            "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
                             "ASTERION_PRIME_P7_HISTORY_VARIANT": variant,
                             "ASTERION_PRIME_P7_TOOL_MODE": "injected-stale-selector",
                             "ASTERION_PRIME_IPYTHON_TOOL_REGISTRY": "injected-stale-registry",
                         },
-                        pi_base_command=("/usr/bin/pi", "--mode", "rpc", "--tools", "stale"),
+                        executable=Path("/usr/bin/pi"),
                         extension_path=resource_root / "p7-research-extension.mjs",
                         working_directory=root,
                         worker=worker,
@@ -788,20 +784,23 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                     )
                 try:
                     launch = resources.host_services["prime.launch"]
-                    self.assertEqual(launch.extension_path.name, expected_name)
-                    expected = {
-                        "module_id": registry.module_id,
-                        "capability_id": registry.capability_id,
-                        "tool_names": list(registry.tool_names),
-                    }
-                    self.assertEqual(json.loads(launch.binding_environment.get("ASTERION_PRIME_IPYTHON_TOOL_REGISTRY", "null")), expected)
-                    self.assertEqual(json.loads(launch.approved_environment.get("ASTERION_PRIME_IPYTHON_TOOL_REGISTRY", "null")), expected)
-                    self.assertNotIn("ASTERION_PRIME_P7_TOOL_MODE", launch.approved_environment)
-                    command = launch.approved_command
-                    self.assertEqual(command[command.index("--tools") + 1], ",".join(registry.tool_names))
+                    self.assertEqual(launch._spec.tools.path.name, expected_name)
+                    self.assertEqual(launch.tool_registry, registry)
+                    self.assertIsNone(launch._persistent)
+                    self.assertNotIn('ASTERION_PRIME_P7_TOOL_MODE', launch._operator.environment)
+                    self.assertNotIn('ASTERION_PRIME_IPYTHON_TOOL_REGISTRY', launch._operator.environment)
                     self.assertEqual(worker.starts, 0)
+                    from asterion.agents.prime import _launch
+                    owned = _launch.persistent_launch(launch._operator, launch._spec,
+                        launch.services, *launch._runtime_material, metrics_root=launch._metrics_root)
+                    launch._persistent = owned
+                    self.assertEqual(resources.context_view_metrics()['status'], 'not-recorded')
+                    self.assertEqual(resources.provider_prefix_metrics()['status'], 'not-recorded')
+                    self.assertIsNone(owned.rpc.process)
                 finally:
                     asyncio.run(resources.close())
+                self.assertEqual(owned.metrics.read()['status'], 'unavailable')
+                self.assertEqual(owned.prefix_metrics.read()['status'], 'unavailable')
 
     def test_operator_builds_composed_native_runtime_without_starting_edges(
         self,
@@ -817,8 +816,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             worker = _Worker()
 
             resources = build_p7_operator_resources(
-                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"},
-                pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
+                environment={"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"},
+                executable=Path("/usr/bin/pi"),
                 extension_path=extension,
                 working_directory=root,
                 worker=worker,
@@ -844,7 +843,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             assembly = composed.applications[0].assemblies[0]
             assert assembly.runtime_binding is not None
             runtime = assembly.runtime_binding.factory(
-                RuntimeFactoryContext(
+                _context(
                     provider_id=composed.provider_id,
                     application_id="prime.arc-agi-3-solving",
                     application_version="1.0.0",
@@ -855,21 +854,12 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 )
             )
 
-            launch = cast(
-                PrimeLaunch,
-                resources.host_services["prime.launch"],
-            )
+            launch = resources.application
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
-            self.assertEqual(launch.approved_command[:2], ("/usr/bin/pi", "--mode"))
-            self.assertIn("--provider", launch.approved_command)
-            self.assertIn("openai-codex", launch.approved_command)
-            self.assertIn("--model", launch.approved_command)
-            self.assertIn("gpt-6-sol", launch.approved_command)
-            self.assertTrue(launch.approved_command[-len(launch.extension_lease.command_args()):] == launch.extension_lease.command_args())
-            self.assertEqual(
-                launch.approved_environment["ASTERION_PRIME_PI_AGENT_DIR"],
-                str(Path.home() / ".pi/agent"),
-            )
+            self.assertIs(type(launch), PrimeApplication)
+            self.assertEqual(launch.identity, ('prime.arc-agi-3-solving', '1.0.0', 'openai-codex', 'gpt-6.1-sol'))
+            self.assertIsNone(launch._persistent)
+            self.assertFalse(hasattr(launch, 'approved_command'))
             self.assertEqual(worker.starts, 0)
             fake_runtime = _CompletingRuntime(
                 cast(ArcBroker, resources.host_services["prime.arc-broker"])
@@ -892,7 +882,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             )
             self.assertEqual(len(result.artifacts), 1)
             self.assertEqual(fake_runtime.requests[0].input_text, P7_SOLVE_PROMPT)
-            cast(AsterionPrimeRuntimeClient, runtime)._session.close()
+            asyncio.run(launch.close())
             asyncio.run(resources.close())
 
     def test_runtime_factory_failure_closes_unhanded_lease(self) -> None:
@@ -900,7 +890,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             root = Path(directory).resolve()
             broker = ArcBroker(engine=_Engine())
             launch, trace = self._launch(root, broker)
-            context = RuntimeFactoryContext(
+            context = _context(
                 provider_id="other-provider",
                 application_id="prime.arc-agi-3-solving",
                 application_version="1.0.0",
@@ -922,7 +912,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 RuntimeFactoryError, "Asterion-prime runtime configuration is invalid"
             ):
                 asterion_prime_runtime_binding().factory(context)
-            self.assertTrue(launch.extension_lease.closed)
+            self.assertIsNone(launch._persistent)
 
     def test_runtime_factory_rejects_cap_different_from_selected_full_game(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -931,9 +921,9 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             broker = ArcBroker(engine=_Engine(), game=game)
             launch, trace = self._launch(root, broker)
             ipython = PersistentIpythonHost(worker=_Worker(), p7_client=p7_client_facade(broker))
-            options = dict(p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"}, game), game))
+            options = dict(p7_runtime_options(resolve_p7_runtime({"ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"}, game), game))
             options["max_actions"] = "500"
-            context = RuntimeFactoryContext(
+            context = _context(
                 provider_id="prime-applications",
                 application_id="prime.arc-agi-3-solving",
                 application_version="1.0.0",
@@ -949,7 +939,24 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             )
             with self.assertRaisesRegex(RuntimeFactoryError, "configuration is invalid"):
                 asterion_prime_runtime_binding().factory(context)
-            self.assertTrue(launch.extension_lease.closed)
+            self.assertIsNone(launch._persistent)
+
+    def test_unknown_action_blocks_prompt_recovery(self):
+        from asterion.applications.prime.p7.action_journal import ActionJournal
+        from asterion.applications.prime.p7.runtime_binding import _p7_recovery_effects_settled
+        from tests.test_prime_p7_action_journal import SCOPE, ACTION, BEFORE
+        with tempfile.TemporaryDirectory() as directory:
+            journal = ActionJournal(Path(directory).resolve(), SCOPE)
+            engine = _Engine()
+            engine.action_journal = journal
+            broker = ArcBroker(engine=engine)
+            ipython = PersistentIpythonHost(worker=_Worker(), p7_client=p7_client_facade(broker))
+            self.assertTrue(_p7_recovery_effects_settled(ipython, broker))
+            journal.prepare(sequence=1, action=ACTION, before=BEFORE)
+            journal.dispatch_entered(ACTION)
+            journal.unresolved('dispatched-no-reply')
+            self.assertFalse(_p7_recovery_effects_settled(ipython, broker))
+            asyncio.run(ipython.close())
 
     def test_private_trace_receipt_rejects_early_mismatch_and_repeated_access(
         self,
@@ -999,42 +1006,23 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                         adapter.get_receipt(run_id="adapter-run", receipt_sha256=digest)
 
     @staticmethod
-    def _launch(
-        root: Path, broker: ArcBroker, *, declare_model: bool = True
-    ) -> tuple[PrimeLaunch, P7PrivateTraceReceipt]:
-        source = root / "prime_ipython.mjs"
-        source.write_text("export default function extension() {}\n", encoding="utf-8")
-        binding = PiExtensionBinding(
-            extension_id="prime.ipython",
-            path=source,
-            capabilities=("prime.tool.ipython",),
-            inherited_fds=(),
-            environment={},
-        )
-        lease = binding.preflight()
-        declaration = (
-            ("--provider", "openai-codex", "--model", "gpt-6-sol")
-            if declare_model
-            else ()
-        )
-        command = ("pi", "--mode", "rpc", *declaration, *lease.command_args())
-        trace_root = root / "trace"
+    def _launch(root, broker, *, declare_model=True):
+        import time
+        from asterion.agents.prime.application import (PrimeApplicationSpec, PrimeOperatorContext,
+            PrimeToolModuleArtifact, prepare_prime_application)
+        from asterion.agents.prime.deadline import TaskDeadline
+        source = root / 'prime_ipython.mjs'
+        source.write_text('export default function extension() {}\n')
+        owner = prepare_prime_application(
+            PrimeApplicationSpec('prime.arc-agi-3-solving', '1.0.0', 'persistent-code-tools',
+                                 tools=PrimeToolModuleArtifact(source, P7_LEGACY_TOOL_REGISTRY)),
+            PrimeOperatorContext(Path('/usr/bin/pi'), None, root, 'openai-codex',
+                'gpt-6.1-sol' if declare_model else 'invalid-model', 'medium', {},
+                TaskDeadline(deadline_monotonic=time.monotonic()+3600, deadline_epoch=time.time()+3600)),
+            authorization=ASTERION_PRIME_LIMITS)
+        trace_root = root / 'trace'
         trace_root.mkdir()
-        return (
-            PrimeLaunch(
-                approved_command=command,
-                working_directory=root,
-                extension_id=binding.extension_id,
-                extension_path=source,
-                extension_capabilities=binding.capabilities,
-                binding_inherited_fds=binding.inherited_fds,
-                binding_environment=dict(binding.environment),
-                extension_lease=lease,
-                deadline_seconds=ASTERION_PRIME_LIMITS.deadline_ms / 1000,
-                tool_registry=P7_LEGACY_TOOL_REGISTRY,
-            ),
-            P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root)),
-        )
+        return owner, P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root))
 
     def test_pyproject_registers_only_the_new_selected_p7_provider(self) -> None:
         pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))

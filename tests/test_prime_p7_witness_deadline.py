@@ -1,6 +1,5 @@
 """Provider-free checks for the guest-owned witness wall deadline."""
 import asyncio
-from dataclasses import replace
 import os
 from pathlib import Path
 import tempfile
@@ -11,9 +10,10 @@ from unittest.mock import patch
 
 from asterion.applications.prime.p7 import operator
 from asterion.applications.prime.p7.solver_control import SolverControl
-from asterion.applications.prime.p7.runtime_binding import build_p7_runtime
-from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
-from tests.test_prime_p7_native_provider import ASSEMBLY, _Worker, _CompletingEngine
+from asterion.applications.prime.p7.runtime_binding import build_p7_direct_runtime
+from asterion.runtime.factory import RuntimeFactoryError
+from tests.test_prime_p7_native_provider import _Worker, _CompletingEngine
+from asterion.agents.prime import _launch
 from tests.test_asterion_prime_session import SessionFixture, FakePiRpcSession
 from asterion.agents.prime.session import AsterionPrimeSession, AsterionPrimeLimits, ASTERION_PRIME_LIMITS
 from asterion.runtimes.pi_rpc import PiRpcConfig
@@ -105,38 +105,36 @@ class TestWitnessDeadline(unittest.TestCase):
                 (root / 'trace').mkdir()
                 env = {'ASTERION_PRIME_PI_AGENT_DIR': str(Path.home() / '.pi/agent'),
                        'ASTERION_PRIME_PROVIDER': 'openai-codex',
-                       'ASTERION_PRIME_MODEL': 'gpt-6-sol',
+                       'ASTERION_PRIME_MODEL': 'gpt-6.1-sol',
                        'ASTERION_PRIME_P7_HISTORY_VARIANT': 'verified',
                        **(environment() if witness else {})}
                 worker = _Worker()
                 resources = operator.build_p7_operator_resources(
-                    environment=env, pi_base_command=('/usr/bin/pi', '--mode', 'rpc'),
+                    environment=env, executable=Path('/usr/bin/pi'), entry=None,
                     extension_path=extension, working_directory=root,
                     worker=worker, engine=_CompletingEngine(), private_trace_root=root / 'trace')
                 try:
                     launch = resources.host_services['prime.launch']
-                    self.assertEqual(launch.deadline_seconds, 900.0 if witness else 3600.0)
-                    self.assertNotIn(STARTED, launch.approved_environment)
+                    self.assertEqual(launch.authorized_limits.deadline_ms, 900000 if witness else 3600000)
+                    self.assertNotIn(STARTED, launch._operator.environment)
                     self.assertEqual(resources.runtime_options['deadline_ms'], '900000' if witness else '3600000')
                     ipython = resources.host_services['prime.ipython']
                     remaining = ipython.control.budget_snapshot()['wall_time_remaining_seconds']
                     expected = 875.0 if witness else 3600.0
                     self.assertLessEqual(remaining, expected)
                     self.assertGreater(remaining, expected - 1)
-                    context = RuntimeFactoryContext(
-                        provider_id='prime-applications', application_id='prime.arc-agi-3-solving',
-                        application_version='1.0.0', runtime_id='asterion.prime',
-                        assembly_path=ASSEMBLY, options=resources.runtime_options,
-                        host_services=resources.host_services)
                     if not witness:
-                        context = replace(context, options={**resources.runtime_options, 'deadline_ms': '900000'})
                         with self.assertRaises(RuntimeFactoryError):
-                            build_p7_runtime(context)
+                            build_p7_direct_runtime(resources.host_services,
+                                {**resources.runtime_options, 'deadline_ms': '900000'})
                     else:
-                        runtime = build_p7_runtime(context)
-                        self.assertEqual(runtime._session._limits.deadline_ms, 900000)
-                        self.assertEqual(runtime._session._rpc_session.config.deadline_seconds, 900.0)
-                        runtime._session.close()
+                        build_p7_direct_runtime(resources.host_services, resources.runtime_options)
+                        limits, hooks = launch._runtime_material
+                        launch._persistent = _launch.persistent_launch(
+                            launch._operator, launch._spec, launch.services, limits, hooks,
+                            metrics_root=launch._metrics_root)
+                        self.assertEqual(launch._persistent.session._limits.deadline_ms, 900000)
+                        self.assertEqual(launch._persistent.rpc.config.deadline_seconds, 900.0)
                     self.assertEqual(worker.starts, 0)
                 finally:
                     asyncio.run(resources.close())

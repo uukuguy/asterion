@@ -502,7 +502,7 @@ class TestDecisionSource(unittest.TestCase):
 
     def test_both_dispatch_paths_forward_the_real_summary(self):
         from asterion.applications.prime.p7.ipython_host import p7_client_facade
-        from asterion.applications.prime.p7.operator import _IpythonBridgeServer
+        from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
         from asterion.applications.prime.p7.live import P7ClientServer, WORKER_PROTOCOL
         from tests.test_prime_p7_bridge_dispatch import _Facade
         class Client(_Facade):
@@ -512,7 +512,7 @@ class TestDecisionSource(unittest.TestCase):
                 return {'received': payload, 'execution_authority': 'none'}
         payload = {'goal': '继续移动', 'basis': '当前观察', 'expected': '位置变化'}
         facade = p7_client_facade(Client())
-        bridge = object.__new__(_IpythonBridgeServer)
+        bridge = object.__new__(P7ToolDispatch)
         bridge._client, bridge._method_calls, bridge._method_failures = facade, {}, {}
         result = bridge._dispatch_method_call('request', 'decision', payload)
         self.assertEqual(json.loads(result['output'])['received'], payload)
@@ -527,14 +527,14 @@ class TestDecisionSource(unittest.TestCase):
         from unittest.mock import patch
         from asterion.applications.prime.p7.broker import ArcBroker
         from asterion.applications.prime.p7.ipython_host import p7_client_facade
-        from asterion.applications.prime.p7.operator import _IpythonBridgeServer
+        from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
         from tests.test_prime_p7_bridge_dispatch import _Facade
         class Client(_Facade):
             _cognition_mode = True
             _broker = object.__new__(ArcBroker)
             def act(self, actions):
                 return {}
-        bridge = object.__new__(_IpythonBridgeServer)
+        bridge = object.__new__(P7ToolDispatch)
         bridge._client = p7_client_facade(Client())
         with patch.object(ArcBroker, 'cognition_projection', return_value={'cognition_session': {'session': {'state': 'OBSERVE', 'episode_actions': 0}}}):
             self.assertTrue(bridge._first_probe_required('act_checked'))

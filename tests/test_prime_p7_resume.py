@@ -126,7 +126,7 @@ class TestP7ExplicitResume(unittest.TestCase):
                 )
 
             game = P7GameSelection("ls20-9607627b", 0, 6)
-            invocation = P7Invocation(root, {}, arc_root, (), root, game, resume_run_id=source.name)
+            invocation = P7Invocation(root, {}, arc_root, Path("/usr/bin/pi"), None, root, game, resume_run_id=source.name)
             assembly = SimpleNamespace(runtime_binding=SimpleNamespace(factory=lambda _: object()), path=root, plan=object())
             with (
                 mock.patch("asterion.applications.prime.p7.solutions._fresh_engine", side_effect=lambda *_: _LiveEngine()),
@@ -134,6 +134,7 @@ class TestP7ExplicitResume(unittest.TestCase):
                 mock.patch("asterion.applications.prime.p7.operator.live.ArcadeEngine", side_effect=lambda **kwargs:
                            DivergentEngine() if divergent and kwargs["recordings_dir"].name == "recordings" else _LiveEngine()),
                 mock.patch("asterion.applications.prime.p7.operator.build_p7_operator_resources", side_effect=resources),
+                mock.patch("asterion.applications.prime.p7.runtime_binding.build_p7_direct_runtime", return_value=object()),
                 mock.patch("asterion.applications.prime.p7.operator._resolve_p7_application", return_value=SimpleNamespace(assemblies=[assembly], implementations=())),
                 mock.patch("asterion.applications.prime.p7.operator.run_composed_application", new_callable=mock.AsyncMock, side_effect=composed) as model,
                 contextlib.redirect_stderr(io.StringIO()),

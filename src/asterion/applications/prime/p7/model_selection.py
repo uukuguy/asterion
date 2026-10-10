@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_PROVIDER = "openai-codex"
-DEFAULT_MODEL = "gpt-6-sol"
+DEFAULT_MODEL = "gpt-6.1-sol"
 PROVIDER_ENV = "ASTERION_PRIME_PROVIDER"
 MODEL_ENV = "ASTERION_PRIME_MODEL"
 
@@ -58,6 +58,10 @@ class P7ModelSelectionError(RuntimeError):
     """The operator-declared P7 model selection is unusable."""
 
 
+class P7ModelMismatchError(P7ModelSelectionError):
+    """The explicit selection differs from the P7 exact model policy."""
+
+
 def valid_selection_name(value: object) -> bool:
     """Accept only a bounded, printable, ASCII provider or model name."""
 
@@ -84,9 +88,8 @@ class P7ModelSelection:
 def declared_model_selection(environment: Mapping[str, str]) -> P7ModelSelection:
     """Read the operator-declared selection, applying the documented defaults.
 
-    Shape validation only: this never touches the Pi profile, so an operator
-    that is merely reporting what it was asked to run can use it without
-    claiming the selection is usable.
+    Validate the exact P7 policy without touching the Pi profile. This does not
+    establish credential or backend availability.
     """
 
     try:
@@ -94,7 +97,10 @@ def declared_model_selection(environment: Mapping[str, str]) -> P7ModelSelection
             raise P7ModelSelectionError("P7 model selection is invalid")
         provider = environment.get(PROVIDER_ENV, DEFAULT_PROVIDER)
         model = environment.get(MODEL_ENV, DEFAULT_MODEL)
-        return P7ModelSelection(provider=provider, model=model)
+        selection = P7ModelSelection(provider=provider, model=model)
+        if (provider, model) != (DEFAULT_PROVIDER, DEFAULT_MODEL):
+            raise P7ModelMismatchError('P7 model selection is incompatible')
+        return selection
     except P7ModelSelectionError:
         raise
     except Exception:

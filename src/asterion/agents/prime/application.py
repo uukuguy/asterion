@@ -9,15 +9,21 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, fields
 import math
+import asyncio
+import re
 from pathlib import Path
 from types import MappingProxyType
 from typing import Literal, Protocol
 
 from asterion.agents.prime import _launch
+from asterion.agents.prime._workspace_owner import WorkspaceOwner
 from asterion.agents.prime._text_model import (
     LiveModelReply, LiveModelSession, LiveModelUsage, _TextUsage,
 )
 from asterion.agents.prime.backend import PrimeAttachment
+from asterion.agents.prime.ipython import (
+    KernelBootstrap, KernelExport, KernelLimits, PersistentIpythonHost, PersistentIpythonWorker,
+)
 from asterion.agents.prime.compaction_budget import ModelPrice
 from asterion.agents.prime.deadline import TaskDeadline
 from asterion.agents.prime.execution import (
@@ -28,7 +34,7 @@ from asterion.agents.prime.execution import (
 from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.agents.prime.tools import PrimeToolResult
 from asterion.capabilities.protocol import SEMANTIC_VERSION
-from asterion.runtime.host import AgentRuntimeClient, CancellationSignal
+from asterion.runtime.host import AgentRuntimeClient, CancellationSignal, RunRequest
 from asterion.runtime.protocol import IDENTIFIER, ProtocolError
 from asterion.services.diagnostics import (
     DiagnosticSink,
@@ -76,12 +82,15 @@ class PrimeOperatorContext:
     task_deadline: TaskDeadline | None
     diagnostics: DiagnosticSink | None = None
     private_failure_sink: PrivateFailureSink | None = None
+    private_root: Path | None = None
 
     def __post_init__(self) -> None:
         for path in (self.executable, self.cwd):
             _path(path)
         if self.entry is not None:
             _path(self.entry)
+        if self.private_root is not None:
+            _path(self.private_root)
         _identifier(self.provider)
         _identifier(self.model)
         if type(self.effort) is not str or self.effort not in (
@@ -264,8 +273,8 @@ class PrimeApplicationServices(Protocol):
     def validate_lifecycle(self) -> object: ...
     async def execute(self, request_id: str, code: str,
                       signal: CancellationSignal) -> PrimeToolResult: ...
-    async def call(self, request_id: str, method: str, params: Mapping[str, object],
-                   signal: CancellationSignal) -> Mapping[str, object]: ...
+    async def call(self, request_id: str, method: str, params: object,
+                   signal: CancellationSignal, *, params_present: bool = True) -> Mapping[str, object]: ...
     def request_stop(self) -> None: ...
     async def close(self) -> None: ...
 
@@ -305,7 +314,8 @@ class PrimeApplication:
 
     __slots__ = ('_spec', '_operator', '_authorization', '_state',
                  '_text_limits_by_key', '_cleanup', '_text_sessions', '_text_closed_keys',
-                 '_text_usage')
+                 '_text_usage', '_runtime_client', '_runtime_material', '_persistent',
+                 '_services', '_workspace_owner', '_metrics_root', '_run_claimed')
 
     def __init__(self, spec: PrimeApplicationSpec, operator: PrimeOperatorContext, *,
                  authorization: PrimeTextLimits | AsterionPrimeLimits | PrimeBackendSpec):
@@ -316,6 +326,10 @@ class PrimeApplication:
                 _invalid()
         elif type(authorization) not in (AsterionPrimeLimits, PrimeBackendSpec):
             _invalid()
+        self._runtime_client = self._runtime_material = self._persistent = self._services = None
+        self._workspace_owner = WorkspaceOwner()
+        self._metrics_root = operator.private_root
+        self._run_claimed = False
         self._spec = spec
         self._operator = operator
         self._authorization = authorization
@@ -421,7 +435,82 @@ class PrimeApplication:
     def runtime(self, *, services: PrimeApplicationServices, limits: AsterionPrimeLimits,
                 hooks: PrimeRunHooks) -> AgentRuntimeClient:
         self._admit_runtime_limits(limits)
-        raise ProtocolError('Prime application runtime profile is not assembled')
+        if (type(hooks) is not PrimeRunHooks or any(not callable(getattr(services, name, None))
+                for name in ('execute', 'call', 'request_stop', 'close', 'validate_lifecycle'))
+                or type(getattr(services, 'identity_sha256', None)) is not str
+                or re.fullmatch(r'[0-9a-f]{64}', services.identity_sha256) is None):
+            _invalid()
+        try:
+            services.validate_lifecycle()
+        except Exception:
+            _invalid()
+        if self._runtime_client is not None:
+            if self._services is not services or self._runtime_material != (limits, hooks):
+                raise ProtocolError('Prime runtime view is fixed')
+            return self._runtime_client
+        self._services = services
+        self._runtime_material = (limits, hooks)
+        from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
+        self._runtime_client = AsterionPrimeRuntimeClient(_OwnedRuntimeSession(self))
+        return self._runtime_client
+
+    @property
+    def services(self) -> PrimeApplicationServices | None:
+        return self._services
+
+    @property
+    def identity(self) -> tuple[str, str, str, str]:
+        return (self._spec.application_id, self._spec.application_version,
+                self._operator.provider, self._operator.model)
+
+    @property
+    def tool_registry(self) -> PrimeApplicationToolRegistry | None:
+        return self._spec.tools.registry if self._spec.tools is not None else None
+
+    @property
+    def authorized_limits(self) -> PrimeTextLimits | AsterionPrimeLimits:
+        return self._authorization.limits if type(self._authorization) is PrimeBackendSpec else self._authorization
+
+    @property
+    def task_deadline(self) -> TaskDeadline | None:
+        return self._operator.task_deadline
+
+    def create_workspace(
+        self, bootstrap: KernelBootstrap, limits: KernelLimits, *, python: Path | None = None,
+        observer: Callable[[str, Mapping[str, object]], None] | None = None,
+        worker: PersistentIpythonWorker | None = None,
+    ) -> PersistentIpythonHost:
+        self._require_available()
+        if self._spec.profile != 'persistent-code-tools':
+            _invalid()
+        workspace = self._workspace_owner.create_workspace(bootstrap, limits, python=python,
+                                                           observer=observer, worker=worker)
+        return workspace
+    async def restore_workspace(
+        self, previous: PersistentIpythonHost, source_exports: tuple[KernelExport, ...],
+        data_exports: Mapping[str, KernelExport], signal: CancellationSignal,
+    ) -> PersistentIpythonHost:
+        self._require_available()
+        return await self._workspace_owner.restore_workspace(previous, source_exports, data_exports, signal)
+
+    def runtime_observation(self):
+        """Private, body-free accounting without exposing a transport handle."""
+        from hashlib import sha256
+        resource = self._persistent
+        if resource is None:
+            return {}
+        stderr = resource.rpc.stderr
+        return {'stderr_bytes': len(stderr), 'stderr_sha256': sha256(stderr).hexdigest(),
+                'model_failed': bool(resource.rpc.last_failure),
+                'native_event_summary': resource.session.native_event_summary}
+
+    def context_view_metrics(self):
+        resource = self._persistent
+        return resource.metrics.read() if resource is not None and resource.metrics else {'status': 'unavailable'}
+
+    def provider_prefix_metrics(self):
+        resource = self._persistent
+        return resource.prefix_metrics.read() if resource is not None and resource.prefix_metrics else {'status': 'unavailable'}
 
     async def open_backend(self, *, spec: PrimeBackendSpec,
                            services: PrimeApplicationServices) -> PrimeAttachment:
@@ -447,10 +536,96 @@ class PrimeApplication:
                 await close_sessions()
         else:
             await close_sessions()
-        self._cleanup = PrimeApplicationCleanup(model_closed, model_closed, True, True, True)
+        # stop() reaps independently of an active RPC command's asyncio lock.
+        effects_stopped = bridge_closed = extension_closed = True
+        resource = self._persistent
+        if self._services is not None:
+            try:
+                self._services.request_stop()
+            except Exception:
+                effects_stopped = False
+        if resource is not None:
+            try:
+                await asyncio.to_thread(resource.rpc.stop)
+                await asyncio.wait_for(resource.rpc.close(), timeout=6)
+            except Exception:
+                model_closed = False
+            try:
+                await asyncio.to_thread(resource.bridge.close)
+            except Exception:
+                bridge_closed = False
+            try:
+                resource.close_descriptors()
+            except Exception:
+                extension_closed = False
+        elif self._services is not None:
+            try:
+                await self._services.close()
+            except Exception:
+                bridge_closed = False
+        workspace_closed = await self._workspace_owner.close()
+        self._cleanup = PrimeApplicationCleanup(effects_stopped, model_closed, extension_closed,
+                                               bridge_closed, workspace_closed)
         if self._cleanup.complete:
             self._state = 'closed'
         return self._cleanup
+
+
+class _OwnerSignal:
+    def __init__(self, owner, parent):
+        self.owner, self.parent = owner, parent
+
+    @property
+    def cancelled(self):
+        deadline = self.owner.task_deadline
+        return (self.owner.state in ('closing', 'closed')
+                or bool(getattr(self.parent, 'cancelled', False))
+                or deadline is not None and deadline.expired())
+
+
+class _OwnedRuntimeSession:
+    """Lazy resource acquisition followed by the existing session's sole run loop."""
+    def __init__(self, owner):
+        self._owner = owner
+
+    @property
+    def last_diagnostic(self):
+        resource = self._owner._persistent
+        return resource.session.last_diagnostic if resource is not None else None
+
+    @property
+    def last_diagnostic_id(self):
+        diagnostic = self.last_diagnostic
+        return diagnostic.diagnostic_id if diagnostic is not None else None
+
+    async def run(self, request, *, signal=None):
+        if type(request) is not RunRequest:
+            raise ProtocolError("Asterion-prime request is invalid")
+        request.to_mapping()
+        owner = self._owner
+        owner._require_available()
+        if owner._run_claimed:
+            raise ProtocolError('Prime runtime authority was already consumed')
+        owner._run_claimed = True
+        combined = _OwnerSignal(owner, signal)
+        if combined.cancelled:
+            from asterion.runtime.host import RunEvent
+            yield RunEvent(request.run_id, 1, 'run.started', {'capabilities': ['prime.tool.ipython']})
+            yield RunEvent(request.run_id, 2, 'run.completed', {'status': 'cancelled'})
+            return
+        limits, hooks = owner._runtime_material
+        try:
+            owner._services.validate_lifecycle()
+            owner._persistent = _launch.persistent_launch(owner._operator, owner._spec, owner._services,
+                                                          limits, hooks, metrics_root=owner._metrics_root)
+        except BaseException as error:
+            await owner.close()
+            if isinstance(error, asyncio.CancelledError):
+                raise
+            raise ProtocolError('Prime runtime preparation failed') from None
+        owner._activate()
+        async for event in owner._persistent.session.run(request, signal=combined):
+            yield event
 
 
 def prepare_prime_application(spec: PrimeApplicationSpec, operator: PrimeOperatorContext, *,

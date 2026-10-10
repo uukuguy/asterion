@@ -79,8 +79,8 @@ class TestP7Autonomy(unittest.TestCase):
 
     def test_exact_factory_uses_finite_profile_and_absolute_outer_admission(self):
         from dataclasses import replace
-        from asterion.runtime.factory import RuntimeFactoryContext
-        from tests.test_prime_p7_native_provider import ASSEMBLY, _Worker
+        from asterion.agents.prime import _launch
+        from tests.test_prime_p7_native_provider import _Worker
         from tests.test_prime_p7_native_broker import _Engine
         from asterion.applications.prime.p7.model_selection import P7ModelSelection
         with tempfile.TemporaryDirectory() as directory, patch('time.monotonic', return_value=125.0), \
@@ -94,29 +94,30 @@ class TestP7Autonomy(unittest.TestCase):
             game = replace(P7GameSelection('ls20-9607627b', 0, 6),
                            action_cap_override=1000, action_cap_reason='action-cap')
             resources = operator.build_p7_operator_resources(environment=env,
-                pi_base_command=('/usr/bin/pi', '--mode', 'rpc'), extension_path=extension,
+                executable=Path('/usr/bin/pi'), entry=None, extension_path=extension,
                 working_directory=root, worker=_Worker(), engine=_Engine(),
                 private_trace_root=root / 'trace', game=game)
             try:
                 launch = resources.host_services['prime.launch']
                 host = resources.host_services['prime.ipython']
-                metrics_fd = int(launch.approved_environment['ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD'])
-                self.assertIn(metrics_fd, launch.extension_lease.inherited_fds)
+                runtime_binding.build_p7_direct_runtime(resources.host_services, resources.runtime_options)
+                limits, hooks = launch._runtime_material
+                launch._persistent = _launch.persistent_launch(
+                    launch._operator, launch._spec, launch.services, limits, hooks,
+                    metrics_root=launch._metrics_root)
+                native = launch._persistent
+                metrics_fd = int(native.rpc.config.environment['ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD'])
+                self.assertIn(metrics_fd, native.lease.inherited_fds)
                 self.assertEqual(resources.context_view_metrics(), {'status': 'not-recorded'})
-                prefix_fd = int(launch.approved_environment['ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD'])
-                self.assertIn(prefix_fd, launch.extension_lease.inherited_fds)
+                prefix_fd = int(native.rpc.config.environment['ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD'])
+                self.assertIn(prefix_fd, native.lease.inherited_fds)
                 self.assertNotEqual(prefix_fd, metrics_fd)
                 self.assertEqual(resources.provider_prefix_metrics(), {'status': 'not-recorded'})
                 self.assertEqual(host.solver.learner_profile, 'autonomous')
-                self.assertNotIn('ASTERION_PRIME_P7_RESEARCH_PYTHON', launch.approved_environment)
-                self.assertEqual(launch.autonomy_deadline_monotonic, 5500.0)
+                self.assertNotIn('ASTERION_PRIME_P7_RESEARCH_PYTHON', native.rpc.config.environment)
+                self.assertEqual(launch.task_deadline.deadline_monotonic, 5500.0)
                 self.assertEqual(host.control._deadline, 5500.0)
-                context = RuntimeFactoryContext(provider_id='prime-applications',
-                    application_id='prime.arc-agi-3-solving', application_version='1.0.0',
-                    runtime_id='asterion.prime', assembly_path=ASSEMBLY,
-                    options=resources.runtime_options, host_services=resources.host_services)
-                runtime = runtime_binding.build_p7_runtime(context)
-                session = runtime._session
+                session = native.session
                 self.assertEqual(session._limits.model_callbacks, 1024)
                 self.assertEqual(session._limits.tool_callbacks, 4096)
                 self.assertEqual(session._limits.deadline_ms, 5400000)
@@ -127,7 +128,6 @@ class TestP7Autonomy(unittest.TestCase):
                 for _ in range(10):
                     self.assertTrue(asyncio.run(host.admit_round(0, signal)))
                 self.assertFalse(asyncio.run(session._kernel._round_admission(6, signal)))
-                session.close()
             finally:
                 asyncio.run(resources.close())
 
@@ -138,7 +138,7 @@ class TestP7Autonomy(unittest.TestCase):
             root = Path(directory).resolve()
             game = P7GameSelection('test-1', 0, 6, (10,) * 9, 9, 1000, 'action-cap')
             invocation = operator.P7Invocation(root, environment(self.wrapper), root,
-                                               ('pi',), root / 'extension.mjs', game)
+                                               root / 'pi', None, root / 'extension.mjs', game)
             with patch('asterion.applications.prime.p7.experience.load_experience') as experience, \
                  patch('asterion.applications.prime.p7.solutions.load_best_prefix') as prefix, \
                  patch.object(operator.live, 'SubprocessPythonWorker'), \

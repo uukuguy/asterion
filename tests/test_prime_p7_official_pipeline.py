@@ -111,7 +111,7 @@ class TestOfficialPipeline(unittest.TestCase):
     @staticmethod
     def _invocation(root: Path) -> OfficialInvocation:
         return OfficialInvocation(
-            operator_root=root, environment={}, pi_base_command=("pi",),
+            operator_root=root, environment={}, executable=Path("/usr/bin/pi"), entry=None,
             extension_path=root / "extension.mjs", api_key="private-arc-key",
         )
 

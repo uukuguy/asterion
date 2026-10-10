@@ -12,16 +12,12 @@ from pathlib import Path
 import sys
 from typing import Any
 
-from asterion.applications.prime import create_prime_arc_agi_3_gameplay_provider
-from asterion.applications.provider import InstalledApplication, resolve_installed_provider
+from asterion.applications.provider import InstalledApplication
 from asterion.capabilities.prime_arc_agi_3_gameplay.provider import (
     CAPABILITY_REF,
     PACKAGE_REF,
-    create_prime_arc_agi_3_gameplay_package,
 )
 from asterion.runner.composed import run_composed_application
-from asterion.runtime.defaults import default_runtime_factory_registry
-from asterion.runtime.factory import RuntimeFactoryContext
 
 from .game import ArcGameContract, GAME_ID_ENV, SEED_ENV, _read_catalog, resolve_game_selection
 from . import live
@@ -88,7 +84,8 @@ async def run_official_games(
 class OfficialInvocation:
     operator_root: Path
     environment: Mapping[str, str]
-    pi_base_command: tuple[str, ...]
+    executable: Path
+    entry: Path | None
     extension_path: Path
     api_key: str
 
@@ -151,11 +148,7 @@ def _preflight(process_environment: Mapping[str, str]) -> OfficialInvocation:
         return OfficialInvocation(
             root,
             environment,
-            live.pi_base_command(
-                node=live.resolve_node(environment),
-                pi_entry=live.resolve_pi_entry(environment),
-                environment=environment,
-            ),
+            live.resolve_node(environment), live.resolve_pi_entry(environment),
             live.extension_path(research_mode=True),
             api_key,
         )
@@ -226,12 +219,8 @@ def _private_root(operator_root: Path, run_id: str) -> Path:
 
 
 def _resolve_gameplay_application() -> InstalledApplication:
-    provider = resolve_installed_provider(
-        create_prime_arc_agi_3_gameplay_provider(),
-        runtime_factories=default_runtime_factory_registry(),
-        installed_packages=(create_prime_arc_agi_3_gameplay_package(),),
-    )
-    return provider.applications[0]
+    from .runtime_binding import compose_p7_application
+    return compose_p7_application(gameplay=True)
 
 
 async def _run_game(
@@ -249,29 +238,18 @@ async def _run_game(
         game_root.mkdir(mode=0o700)
         trace_root = game_root / "trace"
         trace_root.mkdir(mode=0o700)
-        worker = live.SubprocessPythonWorker(root=game_root)
         resources = build_p7_operator_resources(
             environment=invocation.environment,
-            pi_base_command=invocation.pi_base_command,
+            executable=invocation.executable, entry=invocation.entry,
             extension_path=invocation.extension_path,
             working_directory=invocation.operator_root,
-            worker=worker,
             engine=engine,
             private_trace_root=trace_root,
             game=game,
         )
         assembly = application.assemblies[0]
-        runtime = assembly.runtime_binding.factory(
-            RuntimeFactoryContext(
-                provider_id="prime-applications",
-                application_id="prime.arc-agi-3-gameplay",
-                application_version="1.0.0",
-                runtime_id="asterion.prime",
-                assembly_path=assembly.path,
-                options=resources.runtime_options,
-                host_services=resources.host_services,
-            )
-        )
+        from .runtime_binding import build_p7_direct_runtime
+        runtime = build_p7_direct_runtime(resources.host_services, resources.runtime_options, gameplay=True)
         result = await run_composed_application(
             assembly.plan,
             implementations=application.implementations,

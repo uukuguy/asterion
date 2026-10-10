@@ -1,8 +1,8 @@
-"""The operator environment is the only P7 model control.
+"""P7 admits the exact model pair while preserving historical trace readers.
 
-``ASTERION_PRIME_PROVIDER`` / ``ASTERION_PRIME_MODEL`` select the provider and
-model; everything else (runtime options, public receipt, private experiment and
-the trace identity) must follow that one selection or fail closed.
+``ASTERION_PRIME_PROVIDER`` / ``ASTERION_PRIME_MODEL`` must resolve to the exact
+approved pair. Runtime options and Prime-owned commands follow that pair;
+offline trace readers retain support for earlier model identities.
 """
 
 from __future__ import annotations
@@ -10,7 +10,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 
 _CATALOG = {
@@ -40,9 +42,9 @@ class TestP7ModelSelection(unittest.TestCase):
             selection = resolve_model_selection(
                 {"ASTERION_PRIME_PI_AGENT_DIR": _profile(directory)}
             )
-        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6-sol"))
+        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6.1-sol"))
 
-    def test_operator_environment_selects_another_listed_model(self) -> None:
+    def test_explicit_exact_pair_reaches_runtime_options(self) -> None:
         from asterion.applications.prime.p7.game import P7GameSelection
         from asterion.applications.prime.p7.operator import (
             p7_runtime_options,
@@ -51,7 +53,7 @@ class TestP7ModelSelection(unittest.TestCase):
 
         environment = {
             "ASTERION_PRIME_PROVIDER": "openai-codex",
-            "ASTERION_PRIME_MODEL": "gpt-6-astra",
+            "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
         }
         with tempfile.TemporaryDirectory() as directory:
             environment["ASTERION_PRIME_PI_AGENT_DIR"] = _profile(directory)
@@ -63,8 +65,8 @@ class TestP7ModelSelection(unittest.TestCase):
                     selection, P7GameSelection("ls20-9607627b", 0, 1)
                 )
             )
-        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6-astra"))
-        self.assertEqual(options["model"], "gpt-6-astra")
+        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6.1-sol"))
+        self.assertEqual(options["model"], "gpt-6.1-sol")
         self.assertEqual(options["provider"], "openai-codex")
 
     def test_an_environment_key_provider_resolves_without_auth_entry(self) -> None:
@@ -73,14 +75,36 @@ class TestP7ModelSelection(unittest.TestCase):
         )
 
         environment = {
-            "ASTERION_PRIME_PROVIDER": "deepseek",
-            "ASTERION_PRIME_MODEL": "deepseek-flash",
-            "DEEPSEEK_API_KEY": "operator-secret",
+            "ASTERION_PRIME_PROVIDER": "openai-codex",
+            "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
+            "CODEX_API_KEY": "operator-secret",
         }
         with tempfile.TemporaryDirectory() as directory:
-            environment["ASTERION_PRIME_PI_AGENT_DIR"] = _profile(directory)
+            environment["ASTERION_PRIME_PI_AGENT_DIR"] = _profile(directory, auth={})
             selection = resolve_model_selection(environment)
-        self.assertEqual((selection.provider, selection.model), ("deepseek", "deepseek-flash"))
+        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6.1-sol"))
+
+    def test_incompatible_pair_rejects_before_profile_or_model_effects(self) -> None:
+        from asterion.applications.prime.p7 import model_selection
+
+        for provider, model in (("openai-codex", "gpt-6-astra"),
+                                ("openai-codex", "gpt-6-sol"),
+                                ("deepseek", "deepseek-flash"),
+                                ("deepseek", "gpt-6.1-sol")):
+            with (
+                self.subTest(provider=provider, model=model),
+                mock.patch.object(model_selection, "_agent_dir") as profile,
+                mock.patch.object(model_selection, "_catalog") as catalog,
+                mock.patch.object(model_selection, "_has_credential") as credential,
+            ):
+                with self.assertRaisesRegex(model_selection.P7ModelSelectionError, "^P7 model selection is incompatible$"):
+                    model_selection.resolve_model_selection({
+                        "ASTERION_PRIME_PROVIDER": provider, "ASTERION_PRIME_MODEL": model,
+                        "CODEX_API_KEY": "PRIVATE-KEY",
+                    })
+                profile.assert_not_called()
+                catalog.assert_not_called()
+                credential.assert_not_called()
 
     def test_well_formed_model_can_be_selected_before_profile_catalog_refresh(self) -> None:
         from asterion.applications.prime.p7.model_selection import resolve_model_selection
@@ -156,7 +180,7 @@ class TestP7ModelSelection(unittest.TestCase):
             ("missing-profile", None),
             ("blank-profile", {"ASTERION_PRIME_PI_AGENT_DIR": "   "}),
             ("unlisted-provider", {"ASTERION_PRIME_PROVIDER": "mystery"}),
-            ("unauthenticated", {"ASTERION_PRIME_MODEL": "gpt-6-astra"}),
+            ("unauthenticated", {"ASTERION_PRIME_MODEL": "gpt-6.1-sol"}),
             ("malformed-model", {"ASTERION_PRIME_MODEL": "bad name"}),
             ("oversize-model", {"ASTERION_PRIME_MODEL": "x" * 129}),
             ("non-ascii-model", {"ASTERION_PRIME_MODEL": "模型"}),
@@ -182,16 +206,16 @@ class TestP7ModelSelection(unittest.TestCase):
                     )
                 self.assertNotIn("ASTERION_PRIME_", str(raised.exception))
 
-    def test_declared_selection_reports_the_configured_pair_before_validation(self) -> None:
+    def test_declared_exact_pair_is_available_without_profile_validation(self) -> None:
         from asterion.applications.prime.p7.model_selection import (
             declared_model_selection,
         )
 
         selection = declared_model_selection(
-            {"ASTERION_PRIME_PROVIDER": "deepseek", "ASTERION_PRIME_MODEL": "deepseek-pro"}
+            {"ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"}
         )
-        self.assertEqual(selection.provider, "deepseek")
-        self.assertEqual(selection.model, "deepseek-pro")
+        self.assertEqual(selection.provider, "openai-codex")
+        self.assertEqual(selection.model, "gpt-6.1-sol")
 
     def test_prefix_reuse_is_strict_only_on_the_runtime_path(self) -> None:
         from asterion.applications.prime.p7.private_trace import (
@@ -203,32 +227,34 @@ class TestP7ModelSelection(unittest.TestCase):
         active = trace_identities_for("gpt-6-astra")
         historical = {**P7_TRACE_IDENTITIES, "model_id": "deepseek-v4-flash"}
         self.assertTrue(_known_trace_identities(active, "gpt-6-astra"))
-        self.assertTrue(_known_trace_identities(P7_TRACE_IDENTITIES, "gpt-6-sol"))
+        self.assertTrue(_known_trace_identities(P7_TRACE_IDENTITIES, "gpt-6.1-sol"))
         self.assertTrue(_known_trace_identities(historical, "gpt-6-astra"))
         self.assertFalse(_known_trace_identities(active, "gpt-6-sol"))
         self.assertTrue(_known_trace_identities(active, None))
         self.assertFalse(_known_trace_identities({"application_id": "other"}, None))
         self.assertFalse(_known_trace_identities("identities", None))
 
-    def test_launch_command_must_declare_exactly_one_selection(self) -> None:
-        from asterion.applications.prime.p7.runtime_binding import _launch_selection
-
-        self.assertEqual(
-            _launch_selection(
-                ("pi", "--mode", "rpc", "--provider", "openai-codex", "--model", "gpt-6-sol")
-            ),
-            ("openai-codex", "gpt-6-sol"),
+    def test_core_owned_command_declares_exactly_one_model_pair(self) -> None:
+        from asterion.agents.prime import _launch
+        from asterion.agents.prime.application import (
+            PrimeApplicationSpec, PrimeOperatorContext, PrimeToolModuleArtifact,
         )
-        for command in (
-            (),
-            ["pi", "--provider", "openai-codex"],
-            ("pi", "--mode", "rpc"),
-            ("pi", "--provider", "openai-codex", "--model", "gpt-6-sol", "--model", "gpt-6-astra"),
-            ("pi", "--provider", "openai-codex", "--model", "bad model"),
-            ("pi", "--provider", "openai-codex", "--model"),
-        ):
-            with self.subTest(command=command):
-                self.assertIsNone(_launch_selection(command))
+        from asterion.applications.prime.p7.tool_registry import P7_LEGACY_TOOL_REGISTRY
+
+        operator = PrimeOperatorContext(
+            executable=Path("/tmp/node"), entry=Path("/tmp/pi.mjs"), cwd=Path("/tmp"),
+            provider="openai-codex", model="gpt-6.1-sol", effort="high",
+            environment={}, task_deadline=None,
+        )
+        spec = PrimeApplicationSpec("prime.arc-agi-3-solving", "1.0.0", "persistent-code-tools",
+            tools=PrimeToolModuleArtifact(Path("/tmp/extension.mjs"), P7_LEGACY_TOOL_REGISTRY))
+        lease = SimpleNamespace(command_args=lambda: ("--extension", "/tmp/loader.mjs"))
+        command = _launch.persistent_command(operator, spec, lease)
+        self.assertEqual(command[:2], ("/tmp/node", "/tmp/pi.mjs"))
+        self.assertEqual(command.count("--provider"), 1)
+        self.assertEqual(command.count("--model"), 1)
+        self.assertEqual(command[command.index("--provider") + 1], "openai-codex")
+        self.assertEqual(command[command.index("--model") + 1], "gpt-6.1-sol")
 
 
 if __name__ == "__main__":

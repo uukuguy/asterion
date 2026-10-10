@@ -73,7 +73,7 @@ class TestFreshTargetPolicy(unittest.TestCase):
                            "ASTERION_PRIME_P7_ATTEMPT_UNIT": "asterion-p7-" + "a" * 32 + ".service",
                            "ASTERION_PRIME_P7_CONSOLE_RUN_ID": "p7-live-20261006123456-" + "a" * 24}
             invocation = operator.P7Invocation(root, environment,
-                                                root, (), root, game, resume_run_id="failed-001",
+                                                root, root / "pi", None, root, game, resume_run_id="failed-001",
                                                 fresh_target_policy=policy)
             with patch("asterion.applications.prime.p7.solutions._read_one", return_value=(prefix, None, game)), \
                  patch("asterion.applications.prime.p7.solutions.load_exact_prefix") as load_prefix, \
@@ -112,12 +112,12 @@ class TestFreshTargetPolicy(unittest.TestCase):
                 environment={"ASTERION_PRIME_PI_AGENT_DIR": _profile(directory),
                              "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
                              MODE: "fresh-target", POLICY: "SENTINEL_OPERATOR_POLICY"},
-                pi_base_command=("/usr/bin/pi", "--mode", "rpc"), extension_path=extension,
+                executable=Path("/usr/bin/pi"), entry=None, extension_path=extension,
                 working_directory=root, worker=worker, engine=native_fixture._CompletingEngine(),
                 private_trace_root=trace_root,
             )
             try:
-                approved = resources.host_services["prime.launch"].approved_environment
+                approved = resources.host_services["prime.launch"]._operator.environment
                 self.assertNotIn(MODE, approved)
                 self.assertNotIn(POLICY, approved)
                 self.assertNotIn("SENTINEL_OPERATOR_POLICY", json.dumps(dict(approved)))

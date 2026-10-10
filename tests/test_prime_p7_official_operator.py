@@ -33,12 +33,13 @@ class TestOfficialOperator(unittest.TestCase):
                 mock.patch.object(live, "load_operator_environment", return_value={"ARC_API_KEY": "PRIVATE-KEY"}),
                 mock.patch.object(live, "resolve_node", return_value=base / "node"),
                 mock.patch.object(live, "resolve_pi_entry", return_value=base / "pi.mjs"),
-                mock.patch.object(live, "pi_base_command", return_value=("pi",)),
                 mock.patch.object(live, "extension_path", return_value=extension) as resolve_extension,
             ):
                 invocation = official_operator._preflight({live.OPERATOR_ROOT_ENV: str(root)})
             resolve_extension.assert_called_once_with(research_mode=True)
             self.assertEqual(invocation.extension_path, extension)
+            self.assertEqual(invocation.executable, base / "node")
+            self.assertEqual(invocation.entry, base / "pi.mjs")
 
     def test_full_roster_saved_submission_makes_all_25_once_without_extra_actions(self) -> None:
         from asterion.applications.prime.p7.official import prepare_session
@@ -376,7 +377,7 @@ class TestOfficialOperator(unittest.TestCase):
 
         invocation = OfficialInvocation(
             Path("/tmp"), {"DEEPSEEK_API_KEY": "model-secret"},
-            ("/usr/bin/pi",), Path("/tmp/extension"), "arc-secret",
+            Path("/usr/bin/pi"), None, Path("/tmp/extension"), "arc-secret",
         )
         self.assertNotIn("model-secret", repr(invocation))
         self.assertNotIn("arc-secret", repr(invocation))
@@ -469,10 +470,10 @@ class TestOfficialOperator(unittest.TestCase):
         self.assertEqual(p7_runtime_options(selection, game)["max_actions"], "1000")
 
     def test_official_resources_route_scoreless_evidence_without_arc_key(self) -> None:
+        from asterion.agents.prime.application import PrimeApplication
         from asterion.applications.prime.p7.gameplay_trace import PrimeGameplayTrace
-        from asterion.applications.prime.p7.official_operator import _resolve_gameplay_application
         from asterion.applications.prime.p7.operator import build_p7_operator_resources
-        from asterion.runtime.factory import RuntimeFactoryContext
+        from asterion.applications.prime.p7.runtime_binding import build_p7_direct_runtime
         from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
 
         class Engine:
@@ -511,7 +512,8 @@ class TestOfficialOperator(unittest.TestCase):
                     "ASTERION_PRIME_PI_AGENT_DIR": str(Path.home() / ".pi/agent"),
                     "ARC_API_KEY": "arc-secret",
                 },
-                pi_base_command=("/usr/bin/pi", "--mode", "rpc"),
+                executable=Path("/usr/bin/pi"),
+                entry=None,
                 extension_path=extension,
                 working_directory=root,
                 worker=Worker(),
@@ -527,23 +529,15 @@ class TestOfficialOperator(unittest.TestCase):
             self.assertEqual(broker.history(0, 1)[0]["sequence"], 0)
             self.assertEqual(broker.frame_at(0), [[1]])
             launch = resources.host_services["prime.launch"]
-            self.assertNotIn("ARC_API_KEY", launch.approved_environment)
+            self.assertIs(type(launch), PrimeApplication)
+            self.assertNotIn("ARC_API_KEY", launch._operator.environment)
+            self.assertNotIn("arc-secret", repr(launch))
             self.assertNotIn("arc-secret", repr(resources))
-            application = _resolve_gameplay_application()
-            assembly = application.assemblies[0]
             self.assertEqual(dict(resources.runtime_options), {
                 "deadline_ms": "3600000", "max_actions": "1000", "max_callbacks": "128",
-                "model": "gpt-6-sol", "provider": "openai-codex",
+                "model": "gpt-6.1-sol", "provider": "openai-codex",
             })
-            runtime = assembly.runtime_binding.factory(RuntimeFactoryContext(
-                provider_id="prime-applications",
-                application_id="prime.arc-agi-3-gameplay",
-                application_version="1.0.0",
-                runtime_id="asterion.prime",
-                assembly_path=assembly.path,
-                options=resources.runtime_options,
-                host_services=resources.host_services,
-            ))
+            runtime = build_p7_direct_runtime(resources.host_services, resources.runtime_options, gameplay=True)
             self.assertIs(type(runtime), AsterionPrimeRuntimeClient)
             asyncio.run(resources.close())
 
@@ -558,7 +552,8 @@ class TestOfficialOperator(unittest.TestCase):
             invocation = OfficialInvocation(
                 operator_root=root,
                 environment={"DEEPSEEK_API_KEY": "private"},
-                pi_base_command=("pi",),
+                executable=root / "pi",
+                entry=None,
                 extension_path=root / "extension.mjs",
                 api_key="arc-private",
             )
@@ -578,32 +573,34 @@ class TestOfficialOperator(unittest.TestCase):
                     ))
             engine.close.assert_called_once_with()
 
-    def test_host_cleanup_releases_trace_and_extension_after_worker_failure(self) -> None:
-        from asterion.applications.prime.p7.operator import P7OperatorResources
+    def test_host_cleanup_always_closes_trace_after_owner_cleanup_failure(self) -> None:
+        from asterion.agents.prime.application import PrimeApplicationCleanup
+        from asterion.applications.prime.p7.operator import P7OperatorError, P7OperatorResources
 
-        bridge = SimpleNamespace(close=mock.Mock())
-        ipython = SimpleNamespace(
-            close=mock.AsyncMock(side_effect=RuntimeError("private worker failure"))
-        )
-        trace = SimpleNamespace(close=mock.Mock())
-        lease = SimpleNamespace(close=mock.Mock())
-        launch = SimpleNamespace(extension_lease=lease)
-        resources = P7OperatorResources(
-            host_services={
-                "prime.ipython": ipython,
-                "prime.private-trace": trace,
-                "prime.launch": launch,
-            },
-            runtime_options={},
-            _bridge=bridge,
-        )
+        for incomplete in (False, True):
+            with self.subTest(incomplete=incomplete):
+                calls = []
 
-        with self.assertRaisesRegex(RuntimeError, "private worker failure"):
-            asyncio.run(resources.close())
-        bridge.close.assert_called_once_with()
-        ipython.close.assert_awaited_once_with()
-        trace.close.assert_called_once_with()
-        lease.close.assert_called_once_with()
+                async def close_owner():
+                    calls.append("owner")
+                    if incomplete:
+                        return PrimeApplicationCleanup(True, True, True, True, False)
+                    raise RuntimeError("private owner failure")
+
+                owner = SimpleNamespace(close=mock.AsyncMock(side_effect=close_owner))
+                trace = SimpleNamespace(close=mock.Mock(side_effect=lambda: calls.append("trace")))
+                resources = P7OperatorResources(
+                    host_services={"prime.private-trace": trace, "prime.launch": owner},
+                    runtime_options={},
+                )
+                with self.assertRaisesRegex(
+                    P7OperatorError if incomplete else RuntimeError,
+                    "P7 computation cleanup is incomplete" if incomplete else "private owner failure",
+                ):
+                    asyncio.run(resources.close())
+                owner.close.assert_awaited_once_with()
+                trace.close.assert_called_once_with()
+                self.assertEqual(calls, ["owner", "trace"])
 
     def test_one_card_attempts_every_game_despite_one_game_failure(self) -> None:
         from asterion.applications.prime.p7.official_operator import run_official_games

@@ -12,8 +12,8 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits, PersistentIpythonHost
-from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
+from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
+from asterion.agents.prime._workspace_owner import WorkspaceOwner
 from asterion.agents.prime.tools import PrimeToolResult
 
 from .broker import ArcBrokerError
@@ -108,13 +108,13 @@ class P7ResearchRuntime:
     """Thin application host over the generic Prime workspace."""
 
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
-                 deadline_seconds: float, event_sink, worker=None, worker_factory=None,
+                 deadline_seconds: float, event_sink, worker=None, workspace_owner=None, python=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None,
                  learner_profile='legacy', task_deadline=None):
-        if worker_factory is not None and not callable(worker_factory):
-            raise ValueError("research worker factory unavailable")
-        self._worker_factory = worker_factory or SubprocessPythonWorker
+        self._workspace_owner = workspace_owner or WorkspaceOwner()
+        self._owns_workspace_owner = workspace_owner is None
+        self._python = python
         self._closed = False
         self.cell_count = 0
         self._lost = False  # The application can rebuild a computation kernel.
@@ -173,10 +173,9 @@ class P7ResearchRuntime:
             raise
 
     def _new_kernel(self, worker=None):
-        return PersistentIpythonHost(
-            worker=worker if worker is not None else self._worker_factory(), bootstrap=self._bootstrap,
-            limits=self._limits,
-            observer=self._kernel_event,
+        return self._workspace_owner.create_workspace(
+            self._bootstrap, self._limits, python=self._python,
+            observer=self._kernel_event, worker=worker,
         )
 
     def _read_diagnostic(self, value):
@@ -306,21 +305,15 @@ class P7ResearchRuntime:
             return
         checkpoint = self.solver.checkpoint()
         previous = self.kernel
-        self.kernel = self._new_kernel()
+        sources, data = (), {}
+        if checkpoint is not None:
+            sources = tuple(previous.read_export(ref) for ref in checkpoint['source_export_ids'])
+            for field, name in (('state_export_id', 'state'), ('frontier_export_id', 'frontier')):
+                ref = checkpoint.get(field)
+                if ref is not None:
+                    data[name] = previous.read_export(ref)
+        self.kernel = await self._workspace_owner.restore_workspace(previous, sources, data, signal)
         self.solver.kernel_recovered()
-        try:
-            if checkpoint is not None:
-                sources = tuple(previous.read_export(ref) for ref in checkpoint["source_export_ids"])
-                data = {}
-                for field, name in (("state_export_id", "state"), ("frontier_export_id", "frontier")):
-                    ref = checkpoint.get(field)
-                    if ref is not None:
-                        data[name] = previous.read_export(ref)
-                await self.kernel.restore(sources, data, signal)
-        except BaseException:
-            await self.kernel.close()
-            self.kernel = previous
-            raise
 
     async def execute(self, call_id, code, signal):
         if not await self.admit_round(0, signal):
@@ -669,6 +662,9 @@ class P7ResearchRuntime:
             self.control.request("stop", "operator-close")
         finally:
             try:
-                await self.kernel.close()
+                if self._owns_workspace_owner:
+                    await self._workspace_owner.close()
+                else:
+                    await self.kernel.close()
             finally:
                 await asyncio.to_thread(self._read_server.close)

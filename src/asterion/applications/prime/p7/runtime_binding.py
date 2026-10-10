@@ -3,15 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
 import json
-import math
 from pathlib import Path
 import sys
-import time
 from typing import cast
 
-from asterion.agents.prime.session import AsterionPrimeSession
 from asterion.agents.prime.execution import (
     ASTERION_PRIME_LIMITS,
     AsterionPrimeLimits,
@@ -19,13 +15,11 @@ from asterion.agents.prime.execution import (
     PrimePromptRecovery,
 )
 from asterion.applications.prime.p7.action_journal import ActionJournal
-from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.applications.prime.p7.game import P7GameSelection
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError, ArcStatus
 from asterion.applications.prime.p7.ipython_host import PersistentIpythonHost
 from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
-from asterion.applications.prime.p7.model_selection import valid_selection_name
 from asterion.applications.prime.p7.private_trace import (
     P7PrivateTraceReceipt,
     P7PrivateTraceReceiptError,
@@ -45,12 +39,8 @@ from asterion.runtime.factory import (
     RuntimeFactoryContext,
     RuntimeFactoryError,
 )
-from asterion.runtime.host import AgentRuntimeClient, RunEvent, RunRequest
-from asterion.runtime.native_rpc import build_rpc_session
-from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
+from asterion.runtime.host import RunEvent, RunRequest
 from asterion.runtimes.asterion_prime import AsterionPrimeRuntimeClient
-from asterion.immutable import RedactedImmutableMapping
-from asterion.services.diagnostics import MemoryDiagnosticSink, PrivateFailureSink
 
 
 _HOST_CAPABILITIES = frozenset(
@@ -96,23 +86,6 @@ def _p7_round_diagnostic(trace_adapter: object):
             pass
 
     return record
-
-
-def _launch_selection(command: object) -> tuple[str, str] | None:
-    """Return the one provider/model pair the approved launch declares."""
-
-    if type(command) is not tuple or not command:
-        return None
-    declared: dict[str, str] = {}
-    for flag in ("--provider", "--model"):
-        positions = [index for index, part in enumerate(command) if part == flag]
-        if len(positions) != 1:
-            return None
-        value = command[positions[0] + 1 : positions[0] + 2]
-        if len(value) != 1 or not valid_selection_name(value[0]):
-            return None
-        declared[flag] = value[0]
-    return declared["--provider"], declared["--model"]
 
 
 def _p7_terminal(broker: ArcBroker) -> bool:
@@ -221,96 +194,6 @@ def _p7_continuation_prompt(broker: ArcBroker, round_index: int) -> str:
         "that action and RESET or switch to one different probe.\n"
         + json.dumps(state, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )
-
-
-@dataclass(frozen=True, repr=False, slots=True)
-class PrimeLaunch:
-    """Plain-data launch material crossing the application-runtime seam.
-
-    Carries only operator-owned authorization (command argv, environment) and
-    the extension resource's plain identity plus its already-acquired pinned
-    file descriptors, plus an optional operator-owned private failure sink.
-    The transferable ``ExtensionLease`` is the single owner of the pinned
-    descriptors; replacing it with a plain snapshot would force a path
-    re-resolution (TOCTOU) or a
-    second descriptor owner. See ``runtime/pinned_extension.py``.
-    """
-
-    approved_command: tuple[str, ...]
-    working_directory: Path
-    extension_id: str
-    extension_path: Path
-    extension_capabilities: tuple[str, ...]
-    binding_inherited_fds: tuple[int, ...]
-    binding_environment: Mapping[str, str]
-    extension_lease: ExtensionLease
-    deadline_seconds: float | None
-    tool_registry: PrimeApplicationToolRegistry
-    compact_events: bool = True
-    approved_environment: Mapping[str, str] | None = None
-    witness_deadline_monotonic: float | None = None
-    autonomy_deadline_monotonic: float | None = None
-    private_failure_sink: PrivateFailureSink | None = None
-
-    def __post_init__(self) -> None:
-        lease = self.extension_lease
-        valid = (
-            type(lease) is ExtensionLease
-            and type(self.approved_command) is tuple
-            and bool(self.approved_command)
-            and all(type(part) is str and part for part in self.approved_command)
-            and isinstance(self.working_directory, Path)
-            and type(self.extension_id) is str
-            and self.extension_id == "prime.ipython"
-            and isinstance(self.extension_path, Path)
-            and type(self.extension_capabilities) is tuple
-            and self.extension_capabilities == ("prime.tool.ipython",)
-            and type(self.binding_inherited_fds) is tuple
-            and isinstance(self.binding_environment, Mapping)
-            and (self.deadline_seconds is None or (
-                type(self.deadline_seconds) is float and self.deadline_seconds > 0
-            ))
-            and type(self.compact_events) is bool
-            and (self.witness_deadline_monotonic is None or (
-                type(self.witness_deadline_monotonic) is float
-                and math.isfinite(self.witness_deadline_monotonic)
-                and self.deadline_seconds == 900.0
-                and time.monotonic() < self.witness_deadline_monotonic <= time.monotonic() + 900
-            ))
-            and (self.autonomy_deadline_monotonic is None or (
-                type(self.autonomy_deadline_monotonic) is float
-                and math.isfinite(self.autonomy_deadline_monotonic)
-                and self.witness_deadline_monotonic is None
-                and self.deadline_seconds == 5400.0
-                and time.monotonic() < self.autonomy_deadline_monotonic <= time.monotonic() + 5400
-            ))
-            and type(self.tool_registry) is PrimeApplicationToolRegistry
-            and not lease.closed
-        )
-        if not valid:
-            if type(lease) is ExtensionLease:
-                lease.close()
-            raise RuntimeFactoryError(_ERROR)
-        try:
-            environment = (
-                dict(lease.environment)
-                if self.approved_environment is None
-                else dict(self.approved_environment)
-            )
-        except (TypeError, ValueError):
-            lease.close()
-            raise RuntimeFactoryError(_ERROR) from None
-        if any(
-            environment.get(name) != value for name, value in lease.environment.items()
-        ):
-            lease.close()
-            raise RuntimeFactoryError(_ERROR)
-        object.__setattr__(
-            self, "approved_environment", RedactedImmutableMapping(environment)
-        )
-
-    def __repr__(self) -> str:
-        return "<PrimeLaunch redacted>"
 
 
 class _P7SolveEventProjector:
@@ -498,283 +381,133 @@ class _P7GameplayEventProjector:
             )
 
 
-def build_p7_runtime(
-    context: RuntimeFactoryContext,
-) -> AgentRuntimeClient:
-    """Assemble P7 from its exact host-preflighted resources."""
-
-    if type(context) is not RuntimeFactoryContext:
+def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=False):
+    """Apply P7 policy to its local Prime owner, without provider discovery."""
+    from asterion.agents.prime.application import PrimeApplication, PrimeRunHooks
+    from .model_selection import DEFAULT_PROVIDER, DEFAULT_MODEL
+    from .tool_dispatch import P7ToolDispatch
+    owner = host_services.get('prime.launch')
+    ipython = host_services.get('prime.ipython')
+    broker = host_services.get('prime.arc-broker')
+    trace_adapter = host_services.get('prime.arc-run-evidence' if gameplay else 'prime.private-trace')
+    expected_trace = PrimeGameplayTrace if gameplay else P7PrivateTraceReceipt
+    application_id = 'prime.arc-agi-3-gameplay' if gameplay else 'prime.arc-agi-3-solving'
+    if type(owner) is not PrimeApplication or type(broker) is not ArcBroker:
         raise RuntimeFactoryError(_ERROR)
-    launch_value = context.host_services.get("prime.launch")
-    launch = launch_value if type(launch_value) is PrimeLaunch else None
-    try:
-        ipython = context.host_services.get("prime.ipython")
-        broker = context.host_services.get("prime.arc-broker")
-        trace_service = context.host_services.get("prime.private-trace")
-        trace_adapter = (
-            trace_service if type(trace_service) is P7PrivateTraceReceipt else None
-        )
-        trace = None if trace_adapter is None else trace_adapter.runtime_recorder
-        unbounded = launch is not None and launch.deadline_seconds is None
-        witness = launch is not None and launch.witness_deadline_monotonic is not None
-        autonomy = launch is not None and launch.autonomy_deadline_monotonic is not None
-        declared = None if launch is None else _launch_selection(launch.approved_command)
-        expected_options = dict(_RUNTIME_OPTIONS)
-        provider = context.options.get("provider")
-        model = context.options.get("model")
-        if (
-            type(provider) is not str or not provider
-            or type(model) is not str or not model
-            or not provider.isascii() or not model.isascii()
-        ):
+    limits = owner.authorized_limits
+    unbounded = type(limits) is AsterionPrimeLimits and limits.deadline_ms is None
+    autonomy = type(limits) is AsterionPrimeLimits and limits.deadline_ms == 5_400_000
+    research = type(ipython) is P7ResearchRuntime
+    trace = getattr(trace_adapter, 'runtime_recorder', None)
+    expected_options = {
+        'provider': DEFAULT_PROVIDER, 'model': DEFAULT_MODEL,
+        'deadline_ms': 'none' if unbounded else str(limits.deadline_ms),
+        'max_callbacks': 'none' if unbounded else str(limits.model_callbacks),
+        'max_actions': str(broker.game.action_cap),
+    }
+    checks = {
+        'identity': owner.identity == (application_id, '1.0.0', DEFAULT_PROVIDER, DEFAULT_MODEL),
+        'host_services': set(host_services) == (_GAMEPLAY_HOST_CAPABILITIES if gameplay else _HOST_CAPABILITIES),
+        'tool_registry': owner.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID),
+        'allowlist': owner.tool_registry.allowed_tool_names == (P7_APPLICATION_TOOL_NAMES if research else P7_LEGACY_TOOL_REGISTRY.allowed_tool_names),
+        'ipython_type': type(ipython) in (PersistentIpythonHost, P7ResearchRuntime),
+        'ipython_open': not getattr(ipython, '_closed', True) and not getattr(ipython, '_lost', True),
+        'options': dict(options) == expected_options,
+        'trace': type(trace_adapter) is expected_trace and type(trace) is PrimeTraceRecorder,
+        'trace_broker': type(trace_adapter) is expected_trace and trace_adapter.matches_runtime_broker(broker),
+        'trace_ready': trace is not None and trace._seal is None and trace._trace_fd is not None
+            and (gameplay or type(trace_adapter) is P7PrivateTraceReceipt and trace_adapter.runtime_ready()),
+        'limits': limits in (ASTERION_PRIME_LIMITS, AsterionPrimeLimits(128, 500, 900_000),
+                             AsterionPrimeLimits(1024, 4096, 5_400_000), AsterionPrimeLimits(None, None, None)),
+        'deadline': unbounded or owner.task_deadline is not None,
+    }
+    if gameplay:
+        checks['gameplay'] = (getattr(broker.game, 'is_full_game', False)
+                              and limits == ASTERION_PRIME_LIMITS
+                              and broker.status() == ArcStatus(0, 0, broker.game.action_cap, 'active'))
+    elif unbounded:
+        checks['unbounded'] = type(broker.game) is P7GameSelection and broker.game.action_cap_override is not None
+    elif autonomy:
+        checks['autonomy'] = (research and broker.game.target_level == 6 and broker.game.action_cap == 1000
+                              and broker.game.action_cap_reason == 'action-cap')
+    if not all(checks.values()):
+        raise RuntimeFactoryError(_ERROR + ': ' + ','.join(k for k, v in checks.items() if not v))
+    services = owner.services if services is None else services
+    if type(services) is not P7ToolDispatch or services._host is not ipython:
+        raise RuntimeFactoryError(_ERROR)
+    if getattr(services, '_runtime_client', None) is not None:
+        if owner.services is not services:
             raise RuntimeFactoryError(_ERROR)
-        expected_options.update(provider=provider, model=model)
-        if witness:
-            environment = launch.approved_environment or {}
-            if (
-                launch.deadline_seconds != 900.0
-                or not time.monotonic() < launch.witness_deadline_monotonic <= time.monotonic() + 900
-                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "witness"
-                or environment.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") != "900"
-                or (type(ipython) is P7ResearchRuntime
-                    and ipython.control._deadline != launch.witness_deadline_monotonic)
-            ):
-                raise RuntimeFactoryError(_ERROR)
-            expected_options["deadline_ms"] = "900000"
-        if autonomy:
-            from asterion.agents.prime.execution import ASTERION_PRIME_RESEARCH_LIMITS
-            from asterion.agents.prime.continuation import PrimeContinuationBudget, PrimeContinuationController
-            environment = launch.approved_environment or {}
-            if (witness or unbounded or launch.deadline_seconds != 5400.0
-                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "autonomy"
-                or environment.get("ASTERION_PRIME_P7_ATTEMPT_SECONDS") != "5400"
-                or type(ipython) is not P7ResearchRuntime
-                or ipython.control._deadline != launch.autonomy_deadline_monotonic
-                or broker.game.target_level != 6 or broker.game.action_cap != 1000
-                or broker.game.action_cap_reason != "action-cap"):
-                raise RuntimeFactoryError(_ERROR)
-            expected_options.update(deadline_ms="5400000", max_callbacks="1024")
-            controller = PrimeContinuationController(PrimeContinuationBudget(
-                launch.autonomy_deadline_monotonic, 6))
-        if unbounded:
-            # The operator validates OFFLINE authorization before stripping ARC
-            # configuration from the model subprocess environment. This seam
-            # consumes that injected launch and its local sweep action cap.
-            environment = launch.approved_environment or {}
-            if (
-                type(broker) is not ArcBroker
-                or type(broker.game) is not P7GameSelection
-                or broker.game.action_cap_override is None
-                or environment.get("ASTERION_PRIME_P7_UNBOUNDED_FIRST_ROUND") != "1"
-                or environment.get("ASTERION_PRIME_P7_RUN_MODE") != "sweep"
-            ):
-                raise RuntimeFactoryError(_ERROR)
-            expected_options.update(deadline_ms="none", max_callbacks="none")
-        checks = {
-            "provider_id": context.provider_id == "prime-applications",
-            "application_id": context.application_id == "prime.arc-agi-3-solving",
-            "application_version": context.application_version == "1.0.0",
-            "runtime_id": context.runtime_id == "asterion.prime",
-            "host_services": set(context.host_services) == _HOST_CAPABILITIES,
-            "launch": launch is not None,
-            "selection": declared == (provider, model),
-            "tool_registry": launch is not None and launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID),
-            "allowlist": launch is not None and launch.tool_registry.allowed_tool_names == (
-                P7_APPLICATION_TOOL_NAMES if type(ipython) is P7ResearchRuntime
-                else P7_LEGACY_TOOL_REGISTRY.allowed_tool_names
-            ),
-            "ipython_type": type(ipython) in (PersistentIpythonHost, P7ResearchRuntime),
-            "ipython_open": not getattr(ipython, "_closed", True),
-            "ipython_lost": not getattr(ipython, "_lost", True),
-            "broker_type": type(broker) is ArcBroker,
-            "options": type(broker) is ArcBroker and dict(context.options) == {**expected_options, "max_actions": str(broker.game.action_cap)},
-            "trace_service": trace_adapter is not None,
-            "trace": trace is not None,
-            "trace_broker": trace_adapter is not None and trace_adapter.matches_runtime_broker(broker),
-            "trace_ready": trace_adapter is not None and trace_adapter.runtime_ready(),
-            "trace_type": type(trace) is PrimeTraceRecorder,
-            "trace_sealed": trace is not None and trace._seal is None,
-            "trace_fd": trace is not None and trace._trace_fd is not None,
-        }
-        if not all(checks.values()):
-            failed = ",".join(name for name, passed in checks.items() if not passed)
-            raise RuntimeFactoryError(f"{_ERROR}: {failed}")
-        # Reconstruct the framework-owned launch objects from plain data. The
-        # pinned extension is already acquired (fd + digest) by the operator;
-        # this factory consumes those exact descriptors without re-resolving
-        # the extension source by path.
-        binding = ExtensionBinding(
-            extension_id=launch.extension_id,
-            path=launch.extension_path,
-            capabilities=launch.extension_capabilities,
-            inherited_fds=launch.binding_inherited_fds,
-            environment=launch.binding_environment,
-        )
-        if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
-            raise RuntimeFactoryError(_ERROR)
-        diagnostic_sink = MemoryDiagnosticSink()
-        rpc_session = build_rpc_session(
-            command=launch.approved_command,
-            cwd=launch.working_directory,
-            environment=launch.approved_environment or {},
-            deadline_seconds=launch.deadline_seconds,
-            inherited_fds=launch.extension_lease.inherited_fds,
-            compact_events=launch.compact_events,
-            diagnostics=diagnostic_sink,
-            private_failure_sink=launch.private_failure_sink,
-        )
-        # Recovery retains this exact process, worker and action journal. A
-        # missing receipt or an unbounded launch never grants that authority.
-        recovery = (
-            PrimePromptRecovery(
-                lambda: _p7_recovery_effects_settled(ipython, broker),
-                deadline_monotonic=getattr(getattr(broker._engine, "task_deadline", None),
-                                           "deadline_monotonic", None),
-            )
-            if not unbounded and type(getattr(broker._engine, "action_journal", None)) is ActionJournal
-            else None
-        )
-        async def outer_admission(round_index, signal):
-            if autonomy and not await controller.admit(round_index, signal):
-                return False
-            return await ipython.admit_round(round_index, signal)
+        return services._runtime_client
+    controller = None
+    if autonomy:
+        from asterion.agents.prime.continuation import PrimeContinuationBudget, PrimeContinuationController
+        controller = PrimeContinuationController(PrimeContinuationBudget(owner.task_deadline.deadline_monotonic, 6))
 
-        session = AsterionPrimeSession(
-            rpc_session=rpc_session,
-            extension_binding=binding,
-            extension_lease=launch.extension_lease,
-            approved_command=launch.approved_command,
-            approved_environment=launch.approved_environment,
-            limits=(ASTERION_PRIME_RESEARCH_LIMITS if autonomy else
-                    AsterionPrimeLimits(None, None, None) if unbounded else
-                    AsterionPrimeLimits(ASTERION_PRIME_LIMITS.model_callbacks,
-                                       ASTERION_PRIME_LIMITS.tool_callbacks, 900_000)
-                    if witness else ASTERION_PRIME_LIMITS),
-            completion_predicate=lambda: _p7_terminal(broker),
-            continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
-                                 else lambda round_index: _p7_continuation_prompt(broker, round_index)),
-            round_admission=outer_admission if type(ipython) is P7ResearchRuntime else None,
-            reusable_session=autonomy,
-            prompt_recovery=recovery,
-            round_diagnostic=_p7_round_diagnostic(trace_adapter),
-            failure_diagnostic=getattr(trace_adapter, "record_failure", None),
-            allowed_tool_names=launch.tool_registry.allowed_tool_names,
-        )
-        launch = None
-        return AsterionPrimeRuntimeClient(
-            session, event_projector=_P7SolveEventProjector(trace_adapter)
-        )
+    async def outer_admission(round_index, signal):
+        if controller is not None and not await controller.admit(round_index, signal):
+            return False
+        return await ipython.admit_round(round_index, signal)
+
+    recovery = (PrimePromptRecovery(lambda: _p7_recovery_effects_settled(ipython, broker),
+                                   deadline_monotonic=owner.task_deadline.deadline_monotonic)
+                if not unbounded and type(getattr(broker._engine, 'action_journal', None)) is ActionJournal else None)
+    hooks = PrimeRunHooks(
+        completion_predicate=lambda: (_p7_gameplay_terminal(broker) if gameplay else _p7_terminal(broker)),
+        continuation_prompt=ipython.continuation_prompt if research else lambda i: _p7_continuation_prompt(broker, i),
+        round_admission=outer_admission if research else None,
+        reusable_session=autonomy, prompt_recovery=recovery,
+        round_diagnostic=_p7_round_diagnostic(trace_adapter),
+        failure_diagnostic=getattr(trace_adapter, 'record_failure', None))
+    runtime = owner.runtime(services=services, limits=limits, hooks=hooks)
+    services._runtime_client = AsterionPrimeRuntimeClient(
+        runtime, event_projector=(_P7GameplayEventProjector(trace_adapter) if gameplay
+                                 else _P7SolveEventProjector(trace_adapter)))
+    return services._runtime_client
+
+
+def _compat_runtime(context, *, gameplay):
+    if (type(context) is not RuntimeFactoryContext or context.provider_id != 'prime-applications'
+            or context.application_id != ('prime.arc-agi-3-gameplay' if gameplay else 'prime.arc-agi-3-solving')
+            or context.application_version != '1.0.0' or context.runtime_id != 'asterion.prime'):
+        raise RuntimeFactoryError(_ERROR)
+    try:
+        return build_p7_direct_runtime(context.host_services, context.options, gameplay=gameplay)
     except RuntimeFactoryError:
         raise
     except Exception:
         raise RuntimeFactoryError(_ERROR) from None
-    finally:
-        if launch is not None:
-            launch.extension_lease.close()
 
 
-def build_p7_gameplay_runtime(context: RuntimeFactoryContext) -> AgentRuntimeClient:
-    """Assemble the scoreless official gameplay route."""
-    if type(context) is not RuntimeFactoryContext:
-        raise RuntimeFactoryError(_ERROR)
-    launch_value = context.host_services.get("prime.launch")
-    launch = launch_value if type(launch_value) is PrimeLaunch else None
-    try:
-        provider = context.options.get("provider")
-        model = context.options.get("model")
-        if (
-            type(provider) is not str or not provider
-            or type(model) is not str or not model
-            or not provider.isascii() or not model.isascii()
-        ):
-            raise RuntimeFactoryError(_ERROR)
-        ipython = context.host_services.get("prime.ipython")
-        broker = context.host_services.get("prime.arc-broker")
-        trace_value = context.host_services.get("prime.arc-run-evidence")
-        trace_adapter = trace_value if type(trace_value) is PrimeGameplayTrace else None
-        trace = None if trace_adapter is None else trace_adapter.runtime_recorder
-        declared = None if launch is None else _launch_selection(launch.approved_command)
-        if (
-            context.provider_id != "prime-applications"
-            or context.application_id != "prime.arc-agi-3-gameplay"
-            or context.application_version != "1.0.0"
-            or context.runtime_id != "asterion.prime"
-            or set(context.host_services) != _GAMEPLAY_HOST_CAPABILITIES
-            or launch is None
-            or declared != (provider, model)
-            or not launch.tool_registry.matches(P7_TOOL_MODULE_ID, P7_TOOL_CAPABILITY_ID)
-            or launch.tool_registry.allowed_tool_names != (
-                P7_APPLICATION_TOOL_NAMES if type(ipython) is P7ResearchRuntime
-                else P7_LEGACY_TOOL_REGISTRY.allowed_tool_names
-            )
-            or type(ipython) not in (PersistentIpythonHost, P7ResearchRuntime)
-            or getattr(ipython, "_closed", True)
-            or getattr(ipython, "_lost", True)
-            or type(broker) is not ArcBroker
-            or not getattr(broker.game, "is_full_game", False)
-            or dict(context.options) != {
-                **_GAMEPLAY_OPTIONS,
-                "provider": provider,
-                "model": model,
-                "max_actions": str(broker.game.action_cap),
-            }
-            or broker.status() != ArcStatus(0, 0, broker.game.action_cap, "active")
-            or trace_adapter is None
-            or trace is None
-            or not trace_adapter.matches_runtime_broker(broker)
-            or type(trace) is not PrimeTraceRecorder
-            or trace._seal is not None
-            or trace._trace_fd is None
-        ):
-            raise RuntimeFactoryError(_ERROR)
-        binding = ExtensionBinding(
-            extension_id=launch.extension_id,
-            path=launch.extension_path,
-            capabilities=launch.extension_capabilities,
-            inherited_fds=launch.binding_inherited_fds,
-            environment=launch.binding_environment,
-        )
-        if binding.binding_fingerprint != launch.extension_lease.binding_fingerprint:
-            raise RuntimeFactoryError(_ERROR)
-        rpc_session = build_rpc_session(
-            command=launch.approved_command,
-            cwd=launch.working_directory,
-            environment=launch.approved_environment or {},
-            deadline_seconds=launch.deadline_seconds,
-            inherited_fds=launch.extension_lease.inherited_fds,
-            compact_events=launch.compact_events,
-            private_failure_sink=launch.private_failure_sink,
-        )
-        session = AsterionPrimeSession(
-            rpc_session=rpc_session,
-            extension_binding=binding,
-            extension_lease=launch.extension_lease,
-            approved_command=launch.approved_command,
-            approved_environment=launch.approved_environment,
-            completion_predicate=lambda: _p7_gameplay_terminal(broker),
-            continuation_prompt=(ipython.continuation_prompt if type(ipython) is P7ResearchRuntime
-                                 else lambda round_index: _p7_continuation_prompt(broker, round_index)),
-            round_admission=ipython.admit_round if type(ipython) is P7ResearchRuntime else None,
-            round_diagnostic=_p7_round_diagnostic(trace_adapter),
-            allowed_tool_names=launch.tool_registry.allowed_tool_names,
-        )
-        launch = None
-        return AsterionPrimeRuntimeClient(
-            session, event_projector=_P7GameplayEventProjector(trace_adapter)
-        )
-    except RuntimeFactoryError:
-        raise
-    except Exception:
-        raise RuntimeFactoryError(_ERROR) from None
-    finally:
-        if launch is not None:
-            launch.extension_lease.close()
+def build_p7_runtime(context):
+    return _compat_runtime(context, gameplay=False)
 
 
-__all__ = (
-    "PrimeLaunch",
-    "build_p7_runtime",
-    "build_p7_gameplay_runtime",
-    "_P7SolveEventProjector",
-    "_p7_gameplay_terminal",
-)
+def build_p7_gameplay_runtime(context):
+    return _compat_runtime(context, gameplay=True)
+
+
+__all__ = ('build_p7_runtime', 'build_p7_gameplay_runtime', 'build_p7_direct_runtime',
+           '_P7SolveEventProjector', '_p7_gameplay_terminal')
+
+
+def compose_p7_application(*, gameplay=False):
+    """Resolve this application's explicit local assembly using the existing composer."""
+    from asterion.applications.provider import InstalledApplication, InstalledAssembly
+    from asterion.assembly.protocol import resolve_assembly
+    from asterion.capabilities.catalog import discover_capabilities
+    from asterion.runtime.host import RuntimeManifest
+    if gameplay:
+        from asterion.capabilities.prime_arc_agi_3_gameplay.provider import create_prime_arc_agi_3_gameplay_package
+        package = create_prime_arc_agi_3_gameplay_package()
+    else:
+        from asterion.capabilities.prime_arc_agi_3_solver.provider import create_prime_arc_agi_3_solver_package
+        package = create_prime_arc_agi_3_solver_package()
+    name = 'prime-arc-agi-3-gameplay' if gameplay else 'prime-arc-agi-3-solving'
+    path = Path(__file__).resolve().parent.parent / 'assemblies' / (name + '.json')
+    material = json.loads(path.read_text())
+    plan = resolve_assembly(material, catalog=discover_capabilities(package.catalog_roots),
+                            runtime_manifest=RuntimeManifest('asterion.prime', ('prime.tool.ipython',)).to_mapping())
+    return InstalledApplication(material['application_id'], '1.0.0', (path,),
+        (package.package_ref,), ('asterion.prime',), (package,),
+        (InstalledAssembly('asterion.prime', path, plan),))

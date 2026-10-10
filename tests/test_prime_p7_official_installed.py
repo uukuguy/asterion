@@ -116,9 +116,15 @@ if (result.applied_count !== 13 || result.observation.levels_completed !== 1)
         def main():
             arguments = sys.argv[1:]
             loader = arguments[arguments.index("--extension") + 1]
-            node = arguments[0]
+            node = os.environ["FIXTURE_NODE"]
+            provider = arguments[arguments.index("--provider") + 1]
+            model = arguments[arguments.index("--model") + 1]
             for raw in sys.stdin:
                 request = json.loads(raw)
+                if request.get("type") == "get_state":
+                    emit({"id": request["id"], "type": "response", "command": "get_state",
+                          "success": True, "data": {"model": {"provider": provider, "id": model}}})
+                    continue
                 if request.get("type") == "abort":
                     return 0
                 if request.get("type") != "prompt":
@@ -202,8 +208,8 @@ _RUNNER = textwrap.dedent(
         root = Path.cwd()
         profile = root / "pi-profile"
         profile.mkdir(exist_ok=True)
-        (profile / "auth.json").write_text(json.dumps({"deepseek": {"token": "fixture-only"}}))
-        (profile / "models-store.json").write_text(json.dumps({"deepseek": {"models": [{"id": "deepseek-flash"}]}}))
+        (profile / "auth.json").write_text(json.dumps({"openai-codex": {"token": "fixture-only"}}))
+        (profile / "models-store.json").write_text(json.dumps({"openai-codex": {"models": [{"id": "gpt-6.1-sol"}]}}))
         marker = root / "closed"
         evidence = root / "evidence"
         evidence.mkdir()
@@ -213,12 +219,12 @@ _RUNNER = textwrap.dedent(
         invocation = OfficialInvocation(
             root,
             {
-                "ASTERION_PRIME_PROVIDER": "deepseek",
-                "ASTERION_PRIME_MODEL": "deepseek-flash",
+                "ASTERION_PRIME_PROVIDER": "openai-codex",
+                "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
                 "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
-                "DEEPSEEK_API_KEY": "fixture-only",
+                "FIXTURE_NODE": str(Path(sys.argv[1]).resolve()),
             },
-            (sys.executable, str(root / "fake_pi_rpc.py"), str(Path(sys.argv[1]).resolve())),
+            Path(sys.executable), root / "fake_pi_rpc.py",
             extension,
             "arc-fixture-only",
         )

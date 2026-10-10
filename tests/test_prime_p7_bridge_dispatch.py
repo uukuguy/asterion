@@ -4,10 +4,10 @@ import unittest
 from contextlib import redirect_stderr
 from unittest import mock
 
+from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
 from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
 from asterion.applications.prime.p7.cognition_narrative import render_cognition_narrative_zh
 from asterion.applications.prime.p7.operator import (
-    _IpythonBridgeServer,
     _P7BrokerClient,
     _compact_cognition_session,
     _compact_planning_background,
@@ -66,7 +66,7 @@ class _Facade:
 
 class TestP7BridgeDispatch(unittest.TestCase):
     def setUp(self):
-        self.bridge = object.__new__(_IpythonBridgeServer)
+        self.bridge = object.__new__(P7ToolDispatch)
         self.bridge._client = _Facade()
         self.bridge._method_calls = {}
         self.bridge._method_failures = {}
@@ -690,3 +690,30 @@ class TestP7BridgeDispatch(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPrimeGenericBridge(unittest.TestCase):
+    def test_bridge_dispatches_independent_method_and_checks_result_identity(self):
+        import socket
+        import importlib.util
+        self.assertIsNotNone(importlib.util.find_spec('asterion.agents.prime._tool_bridge'))
+        from asterion.agents.prime._tool_bridge import ToolBridgeServer
+        from tests.test_prime_application_entry import _Services
+        services = _Services()
+        parent, child = socket.socketpair()
+        bridge = ToolBridgeServer(parent, services)
+        try:
+            request = {'protocol': 'asterion.prime-ipython/v1', 'request_id': 'lookup',
+                       'type': 'method_call', 'method': 'example_lookup', 'params': {}}
+            result = json.loads(bridge._dispatch(json.dumps(request).encode()))
+            self.assertEqual((result['type'], result['status']), ('method_result', 'ok'))
+            async def mismatch(*args, **kwargs):
+                return {'protocol': 'asterion.prime-ipython/v1', 'request_id': 'wrong',
+                        'type': 'method_result', 'status': 'ok', 'output': '{}'}
+            services.call = mismatch
+            result = json.loads(bridge._dispatch(json.dumps(request).encode()))
+            self.assertEqual(result['status'], 'error')
+        finally:
+            child.close()
+            bridge.close()
+        self.assertTrue(services.closed)

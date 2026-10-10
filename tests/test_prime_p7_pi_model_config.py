@@ -16,14 +16,14 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
                 '{"openai-codex": {"type": "oauth", "access": "profile-token"}}'
             )
             (profile / "models-store.json").write_text(
-                '{"openai-codex": {"models": [{"id": "gpt-6-sol"}]}}'
+                '{"openai-codex": {"models": [{"id": "gpt-6.1-sol"}]}}'
             )
             selection = resolve_p7_runtime(
-                {"ASTERION_PRIME_PI_AGENT_DIR": str(profile), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6-sol"},
+                {"ASTERION_PRIME_PI_AGENT_DIR": str(profile), "ASTERION_PRIME_PROVIDER": "openai-codex", "ASTERION_PRIME_MODEL": "gpt-6.1-sol"},
                 P7GameSelection("ls20-9607627b", 0, 1),
             )
         self.assertEqual(selection.provider, "openai-codex")
-        self.assertEqual(selection.model, "gpt-6-sol")
+        self.assertEqual(selection.model, "gpt-6.1-sol")
 
     def test_provider_and_model_are_selected_from_operator_environment(self) -> None:
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -32,17 +32,17 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             profile = Path(directory)
             (profile / "auth.json").write_text("{}")
-            (profile / "models-store.json").write_text('{"deepseek": {"models": []}}')
+            (profile / "models-store.json").write_text('{"openai-codex": {"models": []}}')
             selection = resolve_p7_runtime(
                 {
                     "ASTERION_PRIME_PI_AGENT_DIR": str(profile),
-                    "ASTERION_PRIME_PROVIDER": "deepseek",
-                    "ASTERION_PRIME_MODEL": "deepseek-v4-flash",
-                    "DEEPSEEK_API_KEY": "test-operator-credential",
+                    "ASTERION_PRIME_PROVIDER": "openai-codex",
+                    "ASTERION_PRIME_MODEL": "gpt-6.1-sol",
+                    "CODEX_API_KEY": "test-operator-credential",
                 },
                 P7GameSelection("ls20-9607627b", 0, 1),
             )
-        self.assertEqual((selection.provider, selection.model), ("deepseek", "deepseek-v4-flash"))
+        self.assertEqual((selection.provider, selection.model), ("openai-codex", "gpt-6.1-sol"))
 
     def test_pi_profile_root_must_not_be_a_symlink(self) -> None:
         from asterion.applications.prime.p7.live import P7LiveSolveError, resolve_pi_agent_dir
@@ -87,18 +87,26 @@ class TestPrimeP7PiModelConfig(unittest.TestCase):
     def test_invalid_effort_rejects_operator_resources_before_service_preflight(self) -> None:
         from unittest.mock import patch
         from asterion.applications.prime.p7 import operator
+        from asterion.applications.prime.p7.model_selection import P7ModelSelection
 
-        with patch.object(operator, "resolve_p7_runtime") as resolve, \
-             patch.object(operator.socket, "socketpair") as sockets, \
-             self.assertRaises(operator.P7OperatorError) as raised:
-            operator.build_p7_operator_resources(
-                environment={"ASTERION_PRIME_EFFORT": "SENTINELSECRET"},
-                pi_base_command=("node", "pi", "--thinking", "medium"),
-                extension_path=Path("/unused"), working_directory=Path("/unused"),
-                worker=None, engine=None, private_trace_root=Path("/unused"),
-            )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            trace = root / "trace"
+            trace.mkdir()
+            extension = root / "extension.mjs"
+            extension.write_text("export default function extension() {}\n")
+            with patch.object(operator, "resolve_model_selection", return_value=P7ModelSelection("openai-codex", "gpt-6.1-sol")), \
+                 patch.object(operator, "prepare_prime_application") as prepare, \
+                 patch("socket.socketpair") as sockets, \
+                 self.assertRaises(operator.P7OperatorError) as raised:
+                operator.build_p7_operator_resources(
+                    environment={"ASTERION_PRIME_EFFORT": "SENTINELSECRET"},
+                    executable=root / "node", entry=root / "pi.mjs",
+                    extension_path=extension, working_directory=root,
+                    worker=None, engine=None, private_trace_root=trace,
+                )
         self.assertNotIn("SENTINELSECRET", str(raised.exception))
-        resolve.assert_not_called()
+        prepare.assert_not_called()
         sockets.assert_not_called()
 
 

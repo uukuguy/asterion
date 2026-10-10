@@ -281,23 +281,18 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('context_memory', result)
         self.assertEqual(self.host.current_context()['notes']['text'], 'n' * (16 * 1024))
 
-    async def test_kernel_recovery_reuses_explicit_worker_factory_and_wrapper(self):
+    async def test_kernel_recovery_reuses_explicit_python_and_owner(self):
         import shlex
         import sys
-        from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
         marker = self.root / 'wrapper-starts.txt'
         wrapper = self.root / 'trusted-research-python'
         wrapper.write_text('#!/bin/sh\n'
                            + 'printf "started\\n" >> ' + shlex.quote(str(marker)) + '\n'
                            + 'exec ' + shlex.quote(sys.executable) + ' "$@"\n')
         wrapper.chmod(0o700)
-        calls = []
-        def factory():
-            calls.append(wrapper)
-            return SubprocessPythonWorker(python=wrapper)
         host = P7ResearchRuntime(broker=self.broker, trace_client=self.trace,
             run_root=self.root, run_id=self.run_id, deadline_seconds=30,
-            event_sink=lambda *_: None, worker_factory=factory)
+            event_sink=lambda *_: None, python=wrapper)
         self.addAsyncCleanup(host.close)
         first = await host.execute('first-restricted-start', 'print(1)', _Signal())
         self.assertEqual(first.status, 'ok')
@@ -305,7 +300,6 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(lost.status, 'error')
         restored = await host.execute('second-restricted-start', 'print(2)', _Signal())
         self.assertEqual(restored.status, 'ok')
-        self.assertEqual(calls, [wrapper, wrapper])
         self.assertEqual(marker.read_text().splitlines(), ['started', 'started'])
         self.assertEqual(self.engine.calls, [])
 
@@ -578,7 +572,8 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
 class TestResearchOperatorBridge(unittest.TestCase):
     def test_persistent_loop_preserves_namespace_and_settled_errors(self):
         import socket
-        from asterion.applications.prime.p7.operator import _IpythonBridgeServer, _BRIDGE_PROTOCOL
+        from asterion.agents.prime._tool_bridge import ToolBridgeServer, PROTOCOL as _BRIDGE_PROTOCOL
+        from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / 'bridge-story'
@@ -592,7 +587,7 @@ class TestResearchOperatorBridge(unittest.TestCase):
             )
             actor, server = socket.socketpair()
             actor.settimeout(10)
-            bridge = _IpythonBridgeServer(server, host, _TraceClient())
+            bridge = ToolBridgeServer(server, P7ToolDispatch(host, _TraceClient(), run_id='bridge-story'))
             bridge.start()
             reader = actor.makefile('rb')
             try:
