@@ -181,7 +181,9 @@ async def main():
     witness = resolve_game_selection({"ASTERION_PRIME_P7_GAME_ID": "zx42", "ASTERION_PRIME_P7_TARGET_LEVEL": "1"}, root / "arc")
     assert witness.target_level == 1
     target_level = int(__import__("os").environ["P7_TEST_TARGET_LEVEL"])
-    trace = root / f"trace-{target_level}"; trace.mkdir()
+    # Each independent run owns exclusive metrics and evidence under trace.parent.
+    trace = root / f"run-{target_level}" / "trace"
+    trace.mkdir(parents=True)
     extension = Path(str(resources.files("asterion.applications.prime").joinpath("resources/p7-legacy-extension.mjs"))).resolve()
     worker = Worker()
     worker.target_level = target_level
