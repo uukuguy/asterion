@@ -50,6 +50,7 @@ class _TextUsage:
         self.prompts = self.input_bytes = self.output_bytes = 0
         self.input_tokens = self.output_tokens = 0
         self.blocked = False
+        self.unknown_effect = False
         self.started = time.monotonic()
         self.deadline = self.started + limits.deadline_seconds
         self.task_deadline = task_deadline
@@ -156,6 +157,7 @@ class LiveModelSession:
     async def prompt(self, text: str, *, signal: CancellationSignal) -> LiveModelReply:
         usage, limits = self._usage, self._limits
         effect_started = False
+        effect_known = False
         try:
             usage.remaining(limits)
             if not self._opened or self._closed or self._closing or signal.cancelled or type(text) is not str or not text:
@@ -205,6 +207,7 @@ class LiveModelSession:
             usage.input_tokens += incoming
             usage.output_tokens += outgoing
             usage.output_bytes += len(result.final_text.encode('utf-8'))
+            effect_known = True
             if (_over(usage.input_tokens, limits.max_input_tokens)
                     or _over(usage.output_tokens, limits.max_output_tokens)
                     or _over(_cost(usage.input_tokens, usage.output_tokens, limits.price), limits.max_cost_micros)
@@ -216,6 +219,7 @@ class LiveModelSession:
         except BaseException as error:
             if effect_started:
                 usage.blocked = True
+                usage.unknown_effect = usage.unknown_effect or not effect_known
             await self.close()
             if isinstance(error, (KeyboardInterrupt, SystemExit, GeneratorExit, asyncio.CancelledError)):
                 raise

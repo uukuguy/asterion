@@ -180,6 +180,32 @@ class TestPrimeApplicationEntry(unittest.TestCase):
             self.assertTrue((await app.close()).complete)
         asyncio.run(run())
 
+    def test_text_private_identity_and_known_usage_survive_cleanup_failure(self):
+        limits = replace(self.limits, price=ModelPrice(300000, 1200000))
+        app, command = self._text_app(limits)
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                identity = app._text_identity_summary()
+                self.assertEqual(len(identity.command_sha256), 64)
+                self.assertEqual(len(identity.binding_sha256), 64)
+                with self.assertRaises(FrozenInstanceError):
+                    identity.command_sha256 = 'changed'
+                view = app.text_model(key='one', limits=limits)
+                await view.prompt('hello', signal=_NeverCancelled())
+                rpc = app._text_sessions['one']._rpc
+                with patch.object(rpc, 'stop', side_effect=RuntimeError('private-sentinel')):
+                    self.assertFalse((await app.close()).complete)
+                usage = app._text_usage_summary()
+                self.assertEqual((usage.prompts, usage.input_tokens, usage.output_tokens, usage.cost_micros),
+                                 (1, 1000, 500, 900))
+                self.assertTrue(usage.blocked)
+                self.assertFalse(usage.unknown_effect)
+                self.assertNotIn('900', repr(usage))
+                self.assertTrue((await app.close()).complete)
+                self.assertEqual(app._text_identity_summary(), identity)
+                self.assertEqual(app._text_usage_summary(), usage)
+        asyncio.run(run())
+
     def test_unlisted_application_runs_without_provider_lookup(self):
         app, command = self._text_app()
         async def run():
@@ -213,6 +239,7 @@ class TestPrimeApplicationEntry(unittest.TestCase):
                     await app.text_once(key='two', text='hello', limits=self.limits,
                                         signal=_NeverCancelled())
                 self.assertEqual(app._text_usage.prompts, 1)
+                self.assertTrue(app._text_usage_summary().unknown_effect)
                 await app.close()
         asyncio.run(run())
 

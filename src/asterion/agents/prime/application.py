@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, fields
+import hashlib
+import json
 import math
 import asyncio
 import re
@@ -18,7 +20,7 @@ from typing import Literal, Protocol
 from asterion.agents.prime import _launch
 from asterion.agents.prime._workspace_owner import WorkspaceOwner
 from asterion.agents.prime._text_model import (
-    LiveModelReply, LiveModelSession, LiveModelUsage, _TextUsage,
+    LiveModelReply, LiveModelSession, LiveModelUsage, _TextUsage, _cost,
 )
 from asterion.agents.prime.backend import PrimeAttachment
 from asterion.agents.prime.ipython import (
@@ -309,6 +311,32 @@ class _PrimeModelView:
         return await self._owner._prompt_text(self._key, text, signal=signal)
 
 
+@dataclass(frozen=True, slots=True, repr=False)
+class _PrimeTextIdentitySummary:
+    command_sha256: str
+    binding_sha256: str
+
+    def __repr__(self) -> str:
+        return '<Prime text identity redacted>'
+
+
+@dataclass(frozen=True, slots=True, repr=False)
+class _PrimeTextUsageSummary:
+    prompts: int
+    input_tokens: int
+    output_tokens: int
+    cost_micros: int
+    unknown_effect: bool
+    blocked: bool
+
+    def __repr__(self) -> str:
+        return '<Prime text usage redacted>'
+
+
+def _digest(value: object) -> str:
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
 class PrimeApplication:
     """Resource owner with fixed authorization; construction never launches Pi."""
 
@@ -343,6 +371,25 @@ class PrimeApplication:
 
     def __repr__(self) -> str:
         return '<PrimeApplication redacted>'
+
+    def _text_identity_summary(self) -> _PrimeTextIdentitySummary:
+        if self._spec.profile != 'text-only':
+            _invalid()
+        return _PrimeTextIdentitySummary(
+            _digest(_launch.text_command(self._operator, self._spec)),
+            _digest({'profile': 'text-only', 'tools': (), 'extensions': (),
+                     'provider': self._operator.provider, 'model': self._operator.model}),
+        )
+
+    def _text_usage_summary(self) -> _PrimeTextUsageSummary:
+        usage = self._text_usage
+        if usage is None:
+            _invalid()
+        return _PrimeTextUsageSummary(
+            usage.prompts, usage.input_tokens, usage.output_tokens,
+            _cost(usage.input_tokens, usage.output_tokens, self._authorization.price),
+            usage.unknown_effect, usage.blocked,
+        )
 
     @property
     def state(self) -> Literal['prepared', 'active', 'closing', 'closed']:
