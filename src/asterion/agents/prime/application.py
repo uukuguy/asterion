@@ -22,7 +22,7 @@ from asterion.agents.prime._text_model import (
 )
 from asterion.agents.prime.backend import PrimeAttachment
 from asterion.agents.prime.ipython import (
-    KernelBootstrap, KernelExport, KernelLimits, PersistentIpythonHost, PersistentIpythonWorker,
+    KernelBootstrap, KernelExport, KernelLimits, PersistentIpythonHost,
 )
 from asterion.agents.prime.compaction_budget import ModelPrice
 from asterion.agents.prime.deadline import TaskDeadline
@@ -478,14 +478,14 @@ class PrimeApplication:
     def create_workspace(
         self, bootstrap: KernelBootstrap, limits: KernelLimits, *, python: Path | None = None,
         observer: Callable[[str, Mapping[str, object]], None] | None = None,
-        worker: PersistentIpythonWorker | None = None,
     ) -> PersistentIpythonHost:
         self._require_available()
         if self._spec.profile != 'persistent-code-tools':
             _invalid()
         workspace = self._workspace_owner.create_workspace(bootstrap, limits, python=python,
-                                                           observer=observer, worker=worker)
+                                                           observer=observer)
         return workspace
+
     async def restore_workspace(
         self, previous: PersistentIpythonHost, source_exports: tuple[KernelExport, ...],
         data_exports: Mapping[str, KernelExport], signal: CancellationSignal,
@@ -544,6 +544,8 @@ class PrimeApplication:
                 self._services.request_stop()
             except Exception:
                 effects_stopped = False
+        # Owned workers must stop before a domain close waits on a cell lock.
+        workspace_closed = await self._workspace_owner.close()
         if resource is not None:
             try:
                 await asyncio.to_thread(resource.rpc.stop)
@@ -563,7 +565,6 @@ class PrimeApplication:
                 await self._services.close()
             except Exception:
                 bridge_closed = False
-        workspace_closed = await self._workspace_owner.close()
         self._cleanup = PrimeApplicationCleanup(effects_stopped, model_closed, extension_closed,
                                                bridge_closed, workspace_closed)
         if self._cleanup.complete:

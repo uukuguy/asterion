@@ -3560,7 +3560,7 @@ def build_p7_operator_resources(
                 deadline_monotonic=task_deadline,
                 task_deadline=execution_budget,
                 event_sink=prediction_client._emit_console,
-                workspace_owner=application, python=research_python, worker=worker,
+                workspace_owner=application, python=research_python,
                 experience=experience,
                 learner_profile="autonomous",
             )

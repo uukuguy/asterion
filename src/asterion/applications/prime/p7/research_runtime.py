@@ -108,7 +108,7 @@ class P7ResearchRuntime:
     """Thin application host over the generic Prime workspace."""
 
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
-                 deadline_seconds: float, event_sink, worker=None, workspace_owner=None, python=None,
+                 deadline_seconds: float, event_sink, workspace_owner=None, python=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None,
                  learner_profile='legacy', task_deadline=None):
@@ -150,7 +150,7 @@ class P7ResearchRuntime:
                 workspace=run_root / "research-kernel",
             )
             self._limits = limits or KernelLimits()
-            self.kernel = self._new_kernel(worker)
+            self.kernel = self._new_kernel()
             self.solver = Solver(
                 broker=self._broker, kernel=_KernelHandle(self), control=self.control,
                 workspace_root=run_root / "research", run_id=run_id,
@@ -172,10 +172,10 @@ class P7ResearchRuntime:
             self._read_server.close()
             raise
 
-    def _new_kernel(self, worker=None):
+    def _new_kernel(self):
         return self._workspace_owner.create_workspace(
             self._bootstrap, self._limits, python=self._python,
-            observer=self._kernel_event, worker=worker,
+            observer=self._kernel_event,
         )
 
     def _read_diagnostic(self, value):

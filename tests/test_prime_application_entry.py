@@ -470,6 +470,81 @@ class TestPrimePersistentOwner(unittest.TestCase):
         self.assertTrue(cleanup.bridge_closed and cleanup.extension_closed and cleanup.workspace_closed)
         self.assertTrue(services.stopped)
 
+    def test_workspace_api_does_not_accept_a_caller_worker(self):
+        import inspect
+        from asterion.agents.prime._workspace_owner import WorkspaceOwner
+        from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
+        app = self._persistent_app()
+        for create in (app.create_workspace, WorkspaceOwner.create_workspace, P7ResearchRuntime):
+            self.assertNotIn('worker', inspect.signature(create).parameters)
+        asyncio.run(app.close())
+
+    def test_owner_close_stops_active_workspace_without_caller_cancellation(self):
+        from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
+        app = self._persistent_app()
+        async def run():
+            kernel = app.create_workspace(KernelBootstrap({}, {}, self.root / 'active-workspace'),
+                                         KernelLimits(deadline_seconds=30))
+            services = _Services()
+            services.close = kernel.close
+            app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+            marker = kernel._bootstrap.workspace / 'started'
+            caller = _NeverCancelled()
+            cell = asyncio.create_task(kernel.execute('active-cell',
+                "from pathlib import Path\nimport time\nPath('started').touch()\nwhile True: time.sleep(0.01)", caller))
+            try:
+                async with asyncio.timeout(3):
+                    while not marker.exists():
+                        await asyncio.sleep(0.01)
+                process = kernel._worker._process
+                async with asyncio.timeout(3):
+                    cleanup = await app.close()
+                self.assertTrue(cleanup.complete)
+                result = await asyncio.wait_for(cell, 1)
+                self.assertEqual(result.status, 'uncertain')
+                self.assertFalse(caller.cancelled)
+                self.assertIsNotNone(process.returncode)
+                self.assertTrue(kernel.status()['closed'])
+            finally:
+                if not cell.done():
+                    cell.cancel()
+                await asyncio.gather(cell, return_exceptions=True)
+                await app.close()
+        asyncio.run(run())
+
+    def test_owner_reaps_workspace_on_its_execution_loop(self):
+        from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
+        app = self._persistent_app()
+        async def run():
+            kernel = app.create_workspace(KernelBootstrap({}, {}, self.root / 'thread-workspace'),
+                                         KernelLimits(deadline_seconds=30))
+            marker = kernel._bootstrap.workspace / 'started'
+            execution = {}
+            async def execute():
+                execution['loop'] = asyncio.get_running_loop()
+                execution['task'] = asyncio.current_task()
+                return await kernel.execute('thread-cell',
+                    "from pathlib import Path\nimport time\nPath('started').touch()\nwhile True: time.sleep(0.01)",
+                    _NeverCancelled())
+            cell = asyncio.create_task(asyncio.to_thread(lambda: asyncio.run(execute())))
+            try:
+                async with asyncio.timeout(3):
+                    while not marker.exists():
+                        await asyncio.sleep(0.01)
+                process = kernel._worker._process
+                async with asyncio.timeout(3):
+                    cleanup = await app.close()
+                self.assertTrue(cleanup.complete)
+                self.assertEqual((await cell).status, 'uncertain')
+                self.assertIsNotNone(process.returncode)
+                self.assertTrue(kernel.status()['closed'])
+            finally:
+                if not cell.done() and 'loop' in execution:
+                    execution['loop'].call_soon_threadsafe(execution['task'].cancel)
+                await asyncio.gather(cell, return_exceptions=True)
+                await app.close()
+        asyncio.run(run())
+
     def test_explicit_workspace_restore_advances_generation(self):
         from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
         app = self._persistent_app()

@@ -14,6 +14,7 @@ from pathlib import Path
 import signal as process_signals
 import socket
 import sys
+import threading
 
 
 class SubprocessPythonWorker:
@@ -24,6 +25,10 @@ class SubprocessPythonWorker:
         self._pending = bytearray()
         self._response_limit = 0
         self.closed = False
+        self._stop_requested = threading.Event()
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._spawn_task: asyncio.Task | None = None
+        self._close_task: asyncio.Task | None = None
 
     def __repr__(self) -> str:
         return "<SubprocessPythonWorker redacted>"
@@ -31,8 +36,9 @@ class SubprocessPythonWorker:
     async def start(self, bootstrap: object, *, limits: object, signal: object) -> None:
         from asterion.agents.prime.ipython import _plain
 
-        if self._process is not None or self.closed or signal.cancelled:
+        if self._process is not None or self.closed or self._stop_requested.is_set() or signal.cancelled:
             raise RuntimeError("Prime worker is unavailable")
+        self._loop = asyncio.get_running_loop()
         workspace = bootstrap.workspace
         workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
         parent, child = socket.socketpair()
@@ -44,7 +50,7 @@ class SubprocessPythonWorker:
             + 8192
         )
         try:
-            self._process = await asyncio.create_subprocess_exec(
+            self._spawn_task = asyncio.create_task(asyncio.create_subprocess_exec(
                 self._python,
                 "-I",
                 "-u",
@@ -58,9 +64,13 @@ class SubprocessPythonWorker:
                 close_fds=True,
                 pass_fds=(child.fileno(),),
                 start_new_session=True,
-            )
+            ))
+            self._process = await asyncio.shield(self._spawn_task)
         finally:
             child.close()
+        if self._stop_requested.is_set():
+            await self.close()
+            raise RuntimeError("Prime worker is unavailable")
         value = await self._request(
             {
                 "operation": "bootstrap",
@@ -94,7 +104,8 @@ class SubprocessPythonWorker:
         process = self._process
         channel = self._channel
         if (
-            process is None
+            self._stop_requested.is_set()
+            or process is None
             or process.stdin is None
             or channel is None
             or process.returncode is not None
@@ -120,7 +131,42 @@ class SubprocessPythonWorker:
             raise RuntimeError("Prime worker response was invalid")
         return value
 
+    def _request_stop(self) -> None:
+        """Stop admission and interrupt the owned process group without a host lock."""
+        self._stop_requested.set()
+        process = self._process
+        if process is not None and not self.closed:
+            try:
+                os.killpg(process.pid, process_signals.SIGTERM)
+            except (ProcessLookupError, PermissionError):
+                pass
+
     async def close(self) -> None:
+        self._request_stop()
+        loop = self._loop
+        if loop is not None and loop is not asyncio.get_running_loop() and not self.closed:
+            if not loop.is_running():
+                raise RuntimeError("Prime worker cleanup loop is unavailable")
+            future = asyncio.run_coroutine_threadsafe(self._close_once(), loop)
+            await asyncio.wrap_future(future)
+            return
+        await self._close_once()
+
+    async def _close_once(self) -> None:
+        if self.closed:
+            return
+        task = self._close_task
+        if task is None or task.done():
+            task = self._close_task = asyncio.create_task(self._close_process())
+        # Active-cell failure and owner shutdown share one reap operation.
+        await asyncio.shield(task)
+
+    async def _close_process(self) -> None:
+        if self._spawn_task is not None:
+            try:
+                self._process = await asyncio.shield(self._spawn_task)
+            except Exception:
+                pass  # Failed creation still owns the response descriptor.
         if self.closed:
             return
         process = self._process
