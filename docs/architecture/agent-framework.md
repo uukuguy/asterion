@@ -18,8 +18,11 @@ P1–P7 are independent applications of Asterion Prime. The standard-entry
 migration targets direct library use: an application supplies its domain goals,
 tools, data and completion conditions, while Prime owns private Pi/session
 resources. Central application registration, provider discovery and CLI
-dispatch are not prerequisites of that target interface. Existing wiring has
-not yet completed this migration.
+dispatch are not prerequisites of that interface. Task40 migrates the existing
+P1 and P3–P7 live paths, including the P7 narrator, to the standard owner;
+P2 retains its model-free local retrieval mechanism. Source migration and
+provider-free verification do not establish cross-domain research ability.
+Packaged/live acceptance is recorded in the active worklist and checkpoint.
 
 The purpose and scope of a Prime CLI remain **undecided**. Task40 does not
 design a unified application-management CLI. Existing Asterion CLI and
@@ -82,18 +85,23 @@ adapts those layers without importing its semantics into generic framework
 modules. These application responsibilities do not introduce another runner
 or change the existing provider, assembly, runtime or host-service contracts.
 
-The intended backend dependency is `P7 -> Asterion Prime -> Pi`. Prime owns
-backend launch, model/profile resolution from injected operator configuration,
-extension loading, RPC sessions, native event handling and default code-aware
-compaction. P7 supplies domain tools, goal/continuation content and mappings
+The backend dependency is `P7 -> Asterion Prime -> Pi`. Prime owns
+backend launch, extension loading, RPC sessions and native event handling.
+The application operator resolves configuration and injects exact model and
+resource context; the generic owner does not read `.env` or profile contents.
+P1–P6 target `deepseek/deepseek-flash`; all P7 model paths use
+`openai-codex/gpt-6.1-sol`. P2 currently makes no model calls.
+P7 supplies domain tools, goal/continuation content and mappings
 from framework events to game evidence. Naming a Pi transport with a neutral
 alias does not transfer that ownership. The current migration and its
 verification boundary are recorded in the active worklist.
 
 For a persistent IPython kernel, compaction must retain useful identifiers,
 function interfaces, computational state, counterexamples and evidence
-references. Prime supplies these summarization semantics by default;
-applications do not select summary prompts. Pi continues to own compaction
+references. The design assigns these default summarization semantics to Prime;
+their specialized implementation is not yet wired into the current launch
+chain and is not verified by Task40. Applications do not select summary prompts.
+Pi continues to own compaction
 triggering, source preparation and persistence. Normal research NOTES remain
 the model's primary cognition; specialized compaction is a separate continuity
 safeguard. Both capabilities require implementation and named verification.

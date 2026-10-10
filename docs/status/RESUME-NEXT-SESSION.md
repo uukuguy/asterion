@@ -1,11 +1,13 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-10 18:55 CST. Session remains active — not a final handoff. 用户已要求继续实施；计划 Task 1–4/6 已实现并复审；Task 5 修复复审发现，Task 7 实施中。
+> Updated: 2026-10-10 19:48 CST. Session remains active — not a final handoff. 用户要求完成全部迁移；Task 1–7 已提交复审，Task8 清理已提交，最终取消关闭修复与打包/真实见证进行中。
 
 ## 恢复摘要
 
 - 分支 `feat/prime-research-notes`；managed，唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md) Task40。用户已同意先统一已有真实模型路径的标准接入和资源所有权，保持 Prime 稳定底层；P2 本轮记录目标与边界，自主检索能力补全另列。
-- 当前产物：[标准应用入口设计](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)已经用户确认；[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)已完成自审。当前执行：Task 1 已由 d5668e8c/ae185b25 完成无效果入口与输入合同，8 项测试/复审通过；Task 2 由 6fe51d20/5cc50b56 完成有界文本会话，67 项测试与复审通过；Task 3 由 fc225adb 完成通用扩展/应用工具拆分，TS 93 PASS/6 外部 skip、Python/安装/三资源构建通过，独立复审无发现；Task 4 由 865eea25 提交 persistent runtime/bridge/workspace 与 P7 迁移，定向测试通过；61856505 修复公开 worker 注入与活动工作区阻塞关闭，60 项定向测试通过、Astra 复审批准；首次 1278 项广跑失败后只重跑受影响子集，不将未重跑广套件标 PASS。Task 6 由 3d23decc 完成 P3/P4/P5，51 项测试与 Sol 复审通过；P4 历史启动/绑定指纹不符会在模型前拒绝，不隐式转换。Task 5 的19eb7ee0/f6a2506d/9dcc2978实现P1/narrator与共享投影，155项测试通过，但Astra发现domain close阻塞可跳过Pi/lease独立回收，entry_task5正在修复。Task7 entry_task7正在改P6效果顺序，无核心文件交叉；随后Task8删除过渡包装、最终复审、打包与真实见证。报告见.superpowers/sdd/prime-entry-task-{5,6,7}-report.md；代码所有权、迁移兼容和验收条件已列明。执行方式沿用 AGENTS 的子代理分工，无需再选择模式。计划文档验证：docs-check313文件/228链接、diff-check通过。代码实施已授权并进行中；尚未启动付费运行。
+- 当前产物：[标准入口设计](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)和[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)。Tasks1–7 已实现并独立复审：入口 d5668e8c/ae185b25；text owner 6fe51d20/5cc50b56；三工具模块 fc225adb；P7 persistent owner 865eea25/61856505；P1/narrator 19eb7ee0/f6a2506d/9dcc2978/61370a0e；P3/P4/P5 3d23decc；P6 8607fd0a。Task8 移除过渡包装4d489f0d，162项定向测试通过；最终 Sol 领域复审 PASS/APPROVE。
+- 最终 Astra 合同复审 R1：非 durable/P7 close 在 RPC/bridge await 收到取消时可能漏后续描述符清理。entry_task7 修复 application.py 与定向取消回归；修复后 entry_final_contract_review 做 focused re-review。最终 TS99项为93通过/6既有外部跳过；最终 Python、promotion/lint/docs 与有限 r11l L1 见证待修复后执行。无模型调用已启动。报告在 .superpowers/sdd/prime-entry-final-{domain,contract}-review.md、prime-entry-task-8-cleanup-report.md。
+- P4 历史启动/绑定指纹不匹配在模型前拒绝，不隐式转换。首次1278项P7广跑未整体重跑，失败对应子集已通过，不能将广套件标 PASS。P1隔离settings-only profile与DeepSeek环境preflight保留；核心不读取operator认证/profile。
 - 用户补充：P1–P7 是独立应用，直接使用 Prime 标准接口，不需要中央注册；CLI 定位待定，本轮不设计统一应用管理 CLI。不得以 DCI/Native 的用途推导 Prime CLI 需求。现存 provider/assembly 仅保留兼容。工具注册与应用登记分开。
 - 模型要求：P1–P6 精确使用 `deepseek-flash`，P7 全部模型路径（含 narrator）使用 `gpt-6.1-sol`。P2 当前无模型调用；不得以改模型要求扩张检索能力。计划移除必填 provider 身份和核心应用分派，并验收未登记外部应用。
 - Prime 复用既有执行核心；收回 Pi/RPC、扩展加载、工具装配及会话生命周期。应用保留目标/工具/数据/领域完成条件；operator 显式注入配置和有限授权。先 P7，后 P1 与 P3–P6 live；P2 本地 witness 的行为保留。
@@ -52,14 +54,14 @@ Goal126请求input4639960/output42760；final127 input4699481/output42803/raw637
 
 - Task38“NOTES短但全部原生历史仍累积”是Task39前的真实诊断；不能继续写成当前尚未实现。历史评估保留在原分析，不装入恢复上下文全文。
 - 小窗口盲切、额外强制模型checkpoint、细碎认知门禁不是当前方向。提供完整客观信息及可追溯证据，让模型自主推理。
-- P7当前确实通过AsterionPrimeSession执行，但应用仍构造底层RPC/扩展接线；不代表统一私有Prime入口已完成，也不是绕过Prime的独立解题器。D-2026-10-10-02替代旧D-2026-09-27-01临时许可。私有Pi不意味着所有会话共享一个进程。
+- 迁移前P7已通过AsterionPrimeSession执行，但应用构造底层RPC/扩展，是Task40修复的历史缺口。当前消费者源码已迁入标准owner；打包实跑单独验收。D-2026-10-10-02替代旧D-2026-09-27-01临时许可。私有Pi不意味着所有会话共享一个进程。
 
 ## 未完成边界
 
 - 原生Pi正文未持久化；stderr前14条primary及退休0→4→12可直接审计，此后diagnostics-suppressed，完整FD指标不能替代全程逐组正文审计。另有1oversize旁路省略，原字节完整转发。native context_archive是否实际调用未知（17workspace中16NOTES、另一次op/body未保存）；已有cell/history/frame/patches实际回读。
 - 未观察到native compaction，不验证专用摘要。旧Prime fork确实改写原生摘要生成，当前迁移启动链未接通该改写；默认高阈值约255616与专用语义是两件事。未来低阈值验证需真实选定模型摘要、usage/预算、持久kernel变量/函数/generation、NOTES/反例以及继续正确解题。
-- 全部 Pi 启动/配置/扩展/RPC 及默认专用摘要应归 Prime 私有接入。P1/P7 仍有应用侧接线；P3–P6 live 直接创建真实 Pi 文本会话，另有确定性 witness；P2 是本地 worker/context。Task40 已确认标准接入设计范围，入口、文本 owner 与工具模块已实现；P7/P1/P3–P6 消费者迁移及打包实测未完成，统一真实长程 agent 能力未验证。
-- 专用摘要未完成初稿隔离在stash `30ec751b8219f52c55e265e94ca965f65c0c85f7`（3个TS文件）；保留，不自动apply或删除。Task40 新增入口与文本 owner 的 Python 源码，消费者迁移进行中。约23KB重复初始指令/快照及大stdout仍有开销，未修复。
+- Pi启动/扩展/RPC归Prime私有owner，operator负责配置解析；P1/P3–P7消费者迁移源码已实现，P2本地检索不新增模型。Task40最终清理与打包实跑尚未完成，统一真实长程agent能力未验证；默认专用摘要仍单列未完成。
+- 专用摘要未完成初稿隔离在stash `30ec751b8219f52c55e265e94ca965f65c0c85f7`（3个TS文件）；保留，不自动apply或删除。Task40新增入口、文本owner与消费者源码已提交，最终验收进行中。约23KB重复初始指令/快照及大stdout仍有开销，未修复。
 - 跨领域能力、稳定成功率、压缩后重放范围、评分/时延的稳定改进未证明。六关目标不是BP35九关全通。
 
 ## 清理与恢复命令
@@ -73,4 +75,4 @@ rg -n 'Task39|D-2026-10-10-0[12]' docs/status/DECISIONS.md docs/reviews/2026-10-
 git stash list
 ```
 
-Task39 已提交核心2930fbd8、r11l1046624f、架构记录f9f4b512、低阈值验证0fb15c7c、最终评估f0760ab8；前次最终交接b08bc5a2、日志be028db7。本轮已提交入口、文本 owner 和工具模块迁移，没有执行push/merge；这是活动会话 checkpoint，不是新的最终收口。
+Task39 已提交核心2930fbd8、r11l1046624f、架构记录f9f4b512、低阈值验证0fb15c7c、最终评估f0760ab8；前次最终交接b08bc5a2、日志be028db7。本轮已提交标准入口、文本/持久owner、工具模块及消费者迁移，没有执行push/merge；这是活动会话checkpoint，不是新的最终收口。

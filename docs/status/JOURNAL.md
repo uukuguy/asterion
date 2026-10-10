@@ -4829,4 +4829,14 @@
 
 - 2026-10-10 `9dcc2978`: Moves P1 durable resources into Prime owner while preserving attachment recovery, finite budgets, and independent reap.
 - Task5复审定位domain close阻塞会跳过独立Pi/lease回收，修复中；其余身份、预算与narrator边界已核对。
+- cb8a8ebc 保存P3–P5已复审、P1清理修复与P6执行顺序的恢复位置，明确历史检查点兼容边界。
+
+- 2026-10-10 `61370a0e`: Starts independent Pi reap and descriptor closure before domain waits so shutdown cancellation cannot skip cleanup.
+- Task7 contains P6 generation within composed execution; preserves owner cost, deadline, cleanup and rollback; 61 focused tests passed.
+- 18:57 P6 generation runs inside composed execution to preserve cancellation, deadline and single-charge boundaries. [8607fd0a]
+- Task5清理缺口经61370a0e修复并通过Astra复审；P1与narrator源码迁移已验证，部署仍待Task8。
 - Task8 removed obsolete startup wrappers; alias-aware boundary scan and 162 focused tests passed; packaged deployment remains pending.
+- 19:03 Removed obsolete startup wrappers to enforce Prime ownership; 162 focused tests passed. [4d489f0d]
+
+- Task7 Sol复审通过；Task8移除旁路/162测试通过，最终领域复审通过；合同复审定位取消关闭会漏bridge/descriptor，修复中。
+- Task40最终TS检查99项：93通过/6既有外部跳过；无provider调用，尚未运行真实见证。

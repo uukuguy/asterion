@@ -32,3 +32,7 @@
 - Tasks 5/6: active in approved parallel wave; Task5 owns shared core/durable P1/narrator, Task6 owns P3/P4/P5 consumers.
 - Task 6: complete (3d23decc; Sol independent spec PASS/quality APPROVE without findings; 51 focused tests pass). Task 7 active, Task 5 continues.
 - Task 5 implemented (19eb7ee0/f6a2506d/9dcc2978), 155 focused tests pass; Astra review NEEDS FIX: blocked services.close can prevent durable independent Pi/lease cleanup. Fix in progress.
+- Task 5: complete (19eb7ee0/f6a2506d/9dcc2978 + 61370a0e; independent Astra re-review approved, 155 original and64cleanup subset tests pass).
+- Task 7: complete8607fd0a,61focused tests pass; Sol independent spec PASS/quality APPROVE.
+
+- Task 8: cleanup4d489f0d complete,162focused tests pass; final domain spec PASS/quality APPROVE. Astra final contract review R1 requires cancellation-safe non-durable cleanup; fixing before final Python/promotion/live gates. TS final93 PASS/6 External-limited.

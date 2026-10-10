@@ -1,10 +1,12 @@
 # Asterion Prime P1–P7 验收指南
 
-> Updated: 2026-09-24. P3–P6 默认 `-run` 命令已改为有界真实模型应用运行；旧确定性路径改名 `-witness`。
+> Updated: 2026-10-10. Task40 标准入口源码已迁移，最终资源清理复审与打包/实跑验收进行中。P3–P6 默认 `-run` 是有界真实模型应用运行；确定性路径为 `-witness`。
 > 这份文档给"想要快速理解每个应用在做什么、跑得通什么、还有哪些没验证"
 > 的人看。
 
 2026-09-24 本地已安装 wheel 实跑：P3 两个独立 Pi 会话完成子任务与汇合；P4 两个独立进程完成固定任务状态的提交与恢复；P5 模型首轮候选通过语义校验（0 次修复）；P6 模型候选经独立 holdout 改进检查并在项目范围促升。四者都只有一次固定小任务成功，不是稳定率、通用编码能力或完整论文复现。以下旧章节中的 deterministic 结果仅指各自 `-witness` 和 `-run-limits` 路径。
+
+2026-10-10 Task40：P1、P3–P7 的已有 live 路径（含 P7 narrator）使用 Prime 标准 owner；Prime 管理 Pi/RPC、扩展、workspace 与会话回收，operator 解析配置并注入上下文。独立应用直接使用库，不需要中央注册。P1–P6 的模型目标为 `deepseek/deepseek-flash`，P7 全部模型路径为 `openai-codex/gpt-6.1-sol`。P2 当前无模型调用，自主检索能力补全另列。当前定向测试和源码复审只证明迁移合同；最终打包与真实运行证据见当前 checkpoint，不把旧实跑归为本次版本的结果。P4 的历史启动/绑定指纹不匹配会在模型前拒绝，不隐式转换检查点。专用代码摘要接通仍未完成。
 
 ## 文档怎么读
 
@@ -21,18 +23,19 @@
 
 ## 验收前置条件
 
-所有应用都跑同一条路(已安装在 `src/asterion/applications/prime/`),都需要这几样东西:
+安装 wheel 后，各应用有自己的入口。真实模型路径按下表准备外部资源；P2 本地检索和确定性 witness 不因标准接入而新增模型认证要求：
 
 | 项目 | 怎么来 |
 |---|---|
 | 安装好的 Pi(`@earendil-works/pi-coding-agent@0.85.1`) | Homebrew 全局 npm;在 Orb 内通过 `/mnt/mac/opt/homebrew/...` 访问 |
 | `node@22` | 必须是 v22+(Pi 用了 `node:fs.globSync`);Orb 默认 v20 不行 |
-| `DEEPSEEK_API_KEY` | 仓库根 `.env` 里(已存在) |
+| P1/P3–P6 的 DeepSeek 认证 | operator 私有环境/profile；P1 preflight 必须有 `DEEPSEEK_API_KEY`，使用隔离 settings-only profile |
+| P7 的 Codex 认证 | operator Pi profile 的 OAuth 认证，精确 `openai-codex/gpt-6.1-sol`；含 narrator |
 | `ASTERION_PRIME_OPERATOR_ROOT` | 当前 checkout 根 |
 | `ASTERION_PRIME_PI_ENTRY` | 装好的 Pi 的 RPC 入口路径 |
-| `ASTEROID_PRIME_P{N}_PRIVATE_ROOT` | 每个应用一个独立私有根(`mktemp` 即可) |
+| `ASTERION_PRIME_P{N}_PRIVATE_ROOT` | 每个应用一个独立私有根(`mktemp` 即可)，以该应用 operator 的变量为准 |
 
-**一个跑通 P1 的最小命令例子**(其它应用换变量名即可):
+**一个 P1 入口命令例子**（其它应用使用各自命令和 preflight）：
 
 ```bash
 export ASTERION_PRIME_OPERATOR_ROOT="$(pwd)"
@@ -41,7 +44,7 @@ make asterion-prime-p1-run
 # 期望:退出码 0,输出最后一行是 JSON receipt,digest 字段非空
 ```
 
-如果你只看一眼"系统是不是真的跑通了",**最简单的方法是直接跑每个应用的 `make` 命令看退出码 0**。详细 receipt 校验留给自动化。
+验收要同时核对退出码、receipt 的终止原因、运行身份及清理结果。`preflight` 或确定性 witness 成功只证明对应边界；真实求解还要核对实际目标与动作证据。
 
 ---
 

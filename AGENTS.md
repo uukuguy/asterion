@@ -76,11 +76,11 @@ Host services are operator-owned and explicitly injected. `executor.controlled` 
 
 ### Prime 应用入口与私有底层
 
-应用使用 Prime 标准入口，Pi、RPC、扩展加载及会话构造由 Prime 内部管理；应用提供领域目标、工具、数据与完成/续跑条件，不自行创建 Pi/RPC 对象注入 Prime。现有 P1/P7 仍有此类接线，是待整改的历史缺口，不能作为新应用模板；P2–P6 的机制见证也不能当作统一真实智能体后端已验证。统一整改见 D-2026-10-10-02。用户已明确暂缓大迁移，当前先完成 P7 NOTES 与解题实测，不据此规则扩张本轮代码范围。
+应用使用 Prime 标准入口，Pi、RPC、扩展加载及会话构造由 Prime 内部管理；应用提供领域目标、工具、数据与完成/续跑条件，不自行创建 Pi/RPC 对象注入 Prime。Task40 已按用户授权迁移 P1、P3–P7 的已有真实模型路径（包括 P7 narrator）；operator 解析配置并注入上下文，通用核心不读取 `.env` 或认证 profile。P1–P6 使用 `deepseek/deepseek-flash`，P7 使用 `openai-codex/gpt-6.1-sol`；P2 当前仍为无模型的本地检索机制，其自主能力补全另列。独立应用不以中央注册或 CLI 为前提；CLI 定位待定。统一接入与实际解题能力的验证分开，最终打包/实跑状态见 Task40 与当前 checkpoint。D-2026-10-10-03 取代此前暂缓迁移的范围限制；专用代码摘要接通仍单独验证。
 
 ### Prime 应用级工具（当前以 P7 验证）
 
-应用级工具注册是 Prime 应用的通用机制：打包的 Pi 扩展由 TypeScript 源码中的 `register(pi)` 调用 `registerTool`，构建产物是 `src/asterion/applications/prime/resources/ipython-extension.mjs`。当前仅在 P7 中完成实用验证；P7 的 Python operator 负责工具元数据与 bridge dispatch，将已注册工具映射到 `P7ClientFacade`（`p7_mechanics_prior` 对应 `mechanics_prior`）。不要用 prompt 伪造注册，也不要在通用 runtime 另造一套注册机制；改工具时同步更新 TypeScript、打包资源、对应应用 bridge 和测试。
+应用级工具注册是 Prime 应用的通用机制：通用 TypeScript `registerPrime` 注册 IPython 与声明的应用工具；P7 领域描述与上下文 hooks 位于 `p7-tools.ts`。wheel 同时打包 `src/asterion/applications/prime/resources/` 下的 `ipython-extension.mjs`、`p7-research-extension.mjs` 和 `p7-legacy-extension.mjs`，分别用于通用、P7 research 和 legacy 模块。Prime 管理扩展加载与 bridge 传输，P7 的 `p7/tool_dispatch.py` 将领域工具映射到 `P7ClientFacade`（`p7_mechanics_prior` 对应 `mechanics_prior`）。注册集合必须与 artifact 描述及 Pi allowlist 精确一致。当前实用领域验证以 P7 为主；不要用 prompt 伪造注册，也不要在通用 runtime 另造一套注册机制；改工具时同步更新 TypeScript、打包资源、对应应用 bridge 和测试。
 
 必需的状态/观察结果由应用直接追加到模型上下文；只把有明确使用场景的查询或动作工具注册给模型，并在工具描述中写清调用时机、输入和返回结果。减少或新增工具时同步修改 Pi allowlist、TypeScript 注册、Python bridge、prompt 说明和测试。
 

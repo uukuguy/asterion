@@ -8,7 +8,7 @@
 
 **Tech Stack:** Python 3、unittest、现有 Pi RPC/Node、TypeScript 打包扩展、现有 wheel 与 Make 部署检查。
 
-**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–4/6 完成，Task 5/7 进行中）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
+**Status:** 书面设计已获用户批准；本计划已完成根代理覆盖、接口及迁移顺序自审，实施进行中（Task 1–7 完成并复审；Task 8 清理已提交，最终关闭边界修复及打包实跑待验）。已完成计划文档检查；各代码测试与模型验证按任务实际结果记录。
 
 **Design:** [approved design](../specs/2026-10-10-prime-standard-application-entry-design.md)；[canonical worklist](2026-10-08-prime-autonomous-research-interface.md) Task 40；[DECISIONS](../../status/DECISIONS.md) D-2026-10-10-03。
 
@@ -251,7 +251,7 @@ Task 4 完成：`865eea25` + `61856505`，Astra 复审通过；公开 worker 注
 **Interfaces:** `PrimeBackendSpec/open_backend` 创建 backend/store/witness 并保留其 owner；P1 得到现有 attachment 操作，narrator 使用 `text_once`。
 实施补充范围：控制兼容工厂可接受 exact PrimeApplication 并调用 attach_backend，保留身份/授权校验；通用 bridge 保留 P1 原事件循环。共享 owner 提供私有不可变启动指纹与既有用量账本投影，区分 unknown effect 与仅清理失败；Task 5 独占共享核心文件，Task 6 只消费这些接口。
 
-- [ ] RED 测试扩展 P1 清理：close attachment 后同 owner 可 attach、kernel generation 未变；Pi close 故障时 independent reap 仍执行，构造阶段不启动模型。
+- [x] RED 测试扩展 P1 清理：close attachment 后同 owner 可 attach、kernel generation 未变；Pi close 故障时 independent reap 仍执行，构造阶段不启动模型。
 
 ```python
 attachment = await app.open_backend(spec=backend_spec, services=executor)
@@ -263,17 +263,19 @@ self.assertEqual(attached_again.snapshot().identity.generation, before)
 self.assertFalse(executor.closed)
 ```
 
-- [ ] 将 `attach_backend(identity: PrimeBackendIdentity) -> PrimeAttachment` 作为 owner 的只读身份核验入口，只调用已创建 backend.attach，不另建 owner 或执行效果。
-- [ ] RED：`uv run python -m unittest -v tests.test_asterion_prime_backend tests.test_asterion_prime_p1_operator tests.test_prime_arc_agi_3_run_story`。
-- [ ] 从 P1 `_build_resources` 搬移 RPC/binding/lease/store/witness/identity 私有启动派生到 Prime；identity 的应用字段和授权数据由 spec 提供，command/binding 指纹由 owner 计算，不能接受应用伪造启动哈希。
-- [ ] P1 独立 operator 使用本地 spec 与 backend owner；原 provider 包装只负责兼容身份映射。中央 application lookup 被 patch 为拒绝时，直接 setup/verify 生命周期仍能通过替身执行。
-- [ ] P1Oracle、coordination、domain stage 和 `_construct_host/reconstruct/compact/resume` 留 P1；worker 是领域 executor，可转交 owner 管理关闭，core 不导入 P1WorkerProcess。
-- [ ] P1 operator 固定为 exact deepseek/deepseek-flash；同步价格、get_state/trace identity 与相关 fixture，旧 v4-flash 值不能作为 alias 继续通过。已有 token/cost/时间额度保持不扩张，未核实 exact model 价格即 preflight 拒绝。
-- [ ] 保留 P1 `cleanup` 的独立 worker/Pi 强制回收；不把所有 close 串在同一 backend lock 后面。已启动但结果未知继续 fence；账本丢失不得重试。
-- [ ] narrator resolver 改为 P7 同一 exact openai-codex/gpt-6.1-sol 选择，移除 EXPERIMENT_MODEL/deepseek-only 选择旁路；保留 300 秒与领域输入输出行为，使用该 provider 的注入授权环境。`invoke` 内 asyncio.run 仅包 owner.text_once+finally close，不再构造 RPC/argv，不套用 flash 的512 output上限。
-- [ ] narrator 继续同步 `RunStoryNarrator.generate` API 与 JSON/引用/脱敏验证；模型失败不改变 deterministic renderer/evidence 数据。
-- [ ] GREEN：同 RED 命令，另 `uv run python -m unittest -v tests.test_asterion_prime_p1_runtime`；重点保留 `test_aggregate_usage_includes_both_stages_and_compact_charge`。
-- [ ] 提交：`git commit -m "refactor(prime): bind durable P1 and narrator to owned sessions"`。
+- [x] 将 `attach_backend(identity: PrimeBackendIdentity) -> PrimeAttachment` 作为 owner 的只读身份核验入口，只调用已创建 backend.attach，不另建 owner 或执行效果。
+- [x] RED：`uv run python -m unittest -v tests.test_asterion_prime_backend tests.test_asterion_prime_p1_operator tests.test_prime_arc_agi_3_run_story`。
+- [x] 从 P1 `_build_resources` 搬移 RPC/binding/lease/store/witness/identity 私有启动派生到 Prime；identity 的应用字段和授权数据由 spec 提供，command/binding 指纹由 owner 计算，不能接受应用伪造启动哈希。
+- [x] P1 独立 operator 使用本地 spec 与 backend owner；原 provider 包装只负责兼容身份映射。中央 application lookup 被 patch 为拒绝时，直接 setup/verify 生命周期仍能通过替身执行。
+- [x] P1Oracle、coordination、domain stage 和 `_construct_host/reconstruct/compact/resume` 留 P1；worker 是领域 executor，可转交 owner 管理关闭，core 不导入 P1WorkerProcess。
+- [x] P1 operator 固定为 exact deepseek/deepseek-flash；同步价格、get_state/trace identity 与相关 fixture，旧 v4-flash 值不能作为 alias 继续通过。已有 token/cost/时间额度保持不扩张，未核实 exact model 价格即 preflight 拒绝。
+- [x] 保留 P1 `cleanup` 的独立 worker/Pi 强制回收；不把所有 close 串在同一 backend lock 后面。已启动但结果未知继续 fence；账本丢失不得重试。
+- [x] narrator resolver 改为 P7 同一 exact openai-codex/gpt-6.1-sol 选择，移除 EXPERIMENT_MODEL/deepseek-only 选择旁路；保留 300 秒与领域输入输出行为，使用该 provider 的注入授权环境。`invoke` 内 asyncio.run 仅包 owner.text_once+finally close，不再构造 RPC/argv，不套用 flash 的512 output上限。
+- [x] narrator 继续同步 `RunStoryNarrator.generate` API 与 JSON/引用/脱敏验证；模型失败不改变 deterministic renderer/evidence 数据。
+- [x] GREEN：同 RED 命令，另 `uv run python -m unittest -v tests.test_asterion_prime_p1_runtime`；重点保留 `test_aggregate_usage_includes_both_stages_and_compact_charge`。
+- [x] 提交：`git commit -m "refactor(prime): bind durable P1 and narrator to owned sessions"`。
+
+Task 5 完成：`19eb7ee0`/`f6a2506d`/`9dcc2978` + `61370a0e`；155 项原定向测试及64项清理修复子集通过，Astra复审通过。领域 close 阻塞不再跳过 Pi/lease 回收，不完整清理仍拒绝成功。
 
 ## Task 6：P3/P4/P5 live 消费窄模型视图
 
@@ -309,7 +311,7 @@ Task 6 完成：`3d23decc`；51 项定向测试通过，Sol 独立复审无发�
 **Files:** Modify `src/asterion/applications/prime/p6/live.py`、`operator.py`、`runtime_binding.py`；Test `tests/test_prime_p6_live.py`、`tests/test_prime_p5_p6_composed_execution.py`、`tests/test_prime_p6_live_task.py`。
 **Interfaces:** 使用 `_ComposedCandidateHost(..., workflow=...)` 与 `run_candidate(root_run_id, signal)` 的现有执行点；模型仅由 Prime view 提供。
 
-- [ ] 在既有 composed tests 添加事件顺序与 pre-cancel 断言；fake model 记录调用时已见 `run.started`，预取消时零 model/候选文件/admission。
+- [x] 在既有 composed tests 添加事件顺序与 pre-cancel 断言；fake model 记录调用时已见 `run.started`，预取消时零 model/候选文件/admission。
 
 ```python
 async def generate(text, *, signal):
@@ -319,34 +321,36 @@ async def generate(text, *, signal):
 self.assertEqual(model_calls_after_precancel, 0)
 ```
 
-- [ ] RED：`uv run python -m unittest -v tests.test_prime_p6_live tests.test_prime_p5_p6_composed_execution`；当前前置模型效果使新增顺序断言失败。
-- [ ] P6 直接入口以本地精确 assembly 和原 composed runner 组织 workflow，不查询中央应用清单；给同一替身执行添加 lookup 禁用断言。P2 保留既有本地入口，不因统一接口强制注册或挂接模型。
-- [ ] 将 `run_live_candidate` 中 session_factory/open/prompt/close、parse、candidate 写入、Task A 证据构造搬进现有 workflow 执行体；构造 loop/coordinator 本身保持无模型效果。
-- [ ] P6 同步切到 exact deepseek-flash 的新 context/view；Task 2 旧 .command/factory 兼容此时才失去最后消费者，先以 rg 核对，删除统一放 Task 8。
-- [ ] workflow 先 `await model.prompt(_TASK_A_PROMPT, signal=signal)`，再原 `parse_candidate/task_a_evidence/_run_workflow`；异常进入已有 host 的 baseline/rollback/recovery-required 路径，不绕过 domain admission。
-- [ ] 建立单个已有总 deadline：runtime 的执行期限覆盖生成与后续 workflow，text 模型仍受原 120s/3000micros 等更窄限制，不能改用 P6 较宽 300000micro cap。
-- [ ] 已有 `effect_sender` 从本次 owner usage 读取候选消耗，保留证据与账本关系；标明 ledger owner，禁止 generation 和 workflow 两次为同 usage 增加总额。
-- [ ] 加生成失败不 admit/promote、预取消零调用、生成消耗可见且不双计、跨阶段 deadline 不续期四项正常边界；用 fake clock，不增加长 sleep 或极端矩阵。
-- [ ] GREEN：同 RED 命令，另 `uv run python -m unittest -v tests.test_prime_p6_live_task`；保留 unsafe JSON、holdout、回滚和 unknown-effect 原测试。
-- [ ] 提交：`git commit -m "fix(prime): contain P6 candidate model effects within composed execution"`。
+- [x] RED：`uv run python -m unittest -v tests.test_prime_p6_live tests.test_prime_p5_p6_composed_execution`；当前前置模型效果使新增顺序断言失败。
+- [x] P6 直接入口以本地精确 assembly 和原 composed runner 组织 workflow，不查询中央应用清单；给同一替身执行添加 lookup 禁用断言。P2 保留既有本地入口，不因统一接口强制注册或挂接模型。
+- [x] 将 `run_live_candidate` 中 session_factory/open/prompt/close、parse、candidate 写入、Task A 证据构造搬进现有 workflow 执行体；构造 loop/coordinator 本身保持无模型效果。
+- [x] P6 同步切到 exact deepseek-flash 的新 context/view；Task 2 旧 .command/factory 兼容此时才失去最后消费者，先以 rg 核对，删除统一放 Task 8。
+- [x] workflow 先 `await model.prompt(_TASK_A_PROMPT, signal=signal)`，再原 `parse_candidate/task_a_evidence/_run_workflow`；异常进入已有 host 的 baseline/rollback/recovery-required 路径，不绕过 domain admission。
+- [x] 建立单个已有总 deadline：runtime 的执行期限覆盖生成与后续 workflow，text 模型仍受原 120s/3000micros 等更窄限制，不能改用 P6 较宽 300000micro cap。
+- [x] 已有 `effect_sender` 从本次 owner usage 读取候选消耗，保留证据与账本关系；标明 ledger owner，禁止 generation 和 workflow 两次为同 usage 增加总额。
+- [x] 加生成失败不 admit/promote、预取消零调用、生成消耗可见且不双计、跨阶段 deadline 不续期四项正常边界；用 fake clock，不增加长 sleep 或极端矩阵。
+- [x] GREEN：同 RED 命令，另 `uv run python -m unittest -v tests.test_prime_p6_live_task`；保留 unsafe JSON、holdout、回滚和 unknown-effect 原测试。
+- [x] 提交：`git commit -m "fix(prime): contain P6 candidate model effects within composed execution"`。
+
+Task 7 完成：`8607fd0a`；61 项定向测试通过，Sol 独立规格 PASS / 质量 APPROVE。生成与候选效果受既有 composed 执行、同一 deadline 和 owner usage 约束。
 
 ## Task 8：移除旁路、打包验收与状态收口
 
 **Files:** Modify `src/asterion/applications/prime/runtime_binding.py`、`live_model.py`（仅删除遗留兼容启动）、`docs/architecture/agent-framework.md`、`docs/status/PRIME-P1-P7-ACCEPTANCE.md`、`docs/status/CURRENT-STATE.md`、`docs/status/DECISIONS.md`、`docs/status/INDEX.md`、`docs/status/RESUME-NEXT-SESSION.md`；更新 canonical Task 40 与现有协作 MEMORY/JOURNAL 的真实位置；Test `tests/test_prime_application_entry.py` 和下列 installed suites。
 **Interfaces:** 独立应用直接依赖 standard entry；现有 provider 的 exact dispatch 和 metadata-only list 仅兼容保留，不能成为入口前置条件。CLI 定位待定，本任务不新增 Prime CLI。
 
-- [ ] 写一个静态依赖边界测试扫描指定迁移文件的 AST import/call：禁止 PiRpcSession/PiRpcConfig/build_rpc_session/ExtensionBinding/Lease、AsterionPrimeSession/PrimeSessionBackend 构造。机制 fixture 与底层私有实现不纳入禁区。
-- [ ] RED：先在遗留兼容 wrapper 尚在时运行 `uv run python -m unittest -v tests.test_prime_application_entry`，预期点名旁路位置；若前面已全部清除，加入临时内存源码 fixture 验证检测器能识别禁止调用，勿人为破坏生产代码。
-- [ ] 删除应用树已无调用者的 argv/启动 wrapper；provider dispatcher 保持惰性 exact key，不能导入未选应用。`live_model.py` 只留 operator resolver 与明确兼容数据 re-export，或迁完所有导入后移除。
-- [ ] 将 Task 2 过渡 `.command`/old factory 与 Task 3 过渡旧 lease producer 纳入明确删除清单；现有 provider adapter 只调用直接入口，framework core 不 import P7/tools inventory。未注册 direct-app 测试和内置兼容测试同时通过才能关闭迁移。
-- [ ] 静态核对：
+- [x] 写一个静态依赖边界测试扫描指定迁移文件的 AST import/call：禁止 PiRpcSession/PiRpcConfig/build_rpc_session/ExtensionBinding/Lease、AsterionPrimeSession/PrimeSessionBackend 构造。机制 fixture 与底层私有实现不纳入禁区。
+- [x] RED：先在遗留兼容 wrapper 尚在时运行 `uv run python -m unittest -v tests.test_prime_application_entry`，预期点名旁路位置；若前面已全部清除，加入临时内存源码 fixture 验证检测器能识别禁止调用，勿人为破坏生产代码。
+- [x] 删除应用树已无调用者的 argv/启动 wrapper；provider dispatcher 保持惰性 exact key，不能导入未选应用。`live_model.py` 只留 operator resolver 与明确兼容数据 re-export，或迁完所有导入后移除。
+- [x] 将 Task 2 过渡 `.command`/old factory 与 Task 3 过渡旧 lease producer 纳入明确删除清单；现有 provider adapter 只调用直接入口，framework core 不 import P7/tools inventory。未注册 direct-app 测试和内置兼容测试同时通过才能关闭迁移。
+- [x] 静态核对：
 
 ```bash
 rg -n 'PiRpcSession|PiRpcConfig|build_rpc_session|ExtensionBinding|ExtensionLease|AsterionPrimeSession\(|PrimeSessionBackend\(|pi_base_command' src/asterion/applications/prime
 rg -n 'asterion\.applications|dotenv|load_operator_environment' src/asterion/agents/prime src/asterion/runtimes/asterion_prime.py
 ```
 
-- [ ] 每条命中分类：禁止的真实模型构造消除；保留的 operator 配置解析/领域 executor 必须说明；不以改名 alias 或启动 callback 绕过检查。
+- [x] 每条命中分类：禁止的真实模型构造消除；保留的 operator 配置解析/领域 executor 必须说明；不以改名 alias 或启动 callback 绕过检查。
 - [ ] 最终 focused 顺序：
 
 ```bash
