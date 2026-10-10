@@ -750,49 +750,69 @@ class PrimeApplication:
             return await self._close_backend()
         self._state = 'closing'
         self._text_closed_keys.update(self._text_limits_by_key)
-        model_closed = True
-        usage = self._text_usage
-        async def close_sessions() -> None:
-            nonlocal model_closed
-            for session in self._text_sessions.values():
-                try:
-                    await session.close()
-                except Exception:
-                    model_closed = False
-        if usage is not None:
-            async with usage.lock:
-                await close_sessions()
-        else:
-            await close_sessions()
-        # stop() reaps independently of an active RPC command's asyncio lock.
         effects_stopped = bridge_closed = extension_closed = True
         resource = self._persistent
         if self._services is not None:
             try:
                 self._services.request_stop()
-            except Exception:
+            except BaseException:
                 effects_stopped = False
-        # Owned workers must stop before a domain close waits on a cell lock.
-        workspace_closed = await self._workspace_owner.close()
+
+        # Fence views first, then start independent cleanup before any await.
+        # A held text usage lock must not prevent the owner from stopping Pi.
+        workspace_task = asyncio.create_task(self._workspace_owner.close())
+        text_tasks = tuple(asyncio.create_task(session.close())
+                           for session in self._text_sessions.values())
+        model_task = domain_task = None
         if resource is not None:
+            async def close_model():
+                await _launch.force_close_rpc(resource.rpc)
+                await resource.rpc.close()
+
+            model_task = asyncio.create_task(close_model())
+        elif self._services is not None:
+            async def close_domain():
+                # Never enter a domain's active-cell lock before worker cleanup.
+                await asyncio.wait((workspace_task,))
+                await self._services.close()
+
+            domain_task = asyncio.create_task(close_domain())
+        tasks = (workspace_task, *text_tasks,
+                 *((model_task,) if model_task is not None else ()),
+                 *((domain_task,) if domain_task is not None else ()))
+        for task in tasks:
+            task.add_done_callback(_consume_cleanup_result)
+        waiting_cancelled = False
+        try:
+            await asyncio.wait(tasks, timeout=5.0)
+        except asyncio.CancelledError:
+            # Revoking the wait does not revoke independent process cleanup.
+            waiting_cancelled = True
+            effects_stopped = False
+        workspace_closed = (_cleanup_succeeded(workspace_task)
+                            and workspace_task.result() is True)
+        model_closed = all(_cleanup_succeeded(task) for task in text_tasks)
+        if model_task is not None:
+            model_closed = model_closed and _cleanup_succeeded(model_task)
+        if domain_task is not None:
+            bridge_closed = _cleanup_succeeded(domain_task)
+        if resource is not None:
+            bridge_task = asyncio.create_task(asyncio.to_thread(resource.bridge.close))
+            bridge_task.add_done_callback(_consume_cleanup_result)
             try:
-                await asyncio.to_thread(resource.rpc.stop)
-                await asyncio.wait_for(resource.rpc.close(), timeout=6)
-            except Exception:
-                model_closed = False
-            try:
-                await asyncio.to_thread(resource.bridge.close)
-            except Exception:
-                bridge_closed = False
+                await asyncio.wait((bridge_task,), timeout=0.1 if waiting_cancelled else 5.0)
+            except asyncio.CancelledError:
+                effects_stopped = False
+            bridge_closed = _cleanup_succeeded(bridge_task)
+            if not bridge_task.done():
+                bridge_task.cancel()
             try:
                 resource.close_descriptors()
-            except Exception:
+            except BaseException:
                 extension_closed = False
-        elif self._services is not None:
-            try:
-                await self._services.close()
-            except Exception:
-                bridge_closed = False
+        for task in tasks:
+            if not task.done():
+                task.cancel()
         self._cleanup = PrimeApplicationCleanup(effects_stopped, model_closed, extension_closed,
                                                bridge_closed, workspace_closed)
         if self._cleanup.complete:

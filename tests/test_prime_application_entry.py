@@ -333,6 +333,24 @@ class TestPrimeApplicationEntry(unittest.TestCase):
                 self.assertEqual(app._text_usage_summary(), usage)
         asyncio.run(run())
 
+    def test_text_usage_lock_does_not_block_owned_process_cleanup(self):
+        app, command = self._text_app()
+
+        async def run():
+            with patch('asterion.agents.prime._launch.text_command', return_value=command):
+                await app.text_model(key='one', limits=self.limits).prompt(
+                    'hello', signal=_NeverCancelled(),
+                )
+            session = app._text_sessions['one']
+            process = session.process
+            async with app._text_usage.lock:
+                async with asyncio.timeout(1):
+                    cleanup = await app.close()
+            self.assertTrue(cleanup.complete)
+            self.assertIsNone(session.process)
+            self.assertIsNotNone(process.poll())
+        asyncio.run(run())
+
     def test_unlisted_application_runs_without_provider_lookup(self):
         app, command = self._text_app()
         async def run():
@@ -623,6 +641,121 @@ class TestPrimePersistentOwner(unittest.TestCase):
         self.assertFalse(cleanup.model_closed)
         self.assertTrue(cleanup.bridge_closed and cleanup.extension_closed and cleanup.workspace_closed)
         self.assertTrue(services.stopped)
+
+    def test_cancelled_cleanup_stage_does_not_skip_independent_resources(self):
+        from types import SimpleNamespace
+
+        for interrupted in ('workspace', 'rpc', 'bridge'):
+            with self.subTest(interrupted=interrupted):
+                app, services = self._persistent_app(), _Services()
+                app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+                order = []
+
+                async def close_workspace():
+                    order.append('workspace')
+                    if interrupted == 'workspace':
+                        raise asyncio.CancelledError()
+                    return True
+
+                async def close_rpc():
+                    order.append('rpc.close')
+                    self.assertLess(order.index('stop'), order.index('rpc.close'))
+                    if interrupted == 'rpc':
+                        raise asyncio.CancelledError()
+
+                def close_bridge():
+                    order.append('bridge')
+                    if interrupted == 'bridge':
+                        raise asyncio.CancelledError()
+
+                app._workspace_owner = SimpleNamespace(close=close_workspace)
+                app._persistent = SimpleNamespace(
+                    rpc=SimpleNamespace(stop=lambda: order.append('stop'), close=close_rpc),
+                    bridge=SimpleNamespace(close=close_bridge),
+                    close_descriptors=lambda: order.append('descriptors'),
+                )
+                cleanup = None
+                try:
+                    cleanup = asyncio.run(app.close())
+                except asyncio.CancelledError:
+                    pass
+                self.assertIn('stop', order)
+                self.assertIn('bridge', order)
+                self.assertIn('descriptors', order)
+                self.assertIsNotNone(cleanup)
+                self.assertFalse(cleanup.complete)
+                self.assertTrue(cleanup.extension_closed)
+                self.assertTrue(services.stopped)
+                self.assertEqual(app.state, 'closing')
+
+    def test_outer_close_cancellation_keeps_bridge_and_descriptors_reachable(self):
+        from types import SimpleNamespace
+
+        app, services = self._persistent_app(), _Services()
+        app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+        order = []
+
+        async def run():
+            rpc_closing = asyncio.Event()
+
+            async def close_rpc():
+                rpc_closing.set()
+                await asyncio.Event().wait()
+
+            app._persistent = SimpleNamespace(
+                rpc=SimpleNamespace(stop=lambda: order.append('stop'), close=close_rpc),
+                bridge=SimpleNamespace(close=lambda: order.append('bridge')),
+                close_descriptors=lambda: order.append('descriptors'),
+            )
+            shutdown = asyncio.create_task(app.close())
+            async with asyncio.timeout(1):
+                await rpc_closing.wait()
+                shutdown.cancel()
+                cleanup = None
+                try:
+                    cleanup = await shutdown
+                except asyncio.CancelledError:
+                    pass
+            self.assertEqual(order, ['stop', 'bridge', 'descriptors'])
+            self.assertIsNotNone(cleanup)
+            self.assertFalse(cleanup.complete)
+            self.assertFalse(cleanup.model_closed)
+            self.assertTrue(cleanup.bridge_closed and cleanup.extension_closed)
+        asyncio.run(run())
+
+    def test_cancelled_text_close_does_not_skip_other_owned_cleanup(self):
+        from types import SimpleNamespace
+
+        app = prepare_prime_application(self.spec, self.operator, authorization=self.limits)
+        order = []
+
+        async def cancelled_close():
+            order.append('text.one')
+            raise asyncio.CancelledError()
+
+        async def close_other():
+            order.append('text.two')
+
+        async def close_workspace():
+            order.append('workspace')
+            return True
+
+        app._text_sessions.update({
+            'one': SimpleNamespace(close=cancelled_close),
+            'two': SimpleNamespace(close=close_other),
+        })
+        app._workspace_owner = SimpleNamespace(close=close_workspace)
+        cleanup = None
+        try:
+            cleanup = asyncio.run(app.close())
+        except asyncio.CancelledError:
+            pass
+        self.assertIn('text.two', order)
+        self.assertIn('workspace', order)
+        self.assertIsNotNone(cleanup)
+        self.assertFalse(cleanup.complete)
+        self.assertFalse(cleanup.model_closed)
+        self.assertTrue(cleanup.workspace_closed)
 
     def test_workspace_api_does_not_accept_a_caller_worker(self):
         import inspect
