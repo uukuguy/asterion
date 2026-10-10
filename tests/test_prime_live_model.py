@@ -112,33 +112,35 @@ class TestLiveModelSession(unittest.IsolatedAsyncioTestCase):
         await self.session.close()
         self.assertFalse(config_root.exists())
 
-    async def test_explicit_operator_profile_keeps_auth_and_isolates_settings(self):
+    async def test_explicit_operator_profile_is_passed_through_without_file_access(self):
         profile = Path(self.temp.name) / 'profile'
         profile.mkdir()
-        (profile / 'auth.json').write_text('{"approved": "private-auth"}')
-        (profile / 'models.json').write_text('{"providers": {}}')
-        session = CoreTextSession(command=('fake-pi',),
-                                  environment={'PI_CODING_AGENT_DIR': str(profile)},
-                                  cwd=Path(self.temp.name), limits=PrimeTextLimits(300),
-                                  provider='openai-codex', model='gpt-6.1-sol')
-        isolated = Path(session._rpc.config.environment['PI_CODING_AGENT_DIR'])
-        try:
-            self.assertNotEqual(isolated, profile)
-            self.assertEqual((isolated / 'auth.json').read_text(),
-                             (profile / 'auth.json').read_text())
-            self.assertEqual(json.loads((isolated / 'models.json').read_text()), {'providers': {}})
-            self.assertEqual((profile / 'models.json').read_text(), '{"providers": {}}')
-        finally:
-            await session.close()
-        self.assertFalse(isolated.exists())
-        self.assertTrue((profile / 'auth.json').exists())
+        auth = profile / 'auth.json'
+        models = profile / 'models.json'
+        auth.write_text('{"approved": "private-auth"}')
+        models.write_text('{"providers": {}}')
+        before = {path.name: path.read_bytes() for path in (auth, models)}
+        with (patch.object(Path, 'read_text', side_effect=AssertionError('profile read')),
+              patch.object(Path, 'write_text', side_effect=AssertionError('profile write')),
+              patch.object(Path, 'chmod', side_effect=AssertionError('profile chmod')),
+              patch.object(Path, 'unlink', side_effect=AssertionError('profile delete'))):
+            session = CoreTextSession(command=('fake-pi',),
+                                      environment={'PI_CODING_AGENT_DIR': str(profile)},
+                                      cwd=Path(self.temp.name), limits=PrimeTextLimits(300),
+                                      provider='openai-codex', model='gpt-6.1-sol')
+            try:
+                self.assertEqual(session._rpc.config.environment['PI_CODING_AGENT_DIR'], str(profile))
+                self.assertIsNone(session._config_root)
+            finally:
+                await session.close()
+        self.assertEqual({path.name: path.read_bytes() for path in (auth, models)}, before)
 
     async def test_model_cap_mismatch_rejected_before_prompt(self):
         script = Path(self.temp.name) / "bad-producer.py"
         script.write_text(_PRODUCER.replace('"maxTokens": 512', '"maxTokens": 2048'))
         other = LiveModelSession(
             command=(sys.executable, "-I", str(script)),
-            environment={},
+            environment={"PI_CODING_AGENT_DIR": self.temp.name},
             cwd=Path(self.temp.name),
         )
         try:

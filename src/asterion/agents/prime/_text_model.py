@@ -6,7 +6,6 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 from pathlib import Path
-import shutil
 import tempfile
 import time
 from typing import TYPE_CHECKING
@@ -87,27 +86,22 @@ class LiveModelSession:
         self._config_root = None
         try:
             remaining = self._usage.remaining(self._limits)
-            self._config_root = tempfile.TemporaryDirectory(prefix='asterion-prime-pi-')
-            root = Path(self._config_root.name)
-            # Keep operator-approved OAuth/profile material while isolating settings.
-            # Only explicit profile files are copied; core never discovers credentials.
-            profile = environment.get('PI_CODING_AGENT_DIR')
-            if profile is not None:
-                for name in ('auth.json', 'models.json'):
-                    source = Path(profile) / name
-                    if source.is_file():
-                        shutil.copyfile(source, root / name)
-                        (root / name).chmod(0o600)
-            path = root / 'models.json'
-            material = json.loads(path.read_text()) if path.exists() else {}
-            if self._limits.provider_output_tokens is not None:
-                provider_config = material.setdefault('providers', {}).setdefault(provider, {})
-                override = provider_config.setdefault('modelOverrides', {}).setdefault(model, {})
-                override['maxTokens'] = self._limits.provider_output_tokens
-            path.write_text(json.dumps(material, separators=(',', ':')))
-            path.chmod(0o600)
-            config = PiRpcConfig(command=command,
-                                 environment={**environment, 'PI_CODING_AGENT_DIR': str(root)},
+            rpc_environment = dict(environment)
+            if 'PI_CODING_AGENT_DIR' not in rpc_environment:
+                self._config_root = tempfile.TemporaryDirectory(prefix='asterion-prime-pi-')
+                root = Path(self._config_root.name)
+                material = {}
+                if self._limits.provider_output_tokens is not None:
+                    material = {'providers': {provider: {'modelOverrides': {
+                        model: {'maxTokens': self._limits.provider_output_tokens},
+                    }}}}
+                path = root / 'models.json'
+                path.write_text(json.dumps(material, separators=(',', ':')))
+                path.chmod(0o600)
+                rpc_environment['PI_CODING_AGENT_DIR'] = str(root)
+            # Explicit profiles remain operator-owned. Only Pi reads them;
+            # get_state verifies the effective model and cap before effects.
+            config = PiRpcConfig(command=command, environment=rpc_environment,
                                  cwd=cwd, deadline_seconds=remaining, compact_events=False)
             self._rpc = _launch.text_rpc(config)
         except Exception:
@@ -165,6 +159,14 @@ class LiveModelSession:
         try:
             usage.remaining(limits)
             if not self._opened or self._closed or self._closing or signal.cancelled or type(text) is not str or not text:
+                raise LiveModelError()
+            consumed = (
+                (usage.input_tokens, limits.max_input_tokens),
+                (usage.output_tokens, limits.max_output_tokens),
+                (usage.output_bytes, limits.max_output_bytes),
+                (_cost(usage.input_tokens, usage.output_tokens, limits.price), limits.max_cost_micros),
+            )
+            if any(ceiling is not None and value >= ceiling for value, ceiling in consumed):
                 raise LiveModelError()
             encoded = text.encode('utf-8')
             if _over(usage.prompts + 1, limits.max_prompts) or _over(usage.input_bytes + len(encoded), limits.max_input_bytes):
@@ -227,7 +229,8 @@ class LiveModelSession:
         self._opened = False
         try:
             self._rpc.stop()
-            self._config_root.cleanup()
+            if self._config_root is not None:
+                self._config_root.cleanup()
         except BaseException:
             self._usage.blocked = True
             raise LiveModelError() from None

@@ -6,7 +6,8 @@ from pathlib import Path
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
+from asterion.agents.prime import _launch
 
 from asterion.agents.prime.application import (
     PrimeApplicationSpec,
@@ -265,6 +266,41 @@ class TestPrimeApplicationEntry(unittest.TestCase):
                 self.assertEqual(app._text_usage.prompts, 1)
                 self.assertTrue((await app.close()).complete)
         asyncio.run(run())
+
+    def test_consumed_ceilings_reject_next_key_before_rpc_dispatch(self):
+        cases = (
+            ('max_input_tokens', 1000, 1000),
+            ('max_output_tokens', 500, 500),
+            ('max_output_bytes', len('private answer'.encode()), len('private answer'.encode())),
+            ('max_cost_micros', 900, 900),
+            ('max_input_tokens', 2000, 500),
+        )
+        for field, approved, requested in cases:
+            with self.subTest(field=field, approved=approved, requested=requested):
+                limits = replace(self.limits, **{field: approved}, price=ModelPrice(300000, 1200000))
+                app, command = self._text_app(limits)
+                dispatches = []
+                original_rpc = _launch.text_rpc
+                def make_rpc(config):
+                    rpc = original_rpc(config)
+                    rpc.prompt = AsyncMock(wraps=rpc.prompt)
+                    dispatches.append(rpc.prompt)
+                    return rpc
+                async def run():
+                    try:
+                        with (patch('asterion.agents.prime._launch.text_command', return_value=command),
+                              patch('asterion.agents.prime._launch.text_rpc', side_effect=make_rpc)):
+                            await app.text_once(key='one', text='hello', limits=limits,
+                                                signal=_NeverCancelled())
+                            with self.assertRaises(LiveModelError):
+                                await app.text_once(key='two', text='hello',
+                                                    limits=replace(limits, **{field: requested}),
+                                                    signal=_NeverCancelled())
+                            self.assertEqual(sum(call.await_count for call in dispatches), 1)
+                            self.assertEqual(app._text_usage.prompts, 1)
+                    finally:
+                        await app.close()
+                asyncio.run(run())
 
     def test_hooks_and_backend_inputs_are_immutable_and_checked(self):
         with self.assertRaises(ProtocolError):
