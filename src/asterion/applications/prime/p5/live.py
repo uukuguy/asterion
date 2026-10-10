@@ -8,19 +8,22 @@ the public composed route owns the terminal receipt.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+import time
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 import os
 from pathlib import Path
 import secrets
-from typing import Protocol
 
+from asterion.agents.prime.application import (
+    PrimeApplication, PrimeApplicationSpec, PrimeModelView, PrimeTextLimits, prepare_prime_application,
+)
+from asterion.agents.prime.deadline import TaskDeadline
 from asterion.applications.prime.p5 import operator
 from asterion.applications.prime.live_model import (
-    LiveModelSession,
-    resolve_live_model_launch,
+    bounded_text_limits,
+    resolve_live_model_context,
 )
 from asterion.applications.prime.p5.oracle import P5Oracle
 from asterion.applications.prime.p5.runtime_binding import P5_RUNTIME_OPTIONS
@@ -35,12 +38,6 @@ from asterion.runtime.host import CancellationSignal
 class P5LiveError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("P5 live verification failed")
-
-
-class ModelSession(Protocol):
-    async def open(self, *, signal: CancellationSignal) -> None: ...
-    async def prompt(self, text: str, *, signal: CancellationSignal) -> object: ...
-    async def close(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,8 +85,8 @@ def _candidate(text: object) -> dict[str, int]:
 
 
 class _CandidateWork:
-    def __init__(self, session: ModelSession, run_id: str) -> None:
-        self.session = session
+    def __init__(self, model: PrimeModelView, run_id: str) -> None:
+        self.model = model
         self.run_id = run_id
         self.candidates: list[dict[str, int]] = []
         self.verdicts: list[dict[str, object]] = []
@@ -102,7 +99,7 @@ class _CandidateWork:
         active = signal if signal is not None else operator._NeverCancelled()
         if active.cancelled:
             raise asyncio.CancelledError()
-        reply = await self.session.prompt(prompt, signal=active)
+        reply = await self.model.prompt(prompt, signal=active)
         usage = {
             key: getattr(reply.usage, key)
             for key in ("input_tokens", "output_tokens", "cost_micros")
@@ -175,18 +172,18 @@ class _CandidateWork:
 
 async def run_live_verification(
     *,
-    session_factory: Callable[[str, Path], ModelSession],
+    prime: PrimeApplication,
     private_root: Path,
-    command_sha256: str,
-    binding_sha256: str,
+    limits: PrimeTextLimits | None = None,
     signal: CancellationSignal | None = None,
 ) -> P5LiveResult:
     """Run one fixed model proposal through semantic verification and P5 composition."""
     active = signal if signal is not None else operator._NeverCancelled()
     if active.cancelled:
         raise asyncio.CancelledError()
-    session: ModelSession | None = None
     try:
+        limits = bounded_text_limits() if limits is None else limits
+        identity_summary = prime._text_identity_summary()
         root = private_root.absolute()
         root.mkdir(parents=True, mode=0o700, exist_ok=False)
         run_id = "p5-live-" + secrets.token_hex(12)
@@ -196,22 +193,21 @@ async def run_live_verification(
             session_id=run_id,
             continuation_id="p5-live-continuation",
             worker_sha=_digest({"session_lease": run_id}),
-            pi_command_sha256=command_sha256,
-            extension_binding_fingerprint=binding_sha256,
+            pi_command_sha256=identity_summary.command_sha256,
+            extension_binding_fingerprint=identity_summary.binding_sha256,
             ceilings_sha256=_digest(dict(P5_RUNTIME_OPTIONS)),
         )
-        session = session_factory("loop", root)
+        model = prime.text_model(key="candidate", limits=limits)
         resources = operator._OperatorResources(
             mode="live",
             private_root=root,
             root_run_id=run_id,
             root_identity=identity,
             p5_oracle=P5Oracle(),
-            pi_extension=session,
+            pi_extension=prime,
             private_trace=None,
         )
-        work = _CandidateWork(session, run_id)
-        await session.open(signal=active)
+        work = _CandidateWork(model, run_id)
         loop = await operator._open_bounded_autonomy_loop(
             work.propose,
             work.verify,
@@ -221,11 +217,10 @@ async def run_live_verification(
             loop,
             resources,
             signal=active,
-            finalize=session.close,
+            prime=prime,
         )
         if receipt.terminal_reason != "success":
             raise P5LiveError()
-        session = None
         evidence = {
             "candidates": work.candidates,
             "verdicts": work.verdicts,
@@ -255,9 +250,10 @@ async def run_live_verification(
     except Exception:
         raise P5LiveError() from None
     finally:
-        if session is not None:
-            async with asyncio.timeout(5):
-                await session.close()
+        async with asyncio.timeout(5):
+            cleanup = await prime.close()
+        if not cleanup.complete:
+            raise P5LiveError()
 
 
 async def run_operator_live(environment: dict[str, str]) -> P5LiveResult:
@@ -270,22 +266,19 @@ async def run_operator_live(environment: dict[str, str]) -> P5LiveResult:
         private_base = Path(private_text).resolve()
         private_base.mkdir(mode=0o700, parents=True, exist_ok=True)
         private_root = private_base / ("live-" + secrets.token_hex(12))
-        launch = resolve_live_model_launch(Path(root_text), environment)
-        return await run_live_verification(
-            session_factory=lambda role, cwd: LiveModelSession(
-                command=launch.command,
-                environment=launch.environment,
-                cwd=launch.cwd,
-            ),
-            private_root=private_root,
-            command_sha256=_digest(launch.command),
-            binding_sha256=_digest({"extension": "none", "task": "p5-offset"}),
+        limits = bounded_text_limits()
+        deadline = TaskDeadline(deadline_monotonic=time.monotonic() + limits.deadline_seconds,
+                                deadline_epoch=time.time() + limits.deadline_seconds)
+        context = resolve_live_model_context(Path(root_text), environment, task_deadline=deadline)
+        prime = prepare_prime_application(
+            PrimeApplicationSpec("prime.bounded-autonomy", "1.0.0", "text-only"),
+            context, authorization=limits,
         )
+        return await run_live_verification(prime=prime, private_root=private_root, limits=limits)
     except asyncio.CancelledError:
         raise
     except Exception:
         raise P5LiveError() from None
-
 
 def main() -> int:
     try:

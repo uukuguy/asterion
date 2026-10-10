@@ -7,15 +7,15 @@ remain private; the selected composed application emits its native receipt.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 from hashlib import sha256
 import json
 from pathlib import Path
 import secrets
-from typing import Protocol
 
+from asterion.agents.prime.application import PrimeApplication, PrimeTextLimits
+from asterion.applications.prime.live_model import bounded_text_limits
 from asterion.applications.prime.p3 import operator
 from asterion.applications.prime.p3.host import P3RootResult
 from asterion.applications.prime.p3.oracle import P3Oracle
@@ -28,12 +28,6 @@ from asterion.runtime.host import CancellationSignal
 class P3LiveError(RuntimeError):
     def __init__(self) -> None:
         super().__init__("P3 live verification failed")
-
-
-class ModelSession(Protocol):
-    async def open(self, *, signal: CancellationSignal) -> None: ...
-    async def prompt(self, text: str, *, signal: CancellationSignal) -> object: ...
-    async def close(self) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,10 +80,10 @@ def _answer(text: object, key: str, expected: int) -> dict[str, int]:
 class P3LiveHost(operator._OperatorP3RuntimeHost):
     """Host execution reached exclusively through the composed P3 runtime."""
 
-    def __init__(self, resources, session_factory):
+    def __init__(self, resources, prime: PrimeApplication, limits: PrimeTextLimits):
         super().__init__(resources)
-        self._factory = session_factory
-        self._sessions: list[ModelSession] = []
+        self._prime = prime
+        self._limits = limits
         self._usage: list[dict[str, int]] = []
         self.evidence_sha256 = ""
 
@@ -115,28 +109,26 @@ class P3LiveHost(operator._OperatorP3RuntimeHost):
     async def _prompt(self, role, text, signal, *, child_run_id=None):
         if signal.cancelled:
             raise asyncio.CancelledError()
-        cwd = self._resources.private_root / role
-        cwd.mkdir(mode=0o700)
-        session = self._factory(role, cwd)
-        if any(session is prior for prior in self._sessions):
-            raise P3LiveError()
-        self._sessions.append(session)
+        before = self._prime._text_usage_summary()
         try:
-            await session.open(signal=signal)
-            reply = await session.prompt(text, signal=signal)
-            usage = self._record_usage(reply)
-            if child_run_id is not None:
+            reply = await self._prime.text_once(
+                key=role, text=text, limits=self._limits, signal=signal,
+            )
+        finally:
+            after = self._prime._text_usage_summary()
+            # Accounting releases admission only for a known, finished effect.
+            # A paid reply stays known even if Prime cannot reap its process.
+            if (child_run_id is not None and not after.unknown_effect
+                    and after.prompts > before.prompts):
                 self._resources.child_runner.record_child_cost(
-                    Decimal(usage["cost_micros"]) / Decimal(1_000_000),
+                    Decimal(after.cost_micros - before.cost_micros) / Decimal(1_000_000),
                     child_run_id=child_run_id,
                 )
-            self._check_budget()
-            if signal.cancelled:
-                raise asyncio.CancelledError()
-            return reply.text
-        finally:
-            async with asyncio.timeout(5):
-                await session.close()
+        self._record_usage(reply)
+        self._check_budget()
+        if signal.cancelled:
+            raise asyncio.CancelledError()
+        return reply.text
 
     async def run_root(self, *, parent_run_id, child_request, signal):
         resources = self._resources
@@ -200,8 +192,8 @@ class P3LiveHost(operator._OperatorP3RuntimeHost):
 
 
 async def run_live_verification(
-    *, session_factory: Callable[[str, Path], ModelSession], private_root: Path,
-    command_sha256: str, binding_sha256: str,
+    *, prime: PrimeApplication, private_root: Path,
+    limits: PrimeTextLimits | None = None,
     signal: CancellationSignal | None = None,
     child_runner: ChildRunnerHostService | None = None,
 ) -> P3LiveResult:
@@ -210,6 +202,8 @@ async def run_live_verification(
     if active_signal.cancelled:
         raise asyncio.CancelledError()
     try:
+        limits = bounded_text_limits() if limits is None else limits
+        identity_summary = prime._text_identity_summary()
         private_root = private_root.absolute()
         private_root.mkdir(mode=0o700, parents=True, exist_ok=False)
         run_id = "p3-live-" + secrets.token_hex(12)
@@ -217,8 +211,8 @@ async def run_live_verification(
             private_root=private_root, generation=1, session_id=run_id,
             continuation_id="p3-live-continuation",
             worker_sha=_digest({"session_lease": run_id, "role": "root"}),
-            pi_command_sha256=command_sha256,
-            extension_binding_fingerprint=binding_sha256,
+            pi_command_sha256=identity_summary.command_sha256,
+            extension_binding_fingerprint=identity_summary.binding_sha256,
             ceilings_sha256=_digest(dict(P3_RUNTIME_OPTIONS)),
         )
         resources = operator._OperatorResources(
@@ -229,9 +223,9 @@ async def run_live_verification(
                 worker_identity_sha256=_digest({"session_lease": run_id, "role": "child"}),
             ),
             child_runner=child_runner if child_runner is not None else await operator._open_child_runner(),
-            p3_oracle=P3Oracle(), pi_extension=session_factory, private_trace=None,
+            p3_oracle=P3Oracle(), pi_extension=prime, private_trace=None,
         )
-        host = P3LiveHost(resources, session_factory)
+        host = P3LiveHost(resources, prime, limits)
         async with asyncio.timeout(60):
             public = await operator._invoke_composed_success(
                 resources, active_signal, session_backend=host,
@@ -247,6 +241,11 @@ async def run_live_verification(
         raise asyncio.CancelledError() from None
     except Exception:
         raise P3LiveError() from None
+    finally:
+        async with asyncio.timeout(5):
+            cleanup = await prime.close()
+        if not cleanup.complete:
+            raise P3LiveError()
 
 
 __all__ = ("P3LiveError", "P3LiveHost", "P3LiveResult", "run_live_verification")

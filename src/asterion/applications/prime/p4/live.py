@@ -8,17 +8,16 @@ prompt or assuming that Python heap objects survived the prior process.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from pathlib import Path
 import secrets
 import sys
-import tempfile
-from typing import Protocol
 
+from asterion.agents.prime.application import PrimeApplication, PrimeTextLimits
 from asterion.agents.prime.store import FilePrimeSessionStore
+from asterion.applications.prime.live_model import bounded_text_limits
 from asterion.applications.prime.p4 import operator
 from asterion.applications.prime.p4.host import P4CommitReceipt
 from asterion.applications.prime.p4.oracle import P4Oracle
@@ -30,12 +29,6 @@ from asterion.runtime.host import CancellationSignal
 class P4LiveError(RuntimeError):
     def __init__(self):
         super().__init__("P4 live continuity failed")
-
-
-class ModelSession(Protocol):
-    async def open(self, *, signal: CancellationSignal) -> None: ...
-    async def prompt(self, text: str, *, signal: CancellationSignal) -> object: ...
-    async def close(self) -> None: ...
 
 
 class _NeverCancelled:
@@ -110,11 +103,12 @@ class _LiveContinuityStore(ContinuityStoreHostService):
 class P4LiveHost(operator._OperatorP4RuntimeHost):
     """Live host using existing continuity storage and public composed runtime."""
 
-    def __init__(self, *, mode, private_root, session_factory, command_sha256, binding_sha256):
+    def __init__(self, *, mode, private_root, prime: PrimeApplication, limits: PrimeTextLimits | None = None):
+        identity_summary = prime._text_identity_summary()
+        command_sha256 = identity_summary.command_sha256
+        binding_sha256 = identity_summary.binding_sha256
         self.mode = mode
         self._store = None
-        self._temporary = None
-        self._session = None
         self._worker_closed = False
         self._prior = None
         self._state = None
@@ -122,7 +116,8 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
         self._checkpoint = None
         self._result_sha = None
         self.usage = None
-        self._factory = session_factory
+        self._prime = prime
+        self._limits = bounded_text_limits() if limits is None else limits
         self._private_root = private_root
         ceilings_sha = _digest(dict(P4_RUNTIME_OPTIONS))
         try:
@@ -168,8 +163,7 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                 self._store = FilePrimeSessionStore(private_root, identity)
             self.continuity = _LiveContinuityStore(self._store)
             self.oracle = object()
-            self.extension = session_factory
-            self._temporary = tempfile.TemporaryDirectory(prefix="p4-live-session-")
+            self.extension = prime
         except BaseException:
             if self._store is not None:
                 self._store.close()
@@ -197,11 +191,11 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
             raise P4LiveError()
         self.continuity.use_continued(self._store)
 
-    async def _close_model(self):
-        if self._session is not None and not self._worker_closed:
-            async with asyncio.timeout(5):
-                await self._session.close()
-            self._worker_closed = True
+    async def _close_prime(self):
+        async with asyncio.timeout(5):
+            cleanup = await self._prime.close()
+        if not cleanup.complete:
+            raise P4LiveError()
 
     async def commit_checkpoint(self, *, run_id, call, signal):
         if self._checkpoint is not None or signal.cancelled:
@@ -223,10 +217,12 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                 '"token" copied exactly from prior, "prior_total" copied from prior total, '
                 'and "total" equal to prior total plus increment. Use no tools. TASK_JSON='
             )
-        self._session = self._factory(self.mode, Path(self._temporary.name))
         try:
-            await self._session.open(signal=signal)
-            reply = await self._session.prompt(prompt + _encoded(task).decode(), signal=signal)
+            reply = await self._prime.text_once(
+                key=self.mode, text=prompt + _encoded(task).decode(),
+                limits=self._limits, signal=signal,
+            )
+            self._worker_closed = True
             usage = {key: getattr(reply.usage, key) for key in ("input_tokens", "output_tokens", "cost_micros")}
             if (
                 any(type(value) is not int or value < 0 for value in usage.values())
@@ -254,7 +250,7 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                 raise asyncio.CancelledError()
         finally:
             # No checkpoint is signed until the model process has been reaped.
-            await self._close_model()
+            await self._close_prime()
         if signal.cancelled:
             raise asyncio.CancelledError()
         encoded = _encoded(result)
@@ -276,23 +272,20 @@ class P4LiveHost(operator._OperatorP4RuntimeHost):
                                self.identity.generation, len(encoded))
 
     async def report_recovery_stopped(self, *, run_id, pending_classification):
-        await self._close_model()
+        await self._close_prime()
         self._classification = pending_classification
 
     async def close(self):
         try:
-            await self._close_model()
+            await self._close_prime()
         finally:
             if self._store is not None:
                 self._store.close()
-            if self._temporary is not None:
-                self._temporary.cleanup()
 
 
 async def run_live_round(
     *, mode: str, private_root: Path,
-    session_factory: Callable[[str, Path], ModelSession],
-    command_sha256: str, binding_sha256: str,
+    prime: PrimeApplication, limits: PrimeTextLimits | None = None,
     signal: CancellationSignal | None = None,
 ) -> P4LiveResult:
     """Run one fixed commit or recover round in the calling operator process."""
@@ -302,8 +295,7 @@ async def run_live_round(
     host = None
     try:
         host = P4LiveHost(
-            mode=mode, private_root=private_root.absolute(), session_factory=session_factory,
-            command_sha256=command_sha256, binding_sha256=binding_sha256,
+            mode=mode, private_root=private_root.absolute(), prime=prime, limits=limits,
         )
         preflight = operator._Preflight(
             private_root.parent, Path(sys.executable), private_root, mode, None,
@@ -328,6 +320,10 @@ async def run_live_round(
                 await host.close()
             except Exception:
                 raise P4LiveError() from None
+        else:
+            cleanup = await prime.close()
+            if not cleanup.complete:
+                raise P4LiveError()
 
 
 __all__ = ("P4LiveError", "P4LiveHost", "P4LiveResult", "run_live_round")

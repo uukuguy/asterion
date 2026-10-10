@@ -446,11 +446,11 @@ def _verify_callable_factory(
 class _ComposedLoopHost:
     """Own the same loop used by the operator's public composed execution."""
 
-    def __init__(self, loop, resources, finalize=None):
+    def __init__(self, loop, resources, prime=None):
         self.loop = loop
         self.resources = resources
         self.receipt = None
-        self.finalize = finalize
+        self.prime = prime
 
     def validate_runtime_services(self, services):
         from asterion.applications.prime.p5.runtime_binding import P5_HOST_CAPABILITIES
@@ -483,16 +483,16 @@ class _ComposedLoopHost:
 
         if self.receipt is None:
             raise P5OperatorError()
-        if self.finalize is not None:
-            await self.finalize()
+        if self.prime is not None:
+            cleanup = await self.prime.close()
+            if not cleanup.complete:
+                raise P5OperatorError()
         return P5Finalization("completed", self.receipt.receipt_sha256)
 
 
-async def _run_composed_loop(loop, resources, signal=None, finalize=None):
-    from asterion.applications.provider import compose_installed_provider
-    from asterion.applications.prime.provider import (
-        create_prime_bounded_autonomy_provider,
-    )
+async def _run_composed_loop(loop, resources, signal=None, prime=None):
+    from asterion.assembly.protocol import resolve_assembly
+    from asterion.capabilities.catalog import discover_capabilities
     from asterion.applications.prime.p5.runtime_binding import (
         build_p5_runtime,
         P5_RUNTIME_OPTIONS,
@@ -500,17 +500,12 @@ async def _run_composed_loop(loop, resources, signal=None, finalize=None):
     from asterion.capabilities.prime_bounded_autonomy_native.provider import (
         create_prime_bounded_autonomy_native_package,
     )
-    from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+    from asterion.runtime.factory import RuntimeFactoryContext
     from asterion.runner.composed import run_composed_application
 
-    host = _ComposedLoopHost(loop, resources, finalize)
+    host = _ComposedLoopHost(loop, resources, prime)
     package = create_prime_bounded_autonomy_native_package()
-    provider = compose_installed_provider(
-        create_prime_bounded_autonomy_provider(),
-        runtime_factories=RuntimeFactoryRegistry(()),
-        installed_packages=(package,),
-    )
-    plan = provider.applications[0].assemblies[0].plan
+    assembly_path = Path(__file__).resolve().parent.parent / "assemblies/prime-bounded-autonomy.json"
     services = {
         "prime.ipython": loop,
         "prime.pi-extension": resources.pi_extension or host,
@@ -524,11 +519,15 @@ async def _run_composed_loop(loop, resources, signal=None, finalize=None):
             application_id="prime.bounded-autonomy",
             application_version="1.0.0",
             runtime_id="asterion.prime",
-            assembly_path=Path(__file__).resolve().parent.parent
-            / "assemblies/prime-bounded-autonomy.json",
+            assembly_path=assembly_path,
             options=P5_RUNTIME_OPTIONS,
             host_services=services,
         )
+    )
+    plan = resolve_assembly(
+        json.loads(assembly_path.read_text()),
+        catalog=discover_capabilities(package.catalog_roots),
+        runtime_manifest=runtime.manifest.to_mapping(),
     )
     result = await run_composed_application(
         plan,

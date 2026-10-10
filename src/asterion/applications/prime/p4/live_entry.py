@@ -8,18 +8,16 @@ new root; this entry never removes or overwrites an existing user's run.
 from __future__ import annotations
 
 import asyncio
+import time
 from dataclasses import asdict
-from hashlib import sha256
 import json
 import os
 from pathlib import Path
 
-from asterion.applications.prime.live_model import LiveModelSession, resolve_live_model_launch
+from asterion.applications.prime.live_model import bounded_text_limits, resolve_live_model_context
+from asterion.agents.prime.application import PrimeApplicationSpec, prepare_prime_application
+from asterion.agents.prime.deadline import TaskDeadline
 from asterion.applications.prime.p4.live import P4LiveError, run_live_round
-
-
-def _digest(value):
-    return sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 async def _run(environment):
@@ -28,16 +26,15 @@ async def _run(environment):
     private_root = environment.get("ASTERION_PRIME_P4_PRIVATE_ROOT")
     if mode not in {"commit", "recover"} or not operator_root or not private_root:
         raise P4LiveError()
-    launch = resolve_live_model_launch(Path(operator_root), environment)
-
-    def factory(mode, cwd):
-        return LiveModelSession(command=launch.command, environment=launch.environment, cwd=cwd)
-
-    return await run_live_round(
-        mode=mode, private_root=Path(private_root), session_factory=factory,
-        command_sha256=_digest(launch.command),
-        binding_sha256=_digest({"binding": "prime.live-model", "tools": [], "extensions": []}),
+    limits = bounded_text_limits()
+    deadline = TaskDeadline(deadline_monotonic=time.monotonic() + limits.deadline_seconds,
+                            deadline_epoch=time.time() + limits.deadline_seconds)
+    context = resolve_live_model_context(Path(operator_root), environment, task_deadline=deadline)
+    prime = prepare_prime_application(
+        PrimeApplicationSpec("prime.long-session-continuity", "1.0.0", "text-only"),
+        context, authorization=limits,
     )
+    return await run_live_round(mode=mode, private_root=Path(private_root), prime=prime, limits=limits)
 
 
 def main() -> int:

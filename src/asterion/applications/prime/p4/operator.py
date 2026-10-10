@@ -26,6 +26,8 @@ import subprocess
 import sys
 from types import MappingProxyType
 
+from asterion.assembly.protocol import resolve_assembly
+from asterion.capabilities.catalog import discover_capabilities
 from asterion.agents.prime.state import (
     PrimeBackendIdentity,
     PrimeCheckpoint,
@@ -48,17 +50,13 @@ from asterion.applications.prime.p4.runtime_binding import (
     P4_RUNTIME_OPTIONS,
     build_p4_runtime,
 )
-from asterion.applications.prime.provider import (
-    create_prime_long_session_continuity_provider,
-)
 from asterion.applications.prime.services import ContinuityStoreHostService
-from asterion.applications.provider import compose_installed_provider
 from asterion.capabilities.prime_long_session_continuity_native.provider import (
     P4_INPUT_PRESET,
     create_prime_long_session_continuity_native_package,
 )
 from asterion.runner.composed import run_composed_application
-from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+from asterion.runtime.factory import RuntimeFactoryContext
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -486,13 +484,7 @@ async def _invoke_composed_round(
     signal=None,
 ) -> P4PublicResult:
     package = create_prime_long_session_continuity_native_package()
-    provider = compose_installed_provider(
-        create_prime_long_session_continuity_provider(),
-        runtime_factories=RuntimeFactoryRegistry(()),
-        installed_packages=(package,),
-    )
-    application = provider.applications[0]
-    assembly = application.assemblies[0]
+    assembly_path = Path(__file__).resolve().parent.parent / "assemblies/prime-long-session-continuity.json"
     if host is None:
         host = _OperatorP4RuntimeHost(preflight)
     try:
@@ -509,14 +501,19 @@ async def _invoke_composed_round(
                 "prime.long-session-continuity",
                 "1.0.0",
                 "asterion.prime",
-                assembly.path,
+                assembly_path,
                 P4_RUNTIME_OPTIONS,
                 services,
             )
         )
+        plan = resolve_assembly(
+            json.loads(assembly_path.read_text()),
+            catalog=discover_capabilities(package.catalog_roots),
+            runtime_manifest=runtime.manifest.to_mapping(),
+        )
         result = await run_composed_application(
-            assembly.plan,
-            implementations=application.implementations,
+            plan,
+            implementations=tuple((b.capability_ref, b.implementation) for b in package.implementations),
             runtime=runtime,
             run_id="p4-" + preflight.mode + "-" + secrets.token_hex(8),
             input_text=P4_INPUT_PRESET,
