@@ -33,6 +33,8 @@ class PersistentLaunch:
     def __init__(self):
         self.binding = self.lease = self.bridge = self.rpc = self.session = None
         self.metrics = self.prefix_metrics = None
+        self.witness = self.store = None
+        self.command = self.environment = None
 
     def close_descriptors(self):
         if self.lease is not None:
@@ -51,9 +53,10 @@ def persistent_command(operator, spec, lease):
     return (*command, *lease.command_args())
 
 
-def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=None):
+def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=None, durable=False):
     """Acquire the explicit artifact and bridge without any application discovery."""
     import socket
+    import secrets
     from dataclasses import fields
     from asterion.agents.prime._tool_bridge import ToolBridgeServer
     from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile, ProviderPrefixMetricsFile
@@ -63,12 +66,22 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
     from asterion.runtime.native_rpc import build_rpc_session
 
     resource = PersistentLaunch()
-    parent = child = None
+    parent = child = witness_parent = witness_child = None
     try:
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         environment = {'ASTERION_PRIME_IPYTHON_FD': str(child.fileno()),
                        TOOL_REGISTRY_ENV: spec.tools.registry.environment_value()}
         descriptors = [child.fileno()]
+        if durable:
+            from asterion.agents.prime.context import PrimeContextWitnessSession
+            witness_parent, witness_child = socket.socketpair()
+            nonce = secrets.token_hex(32)
+            descriptors.append(witness_child.fileno())
+            environment.update({'ASTERION_PRIME_IPYTHON_CONTEXT_FD': str(witness_child.fileno()),
+                                'ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE': nonce})
+            resource.witness = PrimeContextWitnessSession(
+                witness_parent, launch_nonce=nonce, timeout_seconds=60, mark_uncertain=lambda: None)
+            witness_parent = None
         if metrics_root is not None:
             resource.metrics = ContextViewMetricsFile(metrics_root / 'context-view-metrics.json')
             resource.prefix_metrics = ProviderPrefixMetricsFile(metrics_root / 'provider-prefix-metrics.json')
@@ -80,24 +93,30 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
         resource.lease = resource.binding.preflight()
         child.close()
         child = None
+        if witness_child is not None:
+            witness_child.close()
+            witness_child = None
         if set(operator.environment).intersection(resource.lease.environment):
             raise ValueError('Prime launch environment is invalid')
         environment = {**operator.environment, **resource.lease.environment}
         command = persistent_command(operator, spec, resource.lease)
+        resource.command, resource.environment = command, environment
         resource.rpc = build_rpc_session(
             command=command, cwd=operator.cwd, environment=environment,
             deadline_seconds=None if limits.deadline_ms is None else limits.deadline_ms / 1000,
             inherited_fds=resource.lease.inherited_fds, compact_events=True,
             diagnostics=operator.diagnostics, private_failure_sink=operator.private_failure_sink,
             expected_provider=operator.provider, expected_model=operator.model)
-        resource.session = AsterionPrimeSession(
-            rpc_session=resource.rpc, extension_binding=resource.binding,
-            extension_lease=resource.lease, approved_command=command,
-            approved_environment=environment, limits=limits,
-            allowed_tool_names=spec.tools.registry.allowed_tool_names,
-            **{field.name: getattr(hooks, field.name) for field in fields(hooks)})
+        if not durable:
+            resource.session = AsterionPrimeSession(
+                rpc_session=resource.rpc, extension_binding=resource.binding,
+                extension_lease=resource.lease, approved_command=command,
+                approved_environment=environment, limits=limits,
+                allowed_tool_names=spec.tools.registry.allowed_tool_names,
+                **{field.name: getattr(hooks, field.name) for field in fields(hooks)})
         resource.bridge = ToolBridgeServer(parent, services)
-        resource.bridge.start()
+        if not durable:
+            resource.bridge.start()
         parent = None
         return resource
     except BaseException:
@@ -105,6 +124,11 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
             parent.close()
         if child is not None:
             child.close()
+        for channel in (witness_parent, witness_child):
+            if channel is not None:
+                channel.close()
+        if resource.witness is not None:
+            resource.witness.close()
         if resource.bridge is not None:
             resource.bridge.close()
         resource.close_descriptors()
@@ -117,3 +141,43 @@ def persistent_base_command(executable, entry, effort, tool_names):
             '--tools', ','.join(tool_names), '--approve', '--no-session', '--no-extensions',
             '--no-skills', '--no-prompt-templates', '--no-themes', '--no-context-files',
             '--thinking', effort)
+
+
+async def force_close_rpc(rpc) -> None:
+    """Use the retained process owner, never an active RPC command lock."""
+    import asyncio
+    import os
+    import signal
+    import threading
+
+    process = getattr(rpc, 'process', None)
+    if process is not None and process.poll() is None:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    loop = asyncio.get_running_loop()
+    stopped = loop.create_future()
+
+    def finish(failed: bool) -> None:
+        if not stopped.done():
+            if failed:
+                stopped.set_exception(RuntimeError('Prime process cleanup is incomplete'))
+            else:
+                stopped.set_result(None)
+
+    def stop() -> None:
+        failed = False
+        try:
+            rpc.stop()
+        except BaseException:
+            failed = True
+        try:
+            loop.call_soon_threadsafe(finish, failed)
+        except RuntimeError:
+            pass  # The bounded launcher has already closed its loop.
+
+    threading.Thread(target=stop, daemon=True).start()
+    await stopped
+    if getattr(rpc, 'process', None) is not None or (process is not None and process.poll() is None):
+        raise RuntimeError('Prime process cleanup is incomplete')

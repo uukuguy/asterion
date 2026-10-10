@@ -3,8 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict, replace
-import importlib.util
+from dataclasses import replace
 import io
 import json
 import os
@@ -18,18 +17,15 @@ from typing import Any, cast
 import unittest
 from unittest.mock import patch
 
-from asterion.agents.prime.backend import PrimeSessionBackend
 from asterion.agents.prime.compaction_budget import (
     ModelPrice,
     quote_compaction_reservation,
 )
 from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.session import AsterionPrimeLimits
-from asterion.agents.prime.state import PrimeBackendIdentity
-from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
 from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
 from asterion.applications.prime.p1.runtime_binding import P1WorkerOwnerAdapter
-from asterion.applications.prime.p1.worker import P1CellRequest, digest
+from asterion.applications.prime.p1.worker import P1CellRequest
 from asterion.runtimes.pi_extensions import PiExtensionBinding
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcEvent, PiRpcResult, PiRpcSession
 from tests.test_asterion_prime_backend import FakeReusablePi
@@ -98,110 +94,76 @@ class CodingPi(FakeReusablePi):
 
 class TestP1Operator(unittest.IsolatedAsyncioTestCase):
     async def fixture(self, *, aggregate_tokens: int = 64_000):
-        self.assertIsNotNone(
-            importlib.util.find_spec("asterion.applications.prime.p1.operator"),
-            "native P1 operator coordinator is missing",
-        )
         from asterion.applications.prime.p1.operator import (
-            P1OperatorResources,
-            _COMPACTION_INSTRUCTIONS,
+            P1OperatorResources, _COMPACTION_INSTRUCTIONS, _P1Services,
         )
-
+        from asterion.agents.prime.application import (
+            PrimeApplicationSpec, PrimeOperatorContext, PrimeBackendSpec,
+            PrimeToolModuleArtifact, prepare_prime_application,
+        )
+        from asterion.agents.prime.deadline import TaskDeadline
+        from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY
         temporary = tempfile.TemporaryDirectory(prefix="asterion-p1-operator-test-")
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name).resolve()
         extension = root / "extension.mjs"
         extension.write_text("export default function extension() {}\n")
         trace = []
+        deadline = time.monotonic() + 20
         worker = P1WorkerProcess(deadline=time.monotonic() + 30)
         await worker.start()
         self.addAsyncCleanup(worker.close)
         owner = P1WorkerOwnerAdapter(worker)
-        binding = PiExtensionBinding(
-            "prime.ipython", extension, ("prime.tool.ipython",), (), {}
-        )
-        lease = binding.preflight()
-        config = PiRpcConfig(
-            command=("pi", "--mode", "rpc", *lease.command_args()),
-            cwd=root,
-            environment=dict(lease.environment),
-            inherited_fds=lease.inherited_fds,
-            deadline_seconds=600,
-        )
-        rpc = CodingPi(config)
-        cast(Any, rpc).worker = worker
-        cast(Any, rpc).trace = trace
-        channel, peer = socket.socketpair()
-        peer.setblocking(False)
-        self.addCleanup(peer.close)
-        cast(Any, rpc).peer = peer
-        witness = PrimeContextWitnessSession(
-            channel,
-            launch_nonce=LAUNCH,
-            timeout_seconds=0.2,
-            mark_uncertain=lambda: None,
-        )
         private = root / "private"
         private.mkdir(mode=0o700)
         limits = AsterionPrimeLimits(8, 4, 600_000)
-        identity = PrimeBackendIdentity(
-            "session-1",
-            1,
-            "prime-applications",
-            "prime.ipython-coding",
-            "1.0.0",
-            "asterion.prime",
-            digest(config.command),
-            binding.binding_fingerprint,
-            worker.identity_sha256,
-            "continuation-1",
-            private_root_identity(private),
-            digest(
-                {
-                    **asdict(limits),
-                    "aggregate_tokens": aggregate_tokens,
-                    "cost_micros": 500_000,
-                }
-            ),
-        )
-        store = FilePrimeSessionStore(private, identity)
-        backend = PrimeSessionBackend(
-            identity=identity,
-            store=store,
-            rpc_session=cast(PiRpcSession, rpc),
-            extension_binding=binding,
-            extension_lease=lease,
-            approved_command=config.command,
-            limits=limits,
-            aggregate_tokens=aggregate_tokens,
-            cost_micros=500_000,
-            model_price=ModelPrice(1_000_000, 1_000_000),
-            witness=witness,
-            tool_executor=owner,
-            # The operator's own private table, so a test backend resolves the
-            # same reference the preset application sends.
-            compaction_instructions=_COMPACTION_INSTRUCTIONS,
-            authority_id="authority-1",
-        )
-        self.addAsyncCleanup(backend.close)
+        spec = PrimeBackendSpec("session-1", 1, private, "continuation-1", limits,
+            aggregate_tokens, 500000, ModelPrice(1000000, 1000000), "authority-1",
+            _COMPACTION_INSTRUCTIONS, compat_provider_id="prime-applications")
+        application = prepare_prime_application(
+            PrimeApplicationSpec("prime.ipython-coding", "1.0.0", "persistent-code-tools",
+                tools=PrimeToolModuleArtifact(extension, CORE_TOOL_REGISTRY)),
+            PrimeOperatorContext(Path('/usr/bin/true'), None, root, 'deepseek', 'deepseek-flash',
+                'off', {}, TaskDeadline(deadline_monotonic=deadline, deadline_epoch=time.time()+20)),
+            authorization=spec)
+        self.addAsyncCleanup(application.close)
+        services = _P1Services(worker, owner)
+        def build(**kwargs):
+            kwargs.pop('diagnostics', None)
+            kwargs.pop('private_failure_sink', None)
+            rpc = CodingPi(PiRpcConfig(**kwargs))
+            rpc.stop = lambda: trace.append('pi.stop')
+            rpc.worker, rpc.trace = worker, trace
+            peer = socket.socket(fileno=os.dup(int(kwargs['environment']['ASTERION_PRIME_IPYTHON_CONTEXT_FD'])))
+            peer.setblocking(False)
+            rpc.peer = peer
+            self.addCleanup(peer.close)
+            rpc.tool_peer = socket.socket(fileno=os.dup(int(kwargs['environment']['ASTERION_PRIME_IPYTHON_FD'])))
+            rpc.tool_peer.setblocking(False)
+            self.addCleanup(rpc.tool_peer.close)
+            return rpc
+        original_witness = PrimeContextWitnessSession
+        def witness(*args, **kwargs):
+            kwargs['timeout_seconds'] = .2
+            return original_witness(*args, **kwargs)
+        with (patch('asterion.runtime.native_rpc.build_rpc_session', side_effect=build),
+              patch('asterion.agents.prime.context.PrimeContextWitnessSession', side_effect=witness),
+              patch('secrets.token_hex', return_value=LAUNCH)):
+            attachment = await application.open_backend(spec=spec, services=services)
+        rpc = application._persistent.rpc
         resources = P1OperatorResources(
-            backend=backend,
-            store=store,
-            worker=worker,
-            worker_owner=owner,
-            extension_lease=lease,
-            private_root=private,
-            journal_root=root / "journal",
-            run_id="p1-test",
-            deadline=time.monotonic() + 20,
-            observe=trace.append,
-            close_pi=rpc.close,
-            close_witness=witness.close,
-        )
-        cast(Any, rpc).resources = resources
+            application=application, backend=attachment, worker=worker, worker_owner=owner,
+            private_root=private, journal_root=root / "journal", run_id="p1-test",
+            deadline=deadline, observe=trace.append)
+        services.resources = resources
+        rpc.resources = resources
         return resources, rpc, trace
 
     async def test_real_closed_loop_and_cleanup_precede_runner_terminal(self):
+        for target in ('asterion.applications.discovery.list_application_providers',
+                       'asterion.applications.discovery.load_application_provider',
+                       'asterion.applications.prime.inventory.prime_release_application'):
+            self.enterContext(patch(target, side_effect=AssertionError('central lookup')))
         resources, rpc, trace = await self.fixture()
         from asterion.applications.prime.p1.operator import run_fixed_small_verification
 
@@ -245,6 +207,7 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                 "oracle.pass",
                 "host2.close",
                 "worker.close",
+                "pi.stop",
                 "pi.close",
                 "backend.close",
                 "runner.terminal",
@@ -318,15 +281,15 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                 observed = []
 
                 async def compact():
-                    checkpoint = resources.store.recover_checkpoint()
+                    checkpoint = resources.application._backend_checkpoint()
                     assert checkpoint is not None
-                    before = checkpoint.checkpoint
+                    before = checkpoint
                     try:
                         return await original_compact()
                     finally:
-                        checkpoint = resources.store.recover_checkpoint()
+                        checkpoint = resources.application._backend_checkpoint()
                         assert checkpoint is not None
-                        after = checkpoint.checkpoint
+                        after = checkpoint
                         observed.append(
                             (
                                 before,
@@ -375,18 +338,13 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status, "budget-limited", trace)
         self.assertEqual(rpc.calls, 1)
         self.assertEqual(rpc.compacts, 0)
-        self.assertIsNone(resources.backend._outstanding)
+        self.assertIsNone(resources.backend.snapshot().outstanding_effect)
         self.assertEqual(events[-1].payload["code"], "p1_budget_limited")
 
     async def test_private_bridge_accepts_only_an_active_turn(self):
-        from asterion.applications.prime.p1.operator import _P1Bridge
-
         resources, rpc, trace = await self.fixture()
-        host, child = socket.socketpair()
-        child.setblocking(False)
-        bridge = _P1Bridge(host, resources)
-        self.addAsyncCleanup(bridge.close)
-        self.addCleanup(child.close)
+        child = rpc.tool_peer
+        bridge = resources.application._persistent.bridge
         resources.active_turn_id = "setup-turn"
         request = {
             "protocol": "asterion.prime-ipython/v1",
@@ -399,8 +357,8 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         response = json.loads(await asyncio.wait_for(loop.sock_recv(child, 4096), 2))
         self.assertEqual(response["status"], "ok")
         self.assertEqual(resources.worker.snapshot().cells[0].turn_id, "setup-turn")
-        await bridge.close()
-        self.assertTrue(bridge._task.done())
+        await resources.application.close()
+        self.assertFalse(bridge._thread.is_alive())
 
     async def test_cancellation_at_each_coordination_barrier(self):
         from asterion.applications.prime.p1.operator import run_fixed_small_verification
@@ -470,7 +428,7 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(rpc.compacts, 1)
                 self.assertNotIn("stage2.release", trace)
                 if fault != "reconstruction":
-                    self.assertEqual(resources.backend._phase, "recovery-required")
+                    self.assertEqual(resources.backend.snapshot().phase, "recovery-required")
                 self.assertNotIn("SENTINEL_PRIVATE", repr(result))
 
     async def test_stage_two_failure_and_budget_stop_cleanup_once(self):
@@ -540,7 +498,7 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         cast(Any, rpc).close = fail_close
         result = await run_fixed_small_verification(resources)
         self.assertEqual(result.status, "protocol-failure")
-        self.assertEqual(rpc.closes, 1)
+        self.assertEqual(trace.count('pi.stop'), 1)
         self.assertFalse(resources.private_root.exists())
         self.assertNotIn("runner.terminal", trace)
 
@@ -648,7 +606,6 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rpc.closes, 1)
 
     async def test_forced_pi_close_bypasses_an_active_command_lock(self):
-        from asterion.applications.prime.p1 import operator
 
         with tempfile.TemporaryDirectory() as temporary:
             rpc = PiRpcSession(
@@ -663,7 +620,8 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             process = rpc.process
             try:
                 async with rpc._command_lock:
-                    close = getattr(operator, "_force_close_pi", None)
+                    from asterion.agents.prime import _launch
+                    close = _launch.force_close_rpc
                     self.assertIsNotNone(
                         close, "forced close must bypass the command lock"
                     )
@@ -724,7 +682,7 @@ async def invoke():
             try: await asyncio.Event().wait()
             except asyncio.CancelledError: pass
     if sys.argv[1] == 'backend':
-        owned.backend.close = stubborn
+        owned.application._backend.close = stubborn
     if sys.argv[1] == 'effect':
         rpc.prompt = stubborn
         owned.coordination.deadline = time.monotonic() + .15
@@ -743,8 +701,8 @@ async def invoke():
     result = await operator.run_fixed_small_verification(owned)
     assert result.status == 'protocol-failure'
     assert owned.worker._started_process.poll() is not None, 'worker still live'
-    assert trace.count('pi.close') == 1, 'Pi owner not closed'
-    assert owned.extension_lease.closed, 'lease not closed'
+    assert trace.count('pi.stop') == 1, 'Pi owner not reaped'
+    assert owned.application._persistent.lease.closed, 'lease not closed'
     assert not owned.private_root.exists(), 'private root not removed'
     assert not owned._cleanup.complete, 'unclean host was claimed complete'
     assert 'runner.terminal' not in trace
@@ -811,15 +769,19 @@ class TestP1LaunchPreflight(unittest.TestCase):
             with (
                 patch.object(asterion, "__file__", str(installed)),
                 patch.object(operator.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, b"", b"")),
-                patch.object(operator.live, "load_operator_environment", return_value={}),
+                patch.object(operator.live, "load_operator_environment", return_value={"DEEPSEEK_API_KEY": "sentinel-key"}) as load,
                 patch.object(operator.live, "resolve_node", return_value=Path("/usr/bin/node")),
                 patch.object(operator.live, "resolve_pi_entry", return_value=base / "pi.mjs"),
             ):
                 preflight = operator._preflight({operator.live.OPERATOR_ROOT_ENV: str(root)})
+                load.return_value = {}
+                with self.assertRaises(operator.P1OperatorError):
+                    operator._preflight({operator.live.OPERATOR_ROOT_ENV: str(root)})
             self.assertEqual(preflight.extension_path.name, "ipython-extension.mjs")
-            self.assertEqual(preflight.pi_base_command[preflight.pi_base_command.index("--tools") + 1], "ipython")
+            self.assertEqual(preflight.executable, Path("/usr/bin/node"))
+            self.assertEqual(preflight.entry, base / "pi.mjs")
 
-    def test_resource_binding_injects_core_registry_before_any_worker(self) -> None:
+    def test_resource_binding_injects_core_registry_before_any_model(self) -> None:
         from asterion.applications.prime.p1 import operator
 
         captured = []
@@ -831,8 +793,8 @@ class TestP1LaunchPreflight(unittest.TestCase):
             root = Path(directory).resolve()
             extension = root / "ipython-extension.mjs"
             extension.write_text("export default function register() {}")
-            preflight = operator._Preflight(root, {"ASTERION_PRIME_IPYTHON_TOOL_REGISTRY": "stale"}, root, ("pi",), extension)
-            with patch.object(operator.ExtensionBinding, "preflight", reject), self.assertRaises(operator.P1OperatorError):
+            preflight = operator._Preflight(root, {}, Path(sys.executable), Path("/usr/bin/true"), None, "off", extension)
+            with patch.object(PiExtensionBinding, "preflight", reject), self.assertRaises(operator.P1OperatorError):
                 asyncio.run(operator._build_resources(preflight))
         self.assertEqual(len(captured), 1)
         self.assertEqual(json.loads(captured[0].environment.get("ASTERION_PRIME_IPYTHON_TOOL_REGISTRY", "null")), {
@@ -842,6 +804,8 @@ class TestP1LaunchPreflight(unittest.TestCase):
     def test_fixed_preset_values_agree_with_the_runtime_factory(self) -> None:
         from asterion.applications.prime.p1 import operator
         from asterion.applications.prime.p1.runtime_binding import P1_RUNTIME_OPTIONS
+        self.assertEqual((operator._PROVIDER, operator._MODEL), ('deepseek', 'deepseek-flash'))
+        self.assertEqual(operator._PRICE, ModelPrice(300000, 1200000))
 
         # The launch path builds the exact budget and limits the runtime factory
         # re-validates, so a drift between the two would reject every run at the

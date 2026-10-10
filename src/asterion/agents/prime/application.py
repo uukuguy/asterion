@@ -7,7 +7,7 @@ preflight owns paths, credentials, model selection and verified price evidence.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Mapping
-from dataclasses import dataclass, fields
+from dataclasses import asdict, dataclass, fields
 import hashlib
 import json
 import math
@@ -22,7 +22,9 @@ from asterion.agents.prime._workspace_owner import WorkspaceOwner
 from asterion.agents.prime._text_model import (
     LiveModelReply, LiveModelSession, LiveModelUsage, _TextUsage, _cost,
 )
-from asterion.agents.prime.backend import PrimeAttachment
+from asterion.agents.prime.backend import PrimeAttachment, PrimeSessionBackend
+from asterion.agents.prime.state import PrimeBackendIdentity
+from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
 from asterion.agents.prime.ipython import (
     KernelBootstrap, KernelExport, KernelLimits, PersistentIpythonHost,
 )
@@ -334,7 +336,8 @@ class _PrimeTextUsageSummary:
 
 
 def _digest(value: object) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(',', ':'),
+                                     ensure_ascii=False, allow_nan=False).encode()).hexdigest()
 
 
 class PrimeApplication:
@@ -343,7 +346,7 @@ class PrimeApplication:
     __slots__ = ('_spec', '_operator', '_authorization', '_state',
                  '_text_limits_by_key', '_cleanup', '_text_sessions', '_text_closed_keys',
                  '_text_usage', '_runtime_client', '_runtime_material', '_persistent',
-                 '_services', '_workspace_owner', '_metrics_root', '_run_claimed')
+                 '_services', '_workspace_owner', '_metrics_root', '_run_claimed', '_backend')
 
     def __init__(self, spec: PrimeApplicationSpec, operator: PrimeOperatorContext, *,
                  authorization: PrimeTextLimits | AsterionPrimeLimits | PrimeBackendSpec):
@@ -355,6 +358,7 @@ class PrimeApplication:
         elif type(authorization) not in (AsterionPrimeLimits, PrimeBackendSpec):
             _invalid()
         self._runtime_client = self._runtime_material = self._persistent = self._services = None
+        self._backend = None
         self._workspace_owner = WorkspaceOwner()
         self._metrics_root = operator.private_root
         self._run_claimed = False
@@ -481,6 +485,8 @@ class PrimeApplication:
 
     def runtime(self, *, services: PrimeApplicationServices, limits: AsterionPrimeLimits,
                 hooks: PrimeRunHooks) -> AgentRuntimeClient:
+        if type(self._authorization) is PrimeBackendSpec:
+            raise ProtocolError('Prime durable owner already fixes the execution view')
         self._admit_runtime_limits(limits)
         if (type(hooks) is not PrimeRunHooks or any(not callable(getattr(services, name, None))
                 for name in ('execute', 'call', 'request_stop', 'close', 'validate_lifecycle'))
@@ -562,11 +568,163 @@ class PrimeApplication:
     async def open_backend(self, *, spec: PrimeBackendSpec,
                            services: PrimeApplicationServices) -> PrimeAttachment:
         self._require_available()
-        raise ProtocolError('Prime application backend profile is not assembled')
+        if (type(spec) is not PrimeBackendSpec or type(self._authorization) is not PrimeBackendSpec
+                or spec != self._authorization or self._runtime_client is not None
+                or spec.model_price is None or self._operator.task_deadline is None
+                or self._operator.task_deadline.expired()):
+            _invalid()
+        self._admit_runtime_limits(spec.limits)
+        if self._backend is not None:
+            if services is not self._services:
+                _invalid()
+            return self.attach_backend(self._backend.identity)
+        if (any(not callable(getattr(services, name, None))
+                for name in ('execute', 'call', 'request_stop', 'close', 'validate_lifecycle'))
+                or type(getattr(services, 'identity_sha256', None)) is not str
+                or re.fullmatch(r'[0-9a-f]{64}', services.identity_sha256) is None):
+            _invalid()
+        services.validate_lifecycle()
+        self._services = services
+        try:
+            resource = _launch.persistent_launch(
+                self._operator, self._spec, services, spec.limits, PrimeRunHooks(), durable=True)
+            self._persistent = resource
+            identity = PrimeBackendIdentity(
+                spec.session_id, spec.generation, spec.compat_provider_id or 'prime.direct',
+                self._spec.application_id, self._spec.application_version, 'asterion.prime',
+                _digest(resource.command), resource.binding.binding_fingerprint,
+                services.identity_sha256, spec.continuation_policy_id,
+                private_root_identity(spec.private_root),
+                _digest({**asdict(spec.limits), 'aggregate_tokens': spec.aggregate_tokens,
+                         'cost_micros': spec.cost_micros}),
+            )
+            resource.store = FilePrimeSessionStore(spec.private_root, identity)
+            self._backend = PrimeSessionBackend(
+                identity=identity, store=resource.store, rpc_session=resource.rpc,
+                extension_binding=resource.binding, extension_lease=resource.lease,
+                approved_command=resource.command, approved_environment=resource.environment,
+                limits=spec.limits, aggregate_tokens=spec.aggregate_tokens, cost_micros=spec.cost_micros,
+                model_price=spec.model_price, witness=resource.witness, tool_executor=services,
+                compaction_instructions=spec.compaction_instructions, authority_id=spec.authority_id,
+                diagnostics=self._operator.diagnostics, task_deadline=self._operator.task_deadline,
+            )
+            resource.bridge.start()
+            self._activate()
+            return self.attach_backend(identity)
+        except BaseException as error:
+            await self.close()
+            if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
+                raise
+            raise ProtocolError('Prime durable application is unavailable') from None
+
+    def attach_backend(self, identity: PrimeBackendIdentity) -> PrimeAttachment:
+        self._require_available()
+        if self._backend is None:
+            _invalid()
+        return self._backend.attach(identity)
+
+    def _backend_snapshot(self):
+        if self._backend is None:
+            _invalid()
+        return self._backend.snapshot()
+
+    def _backend_authority_id(self):
+        if self._backend is None:
+            _invalid()
+        return self._authorization.authority_id
+
+    def _backend_checkpoint(self):
+        if self._backend is None:
+            _invalid()
+        recovered = self._persistent.store.recover_checkpoint()
+        return None if recovered is None else recovered.checkpoint
+
+    def _backend_prompt_usage(self, command_id: str) -> tuple[int, int]:
+        from asterion.runtime.native_rpc import normalize_usage
+        if self._backend is None:
+            _invalid()
+        recovered = self._persistent.store.recover_checkpoint()
+        if recovered is None:
+            _invalid()
+        incoming = outgoing = 0
+        for turn in json.loads(recovered.transcript):
+            if turn['command_id'] == command_id:
+                for event in turn['events']:
+                    if event['type'] == 'message_end':
+                        usage = normalize_usage(event['payload'])
+                        if usage is not None:
+                            incoming += usage['input_tokens']
+                            outgoing += usage['output_tokens']
+        return incoming, outgoing
+
+    def _validate_backend_resources(self) -> None:
+        self._require_available()
+        if self._backend is None:
+            _invalid()
+        self._services.validate_lifecycle()
+        self._persistent.lease.validate_launch()
+
+    async def _close_backend(self) -> PrimeApplicationCleanup:
+        """Reap independent owners before waiting on the durable effect lock."""
+        resource = self._persistent
+        self._state = 'closing'
+        if self._backend is not None:
+            self._backend._request_stop()
+        effects = model = extension = bridge = workspace = True
+        try:
+            self._services.request_stop()
+        except Exception:
+            effects = False
+        workspace = await self._workspace_owner.close()
+        try:
+            await self._services.close()
+        except Exception:
+            workspace = False
+        try:
+            await _launch.force_close_rpc(resource.rpc)
+        except Exception:
+            model = False
+        try:
+            await asyncio.to_thread(resource.bridge.close)
+        except Exception:
+            bridge = False
+        try:
+            if resource.witness is not None:
+                resource.witness.close()
+            resource.close_descriptors()
+        except Exception:
+            extension = False
+        # A stuck backend cannot prevent the independent reap above. Its task
+        # remains cancelled/fenced and no successful cleanup receipt is issued.
+        if self._backend is not None:
+            task = asyncio.create_task(self._backend.close())
+            task.add_done_callback(_consume_cleanup_result)
+            done, _ = await asyncio.wait((task,), timeout=0.1)
+            if task not in done:
+                task.cancel()
+                effects = False
+            else:
+                try:
+                    receipt = task.result()
+                    effects = effects and receipt.complete
+                    workspace = workspace and receipt.application_closed
+                except BaseException:
+                    effects = False
+        try:
+            if resource.store is not None:
+                resource.store.close()
+        except Exception:
+            effects = False
+        self._cleanup = PrimeApplicationCleanup(effects, model, extension, bridge, workspace)
+        if self._cleanup.complete:
+            self._state = 'closed'
+        return self._cleanup
 
     async def close(self) -> PrimeApplicationCleanup:
         if self._cleanup is not None and self._cleanup.complete:
             return self._cleanup
+        if type(self._authorization) is PrimeBackendSpec and self._persistent is not None:
+            return await self._close_backend()
         self._state = 'closing'
         self._text_closed_keys.update(self._text_limits_by_key)
         model_closed = True
@@ -617,6 +775,13 @@ class PrimeApplication:
         if self._cleanup.complete:
             self._state = 'closed'
         return self._cleanup
+
+
+def _consume_cleanup_result(task):
+    try:
+        task.exception()
+    except BaseException:
+        pass
 
 
 class _OwnerSignal:

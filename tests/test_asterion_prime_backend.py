@@ -1016,3 +1016,116 @@ class TestPiCompactTerminalContract(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
+    async def fixture(self):
+        import time
+        from asterion.agents.prime.application import (
+            PrimeApplicationSpec, PrimeOperatorContext, PrimeBackendSpec,
+            PrimeToolModuleArtifact, prepare_prime_application,
+        )
+        from asterion.agents.prime.deadline import TaskDeadline
+        from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        root = Path(self.temp.name).resolve()
+        extension = root / 'extension.mjs'
+        extension.write_text('export default function extension() {}\n')
+        private = root / 'backend'
+        private.mkdir(mode=0o700)
+        self.spec = PrimeBackendSpec('owner-session', 1, private, 'continue-one',
+            AsterionPrimeLimits(8, 4, 600000), 64000, 500000,
+            ModelPrice(300000, 1200000), 'authority-1', {},
+            compat_provider_id='prime-applications')
+        operator = PrimeOperatorContext(Path('/usr/bin/true'), None, root,
+            'deepseek', 'deepseek-flash', 'off', {},
+            TaskDeadline(deadline_monotonic=time.monotonic()+60, deadline_epoch=time.time()+60))
+        self.app = prepare_prime_application(
+            PrimeApplicationSpec('prime.ipython-coding', '1.0.0', 'persistent-code-tools',
+                                 tools=PrimeToolModuleArtifact(extension, CORE_TOOL_REGISTRY)),
+            operator, authorization=self.spec)
+        self.addAsyncCleanup(self.app.close)
+        self.executor = FakeToolExecutor()
+        self.executor.execute = lambda *args: None
+        self.executor.call = lambda *args: None
+        self.executor.request_stop = lambda: None
+        def rpc(**kwargs):
+            kwargs.pop('diagnostics', None)
+            kwargs.pop('private_failure_sink', None)
+            self.rpc = FakeReusablePi(PiRpcConfig(**kwargs))
+            self.rpc.stop = lambda: setattr(self.rpc, 'stopped', True)
+            return self.rpc
+        with patch('asterion.runtime.native_rpc.build_rpc_session', side_effect=rpc):
+            self.attachment = await self.app.open_backend(spec=self.spec, services=self.executor)
+
+    async def test_attachment_close_keeps_owner_and_generation_without_model_effect(self):
+        await self.fixture()
+        identity = self.attachment.snapshot().identity
+        self.assertEqual(self.rpc.opens, 0)
+        self.assertEqual((self.rpc.config.expected_provider, self.rpc.config.expected_model),
+                         ('deepseek', 'deepseek-flash'))
+        await self.attachment.close()
+        again = self.app.attach_backend(identity)
+        self.assertEqual(again.snapshot().identity.generation, identity.generation)
+        self.assertFalse(self.executor.closed)
+        with self.assertRaises(Exception):
+            self.app.attach_backend(replace(identity, generation=2))
+        self.assertTrue((await self.app.close()).complete)
+        self.assertTrue(self.executor.closed)
+
+    async def test_authority_snapshot_cannot_renew_absolute_task_deadline(self):
+        await self.fixture()
+        self.attachment.sync_authority_snapshot(
+            RemainingBudget(64000, 64000, 0, 64000, 500000, 600000), authority_revision=1)
+        await self.attachment.accept_control(ControlCommand(
+            'create-one', self.spec.session_id, 1, 'session.create',
+            {'system_id': 'prime.ipython-coding', 'system_version': '1.0.0',
+             'goal_id': 'goal-one', 'goal_ref': 'goal-ref'}))
+        with patch.object(self.app.task_deadline, 'remaining_seconds', return_value=0):
+            with self.assertRaises(PrimeBackendError):
+                await self.attachment.execute_prompt(
+                    PrimePromptRequest('prompt-one', self.spec.session_id, 1, 'private task'))
+        self.assertEqual(self.rpc.opens, 0)
+
+    async def test_rpc_close_failure_still_reaps_and_closes_independent_resources(self):
+        await self.fixture()
+        async def fail():
+            raise RuntimeError('private-close-failure')
+        self.rpc.close = fail
+        receipt = await self.app.close()
+        self.assertTrue(self.rpc.stopped)
+        self.assertTrue(self.executor.closed)
+        self.assertTrue(receipt.extension_closed)
+        self.assertTrue(receipt.bridge_closed)
+        self.assertFalse(receipt.complete)
+
+    async def test_failed_backend_construction_closes_acquired_owners(self):
+        from asterion.runtime.protocol import ProtocolError
+        with patch('asterion.agents.prime.application.PrimeSessionBackend',
+                   side_effect=ValueError('private-sentinel')):
+            with self.assertRaises(ProtocolError) as failure:
+                await self.fixture()
+        self.assertNotIn('private-sentinel', str(failure.exception))
+        self.assertTrue(self.executor.closed)
+        self.assertTrue(self.rpc.stopped)
+        self.assertTrue(self.app._persistent.lease.closed)
+
+    async def test_control_factory_accepts_exact_owner_and_rejects_authority_mismatch(self):
+        from tests.test_asterion_prime_control import authority, remaining_budget
+        from asterion.control.factory import ControlPlaneFactoryContext, ControlPlaneFactoryError
+        from asterion.control.providers.asterion_prime import build_asterion_prime_control_plane_client
+        await self.fixture()
+        self.attachment.sync_authority_snapshot(remaining_budget(), authority_revision=1)
+        context = ControlPlaneFactoryContext(
+            system_id='prime.ipython-coding', system_version='1.0.0',
+            control_plane_id='asterion.prime-control', control_plane_version='1.0.0',
+            private_root=self.spec.private_root,
+            options={'generation': '1', 'session_id': self.spec.session_id},
+            authority=authority(), host_services={'prime.session-backend': self.app})
+        client = build_asterion_prime_control_plane_client(context)
+        await client.close()
+        self.assertFalse(self.executor.closed)
+        bad = replace(context, authority=replace(authority(), authority_id='wrong-authority'))
+        with self.assertRaises(ControlPlaneFactoryError):
+            build_asterion_prime_control_plane_client(bad)

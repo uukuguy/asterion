@@ -299,6 +299,13 @@ class _P1RuntimeSession:
             raise _P1BudgetExceeded
 
 
+def build_p1_runtime_from_host(host: P1RuntimeHost) -> AsterionPrimeRuntimeClient:
+    """Use the domain runtime directly without provider or inventory lookup."""
+    if not isinstance(host, P1RuntimeHost):
+        raise RuntimeFactoryError(_ERROR)
+    return AsterionPrimeRuntimeClient(_P1RuntimeSession(host))
+
+
 def build_p1_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClient:
     """Bind exact preflighted P1 services without constructing the coordinator."""
 
@@ -326,7 +333,7 @@ def build_p1_runtime(context: RuntimeFactoryContext) -> AsterionPrimeRuntimeClie
         )
         if validated is not None:
             raise ValueError
-        return AsterionPrimeRuntimeClient(_P1RuntimeSession(service))
+        return build_p1_runtime_from_host(service)
     except Exception:
         raise RuntimeFactoryError(_ERROR) from None
 
@@ -336,4 +343,5 @@ __all__ = (
     "P1_RUNTIME_OPTIONS",
     "P1WorkerOwnerAdapter",
     "build_p1_runtime",
+    "build_p1_runtime_from_host",
 )

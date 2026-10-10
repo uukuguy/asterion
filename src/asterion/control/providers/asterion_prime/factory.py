@@ -6,6 +6,7 @@ import json
 from importlib import resources
 
 from asterion.agents.prime.backend import PrimeSessionBackend
+from asterion.agents.prime.application import PrimeApplication
 from asterion.agents.prime.state import PrimeBackendIdentity, PrimeBackendSnapshot
 from asterion.agents.prime.store import private_root_identity
 from asterion.control.authority import AuthorityEnvelope
@@ -90,11 +91,13 @@ def build_asterion_prime_control_plane_client(
             or authority.cancelled
             or ASTERION_PRIME_SESSION_BACKEND_SERVICE
             not in authority.host_service_grants
-            or type(backend) is not PrimeSessionBackend
+            or type(backend) not in (PrimeSessionBackend, PrimeApplication)
         ):
             raise ValueError
-        identity = backend.identity
-        snapshot = backend.snapshot()
+        owned = type(backend) is PrimeApplication
+        snapshot = backend._backend_snapshot() if owned else backend.snapshot()
+        identity = snapshot.identity if owned else backend.identity
+        authority_id = backend._backend_authority_id() if owned else getattr(backend, '_authority_id', None)
         if (
             type(identity) is not PrimeBackendIdentity
             or type(snapshot) is not PrimeBackendSnapshot
@@ -106,7 +109,7 @@ def build_asterion_prime_control_plane_client(
             or context.system_version != identity.application_version
             or private_root_identity(context.private_root)
             != identity.private_root_identity
-            or getattr(backend, "_authority_id", None) != authority.authority_id
+            or authority_id != authority.authority_id
             or not any(
                 grant.provider_id == identity.provider_id
                 and grant.application_id == identity.application_id
@@ -116,7 +119,7 @@ def build_asterion_prime_control_plane_client(
             )
         ):
             raise ValueError
-        attachment = backend.attach(identity)
+        attachment = backend.attach_backend(identity) if owned else backend.attach(identity)
         return AsterionPrimeControlPlaneClient(
             manifest=manifest,
             attachment=attachment,

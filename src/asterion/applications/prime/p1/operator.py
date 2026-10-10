@@ -11,30 +11,25 @@ import os
 from pathlib import Path
 import secrets
 import shutil
-import signal
-import socket
 import subprocess
 import sys
 import tempfile
-import threading
 import time
 from types import MappingProxyType
 
 from asterion.agents.prime.backend import (
     PrimeBackendBudgetError,
     PrimePromptRequest,
-    PrimeSessionBackend,
+    PrimeAttachment,
 )
 from asterion.agents.prime.compaction_budget import (
     ModelPrice,
     quote_compaction_reservation,
 )
-from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.execution import AsterionPrimeLimits
-from asterion.agents.prime.state import PrimeBackendIdentity
-from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
+from asterion.agents.prime.store import private_root_identity
 from asterion.agents.prime.summarization import compaction_custom_instructions
-from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY, TOOL_REGISTRY_ENV
+from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY
 from asterion.applications.first_party_packages import (
     create_prime_ipython_coding_native_package,
 )
@@ -57,9 +52,8 @@ from asterion.applications.prime.p1.receipt import (
     seal_cleanup_receipt,
 )
 from asterion.applications.prime.p1.runtime_binding import (
-    P1_RUNTIME_OPTIONS,
     P1WorkerOwnerAdapter,
-    build_p1_runtime,
+    build_p1_runtime_from_host,
 )
 from asterion.applications.prime.p1.task import P1_TASK_STATEMENT
 from asterion.applications.prime.p1.worker import (
@@ -100,10 +94,15 @@ from asterion.control.system import resolve_agent_system
 from asterion.applications.prime.p7 import live
 from asterion.runner.application import ApplicationRunResult
 from asterion.runner.composed import run_composed_application
-from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
+from asterion.runtime.factory import RuntimeFactoryRegistry
 from asterion.runtime.host import CancellationSignal
-from asterion.runtime.native_rpc import RpcSession, build_rpc_session, normalize_usage
-from asterion.runtime.pinned_extension import ExtensionBinding, ExtensionLease
+from asterion.agents.prime.application import (
+    PrimeApplication, PrimeApplicationSpec, PrimeOperatorContext, PrimeBackendSpec,
+    PrimeToolModuleArtifact, prepare_prime_application,
+)
+from asterion.agents.prime.deadline import TaskDeadline
+from asterion.agents.prime.tools import PrimeToolResult
+from asterion.applications.prime.operator_config import resolve_pi_effort
 
 _CLEANUP_SECONDS = 5.0
 
@@ -172,20 +171,16 @@ class P1OperatorResources:
     def __init__(
         self,
         *,
-        backend: PrimeSessionBackend,
-        store: FilePrimeSessionStore,
+        application: PrimeApplication,
+        backend: PrimeAttachment,
         worker: P1WorkerProcess,
         worker_owner: P1WorkerOwnerAdapter,
-        extension_lease: ExtensionLease,
         private_root: Path,
         journal_root: Path,
         run_id: str,
         deadline: float,
         observe: Callable[[str], None] = lambda _: None,
-        close_bridge: Callable[[], Awaitable[None]] | None = None,
         cleanup_root: Callable[[], None] | None = None,
-        close_pi: Callable[[], Awaitable[None]] | None = None,
-        close_witness: Callable[[], None] | None = None,
     ) -> None:
         identity = backend.snapshot().identity
         if (
@@ -198,26 +193,22 @@ class P1OperatorResources:
             != ("prime-applications", "prime.ipython-coding", "1.0.0", "asterion.prime")
             or identity.worker_identity_sha256 != worker.identity_sha256
             or identity.private_root_identity != private_root_identity(private_root)
+            or application._backend_snapshot().identity != identity
         ):
             raise P1OperatorError()
-        self.backend, self.store, self.worker, self.worker_owner = (
-            backend,
-            store,
-            worker,
-            worker_owner,
-        )
-        self.extension_lease = extension_lease
+        self.application, self.backend = application, backend
+        self.worker, self.worker_owner = worker, worker_owner
         self.private_root, self.journal_root = private_root, journal_root
         self.identity, self.run_id = identity, run_id
         self.coordination = P1Coordination(run_id=run_id, deadline=deadline)
         self.oracle = P1Oracle(worker, kernel_generation=identity.generation)
-        self.observe, self._close_bridge = observe, close_bridge
+        self.observe = observe
         self._cleanup_root = cleanup_root
-        self._close_pi, self._close_witness = close_pi, close_witness
         self.active_turn_id = ""
         self._host_number = 0
         self._host_closed = True
         self._cleanup: P1OwnerCleanup | None = None
+        self._prime_cleanup = None
         self._stage_one: P1StageOneReceipt | None = None
         self._oracle_result: P1OracleReceipt | None = None
         self._release: P1StageTwoRelease | None = None
@@ -270,22 +261,14 @@ class P1OperatorResources:
             {
                 "prime.ipython": worker,
                 "prime.p1-oracle": self.oracle,
-                "prime.launch": extension_lease,
-                "prime.private-trace": store,
+                "prime.launch": application,
+                "prime.private-trace": application,
                 "prime.session-backend": self,
             }
         )
-        self.runtime = build_p1_runtime(
-            RuntimeFactoryContext(
-                "prime-applications",
-                "prime.ipython-coding",
-                "1.0.0",
-                "asterion.prime",
-                assembly.path,
-                P1_RUNTIME_OPTIONS,
-                self.host_services,
-            )
-        )
+        self.validate_runtime_services(
+            ipython=worker, oracle=self.oracle, extension=application, private_trace=application)
+        self.runtime = build_p1_runtime_from_host(self)
         binding = asterion_prime_control_plane_binding()
         self._system = resolve_agent_system(
             {
@@ -327,12 +310,12 @@ class P1OperatorResources:
         if (
             ipython is not self.worker
             or oracle is not self.oracle
-            or extension is not self.extension_lease
-            or private_trace is not self.store
+            or extension is not self.application
+            or private_trace is not self.application
         ):
             raise P1OperatorError()
         self.worker_owner.validate_lifecycle()
-        self.extension_lease.validate_launch()
+        self.application._validate_backend_resources()
 
     def _clock_ms(self) -> int:
         return int(time.monotonic() * 1000)
@@ -384,7 +367,7 @@ class P1OperatorResources:
                     "session_id": self.identity.session_id,
                 },
                 authority=self.authority,
-                host_services={"prime.session-backend": self.backend},
+                host_services={"prime.session-backend": self.application},
             )
         )
         try:
@@ -445,19 +428,7 @@ class P1OperatorResources:
             raise P1RuntimeHostError("budget-limited") from None
         finally:
             self.active_turn_id = ""
-        recovered = self.store.recover_checkpoint()
-        if recovered is None:
-            raise P1OperatorError()
-        incoming = outgoing = 0
-        for turn in json.loads(recovered.transcript):
-            if turn["command_id"] == command_id:
-                for event in turn["events"]:
-                    if event["type"] == "message_end":
-                        usage = normalize_usage(event["payload"])
-                        if usage is not None:
-                            incoming += usage["input_tokens"]
-                            outgoing += usage["output_tokens"]
-        return incoming, outgoing
+        return self.application._backend_prompt_usage(command_id)
 
     async def execute_stage_one(
         self, *, run_id: str, signal: CancellationSignal | None
@@ -590,15 +561,15 @@ class P1OperatorResources:
         if receipt.status != "succeeded":
             raise P1RuntimeHostError("recovery-required")
         self.observe("resume.persist")
-        checkpoint = self.store.recover_checkpoint()
-        if checkpoint is None or checkpoint.checkpoint.outstanding_effect is not None:
+        checkpoint = self.application._backend_checkpoint()
+        if checkpoint is None or checkpoint.outstanding_effect is not None:
             raise P1OperatorError()
         fields = compact.payload["result"]
         assert isinstance(fields, Mapping)
         before, after = fields["before_context_tokens"], fields["after_context_tokens"]
         assert type(before) is int and type(after) is int
         compact_digest = digest(compact.to_mapping())
-        checkpoint_digest = digest(asdict(checkpoint.checkpoint))
+        checkpoint_digest = digest(asdict(checkpoint))
         self.worker.mark_compact_checkpoint(
             P1WorkerCheckpoint(
                 self.worker.identity_sha256,
@@ -656,38 +627,26 @@ class P1OperatorResources:
             host_closed = await bounded(self.close_host(), share=7)
         except BaseException:
             pass
-        try:
-            if self._close_bridge is not None:
-                bridge_closed = await bounded(self._close_bridge(), share=6)
-            else:
-                bridge_closed = True
-        except BaseException:
-            pass
-        # Backend close aborts/settles active effects, then closes worker, Pi,
-        # witness, extension and store exactly once in that owner order.
-        # The worker handle is independent of a stuck host/effect/backend lock.
+        # P1 keeps independent access to the domain worker owner; Prime reaps
+        # Pi and descriptors independently of the backend effect lock.
         if await bounded(self.worker_owner.close(), share=4):
             self.observe("worker.close")
-        backend_task = asyncio.create_task(self.backend.close())
-        backend_returned = await bounded(backend_task, share=3)
-        backend_closed = backend_returned and backend_task.result().complete
-        pi_closed = backend_returned and backend_task.result().pi_closed
+        owner_task = asyncio.create_task(self.application.close())
+        owner_returned = await bounded(owner_task, share=1)
+        receipt = owner_task.result() if owner_returned else None
+        self._prime_cleanup = receipt
+        backend_closed = receipt is not None and receipt.complete
+        pi_closed = receipt is not None and receipt.model_closed
+        bridge_closed = receipt is not None and receipt.bridge_closed
+        extension_closed = receipt is not None and receipt.extension_closed
         if backend_closed:
             self.observe("backend.close")
-        elif not backend_returned or not pi_closed:
-            # Do not trust an unresponsive backend to reach its child owners.
-            if self._close_pi is not None:
-                pi_closed = await bounded(self._close_pi(), share=2)
-            if self._close_witness is not None:
-                self._close_witness()
-            self.extension_lease.close()
-            self.store.close()
         if self._journal is not None:
             self._journal.close()
         if (
             self.worker.cleanup_receipt is not None
             and pi_closed
-            and self.extension_lease.closed
+            and extension_closed
         ):
             try:
                 if (
@@ -719,6 +678,8 @@ class P1OperatorResources:
             self._oracle_result is None
             or self.worker_owner.cleanup_receipt is None
             or not cleanup.complete
+            or self._prime_cleanup is None
+            or not self._prime_cleanup.complete
         ):
             raise P1OperatorError()
         sealed = seal_cleanup_receipt(
@@ -727,7 +688,7 @@ class P1OperatorResources:
             self.worker_owner.cleanup_receipt,
             backend_closed=cleanup.backend_closed,
             pi_reaped=True,
-            extension_closed=self.extension_lease.closed,
+            extension_closed=self._prime_cleanup.extension_closed,
             private_store_removed=cleanup.private_store_removed,
         )
         receipt = build_native_receipt(self.oracle, self._oracle_result, sealed)
@@ -832,77 +793,59 @@ async def run_fixed_small_verification(
     )
 
 
-class _P1Bridge:
-    """One bounded private socket server on the worker's owning event loop."""
+class _P1Services:
+    """Domain execution stays on the worker and coordination's owning loop."""
 
-    def __init__(self, channel: socket.socket, resources: P1OperatorResources) -> None:
-        self._channel, self._resources = channel, resources
-        channel.setblocking(False)
-        self._task = asyncio.create_task(self._serve())
-        self._task.add_done_callback(consume_task_result)
-        self._closed = False
+    def __init__(self, worker, owner):
+        self.worker, self.owner = worker, owner
+        self.resources = None
+        self._loop = asyncio.get_running_loop()
+        self._stopping = False
 
-    async def _serve(self) -> None:
-        pending = bytearray()
-        loop = asyncio.get_running_loop()
+    @property
+    def identity_sha256(self):
+        return self.owner.identity_sha256
+
+    def validate_lifecycle(self):
+        return self.owner.validate_lifecycle()
+
+    async def _on_loop(self, operation):
+        if asyncio.get_running_loop() is self._loop:
+            return await operation
         try:
-            while True:
-                chunk = await loop.sock_recv(self._channel, 4096)
-                if not chunk:
-                    return
-                pending.extend(chunk)
-                if len(pending) > 131_072:
-                    raise P1OperatorError()
-                if b"\n" not in pending:
-                    continue
-                raw, _, trailing = pending.partition(b"\n")
-                if trailing:
-                    raise P1OperatorError()
-                pending.clear()
-                request = json.loads(raw)
-                if (
-                    type(request) is not dict
-                    or set(request) != {"protocol", "request_id", "type", "code"}
-                    or request["protocol"] != "asterion.prime-ipython/v1"
-                    or request["type"] != "execute"
-                ):
-                    raise P1OperatorError()
-                self._resources.coordination.check(self._resources.run_id)
-                result = await self._resources.worker.execute_cell(
-                    P1CellRequest(
-                        request["request_id"],
-                        self._resources.active_turn_id,
-                        request["code"],
-                    )
-                )
-                response = {
-                    "protocol": "asterion.prime-ipython/v1",
-                    "request_id": result.request_id,
-                    "type": "result",
-                    "status": result.status,
-                    "output": result.output,
-                }
-                await loop.sock_sendall(
-                    self._channel,
-                    json.dumps(response, separators=(",", ":")).encode() + b"\n",
-                )
-        except asyncio.CancelledError:
-            return
-        except Exception:
-            self._resources.coordination.request_stop("recovery-required")
+            future = asyncio.run_coroutine_threadsafe(operation, self._loop)
+        except BaseException:
+            operation.close()
+            raise
+        return await asyncio.wrap_future(future)
 
-    async def close(self) -> None:
-        if self._closed:
-            return
-        self._task.cancel()
-        deadline = self._resources.coordination.shutdown_deadline or (
-            time.monotonic() + _CLEANUP_SECONDS
-        )
-        closed = await wait_task_until(self._task, deadline, cancel=True)
-        self._channel.close()
-        self._closed = closed
-        if not closed:
+    async def execute(self, request_id, code, signal):
+        return await self._on_loop(self._execute(request_id, code, signal))
+
+    async def _execute(self, request_id, code, signal):
+        resources = self.resources
+        if self._stopping or resources is None or signal.cancelled:
             raise P1OperatorError()
+        try:
+            resources.coordination.check(resources.run_id)
+            result = await self.worker.execute_cell(
+                P1CellRequest(request_id, resources.active_turn_id, code))
+            return PrimeToolResult(result.request_id, result.status,
+                                   ({"type": "text", "text": result.output},))
+        except BaseException:
+            resources.coordination.request_stop("recovery-required")
+            raise
+
+    async def call(self, request_id, method, params, signal, **kwargs):
+        raise P1OperatorError()
+
+    def request_stop(self):
+        self._stopping = True
+
+    async def close(self):
+        if self.owner.cleanup_receipt is not None:
+            return
+        await self._on_loop(self.owner.close())
 
 
 # The one fixed model host this preset runs against. Provider, model, deadline,
@@ -910,26 +853,14 @@ class _P1Bridge:
 # small verification must not ask for provider, model, cost or deadline
 # selection, so the integration fixes them here and exposes only public status.
 _PROVIDER = "deepseek"
-_MODEL = "deepseek-v4-flash"
+_MODEL = "deepseek-flash"
 _DEADLINE_SECONDS = 600.0
 _AGGREGATE_TOKENS = 64_000
 _COST_MICROS = 500_000
 _LIMITS = AsterionPrimeLimits(8, 4, 600_000)
-# Micro-units per million tokens for the fixed model, taken from the
-# operator-owned Pi distribution's own cost entry for it (0.14 and 0.28 USD per
-# million). It bounds the compaction reservation and is charged against the run
-# budget, and must never be re-derived from a model registry inside a checkout:
-# that is the coupling this phase removes, and the Pi exposes no public
-# queryable price (its model listing carries no cost column, and its registry
-# lives in content-hashed bundle chunks).
-#
-# This is therefore a preset constant with no runtime cross-check. Its only
-# failure mode is a silent drift in the private ledger's ``cost_micros`` --
-# bounded and small, because ``_AGGREGATE_TOKENS``, ``_DEADLINE_SECONDS`` and
-# ``_LIMITS`` bind the run independently of price, and it reaches no public
-# surface. Re-read the operator's Pi registry whenever the Pi distribution or
-# ``_MODEL`` changes.
-_PRICE = ModelPrice(140_000, 280_000)
+# Exact deepseek/deepseek-flash rates from the approved shipped Pi metadata:
+# USD 0.30 input / 1.20 output per million; cached input is charged in full.
+_PRICE = ModelPrice(300_000, 1_200_000)
 # The two compaction callbacks this application reserves, capped exactly as the
 # reservation arithmetic requires.
 _COMPACTION_INPUT_CAPS = (4096, 4096)
@@ -961,7 +892,9 @@ class _Preflight:
     operator_root: Path
     environment: Mapping[str, str]
     worker_python: Path
-    pi_base_command: tuple[str, ...]
+    executable: Path
+    entry: Path | None
+    effort: str
     extension_path: Path
 
 
@@ -1025,13 +958,10 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
         raise P1OperatorError()
     try:
         resolved = live.load_operator_environment(root)
-        pi_base_command = live.pi_base_command(
-            node=live.resolve_node(resolved), pi_entry=live.resolve_pi_entry(resolved),
-            environment=resolved,
-        )
-        command = list(pi_base_command)
-        command[command.index("--tools") + 1] = ",".join(CORE_TOOL_REGISTRY.tool_names)
-        pi_base_command = tuple(command)
+        if not resolved.get('DEEPSEEK_API_KEY', '').strip():
+            raise P1OperatorError()
+        executable, entry = live.resolve_node(resolved), live.resolve_pi_entry(resolved)
+        effort = resolve_pi_effort(resolved, default='medium')
         extension = _extension_path()
     except live.P7LiveSolveError:
         raise P1OperatorError() from None
@@ -1044,182 +974,55 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
         )
     except (TypeError, ValueError):
         raise P1OperatorError() from None
-    return _Preflight(root, resolved, worker, pi_base_command, extension)
+    return _Preflight(root, resolved, worker, executable, entry, effort, extension)
 
 
 async def _build_resources(preflight: _Preflight) -> P1OperatorResources:
-    """Preflight every host service before the first worker or model process."""
+    """Provide domain executor and operator data to the Prime resource owner."""
     temporary = tempfile.TemporaryDirectory(prefix="asterion-native-p1-")
     root = Path(temporary.name).resolve()
-    bridge_owner, bridge_pi = socket.socketpair()
-    witness_owner, witness_pi = socket.socketpair()
-    lease = None
-    worker = backend = store = bridge = witness = None
+    application = worker = None
     try:
-        nonce = secrets.token_hex(32)
-        descriptors = tuple(sorted((bridge_pi.fileno(), witness_pi.fileno())))
-        binding = ExtensionBinding(
-            "prime.ipython",
-            preflight.extension_path,
-            ("prime.tool.ipython",),
-            descriptors,
-            {
-                TOOL_REGISTRY_ENV: CORE_TOOL_REGISTRY.environment_value(),
-                "ASTERION_PRIME_IPYTHON_FD": str(bridge_pi.fileno()),
-                "ASTERION_PRIME_IPYTHON_CONTEXT_FD": str(witness_pi.fileno()),
-                "ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE": nonce,
-            },
-        )
-        lease = binding.preflight()
-        bridge_pi.close()
-        witness_pi.close()
+        # This configuration directory belongs to this operator invocation.
+        # No caller profile, auth or catalog file is copied or changed.
         agent_root = root / "agent"
         agent_root.mkdir(mode=0o700)
-        (agent_root / "settings.json").write_text(
-            json.dumps(_AGENT_SETTINGS), encoding="utf-8"
-        )
+        (agent_root / "settings.json").write_text(json.dumps(_AGENT_SETTINGS), encoding="utf-8")
         environment = dict(preflight.environment)
         environment[_AGENT_DIR_ENV] = str(agent_root)
-        environment.update(lease.environment)
-        command = (
-            *preflight.pi_base_command,
-            "--provider",
-            _PROVIDER,
-            "--model",
-            _MODEL,
-            *lease.command_args(),
-        )
         deadline = time.monotonic() + _DEADLINE_SECONDS
-        worker = P1WorkerProcess(
-            deadline=deadline, interpreter=str(preflight.worker_python)
-        )
-        await worker.start()
-        owner = P1WorkerOwnerAdapter(worker)
+        task_deadline = TaskDeadline(deadline_monotonic=deadline,
+                                     deadline_epoch=time.time() + _DEADLINE_SECONDS)
         private = root / "backend"
         private.mkdir(mode=0o700)
         run_id = "p1-" + secrets.token_hex(12)
-        identity = PrimeBackendIdentity(
-            run_id,
-            1,
-            "prime-applications",
-            "prime.ipython-coding",
-            "1.0.0",
-            "asterion.prime",
-            digest(command),
-            binding.binding_fingerprint,
-            worker.identity_sha256,
-            "p1-continuation",
-            private_root_identity(private),
-            digest(
-                {
-                    **asdict(_LIMITS),
-                    "aggregate_tokens": _AGGREGATE_TOKENS,
-                    "cost_micros": _COST_MICROS,
-                }
-            ),
-        )
-        store = FilePrimeSessionStore(private, identity)
-        rpc = build_rpc_session(
-            command=command,
-            cwd=root,
-            environment=environment,
-            inherited_fds=lease.inherited_fds,
-            deadline_seconds=_DEADLINE_SECONDS,
-            compact_events=True,
-        )
-        witness = PrimeContextWitnessSession(
-            witness_owner,
-            launch_nonce=nonce,
-            timeout_seconds=60,
-            mark_uncertain=lambda: None,
-        )
-        backend = PrimeSessionBackend(
-            identity=identity,
-            store=store,
-            rpc_session=rpc,
-            extension_binding=binding,
-            extension_lease=lease,
-            approved_command=command,
-            approved_environment=environment,
-            limits=_LIMITS,
-            aggregate_tokens=_AGGREGATE_TOKENS,
-            cost_micros=_COST_MICROS,
-            model_price=_PRICE,
-            witness=witness,
-            tool_executor=owner,
-            compaction_instructions=_COMPACTION_INSTRUCTIONS,
-            authority_id="authority-1",
-        )
+        backend_spec = PrimeBackendSpec(
+            run_id, 1, private, "p1-continuation", _LIMITS, _AGGREGATE_TOKENS,
+            _COST_MICROS, _PRICE, "authority-1", _COMPACTION_INSTRUCTIONS,
+            compat_provider_id="prime-applications")
+        application = prepare_prime_application(
+            PrimeApplicationSpec("prime.ipython-coding", "1.0.0", "persistent-code-tools",
+                tools=PrimeToolModuleArtifact(preflight.extension_path, CORE_TOOL_REGISTRY)),
+            PrimeOperatorContext(preflight.executable, preflight.entry, root, _PROVIDER, _MODEL,
+                preflight.effort, environment, task_deadline), authorization=backend_spec)
+        worker = P1WorkerProcess(deadline=deadline, interpreter=str(preflight.worker_python))
+        await worker.start()
+        owner = P1WorkerOwnerAdapter(worker)
+        services = _P1Services(worker, owner)
+        attachment = await application.open_backend(spec=backend_spec, services=services)
         resources = P1OperatorResources(
-            backend=backend,
-            store=store,
-            worker=worker,
-            worker_owner=owner,
-            extension_lease=lease,
-            private_root=private,
-            journal_root=root / "journal",
-            run_id=run_id,
-            deadline=deadline,
-            cleanup_root=temporary.cleanup,
-            close_pi=lambda: _force_close_pi(rpc),
-            close_witness=witness.close,
-        )
-        bridge = _P1Bridge(bridge_owner, resources)
-        resources._close_bridge = bridge.close
+            application=application, backend=attachment, worker=worker, worker_owner=owner,
+            private_root=private, journal_root=root / "journal", run_id=run_id,
+            deadline=deadline, cleanup_root=temporary.cleanup)
+        services.resources = resources
         return resources
     except BaseException:
-        if bridge is not None:
-            await bridge.close()
-        if backend is not None:
-            await backend.close()
-        else:
-            if worker is not None:
-                await worker.close()
-            if witness is not None:
-                witness.close()
-            if store is not None:
-                store.close()
-            if lease is not None:
-                lease.close()
-        for channel in (bridge_owner, bridge_pi, witness_owner, witness_pi):
-            channel.close()
+        if worker is not None:
+            await worker.close()
+        if application is not None:
+            await application.close()
         temporary.cleanup()
     raise P1OperatorError()
-
-
-async def _force_close_pi(rpc: RpcSession) -> None:
-    """Use the retained process owner, never an active RPC command lock."""
-    process = rpc.process
-    if process is not None and process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    loop = asyncio.get_running_loop()
-    stopped = loop.create_future()
-
-    def finish(failed: bool) -> None:
-        if not stopped.done():
-            if failed:
-                stopped.set_exception(P1OperatorError())
-            else:
-                stopped.set_result(None)
-
-    def stop() -> None:
-        failed = False
-        try:
-            rpc.stop()
-        except BaseException:
-            failed = True
-        try:
-            loop.call_soon_threadsafe(finish, failed)
-        except RuntimeError:
-            pass  # The bounded launcher has already closed its loop.
-
-    threading.Thread(target=stop, daemon=True).start()
-    await stopped
-    if rpc.process is not None or (process is not None and process.poll() is None):
-        raise P1OperatorError()
 
 
 def _run_operator(invoke: Callable[[], Awaitable[P1PublicResult]]) -> P1PublicResult:

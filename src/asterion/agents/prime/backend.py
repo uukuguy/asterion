@@ -24,6 +24,7 @@ from asterion.agents.prime.context import (
     PrimeContextWitnessSession,
     count_rebuilt_context,
 )
+from asterion.agents.prime.deadline import TaskDeadline
 from asterion.agents.prime.execution import (
     AsterionPrimeLimits,
     PrimeExecutionKernel,
@@ -273,6 +274,7 @@ class PrimeSessionBackend:
         tool_executor: PrimeToolExecutor | None = None,
         compaction_instructions: Mapping[str, str] | None = None,
         diagnostics: DiagnosticSink | None = None,
+        task_deadline: TaskDeadline | None = None,
     ) -> None:
         try:
             if type(identity) is not PrimeBackendIdentity or store.identity != identity:
@@ -378,6 +380,7 @@ class PrimeSessionBackend:
         self._cleanup: PrimeCleanupReceipt | None = None
         self._deadline: float | None = None
         self._authority_deadline: float | None = None
+        self._task_deadline = task_deadline
         self._rpc_lifecycle: object | None = None
         self._attachment_generation = 0
         self._position = 0
@@ -503,7 +506,10 @@ class PrimeSessionBackend:
         deadlines = [
             d for d in (self._deadline, self._authority_deadline) if d is not None
         ]
-        return min(deadlines) - time.monotonic() if deadlines else 0.0
+        remaining = min(deadlines) - time.monotonic() if deadlines else 0.0
+        if self._task_deadline is not None:
+            remaining = min(remaining, self._task_deadline.remaining_seconds())
+        return remaining
 
     def _ready(self, *, read_only: bool = False) -> None:
         if self._cleanup is not None or self._closing:
@@ -1234,13 +1240,18 @@ class PrimeSessionBackend:
         if self._outstanding == command_id and self._active_task is not None:
             self._active_task.cancel()
 
-    async def close(self) -> PrimeCleanupReceipt:
-        if self._cleanup is not None:
-            return self._cleanup
+    def _request_stop(self) -> None:
         self._closing = self._cancelled = True
         active = self._active_task
         if active is not None and active is not asyncio.current_task():
             active.cancel()
+
+    async def close(self) -> PrimeCleanupReceipt:
+        if self._cleanup is not None:
+            return self._cleanup
+        self._request_stop()
+        active = self._active_task
+        if active is not None and active is not asyncio.current_task():
             try:
                 await active
             except BaseException:
