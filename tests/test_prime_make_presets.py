@@ -11,7 +11,7 @@ import tempfile
 
 _P7_PRESET_TARGETS = (
     "asterion-prime-p7-solve asterion-prime-p7-cognition "
-    "asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt asterion-prime-p7-autonomy"
+    "asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt asterion-prime-p7-autonomy asterion-prime-p7-research"
 )
 
 

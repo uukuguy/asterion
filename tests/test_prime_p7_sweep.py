@@ -695,7 +695,7 @@ class TestPrimeP7Sweep(unittest.TestCase):
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(encoding="utf-8")
         recipe = makefile.split(
             "asterion-prime-p7-solve asterion-prime-p7-cognition "
-            "asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt asterion-prime-p7-autonomy:\n", 1
+            "asterion-prime-p7-level-witness asterion-prime-p7-sweep-attempt asterion-prime-p7-autonomy asterion-prime-p7-research:\n", 1
         )[1]
         contract = (Path(__file__).resolve().parents[1] / "tools" / "p7_guest_environment.txt").read_text(encoding="utf-8")
         self.assertIn("tools/p7_guest_environment.txt", recipe)
