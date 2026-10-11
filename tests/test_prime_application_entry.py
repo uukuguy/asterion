@@ -541,6 +541,24 @@ class _Services:
 
 
 class TestPrimePersistentOwner(unittest.TestCase):
+    def test_runtime_observation_exposes_only_scalar_counters_and_safe_diagnostics(self):
+        from types import SimpleNamespace
+        app = self._persistent_app()
+        app._persistent = SimpleNamespace(
+            rpc=SimpleNamespace(stderr=b'SECRET_SENTINEL', last_failure=None),
+            session=SimpleNamespace(
+                _kernel=SimpleNamespace(model_callbacks=129, tool_callbacks=600),
+                native_event_summary=({'sequence': 1, 'type': 'turn_start'},),
+            ),
+        )
+        record = app.runtime_observation()
+        self.assertEqual((record['model_callbacks'], record['tool_callbacks']), (129, 600))
+        self.assertNotIn('SECRET_SENTINEL', repr(record))
+        self.assertEqual(set(record), {
+            'stderr_bytes', 'stderr_sha256', 'model_failed', 'native_event_summary',
+            'model_callbacks', 'tool_callbacks',
+        })
+
     setUp = TestPrimeApplicationEntry.setUp
     def _persistent_app(self):
         from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY

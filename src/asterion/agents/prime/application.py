@@ -555,6 +555,8 @@ class PrimeApplication:
         stderr = resource.rpc.stderr
         return {'stderr_bytes': len(stderr), 'stderr_sha256': sha256(stderr).hexdigest(),
                 'model_failed': bool(resource.rpc.last_failure),
+                'model_callbacks': resource.session._kernel.model_callbacks,
+                'tool_callbacks': resource.session._kernel.tool_callbacks,
                 'native_event_summary': resource.session.native_event_summary}
 
     def context_view_metrics(self):
