@@ -77,6 +77,8 @@ class P7GameSelection:
     # this opt-in leaves the normal solve and official contracts unchanged.
     action_cap_override: int | None = None
     action_cap_reason: str = "human-baseline"
+    # Only the operator's supervised research entry grants this authority.
+    supervised_research: bool = False
 
     def __post_init__(self) -> None:
         if (
@@ -97,6 +99,8 @@ class P7GameSelection:
                 or self._metadata_win_levels != len(self._metadata_baseline_actions or ())
             )
             or type(self.action_cap_reason) is not str
+            or type(self.supervised_research) is not bool
+            or self.supervised_research and self.action_cap_override is not None
             or self.action_cap_reason not in {"human-baseline", "action-cap"}
             or self.action_cap_override is not None
             and (
@@ -112,7 +116,9 @@ class P7GameSelection:
         return self.target_level == self.win_levels
 
     @property
-    def action_cap(self) -> int:
+    def action_cap(self) -> int | None:
+        if self.supervised_research:
+            return None
         if self.action_cap_override is not None:
             return self.action_cap_override
         if self.is_full_game:

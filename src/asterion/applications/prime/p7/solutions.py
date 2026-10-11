@@ -62,6 +62,7 @@ class VerifiedPrefix:
     source_run_id: str
     replay_sha256: str
     observations: tuple[ArcObservation, ...] | None = None
+    supervised_research: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +82,7 @@ class VerifiedAttempt:
     source_run_id: str
     terminal_reason: str
     replay_sha256: str
+    supervised_research: bool = False
 
 
 def load_verified_attempt(
@@ -499,6 +501,9 @@ def _read_one(
         evidence = partial[0] if is_partial else completed[0]
         if not isinstance(evidence, Mapping):
             return None
+        supervised = _supervised_provenance(summary, evidence)
+        if supervised is None:
+            return None
         identity = _recording_identity(run, transitions)
         if identity is None:
             return None
@@ -540,14 +545,17 @@ def _read_one(
         # research. A partial-level default of 500 may be smaller than a saved
         # cumulative prefix; replay exactly that bounded history, retaining the
         # selected target. Live continuation calculates its own budget later.
-        if len(transitions) > 5000:
+        if not supervised and len(transitions) > 5000:
             return None
-        if len(transitions) > game.action_cap:
+        if supervised:
+            game = replace(game, supervised_research=True)
+        elif game.action_cap is not None and len(transitions) > game.action_cap:
             game = replace(game, action_cap_override=len(transitions))
-        receipt = ArcRunReceipt(recorded_game_id, seed, len(transitions), levels, terminal, recorded_digest)
+        receipt = ArcRunReceipt(recorded_game_id, seed, len(transitions), levels, terminal, recorded_digest,
+                                supervised_research=supervised)
         observations = recorded_observations(run, transitions, recorded_game_id, win_levels)
         return (VerifiedPrefix(recorded_game_id, seed, win_levels, levels, transitions, run_id,
-                               recorded_digest, observations), receipt, game)
+                               recorded_digest, observations, supervised), receipt, game)
     except Exception:
         return None
 
@@ -657,6 +665,9 @@ def _load_attempt_one(
         evidence = failed[0] if failed else partial[0]
         if not isinstance(evidence, Mapping):
             return None
+        supervised = _supervised_provenance(summary, evidence)
+        if supervised is None:
+            return None
         required = {
             "game_id", "seed", "win_levels", "levels_completed",
             "primitive_actions", "replay_sha256", "terminal_reason",
@@ -677,7 +688,7 @@ def _load_attempt_one(
             )
             if type(terminal) is not str or terminal not in {"action-cap", "game-over", "human-baseline", "interrupted"}:
                 return None
-        elif set(evidence) != required:
+        elif set(evidence) != required | ({"supervised_research"} if supervised else set()):
             return None
         if (
             evidence.get("game_id") != expected_game_id
@@ -729,10 +740,13 @@ def _load_attempt_one(
         )
         if game.win_levels != win_levels or game.target_level != win_levels:
             return None
-        if terminal == "human-baseline":
+        if supervised:
+            game = replace(game, supervised_research=True)
+        elif terminal == "human-baseline":
             game = replace(game, action_cap_override=actions)
         receipt = ArcRunReceipt(
-            expected_game_id, seed, actions, levels, terminal, digest
+            expected_game_id, seed, actions, levels, terminal, digest,
+            supervised_research=supervised,
         )
         with tempfile.TemporaryDirectory(prefix="asterion-p7-attempt-") as directory:
             replay_arc_run(
@@ -751,6 +765,7 @@ def _load_attempt_one(
             run.name,
             terminal,
             digest,
+            supervised_research=supervised,
         )
     except Exception:
         return None
@@ -899,6 +914,10 @@ def _prefix_values(
     }
     identity_fields = {"game_id", "seed", "win_levels"}
     fields = set(value)
+    if "supervised_research" in fields:
+        if value["supervised_research"] is not True:
+            return None
+        fields.remove("supervised_research")
     has_identity = fields == result_fields | identity_fields
     if not has_identity and (is_partial or fields != result_fields):
         return None
@@ -923,9 +942,34 @@ def _prefix_values(
     return levels, actions, terminal, digest
 
 
+def _supervised_provenance(summary: Mapping, evidence: Mapping) -> bool | None:
+    """Require agreement between sealed evidence and operator run metadata.
+
+    Missing markers retain the historical finite contract. Replay authority
+    never follows from a long trace or an absent aggregate cap alone.
+    """
+    experiment = summary.get("experiment", {})
+    if experiment is None:
+        experiment = {}  # Historical summaries permit absent experiment metadata.
+    if not isinstance(experiment, Mapping):
+        return None
+    declared = experiment.get("supervised_research", False)
+    recorded = evidence.get("supervised_research", False)
+    if type(declared) is not bool or type(recorded) is not bool or declared != recorded:
+        return None
+    if recorded and (evidence.get("supervised_research") is not True
+                     or "action_cap" not in experiment or experiment["action_cap"] is not None):
+        return None
+    if not recorded and "action_cap" in experiment and experiment["action_cap"] is None:
+        return None
+    return recorded
+
+
 def _summary_matches(summary: dict[object, object], game_id: str, seed: int, win_levels: int, levels: int, actions: int, terminal: str, digest: str) -> bool:
     broker, receipt = summary.get("broker"), summary.get("receipt")
     if type(broker) is not dict or type(receipt) is not dict:
+        return False
+    if _supervised_provenance(summary, broker) is None:
         return False
     for key, value in (("levels_completed", levels), ("primitive_actions", actions), ("terminal_reason", terminal), ("replay_sha256", digest)):
         if broker.get(key) != value:

@@ -23,11 +23,15 @@ def native_evidence(run: Path) -> tuple:
         _recording_identity,
         recorded_observations,
         _summary_matches,
+        _supervised_provenance,
     )
 
     summary = json.loads(_private_path(run, "summary.json").read_text())
     experiment = summary["experiment"]
     broker = summary["broker"]
+    supervised = _supervised_provenance(summary, broker)
+    if supervised is None:
+        raise ValueError
     if (
         summary.get("schema") != "asterion.prime.p7-live-private-summary/v1"
         or summary.get("run_id") != run.name
@@ -86,7 +90,8 @@ def native_evidence(run: Path) -> tuple:
                 "terminal_reason",
                 "replay_sha256",
             )
-        )
+        ),
+        supervised_research=supervised,
     )
     if (
         len(transitions) != receipt.primitive_actions
@@ -147,6 +152,9 @@ def recovery_source(run: Path, summary: dict) -> tuple[Path, dict] | None:
         ):
             return None
         experiment = summary["experiment"]
+        from .solutions import _supervised_provenance
+        if _supervised_provenance(summary, summary.get("broker", {})) != receipt.supervised_research:
+            return None
         if experiment.get("prediction_variant") != "offline-replay" or any(
             experiment.get(key) != original["experiment"].get(key)
             for key in ("game_id", "seed", "model", "target_level")

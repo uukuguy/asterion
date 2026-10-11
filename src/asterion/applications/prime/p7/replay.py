@@ -96,7 +96,10 @@ def replay_arc_run(
         or type(game) is not P7GameSelection
         or receipt.game_id != game.game_id
         or receipt.seed != game.seed
-        or not 0 <= receipt.primitive_actions <= game.action_cap
+        or type(receipt.supervised_research) is not bool
+        or receipt.supervised_research != game.supervised_research
+        or receipt.primitive_actions < 0
+        or (game.action_cap is not None and receipt.primitive_actions > game.action_cap)
         or not 0 <= receipt.levels_completed <= game.target_level
         or receipt.terminal_reason not in (
             ({"game-won", "game-incomplete", "action-cap", "game-over"}
@@ -110,20 +113,22 @@ def replay_arc_run(
         or (
             receipt.terminal_reason in {"action-cap", "human-baseline"}
             and not (
-                receipt.primitive_actions == game.action_cap
+                game.action_cap is not None and receipt.primitive_actions == game.action_cap
                 and receipt.levels_completed < game.target_level
             )
         )
         or (
             receipt.terminal_reason == "game-over"
             and not (
-                1 <= receipt.primitive_actions < game.action_cap
+                receipt.primitive_actions >= 1
+                and (game.action_cap is None or receipt.primitive_actions < game.action_cap)
                 and receipt.levels_completed < game.target_level
             )
         )
         or len(journal) != receipt.primitive_actions
         or (receipt.terminal_reason == "interrupted" and not (
-            1 <= receipt.primitive_actions < game.action_cap
+            receipt.primitive_actions >= 1
+            and (game.action_cap is None or receipt.primitive_actions < game.action_cap)
             and receipt.levels_completed < game.target_level
         ))
     ):

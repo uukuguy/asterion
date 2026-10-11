@@ -960,7 +960,7 @@ def p7_act(actions):
     terminal = (
         "GAME_SOLVED" if view["state"] == "WIN" and levels >= target
         else "LEVEL_SOLVED" if reason == "level-completed" and levels >= target
-        else "ACTION_CAP" if remaining <= 0
+        else "ACTION_CAP" if remaining is not None and remaining <= 0
         else "RESET_REQUIRED" if reason == "reset-required"
         else "GAME_OVER" if reason == "game-incomplete"
         else "GAME_OVER" if reason == "game-over"
@@ -1359,6 +1359,7 @@ def write_summary(
             "primitive_actions": getattr(broker_receipt, "primitive_actions", None),
             "terminal_reason": getattr(broker_receipt, "terminal_reason", None),
             "replay_sha256": getattr(broker_receipt, "replay_sha256", None),
+            **({"supervised_research": True} if game.supervised_research else {}),
         },
         "replay_verified": replay_verified,
         "sealed_trace": sealed_trace,

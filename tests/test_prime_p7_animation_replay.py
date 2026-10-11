@@ -38,7 +38,7 @@ class _Animated(_RecordingEngine):
 
 
 class TestAnimationReplay(unittest.TestCase):
-    def _source(self, root):
+    def _source(self, root, *, supervised=False):
         from asterion.applications.prime.p7 import live
         from asterion.applications.prime.p7.broker import ArcBroker, ArcBrokerError
         from asterion.applications.prime.p7.game import P7GameSelection
@@ -53,7 +53,7 @@ class TestAnimationReplay(unittest.TestCase):
         rid = "p7-live-20261006064304-7096300396424db6b3c63325"
         run = live.private_root(root, rid)
         (run / "trace").mkdir()
-        game = P7GameSelection("ls20-9607627b", 0, 2)
+        game = P7GameSelection("ls20-9607627b", 0, 2, supervised_research=supervised)
         broker = ArcBroker(
             engine=_Animated(recordings_dir=run / "recordings", game=game), game=game
         )
@@ -99,12 +99,27 @@ class TestAnimationReplay(unittest.TestCase):
                 "model": "gpt-6.1-sol",
                 "target_level": 2,
                 "prediction_variant": "verified",
+                **({"supervised_research": True, "action_cap": None} if supervised else {}),
             },
             diagnostics={
                 "native_event_summary": [{"sequence": 1, "type": "agent_settled"}]
             },
         )
         return run
+
+    def test_native_evidence_preserves_supervised_replay_authority(self):
+        from asterion.applications.prime.p7.animation_replay import native_evidence
+
+        with tempfile.TemporaryDirectory() as directory:
+            run = self._source(Path(directory), supervised=True)
+            _, _, _, receipt, _ = native_evidence(run)
+            self.assertTrue(receipt.supervised_research)
+            summary_path = run / "summary.json"
+            summary = json.loads(summary_path.read_text())
+            del summary["experiment"]["supervised_research"]
+            summary_path.write_text(json.dumps(summary))
+            with self.assertRaises(ValueError):
+                native_evidence(run)
 
     def test_recovery_preserves_original_and_future_restore_uses_real_new_hashes(self):
         from asterion.applications.prime.p7.solutions import (

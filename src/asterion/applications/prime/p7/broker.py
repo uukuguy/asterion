@@ -127,7 +127,7 @@ class ArcAction:
 class ArcStatus:
     primitive_actions: int
     levels_completed: int
-    actions_remaining: int
+    actions_remaining: int | None
     terminal_reason: str
 
 
@@ -164,6 +164,7 @@ class ArcRunReceipt:
     levels_completed: int
     terminal_reason: str
     replay_sha256: str
+    supervised_research: bool = False
 
     def __repr__(self) -> str:
         return "ArcRunReceipt(redacted)"
@@ -2810,7 +2811,7 @@ class ArcBroker:
                 mismatch = {"route": "before-state"}
                 conflict = self._record_model_conflict(records[-1].sequence, "route-before-state")
                 break
-            if self._primitive_actions >= self._game.action_cap:
+            if self._game.action_cap is not None and self._primitive_actions >= self._game.action_cap:
                 stop_reason = "action-cap"
                 break
             if name == "RESET" and self._level_gameplay_actions == 0:
@@ -2933,7 +2934,7 @@ class ArcBroker:
                 stop_reason = "game-over"
                 append_feedback(record, stop_reason)
                 break
-            if self._primitive_actions >= self._game.action_cap:
+            if self._game.action_cap is not None and self._primitive_actions >= self._game.action_cap:
                 stop_reason = "action-cap"
                 append_feedback(record, stop_reason)
                 break
@@ -3002,7 +3003,7 @@ class ArcBroker:
         return ArcStatus(
             self._primitive_actions,
             self._current.levels_completed - self._initial.levels_completed,
-            self._game.action_cap - self._primitive_actions,
+            None if self._game.action_cap is None else self._game.action_cap - self._primitive_actions,
             self._terminal_reason,
         )
 
@@ -3014,7 +3015,9 @@ class ArcBroker:
         return ArcTerminalSnapshot(self._current, self._status())
 
     def _validate_actions(self, actions: object) -> tuple[ArcAction, ...]:
-        if type(actions) is not tuple or not actions or len(actions) > self._game.action_cap - self._primitive_actions:
+        batch_limit = (64 if self._game.action_cap is None
+                       else self._game.action_cap - self._primitive_actions)
+        if type(actions) is not tuple or not actions or len(actions) > batch_limit:
             raise ArcBrokerError("unavailable")
         try:
             validated = tuple(_canonical_action(action) for action in actions)
@@ -3245,7 +3248,7 @@ class ArcBroker:
             if after.levels_completed == self._game.target_level:
                 self._terminal_reason = (("game-won" if after.state == "WIN" else "game-incomplete")
                                          if self._game.is_full_game else "level-completed")
-            elif self._primitive_actions == self._game.action_cap:
+            elif self._game.action_cap is not None and self._primitive_actions == self._game.action_cap:
                 self._terminal_reason = (self._game.action_cap_reason if isinstance(self._game, P7GameSelection)
                     and self._game.action_cap_override is not None else "action-cap")
             elif after.state == "GAME_OVER":
@@ -3544,6 +3547,7 @@ class ArcBroker:
             self._current.levels_completed - self._initial.levels_completed,
             reason,
             replay_sha256(self._journal, terminal_reason=reason, uncertain_action=self._failed_action),
+            type(self._game) is P7GameSelection and self._game.supervised_research,
         )
 
     @property

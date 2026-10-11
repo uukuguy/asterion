@@ -133,8 +133,11 @@ class P7PrivateTraceReceipt:
             if (
                 status.terminal_reason != "active"
                 or type(status.primitive_actions) is not int
-                or not 0 <= status.primitive_actions < self._broker.game.action_cap
-                or status.actions_remaining != self._broker.game.action_cap - status.primitive_actions
+                or status.primitive_actions < 0
+                or (self._broker.game.action_cap is not None
+                    and status.primitive_actions >= self._broker.game.action_cap)
+                or status.actions_remaining != (None if self._broker.game.action_cap is None
+                    else self._broker.game.action_cap - status.primitive_actions)
                 or type(status.levels_completed) is not int
                 or not 0 <= status.levels_completed < self._broker.game.target_level
                 or len(journal) != status.primitive_actions
@@ -271,6 +274,7 @@ class P7PrivateTraceReceipt:
                     "primitive_actions": broker_receipt.primitive_actions,
                     "replay_sha256": broker_receipt.replay_sha256,
                     "terminal_reason": broker_receipt.terminal_reason,
+                    **({"supervised_research": True} if self._broker.game.supervised_research else {}),
                 },
             )
             self._recorder.seal()

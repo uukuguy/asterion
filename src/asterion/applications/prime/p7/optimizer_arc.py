@@ -41,6 +41,7 @@ class ArcReplayOracle:
     ) -> None:
         if (
             type(game) is not P7GameSelection
+            or game.supervised_research
             or not callable(engine_factory)
             or type(warmup) is not tuple
             or any(type(action) is not PlannerAction for action in warmup)
