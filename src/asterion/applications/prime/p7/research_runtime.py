@@ -133,6 +133,10 @@ class P7ResearchRuntime:
         self._experience = experience
         self._memory_instructions = None
         self._cell_archive = CellArchive(run_root)
+        # Only application actor executions belong in the model's directory.
+        # The kernel retains its complete private computation evidence.
+        self._actor_cells = {}
+        self._actor_history_unavailable = False
         self.control = SolverControl(run_root, run_id,
                                      (None if deadline_seconds is None else time.monotonic() + deadline_seconds)
                                      if deadline_monotonic is None else deadline_monotonic,
@@ -147,9 +151,8 @@ class P7ResearchRuntime:
                        if experience is not None else None,
             animation=self._animation,
             transition=self._transition,
-            cell_history=lambda start, limit: self.kernel.cell_history(start=start, limit=limit),
-            cell_read=lambda cell_id, field, start, limit: self.kernel.cell_read(
-                cell_id, field=field, start=start, limit=limit),
+            cell_history=self._actor_cell_history,
+            cell_read=self._actor_cell_read,
             diagnostic_sink=self._read_diagnostic,
             rollout_trace=(lambda ref, section, start, limit:
                            self._rollouts.read_trace(ref, section, start, limit))
@@ -339,6 +342,47 @@ class P7ResearchRuntime:
         async with self._operation_lock:
             return await self._execute_cell(call_id, code, signal)
 
+    def _actor_cell_history(self, start, limit):
+        with self._lock:
+            if self._actor_history_unavailable:
+                raise ValueError('Research computation provenance unavailable')
+            items = list(self._actor_cells.values())
+            selected = items[start:start + limit]
+            return json.loads(json.dumps({
+                'items': selected, 'start': start, 'total': len(items),
+                'next_start': start + len(selected) if start + len(selected) < len(items) else None,
+            }))
+
+    def _actor_cell_read(self, cell_id, field, start, limit):
+        with self._lock:
+            if cell_id not in self._actor_cells:
+                raise ValueError('Research computation unavailable')
+        return self.kernel.cell_read(cell_id, field=field, start=start, limit=limit)
+
+    def _remember_actor_cell(self, history_start, generation):
+        try:
+            if history_start is None:
+                raise ValueError('Research computation provenance unavailable')
+            directory = self.kernel.cell_history(start=history_start, limit=1)
+            records = directory['items']
+            if not records and directory['total'] == history_start:
+                # Rejected before execution: there is no computation to list.
+                return
+            if len(records) != 1 or records[0]['generation'] != generation:
+                raise ValueError('Research computation provenance unavailable')
+            with self._lock:
+                self._actor_cells[records[0]['cell_id']] = records[0]
+        except Exception:
+            # A provenance recording failure does not change execution; it
+            # grants no model access to an unclassified private cell.
+            with self._lock:
+                self._actor_history_unavailable = True
+            self._read_diagnostic(dict(
+                diagnostic_id='research-actor-history:derived-failed:0',
+                code='research-read-failed', severity='warning', stage='derived-failed',
+                action_sequence=0, outcome_known=True, durable=False, observed=None,
+                limit=None, unit=None, recovery='retry-read'))
+
     async def _execute_cell(self, call_id, code, signal):
         if not await self.admit_round(0, signal):
             return PrimeToolResult(call_id, "error", ({"type": "text", "text": "Research stopped."},))
@@ -357,6 +401,7 @@ class P7ResearchRuntime:
                 result = await self.kernel.execute(call_id, code, combined)
             finally:
                 self._observe_research('computation', self.kernel, history_start)
+                self._remember_actor_cell(history_start, generation)
             export_ids = []
             for content in result.content:
                 if content.get("type") == "text":

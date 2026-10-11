@@ -5010,3 +5010,9 @@
 - 2026-10-12 39c952b1 Recorded Task50 stop and fatal-risk demotion evidence to preserve recovery boundary.
 
 - 2026-10-12 Retained fatal witnesses and input reminders verified offline; archived predeath downgrade blocked, original full fixture failure explicitly retained.
+
+- 2026-10-12 07d00c1f Retained fatal witnesses and capacity reminders to prevent model risk downgrades and excessive input accumulation.
+
+- 2026-10-12 Task51 fresh historyOFF BP35 started07d00c1f after explicit user authorization; track retained danger and input pressure.
+
+- 2026-10-12: Task51 stopped4/9; fixed ordinary initializer dependencies and actor-only history; packaged verification ongoing.

@@ -124,3 +124,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task49 每步自动推演与显式致命风险：沿用上述[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)和[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)，代码8e89582b，定向/实际安装kernel/其余打包检查通过，Astra APPROVE；完整全量有一项旧console清理时序失败，单独和整模块重跑PASS，原全量不改写PASS。死亡/条件性致命风险阻断、一般模型不完整只提示；随后获授权的干净实测已用户中止5/9，L2模型漏报与冗余输出诊断已封存；用户授权默认摘要、覆盖边界与当前死亡反例修正，141定向、最终安装kernel及25打包检查通过，最后fallback对齐单独验证、全量快照边界在计划明确。候选提出和后果评估能力分别验证。
 
 - Task50 中止与后续离线修正：沿用上述推演设计/计划；已识别致命风险跨模型保留、旧范围不可用明确暂停；128KiB可配置输入容量提醒不截断画面。见[决策 D-2026-10-12-03](DECISIONS.md#d-2026-10-12-03--retain-identified-fatal-risk-and-monitor-p7-input-pressure)及[当前恢复点](RESUME-NEXT-SESSION.md)。实际死亡前模型安装kernel复现并阻断候选，实战收益及token下降未验证。
+
+- Task51 fresh trial and scope/history follow-up: [current state](CURRENT-STATE.md#task51-stopped-trial-and-narrow-follow-up-2026-10-12), [resume evidence](RESUME-NEXT-SESSION.md). Four levels completed; L5 model error and scope builtin/local-cell support gap remain distinct.

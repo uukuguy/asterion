@@ -29,7 +29,7 @@ import types as _rollout_types
 _registered_rollout_model = None
 _rollout_scope_extractors = {}
 _rollout_scope_builtins = {name:getattr(_rollout_builtins,name) for name in
-    ('range','len','min','max','enumerate','sorted','zip','sum','abs',
+    ('range','len','min','max','enumerate','sorted','zip','sum','abs','hasattr','round',
      'all','any','int','float','bool','str','list','dict','tuple','set')}
 _rollout_registration_sequence = 0
 _rollout_calls = []
@@ -158,7 +158,12 @@ def _rollout_scope_fingerprint(function, seen=()):
     names = set()
     def inspect_code(code):
         for instruction in _rollout_dis.get_instructions(code):
-            if instruction.opname in ('IMPORT_NAME','STORE_GLOBAL','DELETE_GLOBAL','STORE_DEREF','DELETE_DEREF'):
+            if instruction.opname in ('IMPORT_NAME','STORE_GLOBAL','DELETE_GLOBAL'):
+                raise ValueError('scope dependency unsupported')
+            # Comprehensions may capture this call's local cells (e.g. frame
+            # and loop coordinates). Only writes to external closure cells
+            # change retained dependencies beyond the copied inputs.
+            if instruction.opname in ('STORE_DEREF','DELETE_DEREF') and instruction.argval in code.co_freevars:
                 raise ValueError('scope dependency unsupported')
             if instruction.opname == 'LOAD_GLOBAL':
                 names.add(instruction.argval)

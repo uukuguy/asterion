@@ -1,5 +1,6 @@
 """Provider-free automatic evaluation in the existing P7 computation kernel."""
 import asyncio
+import builtins
 import hashlib
 import json
 from pathlib import Path
@@ -10,10 +11,116 @@ import zlib
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
-from asterion.applications.prime.p7.rollout_runtime import RolloutRuntime
+from asterion.applications.prime.p7 import rollout as rollout_helpers
+from asterion.applications.prime.p7.rollout_runtime import KERNEL_SOURCE, RolloutRuntime
 from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
 from tests.test_prime_p7_native_broker import _Engine
 from tests.test_prime_p7_research_runtime import _Signal, _TraceClient
+
+
+class TestRetainedScopeBuiltins(unittest.TestCase):
+    # Task51 cells 229/280/332: from_down's widened grid and reg20 ff.
+    # Only the initializer is replayed; no historical transition/game runs.
+    initializer = """
+gravity=1
+def from_down(f,ref):
+ f=f.tolist() if hasattr(f,'tolist') else f
+ ps=[(x,y) for y,row in enumerate(f) for x,v in enumerate(row) if v==9];py=round(sum(y for x,y in ps)/len(ps));ox=15;oy=py%6
+ g=[[f[y][x] for x in range(15,58,6)] for y in range(oy,63,6)]
+ return {'p':[round((sum(x for x,y in ps)/len(ps)-15)/6),(py-oy)//6],'g':g,'unknown':False,'done':False,'oy':oy}
+def ff(f,ref):
+ s=from_down(f,ref);s['dir']=-1 if ref['sequence']==123 else gravity
+ f=f.tolist() if hasattr(f,'tolist') else f
+ for j,row in enumerate(s['g']):
+  for c,v in enumerate(row):
+   x=15+6*c;y=s['oy']+6*j
+   if v==10 and any(f[yy][xx]==12 for yy in range(max(0,y-2),min(63,y+3)) for xx in range(x-2,x+3)):row[c]=12
+ x,y=s['p'];s['g'][y][x]=10
+ return s
+"""
+
+    def setUp(self):
+        self.reference = {'run_id':'run','attempt_id':'run','level':5,'sequence':143}
+        self.namespace = {**vars(rollout_helpers), '_json':json,
+                          '__builtins__':vars(builtins).copy(),
+                          'current':lambda: {'observation_ref':self.reference},
+                          'replay_deaths':rollout_helpers.replay_cases}
+        exec(KERNEL_SOURCE, self.namespace)
+        exec(self.initializer, self.namespace)
+        self.frame = [[10]*64 for _ in range(64)]
+        self.frame[38][15] = 9
+        self.frame[20][15] = 12
+
+    def test_archived_initializer_freezes_state_and_preserves_risk_applicability(self):
+        from asterion.applications.prime.p7.score import digest
+        namespace = self.namespace
+        action = {'name':'ACTION4','data':{}}
+        namespace['register_rollout_model'](from_frame=namespace['ff'],
+            transition=lambda state, action: {**state,'done':True},
+            settled=lambda state: False, terminal=lambda state: 'dead' if state['done'] else None,
+            supported_actions=['ACTION4'])
+        boundary = namespace['_rollout_boundary'](namespace['current']())
+        assessment, result = namespace['_evaluate_registered'](self.frame,self.reference,action,boundary)
+        self.assertEqual(assessment['risk'], 'predicted_death')
+        extractor_id = assessment['scope_extractor_id']
+        self.assertNotIn('unavailable', extractor_id)
+        grid = [[10]*8 for _ in range(11)]
+        grid[3][0] = 12
+        expected_state = {'p':[0,6],'g':grid,'unknown':False,'done':False,'oy':2,'dir':1}
+        self.assertEqual(result['initial_state_sha256'], digest(expected_state))
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = RolloutRuntime(SimpleNamespace(kernel=SimpleNamespace(generation='g')), Path(directory))
+            runtime._retain_fatal(assessment,self.reference,action,digest(self.frame),
+                                  {'generation':'g','registration_id':1},'sha256:'+'a'*64,'actor')
+            original_witnesses = json.dumps(runtime.retained_fatal_risks, sort_keys=True)
+            changed_frame = json.loads(json.dumps(self.frame))
+            changed_frame[0][0] = 5
+            changed_state = json.loads(json.dumps(changed_frame))
+            changed_state[38][15], changed_state[38][21] = 10, 9
+            for frame, mutation, expected in (
+                    (changed_frame,None,'predicted_death'),
+                    (changed_state,None,'no_identified_fatal'),
+                    (changed_frame,"gravity=-1",'unavailable'),
+                    (changed_frame,"def from_down(f,ref): return {}",'unavailable'),
+                    (changed_frame,"__builtins__['round']=lambda value: 0",'unavailable')):
+                with self.subTest(mutation=mutation, expected=expected):
+                    if mutation:
+                        exec(mutation, namespace)
+                    scope = namespace['_rollout_extract_retained_scope'](extractor_id,frame,self.reference)
+                    current = {'risk':'no_identified_fatal','frame_sha256':digest(frame),
+                               '_retained_scope_assessments':{extractor_id:scope}}
+                    runtime._apply_retained_fatal(current,self.reference,action)
+                    self.assertEqual(current['risk'], 'no_identified_fatal' if expected == 'unavailable' else expected)
+                    self.assertEqual(current.get('hard_stop'), 'risk_applicability_unavailable' if expected == 'unavailable' else None)
+                    if expected == 'predicted_death':
+                        self.assertEqual(current['retained_fatal_risks'][0]['match'], 'initial_state')
+                    self.assertEqual(json.dumps(runtime.retained_fatal_risks, sort_keys=True), original_witnesses)
+                    exec(self.initializer, namespace)
+                    namespace['__builtins__']['round'] = builtins.round
+
+    def test_scope_rejects_impostor_and_unsafe_builtins(self):
+        for name in ('hasattr','round','eval','exec','open','__import__'):
+            with self.subTest(name=name):
+                if name in ('hasattr','round'):
+                    self.namespace['__builtins__'][name] = lambda *args: None
+                exec(f'def probe(frame,ref): return {name}(frame)', self.namespace)
+                with self.assertRaisesRegex(ValueError, 'scope dependency unsupported'):
+                    self.namespace['_rollout_scope_fingerprint'](self.namespace['probe'])
+
+    def test_scope_rejects_external_nonlocal_mutation(self):
+        for mutation in ('value+=1','del value'):
+            with self.subTest(mutation=mutation):
+                exec(f"""
+def make_initializer():
+ value=1
+ def initializer(frame,ref):
+  nonlocal value
+  {mutation}
+  return {{'value':1}}
+ return initializer
+""", self.namespace)
+                with self.assertRaisesRegex(ValueError, 'scope dependency unsupported'):
+                    self.namespace['_rollout_scope_fingerprint'](self.namespace['make_initializer']())
 
 
 class TestRolloutFeedback(unittest.TestCase):

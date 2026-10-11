@@ -400,6 +400,39 @@ class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
         )
         self.addAsyncCleanup(self.host.close)
 
+    async def test_research_history_excludes_host_cells_but_keeps_private_evidence(self):
+        await self.host.execute('actor-first', "print('actor-result')", _Signal())
+        await self.host.kernel.execute('private-host', "print('HOST-SCAFFOLD-SENTINEL')", _Signal())
+        private = self.host.kernel.cell_history()['items'][1]
+        await self.host.execute('actor-second', "print('actor-second')", _Signal())
+        directory = self.host._read_server.dispatch({'method': 'cell_history', 'args': [0, 1]})
+        self.assertEqual(directory['status'], 'ok')
+        self.assertEqual(directory['value']['total'], 2)
+        self.assertEqual(directory['value']['next_start'], 1)
+        second = self.host._read_server.dispatch({'method': 'cell_history', 'args': [1, 1]})
+        self.assertEqual(second['value']['items'][0]['ordinal'], 2)
+        self.assertIsNone(second['value']['next_start'])
+        denied = self.host._read_server.dispatch({
+            'method': 'cell_read', 'args': [private['cell_id'], 'source', 0, 4096]})
+        self.assertEqual(denied['status'], 'rejected')
+        self.assertIn('HOST-SCAFFOLD-SENTINEL', self.host.kernel.cell_read(private['cell_id'])['text'])
+        self.assertEqual(self.host.kernel.cell_history()['total'], 3)
+        rejected = await self.host.execute('empty-request', '', _Signal())
+        self.assertEqual(rejected.status, 'error')
+        directory = self.host._read_server.dispatch({'method': 'cell_history', 'args': [0, 16]})
+        self.assertEqual(directory['status'], 'ok')
+        self.assertEqual(directory['value']['total'], 2)
+        self.assertEqual(self.engine.calls, [])
+
+    async def test_actor_history_provenance_failure_is_visible_without_exposing_host_cells(self):
+        await self.host.execute('actor-first', "print('actor-result')", _Signal())
+        self.host._remember_actor_cell(None, self.host.kernel.generation)
+        directory = self.host._read_server.dispatch({'method': 'cell_history', 'args': [0, 16]})
+        self.assertEqual(directory['status'], 'rejected')
+        self.assertIn('research-actor-history:derived-failed:0',
+                      json.dumps(self.host.solver.diagnostics.projection()))
+        self.assertEqual(self.host.kernel.cell_history()['total'], 1)
+
     async def test_current_computation_reads_survive_kernel_loss_without_replay(self):
         source = "def learned_rule(x):\n    return x + 7\nprint('private-result')"
         result = await self.host.execute('learn-rule', source, _Signal())

@@ -257,7 +257,7 @@ def transition(sequence):
     """One committed paid action (sequence >= 1), exact before/after refs, and after animation metadata; no pixels."""
     return _read("transition", [sequence])
 def cell_history(start=0, limit=16):
-    """Current-run computation directory, at most 64 records per page."""
+    """Finished current-run research cells, including errors; start is the visible directory offset, ordinal is the original kernel ordinal. At most 64 records per page."""
     return _read("cell_history", [start, limit])
 def cell_read(cell_id, field="source", start=0, limit=4096):
     """Read source or output by character offset; at most 16384 characters."""
