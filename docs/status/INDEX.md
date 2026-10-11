@@ -113,3 +113,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task43迁移分层验收：[Prime/P7同输入差分与责任边界](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md)：通用/适配代表性组合链PASS，预设比较不等价已定位；真实原生小验证进行中，整体无损未认证。
 
 - Task43通用关闭修复：[bridge事件循环寿命](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md)：真实native+无模型复现，通用owner关闭失败已定位；修复中。
+
+- [Prime native system-context compatibility design](../superpowers/specs/2026-10-11-prime-native-system-context-design.md) — active Task43 repair; preserves native system/checkpoint metadata.
