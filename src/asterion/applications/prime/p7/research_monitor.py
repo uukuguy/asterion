@@ -60,16 +60,11 @@ class ResearchMonitor:
                 if type(value) is int and value >= 0:
                     self._record[name] = max(self._record[name], value)
             try:
-                try:
-                    status = self._broker.status()
-                except Exception:
-                    status = self._broker.terminal_snapshot().status
-                for name in ('primitive_actions', 'levels_completed'):
-                    value = getattr(status, name, None)
+                accounting = self._broker.accounting_snapshot()
+                for name in ('primitive_actions', 'levels_completed', 'resets'):
+                    value = getattr(accounting, name, None)
                     if type(value) is int and value >= 0:
                         self._record[name] = max(self._record[name], value)
-                self._record['resets'] = max(self._record['resets'], sum(
-                    item.action == 'RESET' for item in self._broker.journal))
             except Exception:
                 pass  # Optional accounting never grants authority or hides effects.
             self._write()

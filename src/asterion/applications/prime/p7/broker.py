@@ -132,6 +132,15 @@ class ArcStatus:
 
 
 @dataclass(frozen=True, slots=True)
+class ArcAccountingSnapshot:
+    """Passive counters; dispatched actions may include an unresolved effect."""
+
+    primitive_actions: int
+    levels_completed: int
+    resets: int
+
+
+@dataclass(frozen=True, slots=True)
 class ArcTerminalSnapshot:
     """Final broker state available only after execution has closed."""
 
@@ -2998,6 +3007,18 @@ class ArcBroker:
     def status(self) -> ArcStatus:
         self._require_open()
         return self._status()
+
+    def accounting_snapshot(self) -> ArcAccountingSnapshot:
+        """Read counters without validating readiness or granting action authority.
+
+        Levels and resets reflect recorded outcomes and can lag an in-flight
+        action. Sampling never consults the engine or its pending transaction.
+        """
+        return ArcAccountingSnapshot(
+            self._actions_dispatched,
+            self._current.levels_completed - self._initial.levels_completed,
+            sum(item.action == "RESET" for item in self._journal),
+        )
 
     def _status(self) -> ArcStatus:
         return ArcStatus(

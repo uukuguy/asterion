@@ -180,9 +180,8 @@ class TestSupervisedEntry(unittest.TestCase):
             root = Path(directory).resolve() / 'run-test'
             root.mkdir()
             now = [2.]
-            status = SimpleNamespace(primitive_actions=6000, levels_completed=1)
-            broker = SimpleNamespace(status=lambda: status,
-                                     journal=[SimpleNamespace(action='RESET')])
+            status = SimpleNamespace(primitive_actions=6000, levels_completed=1, resets=1)
+            broker = SimpleNamespace(accounting_snapshot=lambda: status)
             owner = SimpleNamespace(runtime_observation=lambda: {
                 'model_callbacks': 129, 'tool_callbacks': 600})
             monitor = ResearchMonitor(root, root.name, broker, owner, clock=lambda: now[0])
@@ -210,8 +209,8 @@ class TestResearchHeartbeat(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve() / 'run-test'
             root.mkdir()
-            broker = SimpleNamespace(status=lambda: SimpleNamespace(primitive_actions=0,
-                levels_completed=0), journal=[])
+            broker = SimpleNamespace(accounting_snapshot=lambda: SimpleNamespace(
+                primitive_actions=0, levels_completed=0, resets=0))
             owner = SimpleNamespace(runtime_observation=lambda: {'model_callbacks': 1})
             clock = [0.]
             monitor = ResearchMonitor(root, root.name, broker, owner, clock=lambda: clock[0])
