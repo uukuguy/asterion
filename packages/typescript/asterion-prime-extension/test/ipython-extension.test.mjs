@@ -818,6 +818,10 @@ test("built artifact is comment-free and loads through the pinned loader", async
         + "export const convertToLlm = (messages) => messages;\n"
         + 'export const serializeConversation = () => "";\n',
     );
+    const aiHost = join(root, "node_modules", "@earendil-works", "pi-ai");
+    mkdirSync(aiHost, { recursive: true });
+    writeFileSync(join(aiHost, "package.json"), JSON.stringify({ type: "module", main: "index.js" }));
+    writeFileSync(join(aiHost, "index.js"), "export const getCurrentSystemMessage = () => undefined;\n");
     const loaderCopy = join(root, "asterion_pi_extension_loader.mjs");
     writeFileSync(loaderCopy, readFileSync(loaderPath));
     const loader = await import(`${pathToFileURL(loaderCopy).href}?task5`);
@@ -887,6 +891,7 @@ function runInheritedWitness(pair, payload) {
       buildSessionContext: (entries) => ({ messages: entries.at(-1)?.type === "compaction"
         ? [{ role: "compactionSummary", retainedMessageCount: 0 }] : [] }),
       convertToLlm: (messages) => messages,
+      getCurrentSystemMessage: () => undefined,
       serializeConversation: () => "SERIALIZED-CONVERSATION",
     });
     const hooks = new Map();
@@ -971,6 +976,19 @@ test("the arm frame's native material drives the request the witness proposes", 
   } finally {
     pair.close();
   }
+});
+
+test("system instructions alone cannot authorize a compaction proposal", async () => {
+  const launch = "a".repeat(64), pair = await socketPair();
+  try {
+    const event = structuredClone(WITNESS_PAYLOAD.event);
+    event.preparation.messagesToSummarize = [{role:"system",content:"Only instructions",sections:{policy:"Keep safe"}}];
+    const running = runInheritedWitness(pair, {event, launch});
+    pair.peer.write(witnessFrame({protocol:"asterion.prime-context-witness/v1",launch_nonce:launch,
+      command_nonce:"b".repeat(64),authority_sha256:"c".repeat(64),phase:"arm",summarization:material}));
+    await assert.rejects(readWitnessFrame(pair.peer, 400));
+    assert.deepEqual(await running.result, {outcome:{cancel:true},closed:true});
+  } finally { pair.close(); }
 });
 
 test("tampered arm material is rejected before any proposal", async () => {

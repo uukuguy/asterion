@@ -179,7 +179,7 @@ test("failed environment or tool registration closes the context descriptor", as
           import {fstatSync} from 'node:fs';
           const kind=process.argv[1];
           process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY=JSON.stringify(coreOnlyModule.registry);
-          const deps=Object.freeze({buildSessionContext(){return {messages:[]};},convertToLlm(){return [];},serializeConversation(){return "";}});
+          const deps=Object.freeze({buildSessionContext(){return {messages:[]};},getCurrentSystemMessage(){return undefined;},convertToLlm(){return [];},serializeConversation(){return "";}});
           if(kind!=='missing-ipython-fd')process.env.ASTERION_PRIME_IPYTHON_FD='999998';
           process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD=kind==='closed-descriptor'?'999999':'3';
           if(kind!=='missing-nonce')process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE=${JSON.stringify(launch)};
@@ -224,4 +224,18 @@ test("missing post-mutation ack fences the observer", {skip: externalMechanicsSk
     assert.equal(result.calls,2);assert.equal(result.appends,1);assert.equal(result.fenced,true);
     assert.equal(result.error,"Asterion context witness is unavailable");
   }finally{sockets.close();}
+});
+
+
+test("system projection rejects ambiguous and nonfinite metadata", () => {
+  const system = extension.projectPrimeContext([{role:"system",content:"instructions",sections:{first:"A"}}]).messages[0];
+  for (const changes of [
+    {extra:"private-sentinel"},
+    {sections:[{name:"same",value:"A"},{name:"same",value:null}]},
+    {tools_added_json:'[{"name":"x","name":"y"}]'},
+    {tools_added_json:'[{"name":"x","parameters":{"minimum":1e999}}]'},
+    {tools_removed_json:'{}'},
+  ]) assert.throws(() => extension.countRebuiltContext({format:"asterion.prime-context-projection/v1",
+    system_prompt:"",messages:[{...system,...changes}]}), /invalid Prime context/);
+  assert.throws(() => extension.projectPrimeContext([{role:"system",content:[],sections:null}]), /invalid Prime context/);
 });

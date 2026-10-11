@@ -22,7 +22,7 @@
               "name": "ipython",
               "arguments": {
                 "𐀀": 1e-7,
-                "": -0.0,
+                "": 0,
                 "nested": {
                   "z": 1.25,
                   "a": 1e+21
@@ -194,6 +194,122 @@
       "canonical_json": "{\"format\":\"asterion.prime-context-projection/v1\",\"messages\":[{\"custom_instructions\":null,\"retained_message_count\":2,\"role\":\"compactionSummary\",\"summary\":\"之前的状态\"},{\"content\":[{\"text\":\"split turn prefix\",\"type\":\"text\"}],\"role\":\"user\"},{\"content\":[{\"text\":\"retained suffix\",\"type\":\"text\"}],\"role\":\"assistant\"},{\"cancelled\":false,\"command\":\"printf hello\",\"exit_code\":0,\"output\":\"hello\",\"role\":\"bashExecution\",\"truncated\":false},{\"role\":\"branchSummary\",\"summary\":\"分支\"}],\"system_prompt\":\"\"}",
       "asterion_units": 498,
       "sha256": "cc7e8e41e1208455a114363762115d55690cde00decd3ecff36ab1ceee3102c8"
+    },
+    {
+      "name": "ordered-system-sections-and-tool-deltas",
+      "raw_messages": [
+        {
+          "role": "system",
+          "content": "Base",
+          "sections": {
+            "z-first": "First",
+            "a-second": "Second"
+          },
+          "toolsAdded": [
+            {
+              "name": "ipython",
+              "description": "Compute",
+              "parameters": {
+                "type": "object",
+                "properties": {
+                  "ratio": {
+                    "type": "number",
+                    "minimum": 1.25,
+                    "maximum": 1e+21,
+                    "multipleOf": 1e-7,
+                    "default": 0
+                  }
+                }
+              },
+              "constrainedSampling": false
+            }
+          ],
+          "timestamp": 1
+        },
+        {
+          "role": "user",
+          "content": "Research evidence"
+        },
+        {
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "Update"
+            }
+          ],
+          "sections": {
+            "z-first": null,
+            "new-last": "Last"
+          },
+          "toolsRemoved": [
+            {
+              "name": "ipython"
+            }
+          ],
+          "timestamp": 2
+        }
+      ],
+      "projection": {
+        "format": "asterion.prime-context-projection/v1",
+        "system_prompt": "",
+        "messages": [
+          {
+            "role": "system",
+            "content": [
+              {
+                "type": "text",
+                "text": "Base"
+              }
+            ],
+            "sections": [
+              {
+                "name": "z-first",
+                "value": "First"
+              },
+              {
+                "name": "a-second",
+                "value": "Second"
+              }
+            ],
+            "tools_added_json": "[{\"constrainedSampling\":false,\"description\":\"Compute\",\"name\":\"ipython\",\"parameters\":{\"properties\":{\"ratio\":{\"default\":0,\"maximum\":1e+21,\"minimum\":1.25,\"multipleOf\":1e-7,\"type\":\"number\"}},\"type\":\"object\"}}]",
+            "tools_removed_json": "[]"
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Research evidence"
+              }
+            ]
+          },
+          {
+            "role": "system",
+            "content": [
+              {
+                "type": "text",
+                "text": "Update"
+              }
+            ],
+            "sections": [
+              {
+                "name": "z-first",
+                "value": null
+              },
+              {
+                "name": "new-last",
+                "value": "Last"
+              }
+            ],
+            "tools_added_json": "[]",
+            "tools_removed_json": "[{\"name\":\"ipython\"}]"
+          }
+        ]
+      },
+      "canonical_json": "{\"format\":\"asterion.prime-context-projection/v1\",\"messages\":[{\"content\":[{\"text\":\"Base\",\"type\":\"text\"}],\"role\":\"system\",\"sections\":[{\"name\":\"z-first\",\"value\":\"First\"},{\"name\":\"a-second\",\"value\":\"Second\"}],\"tools_added_json\":\"[{\\\"constrainedSampling\\\":false,\\\"description\\\":\\\"Compute\\\",\\\"name\\\":\\\"ipython\\\",\\\"parameters\\\":{\\\"properties\\\":{\\\"ratio\\\":{\\\"default\\\":0,\\\"maximum\\\":1e+21,\\\"minimum\\\":1.25,\\\"multipleOf\\\":1e-7,\\\"type\\\":\\\"number\\\"}},\\\"type\\\":\\\"object\\\"}}]\",\"tools_removed_json\":\"[]\"},{\"content\":[{\"text\":\"Research evidence\",\"type\":\"text\"}],\"role\":\"user\"},{\"content\":[{\"text\":\"Update\",\"type\":\"text\"}],\"role\":\"system\",\"sections\":[{\"name\":\"z-first\",\"value\":null},{\"name\":\"new-last\",\"value\":\"Last\"}],\"tools_added_json\":\"[]\",\"tools_removed_json\":\"[{\\\"name\\\":\\\"ipython\\\"}]\"}],\"system_prompt\":\"\"}",
+      "asterion_units": 796,
+      "sha256": "996bf8aefaac8ebc789229e0bfa23b02ccb4584a3b9dab9ebcd683aa21d03cf5"
     }
   ]
 }

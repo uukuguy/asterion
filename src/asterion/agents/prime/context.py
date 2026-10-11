@@ -247,6 +247,27 @@ def _validate_projection(value: object) -> dict:
                     _fail()
             _record(message, keys)
             _content(message["content"], allowed)
+        elif role == "system":
+            _record(message, {"role", "content", "sections", "tools_added_json", "tools_removed_json"})
+            _content(message["content"], {"text"})
+            if type(message["sections"]) is not list:
+                _fail()
+            names = set()
+            for raw_section in message["sections"]:
+                section = _record(raw_section, {"name", "value"})
+                name = _string(section["name"])
+                if name in names:
+                    _fail()
+                names.add(name)
+                if section["value"] is not None:
+                    _string(section["value"])
+            for key in ("tools_added_json", "tools_removed_json"):
+                tools = _json(_string(message[key]), arguments=True)
+                if type(tools) is not list:
+                    _fail()
+                for tool in tools:
+                    _string(_record(tool).get("name"))
+                _validate_argument(tools)
         elif role == "bashExecution":
             _record(
                 message,
@@ -362,6 +383,8 @@ def _projection_material(frame: dict, prefix: str) -> dict:
 
 def _real_source(projection: dict) -> bool:
     for message in projection["messages"]:
+        if message["role"] == "system":
+            continue
         if message["role"] in {"compactionSummary", "branchSummary", "bashExecution"}:
             if any(message.get(key) for key in ("summary", "command", "output")):
                 return True
@@ -386,7 +409,9 @@ def _validate_proposal(
     pre = _projection_material(p, "pre")
     if _integer(p["pre_units"]) != count_rebuilt_context(pre):
         _fail()
-    preparation = _record(p["preparation"], _PREPARATION)
+    preparation = _record(p["preparation"])
+    _record(preparation, _PREPARATION | ({"system_context_projection"}
+        if "system_context_projection" in preparation else set()))
     if _digest(preparation) != _hex(p["preparation_sha256"]):
         _fail()
     for key in ("first_kept_entry_id", "covered_leaf_id"):
@@ -413,6 +438,14 @@ def _validate_proposal(
     retained = _validate_projection(preparation["retained_context_projection"])
     if retained["system_prompt"] != pre["system_prompt"]:
         _fail()
+    has_system = any(message["role"] == "system" for message in pre["messages"])
+    if has_system != ("system_context_projection" in preparation):
+        _fail()
+    if has_system:
+        system = _validate_projection(preparation["system_context_projection"])
+        if (system["system_prompt"] or len(system["messages"]) != 1
+                or system["messages"][0]["role"] != "system"):
+            _fail()
     # Pi states retention by `firstKeptEntryId` and never emits a retained
     # count, so a witness proposal declares null. The bound applies only when a
     # producer actually supplies one (the takeover shape, D-2026-09-16-01).
@@ -491,6 +524,7 @@ def validate_compaction_witness(
         if not required <= set(entry) or set(entry) - required - {
             "details",
             "fromHook",
+            "systemMessage",
         }:
             _fail()
         if (
@@ -515,9 +549,16 @@ def validate_compaction_witness(
         post = _projection_material(s, "post")
         preparation = p["preparation"]
         retained = preparation["retained_context_projection"]
+        system_messages = preparation.get("system_context_projection", {}).get("messages", [])
+        if system_messages:
+            if entry.get("systemMessage") != system_messages[0]:
+                _fail()
+        elif "systemMessage" in entry:
+            _fail()
         expected_post = {
             **retained,
             "messages": [
+                *system_messages,
                 {
                     "role": "compactionSummary",
                     "summary": summary,

@@ -3,15 +3,16 @@ import { closeSync, fstatSync, readFileSync } from "node:fs";
 // The pinned source below is loaded from a data: URL and is validated to hold
 // nothing but `node:` specifiers, so it cannot resolve the host package for
 // itself. This loader is a real module inside the host's own extension
-// resolution scope, so the host supplies these three mechanics to it.
+// resolution scope, so the host supplies these native mechanics to it.
 import { buildSessionContext, convertToLlm, serializeConversation } from "@earendil-works/pi-coding-agent";
+import { getCurrentSystemMessage } from "@earendil-works/pi-ai";
 
 const SOURCE_FD = "ASTERION_PI_EXTENSION_SOURCE_FD";
 const SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME";
 const SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256";
 const MAX_SOURCE_BYTES = 4 * 1024 * 1024;
 
-const HOST_MECHANICS = Object.freeze({ buildSessionContext, convertToLlm, serializeConversation });
+const HOST_MECHANICS = Object.freeze({ buildSessionContext, convertToLlm, serializeConversation, getCurrentSystemMessage });
 
 export default async function loadPinnedAsterionExtension(pi) {
   const rawDescriptor = process.env[SOURCE_FD];

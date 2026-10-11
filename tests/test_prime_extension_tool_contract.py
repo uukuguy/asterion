@@ -140,6 +140,10 @@ host = loader.parent / "node_modules/@earendil-works/pi-coding-agent"
 host.mkdir(parents=True)
 (host / "package.json").write_text(json.dumps({"name":"@earendil-works/pi-coding-agent", "type":"module", "exports":"./index.js"}))
 (host / "index.js").write_text("export const buildSessionContext=()=>({messages:[]}); export const convertToLlm=x=>x; export const serializeConversation=()=>'';")
+ai_host = host.parent / "pi-ai"
+ai_host.mkdir()
+(ai_host / "package.json").write_text(json.dumps({"type":"module", "exports":"./index.js"}))
+(ai_host / "index.js").write_text("export const getCurrentSystemMessage=()=>undefined;")
 with tempfile.TemporaryFile() as bridge:
     binding = ExtensionBinding(extension_id="prime.ipython", path=artifact.path,
         capabilities=("prime.tool.ipython",), inherited_fds=(bridge.fileno(),),

@@ -949,9 +949,9 @@ class TestPrimeIndependentPersistent(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(built.returncode, 0, built.stderr)
             # The existing loader receives deterministic host mechanics through Node's resolver.
             stub = root / 'host.mjs'
-            stub.write_text("export const buildSessionContext=()=>({messages:[]}); export const convertToLlm=x=>x; export const serializeConversation=()=>'';")
+            stub.write_text("export const buildSessionContext=()=>({messages:[]}); export const convertToLlm=x=>x; export const serializeConversation=()=>''; export const getCurrentSystemMessage=()=>undefined;")
             resolver = root / 'resolver.mjs'
-            resolver.write_text('export async function resolve(s,c,next){if(s==="@earendil-works/pi-coding-agent")return {url:'
+            resolver.write_text('export async function resolve(s,c,next){if(["@earendil-works/pi-coding-agent","@earendil-works/pi-ai"].includes(s))return {url:'
                                 + json.dumps(stub.as_uri()) + ',shortCircuit:true};return next(s,c);}')
             script = 'const tools=[],hooks=[]; const m=await import('+json.dumps(extension_loader_path().as_uri())+'); await m.default({registerTool:t=>tools.push(t.name),on:n=>hooks.push(n)}); process.stdout.write(JSON.stringify({tools:tools.sort(),hooks}));'
             seen = []

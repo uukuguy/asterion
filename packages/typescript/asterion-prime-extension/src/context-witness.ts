@@ -16,8 +16,8 @@ const ARM_KEYS = [...BASE_KEYS, "summarization"];
 // Pi host mechanics this pinned source may not import for itself: the source is
 // validated to contain only `node:` specifiers and is loaded from a data: URL,
 // where the host package cannot resolve. The Asterion loader is a real module in
-// the host's own resolution scope and supplies exactly these three.
-const DEPENDENCY_KEYS = ["buildSessionContext", "convertToLlm", "serializeConversation"];
+// the host's own resolution scope and supplies these native mechanics.
+const DEPENDENCY_KEYS = ["buildSessionContext", "convertToLlm", "getCurrentSystemMessage", "serializeConversation"];
 const SUMMARIZATION_KEYS = ["conversation_block", "initial_instruction", "previous_summary_block",
   "system_prompt", "turn_prefix_instruction", "update_instruction", "user_instructions_template", "version"];
 const CONVERSATION_MARKER = "{conversation}";
@@ -43,6 +43,9 @@ const WIRE_ENTRY_KEYS = ["type", "id", "parentId", "timestamp", "firstKeptEntryI
 function projectedEntry(entry: RecordValue): RecordValue {
   const projected: RecordValue = {};
   for (const key of WIRE_ENTRY_KEYS) projected[key] = entry[key];
+  if (entry.systemMessage !== undefined) {
+    projected.systemMessage = projectPrimeContext([entry.systemMessage]).messages[0];
+  }
   return projected;
 }
 
@@ -50,6 +53,7 @@ type RecordValue = Record<string, unknown>;
 export interface ContextDependencies {
   buildSessionContext(entries: unknown[]): { messages: unknown[] };
   convertToLlm(messages: unknown[]): unknown;
+  getCurrentSystemMessage(messages: unknown[]): unknown;
   serializeConversation(messages: unknown): string;
 }
 
@@ -260,6 +264,7 @@ class FramedSocket {
 
 function realSource(projection: PrimeContextProjectionV1): boolean {
   return projection.messages.some(message => {
+    if (message.role === "system") return false;
     if (message.role === "branchSummary" || message.role === "compactionSummary") return Boolean(message.summary.trim());
     if (message.role === "bashExecution") return Boolean(message.command.trim() || message.output.trim());
     return message.content.some(block => block.type === "toolCall" ||
@@ -293,17 +298,27 @@ function preparedMaterial(preparation: RecordValue, branch: unknown[], systemPro
   if (typeof preparation.isSplitTurn !== "boolean") fail();
   // Public buildSessionContext supplies both the retained material and its raw
   // presentation boundary. The preview is never appended to Pi's session.
+  // Use the same native reducer as appendCompaction, never a parallel replay
+  // of system-section/tool-delta semantics in the witness or Python host.
+  const systemMessage = deps.getCurrentSystemMessage(deps.buildSessionContext(branch).messages);
   const preview = { type: "compaction", id: randomBytes(16).toString("hex"), parentId: covered,
     timestamp: "2000-01-01T00:00:00.000Z", firstKeptEntryId: firstKept, summary: "", tokensBefore: 0,
-    customInstructions: instructions ?? undefined };
+    customInstructions: instructions ?? undefined,
+    ...(systemMessage === undefined ? {} : { systemMessage }) };
   const rebuilt = deps.buildSessionContext([...branch, preview]).messages;
-  const summary = object(rebuilt[0]);
+  const summaryIndex = systemMessage === undefined ? 0 : 1;
+  const summary = object(rebuilt[summaryIndex]);
   if (summary.role !== "compactionSummary") fail();
+  const systemProjection = systemMessage === undefined ? undefined : projectPrimeContext([systemMessage]);
+  if (systemProjection !== undefined && (systemProjection.messages[0]?.role !== "system" ||
+      canonicalJson(projectPrimeContext(rebuilt.slice(0, 1))) !== canonicalJson(systemProjection))) fail();
   return {
     first_kept_entry_id: firstKept, covered_leaf_id: covered,
     messages_to_summarize: messages, turn_prefix_messages: prefix,
     is_split_turn: preparation.isSplitTurn, previous_summary: optionalString(preparation.previousSummary),
-    custom_instructions: instructions, retained_context_projection: projectPrimeContext(rebuilt.slice(1), systemPrompt),
+    custom_instructions: instructions,
+    ...(systemProjection === undefined ? {} : { system_context_projection: systemProjection }),
+    retained_context_projection: projectPrimeContext(rebuilt.slice(summaryIndex + 1), systemPrompt),
     // Pi states retention by `firstKeptEntryId` and never emits a retained
     // count, so a witness proposal declares null. Only a real producer (the
     // takeover shape, D-2026-09-16-01) supplies one. This mirrors
@@ -425,6 +440,12 @@ export class ContextWitness {
       if (canonicalJson(post) !== canonicalJson(expected)) fail();
       const postJson = canonicalJson(post);
       const wire = projectedEntry(entry);
+      const preparation = object(proposal.preparation);
+      const systemProjection = preparation.system_context_projection;
+      if (systemProjection === undefined) {
+        if (wire.systemMessage !== undefined) fail();
+      } else if (wire.systemMessage === undefined || canonicalJson(wire.systemMessage) !==
+          canonicalJson(array(object(systemProjection).messages)[0])) fail();
       await this.#channel.write({ ...this.#identity, phase: "persisted", first_kept_entry_id: proposal.first_kept_entry_id,
         covered_leaf_id: proposal.covered_leaf_id, preparation_sha256: proposal.preparation_sha256,
         compaction_entry: wire, compaction_entry_sha256: digest(wire), summary, summary_sha256: sha(summary),

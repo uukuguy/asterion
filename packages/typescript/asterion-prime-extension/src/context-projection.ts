@@ -19,6 +19,9 @@ export interface PrimeContextProjectionV1 {
 
 export type PrimeContextMessage =
   | { readonly role: "user" | "assistant" | "custom"; readonly content: readonly PrimeContent[] }
+  | { readonly role: "system"; readonly content: readonly PrimeContent[];
+      readonly sections: readonly { readonly name: string; readonly value: string | null }[];
+      readonly tools_added_json: string; readonly tools_removed_json: string }
   | {
       readonly role: "toolResult";
       readonly tool_name: string;
@@ -197,10 +200,29 @@ function customContent(value: unknown): PrimeContent[] {
     : content(value, ["text", "image"]);
 }
 
+function systemTools(value: unknown): string {
+  if (!Array.isArray(value)) invalid();
+  for (const tool of value) string(record(tool).name);
+  return canonicalToolArguments(value);
+}
+
+function systemSections(value: unknown): { name: string; value: string | null }[] {
+  // Section insertion order is part of Pi's rendered prompt, unlike JSON key order.
+  return Object.entries(record(value)).map(([name, text]) => ({
+    name: string(name), value: text === null ? null : string(text),
+  }));
+}
+
 function projectMessage(value: unknown): PrimeContextMessage {
   const message = record(value);
   const role = string(message.role);
   switch (role) {
+    case "system":
+      return { role, content: typeof message.content === "string"
+          ? [{ type: "text", text: string(message.content) }] : content(message.content, ["text"]),
+        sections: systemSections(message.sections === undefined ? {} : message.sections),
+        tools_added_json: systemTools(message.toolsAdded === undefined ? [] : message.toolsAdded),
+        tools_removed_json: systemTools(message.toolsRemoved === undefined ? [] : message.toolsRemoved) };
     case "user":
       return { role: "user", content: customContent(message.content) };
     case "assistant":
@@ -321,6 +343,27 @@ export function validatePrimeContextProjection(value: unknown): asserts value is
   for (const raw of projection.messages) {
     const message = record(raw);
     switch (string(message.role)) {
+      case "system": {
+        exactKeys(message, ["role", "content", "sections", "tools_added_json", "tools_removed_json"]);
+        validateContent(message.content, ["text"]);
+        if (!Array.isArray(message.sections)) invalid();
+        const names = new Set<string>();
+        for (const rawSection of message.sections) {
+          const section = record(rawSection);
+          exactKeys(section, ["name", "value"]);
+          const name = string(section.name);
+          if (names.has(name)) invalid();
+          names.add(name);
+          if (section.value !== null) string(section.value);
+        }
+        for (const key of ["tools_added_json", "tools_removed_json"]) {
+          const raw = string(message[key]);
+          let parsed: unknown;
+          try { parsed = JSON.parse(raw); } catch { invalid(); }
+          if (systemTools(parsed) !== raw) invalid();
+        }
+        break;
+      }
       case "user":
       case "custom":
         exactKeys(message, ["content", "role"]);

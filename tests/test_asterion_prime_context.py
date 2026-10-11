@@ -243,6 +243,58 @@ class TestAsterionPrimeContext(ContextMixin, unittest.TestCase):
         self.assertNotIn("123456", public)
         self.assertEqual(evidence.usage_label, "reservation-charged")
 
+    def test_system_projection_rejects_ambiguous_or_nonfinite_metadata(self):
+        context = self.module()
+        system = json.loads(FIXTURE.read_text())["cases"][-1]["projection"]["messages"][0]
+        for field, value in (
+            ("extra", SECRET),
+            ("sections", [{"name": "same", "value": "a"}, {"name": "same", "value": None}]),
+            ("tools_added_json", '[{"name":"x","name":"y"}]'),
+            ("tools_added_json", '[{"name":"x","parameters":{"minimum":1e999}}]'),
+            ("tools_removed_json", '{}'),
+        ):
+            with self.subTest(field=field, value=value), self.assertRaises(context.PrimeContextError):
+                context.count_rebuilt_context(projection([{**system, field: value}]))
+
+    def test_system_checkpoint_is_bound_and_preserves_native_order(self):
+        context = self.module()
+        system = deepcopy(json.loads(FIXTURE.read_text())["cases"][-1]["projection"]["messages"][0])
+        proposal, persisted = material()
+        proposal["pre_context_projection"]["messages"].insert(0, deepcopy(system))
+        proposal["pre_context_json"] = encode(proposal["pre_context_projection"]).decode()
+        proposal["pre_context_sha256"] = digest(proposal["pre_context_projection"])
+        proposal["pre_units"] = len(encode(proposal["pre_context_projection"]))
+        proposal["preparation"]["system_context_projection"] = projection([deepcopy(system)])
+        proposal["preparation_sha256"] = digest(proposal["preparation"])
+        persisted["preparation_sha256"] = proposal["preparation_sha256"]
+        persisted["compaction_entry"]["systemMessage"] = deepcopy(system)
+        persisted["compaction_entry_sha256"] = digest(persisted["compaction_entry"])
+        persisted["post_context_projection"]["messages"].insert(0, deepcopy(system))
+        persisted["post_context_json"] = encode(persisted["post_context_projection"]).decode()
+        persisted["post_context_sha256"] = digest(persisted["post_context_projection"])
+        context.validate_compaction_witness(proposal, persisted,
+            expected_launch_nonce=LAUNCH, expected_command_nonce=COMMAND)
+        for mutation in ("missing", "changed", "reordered", "system-only-source"):
+            with self.subTest(mutation=mutation):
+                p, observed = deepcopy((proposal, persisted))
+                if mutation == "missing":
+                    del observed["compaction_entry"]["systemMessage"]
+                elif mutation == "changed":
+                    observed["compaction_entry"]["systemMessage"]["sections"][0]["value"] = "changed"
+                elif mutation == "reordered":
+                    observed["post_context_projection"]["messages"][:2] = reversed(
+                        observed["post_context_projection"]["messages"][:2])
+                else:
+                    p["preparation"]["messages_to_summarize"] = projection([deepcopy(system)])
+                    p["preparation_sha256"] = digest(p["preparation"])
+                    observed["preparation_sha256"] = p["preparation_sha256"]
+                observed["compaction_entry_sha256"] = digest(observed["compaction_entry"])
+                observed["post_context_json"] = encode(observed["post_context_projection"]).decode()
+                observed["post_context_sha256"] = digest(observed["post_context_projection"])
+                with self.assertRaises(context.PrimeContextError):
+                    context.validate_compaction_witness(p, observed,
+                        expected_launch_nonce=LAUNCH, expected_command_nonce=COMMAND)
+
     def test_declared_custom_instructions_are_material_not_context_state(self):
         # Pi carries custom instructions on the `before_compaction` hook event and
         # never on the compaction entry it persists, so a proposal that declares
