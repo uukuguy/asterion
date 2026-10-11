@@ -121,4 +121,4 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task47 连续后果推演：[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)、[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)：P7模型相对助手及本次死亡回测已实现；离线L3反例复现，不代表自主建模或实战收益；fresh安装kernel与fullpromotion25/provider0通过，首次实测2/9停止、助手未用；L2离线条件风险/时长已复审；确定性不足优先推演的入口策略已修改；Task48已停止2/9，原模型死亡诊断见下项。
 
 - Task48 连续推演死亡根因：[实际死亡前模型复现与安全依据](../reviews/2026-10-12-p7-rollout-death-root-cause.md)：99动作/2死亡RESET/2of9用户中止，cleanup/replay完整；精确死亡候选未推演，L2反事实unknown、L3原模型false-settled；Astra APPROVE。调用覆盖和模型缺陷分开；安全筛选优先于找路尚未实现验证。
-- Task49 每步自动推演与显式致命风险：沿用上述[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)和[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)，用户已批准每步宿主推演、主动调用单独记录、死亡/条件性致命风险阻断、一般模型不完整只提示。实现进行中，未授权新实测；候选提出与后果评估的能力分开验证。
+- Task49 每步自动推演与显式致命风险：沿用上述[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)和[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)，代码8e89582b，定向/实际安装kernel/其余打包检查通过，Astra APPROVE；完整全量有一项旧console清理时序失败，单独和整模块重跑PASS，原全量不改写PASS。死亡/条件性致命风险阻断、一般模型不完整只提示；无新实测授权，候选提出和后果评估能力分别验证。

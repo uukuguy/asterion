@@ -4996,3 +4996,5 @@
 - 2026-10-12 4bce77fd commits diagnosis receipt for traceability; recovery boundary unchanged.
 - 2026-10-12 User approves per-action automatic rollout; veto predicted/conditional fatal actions, warn on incomplete models, record proactive coverage separately.
 - 2026-10-12 Task49 focused123/restore28 and final installed-kernel PASS; Astra APPROVE; explicit fatal veto and proactive attribution verified, real gameplay untested.
+- 2026-10-12 8e89582b adds automatic fatal-risk veto and proactive attribution; installed kernel verified, promotion pending.
+- 2026-10-12 Full4702 regression retained one console timing FAIL; isolated/module retry and other24 packaging checks PASS; provider/game0, no third suite.
