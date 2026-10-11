@@ -4886,3 +4886,4 @@
 - 16:00 修正前第二份snapshot同样3fail/1error（4583检查），不能记PASS；30c454cf修正后的独立promotion继续。
 - 16:02 最终30c454cf源代码full promotion25命令PASS，provider_operations=0/full_dataset=no；保留此前失败，Task41按无模型边界关闭。
 - 16:03 关闭Task41并同步状态，最终打包25PASS及无新模型边界可恢复。 [0f23ddae]
+- 16:13 用户授权一次BP35完整监督实测，独立冷根/当前打包版本，无累计预算硬停止，外围持续监测。

@@ -4,7 +4,7 @@
 
 ## 当前实施
 
-用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；本轮未启动。此次未授权新BP35模型实测。
+用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；此前未启动；用户现已授权一次完整BP35监督实测，部署worker supervised_live准备独立冷根和真实打包运行。
 
 ## 最新实测已结束
 
@@ -15,7 +15,7 @@
 - host已退出、guestunit不存在/0PID/空cgroup、trial临时.env删除，原console保留。
 - [实测报告](../reviews/2026-10-11-p7-bp35-full-game-trial.md)；私有证据 `.asterion-private/p7-full-bp35-20261011-135551/`。
 - 实测报告提交 `134f0ef2`；docs314/232及1973项私有manifest校验通过。
-- Task41已关闭，当前无运行工作包；专用摘要接通仍独立未完成。本次不授权新一轮评估。
+- Task41已关闭，当前无运行工作包；专用摘要接通仍独立未完成。用户已授权新的完整监督实测，不能再沿用此前未授权声明。
 
 ## 既有交接事实（本次运行不改写历史证据）
 
