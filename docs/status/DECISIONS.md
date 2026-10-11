@@ -1217,3 +1217,11 @@
 - Architecture: reuse Prime all-None authorization and existing runner/kernel. Nullable action allowance belongs to P7 local domain evidence. Official gameplay and finite automated presets retain their contracts. A missing deadline alone cannot select supervised mode.
 - Scope: P7 supervised entry and safe resource monitoring; no new strategies, NOTES projection changes or new paid trial. Task41 is closed within independently reviewed, provider-free packaged and real guest cancellation boundaries; no new model trial.
 - References: [design](../superpowers/specs/2026-10-11-p7-supervised-research-design.md), [implementation plan](../superpowers/plans/2026-10-11-p7-supervised-research.md), [cold trial](../reviews/2026-10-11-p7-bp35-full-game-trial.md).
+
+## D-2026-10-11-02 — Migration acceptance follows resource topology and same-input behavior
+
+- User requires identifying generic framework regression versus P7 adaptation, with hidden impact investigated. Task40 entry installation/first-level success alone did not establish losslessness.
+- A real generic bridge/owner lifetime defect was reproduced: a worker created in bridged dispatch retains the bridge loop, which stopped between requests; owner cleanup then reported it unavailable.95397749 keeps this single loop alive during asynchronous socket service. Preserve independent model reaping, signal-all-before-await, uncertain effects and truthful cleanup receipts.
+- Confirmed triggering consumer: P7 research owner-managed lazy worker. P1 uses a different worker/loop topology; P3–P6 and narrator text paths do not inherit the same demonstrated trigger. Repair remains generic rather than a P7 bypass.
+- Qualification requires same entry, target, configuration, initial state and evidence policy; historical autonomy and later solve/research presets are not equivalent tests. Missing historical request bytes and untested long-horizon model behavior must remain explicit.
+- Reference: [migration qualification](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md), [bridge lifetime design](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md).
