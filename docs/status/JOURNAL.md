@@ -4964,3 +4964,5 @@
 - 2026-10-11 Default historical experience disabled; P7 output capacity and display paging corrected for authorized clean trial.
 - 2026-10-11 b03b2307 isolates historical experience and aligns output transport for clean P7 qualification.
 - 2026-10-11 b03b2307 full promotion25PASS/provider0; clean BP35 trial authorized after output fix.
+- 2026-10-11 cf44afaa records promotion; clean BP35 started with experienceoff and fresh output policy.
+- 2026-10-11 User requests generic death-risk introduction; future P7 prompts updated, active cold-run prompt unchanged.

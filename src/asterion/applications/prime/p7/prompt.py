@@ -11,6 +11,8 @@ P7_ACTION_PRECONDITIONS_INSTRUCTION = """每步可选 before:{cells:[{x,y,value}
 
 P7_NOTES_SOLVE_PROMPT = """你是 P7 主解题者。依据真实观察自主研究未知游戏，以通关和动作效率为目标。自行选择假说、笔记、实验和计算；部分模型与未知机制都可以支持下一项有用探针。应用给出的 observation、observation_ref、available_actions 和 budget 是当前现实，历史资料与程序预测不能授权动作。
 
+游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。
+
 工具只有 ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实行动只经 p7_execute_plan。IPython namespace 持久，可用 Python stdlib、函数、模型和搜索；它不接入游戏引擎或动作接口。计算与搜索按问题需要使用，无需为每次认识额外编写程序或完整 WorldMap。
 
 NOTES 是由你维护的当前研究记忆：保留仍有用的机制、证据引用、反例、未知、当前局面和下一步打算，自由组织文字。更新是全文替换：p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:当前完整引用,text:'更新后的有效研究笔记'})。开始时及 needs_revision=true 时，先依据当前观察更新 NOTES，再行动。正确匹配的计划可复用当前修订；有值得保留的新认识时主动更新。短而有用即可，最多16KiB UTF-8，并非长度目标。不要累计逐步执行日志；换关只携带可复用认识，重新确认局部状态。RESET 保留知识，但必须重新校准当前局面；失配后修正被反驳的假设。历史反例可标注真实序号，未知保持未知。
@@ -36,6 +38,8 @@ def build_notes_prompt() -> str:
 def build_autonomous_prompt() -> str:
     """P7 supplies evidence and execution authority; the actor owns research."""
     return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
+
+游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。
 
 计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。current_level 中 max_paid_actions_for_115 是保持115分的累计付费动作整数阈值，additional_paid_actions_preserving_115 直接表示保持115分还剩多少步，paid_actions_exceeding_115 表示已超过该阈值多少步；max_paid_actions_for_100 等于 baseline，additional_paid_actions_preserving_100 表示保持baseline的100分还剩多少步，paid_actions_exceeding_100 表示已超过100分阈值多少步。剩余数和超额数均不小于0；剩余为0时，超额为0表示恰好到达阈值，超额大于0表示已超过。baseline 未知时这些字段为null。这些是评分空间，与宿主动作额度分别计算，不构成动作授权或执行停止条件。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
 
@@ -85,6 +89,8 @@ def initial_research_prompt(host, instructions: str) -> str:
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
 P7_SOLVE_PROMPT = """你是 Asterion-prime 的 P7 主解题者。依据当前真实观察，研究未知游戏、构造可修正的 WorldMap，并推动游戏直到真实环境终局。应用初始上下文和每次行动反馈自动提供 observation 与 observation_ref；不要用旧画面代表现实。
+
+游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。
 
 唯一工具面：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实动作只能通过 p7_execute_plan 的唯一 Broker。IPython 是持久研究计算：允许 Python stdlib、函数、数据结构、程序模型和搜索；只读模块 p7_research.context()/history(start,limit)/frame(sequence)/artifact(export_id) 返回真实证据副本，研究端没有动作、发布或任意 RPC 执行入口。程序输出或 print 不会注册动作、发布模型或构成真实证据。
 

@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-11. Completed Task44 BP35 supervised live trial; not a final handoff.
+Updated: 2026-10-11. Active Task45 clean BP35 supervised live trial; not a final handoff.
 
 ## Objective
 
@@ -25,6 +25,14 @@ Offline source/evidence inspection confirms this trial loaded prior same-game/se
 ## Authorized clean-run preparation
 
 User requires history OFF by default and explicitly authorizes a fresh BP35 full-game trial after fixing truncation. New research default never calls load_experience; explicit process EXPERIENCE_MODE=on opts in, explicit resume remains intentional continuation; operator files cannot enable experience. P7 raw output capacity explicitly2MiB, process OUTPUT_BYTES configurable>=256; generic64KiB default unchanged. P7 display(value,start,limit) projects only presentation pixels, keeps original raw data, bounds repr16KiB and returns next_start. Prompt documents paging and discarded stdout boundary. Root targeted81unittestPASS and ruffPASS; registered extension108PASS/6existing skips and bridge-related77PythonPASS. Independent review caught unchanged TS64KiB cap, repaired via validated injected bridge_output_bytes and trusted bootstrap capacity in both transports, JSON line allowance6x+8192, all3 bundled resources synchronized. Full promotion PASS25commands/provider_operations0/full_datasetno; first run4663tests had6new test-fixture ANSI parsing errors only, corrected fixture and rerunPASS. Log `.asterion-private/task45-clean-bp35/promotion.stdout.log`. Sourceb03b2307. User-authorized clean run starts next; no paid run during preparation. Clean trial will use modeoff/new run/no resume, watch exact startup and absence of experience artifacts, report each level's actual transition action counts and reported resource usage.
+
+## Active clean BP35 run
+
+Run `p7-live-20261011144019-094b31b6fdf830482d7ecce6`, host session61293, sourcecf44afaa. Logs `.asterion-private/task45-clean-bp35/operator.*`; status/evidence exact run under `.asterion-private/prime-p7-live/`. Actual startup experience_mode=off/max_output_bytes2097152/seed0/target9/verified worldmap/new session; no resume. Initial check confirms no experience-manifest or experience-consumption artifacts. Follow real per-level transition action counts/resources and user stop requests; preserve consolePID52024. No parallel game runs or additional repairs.
+
+## During-run steering
+
+User asks to report total per-level actions and final successful attempt after last RESET separately. L2 total67=26predeath+1RESET+40success; reset global45 after GAME_OVER global44. User requests generic rule introduction death-risk warning. Future modern P7 prompt now explicitly describes death/continuous hazards, retaining counterexamples and evaluating alternative routes; active run's injected prompt remains sourcecf44afaa unchanged. Do not attribute this run's behavior to the later prompt edit or silently restart it.
 
 ## Current judgment
 
