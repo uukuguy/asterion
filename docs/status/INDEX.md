@@ -26,7 +26,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Task44 BP35 full-game9/9 PASS with per-level actions/resources/replay/cleanup; Task43 migration proofs and remaining historical losslessness limits. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Final Task52 stop:5/9,225actions,64.8min; cache interface separate from frozen trial; evidence, limitations and next instruction boundary. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -128,3 +128,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task51 fresh trial and scope/history follow-up: [current state](CURRENT-STATE.md#task51-stopped-trial-and-narrow-follow-up-2026-10-12), [resume evidence](RESUME-NEXT-SESSION.md). Four levels completed; L5 model error and scope builtin/local-cell support gap remain distinct.
 
 - Prime cache/cost statistics: [decision D-2026-10-12-04](DECISIONS.md#d-2026-10-12-04--retain-cache-and-cost-observations-separately-from-throughput), [current state](CURRENT-STATE.md#prime-cache-and-cost-statistics-2026-10-12). Optional native fractions and SDK estimates, missing unknown; current frozen trial cannot be backfilled.
+
+- Task52 final user stop: [handoff](RESUME-NEXT-SESSION.md) records per-level actions/resources, cleanup and private audit pointers. No active run; cache interface has no real backend acceptance.

@@ -5024,3 +5024,11 @@
 - d1c96cf1: Preserve cache fractions and labelled SDK costs so throughput is not mistaken for spending.
 
 2026-10-12 Task52 user-stopped: 5/9,225 actions,3887s; cleanup complete. Cache statistics commit d1c96cf1 remains undeployed.
+
+33d0214d: Recorded Task52 stop and final resources so recovery cannot accidentally resume the terminated trial.
+
+- 06:00 Final handoff records Task52 cleanup, unknown cache costs and no restart; replaces accumulated checkpoint.
+
+- 06:08 Handoff boundary verified: no Task52 processes, final evidence sealed, cache real acceptance remains open.
+
+- 06:08 Finalized handoff and recovery boundaries for reliable resume [5fba84bc; included in amended closeout].

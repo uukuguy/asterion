@@ -16,7 +16,7 @@
 | project | ✅ verified-active | Completed P7 campaign, community submission and private replay retention |
 | feedback | ✅ verified-active | Reconcile diagnostics with observed successful execution before concluding setup is missing |
 | feedback | ✅ verified-active | Preserve approved architecture across sessions; P7 is the native base for rebuilding P1-P6 |
-| feedback | ✅ verified-active | Research intensity — review changed code, not the whole gate |
+| feedback | ✅ verified-active | Research intensity — review changed code, not the whole gate; report costs separately from throughput |
 | feedback | ✅ verified-active | Judge a subagent by whether the work is done, not by whether it has reported |
 | feedback | ✅ verified-active | Search `PATH` and the real environment before declaring a resource absent |
 | feedback | ✅ verified-active | Report a narrow defect as narrow; do not inflate it into an architecture decision |
@@ -414,3 +414,7 @@ The user wants evaluation against baseline and the115 per-level cap, rather than
 - **2026-10-11 user feedback:** Migration losslessness is the primary goal. Distinguish generic framework defects from P7 adaptation errors, investigate hidden impact, and repair demonstrated regressions; game completion alone is not acceptance.
 
 - **2026-10-11 user feedback:** Resource-limit work took too long. Keep the implementation scope and verification cost proportional; freeze reviewed code before the final packaged gate. Technical policy/evidence are in D-2026-10-11-03 and the migration audit.
+
+### feedback — supervised P7 research and resource reporting (2026-10-12)
+
+The user wants focused changed-code review and necessary boundary tests, not long production regressions. Report each level’s actions,time and resources during real play. Default fresh evaluation excludes historical solutions; load experience only when explicitly testing its benefit. Token totals describe throughput; report cache fractions and labelled cost estimates separately, keeping missing data unknown. The user stopped Task52 because it was too slow; do not restart from older authorization. Exact technical status and evidence are in docs/status/RESUME-NEXT-SESSION.md.
