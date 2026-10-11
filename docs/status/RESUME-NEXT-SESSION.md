@@ -18,10 +18,11 @@ Distinguish generic framework migration regressions from P7 adaptation and quali
 
 Known defects are separated by responsibility and repaired. Entire historical migration equivalence and long-horizon reasoning remain unverified; old/new game runs used different presets, and historical full requests/SDK bytes are missing. Do not infer causal score recovery from shutdown or metadata repairs. Specialized code-aware native summary remains separately unwired/unverified.
 
-## Immediate work
+## Current recovery boundary and next action
 
-1. Final system-source promotion first failed:4589tests, four failures/two errors/four skips. All failures were stale test-owned ESM wiring missing native pi-ai. Fixtures repaired e57f1fbd/097ae81c;27 pinned-resource tests and2 installed-P7 tests PASS. Production code unchanged. Full promotion rerun session65324, log `.asterion-private/task43-system-promotion-recheck.log`. Root owns documentation/integration; collect this gate before claiming PASS.
-2. Synchronize audit/current state/index/canonical plan with final verification, commit docs and source, preserve user consolePID52024. No automatic ARC/model relaunch.
+Known repair work95397749/14d35611/b2d8480d is complete within tested contracts and independently reviewed. Final `make promotion-check` full PASS25commands/provider0/full_datasetno; log `.asterion-private/task43-system-promotion-recheck.log`. Earlier failures were stale test-owned ESM wiring; fixture-onlye57f1fbd/097ae81c corrected them,27 pinned-resource and2 installed-P7 tests PASS. Documentation links and whitespace checks PASS.
+
+Task43 overall historical losslessness remains open because historical full requests/SDK identity and actual long-horizon equivalence cannot be reconstructed from these probes. For any future qualification, preserve exact autonomy preset/model/effort/start state/experience/resource policy and separate deliberate configuration changes from regressions. Dedicated code-aware summary integration remains separate. Do not automatically relaunch ARC/model experiments from this checkpoint. No probe/promotion process remains; user consolePID52024 is preserved.
 
 ## Evidence
 

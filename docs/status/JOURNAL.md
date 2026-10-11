@@ -4931,3 +4931,5 @@
 - 2026-10-11 e57f1fbd aligns pinned-loader pi-ai fixture;27tests PASS. No production changes.
 - 2026-10-11 Task43 installed P7 legacy1/2/7 and official fixtures GREEN after staging pi-ai; root reviewed; final promotion rerunning.
 - 2026-10-11 097ae81c stages native pi-ai for isolated installed P7 fixtures; fixes four promotion subtest failures.
+- 2026-10-11 d7e3a18e records repaired native contracts, actual guest proofs and live final-gate checkpoint.
+- 2026-10-11 Task43 final system promotion full PASS:25commands/provider0; fixture-only repair, native production proofs remain byte-identical.
