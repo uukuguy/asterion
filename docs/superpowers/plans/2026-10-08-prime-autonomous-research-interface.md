@@ -344,3 +344,7 @@ Status: user approved design2026-10-11; implemented and independently APPROVE th
 Scope: explicit P7 supervised research entry, no aggregate callbacks/deadline/action cap; cumulative safe resource monitor and outer stop with bounded settlement. Existing finite solve/witness/autonomy/official remain finite. Generic runner/kernel reused, no new model behavior/prompt/NOTES change.
 
 Acceptance: model128/actionoldcap crossed in provider-free controlled tests; no hidden1h fallback; finite modes still reject; cancellation/unknowneffects/batchcaps/trace provenance preserved; monitored metrics and heartbeat; packaged entry checks. No real nine-level completion claim and no new paid BP35 trial in this implementation.
+
+## Task42 — Passive monitoring correction after supervised trial
+
+User interrupted the full BP35 trial and authorized analysis/correction. [Trial](../../reviews/2026-10-11-p7-supervised-bp35-interrupted-trial.md), [design](../specs/2026-10-11-p7-monitor-observation-fix-design.md). Explicit passive immutable accounting snapshot replaces ResearchMonitor executable status calls; admission and unknown-result rules remain unchanged. Acceptance: real in-flight transaction RED→GREEN, trueunknown still blocked, finite/supervised counters, independent code review and packaged checks. Cognitive failure classes are recorded, not claimed fixed by this observer repair. No new trial. Status: implementing.

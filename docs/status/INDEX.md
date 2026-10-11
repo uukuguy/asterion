@@ -105,3 +105,7 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - 监督研究预算设计：[设计](../superpowers/specs/2026-10-11-p7-supervised-research-design.md)、[实施计划](../superpowers/plans/2026-10-11-p7-supervised-research.md)：用户已确认，显式监督模式无总量硬停止，保留单次控制及有限自动预设；Task41已实现并按provider-free边界关闭，full promotion25PASS。
 
 - 监督研究实施复审：[2026-10-11监督模式代码与验证](../reviews/2026-10-11-p7-supervised-research-review.md)：AstraAPPROVE、provider-free控制与真实guest停止证据；最终full promotion25PASS，无新模型实测。
+
+- 监督监测修正：[无副作用计量设计](../superpowers/specs/2026-10-11-p7-monitor-observation-fix-design.md)：在途事务复现实证，用户授权修正；认知退步归因另列。
+
+- 监督BP35中断实测：[逐关资源、退步与监测缺陷](../reviews/2026-10-11-p7-supervised-bp35-interrupted-trial.md)：5/9用户中断，全部关卡比较、L2死亡重现、被动观察修复待验证。
