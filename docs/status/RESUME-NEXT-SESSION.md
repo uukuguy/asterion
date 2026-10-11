@@ -87,3 +87,7 @@ rg -n 'Task40|D-2026-10-10-03' docs/status/DECISIONS.md docs/superpowers/plans/2
 ## 当前迁移验收目标（用户最新纠正）
 
 Task43重点是迁移是否无损，区分Prime底层能力与P7适配错误。不能以仅分析、监测修复或一轮过关代替迁移验收。regression_analysis负责Python通用运行与恢复差分；live_identity负责TS工具/context hooks差分；resource_comparison负责真实旧新配置/输入证据。Task39实际model6.1-sol/medium已核实、旧新工具schema静态一致，动态同输入探针尚未完成。当前无付费或游戏运行。
+
+## Task43 原生小验证
+
+Root已GO一次旧/新受控小验证，每侧4模型回调/180秒，同Linux guest原认证profile/Node22/Pi；两轮IPython namespace复用，无ARC动作。regression_analysis执行，resource_comparison配环境。不得重复等待GO或自行加预算/第三次启动。动态无模型差分已由root重跑通过，私有证据 `.asterion-private/task43-migration-parity/`。原生验证尚未启动/完成，自动压缩正向及历史provider正文仍未证明。
