@@ -26,7 +26,7 @@ Actual Task39 initial input22193B included911B autonomy guidance; migratedsolve2
 | P7 tool/context extension | Actual old/new default registration, same captured cells, socket requests/results, context/provider callbacks, shutdown and closed-channel compaction | PASS | Positive automatic compaction excluded |
 | P7 composition | Actual old/new resource builders/runtime factory, leasedsocket, bridge, ResearchRuntime/Solver/Broker/ReadServer, realworker, two natural rounds/nine tools | PASS | Controlled engine, exact autonomy6/1024/4096/5400s/1000actions |
 | Native startup | Current exact Makeguest model/effort/tool exposure and Node binary identity | PASS | No model request; historical startup from captured baseline |
-| Paired actual native model | Same fixed two-round persistence task, same guest/profile/Pi, oldSession vs newowner | Pending | Four callbacks/180s per side; noARC |
+| Paired actual native model | Same fixed two-round persistence task, same guest/profile/Pi, oldSession vs newowner | Execution PASS; new cleanup FALSE | Both4callbacks/2cells/22→42/run.completed; noARC; cleanup attribution in progress |
 | Historical provider request bytes | Original complete request bodies were not retained | Not verified | Cannot retroactively claim byte equality |
 | Automatic compaction complete success | Positive path not exercised in this audit | Not verified | Earlier dedicated-summary work remains separate |
 
@@ -36,8 +36,16 @@ P7 TS actual registration does not skip hooks: old/new installed order agrees wi
 
 ## Responsibility and unresolved boundaries
 
-Within the tested boundaries, no generic Prime functional loss or same-preset P7 adaptation loss was reproduced. The confirmed defect in the prior supervised run was a later-added P7 telemetry observer mutating in-flight admission state; source5f50969d fixes it and it is not a demonstrated Task40 regression or explanation of earlier spatial mistakes.
+Computation/session execution and matched P7 composition passed. Native closure exposed a generic Prime migration defect; overall qualification fails until this repair is verified. The confirmed defect in the prior supervised run was a later-added P7 telemetry observer mutating in-flight admission state; source5f50969d fixes it and it is not a demonstrated Task40 regression or explanation of earlier spatial mistakes.
 
 The confirmed migration acceptance problem is mismatched P7 presets and incomplete initial qualification. Current whole-migration status is **UNDETERMINED** outside the tested rows, not a blanketlosslessPASS. Native/model verification and missing historical inputs must retain their distinct boundaries. Model spatial reasoning and six/nine-level outcome are not promoted to verified by software parity.
 
 Private evidence `.asterion-private/task43-migration-parity/summary.json`, old/new and root-rerun outputs plus scripts; P7extension subdirectory contains register/socket replay andREADME. Numeric/config/native-state evidence resides `.asterion-private/p7-supervised-bp35-20261011-161337/`. Provider/prompt payloads and authentication stay private.
+
+## Newly observed native cleanup difference
+
+Old actual native side completed in10.592s, new in10.158s, each4modelrequests/2realcells. Initial provider request input/system/tool hashes identical; subsequent generated model content is not required to match. All requests preserve system/tools/model/effort and input item counts1/3/5/7. Old cleanup true, new owner cleanup false. Keep the latter as a failure of this verification boundary; no extra model call. A provider-free real-resource reproduction is required before attributing it to the framework or probe wrapper and before any repair claim.
+
+## Confirmed generic defect
+
+Provider-free reproduction returns effects/model/extension/bridge closed=true, workspace_closed=false. Exact exception is SubprocessPythonWorker.close: `Prime worker cleanup loop is unavailable`. ToolBridgeServer only runs its loop during individual dispatch; between requests its blocking socket reader leaves the creating loop idle. Cross-loop WorkspaceOwner closure therefore misclassifies a live owner as unavailable. This is generic bridge/worker ownership integration, not P7-only adaptation. Design [bridge-loop lifetime repair](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md). Keep independent reaping and full cleanup truthfulness. No evidence currently connects shutdown-only failure to earlier spatial reasoning mistakes.

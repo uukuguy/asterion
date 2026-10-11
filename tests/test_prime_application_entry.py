@@ -817,6 +817,60 @@ class TestPrimePersistentOwner(unittest.TestCase):
                 await app.close()
         asyncio.run(run())
 
+    def test_owner_closes_real_workspace_after_bridge_becomes_idle(self):
+        import json
+        import socket
+        from types import SimpleNamespace
+        from asterion.agents.prime._tool_bridge import ToolBridgeServer
+        from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
+
+        for eof_on_model_close in (False, True):
+            with self.subTest(eof_on_model_close=eof_on_model_close):
+                app = self._persistent_app()
+
+                async def run():
+                    kernel = app.create_workspace(
+                        KernelBootstrap({}, {}, self.root / f'bridge-{eof_on_model_close}'),
+                        KernelLimits())
+                    services = _Services()
+                    services.execute = kernel.execute
+                    services.close = kernel.close
+                    parent, child = socket.socketpair()
+                    bridge = ToolBridgeServer(parent, services)
+                    app.runtime(services=services, limits=self.run_limits, hooks=PrimeRunHooks())
+
+                    async def close_rpc():
+                        if eof_on_model_close:
+                            child.close()
+
+                    app._persistent = SimpleNamespace(
+                        rpc=SimpleNamespace(stop=lambda: None, close=close_rpc),
+                        bridge=bridge, close_descriptors=child.close)
+                    bridge.start()
+
+                    def execute():
+                        request = {'protocol': 'asterion.prime-ipython/v1',
+                                   'request_id': 'cell', 'type': 'execute', 'code': 'print(22)'}
+                        child.sendall((json.dumps(request) + '\n').encode())
+                        with child.makefile('rb') as stream:
+                            return json.loads(stream.readline())
+
+                    try:
+                        result = await asyncio.to_thread(execute)
+                        self.assertEqual(json.loads(result['output'])['stdout'], '22\n')
+                        process = kernel._worker._process
+                        cleanup = await app.close()
+                        self.assertTrue(cleanup.complete, cleanup)
+                        self.assertIsNotNone(process.returncode)
+                        self.assertTrue(kernel.status()['closed'])
+                        self.assertFalse(bridge._thread.is_alive())
+                    finally:
+                        child.close()
+                        await asyncio.to_thread(bridge.close)
+                        await app.close()
+
+                asyncio.run(run())
+
     def test_owner_reaps_workspace_on_its_execution_loop(self):
         from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
         app = self._persistent_app()

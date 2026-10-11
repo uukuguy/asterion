@@ -90,4 +90,8 @@ Task43重点是迁移是否无损，区分Prime底层能力与P7适配错误。�
 
 ## Task43 原生小验证
 
-Root已GO一次旧/新受控小验证，每侧4模型回调/180秒，同Linux guest原认证profile/Node22/Pi；两轮IPython namespace复用，无ARC动作。regression_analysis执行，resource_comparison配环境。不得重复等待GO或自行加预算/第三次启动。动态无模型差分已由root重跑通过，私有证据 `.asterion-private/task43-migration-parity/`。原生验证尚未启动/完成，自动压缩正向及历史provider正文仍未证明。
+Root已GO一次旧/新受控小验证，每侧4模型回调/180秒，同Linux guest原认证profile/Node22/Pi；两轮IPython namespace复用，无ARC动作。regression_analysis执行，resource_comparison配环境。不得重复等待GO或自行加预算/第三次启动。动态无模型差分已由root重跑通过，私有证据 `.asterion-private/task43-migration-parity/`。原生两侧执行已完成，各4calls/2cells输出22→42；旧cleanup true/new false，regression_analysis正无模型定位。不可追加模型调用。自动压缩正向及历史provider正文仍未证明。
+
+## Task43 实证通用缺陷（当前立即工作）
+
+原生new清理false已无模型真实桥/worker复现。_tool_bridge._serve阻塞socket，使worker创建loop在请求间idle；跨loop WorkspaceOwner.close报cleanup unavailable。regression_analysis拥有通用_tool_bridge修复+TDD，live_identity独立Sol复审；root已批准持续运行单一asyncsocketloop设计。所有ARC实测仍停止，不能用关闭问题解释推理退步。旧侧native4calls已PASS，不重复；新侧修复后最多一次同小验证需rootGO。

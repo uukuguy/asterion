@@ -23,6 +23,7 @@ class _BridgeSignal:
 class ToolBridgeServer:
     def __init__(self, channel, services):
         self._channel, self._services = channel, services
+        self._channel.setblocking(False)
         self._stop = threading.Event()
         self._signal = _BridgeSignal(self._stop)
         self._thread = threading.Thread(target=self._serve, daemon=True)
@@ -43,31 +44,45 @@ class ToolBridgeServer:
             self._channel.shutdown(socket.SHUT_RDWR)
         except OSError:
             pass
-        self._channel.close()
         if self._started:
             self._thread.join(6.0)
         else:
             self._close_services()
+        self._channel.close()
         if self._thread.is_alive() or self._close_error:
             raise RuntimeError('Prime computation cleanup is incomplete')
+
+    async def _close_services_async(self):
+        try:
+            await self._services.close()
+            self._host_closed = True
+        except BaseException:
+            self._close_error = True
 
     def _close_services(self):
         if not self._loop.is_closed():
             try:
-                self._loop.run_until_complete(self._services.close())
-                self._host_closed = True
-            except BaseException:
-                self._close_error = True
+                self._loop.run_until_complete(self._close_services_async())
             finally:
                 self._loop.run_until_complete(self._loop.shutdown_asyncgens())
                 self._loop.close()
 
     def _serve(self):
+        # Workers retain this loop for cross-thread cleanup. Keep it running
+        # while awaiting requests, including the otherwise idle periods.
+        try:
+            self._loop.run_until_complete(self._serve_async())
+        finally:
+            self._loop.run_until_complete(self._loop.shutdown_asyncgens())
+            self._loop.close()
+            self._channel.close()
+
+    async def _serve_async(self):
         try:
             pending = bytearray()
             while not self._stop.is_set():
                 try:
-                    chunk = self._channel.recv(4096)
+                    chunk = await self._loop.sock_recv(self._channel, 4096)
                 except OSError:
                     return
                 if not chunk:
@@ -76,15 +91,18 @@ class ToolBridgeServer:
                 while b'\n' in pending:
                     raw, _, trailing = pending.partition(b'\n')
                     pending = bytearray(trailing)
-                    response = self._dispatch(bytes(raw))
+                    response = await self._dispatch_async(bytes(raw))
                     try:
-                        self._channel.sendall(response + b'\n')
+                        await self._loop.sock_sendall(self._channel, response + b'\n')
                     except OSError:
                         return
         finally:
-            self._close_services()
+            await self._close_services_async()
 
     def _dispatch(self, raw):
+        return self._loop.run_until_complete(self._dispatch_async(raw))
+
+    async def _dispatch_async(self, raw):
         request_id = 'invalid'
         response_type = 'result'
         try:
@@ -99,8 +117,7 @@ class ToolBridgeServer:
                 if (set(value) != {'code', 'protocol', 'request_id', 'type'}
                         or type(value['code']) is not str or not value['code']):
                     raise ValueError
-                result = self._loop.run_until_complete(
-                    self._services.execute(request_id, value['code'], self._signal))
+                result = await self._services.execute(request_id, value['code'], self._signal)
                 if type(result) is not PrimeToolResult or result.call_id != request_id:
                     raise ValueError
                 output = result.content[0].get('text', '') if result.content else ''
@@ -112,9 +129,9 @@ class ToolBridgeServer:
                                        {'protocol', 'request_id', 'type', 'method', 'params'})
                         or type(value['method']) is not str or not value['method']):
                     raise ValueError
-                response = self._loop.run_until_complete(self._services.call(
+                response = await self._services.call(
                     request_id, value['method'], value.get('params'), self._signal,
-                    params_present='params' in value))
+                    params_present='params' in value)
             else:
                 raise ValueError
             if (not isinstance(response, Mapping)
