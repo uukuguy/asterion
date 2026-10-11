@@ -15,6 +15,14 @@
 - Prior cold evaluation: frozen layered-research implementation is packaged; the one cold BP35 target6 trial ended at5400 seconds with5 completed/213paid, target NOT achieved. L1–5 paid26/47/41/23/30; L6 unfinished46. The completed analysis compares actual arc-skill research and old P7 mature-route costs; the active NOTES package supersedes its earlier analysis-only boundary. Original arc-skill6of9/271actions remains the baseline; post-run process audits are complete: L6 research did not converge, 15 undo actions and serial negative experiments consumed actions; mandatory revisions amplify transactions. One natural round never completed, so continuation was not exercised. Request-level latency attribution remains unavailable. See the cold-trial report and offline HTML.
 - Repeated public-game research, failure reuse and certificate-bound prefix restoration are implemented. The official result is an accumulated public-game result, not an unseen/private-game or single fixed-version cold-start capability claim.
 
+## Task47 continuous-consequence experiment (2026-10-12)
+
+用户批准延伸推演：P7 的模型程序先执行一次输入，再展开自动运动至静止、碰撞、终局或未知。已实现 `rollout`、`replay_cases`、`evaluate_candidates`；现有 IPython `p7_research` 追加 `death_cases` / `replay_deaths`，完整核对本次运行死亡动作及前后引用，不加载历史运行。模型死亡候选可被筛出，未知保留；结果只相对于模型，不新增真实动作拦截、执行授权或未来安全证书。通用 Prime、工具注册和主提示不变；用法只追加到 research 实验入口。
+
+已验证：82项定向 Python 测试 PASS（21.930秒），Ruff PASS；Astra 独立复审通过。复审发现并修复输入暂时不变被误判循环、初态已死亡被误算回测成功两处问题。Task46 第三关离线反例：基于公开像素和已有运动观察的人工局部模型，左移后3个自动上浮微步判死，复现真实死亡77；只算输入一步的模型回测不符。零新游戏/模型调用，不能据此声称 LLM 已学会完整动力学或过关改善。证据 `.asterion-private/task47-p7-rollout/l3-offline-receipt.json`。fresh wheel 的隔离安装与真实 PersistentIPython 内核见证 PASS，安装源码哈希一致，死亡1/33全部回测，模型/游戏调用0且关闭完整；证据 `.asterion-private/task47-p7-rollout/installed-kernel-witness/`。`make promotion-check` PASS：25 commands/provider_operations0/full_dataset=no，日志 `.asterion-private/task47-p7-rollout/promotion.stdout.log`。设计与计划见 INDEX。
+
+未完成：真实模型使用率、自主建模质量、通关收益及模型绑定的实时动作防护。Task46仍为用户停止的6/9。用户随后授权打包验证通过后做新一轮干净 BP35 实测；本次启动前仍无活动游戏。
+
 ## Task39 NOTES implementation and measured boundary
 
 正常 NOTES 主认知核心已提交 2930fbd8，独立源码评审 APPROVE，TS88 PASS/6外部跳过、相关Python48 PASS、实际安装Pi无provider探针通过。普通笔记建立工作epoch，旧证据按引用专项读取。本版本打包见证已完成：r11l7paid/Q115/128.140348秒，4次正常NOTES实际退休完整组0→2→4→7；输入61073→21105tokens。本版本BP35前六关自然完成：20/68/34/23/46/51=242paid，一次死亡RESET，1605.836404秒；上下文峰73,098tokens，较Task38明显收拢，但动作、时间和得分整体回退，不能宣称解题收益。

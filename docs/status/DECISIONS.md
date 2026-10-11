@@ -1250,3 +1250,12 @@
 
 - Follow-up: user identifies the b03b2307 compact-display instruction as the leading regression hypothesis. It is a model-facing behavioral variable, not transport-only repair. Remove its mandatory usage/prohibition from the common autonomous prompt; keep display callable and capacity unchanged. Retain the guidance only as a non-default experimental candidate. No new trial is authorized by this correction.
 - Evidence boundary: Task46 uses display5times. None of these outputs contains pixel-omission markers, so pixel deletion is not demonstrated. Two transition mappings displayed with limit1 expose only sequence and leave7fields unshown without continuation. This supports an information-display defect candidate, not a causal attribution of the entire regression.
+
+
+## D-2026-10-12-01 — P7 continuous-consequence model experiment
+
+- User approves extending action reasoning through automatic consequences, with deterministic support beyond prose guidance.
+- Application helpers expand one modeled input followed by autonomous microsteps, replay all current-run death counterexamples and compare candidate routes. Models are actor-owned; no hidden engine, historical route loading or per-level solver is introduced.
+- Every result remains model-relative. Unknown/cycles/limits/errors stay explicit; prediction filtering does not authorize or block real execution. No new compulsory research publication or safety certificate. Future host-bound veto remains unimplemented.
+- Guidance stays in the research experiment entry under D-2026-10-11-04. A local offline death reproduction demonstrates this helper's mechanism, not autonomous learned rules or live efficacy.
+- References: [design](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md), [plan](../superpowers/plans/2026-10-12-p7-continuous-rollout.md).

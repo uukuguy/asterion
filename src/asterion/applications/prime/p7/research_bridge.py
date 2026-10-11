@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 import re
 import secrets
 import socketserver
@@ -191,6 +192,7 @@ class ResearchReadServer:
     def start(self) -> str:
         if self._closed:
             raise ValueError("research readers closed")
+        rollout_source = Path(__file__).with_name('rollout.py').read_text(encoding='utf-8')
         if self._server is None:
             owner = self
 
@@ -226,7 +228,7 @@ class ResearchReadServer:
             )
             self._thread.start()
         address = self._server.server_address
-        return f'''"""Host evidence snapshots; no environment action methods."""
+        return rollout_source + '\n\n' + f'''"""Host evidence snapshots; no environment action methods."""
 import json as _json
 import socket as _socket
 def _read(method, args):
@@ -327,6 +329,94 @@ def display(value, start=0, limit=8):
         if end <= start + 1:
             raise ValueError("display record exceeds 16 KiB; inspect selected fields or page a nested list")
         end -= 1
+''' + '''
+def death_cases():
+    """All observed GAME_OVER actions in this run, without pixels or old runs."""
+    current_ref = context()["observation_ref"]
+    latest = current_ref.get("sequence")
+    if (type(latest) is not int or latest < 0
+            or not isinstance(current_ref.get("run_id"), str)
+            or not isinstance(current_ref.get("attempt_id"), str)):
+        raise ValueError("current death evidence unavailable")
+    if latest == 0:
+        return []
+    cases, cursor = [], 0
+    while cursor <= latest:
+        page = history(cursor, 32)
+        records = page.get("items") if isinstance(page, dict) else page
+        if not isinstance(records, list) or not records:
+            raise ValueError("death history incomplete")
+        for record in records:
+            if not isinstance(record, dict):
+                raise ValueError("death history unavailable")
+            sequence = record.get("sequence")
+            if type(sequence) is not int or sequence < 0:
+                raise ValueError("death history sequence unavailable")
+            # Some history readers omit the initial non-action record.
+            if cursor == 0 and sequence == 1:
+                cursor = 1
+            if sequence != cursor:
+                raise ValueError("death history incomplete")
+            if record.get("run_id", current_ref["run_id"]) != current_ref["run_id"]:
+                raise ValueError("foreign death history unavailable")
+            if sequence > latest:
+                break
+            cursor = sequence + 1
+            if not isinstance(record.get("state"), str):
+                raise ValueError("death history state unavailable")
+            if sequence == 0 or record.get("state") != "GAME_OVER":
+                continue
+            actual = transition(sequence)
+            if not isinstance(actual, dict):
+                raise ValueError("death transition unavailable")
+            before = actual.get("before_observation_ref")
+            after = actual.get("after_observation_ref")
+            if (actual.get("sequence") != sequence or actual.get("state") != "GAME_OVER"
+                    or not isinstance(before, dict) or not isinstance(after, dict)):
+                raise ValueError("death transition unavailable")
+            for ref, expected_sequence in ((before, sequence - 1), (after, sequence)):
+                if (ref.get("sequence") != expected_sequence
+                        or ref.get("run_id") != current_ref["run_id"]
+                        or ref.get("attempt_id") != current_ref["attempt_id"]):
+                    raise ValueError("death transition identity unavailable")
+            name, data = actual.get("action"), actual.get("data")
+            if (not isinstance(name, str) or not isinstance(data, dict)
+                    or name != record.get("action") or data != record.get("data")):
+                raise ValueError("death action unavailable")
+            cases.append({"sequence": sequence, "before_observation_ref": before,
+                          "after_observation_ref": after,
+                          "action": {"name": name, "data": data}, "expected_outcome": "dead"})
+        if cursor > latest:
+            break
+    return cases
+
+def replay_deaths(*, initial_state, transition, settled, terminal, collision=None,
+                  max_ticks_per_action=128):
+    """Backtest the supplied model on every current-run observed death; no certificate.
+
+    initial_state(frame, before_observation_ref) constructs your JSON model state.
+    Unreadable evidence or a failed initializer raises rather than skipping a case.
+    """
+    if not callable(initial_state):
+        raise ValueError("death initial_state callback unavailable")
+    observed = death_cases()
+    cases = [{"sequence": item["sequence"],
+              "initial_state": initial_state(frame(item["before_observation_ref"]["sequence"]),
+                                             _json.loads(_json.dumps(item["before_observation_ref"]))),
+              "actions": [item["action"]], "expected_outcome": item["expected_outcome"]}
+             for item in observed]
+    result = replay_cases(cases, transition=transition, settled=settled, terminal=terminal,
+                          collision=collision, max_ticks_per_action=max_ticks_per_action)
+    backtests = result.get("backtests")
+    if not isinstance(backtests, list) or len(backtests) != len(observed):
+        raise ValueError("death backtest coverage unavailable")
+    for backtest, evidence in zip(backtests, observed):
+        if backtest.get("sequence") != evidence["sequence"]:
+            raise ValueError("death backtest identity unavailable")
+        backtest.update(before_observation_ref=evidence["before_observation_ref"],
+                        after_observation_ref=evidence["after_observation_ref"])
+    return {**result, "observed_cases": observed,
+            "execution_authority": "none", "claims": "model-relative"}
 '''
 
     def close(self) -> None:

@@ -93,6 +93,7 @@ from asterion.applications.prime.p7.optimizer import (
 from asterion.applications.prime.p7.optimizer_arc import optimize_arc_route
 from asterion.applications.prime.p7.prompt import (
     P7_DEATH_RISK_EXPERIMENT_PROMPT,
+    P7_ROLLOUT_EXPERIMENT_PROMPT,
     P7_LEGACY_SOLVE_PROMPT,
     P7_EXPLORE_APPENDIX,
     build_solve_prompt,
@@ -318,7 +319,7 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
 def _append_research_experiment(prompt: str, environment: Mapping[str, str]) -> str:
     """Keep unverified guidance at the explicit supervised experiment entry."""
     if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "research":
-        return prompt + "\n\n" + P7_DEATH_RISK_EXPERIMENT_PROMPT
+        return prompt + "\n\n" + P7_DEATH_RISK_EXPERIMENT_PROMPT + "\n\n" + P7_ROLLOUT_EXPERIMENT_PROMPT
     return prompt
 
 

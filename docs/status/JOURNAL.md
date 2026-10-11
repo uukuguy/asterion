@@ -4979,3 +4979,7 @@
 - 2026-10-12 Removed mandatory compact-display guidance from common prompt;43testsPASS, preserving optional helper and capacity for isolated comparison.
 - 2026-10-12 afac1dd3 withdraws unverified compact-display guidance to isolate the leading regression hypothesis; helper and capacity preserved.
 - 2026-10-12 Reviewed five death inputs: visible-risk misjudgments and offscreen assumptions; compact-display common causality not established.
+- 2026-10-12 2f6b70f8 audits actual death-decision visibility to distinguish missing viewport information from recognized-risk action errors.
+- 2026-10-12 0778bf31 documents existing application bridge capacity override to clarify generic default versus operator-selected output limit.
+- 2026-10-12 User authorizes clean BP35 rollout experiment after packaged verification, requiring per-level actions and resource tracking.
+- 2026-10-12 Implemented P7 continuous rollout and death replay; offline L3/fresh-wheel kernel/full promotion verified, live efficacy unmeasured.

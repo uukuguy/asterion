@@ -1,0 +1,46 @@
+# P7 Continuous Rollout Implementation Plan
+
+> For agentic workers: use supervised subagent implementation with disjoint files and root integration review.
+
+**Goal:** implement and verify a P7 experiment that expands continuous consequences and replays death examples without changing real action authority.
+
+**Architecture:** A standalone application Python helper executes actor-owned callbacks in the existing persistent research kernel. Existing read-only evidence assembles current-run death cases. Experimental guidance lives solely in the supervised entry.
+
+**Tech Stack:** Python stdlib/unittest; existing Prime workspace and wheel packaging.
+
+## Global Constraints
+
+No hidden game-state access, hardcoded level solver, additional paid run, mandatory cognition workflow, new tool registration or safety certificate. Unknown remains unknown. Experimental prompt remains entry-only. Other working-tree edits are preserved.
+
+### Task 1: continuous simulation and report data
+
+Files: src/asterion/applications/prime/p7/rollout.py; tests/test_prime_p7_rollout.py.
+
+- [x] Write and run failing tests for one input followed by autonomous ticks, nonfatal collision, unknown/cycle/limit and immutable input.
+- [x] Implement rollout, replay_cases and evaluate_candidates using the frozen spec signatures, JSON copies and explicit model-relative results.
+- [x] Verify the one-file unittest and Ruff, reporting exact commands. Do not change real plan admission.
+
+### Task 2: existing-kernel integration
+
+Files: research_bridge.py, prompt.py, operator.py and existing research/runtime/autonomous tests.
+
+- [x] Embed installed helper source before generated evidence code; preserve future-import placement and standard existing execution tests.
+- [x] Add death_cases and replay_deaths to local research namespace; collect all committed current-run deaths with exact refs/actions and reject missing evidence.
+- [x] Append P7_ROLLOUT_EXPERIMENT_PROMPT only from exact research entry; public autonomous prompt remains unchanged.
+- [x] Verify read-server and actual persistent kernel availability, plus no new action/tool routes.
+
+### Task 3: integration evidence and review
+
+- [x] Run a private offline witness against preserved Task46 L3 observations, disclosing the partial model and its evidence limits.
+- [x] Run focused integration tests, package verification and one required promotion-check; do not run paid ARC witness.
+- [x] Independently review model-relative claims, unknown handling, kernel source binding, failure propagation and absence of hidden engine reads.
+- [x] Record implementation/verification/unverified live efficacy in existing state files and commit focused changes.
+
+## Evidence so far
+
+- Initial helper tests failed against missing API, then passed; two independent-review regression tests reproduced false cycle / preterminal replay verdicts before repair.
+- Root focused suite: `uv run python -m unittest -q tests.test_prime_p7_rollout tests.test_prime_p7_research tests.test_prime_p7_autonomous_interface tests.test_prime_p7_research_runtime tests.test_prime_p7_action_preconditions tests.test_prime_p7_notes_operator tests.test_prime_p7_output_config` — 82 PASS /21.930s.
+- Changed-file Ruff and docs-check PASS. Astra final review APPROVE; independent16-test focused probe PASS.
+- Private Task46 L3 witness: one input +3 automatic ticks reproduces actual death77; myopic model counterexample; original host observation comparison checked1. Partial operator model, engine/model0, no live efficacy claim.
+- Fresh-wheel isolated installed package + actual PersistentIPython PASS; source hashes match checkout, all4 helpers available, two simulated deaths fully replayed, candidate2ticks, engine/model0, kernel closed. Wheel SHA256 `d7477c1672351699252abf4f6408d4ac63d6d065d11fd49354c3f416d563bd03`; receipt SHA256 `7c6d935c4fd3f5ebddfde0ba345abc4e464509dc13aa84aa1415c35f12f01e61`; exact build/install/witness commands in `.asterion-private/task47-p7-rollout/installed-kernel-witness/receipt.json`.
+- Required `make promotion-check` full PASS:25commands/provider_operations0/full_datasetno. Log `.asterion-private/task47-p7-rollout/promotion.stdout.log`. User later authorizes the next clean trial; this implementation verification made no live game/model calls.

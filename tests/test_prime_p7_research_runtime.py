@@ -37,6 +37,27 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_installed_kernel_replays_current_death_and_predicts_continuous_candidate(self):
+        self.engine.game_over_after = 1
+        self.broker.act(('ACTION1',))
+        result = await self.host.execute('model-death-replay',
+            "import p7_research as r\n"
+            "def step(state, action): return {'tick': state['tick'] + 1}\n"
+            "def rest(state): return state['tick'] >= 3\n"
+            "def end(state): return 'dead' if state['tick'] >= 2 else None\n"
+            "cases = r.death_cases()\n"
+            "backtest = r.replay_deaths(initial_state=lambda board, ref: {'tick': 0}, "
+            "transition=step, settled=rest, terminal=end)\n"
+            "report = r.evaluate_candidates({'tick': 0}, [[cases[0]['action']]], "
+            "transition=step, settled=rest, terminal=end, backtest=backtest)\n"
+            "print(len(cases), cases[0]['sequence'], backtest['status'], "
+            "backtest['backtests'][0]['before_observation_ref']['sequence'], "
+            "report['predicted_dead'], report['execution_authority'])", _Signal())
+        self.assertEqual(result.status, 'ok')
+        envelope = json.loads(result.content[0]['text'])
+        self.assertIn('1 1 checked 0 [0] none', envelope['stdout'])
+        self.assertEqual(self.engine.calls, ['ACTION1'])
+
     async def test_p7_default_output_capacity_keeps_full_frame_bearing_route_print(self):
         from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
         self.assertEqual(self.host._limits.max_output_bytes, 2 * 1024 * 1024)

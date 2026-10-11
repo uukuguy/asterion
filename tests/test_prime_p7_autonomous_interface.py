@@ -18,13 +18,22 @@ class TestAutonomousResearchInterface(unittest.TestCase):
         from asterion.applications.prime.p7 import operator
         append = getattr(operator, '_append_research_experiment', None)
         self.assertTrue(callable(append))
-        experiment = prompt.P7_DEATH_RISK_EXPERIMENT_PROMPT
+        experiment = prompt.P7_DEATH_RISK_EXPERIMENT_PROMPT + '\n\n' + prompt.P7_ROLLOUT_EXPERIMENT_PROMPT
         for mode in ('research', 'autonomy', 'solve', 'witness', 'cognition', 'sweep', None):
             with self.subTest(mode=mode):
                 environment = {} if mode is None else {'ASTERION_PRIME_P7_RUN_MODE': mode}
                 text = append('selected application guidance', environment)
                 self.assertEqual(text, 'selected application guidance' + (
                     '\n\n' + experiment if mode == 'research' else ''))
+
+    def test_rollout_experiment_keeps_public_guidance_and_authority_unchanged(self):
+        experiment = getattr(prompt, 'P7_ROLLOUT_EXPERIMENT_PROMPT', '')
+        self.assertIn('replay_deaths', experiment)
+        self.assertIn('evaluate_candidates', experiment)
+        self.assertIn('未知不等于安全', experiment)
+        self.assertIn('不是安全证书', experiment)
+        for text in (prompt.build_autonomous_prompt(), prompt.build_notes_prompt(), prompt.P7_SOLVE_PROMPT):
+            self.assertNotIn('replay_deaths', text)
 
     def test_public_prompt_excludes_display_experiment_and_retains_pixel_evidence_guidance(self):
         text = prompt.build_autonomous_prompt()

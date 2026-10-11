@@ -1,10 +1,14 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-11. Task46 stopped by user; no game run active. Live-session checkpoint, not a final handoff.
+Updated: 2026-10-12. Task47 continuous rollout implemented; packaged verification PASS. Task46 stopped by user; no game run active. Live-session checkpoint, not a final handoff.
 
 ## Objective
 
 Distinguish generic framework migration regressions from P7 adaptation and qualify losslessness. Game score is not the acceptance criterion. Preserve Prime standard entry and domain-neutral ownership.
+
+## Current Task47 experiment
+
+User approved continuous-consequence rollout beyond prompt guidance. Application-only pure model helpers and current-run complete death replay are implemented; experiment instructions remain research-entry-only. No new registered tools, real action authority or hidden-engine access. Root82 focused tests/Ruff PASS; independent Astra review APPROVE after two false-verdict repairs. Offline Task46 L3 actual death77 is reproduced after one left input +3 autonomous ticks by an operator-authored partial observed-pixel model; myopic prediction fails. Evidence `.asterion-private/task47-p7-rollout/l3-offline-receipt.json`, engine/model calls0. Fresh installed-wheel/actual PersistentIPython kernel PASS, source hashes match checkout, simulated deaths1/33 fully replayed, engine/model0 and kernel closed. Evidence `.asterion-private/task47-p7-rollout/installed-kernel-witness/`; wheel SHA256d7477c1672351699252abf4f6408d4ac63d6d065d11fd49354c3f416d563bd03. Full `make promotion-check` PASS25/provider0/full_datasetno; log `.asterion-private/task47-p7-rollout/promotion.stdout.log`. Live autonomous modeling and gameplay efficacy remain unverified. User subsequently authorized a fresh clean BP35 trial after packaged verification; no game active yet. See CURRENT-STATE Task47 and linked design/plan in INDEX.
 
 ## Verified facts
 

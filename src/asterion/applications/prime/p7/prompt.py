@@ -14,6 +14,13 @@ P7_DEATH_RISK_EXPERIMENT_PROMPT = """游戏可能存在导致死亡或 GAME_OVER
 # Reserved for an explicitly selected comparison experiment; no entry appends it.
 P7_DISPLAY_EXPERIMENT_PROMPT = """批量历史和路线保留完整数据供程序计算；向模型展示时用 print(r.display(value,start=0,limit=8))，按实际返回的 next_start 续页。display 只省略展示中的完整棋盘数组，保留动作、结果和证据引用；原对象不变。需要像素时按需读 frame/render/patches，不要直接打印整个带棋盘的历史或路线列表。若工具返回 stdout_truncated=true，不能把前缀当作完整结果，须重新输出所需字段或分页。"""
 
+# Experimental helpers remain model-relative and confer no execution authority.
+P7_ROLLOUT_EXPERIMENT_PROMPT = """本次监督研究提供实验性连续后果推演助手。r.rollout(state,actions,transition=step,settled=rest,terminal=end,collision=hit,max_ticks_per_action=128) 只运行你写的模型：step(state,action_or_none) 返回新的有限 JSON 状态；首个微步传一次真实输入的动作描述，后续自动微步只传 None，直到静止、碰撞、终局或未知。rest(state) 返回 bool 或 None；end(state) 返回 None、'dead'、'goal' 或 'unknown'；可选 hit(state) 返回 bool 或 None。助手不访问隐藏游戏引擎，不代替真实动作，不凭动作数量假定连续后果已结束。所有动力学、危险碰撞、终局和未知条件由你的模型显式表达；循环、微步上限及不可判定结果保持 unknown。
+
+用 r.death_cases() 读取本次运行实际发生的全部 GAME_OVER 动作及前后观察引用，不载入过去运行。新建或修改有关模型后，用 r.replay_deaths(initial_state=from_frame,transition=step,settled=rest,terminal=end,collision=hit) 回测本次全部死亡反例；from_frame(frame,before_ref) 将每例真实动作前画面转成你的 JSON 状态。返回每例 predicted_outcome、expected_outcome 与真实引用。例子不可读会明确报错，不能当作已核对。比较模型是否重现死亡及仍缺失的机制，不只回测幸存动作；回测吻合不是安全证书。
+
+候选比较示例：backtest=r.replay_deaths(initial_state=from_frame,transition=step,settled=rest,terminal=end)；state=from_frame(r.frame(),r.current()['observation_ref'])；report=r.evaluate_candidates(state,[[{'name':'ACTION3','data':{}}],[{'name':'ACTION4','data':{}}]],transition=step,settled=rest,terminal=end,backtest=backtest)。predicted_dead 只筛出当前模型预测死亡的候选，不证明环境必死；unknown 与 remaining 也不证明环境安全。未知不等于安全，也不要求消除全部未知才行动：结合真实观察、反例、可恢复性与代价自主选择进一步计算、绕行或有价值探针。真实行动仍只经 p7_execute_plan；不用新增发布、笔记或认证流程，助手结果不授予执行权限。"""
+
 
 P7_NOTES_SOLVE_PROMPT = """你是 P7 主解题者。依据真实观察自主研究未知游戏，以通关和动作效率为目标。自行选择假说、笔记、实验和计算；部分模型与未知机制都可以支持下一项有用探针。应用给出的 observation、observation_ref、available_actions 和 budget 是当前现实，历史资料与程序预测不能授权动作。
 
@@ -419,6 +426,7 @@ coordinate, or action sequence."""
 __all__ = (
     "P7_DEATH_RISK_EXPERIMENT_PROMPT",
     "P7_DISPLAY_EXPERIMENT_PROMPT",
+    "P7_ROLLOUT_EXPERIMENT_PROMPT",
     "build_notes_prompt",
     "build_autonomous_prompt",
     "initial_research_prompt",

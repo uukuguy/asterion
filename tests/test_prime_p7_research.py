@@ -1,9 +1,88 @@
 import json
+import unittest
 
 from asterion.applications.prime.p7.research_bridge import ResearchReadServer
 from asterion.applications.prime.p7.solver import Solver
 from asterion.applications.prime.p7.score import canonical_bytes
 from tests.test_prime_p7_solver import P7SolverFixture, draft
+
+
+class TestP7RolloutReadBindings(unittest.TestCase):
+    def module(self, *, envelope=False, frame_error=False, missing=False, page_size=32,
+               foreign=False):
+        def ref(seq):
+            return {'run_id': 'this-run', 'attempt_id': 'this-run', 'level': 1,
+                    'sequence': seq, 'observation_sha256': 'sha256:' + 'a' * 64}
+        records = [{'sequence': seq, 'state': 'GAME_OVER' if seq in {0, 2, 35} else 'NOT_FINISHED',
+                    'action': 'ACTION1', 'data': {}} for seq in range(37)]
+        if missing:
+            records.pop(2)
+        calls = {'history': [], 'transition': [], 'frame': [], 'experience': []}
+        def history(start, limit):
+            calls['history'].append(start)
+            items = [record for record in records if record['sequence'] >= start][:min(limit, page_size)]
+            return {'items': items, 'total': 37} if envelope else items
+        def transition(seq):
+            calls['transition'].append(seq)
+            before = ref(seq - 1)
+            if foreign:
+                before['run_id'] = 'past-run'
+            return {'sequence': seq, 'state': 'GAME_OVER', 'action': 'ACTION1', 'data': {},
+                    'before_observation_ref': before, 'after_observation_ref': ref(seq)}
+        def frame(seq):
+            calls['frame'].append(seq)
+            if frame_error:
+                raise ValueError('frame unavailable')
+            return [[seq]]
+        server = ResearchReadServer(context=lambda: {'observation_ref': ref(36)},
+            history=history, transition=transition, frame=frame, artifact=lambda *_: {},
+            experience=lambda *args: calls['experience'].append(args))
+        self.addCleanup(server.close)
+        module = {}
+        exec(server.start(), module)
+        return module, calls
+
+    def test_death_cases_page_this_runs_real_transitions_without_loading_experience(self):
+        for envelope, page_size in ((False, 32), (True, 32), (True, 3)):
+            with self.subTest(envelope=envelope, page_size=page_size):
+                module, calls = self.module(envelope=envelope, page_size=page_size)
+                self.assertTrue(callable(module.get('death_cases')))
+                cases = module['death_cases']()
+                self.assertEqual([case['sequence'] for case in cases], [2, 35])
+                self.assertEqual(calls['history'], list(range(0, 37, page_size)))
+                self.assertEqual(calls['transition'], [2, 35])
+                self.assertEqual(calls['frame'], [])
+                self.assertEqual(calls['experience'], [])
+                self.assertEqual(cases[0]['action'], {'name': 'ACTION1', 'data': {}})
+                self.assertEqual(cases[0]['expected_outcome'], 'dead')
+
+    def test_death_replay_preserves_all_refs_and_model_predictions_filter_candidates(self):
+        module, calls = self.module()
+        self.assertTrue(callable(module.get('replay_deaths')))
+        callbacks = dict(transition=lambda state, action: {'tick': state['tick'] + 1},
+                         settled=lambda state: state['tick'] >= 3,
+                         terminal=lambda state: 'dead' if state['tick'] >= 2 else None)
+        backtest = module['replay_deaths'](
+            initial_state=lambda board, before_ref: {'tick': 0}, **callbacks)
+        self.assertEqual(backtest['status'], 'checked')
+        self.assertEqual(calls['frame'], [1, 34])
+        self.assertEqual([item['sequence'] for item in backtest['backtests']], [2, 35])
+        self.assertEqual(backtest['backtests'][1]['before_observation_ref']['sequence'], 34)
+        self.assertEqual(backtest['execution_authority'], 'none')
+        evaluated = module['evaluate_candidates']({'tick': 0}, [[{'name': 'ACTION1', 'data': {}}]],
+                                                  backtest=backtest, **callbacks)
+        self.assertEqual(evaluated['predicted_dead'], [0])
+        self.assertEqual(evaluated['remaining'], [])
+
+    def test_unreadable_or_incomplete_death_evidence_cannot_report_checked(self):
+        for option in ('missing', 'frame_error', 'foreign'):
+            with self.subTest(option=option):
+                module, _ = self.module(**{option: True})
+                self.assertTrue(callable(module.get('replay_deaths')))
+                with self.assertRaises(ValueError):
+                    module['replay_deaths'](initial_state=lambda *args: {'tick': 0},
+                        transition=lambda state, action: state, settled=lambda state: True,
+                        terminal=lambda state: None)
 
 
 class TestP7Research(P7SolverFixture):

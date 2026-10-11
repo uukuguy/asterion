@@ -117,3 +117,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task43通用关闭修复：[bridge事件循环寿命](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md)：真实native+无模型复现，通用owner关闭失败已修复95397749，真实worker/native与打包验证通过。
 
 - [Prime native system-context compatibility design](../superpowers/specs/2026-10-11-prime-native-system-context-design.md) — Task43 native compatibility repair; system/checkpoint binding verified on actual guest, final packaged gate25/provider0 PASS.
+
+- Task47 连续后果推演：[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)、[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)：P7模型相对助手及本次死亡回测已实现；离线L3反例复现，不代表自主建模或实战收益；fresh安装kernel与fullpromotion25/provider0通过，用户已授权后续干净实测。
