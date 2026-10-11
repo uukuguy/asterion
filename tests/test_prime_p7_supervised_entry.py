@@ -67,6 +67,43 @@ class TestSupervisedEntry(unittest.TestCase):
             finally:
                 asyncio.run(resources.close())
 
+    def test_win_marker_matches_summary_after_native_finalization_failure(self):
+        from dataclasses import replace
+        from asterion.agents.prime.trace import PrimeTraceRecorder
+        from asterion.applications.prime.p7.broker import ArcBroker
+        from asterion.applications.prime.p7 import live
+        from asterion.applications.prime.p7.operator import _P7BrokerClient, _seal_verified_game_win
+        from asterion.applications.prime.p7.private_trace import P7PrivateTraceReceipt
+        from tests.test_prime_p7_native_broker import _FullGameEngine
+        for supervised in (False, True):
+            with self.subTest(supervised=supervised), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory).resolve()
+                run = root / 'run-test'
+                run.mkdir()
+                (run / 'trace').mkdir()
+                game = replace(DEFAULT_GAME, target_level=7, supervised_research=supervised)
+                broker = ArcBroker(engine=_FullGameEngine(), game=game)
+                recorder = PrimeTraceRecorder(run / 'trace')
+                self.addCleanup(recorder.close)
+                client = _P7BrokerClient(broker, recorder, variant='legacy')
+                for _ in range(7):
+                    client.act([{'name': 'ACTION1', 'data': {}}])
+                receipt = broker.seal()
+                broker.replay(_FullGameEngine)
+                evidence = P7PrivateTraceReceipt(broker, recorder)
+                self.assertTrue(_seal_verified_game_win(broker, evidence, receipt))
+                marker = next(entry.payload for entry in recorder.snapshot()
+                              if entry.kind == 'arc.run.game-won')
+                live.write_summary(root, run, run_id=run.name, receipt={}, broker_receipt=receipt,
+                    game=game, replay_verified=True, sealed_trace=True, cleanup_complete=True,
+                    comparison_report=None, reason='native finalization failed',
+                    failure=RuntimeError('model settlement failed'), diagnostics={})
+                summary = json.loads((run / 'summary.json').read_text())
+                self.assertEqual(marker, summary['broker'])
+                self.assertEqual(marker.get('supervised_research', False), supervised)
+                if not supervised:
+                    self.assertNotIn('supervised_research', marker)
+
     def test_research_default_is_full_game_and_config_cannot_authorize(self):
         with patch('asterion.applications.prime.p7.operator.resolve_game_selection',
                    return_value=DEFAULT_GAME) as resolve:

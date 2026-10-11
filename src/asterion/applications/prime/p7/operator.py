@@ -3035,6 +3035,7 @@ def _seal_verified_game_win(
         ):
             return False
         evidence.runtime_recorder.append("arc.run.game-won", evidence.identities, {
+            **({"supervised_research": True} if broker.game.supervised_research else {}),
             "game_id": receipt.game_id, "seed": receipt.seed,
             "win_levels": broker.game.win_levels,
             "levels_completed": receipt.levels_completed,
