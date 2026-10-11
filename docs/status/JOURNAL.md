@@ -4959,3 +4959,4 @@
 
 - 2026-10-11 Task44 BP359/9 PASS;346actions/0RESET, replay/cleanup verified; resources recorded, sourcec81cef4f.
 - 2026-10-11 eb70ff96 records BP35 full-game PASS and resources for reproducible recovery.
+- 2026-10-11 Qualify Task44 as history-assisted execution; trace eight output truncations to bulky P7 history representations.
