@@ -14,6 +14,7 @@ import signal as signal_module
 import sys
 import tempfile
 import time
+import threading
 from types import MappingProxyType
 
 from asterion.applications.prime._console_logging import configure_console_logging
@@ -2918,6 +2919,7 @@ def _seal_verified_partial_run(
             level,
             "level-completed",
             replay_sha256(prefix, terminal_reason="level-completed"),
+            supervised_research=game.supervised_research,
         )
         from .solution_certificates import verify_for_save
 
@@ -2932,6 +2934,7 @@ def _seal_verified_partial_run(
         if verified_receipt != receipt:
             return None
         payload = {
+            **({"supervised_research": True} if getattr(game, "supervised_research", False) else {}),
             "game_id": receipt.game_id,
             "seed": receipt.seed,
             "win_levels": game.win_levels,
@@ -3083,6 +3086,7 @@ def _seal_replay_verified_first_level_failure(
             "arc.run.failed",
             evidence.identities,
             {
+                **({"supervised_research": True} if broker.game.supervised_research else {}),
                 "game_id": receipt.game_id,
                 "seed": receipt.seed,
                 "win_levels": broker.game.win_levels,
@@ -3103,24 +3107,26 @@ class P7RuntimeSelection:
     runtime_id: str
     provider: str
     model: str
-    max_actions: int
+    max_actions: int | None
     max_callbacks: int | None
     deadline_ms: int | None
     unbounded_first_round: bool = False
     autonomy: bool = False
+    supervised_research: bool = False
 
     def __post_init__(self) -> None:
         if (
             self.runtime_id != _RUNTIME_ID
             or not valid_selection_name(self.provider)
             or not valid_selection_name(self.model)
-            or type(self.max_actions) is not int
-            or not 1 <= self.max_actions <= 5000
+            or type(self.supervised_research) is not bool
+            or (self.supervised_research and (self.max_actions is not None or self.autonomy or self.unbounded_first_round))
+            or (not self.supervised_research and (type(self.max_actions) is not int or not 1 <= self.max_actions <= 5000))
             or type(self.unbounded_first_round) is not bool
             or type(self.autonomy) is not bool
             or (self.autonomy and (self.unbounded_first_round or self.max_actions != 1000))
             or (self.max_callbacks, self.deadline_ms) != (
-                (None, None) if self.unbounded_first_round else (1024, 5_400_000) if self.autonomy else (_MAX_CALLBACKS, _DEADLINE_MS)
+                (None, None) if self.unbounded_first_round or self.supervised_research else (1024, 5_400_000) if self.autonomy else (_MAX_CALLBACKS, _DEADLINE_MS)
             )
         ):
             raise P7OperatorError("P7 runtime selection is invalid")
@@ -3143,6 +3149,7 @@ class P7RuntimeSelection:
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
         object.__setattr__(value, "unbounded_first_round", False)
         object.__setattr__(value, "autonomy", False)
+        object.__setattr__(value, "supervised_research", False)
         return value
 
 
@@ -3207,6 +3214,15 @@ def resolve_p7_runtime(
     except P7ModelSelectionError:
         raise P7OperatorError("P7 model host is unavailable") from None
     provider = selected.provider
+    supervised = environment.get("ASTERION_PRIME_P7_RUN_MODE") == "research"
+    if supervised != bool(getattr(game, "supervised_research", False)):
+        raise P7OperatorError("P7 research preset is invalid")
+    if supervised and (type(game) is not P7GameSelection or game.action_cap_override is not None
+                       or UNBOUNDED_FIRST_ROUND_ENV in environment
+                       or environment.get(P7_HISTORY_VARIANT_ENV, "verified") != "verified"
+                       or _offline_optimization_enabled(environment)
+                       or P7_RESUME_RUN_ID_ENV in environment):
+        raise P7OperatorError("P7 research preset is invalid")
     autonomy = environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy"
     if autonomy:
         _autonomy_deadline(environment)
@@ -3226,9 +3242,10 @@ def resolve_p7_runtime(
         provider=provider,
         model=selected.model,
         max_actions=game.action_cap,
-        max_callbacks=None if unbounded else 1024 if autonomy else _MAX_CALLBACKS,
-        deadline_ms=None if unbounded else 5_400_000 if autonomy else _DEADLINE_MS,
+        max_callbacks=None if unbounded or supervised else 1024 if autonomy else _MAX_CALLBACKS,
+        deadline_ms=None if unbounded or supervised else 5_400_000 if autonomy else _DEADLINE_MS,
         autonomy=autonomy,
+        supervised_research=supervised,
         unbounded_first_round=unbounded,
     )
 
@@ -3242,11 +3259,13 @@ def p7_runtime_options(
         type(selection) is not P7RuntimeSelection
         or selection != replace(
             P7RuntimeSelection.fixed(game, selection.provider, selection.model),
-            max_callbacks=None if selection.unbounded_first_round else 1024 if selection.autonomy else _MAX_CALLBACKS,
-            deadline_ms=None if selection.unbounded_first_round else 5_400_000 if selection.autonomy else _DEADLINE_MS,
+            max_callbacks=None if selection.unbounded_first_round or selection.supervised_research else 1024 if selection.autonomy else _MAX_CALLBACKS,
+            deadline_ms=None if selection.unbounded_first_round or selection.supervised_research else 5_400_000 if selection.autonomy else _DEADLINE_MS,
             autonomy=selection.autonomy,
+            supervised_research=selection.supervised_research,
             unbounded_first_round=selection.unbounded_first_round,
         )
+        or selection.supervised_research != bool(getattr(game, "supervised_research", False))
         or (selection.unbounded_first_round and (
             type(game) is not P7GameSelection or game.action_cap_override is None
         ))
@@ -3255,7 +3274,7 @@ def p7_runtime_options(
     return MappingProxyType(
         {
             "deadline_ms": "none" if selection.deadline_ms is None else str(selection.deadline_ms),
-            "max_actions": str(selection.max_actions),
+            "max_actions": "none" if selection.max_actions is None else str(selection.max_actions),
             "max_callbacks": "none" if selection.max_callbacks is None else str(selection.max_callbacks),
             "model": selection.model,
             "provider": selection.provider,
@@ -3269,6 +3288,7 @@ def _private_experiment(
     """Project the selected runtime controls into private scalar evidence."""
     deadline = runtime_options.get("deadline_ms")
     return {
+        **({"supervised_research": True} if getattr(game, "supervised_research", False) else {}),
         "prediction_variant": variant,
         "model": runtime_options.get("model", _MODEL),
         "game_id": game.game_id,
@@ -3293,7 +3313,7 @@ def _research_python(environment: Mapping[str, str]) -> Path | None:
     try:
         value = environment[P7_RESEARCH_PYTHON_ENV]
         path = Path(value)
-        if (environment.get("ASTERION_PRIME_P7_RUN_MODE") in {"autonomy", "witness"}
+        if (environment.get("ASTERION_PRIME_P7_RUN_MODE") in {"autonomy", "witness", "research"}
             and type(value) is str and path.is_absolute()
             and path.resolve(strict=True) == path
             and not any(part.is_symlink() for part in (path, *path.parents))
@@ -3379,6 +3399,21 @@ def _settlement_budget(budget):
                         deadline_epoch=budget.deadline_epoch + 180)
 
 
+class _SupervisedSettlement:
+    """Arm one immutable cleanup window without authorizing another action."""
+    def __init__(self, engine):
+        self.engine = engine
+        self.budget = None
+        self._lock = threading.RLock()
+
+    def start(self):
+        with self._lock:
+            if self.budget is None:
+                self.budget = _task_budget({}, None, 180)
+                self.engine._settlement_deadline = self.budget
+            return self.budget
+
+
 def _action_scope(run_id, game, budget):
     return {'run_id': run_id, 'game_id': game.game_id, 'seed': game.seed,
             'deadline_monotonic': None if budget is None else budget.deadline_monotonic,
@@ -3460,6 +3495,17 @@ def build_p7_operator_resources(
         execution_budget = execution_budget or _task_budget(
             environment, task_deadline, None if deadline_ms is None else deadline_ms / 1000)
         settlement_budget = settlement_budget or _settlement_budget(execution_budget)
+        supervised_settlement = None
+        if selection.supervised_research:
+            supervised_settlement = _SupervisedSettlement(engine)
+            engine._supervised_settlement = supervised_settlement
+            parent_cancelled = evidence_cancelled
+            def research_cancelled():
+                stopped = parent_cancelled is not None and parent_cancelled()
+                if stopped:
+                    supervised_settlement.start()
+                return stopped
+            evidence_cancelled = research_cancelled
         action_journal = action_journal or ActionJournal(private_trace_root.parent / 'action-journal',
             _action_scope(private_trace_root.parent.name, game, execution_budget))
         dispatch_control = getattr(engine, 'set_dispatch_control', None)
@@ -3496,7 +3542,7 @@ def build_p7_operator_resources(
                 private_trace_root.parent / "debug-transcript.jsonl"
             )
         limits = AsterionPrimeLimits(selection.max_callbacks,
-            None if selection.unbounded_first_round else 4096 if selection.autonomy else 500, deadline_ms)
+            None if selection.unbounded_first_round or selection.supervised_research else 4096 if selection.autonomy else 500, deadline_ms)
         official = type(game) is ArcGameContract
         application = prepare_prime_application(
             PrimeApplicationSpec('prime.arc-agi-3-gameplay' if official else 'prime.arc-agi-3-solving',
@@ -3556,7 +3602,7 @@ def build_p7_operator_resources(
             ipython = P7ResearchRuntime(
                 broker=broker, trace_client=prediction_client,
                 run_root=private_trace_root.parent, run_id=history_run_id,
-                deadline_seconds=(deadline_ms or 3_600_000) / 1000,
+                deadline_seconds=None if selection.supervised_research else (deadline_ms or 3_600_000) / 1000,
                 deadline_monotonic=task_deadline,
                 task_deadline=execution_budget,
                 event_sink=prediction_client._emit_console,
@@ -3564,6 +3610,11 @@ def build_p7_operator_resources(
                 experience=experience,
                 learner_profile="autonomous",
             )
+            if selection.supervised_research:
+                from .research_monitor import ResearchMonitor
+                ipython.research_monitor = ResearchMonitor(private_trace_root.parent, history_run_id,
+                                                           broker, application)
+                ipython._on_stop = supervised_settlement.start
         else:
             prediction_client._capture_console_cognition()
             ipython = PersistentIpythonHost(
@@ -3601,6 +3652,9 @@ def build_p7_operator_resources(
             read_server = getattr(ipython, '_read_server', None)
             if read_server is not None:
                 read_server.close()
+        monitor = getattr(ipython, 'research_monitor', None)
+        if monitor is not None:
+            monitor.finish(cleanup_complete=False)
         if trace is not None:
             trace.close()
         raise P7OperatorError("P7 host services are unavailable") from None
@@ -3780,7 +3834,7 @@ def _select_game_for_mode(
     """Use only an explicitly forwarded level; otherwise solve the full game."""
 
     mode = process_environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
-    if mode not in {"solve", "witness", "sweep", "cognition", "autonomy"}:
+    if mode not in {"solve", "witness", "sweep", "cognition", "autonomy", "research"}:
         raise P7OperatorError("P7 run mode is unavailable")
     if mode in {"witness", "cognition"} and TARGET_LEVEL_ENV not in process_environment:
         raise P7OperatorError("P7 level witness requires explicit LEVEL")
@@ -3792,7 +3846,14 @@ def _select_game_for_mode(
     else:
         selection_environment.pop(TARGET_LEVEL_ENV, None)
     game = resolve_game_selection(selection_environment, arc_root)
-    if mode == "autonomy":
+    if mode == "research":
+        if (UNBOUNDED_FIRST_ROUND_ENV in process_environment
+                or P7_RESUME_RUN_ID_ENV in process_environment
+                or resolved_environment.get(P7_HISTORY_VARIANT_ENV, "verified") != "verified"
+                or _offline_optimization_enabled(resolved_environment)):
+            raise P7OperatorError("P7 research preset is invalid")
+        game = replace(game, supervised_research=True)
+    elif mode == "autonomy":
         _autonomy_deadline(process_environment)
         if game.target_level != 6:
             raise P7OperatorError("P7 autonomy preset is invalid")
@@ -3941,6 +4002,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
+        # Only the operator process can authorize supervised research.
+        resolved["ASTERION_PRIME_P7_RUN_MODE"] = environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
         _research_python(resolved)
         if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "autonomy":
             _autonomy_deadline(environment)
@@ -4458,7 +4521,7 @@ async def run_live(
         prompt = _autonomy_prompt()
     if execution_budget is None:
         execution_budget = _task_budget(invocation.environment, None,
-            None if UNBOUNDED_FIRST_ROUND_ENV in invocation.environment else _DEADLINE_MS / 1000)
+            None if UNBOUNDED_FIRST_ROUND_ENV in invocation.environment or invocation.game.supervised_research else _DEADLINE_MS / 1000)
         settlement_budget = _settlement_budget(execution_budget)
         if execution_budget is not None:
             run_signal = _WitnessDeadlineSignal(run_signal, execution_budget)
@@ -4553,6 +4616,13 @@ async def run_live(
     prediction_client: object | None = None
     completed_prefix: dict[str, object] | None = None
     prefix_journal_start: int | None = None
+    monitor = getattr(resources_.host_services.get('prime.ipython'), 'research_monitor', None)
+    heartbeat_stopped = asyncio.Event()
+    heartbeat = None
+    supervised_stop = False
+    if monitor is not None:
+        heartbeat = asyncio.create_task(monitor.heartbeat(heartbeat_stopped, run_signal,
+            resources_.host_services['prime.ipython']))
     try:
         if invocation.game.target_level > 1:
             if prefix is not None:
@@ -4667,6 +4737,10 @@ async def run_live(
         broker = resources_.host_services["prime.arc-broker"]
         if not isinstance(broker, ArcBroker):
             raise live.P7LiveSolveError("P7 broker is unavailable")
+        if invocation.game.supervised_research:
+            settlement_budget = engine._supervised_settlement.start()
+        if monitor is not None:
+            monitor.sample(phase='settling', stop_requested=bool(run_signal.cancelled))
         _write_terminal_status(private, run_id, broker, execution_budget, action_journal, phase='settling')
         broker_receipt = broker.seal()
         if not cognition_mode:
@@ -4729,13 +4803,23 @@ async def run_live(
             flush=True,
         )
     finally:
+        if invocation.game.supervised_research:
+            settlement_budget = engine._supervised_settlement.start()
+        if monitor is not None:
+            try:
+                supervised_stop = bool(run_signal.cancelled) or (
+                    resources_.host_services['prime.ipython'].control.snapshot()['state'] == 'stop_requested')
+                monitor.sample(phase='settling', stop_requested=supervised_stop)
+            except Exception:
+                pass  # Derivative telemetry cannot bypass evidence cleanup.
         try:
             broker_value = resources_.host_services.get("prime.arc-broker")
             if isinstance(broker_value, ArcBroker):
                 _write_terminal_status(private, run_id, broker_value, execution_budget, action_journal, phase='settling')
-                if (isinstance(failure, asyncio.CancelledError)
-                        and ((process_cancellation is not None and process_cancellation.cancelled)
-                             or (execution_budget is not None and execution_budget.expired()))):
+                if ((invocation.game.supervised_research and supervised_stop)
+                        or (isinstance(failure, asyncio.CancelledError)
+                            and ((process_cancellation is not None and process_cancellation.cancelled)
+                                 or (execution_budget is not None and execution_budget.expired())))):
                     try:
                         broker_value.interrupt()
                     except ArcBrokerError:
@@ -4945,6 +5029,11 @@ async def run_live(
                 processing_diagnostics=diagnostics.get("processing_diagnostics"),
             )
         finally:
+            heartbeat_stopped.set()
+            if heartbeat is not None:
+                await asyncio.gather(heartbeat, return_exceptions=True)
+            if monitor is not None:
+                monitor.finish(cleanup_complete=cleanup_complete, stop_requested=supervised_stop)
             if isinstance(broker_value, ArcBroker):
                 _write_terminal_status(private, run_id, broker_value, execution_budget, action_journal,
                                        phase='closed' if cleanup_complete else 'cleanup-incomplete')
@@ -5123,7 +5212,8 @@ def classify_live_result(
         )
     if result.completed_level_count != result.game.target_level:
         raise live.P7LiveSolveError("target level completion was not observed")
-    if not 1 <= result.primitive_action_count <= result.game.action_cap:
+    if (result.primitive_action_count < 1 or (result.game.action_cap is not None
+            and result.primitive_action_count > result.game.action_cap)):
         raise live.P7LiveSolveError("primitive action count is invalid")
     if result.game.is_full_game and result.terminal_reason != "game-won":
         raise live.P7LiveSolveError("full-game WIN was not observed")

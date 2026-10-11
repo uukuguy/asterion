@@ -199,16 +199,19 @@ def _p7_continuation_prompt(broker: ArcBroker, round_index: int) -> str:
 class _P7SolveEventProjector:
     """Project native tool traffic into the fixed P7 receipt-only stream."""
 
-    __slots__ = ("_trace",)
+    __slots__ = ("_trace", "_monitor")
 
-    def __init__(self, trace: P7PrivateTraceReceipt) -> None:
+    def __init__(self, trace: P7PrivateTraceReceipt, monitor=None) -> None:
         self._trace = trace
+        self._monitor = monitor
 
     async def __call__(
         self, request: RunRequest, events: AsyncIterator[RunEvent]
     ) -> AsyncIterator[RunEvent]:
         sequence = 0
         async for event in events:
+            if self._monitor is not None:
+                self._monitor.event(event.type, event.payload)
             if event.type == "run.started":
                 sequence += 1
                 yield RunEvent(
@@ -395,7 +398,11 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
     if type(owner) is not PrimeApplication or type(broker) is not ArcBroker:
         raise RuntimeFactoryError(_ERROR)
     limits = owner.authorized_limits
-    unbounded = type(limits) is AsterionPrimeLimits and limits.deadline_ms is None
+    supervised = type(broker.game) is P7GameSelection and broker.game.supervised_research
+    first_round = (type(broker.game) is P7GameSelection and not supervised
+                   and broker.game.action_cap_override is not None
+                   and limits == AsterionPrimeLimits(None, None, None))
+    unbounded = supervised or first_round
     autonomy = type(limits) is AsterionPrimeLimits and limits.deadline_ms == 5_400_000
     research = type(ipython) is P7ResearchRuntime
     trace = getattr(trace_adapter, 'runtime_recorder', None)
@@ -403,7 +410,7 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
         'provider': DEFAULT_PROVIDER, 'model': DEFAULT_MODEL,
         'deadline_ms': 'none' if unbounded else str(limits.deadline_ms),
         'max_callbacks': 'none' if unbounded else str(limits.model_callbacks),
-        'max_actions': str(broker.game.action_cap),
+        'max_actions': 'none' if broker.game.action_cap is None else str(broker.game.action_cap),
     }
     checks = {
         'identity': owner.identity == (application_id, '1.0.0', DEFAULT_PROVIDER, DEFAULT_MODEL),
@@ -425,7 +432,11 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
         checks['gameplay'] = (getattr(broker.game, 'is_full_game', False)
                               and limits == ASTERION_PRIME_LIMITS
                               and broker.status() == ArcStatus(0, 0, broker.game.action_cap, 'active'))
-    elif unbounded:
+    elif supervised:
+        checks['supervised'] = (research and broker.game.action_cap is None
+                                and limits == AsterionPrimeLimits(None, None, None)
+                                and owner.task_deadline is None)
+    elif first_round:
         checks['unbounded'] = type(broker.game) is P7GameSelection and broker.game.action_cap_override is not None
     elif autonomy:
         checks['autonomy'] = (research and broker.game.target_level == 6 and broker.game.action_cap == 1000
@@ -460,9 +471,10 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
         round_diagnostic=_p7_round_diagnostic(trace_adapter),
         failure_diagnostic=getattr(trace_adapter, 'record_failure', None))
     runtime = owner.runtime(services=services, limits=limits, hooks=hooks)
+    monitor = getattr(ipython, 'research_monitor', None)
     services._runtime_client = AsterionPrimeRuntimeClient(
         runtime, event_projector=(_P7GameplayEventProjector(trace_adapter) if gameplay
-                                 else _P7SolveEventProjector(trace_adapter)))
+                                 else _P7SolveEventProjector(trace_adapter, monitor)))
     return services._runtime_client
 
 

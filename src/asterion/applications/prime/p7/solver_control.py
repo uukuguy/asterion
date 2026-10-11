@@ -118,10 +118,10 @@ def read_control_ack(run_root: Path, *, run_id: str) -> dict | None:
 
 class SolverControl:
     """Admission gate; it neither dispatches work nor claims process cleanup."""
-    def __init__(self, run_root: Path, run_id: str, deadline: float, *, clock=time.monotonic,
+    def __init__(self, run_root: Path, run_id: str, deadline: float | None, *, clock=time.monotonic,
                  task_deadline: TaskDeadline | None = None):
         self._root = _root(run_root, run_id)
-        if type(deadline) not in (int, float) or not math.isfinite(deadline):
+        if deadline is not None and (type(deadline) not in (int, float) or not math.isfinite(deadline)):
             raise ValueError('solver control unavailable')
         if task_deadline is not None and not isinstance(task_deadline, TaskDeadline):
             raise ValueError('solver control unavailable')
@@ -137,7 +137,7 @@ class SolverControl:
 
     def _settle(self):
         if ((self._task_deadline is not None and self._task_deadline.expired())
-                or self._clock() >= self._deadline):
+                or (self._deadline is not None and self._clock() >= self._deadline)):
             self._state, self._reason = 'stop_requested', 'deadline_expired'
         elif self._state == 'pause_requested' and not any(self._active.values()):
             self._state = 'paused'
@@ -160,10 +160,10 @@ class SolverControl:
                 available = type(reading) in (int, float) and math.isfinite(reading)
             except Exception:
                 reading, available = None, False
-            remaining = max(0.0, self._deadline - reading) if available else 0.0
+            remaining = None if self._deadline is None else max(0.0, self._deadline - reading) if available else 0.0
             if self._task_deadline is not None:
                 sample = self._task_deadline.snapshot()
-                remaining = min(sample['remaining_seconds'], remaining)
+                remaining = sample['remaining_seconds'] if remaining is None else min(sample['remaining_seconds'], remaining)
                 sample['control_deadline_monotonic'] = self._deadline
                 sample['control_sampled_at_monotonic'] = float(reading) if available else None
                 if not available:

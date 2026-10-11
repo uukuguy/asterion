@@ -108,7 +108,7 @@ class P7ResearchRuntime:
     """Thin application host over the generic Prime workspace."""
 
     def __init__(self, *, broker, trace_client, run_root: Path, run_id: str,
-                 deadline_seconds: float, event_sink, workspace_owner=None, python=None,
+                 deadline_seconds: float | None, event_sink, workspace_owner=None, python=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None,
                  learner_profile='legacy', task_deadline=None):
@@ -125,7 +125,8 @@ class P7ResearchRuntime:
         self._experience = experience
         self._memory_instructions = None
         self._cell_archive = CellArchive(run_root)
-        self.control = SolverControl(run_root, run_id, time.monotonic() + deadline_seconds
+        self.control = SolverControl(run_root, run_id,
+                                     (None if deadline_seconds is None else time.monotonic() + deadline_seconds)
                                      if deadline_monotonic is None else deadline_monotonic,
                                      clock=time.monotonic, task_deadline=task_deadline)
         self._read_server = ResearchReadServer(
@@ -271,6 +272,8 @@ class P7ResearchRuntime:
             position = len(self._broker.journal)
             observation_hash = self._broker.observation_reference()["observation_sha256"]
             status = self.control.poll(position, observation_hash)
+            if status['state'] == 'stop_requested' and callable(getattr(self, '_on_stop', None)):
+                self._on_stop()
             signature = (status["state"], status["command_id"], status["request_sequence"])
             if signature != self._last_control:
                 self._last_control = signature

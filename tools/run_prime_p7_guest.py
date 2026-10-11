@@ -8,6 +8,7 @@ import math
 import os
 from pathlib import Path
 import re
+import signal
 import subprocess
 import sys
 import time
@@ -52,6 +53,13 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     _unit(unit)
     console_id = os.environ.get("ASTERION_PRIME_P7_CONSOLE_RUN_ID")
     mode = os.environ.get("ASTERION_PRIME_P7_RUN_MODE")
+    if mode == "research":
+        if (seconds != 0 or console_id is not None
+            or os.environ.get('ASTERION_PRIME_P7_ATTEMPT_UNIT') != unit
+            or os.environ.get('ASTERION_PRIME_P7_ATTEMPT_SECONDS') != '0'
+            or any(name in os.environ for name in (_UNBOUNDED_FIRST_ROUND_ENV,
+                'ASTERION_PRIME_P7_RESUME_RUN_ID', 'ASTERION_PRIME_P7_FRESH_TARGET_POLICY'))):
+            raise ValueError('invalid research attempt')
     if mode == "autonomy":
         if (seconds != 5400 or console_id is not None
             or not os.environ.get("ASTERION_PRIME_P7_RESEARCH_PYTHON", "").strip()
@@ -87,7 +95,7 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     # existing replay/seal/summary cleanup may outlast the generic 20s stop
     # grace, especially after restoring several completed levels. This is
     # cleanup time, not another model/gameplay interval or a caller knob.
-    stop_seconds = 180 if mode in {"witness", "autonomy"} else 20
+    stop_seconds = 180 if mode in {"witness", "autonomy", "research"} else 20
     args = [
         "systemd-run", "--quiet", "--wait", "--pipe", "--collect",
         "--service-type=exec", f"--unit={unit}",
@@ -117,8 +125,60 @@ def launch(unit: str, seconds: float | None, command: list[str]) -> int:
     # Model credentials remain operator-owned and are resolved from its .env/profile.
     # Replace the Orb-managed process: no launcher child can outlive a killed
     # Orb session and submit a new service after cleanup has checked absence.
+    if mode == 'research':
+        return _supervise(unit, [*args, '--', *command])
     os.execvp(args[0], [*args, "--", *command])
     return 1  # exec failure raises; retained for static return typing.
+
+
+def _supervise(unit: str, args: list[str]) -> int:
+    """Keep stop ownership after systemd launch, and verify descendant cleanup."""
+    interrupted = []
+    previous = {}
+    def stop(signum, _frame):
+        interrupted.append(signum)
+    child = None
+    complete = False
+    try:
+        for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+            previous[signum] = signal.signal(signum, stop)
+        child = subprocess.Popen(args)
+        while True:
+            if interrupted:
+                # Fence further launcher submissions before checking containment.
+                child.terminate()
+                break
+            try:
+                status = child.wait(timeout=1)
+                break
+            except subprocess.TimeoutExpired:
+                continue
+    finally:
+        try:
+            if child is not None and interrupted:
+                try:
+                    child.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=5)
+            complete = cleanup(unit)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+            print('P7 research containment cleanup_complete=' + str(complete).lower(),
+                  file=sys.stderr, flush=True)
+    return 130 if interrupted and complete else status if complete else 1
+
+
+def research(command: list[str]) -> int:
+    """Explicit supervised preset, with no aggregate duration and finite stop grace."""
+    if os.environ.get('ASTERION_PRIME_P7_RUN_MODE') != 'research':
+        raise ValueError('invalid research preset')
+    fields = ('ASTERION_PRIME_P7_ATTEMPT_UNIT', 'ASTERION_PRIME_P7_ATTEMPT_SECONDS')
+    if not any(name in os.environ for name in fields):
+        os.environ[fields[0]] = f'asterion-p7-{uuid.uuid4().hex}.service'
+        os.environ[fields[1]] = '0'
+    return launch(os.environ.get(fields[0], ''), 0, command)
 
 
 def witness(command: list[str]) -> int:
@@ -175,7 +235,7 @@ def cleanup(unit: str) -> bool:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=("launch", "cleanup", "witness", "autonomy"))
+    parser.add_argument("mode", choices=("launch", "cleanup", "witness", "autonomy", "research"))
     parser.add_argument("--unit")
     parser.add_argument("--seconds", type=float)
     argv = sys.argv[1:]
@@ -183,10 +243,10 @@ def main() -> int:
     args = parser.parse_args(argv[:split])
     command = argv[split + 1:]
     try:
-        if args.mode in {"witness", "autonomy"}:
+        if args.mode in {"witness", "autonomy", "research"}:
             if args.unit is not None or args.seconds is not None:
                 raise ValueError("invalid witness preset")
-            return witness(command) if args.mode == "witness" else autonomy(command)
+            return {'witness': witness, 'autonomy': autonomy, 'research': research}[args.mode](command)
         if args.unit is None:
             raise ValueError("missing attempt identity")
         if args.mode == "cleanup":
