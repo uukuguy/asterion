@@ -4938,3 +4938,4 @@
 - 2026-10-11 Second independent generic/P7 review bounded APPROVE;72/97Python and9/38Node PASS; source unchanged.
 - 2026-10-11 Inherited manual-summary bytes/4 token-ceiling proof remains open; no actual overspend or migration attribution.
 - 2026-10-11 Clarified live P7 context metrics cover conversation; native-system archive and direct telemetry probes have separate scope.
+- 2026-10-11 b800346b records independent migration re-review and inherited token-reservation proof gap; preserves qualified acceptance boundaries.
