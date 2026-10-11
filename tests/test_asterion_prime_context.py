@@ -538,14 +538,21 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
         self.assertEqual(stored, [])
         self.assertEqual(self.uncertain, [True])
 
-    async def test_expired_deadline_and_overpriced_quote_reject(self):
+    async def test_authority_rejects_overpriced_quote(self):
         await self.arm()
+        quotes = []
+
+        def reserve(quote):
+            quotes.append(quote)
+            return quote.cost_micro_units <= 125_000
+
         approved, decision, reserved = await self.decision(
-            price=ModelPrice(10**12, 10**12)
+            price=ModelPrice(10**12, 10**12), reserve=reserve,
         )
         self.assertFalse(approved)
         self.assertEqual(decision["status"], "reject")
         self.assertEqual(reserved, [])
+        self.assertGreater(quotes[0].cost_micro_units, 125_000)
 
     async def test_private_persistence_failure_fences_without_ack(self):
         await self.arm()
@@ -652,7 +659,7 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
 
 
 class TestCompactionInputTokenCeiling(unittest.TestCase):
-    """The reservation is denominated in tokens; a request is measured in bytes."""
+    """Byte-derived request estimates prove arithmetic, not native token bounds."""
 
     def test_bytes_are_rounded_up_to_a_token_ceiling(self) -> None:
         from asterion.agents.prime.context import _input_token_ceiling
@@ -662,7 +669,7 @@ class TestCompactionInputTokenCeiling(unittest.TestCase):
                 self.assertEqual(_input_token_ceiling(text), expected)
 
     def test_a_realistic_request_leaves_room_under_the_reservation(self) -> None:
-        from asterion.agents.prime.compaction_budget import quote_compaction_reservation
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy, quote_compaction_reservation
         from asterion.agents.prime.context import _input_token_ceiling
 
         # Observed live: a ~6.9 KB and a ~7.7 KB main request beside a small
@@ -673,18 +680,22 @@ class TestCompactionInputTokenCeiling(unittest.TestCase):
                     branch_input_caps=(_input_token_ceiling("x" * request_bytes), 261),
                     branch_output_caps=(3_276, 3_276),
                     price=ModelPrice(140_000, 280_000),
+                    policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+                    config_source="application",
                 )
                 self.assertLessEqual(quote.reserved_tokens, 16_000)
 
     def test_the_same_request_counted_in_bytes_is_refused(self) -> None:
         # The defect this pins: feeding byte counts in as tokens.
-        from asterion.agents.prime.compaction_budget import quote_compaction_reservation
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy, quote_compaction_reservation
 
         with self.assertRaises(ValueError):
             quote_compaction_reservation(
                 branch_input_caps=(13_000, 261),
                 branch_output_caps=(3_276, 3_276),
                 price=ModelPrice(140_000, 280_000),
+                policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+                config_source="application",
             )
 
 

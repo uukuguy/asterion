@@ -19,6 +19,7 @@ from unittest.mock import patch
 
 from asterion.agents.prime.compaction_budget import (
     ModelPrice,
+    PrimeCompactionPolicy,
     quote_compaction_reservation,
 )
 from asterion.agents.prime.context import PrimeContextWitnessSession
@@ -878,6 +879,8 @@ class TestP1LaunchPreflight(unittest.TestCase):
             branch_input_caps=operator._COMPACTION_INPUT_CAPS,
             branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
             price=operator._PRICE,
+            policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+            config_source="application",
         )
         self.assertLessEqual(quote.reserved_tokens, 16_000)
         self.assertLessEqual(quote.cost_micro_units, 125_000)
@@ -892,6 +895,8 @@ class TestP1LaunchPreflight(unittest.TestCase):
             branch_input_caps=(7_114, 1_041),
             branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
             price=operator._PRICE,
+            policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+            config_source="application",
         )
         self.assertLessEqual(quote.reserved_tokens, 16_000)
 
@@ -905,18 +910,22 @@ class TestP1LaunchPreflight(unittest.TestCase):
                         branch_input_caps=caps,
                         branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
                         price=operator._PRICE,
+                        policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+                        config_source="application",
                     )
 
     def test_the_total_reservation_remains_the_binding_limit(self) -> None:
         from asterion.applications.prime.p1 import operator
 
-        # Each branch is within the per-branch cap, but together they exceed the
-        # reservation: the total must still refuse.
+        # Individual inputs have no fixed cap; their combined reservation must
+        # stay within the application's explicit total policy.
         with self.assertRaises(ValueError):
             quote_compaction_reservation(
                 branch_input_caps=(9_448, 9_448),
                 branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
                 price=operator._PRICE,
+                policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+                config_source="application",
             )
 
     def test_source_tree_operator_root_is_refused_before_any_process(self) -> None:

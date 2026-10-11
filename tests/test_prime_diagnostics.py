@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 from contextlib import redirect_stdout
 import io
@@ -10,7 +11,122 @@ from unittest.mock import patch
 
 from asterion.applications.prime.p3.operator import _drive_success, run_success_path
 from asterion.runtime.protocol import ProtocolError
-from asterion.services.diagnostics import MemoryDiagnosticSink, capture_failure
+from asterion.services.diagnostics import (
+    FailureDiagnostic, FailureMetadata, LimitDiagnostic, MemoryDiagnosticSink,
+    ResourceLimitExceeded, capture_failure, capture_limit, limit_diagnostic,
+)
+
+
+class TestLimitDiagnostics(unittest.TestCase):
+    def diagnostic(self):
+        return LimitDiagnostic("compaction-token-limit", "admission", "rejected",
+            48001, 48000, "tokens", "estimate", "authority")
+
+    def test_safe_capture_and_typed_cause(self):
+        sink = MemoryDiagnosticSink()
+        wrapper = RuntimeError("PRIVATE-PROMPT-CREDENTIAL-PATH")
+        wrapper.__cause__ = ResourceLimitExceeded(self.diagnostic())
+        wrapper.failure_metadata = FailureMetadata()
+        identity = capture_failure(sink, stage="prime.compaction", error=wrapper,
+            subject_id="PRIVATE-SESSION-ID", capability_ref="PRIVATE-CAPABILITY")
+        record = sink.get(identity)
+        self.assertEqual(record.limit_diagnostic, self.diagnostic())
+        self.assertEqual(record.failure_code, "compaction-token-limit")
+        self.assertNotIn("PRIVATE", repr(record))
+
+    def test_no_sink_and_failed_sink_do_not_replace_reason(self):
+        class Broken:
+            def record(self, value):
+                raise RuntimeError("PRIVATE-SINK")
+        for sink in (None, Broken()):
+            with self.subTest(sink=type(sink).__name__):
+                self.assertIsNone(capture_limit(sink, stage="prime.compaction",
+                    diagnostic=self.diagnostic(), subject_id="operation-1"))
+        error = ResourceLimitExceeded(self.diagnostic())
+        self.assertEqual(str(error), "resource limit exceeded")
+        self.assertEqual(error.failure_code, "compaction-token-limit")
+        self.assertIsInstance(error, ValueError)
+
+    def test_capture_limit_records_same_typed_diagnostic(self):
+        sink = MemoryDiagnosticSink()
+        identity = capture_limit(sink, stage="prime.compaction",
+            diagnostic=self.diagnostic(), subject_id="operation-1")
+        self.assertEqual(sink.get(identity).limit_diagnostic, self.diagnostic())
+
+    def test_validation_closed_fields_and_numeric_bounds(self):
+        changes = [{field: "PRIVATE"} for field in
+                   ("limit_code", "phase", "action", "unit", "measurement", "config_source")]
+        changes += [{field: []} for field in
+                    ("limit_code", "phase", "action", "unit", "measurement", "config_source")]
+        changes += [{"observed": value} for value in (True, -1, 2**53, 1.5, None)]
+        changes += [{"limit": value} for value in (True, -1, 2**53, 1.5, None)]
+        changes += [{"measurement": "unavailable"}, {"unit": "bytes"}]
+        for change in changes:
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                replace(self.diagnostic(), **change)
+        with self.assertRaises(FrozenInstanceError):
+            self.diagnostic().limit = 1
+        replace(self.diagnostic(), observed=0, limit=2**53-1, measurement="exact")
+        replace(self.diagnostic(), observed=2**53-1, measurement="conservative-bound")
+        replace(self.diagnostic(), observed=None, measurement="unavailable")
+
+    def test_depleted_authority_retains_exact_zero_limit(self):
+        diagnostic = replace(self.diagnostic(), limit_code="compaction-cost-limit",
+            observed=1, limit=0, unit="cost-micros", measurement="exact")
+        sink = MemoryDiagnosticSink()
+        identity = capture_limit(sink, stage="prime.compaction",
+            diagnostic=diagnostic, subject_id="operation-1")
+        self.assertEqual(sink.get(identity).limit_diagnostic.limit, 0)
+        self.assertEqual(sink.get(identity).limit_diagnostic.observed, 1)
+
+    def test_code_unit_mapping_and_closed_enum_values(self):
+        codes = {
+            "tokens": ("compaction-token-limit", "compaction-input-bound-unavailable"),
+            "cost-micros": ("compaction-cost-limit",),
+            "callbacks": ("compaction-callback-limit", "prime-model-callback-limit", "prime-tool-callback-limit"),
+            "milliseconds": ("compaction-deadline", "prime-deadline"),
+            "bytes": ("witness-frame-limit", "summarization-material-limit", "ipython-output-limit",
+                      "context-memory-limit", "context-archive-limit", "pi-output-limit"),
+        }
+        for unit, values in codes.items():
+            for code in values:
+                with self.subTest(code=code):
+                    replace(self.diagnostic(), limit_code=code, unit=unit)
+                    with self.assertRaises(ValueError):
+                        replace(self.diagnostic(), limit_code=code, unit="bytes" if unit != "bytes" else "tokens")
+        for field, values in {
+            "phase": ("admission", "execution", "settlement"),
+            "action": ("observed", "rejected", "stopped", "recovery-required"),
+            "config_source": ("framework-default", "application", "operator", "authority"),
+        }.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    replace(self.diagnostic(), **{field: value})
+
+    def test_untyped_attributes_and_cycles_are_ignored(self):
+        error = RuntimeError("PRIVATE")
+        error.limit_diagnostic = {"limit_code": "PRIVATE"}
+        error.failure_code = "PRIVATE"
+        error.__cause__ = error
+        self.assertIsNone(limit_diagnostic(error))
+        sink = MemoryDiagnosticSink()
+        identity = capture_failure(sink, stage="prime.compaction", error=error, subject_id="operation-1")
+        self.assertIsNone(sink.get(identity).limit_diagnostic)
+        self.assertNotIn("PRIVATE", repr(sink.get(identity)))
+        with self.assertRaises(ValueError):
+            ResourceLimitExceeded(error.limit_diagnostic)
+        subclass = type("DiagnosticSubclass", (LimitDiagnostic,), {})
+        error.limit_diagnostic = subclass("compaction-token-limit", "admission", "rejected",
+            1, 1, "tokens", "exact", "authority")
+        self.assertIsNone(limit_diagnostic(error))
+        with self.assertRaises(ValueError):
+            ResourceLimitExceeded(error.limit_diagnostic)
+
+    def test_failure_diagnostic_preserves_seven_positional_fields(self):
+        metadata = FailureMetadata()
+        record = FailureDiagnostic("identity", "stage", "RuntimeError", "subject", None, None, metadata)
+        self.assertIs(record.failure_metadata, metadata)
+        self.assertIsNone(record.limit_diagnostic)
 
 
 class _Runner:

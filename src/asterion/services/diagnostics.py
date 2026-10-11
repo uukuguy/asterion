@@ -20,6 +20,68 @@ _SAFE_PROVIDER_CODES = frozenset({
 })
 PRIVATE_FAILURE_EVENT_BYTES = 8 * 1024
 PRIVATE_FAILURE_TOTAL_BYTES = 64 * 1024
+_SAFE_INTEGER_MAX = (1 << 53) - 1
+_LIMIT_UNITS = {
+    "compaction-token-limit": "tokens",
+    "compaction-cost-limit": "cost-micros",
+    "compaction-callback-limit": "callbacks",
+    "compaction-deadline": "milliseconds",
+    "compaction-input-bound-unavailable": "tokens",
+    "witness-frame-limit": "bytes",
+    "summarization-material-limit": "bytes",
+    "ipython-output-limit": "bytes",
+    "context-memory-limit": "bytes",
+    "context-archive-limit": "bytes",
+    "prime-model-callback-limit": "callbacks",
+    "prime-tool-callback-limit": "callbacks",
+    "prime-deadline": "milliseconds",
+    "pi-output-limit": "bytes",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class LimitDiagnostic:
+    """Closed, public-safe description of a resource boundary observation."""
+
+    limit_code: str
+    phase: str
+    action: str
+    observed: int | None
+    limit: int
+    unit: str
+    measurement: str
+    config_source: str
+
+    def __post_init__(self) -> None:
+        fields = (
+            (self.limit_code, _LIMIT_UNITS),
+            (self.phase, {"admission", "execution", "settlement"}),
+            (self.action, {"observed", "rejected", "stopped", "recovery-required"}),
+            (self.unit, {"tokens", "bytes", "callbacks", "milliseconds", "cost-micros"}),
+            (self.measurement, {"exact", "conservative-bound", "estimate", "unavailable"}),
+            (self.config_source, {"framework-default", "application", "operator", "authority"}),
+        )
+        if (any(type(value) is not str or value not in allowed for value, allowed in fields)
+                or _LIMIT_UNITS[self.limit_code] != self.unit
+                or type(self.limit) is not int or not 0 <= self.limit <= _SAFE_INTEGER_MAX
+                or (self.observed is None) != (self.measurement == "unavailable")
+                or (self.observed is not None and (type(self.observed) is not int
+                    or not 0 <= self.observed <= _SAFE_INTEGER_MAX))):
+            raise ValueError("limit diagnostic is invalid")
+
+
+class ResourceLimitExceeded(ValueError):
+    """A resource rejection carrying only validated safe boundary metadata."""
+
+    limit_diagnostic: LimitDiagnostic
+    failure_code: str
+
+    def __init__(self, diagnostic: LimitDiagnostic) -> None:
+        if type(diagnostic) is not LimitDiagnostic:
+            raise ValueError("limit diagnostic is invalid")
+        self.limit_diagnostic = diagnostic
+        self.failure_code = diagnostic.limit_code
+        super().__init__("resource limit exceeded")
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +185,7 @@ class FailureDiagnostic:
     capability_sha256: str | None
     failure_code: str | None
     failure_metadata: FailureMetadata | None = None
+    limit_diagnostic: LimitDiagnostic | None = None
 
 
 class DiagnosticSink(Protocol):
@@ -157,6 +220,7 @@ def capture_failure(
     if sink is None:
         return None
     metadata = failure_metadata(error)
+    resource_diagnostic = limit_diagnostic(error)
     diagnostic_id = (metadata.diagnostic_id if metadata is not None else None) or uuid4().hex
     failure_code = _failure_code(error)
     record = FailureDiagnostic(
@@ -171,12 +235,25 @@ def capture_failure(
         ),
         failure_code=failure_code,
         failure_metadata=metadata,
+        limit_diagnostic=resource_diagnostic,
     )
     try:
         sink.record(record)
     except Exception:
         return None
     return diagnostic_id
+
+
+def capture_limit(
+    sink: DiagnosticSink | None,
+    *,
+    stage: str,
+    diagnostic: LimitDiagnostic,
+    subject_id: str,
+    capability_ref: str | None = None,
+) -> str | None:
+    return capture_failure(sink, stage=stage, error=ResourceLimitExceeded(diagnostic),
+                           subject_id=subject_id, capability_ref=capability_ref)
 
 
 def failure_metadata(error: BaseException) -> FailureMetadata | None:
@@ -192,9 +269,25 @@ def failure_metadata(error: BaseException) -> FailureMetadata | None:
     return None
 
 
+def limit_diagnostic(error: BaseException) -> LimitDiagnostic | None:
+    """Recover only an exact validated diagnostic from the explicit cause chain."""
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        diagnostic = getattr(current, "limit_diagnostic", None)
+        if type(diagnostic) is LimitDiagnostic:
+            return diagnostic
+        current = current.__cause__
+    return None
+
+
 def _failure_code(error: Exception) -> str | None:
     """Classify known protocol failures without retaining their messages."""
 
+    resource_diagnostic = limit_diagnostic(error)
+    if resource_diagnostic is not None:
+        return resource_diagnostic.limit_code
     if failure_metadata(error) is not None:
         return "pi-provider-execution"
     native_message = getattr(error, "failure_code", None)
@@ -245,4 +338,8 @@ __all__ = (
     "FailureDiagnostic",
     "MemoryDiagnosticSink",
     "capture_failure",
+    "LimitDiagnostic",
+    "ResourceLimitExceeded",
+    "limit_diagnostic",
+    "capture_limit",
 )

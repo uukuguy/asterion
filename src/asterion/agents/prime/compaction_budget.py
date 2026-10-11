@@ -11,21 +11,13 @@ from dataclasses import asdict, dataclass
 import json
 import sys
 
+from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
+
 
 _ERROR = "invalid compaction reservation"
 _SAFE_INTEGER_MAX = (1 << 53) - 1
 _PER_MILLION = 1_000_000
 _BRANCH_COUNT = 2
-_OUTPUT_CAP_MAX = 3_276
-_RESERVED_TOKENS_MAX = 16_000
-_COST_MICRO_UNITS_MAX = 125_000
-# Derived, not independent. The two branches are asymmetric by construction: the
-# main request carries the whole serialized conversation and the turn-prefix
-# request only a fragment, so one branch is legitimately much larger than the
-# other. A symmetric per-branch cap contradicts the total below -- it can never
-# be approached. A single branch may take whatever the reservation leaves once
-# both output branches have their cap; the total stays the binding limit.
-_INPUT_CAP_MAX = _RESERVED_TOKENS_MAX - 2 * _OUTPUT_CAP_MAX
 
 
 def _fail() -> None:
@@ -38,6 +30,21 @@ def _safe_nonnegative_integer(value: object) -> int:
     if type(value) is not int or value < 0 or value > _SAFE_INTEGER_MAX:
         _fail()
     return value
+
+
+@dataclass(frozen=True, slots=True)
+class PrimeCompactionPolicy:
+    max_total_tokens: int = 262144
+    max_frame_bytes: int = 16777216
+    max_material_bytes: int = 65536
+
+    def __post_init__(self) -> None:
+        for value in (self.max_total_tokens, self.max_frame_bytes, self.max_material_bytes):
+            if _safe_nonnegative_integer(value) == 0:
+                _fail()
+        if (self.max_frame_bytes > min((1 << 32) - 1, sys.maxsize - 4)
+                or self.max_material_bytes >= self.max_frame_bytes):
+            _fail()
 
 
 @dataclass(frozen=True)
@@ -69,13 +76,11 @@ class CompactionReservationQuote:
     branch_quotes: tuple[BranchCompactionQuote, BranchCompactionQuote]
 
 
-def _validated_caps(caps: object, maximum: int) -> tuple[int, int]:
+def _validated_caps(caps: object) -> tuple[int, int]:
     if type(caps) is not tuple or len(caps) != _BRANCH_COUNT:
         _fail()
     first = _safe_nonnegative_integer(caps[0])
     second = _safe_nonnegative_integer(caps[1])
-    if first > maximum or second > maximum:
-        _fail()
     return first, second
 
 
@@ -90,41 +95,45 @@ def quote_compaction_reservation(
     branch_input_caps: tuple[int, int],
     branch_output_caps: tuple[int, int],
     price: ModelPrice,
+    policy: PrimeCompactionPolicy = PrimeCompactionPolicy(),
+    config_source: str = "framework-default",
 ) -> CompactionReservationQuote:
-    """Reserve both possible compaction callbacks under fixed public bounds."""
+    """Price supplied bounds; callers retain responsibility for their measurement.
 
-    input_caps = _validated_caps(branch_input_caps, _INPUT_CAP_MAX)
-    output_caps = _validated_caps(branch_output_caps, _OUTPUT_CAP_MAX)
-    if type(price) is not ModelPrice:
+    The source is explicit so an application's default-valued policy retains its
+    origin. Cost authority is enforced separately by the caller's budget ledger.
+    """
+
+    input_caps = _validated_caps(branch_input_caps)
+    output_caps = _validated_caps(branch_output_caps)
+    if (type(price) is not ModelPrice or type(policy) is not PrimeCompactionPolicy
+            or type(config_source) is not str
+            or config_source not in {"framework-default", "application", "operator", "authority"}):
         _fail()
 
-    branch_quotes = tuple(
-        BranchCompactionQuote(
+    branch_quotes = []
+    for input_tokens, output_tokens in zip(input_caps, output_caps, strict=True):
+        input_cost = _safe_nonnegative_integer(
+            _ceil_priced_component(input_tokens, price.input_per_million))
+        output_cost = _safe_nonnegative_integer(
+            _ceil_priced_component(output_tokens, price.output_per_million))
+        branch_quotes.append(BranchCompactionQuote(
             input_tokens=input_tokens,
             output_tokens=output_tokens,
-            reserved_tokens=input_tokens + output_tokens,
-            input_cost_micro_units=_ceil_priced_component(
-                input_tokens, price.input_per_million
-            ),
-            output_cost_micro_units=_ceil_priced_component(
-                output_tokens, price.output_per_million
-            ),
-            cost_micro_units=(
-                _ceil_priced_component(input_tokens, price.input_per_million)
-                + _ceil_priced_component(output_tokens, price.output_per_million)
-            ),
-        )
-        for input_tokens, output_tokens in zip(input_caps, output_caps, strict=True)
-    )
+            reserved_tokens=_safe_nonnegative_integer(input_tokens + output_tokens),
+            input_cost_micro_units=input_cost,
+            output_cost_micro_units=output_cost,
+            cost_micro_units=_safe_nonnegative_integer(input_cost + output_cost),
+        ))
     # The exact length is established above; this type is retained for callers.
     typed_branch_quotes = (branch_quotes[0], branch_quotes[1])
-    reserved_tokens = sum(branch.reserved_tokens for branch in typed_branch_quotes)
-    cost_micro_units = sum(branch.cost_micro_units for branch in typed_branch_quotes)
-    if (
-        reserved_tokens > _RESERVED_TOKENS_MAX
-        or cost_micro_units > _COST_MICRO_UNITS_MAX
-    ):
-        _fail()
+    reserved_tokens = _safe_nonnegative_integer(sum(branch.reserved_tokens for branch in typed_branch_quotes))
+    cost_micro_units = _safe_nonnegative_integer(sum(branch.cost_micro_units for branch in typed_branch_quotes))
+    if reserved_tokens > policy.max_total_tokens:
+        raise ResourceLimitExceeded(LimitDiagnostic(
+            "compaction-token-limit", "admission", "rejected", reserved_tokens,
+            policy.max_total_tokens, "tokens", "conservative-bound", config_source,
+        ))
     return CompactionReservationQuote(
         reserved_tokens=reserved_tokens,
         cost_micro_units=cost_micro_units,
