@@ -65,11 +65,11 @@ class TestPrimeP7NativeInstalled(unittest.TestCase):
                 environment=environment,
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
-            # The Pi extension loader imports `@earendil-works/pi-coding-agent`
+            # The Pi extension loader imports both native Pi packages
             # via ESM, which walks ``./node_modules`` up from the loader file's
             # directory. The package is operator-installed globally
             # (``/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent``),
-            # so stage a symlink next to the installed loader. ``NODE_PATH`` is
+            # so stage their symlinks next to the installed loader. ``NODE_PATH`` is
             # not honored by ESM and is not used. This is environment wiring
             # owned by the test, not a change to the loader or its import.
             purelib = _run(
@@ -86,10 +86,15 @@ class TestPrimeP7NativeInstalled(unittest.TestCase):
             self.assertTrue(earendil_host.is_dir(), f"global package missing: {earendil_host}")
             loader_node_modules = loader_dir / "node_modules" / "@earendil-works"
             loader_node_modules.mkdir(parents=True, exist_ok=True)
-            symlink_target = loader_node_modules / "pi-coding-agent"
-            if symlink_target.is_symlink() or symlink_target.exists():
-                symlink_target.unlink()
-            symlink_target.symlink_to(earendil_host)
+            for package, target in (
+                ("pi-coding-agent", earendil_host),
+                ("pi-ai", earendil_host / "node_modules" / "@earendil-works" / "pi-ai"),
+            ):
+                self.assertTrue(target.is_dir(), f"native package missing: {target}")
+                symlink_target = loader_node_modules / package
+                if symlink_target.is_symlink() or symlink_target.exists():
+                    symlink_target.unlink()
+                symlink_target.symlink_to(target)
             fixture = root / "fake_pi_rpc.py"
             shutil.copy2(FAKE_PI, fixture)
             node = shutil.which("node")

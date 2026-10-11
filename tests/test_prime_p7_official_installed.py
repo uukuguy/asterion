@@ -325,9 +325,14 @@ class TestPrimeP7OfficialInstalled(unittest.TestCase):
                 "/opt/homebrew/lib/node_modules/@earendil-works/pi-coding-agent"
             )
             self.assertTrue(earendil_host.is_dir())
-            link = loader_dir / "node_modules" / "@earendil-works" / "pi-coding-agent"
-            link.parent.mkdir(parents=True)
-            link.symlink_to(earendil_host)
+            loader_node_modules = loader_dir / "node_modules" / "@earendil-works"
+            loader_node_modules.mkdir(parents=True)
+            for package, target in (
+                ("pi-coding-agent", earendil_host),
+                ("pi-ai", earendil_host / "node_modules" / "@earendil-works" / "pi-ai"),
+            ):
+                self.assertTrue(target.is_dir(), f"native package missing: {target}")
+                (loader_node_modules / package).symlink_to(target)
 
             (root / "fake_pi_rpc.py").write_text(
                 _official_fake_pi_source(), encoding="utf-8"
