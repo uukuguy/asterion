@@ -5002,3 +5002,7 @@
 - 2026-10-12 User authorizes continued clean Task49 BP35 live trial; started p7-live-20261011181335-fd40bbf52e1f781bcd4a1378, source2551b318/historyoff/seed0/target9; automatic fatal-risk checks and proactive attribution monitored separately.
 - 2026-10-12 User stopped Task49 clean BP35 at5/9,184actions/1deathRESET/1898.954s; cleanup/replay true. L2 model contact-risk omission and repeated full death-replay output diagnosed; input17756580/output50468. User authorizes offline input/coverage/model-mismatch repairs, no new live run.
 - 2026-10-12 Input/coverage repairs reviewed APPROVE: default death replay86592→2915chars, full trace/pixels retained;141focused/final14Solver/fresh installed kernel PASS, promotion25/provider0 PASS with final fallback separately qualified. Exact current-run observed fatal recurrence now conditional-vetoed; no new live run, all owned processes closed.
+- 2026-10-12 a324ab57 compacts rollout reports and preserves fatal counterexamples to reduce redundant input and prevent repeated model omissions.
+- 2026-10-12 User authorizes fresh Task50 compact-risk BP35 trial; p7-live-20261011191917-2696469a8b5a8114f640ab86 sourcea324ab57/historyoff/seed0/target9, fresh wheel1d535f10 matches installed witness; per-level/resources/risk monitored.
+
+- 2026-10-12 Task50 user-stopped: 3/9,133 actions,1 death; cleaned and recorded input reduction plus model-revision fatal-risk leak.

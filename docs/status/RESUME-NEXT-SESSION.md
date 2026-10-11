@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-12. Task49 renewed live trial stopped and cleaned; user authorizes input/rollout repairs; Task48 stopped; exact predeath model diagnosis complete. Task49 implemented (8e89582b); scoped and packaged checks verified. Full regression retains one console timing failure with passing isolated/module retries. Live-session checkpoint, not a final handoff.
+Updated: 2026-10-12. Task50 fresh compact-risk trial user-stopped and cleaned; Task49 renewed live trial stopped and cleaned; user authorizes input/rollout repairs; Task48 stopped; exact predeath model diagnosis complete. Task49 implemented (8e89582b); scoped and packaged checks verified. Full regression retains one console timing failure with passing isolated/module retries. Live-session checkpoint, not a final handoff.
 
 ## Objective
 
@@ -127,3 +127,13 @@ L2死亡前模型将自动上浮接触特殊块当普通静止，risk只检查�
 用户授权修正输入明显变大及推演漏报：默认研究助手摘要+完整证据引用，保留原像素和计算访问；显式模型动作/接触覆盖，未声明或未知不默认已评估；真实死亡对照推演并记录模型失配。属于P7能力和校验修正，不能自动判定任意错误模型或保证未知不死亡。当前正在离线实现，不再启动实测。
 
 Repair implementation now reviewed APPROVE and141focused tests PASS; final fallback alignment then14Solver tests PASS. Fresh final wheel1d535f1068908f0be66fb896916fec7f9d0054d4803e2093c4ca93941078f739 actual installed-kernel PASS, all7source/worker hashes match, model/SDK/realARC0 and complete close. Default actor summary642 versus full56421chars; retained pixel hash equal. Exact current-run death recurrence blocks before synthetic dispatch,7→7 unchanged; model_mismatch is linked. Receipt `.asterion-private/task49-p7-auto-rollout/repair-installed-kernel-witness/receipt.json`; previous shared receipt overwritten, copied new results preserve original command paths and explicitly mark absent oldc605receipt. Original Task49 historical witness claims refer to prior records, not current receipt. Promotion completed PASS25/provider0/full_datasetno; its snapshot differs only in later fallback alignment separately verified above. No owned live/verification/sampler processes remain. No new live-run authorization.
+
+## Task50 fresh compact-risk trial (stopped)
+
+User says “继续” after a324ab57 repair report. New standard packaged supervised BP35 `p7-live-20261011191917-2696469a8b5a8114f640ab86`, sourcea324ab579ce6e40a94a71b16ec09f39813a33124, historyoff/noresume/seed0/target9; actual wheel1d535f1068908f0be66fb896916fec7f9d0054d4803e2093c4ca93941078f739 matches repaired installed witness. PTY32540 owned by bp35_preset, unitasterion-p7-a0048bbff1924606ad999a74a57ab2c5.service active. Private launch/rawlogs/new samples under `.asterion-private/task50-bp35-compact-risk-live/`; original Task49 evidence untouched. Root/core independently monitor actual default summaries, action/contact coverage, fatal candidate reselection/veto and per-level actions/resources. Earlier no-new-live authorization statements describe earlier boundaries and are superseded for this single fresh trial. Outcome pending, code frozen, no extra model/SDK calls from monitors; console52024 preserved.
+
+用户明确中止，最终已验证事实：3/9、133动作、1死亡RESET，1241.506秒；L1 18/232.487秒，L2 69=28+RESET1+40/616.172秒，L3 36/252.740秒，L4未完10/140.107秒。input5978443/output36257tokens，135callbacks/134settled usage，单次peak107668/latest30527；自动133/主动56/精确匹配36、缺模型0、实际致命拦截0、model_mismatch1。PTY32540退出2、monitor20592退出130，unit inactive/dead；sealed_trace/replay_verified/cleanup_complete均true，console52024未动。证据 `.asterion-private/task50-bp35-compact-risk-live/final-resource-receipt.json`。上述active描述仅为启动历史；当前无本轮遗留进程，不再启动新实测。
+
+已验证漏报：before43主动call16点击21,33提示conditional_fatal，actor改选安全候选；before45主动call21对同一抽象初始模型state/同一候选使用reg9墙边界假说，前三微步相同却提前settled，移除此前条件危险而降为unknown，真实seq46死亡。实际public frames不同，不能从抽象state相等推断hidden state相同。失配反馈准确留存，首次死亡未防住；当前判断是P7模型修订撤销危险的缺陷，不是自动助手未执行，不得认定漏报已修好。死后改模回测seq46成功；L3无死亡，L4未知蓝块增模仍保留15危险。
+
+输入修正边界：前60次settled input均值36092对上轮96478下降62.6%，峰下降67.6%；研究轨迹不同，不是隔离因果证明。后续单次仍升至107668，不能宣称全程输入硬上限或cache计费下降。actor输出统计必须排除host/private kernel cells；此前198cells/261289chars混合口径已撤回。默认摘要保留风险、原像素计算访问正常；持续模型修订危险的约束尚未实现。下一步先处理危险降级的可证伪依据与回归验证，不自动重启或修改代码。
