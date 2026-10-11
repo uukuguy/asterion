@@ -4,7 +4,7 @@
 
 ## 当前实施
 
-用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；此前未启动；用户现已授权一次完整BP35监督实测，运行已启动：worker supervised_live，hostPID59687，run p7-live-20261011081342-32907b2a2f5eb1d3c910cf85，unit asterion-p7-959191c96abc4b338074bbf77bbe34a8.service。私有根 `.asterion-private/p7-supervised-bp35-20261011-161337/trial/`；监测其 `.asterion-private/prime-p7-live/<run_id>/research-status.json`。guest RuntimeMax=infinity/stop180s；用户已中断：最终5/9、236动作/1RESET/112模型调用、约1462秒，封存/重放/清理标记通过。host和监测PID已退出、guestunit空，console保留。禁止重复启动；当前Task42修复已证监测干扰：status()污染在途事务诊断，改为不可变被动计量；修复5f50969d先RED后GREEN，99focusedPASS/AstraAPPROVE；最终full promotion25PASS/provider0/full_datasetno；Task42按观察正确性边界关闭（59ff82d3），无新模型运行。认知失败与全部关卡比较见新报告95fa1018；不宣称空间推理恢复。
+用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；此前未启动；用户现已授权一次完整BP35监督实测，运行已启动：worker supervised_live，hostPID59687，run p7-live-20261011081342-32907b2a2f5eb1d3c910cf85，unit asterion-p7-959191c96abc4b338074bbf77bbe34a8.service。私有根 `.asterion-private/p7-supervised-bp35-20261011-161337/trial/`；监测其 `.asterion-private/prime-p7-live/<run_id>/research-status.json`。guest RuntimeMax=infinity/stop180s；用户已中断：最终5/9、236动作/1RESET/112模型调用、约1462秒，封存/重放/清理标记通过。host和监测PID已退出、guestunit空，console保留。禁止重复启动；当前Task42修复已证监测干扰：status()污染在途事务诊断，改为不可变被动计量；修复5f50969d先RED后GREEN，99focusedPASS/AstraAPPROVE；最终full promotion25PASS/provider0/full_datasetno；Task42按观察正确性边界关闭（59ff82d3），无新模型运行。用户现要求解决迁移后退步并恢复前六关完成能力：Task43以Task39迁移前完整六关及Task38较好成绩为基线，比较真实请求/模型/上下文/续轮/工具反馈，证据驱动修复和同口径验证。不得仅分析、仅修监测或用继承路线伪装冷测恢复。认知失败与全部关卡比较见新报告95fa1018；不宣称空间推理恢复。
 
 ## 最新实测已结束
 
@@ -83,3 +83,7 @@ rg -n 'Task40|D-2026-10-10-03' docs/status/DECISIONS.md docs/superpowers/plans/2
 ```
 
 下次执行 `$project-state resume` 即可恢复；本交接不授权新付费全量评估。
+
+## 当前迁移验收目标（用户最新纠正）
+
+Task43重点是迁移是否无损，区分Prime底层能力与P7适配错误。不能以仅分析、监测修复或一轮过关代替迁移验收。regression_analysis负责Python通用运行与恢复差分；live_identity负责TS工具/context hooks差分；resource_comparison负责真实旧新配置/输入证据。Task39实际model6.1-sol/medium已核实、旧新工具schema静态一致，动态同输入探针尚未完成。当前无付费或游戏运行。
