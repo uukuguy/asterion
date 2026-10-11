@@ -15,7 +15,7 @@ from asterion.agents.prime.execution import (
     PrimeRoundDiagnostic,
     PrimePromptRecovery,
 )
-from asterion.services.diagnostics import FailureDiagnostic
+from asterion.services.diagnostics import DiagnosticSink, FailureDiagnostic
 from asterion.runtime.host import CancellationSignal, RunEvent, RunRequest
 from asterion.runtime.protocol import ProtocolError
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
@@ -68,6 +68,7 @@ class AsterionPrimeSession:
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         prompt_recovery: PrimePromptRecovery | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         try:
             # Application factories authorize exact finite bounds. The kernel
@@ -131,6 +132,7 @@ class AsterionPrimeSession:
             failure_diagnostic=failure_diagnostic,
             prompt_recovery=prompt_recovery,
             allowed_tool_names=allowed_tool_names,
+            diagnostics=diagnostics,
         )
 
     def __repr__(self) -> str:

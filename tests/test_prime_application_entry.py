@@ -927,8 +927,13 @@ class TestPrimePersistentOwner(unittest.TestCase):
     def test_explicit_workspace_restore_advances_generation(self):
         from asterion.agents.prime.ipython import KernelBootstrap, KernelLimits
         app = self._persistent_app()
+        from dataclasses import replace
+        from asterion.services.diagnostics import MemoryDiagnosticSink
+        sink = MemoryDiagnosticSink()
+        app._operator = replace(app._operator, diagnostics=sink)
         async def run():
             kernel = app.create_workspace(KernelBootstrap({}, {}, self.root / 'workspace'), KernelLimits())
+            self.assertIs(kernel._diagnostics, sink)
             generation = kernel.generation
             result = await kernel.execute('cell-one', "prime_workspace.export('source', 'def answer(): return 42')", _NeverCancelled())
             self.assertEqual(result.status, 'ok')
@@ -937,6 +942,7 @@ class TestPrimePersistentOwner(unittest.TestCase):
             source = kernel.read_export(exports[0]['export_id'])
             restored = await app.restore_workspace(kernel, (source,), {}, _NeverCancelled())
             self.assertNotEqual(restored.generation, generation)
+            self.assertIs(restored._diagnostics, sink)
             self.assertTrue(kernel.status()['closed'])
             self.assertTrue((await app.close()).complete)
             self.assertTrue(restored.status()['closed'])

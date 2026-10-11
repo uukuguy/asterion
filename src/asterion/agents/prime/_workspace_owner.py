@@ -10,6 +10,7 @@ from asterion.agents.prime.ipython import (
 from asterion.runtime.host import CancellationSignal
 from asterion.agents.prime.ipython_worker import SubprocessPythonWorker
 from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import DiagnosticSink
 
 
 class WorkspaceOwner:
@@ -19,15 +20,16 @@ class WorkspaceOwner:
 
     def create_workspace(self, bootstrap: KernelBootstrap, limits: KernelLimits, *,
                          python: Path | None = None,
-                         observer: Callable[[str, Mapping[str, object]], None] | None = None) -> PersistentIpythonHost:
+                         observer: Callable[[str, Mapping[str, object]], None] | None = None,
+                         diagnostics: DiagnosticSink | None = None) -> PersistentIpythonHost:
         if self._closed:
             raise ProtocolError('Prime workspace owner is closed')
         if python is not None and (not isinstance(python, Path) or not python.is_absolute()):
             raise ProtocolError('Prime workspace executable is invalid')
         worker = SubprocessPythonWorker(python=python)
         host = PersistentIpythonHost(worker=worker,
-                                     bootstrap=bootstrap, limits=limits, observer=observer)
-        self._workspaces[host] = (bootstrap, limits, python, observer, worker)
+                                     bootstrap=bootstrap, limits=limits, observer=observer, diagnostics=diagnostics)
+        self._workspaces[host] = (bootstrap, limits, python, observer, diagnostics, worker)
         return host
 
     async def restore_workspace(
@@ -36,8 +38,8 @@ class WorkspaceOwner:
     ) -> PersistentIpythonHost:
         if self._closed or previous not in self._workspaces:
             raise ProtocolError('Prime workspace is unavailable')
-        bootstrap, limits, python, observer, _ = self._workspaces[previous]
-        replacement = self.create_workspace(bootstrap, limits, python=python, observer=observer)
+        bootstrap, limits, python, observer, diagnostics, _ = self._workspaces[previous]
+        replacement = self.create_workspace(bootstrap, limits, python=python, observer=observer, diagnostics=diagnostics)
         try:
             await replacement.restore(source_exports, data_exports, signal)
             await previous.close()
@@ -51,12 +53,12 @@ class WorkspaceOwner:
         complete = True
         # Signal every owned generation before awaiting any host's active-cell
         # lock. Worker cleanup has no dependency on domain cancellation.
-        for _, _, _, _, worker in self._workspaces.values():
+        for _, _, _, _, _, worker in self._workspaces.values():
             try:
                 worker._request_stop()
             except BaseException:
                 complete = False
-        for host, (_, limits, _, _, worker) in self._workspaces.items():
+        for host, (_, limits, _, _, _, worker) in self._workspaces.items():
             try:
                 await asyncio.wait_for(worker.close(), limits.cleanup_seconds)
             except BaseException:

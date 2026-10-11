@@ -37,7 +37,7 @@ from asterion.runtimes.pi_rpc import (
     validate_pi_compact_result,
     normalize_pi_usage,
 )
-from asterion.services.diagnostics import FailureDiagnostic
+from asterion.services.diagnostics import DiagnosticSink, FailureDiagnostic, LimitDiagnostic, capture_limit
 
 
 ASTERION_PRIME_CAPABILITIES = ("prime.tool.ipython",)
@@ -66,9 +66,10 @@ _NATIVE_SUMMARY_TYPES = frozenset({
 
 
 class _CallbackRejected(Exception):
-    def __init__(self, failure_code: str | None = None) -> None:
+    def __init__(self, failure_code: str | None = None, diagnostic: LimitDiagnostic | None = None) -> None:
         super().__init__()
         self.failure_code = failure_code
+        self.limit_diagnostic = diagnostic
 
 
 class _NativeDiagnostic(Enum):
@@ -117,11 +118,12 @@ _NATIVE_DIAGNOSTIC_MESSAGES = MappingProxyType(
 
 
 class _NativeEventRejected(Exception):
-    def __init__(self, code: _NativeDiagnostic) -> None:
+    def __init__(self, code: _NativeDiagnostic, diagnostic: LimitDiagnostic | None = None) -> None:
         if type(code) is not _NativeDiagnostic:
             raise TypeError("Asterion-prime native diagnostic is invalid")
         super().__init__()
         self.code = code
+        self.limit_diagnostic = diagnostic
 
 
 def _snapshot_native_value(value: object, active: set[int] | None = None) -> object:
@@ -319,6 +321,7 @@ class PrimeExecutionKernel:
         failure_diagnostic: Callable[[FailureDiagnostic | None], None] | None = None,
         prompt_recovery: PrimePromptRecovery | None = None,
         allowed_tool_names: tuple[str, ...] = _DEFAULT_TOOL_NAMES,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         self._validate_launch_material(
             rpc_session,
@@ -346,6 +349,7 @@ class PrimeExecutionKernel:
             raise ProtocolError("Asterion-prime failure diagnostic is invalid")
         self._round_diagnostic = round_diagnostic
         self._failure_diagnostic = failure_diagnostic
+        self._diagnostics = diagnostics
         if prompt_recovery is not None and (
             type(prompt_recovery) is not PrimePromptRecovery
             or not reusable or limits.deadline_ms is None
@@ -399,7 +403,10 @@ class PrimeExecutionKernel:
             self._limits.model_callbacks is not None
             and self.model_callbacks >= self._limits.model_callbacks
         ):
-            raise ProtocolError("Asterion-prime model callback limit exceeded")
+            error = ProtocolError("Asterion-prime model callback limit exceeded")
+            error.limit_diagnostic = LimitDiagnostic('prime-model-callback-limit', 'admission', 'rejected',
+                self.model_callbacks + 1, self._limits.model_callbacks, 'callbacks', 'exact', 'application')
+            raise error
         self._native_events = []
         self._native_event_summary.clear()
         self._final_text = ""
@@ -643,7 +650,9 @@ class PrimeExecutionKernel:
                     self._limits.model_callbacks is not None
                     and model_callbacks > self._limits.model_callbacks
                 ):
-                    raise _NativeEventRejected(_NativeDiagnostic.MODEL_CALLBACK_LIMIT)
+                    raise _NativeEventRejected(_NativeDiagnostic.MODEL_CALLBACK_LIMIT,
+                        LimitDiagnostic('prime-model-callback-limit', 'execution', 'stopped',
+                            model_callbacks, self._limits.model_callbacks, 'callbacks', 'exact', 'application'))
                 return
             if event_type == "message_update":
                 model_request_boundary = False
@@ -666,7 +675,9 @@ class PrimeExecutionKernel:
                     self._limits.tool_callbacks is not None
                     and self.tool_callbacks >= self._limits.tool_callbacks
                 ):
-                    raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALLBACK_LIMIT)
+                    raise _NativeEventRejected(_NativeDiagnostic.TOOL_CALLBACK_LIMIT,
+                        LimitDiagnostic('prime-tool-callback-limit', 'execution', 'stopped',
+                            self.tool_callbacks + 1, self._limits.tool_callbacks, 'callbacks', 'exact', 'application'))
                 try:
                     ledger.record_call(call)
                 except ProtocolError:
@@ -728,18 +739,20 @@ class PrimeExecutionKernel:
                 consume_checked(trusted_event)
             except _NativeEventRejected as error:
                 safe_failure = ProtocolError(_NATIVE_DIAGNOSTIC_MESSAGES[error.code])
+                safe_failure.limit_diagnostic = error.limit_diagnostic
             except Exception:
                 safe_failure = ProtocolError(_NATIVE_EVENT_ERROR)
             if safe_failure is not None:
                 callback_failure = safe_failure
-                raise _CallbackRejected(str(safe_failure)) from None
+                raise _CallbackRejected(str(safe_failure), getattr(safe_failure, "limit_diagnostic", None)) from None
 
         prompt = request.input_text
         round_index = 0
         session_opened = False
         admission_limits = [value for value in (request.deadline_ms, self._limits.deadline_ms) if value is not None]
+        admission_started = asyncio.get_running_loop().time()
         admission_deadline = (
-            asyncio.get_running_loop().time() + min(admission_limits) / 1000
+            admission_started + min(admission_limits) / 1000
             if admission_limits else None
         )
         while True:
@@ -753,9 +766,21 @@ class PrimeExecutionKernel:
                 # Application admission waits within this invocation's fixed
                 # deadline and can be interrupted before transport starts.
                 if self._round_admission is not None:
-                    admitted = await self._await_round_admission(
-                        round_index, signal or _NeverCancelled(), admission_deadline
-                    )
+                    try:
+                        admitted = await self._await_round_admission(
+                            round_index, signal or _NeverCancelled(), admission_deadline
+                        )
+                    except TimeoutError:
+                        # Only our measured deadline expiration is a numeric
+                        # witness; an application callback can also time out.
+                        now = asyncio.get_running_loop().time()
+                        if admission_deadline is not None and now >= admission_deadline:
+                            limit = min(admission_limits)
+                            capture_limit(self._diagnostics, stage='prime.admission', subject_id=request.run_id,
+                                diagnostic=LimitDiagnostic('prime-deadline', 'admission', 'rejected',
+                                    int((now - admission_started) * 1000), limit, 'milliseconds', 'exact',
+                                    'authority' if request.deadline_ms == limit else 'application'))
+                        raise
                     if type(admitted) is not bool:
                         raise ProtocolError("Asterion-prime round admission is invalid")
                     if not admitted:
@@ -776,10 +801,18 @@ class PrimeExecutionKernel:
                     if self._reusable
                     else self._rpc_session.run
                 )
+                # The native RPC request has a transport ID; resource alarms
+                # correlate to the owning operation across both RPC/backend
+                # captures. Existing injected driver protocols remain unchanged.
+                diagnostic_options = (
+                    {'diagnostic_subject_id': request.run_id}
+                    if type(self._rpc_session) is PiRpcSession else {}
+                )
                 result = await driver(
                     prompt,
                     signal=signal or _NeverCancelled(),
                     on_event=consume,
+                    **diagnostic_options,
                 )
             except _CallbackRejected:
                 report_failure()
@@ -865,6 +898,14 @@ class PrimeExecutionKernel:
                     and self.tool_callbacks >= self._limits.tool_callbacks
                 )
             ):
+                for code, observed, maximum in (
+                    ('prime-model-callback-limit', model_callbacks, self._limits.model_callbacks),
+                    ('prime-tool-callback-limit', self.tool_callbacks, self._limits.tool_callbacks),
+                ):
+                    if maximum is not None and observed >= maximum:
+                        capture_limit(self._diagnostics, stage='prime.continuation', subject_id=request.run_id,
+                            diagnostic=LimitDiagnostic(code, 'execution', 'stopped', observed, maximum,
+                                'callbacks', 'exact', 'application'))
                 emit(
                     "run.failed",
                     {

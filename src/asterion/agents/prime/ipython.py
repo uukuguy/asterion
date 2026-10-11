@@ -25,6 +25,7 @@ import uuid
 from asterion.agents.prime.tools import PrimeToolResult, _freeze_json
 from asterion.agents.prime.cell_history import CellHistory
 from asterion.runtime.host import CancellationSignal
+from asterion.services.diagnostics import DiagnosticSink, LimitDiagnostic, capture_limit
 
 
 class PersistentIpythonHostError(ValueError):
@@ -217,6 +218,7 @@ class PersistentIpythonHost:
         bootstrap: KernelBootstrap,
         limits: KernelLimits = KernelLimits(),
         observer: Callable[[str, Mapping[str, object]], None] | None = None,
+        diagnostics: DiagnosticSink | None = None,
     ) -> None:
         if (
             type(bootstrap) is not KernelBootstrap
@@ -241,6 +243,7 @@ class PersistentIpythonHost:
         if observer is not None and not callable(observer):
             raise PersistentIpythonHostError()
         self._observer = observer
+        self._diagnostics = diagnostics
         self._generation = uuid.uuid4().hex
         self._execution_status = "idle"
         self._history = CellHistory(bootstrap.workspace, source_limit=limits.max_code_bytes,
@@ -328,8 +331,16 @@ class PersistentIpythonHost:
                     raise PersistentIpythonHostError()
                 output = value["output"]
                 output_truncated = value.get("output_truncated", False)
-                if len(output.encode("utf-8")) > self._limits.max_output_bytes:
+                output_bytes = len(output.encode("utf-8"))
+                if output_bytes > self._limits.max_output_bytes:
+                    capture_limit(self._diagnostics, stage='prime.ipython', subject_id=call_id,
+                        diagnostic=LimitDiagnostic('ipython-output-limit', 'execution', 'stopped',
+                            output_bytes, self._limits.max_output_bytes, 'bytes', 'exact', 'application'))
                     raise PersistentIpythonHostError()
+                if output_truncated:
+                    capture_limit(self._diagnostics, stage='prime.ipython', subject_id=call_id,
+                        diagnostic=LimitDiagnostic('ipython-output-limit', 'execution', 'observed',
+                            None, self._limits.max_output_bytes, 'bytes', 'unavailable', 'application'))
                 received_output, received_truncated = output, output_truncated
                 if value["is_error"]:
                     self._finish_cell(cell_id, 'python-error', output, output_truncated=output_truncated)

@@ -4950,3 +4950,4 @@
 - 2026-10-11 739f2caf adds application-configurable compaction arithmetic and safe typed limit diagnostics;80tests and independent review pass.
 - 2026-10-11 b73baf17 commits approved resource implementation plan; distinguishes command, session and parent authority alarms before approval.
 - 2026-10-11 cc4e834a configures witness capacities and identity binding; independent review and native1.35MiB proposal/resume pass, network0.
+- 2026-10-11 cf91607d preserves command-bound compaction grants and known refusal continuity; prevents double deduction without expanding prompt authority.

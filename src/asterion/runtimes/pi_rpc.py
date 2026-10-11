@@ -1376,10 +1376,14 @@ class PiRpcSession:
         *,
         signal: CancellationSignal,
         on_event: Callable[[PiRpcEvent], None],
+        diagnostic_subject_id: str | None = None,
     ) -> PiRpcResult:
         """Run one prompt on the currently open child."""
 
         self._check_run_ownership()
+        if (diagnostic_subject_id is not None
+                and (type(diagnostic_subject_id) is not str or not diagnostic_subject_id)):
+            raise ValueError("Pi RPC diagnostic operation is invalid")
         if type(prompt) is not str:
             raise ValueError("Pi RPC prompt is invalid")
         if self._command_lock.locked():
@@ -1481,7 +1485,7 @@ class PiRpcSession:
                     self._diagnostics,
                     stage="pi.prompt",
                     error=error,
-                    subject_id=request_id,
+                    subject_id=request_id if diagnostic_subject_id is None else diagnostic_subject_id,
                 )
                 raise
             final_text = (
@@ -1640,6 +1644,7 @@ class PiRpcSession:
         *,
         signal: CancellationSignal,
         on_event: Callable[[PiRpcEvent], None],
+        diagnostic_subject_id: str | None = None,
     ) -> PiRpcResult:
         if type(prompt) is not str:
             raise ValueError("Pi RPC prompt is invalid")
@@ -1657,6 +1662,7 @@ class PiRpcSession:
                 prompt,
                 signal=signal,
                 on_event=on_event,
+                diagnostic_subject_id=diagnostic_subject_id,
             )
             await self.close()
             if state is not None and state.output_error is not None:

@@ -342,6 +342,7 @@ class PrimeSessionBackend:
                 approved_environment=approved_environment,
                 limits=limits,
                 reusable=True,
+                diagnostics=diagnostics,
             )
             # P1 recovery is attachment reconstruction, not resource resurrection.
             if store.position:

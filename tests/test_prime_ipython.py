@@ -328,3 +328,39 @@ class TestPrimeIpython(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(all(result.status == "ok" for result in results))
         self.assertIn("2", self.text(results[1]))
         self.assertEqual((await host.execute("a", "n=99", self.signal)).status, "error")
+
+
+class TestIpythonOutputDiagnostics(unittest.IsolatedAsyncioTestCase):
+    async def test_received_bytes_and_unknown_truncation_are_distinct(self):
+        from asterion.services.diagnostics import MemoryDiagnosticSink
+        class Worker:
+            async def start(self, *args, **kwargs):
+                pass
+            async def execute_cell(self, *args, **kwargs):
+                return {'is_error': False, 'output': self.output, 'exports': [],
+                        'output_truncated': self.truncated}
+            async def restore(self, *args, **kwargs):
+                pass
+            async def close(self):
+                pass
+        with tempfile.TemporaryDirectory() as directory:
+            for index, (output, truncated, observed, measurement, status) in enumerate((
+                ('中' * 100, False, 300, 'exact', 'uncertain'),
+                ('bounded', True, None, 'unavailable', 'ok'),
+            )):
+                with self.subTest(measurement=measurement):
+                    sink = MemoryDiagnosticSink()
+                    worker = Worker()
+                    worker.output, worker.truncated = output, truncated
+                    host = PersistentIpythonHost(worker, KernelBootstrap({}, {}, Path(directory) / str(index)),
+                        KernelLimits(max_output_bytes=256), diagnostics=sink)
+                    result = await host.execute('PRIVATE-call', 'PRIVATE-source', Signal())
+                    self.assertEqual(result.status, status)
+                    self.assertEqual(host.lost, status == 'uncertain')
+                    record = next(iter(sink._records.values()))
+                    diagnostic = record.limit_diagnostic
+                    self.assertEqual((diagnostic.limit_code, diagnostic.observed, diagnostic.limit,
+                                      diagnostic.measurement),
+                                     ('ipython-output-limit', observed, 256, measurement))
+                    self.assertNotIn('PRIVATE', repr(record))
+                    await host.close()

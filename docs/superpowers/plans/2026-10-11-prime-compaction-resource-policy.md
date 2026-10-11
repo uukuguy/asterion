@@ -442,6 +442,7 @@ git commit -m "fix(prime): preserve compaction authority and safe refusal reason
 - Create: `tests/test_prime_resource_alarms.py`.
 - Modify: `src/asterion/applications/prime/p1/operator.py`, `src/asterion/applications/prime/p7/operator.py` (operator-owned sink injection and safe evidence projection).
 - Modify: `src/asterion/agents/prime/execution.py`, `src/asterion/agents/prime/tools.py`, `src/asterion/agents/prime/ipython.py` (existing known numeric callback/deadline/output trip sites only).
+- Modify: `src/asterion/agents/prime/application.py`, `_workspace_owner.py` only as needed to propagate an optional trailing diagnostic sink through workspace creation/restore; preserve prior constructors and owner cleanup/recovery behavior.
 - Modify: `tests/test_asterion_prime_backend.py`, `tests/test_prime_ipython.py`, `tests/test_asterion_prime_runtime.py`, `tests/test_prime_p7_diagnostics.py`.
 - Root-owned evidence: `.asterion-private/task43-resource-policy/native/replay.py` and `entry.mjs`; these are private native-owner evidence, not new production helpers or portable test harnesses.
 - Modify: `docs/status/CURRENT-STATE.md`, `docs/status/RESUME-NEXT-SESSION.md`, `docs/status/INDEX.md` with the named evidence and remaining accounting limitation.
@@ -451,7 +452,7 @@ git commit -m "fix(prime): preserve compaction authority and safe refusal reason
 - Produces: `resource_alarm(diagnostic: FailureDiagnostic) -> dict[str, object] | None`; `ResourceAlarmSink(path: Path, *, emit: Callable[[dict[str, object]], None], downstream: DiagnosticSink | None=None)`, implementing `record(FailureDiagnostic) -> None`; `alarms: tuple[Mapping[str, object], ...]` exposes immutable snapshots for final safe stdout/evidence.
 - The operator passes this sink through existing `PrimeOperatorContext.diagnostics`. Framework modules never create files or notification services. Each diagnostic subject is the actual operation ID; sink dedupe key `(subject_sha256, limit_code)` is per operation, not whole session.
 
-- [ ] **Step 1: Write failing visible/persisted alarm tests.**
+- [x] **Step 1: Write failing visible/persisted alarm tests.**
 
 ```python
 from dataclasses import replace
@@ -508,12 +509,12 @@ class TestResourceAlarms(unittest.TestCase):
 
 Add a persistence-failure case using a path under a missing parent; the sink retains its immutable safe alarm and emit still receives it. Assert original backend reject reason unchanged with no sink, throwing sink, and resource alarm sink. Existing `_safe_failure_diagnostic` test verifies P7 projects only the validated eight numeric/enumerated fields; sentinel prompts, exceptions, private IDs and paths never appear.
 
-- [ ] **Step 2: Run the focused failing test.**
+- [x] **Step 2: Run the focused failing test.**
 
 Run: `uv run python -m unittest -v tests.test_prime_resource_alarms tests.test_prime_p7_diagnostics`.
 Expected: missing application alarm module/limit projection until implementation.
 
-- [ ] **Step 3: Implement the operator sink and existing numeric trip projection.**
+- [x] **Step 3: Implement the operator sink and existing numeric trip projection.**
 
 Use fixed code-to-configuration names. Frame/material/token map to `PrimeCompactionPolicy.max_frame_bytes`, `.max_material_bytes`, `.max_total_tokens`; command codes `compaction-token-limit` / `compaction-cost-limit` with source `authority` map to `SessionContextCommand.payload.budget.controller_tokens/aggregate_tokens` / `.cost_micros`; `prime-session-token-limit` / `prime-session-cost-limit` map to `PrimeBackendSpec.aggregate_tokens` / `.cost_micros`; `prime-parent-token-limit` maps to `RemainingBudget.controller_tokens/aggregate_tokens`, and `prime-parent-cost-limit` maps to `RemainingBudget.cost_micros`; callbacks map to `AsterionPrimeLimits.model_callbacks` / `.tool_callbacks`; IPython maps to `KernelLimits.max_output_bytes`; deadline maps to the owning finite deadline.
 
@@ -589,3 +590,5 @@ Execution receipt: Task1 committed739f2caf; root80tests PASS and independent spe
 Execution receipt: Task2 committedcc4e834a; Astra specification/code-quality review APPROVE, root132Python PASS+2existing skips and106Node PASS+6existing skips. Actual local native witness proposal1351538bytes, persist/resume/worker continuity and cleanup PASS; provider/network0. Fresh-wheel proof remains pending after admission/presentation integration.
 
 Execution receipt: Task3 reviewed specification PASS / quality APPROVE by Astra; 259 Python PASS + 2 historical skips, 107 Node PASS + 6 historical skips. Root independently verified 25 control recovery tests and actual native small-frame refusal / same-process continuation, network0. Alarm presentation and fresh-wheel proof remain pending.
+
+Execution receipt: Task4 implementation reviewed specification PASS / quality APPROVE after fixing public alarm validation and canonical operation deduplication. Final changed-surface267PASS+2historical skips; additional47RPCtests PASS; independent11tests PASS. Fresh final wheel, promotion and broad whole-change review remain pending.

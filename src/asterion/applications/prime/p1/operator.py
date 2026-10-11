@@ -26,6 +26,7 @@ from asterion.agents.prime.compaction_budget import (
     ModelPrice,
     quote_compaction_reservation,
 )
+from asterion.applications.prime.resource_alarms import ResourceAlarmSink, public_resource_alarms
 from asterion.agents.prime.execution import AsterionPrimeLimits
 from asterion.agents.prime.store import private_root_identity
 from asterion.agents.prime.summarization import compaction_custom_instructions
@@ -120,6 +121,7 @@ class P1PublicResult:
     run_id: str
     status: str
     receipt_sha256: str | None = None
+    resource_alarms: tuple[dict[str, object], ...] = ()
 
 
 _PUBLIC_PROGRESS_STAGES = frozenset(
@@ -163,6 +165,11 @@ def _public_progress(stage: str) -> None:
     )
 
 
+def _public_resource_alarm(alarm: dict[str, object]) -> None:
+    print(json.dumps(alarm, allow_nan=False, sort_keys=True, separators=(",", ":")),
+          file=sys.stderr, flush=True)
+
+
 class _NoActions:
     async def execute(self, *args: object, **kwargs: object):
         raise P1OperatorError()
@@ -184,6 +191,7 @@ class P1OperatorResources:
         deadline: float,
         observe: Callable[[str], None] = lambda _: None,
         cleanup_root: Callable[[], None] | None = None,
+        resource_alarm_sink: ResourceAlarmSink | None = None,
     ) -> None:
         identity = backend.snapshot().identity
         if (
@@ -207,6 +215,7 @@ class P1OperatorResources:
         self.oracle = P1Oracle(worker, kernel_generation=identity.generation)
         self.observe = observe
         self._cleanup_root = cleanup_root
+        self.resource_alarm_sink = resource_alarm_sink
         self.active_turn_id = ""
         self._host_number = 0
         self._host_closed = True
@@ -787,12 +796,16 @@ async def run_fixed_small_verification(
                 protocol_failure = True
             if not runner.done():
                 runner.cancel()
+    # The temporary backend has been removed; retained public alarms are the
+    # external evidence, never a claim that its JSONL file survived cleanup.
+    sink = getattr(resources, 'resource_alarm_sink', None)
+    alarms = tuple(dict(alarm) for alarm in sink.alarms) if sink is not None else ()
     if protocol_failure:
-        return P1PublicResult(resources.run_id, "protocol-failure")
+        return P1PublicResult(resources.run_id, "protocol-failure", resource_alarms=alarms)
     resources.observe("runner.terminal")
     assert finalization is not None
     return P1PublicResult(
-        resources.run_id, finalization.classification, finalization.receipt_sha256
+        resources.run_id, finalization.classification, finalization.receipt_sha256, alarms
     )
 
 
@@ -1004,11 +1017,12 @@ async def _build_resources(preflight: _Preflight) -> P1OperatorResources:
             _COST_MICROS, _PRICE, "authority-1", _COMPACTION_INSTRUCTIONS,
             compat_provider_id="prime-applications",
             compaction_policy=P1_COMPACTION_POLICY, compaction_policy_source="application")
+        alarm_sink = ResourceAlarmSink(root / 'resource-alarms.jsonl', emit=_public_resource_alarm)
         application = prepare_prime_application(
             PrimeApplicationSpec("prime.ipython-coding", "1.0.0", "persistent-code-tools",
                 tools=PrimeToolModuleArtifact(preflight.extension_path, CORE_TOOL_REGISTRY)),
             PrimeOperatorContext(preflight.executable, preflight.entry, root, _PROVIDER, _MODEL,
-                preflight.effort, environment, task_deadline), authorization=backend_spec)
+                preflight.effort, environment, task_deadline, diagnostics=alarm_sink), authorization=backend_spec)
         worker = P1WorkerProcess(deadline=deadline, interpreter=str(preflight.worker_python))
         await worker.start()
         owner = P1WorkerOwnerAdapter(worker)
@@ -1017,7 +1031,7 @@ async def _build_resources(preflight: _Preflight) -> P1OperatorResources:
         resources = P1OperatorResources(
             application=application, backend=attachment, worker=worker, worker_owner=owner,
             private_root=private, journal_root=root / "journal", run_id=run_id,
-            deadline=deadline, cleanup_root=temporary.cleanup)
+            deadline=deadline, cleanup_root=temporary.cleanup, resource_alarm_sink=alarm_sink)
         services.resources = resources
         return resources
     except BaseException:
@@ -1055,10 +1069,10 @@ def _run_operator(invoke: Callable[[], Awaitable[P1PublicResult]]) -> P1PublicRe
             item.cancel()
         for item in pending:
             if not await wait_task_until(item, shutdown_deadline, cancel=True):
-                result = P1PublicResult(result.run_id, "protocol-failure")
+                result = P1PublicResult(result.run_id, "protocol-failure", resource_alarms=result.resource_alarms)
         finalizer = asyncio.create_task(loop.shutdown_asyncgens())
         if not await wait_task_until(finalizer, shutdown_deadline):
-            result = P1PublicResult(result.run_id, "protocol-failure")
+            result = P1PublicResult(result.run_id, "protocol-failure", resource_alarms=result.resource_alarms)
         # loop.close uses shutdown(wait=False); a default-executor join is never
         # allowed to undo the bounded coroutine/resource shutdown above.
         return result
@@ -1088,7 +1102,9 @@ def main(argv: list[str] | None = None) -> int:
     if result is None:
         print('{"status":"preflight-rejected"}')
         return 2
-    print(json.dumps(asdict(result), sort_keys=True, separators=(",", ":")))
+    public = asdict(result)
+    public["resource_alarms"] = public_resource_alarms(result.resource_alarms)
+    print(json.dumps(public, sort_keys=True, separators=(",", ":")))
     return 0 if result.status == "completed" else 1
 
 

@@ -127,6 +127,7 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
                 extension_lease=resource.lease, approved_command=command,
                 approved_environment=environment, limits=limits,
                 allowed_tool_names=spec.tools.registry.allowed_tool_names,
+                diagnostics=operator.diagnostics,
                 **{field.name: getattr(hooks, field.name) for field in fields(hooks)})
         resource.bridge = ToolBridgeServer(parent, services)
         if not durable:

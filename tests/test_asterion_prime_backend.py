@@ -1045,11 +1045,11 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
 
     async def test_reserve_limit_and_failed_alarm_sink_keep_original_reason(self):
         from asterion.services.diagnostics import ResourceLimitExceeded
+        from asterion.applications.prime.resource_alarms import ResourceAlarmSink
         await self.backend.execute_prompt(self.request())
         class BrokenSink:
             def record(self, _record):
                 raise RuntimeError("PRIVATE-ALARM-SINK")
-        self.backend._diagnostics = BrokenSink()
         diagnostic = LimitDiagnostic("prime-parent-cost-limit", "admission", "rejected",
             125000, 7, "cost-micros", "exact", "authority")
         original = self.backend._append
@@ -1057,13 +1057,20 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             if kind == "context-reservation":
                 raise ResourceLimitExceeded(diagnostic)
             return original(record_id, kind, payload)
+        visible = []
+        alarm_sink = ResourceAlarmSink(self.root / 'resource-alarms.jsonl', emit=visible.append)
         usage = self.backend.usage
-        with patch.object(self.backend, "_append", side_effect=refuse):
-            receipt = await self.backend.execute_context(self.compact_command())
-        self.assertEqual((receipt.status, receipt.reason_code), ("rejected", diagnostic.limit_code))
-        self.assertEqual(self.backend._witness.last_refusal, diagnostic)
-        self.assertEqual(self.backend.usage, usage)
-        self.assertEqual(self.rpc.compact_decisions, ["reject"])
+        for index, sink in enumerate((None, BrokenSink(), alarm_sink)):
+            with self.subTest(sink=type(sink).__name__):
+                self.backend._diagnostics = sink
+                with patch.object(self.backend, "_append", side_effect=refuse):
+                    receipt = await self.backend.execute_context(self.compact_command(f'limit-{index}'))
+                self.assertEqual((receipt.status, receipt.reason_code), ("rejected", diagnostic.limit_code))
+                self.assertEqual(self.backend._witness.last_refusal, diagnostic)
+                self.assertEqual(self.backend.usage, usage)
+                self.assertEqual(self.rpc.compact_decisions[-1], "reject")
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(alarm_sink.alarms[0]['configuration'], 'RemainingBudget.cost_micros')
 
     async def test_malformed_compact_proposal_retains_protocol_fence_without_charge(self):
         await self.backend.execute_prompt(self.request())

@@ -114,6 +114,7 @@ from asterion.capabilities.prime_arc_agi_3_solver.provider import (
     PACKAGE_REF,
 )
 from asterion.runner.composed import run_composed_application
+from asterion.applications.prime.resource_alarms import ResourceAlarmSink, public_resource_alarms
 from asterion.services.diagnostics import FailureDiagnostic
 from asterion.services.private_failure import FilePrivateFailureSink
 
@@ -143,6 +144,11 @@ _BRIDGE_JOIN_SECONDS = 6.0
 _LEVEL_WITNESS_ONLY = "LEVEL is only available with the P7 level-witness command"
 
 
+def _public_resource_alarm(alarm: dict[str, object]) -> None:
+    print("[asterion-prime-p7] " + json.dumps(alarm, allow_nan=False, sort_keys=True,
+          separators=(",", ":")), file=sys.stderr, flush=True)
+
+
 def _safe_failure_diagnostic(value: object) -> dict[str, object] | None:
     """Project bounded private failure metadata without exception bodies."""
 
@@ -160,6 +166,15 @@ def _safe_failure_diagnostic(value: object) -> dict[str, object] | None:
             **asdict(value.failure_metadata),
             "permanent_rejection": value.failure_metadata.permanent_rejection,
         }
+    from dataclasses import asdict
+    from asterion.services.diagnostics import LimitDiagnostic
+    if type(value.limit_diagnostic) is LimitDiagnostic:
+        try:
+            limit = LimitDiagnostic(**asdict(value.limit_diagnostic))
+        except ValueError:
+            pass
+        else:
+            result["limit_diagnostic"] = asdict(limit)
     return result
 
 class P7OperatorError(RuntimeError):
@@ -348,6 +363,7 @@ class P7LiveAttemptFailure(live.P7LiveSolveError):
         replay_verified: bool,
         sealed_trace: bool,
         cleanup_complete: bool,
+        resource_alarms: tuple[Mapping[str, object], ...] = (),
     ) -> None:
         reason = (
             "game over before the target level was completed"
@@ -364,6 +380,7 @@ class P7LiveAttemptFailure(live.P7LiveSolveError):
         self.replay_verified = replay_verified
         self.sealed_trace = sealed_trace
         self.cleanup_complete = cleanup_complete
+        self.resource_alarms = tuple(MappingProxyType(alarm) for alarm in public_resource_alarms(resource_alarms))
 
 
 
@@ -3160,6 +3177,7 @@ class P7OperatorResources:
     host_services: Mapping[str, object]
     runtime_options: Mapping[str, str]
     _prediction_client: _P7BrokerClient | None = None
+    _resource_alarm_sink: ResourceAlarmSink | None = None
 
     def __post_init__(self):
         object.__setattr__(self, 'host_services', MappingProxyType(dict(self.host_services)))
@@ -3167,6 +3185,10 @@ class P7OperatorResources:
 
     def __repr__(self):
         return '<P7OperatorResources redacted>'
+
+    @property
+    def resource_alarms(self) -> tuple[Mapping[str, object], ...]:
+        return () if self._resource_alarm_sink is None else self._resource_alarm_sink.alarms
 
     @property
     def application(self):
@@ -3544,6 +3566,8 @@ def build_p7_operator_resources(
             )
         limits = AsterionPrimeLimits(selection.max_callbacks,
             None if selection.unbounded_first_round or selection.supervised_research else 4096 if selection.autonomy else 500, deadline_ms)
+        alarm_sink = ResourceAlarmSink(private_trace_root.parent / 'resource-alarms.jsonl',
+                                       emit=_public_resource_alarm)
         official = type(game) is ArcGameContract
         application = prepare_prime_application(
             PrimeApplicationSpec('prime.arc-agi-3-gameplay' if official else 'prime.arc-agi-3-solving',
@@ -3553,6 +3577,7 @@ def build_p7_operator_resources(
                 provider=selection.provider, model=selection.model,
                 effort=resolve_pi_effort(environment, default='medium'), environment=provider_environment,
                 task_deadline=execution_budget, private_root=private_trace_root.parent,
+                diagnostics=alarm_sink,
                 private_failure_sink=FilePrivateFailureSink(private_trace_root.parent / 'pi-rpc-failures.jsonl')),
             authorization=limits)
         trace = PrimeTraceRecorder(private_trace_root)
@@ -3633,7 +3658,7 @@ def build_p7_operator_resources(
         from .runtime_binding import build_p7_direct_runtime
         build_p7_direct_runtime(host_services, runtime_options,
             services=P7ToolDispatch(ipython, prediction_client, run_id=history_run_id), gameplay=official)
-        return P7OperatorResources(host_services, runtime_options, prediction_client)
+        return P7OperatorResources(host_services, runtime_options, prediction_client, alarm_sink)
 
     except Exception as error:
         print(
@@ -5038,6 +5063,7 @@ async def run_live(
             if isinstance(broker_value, ArcBroker):
                 _write_terminal_status(private, run_id, broker_value, execution_budget, action_journal,
                                        phase='closed' if cleanup_complete else 'cleanup-incomplete')
+            diagnostics["resource_alarms"] = [dict(alarm) for alarm in getattr(resources_, "resource_alarms", ())]
             live.write_summary(
                 root,
                 private,
@@ -5083,6 +5109,7 @@ async def run_live(
             replay_verified=replay_verified,
             sealed_trace=sealed_trace,
             cleanup_complete=cleanup_complete,
+            resource_alarms=getattr(resources_, "resource_alarms", ()),
         ) from None
     return live.P7LiveExecution(
         run_id=run_id,
@@ -5092,7 +5119,7 @@ async def run_live(
         sealed_trace=sealed_trace,
         cleanup_complete=cleanup_complete,
         trace_root=trace_root,
-        receipt=receipt,
+        receipt={**receipt, "resource_alarms": [dict(alarm) for alarm in getattr(resources_, "resource_alarms", ())]},
         comparison_report=comparison_report,
         game=invocation.game,
         broker_replay_sha256=broker_receipt.replay_sha256,
@@ -5258,6 +5285,7 @@ def _public_receipt(
     broker_replay_sha256: str | None = None,
     provider: str | None = None,
     model: str | None = None,
+    resource_alarms: tuple[Mapping[str, object], ...] | list[dict[str, object]] = (),
 ) -> Mapping[str, object]:
     """Build the one public receipt; private evidence never crosses this line."""
 
@@ -5280,6 +5308,7 @@ def _public_receipt(
         "replay_verified": replay_verified,
         "sealed_trace": sealed_trace,
         "cleanup_complete": cleanup_complete,
+        "resource_alarms": public_resource_alarms(resource_alarms),
     }
     for name in ("partial_game_score", "receipt_sha256", "promotion", "scope"):
         if name in source:
@@ -5393,13 +5422,17 @@ def main(argv: list[str] | None = None) -> int:
         receipt_selection = None
     receipt_provider = None if receipt_selection is None else receipt_selection.provider
     receipt_model = None if receipt_selection is None else receipt_selection.model
+    resource_alarms: list[dict[str, object]] = []
     try:
+        execution = _run_live_with_process_signals(invocation, run_id)
+        resource_alarms = public_resource_alarms(execution.receipt.get("resource_alarms", ()))
         result = classify_live_result(
-            _run_live_with_process_signals(invocation, run_id),
+            execution,
             provider=receipt_provider,
             model=receipt_model,
             cognition_mode=invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition",
         )
+        result["resource_alarms"] = resource_alarms
     except KeyboardInterrupt:
         return 130
     except Exception as error:
@@ -5425,6 +5458,7 @@ def main(argv: list[str] | None = None) -> int:
                     "unsuccessful", run_id, reason=reason, game=invocation.game,
                     provider=receipt_provider,
                     model=receipt_model,
+                    resource_alarms=(error.resource_alarms if type(error) is P7LiveAttemptFailure else resource_alarms),
                     **failure_evidence,
                 ),
                 allow_nan=False,

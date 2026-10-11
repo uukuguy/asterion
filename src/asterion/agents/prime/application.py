@@ -551,7 +551,7 @@ class PrimeApplication:
         if self._spec.profile != 'persistent-code-tools':
             _invalid()
         workspace = self._workspace_owner.create_workspace(bootstrap, limits, python=python,
-                                                           observer=observer)
+                                                           observer=observer, diagnostics=self._operator.diagnostics)
         return workspace
 
     async def restore_workspace(

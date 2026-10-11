@@ -385,6 +385,37 @@ class TestPrimeBackendNativeCancelRpc(unittest.IsolatedAsyncioTestCase):
     _prompt = staticmethod(TestPrimeBackendRealRpc._prompt)
     _compact = staticmethod(TestPrimeBackendRealRpc._compact)
 
+    async def test_callback_trip_has_one_alarm_across_rpc_and_backend_capture(self):
+        from hashlib import sha256
+        from asterion.agents.prime.backend import PrimeBackendError
+        from asterion.applications.prime.resource_alarms import ResourceAlarmSink
+        # A real local JSONL process emits an over-limit callback stream.
+        self.child.write_text(_REAL_RPC_CHILD.replace(
+            '        emit({"type": "turn_start"})',
+            '        for _ in range(9): emit({"type": "turn_start"})'), encoding='utf-8')
+        backend, rpc, _, identity, _ = await self._backend('callback-trip')
+        visible = []
+        path = self.root / 'resource-alarms.jsonl'
+        sink = ResourceAlarmSink(path, emit=visible.append)
+        backend._diagnostics = rpc._diagnostics = backend.kernel._diagnostics = sink
+        with self.assertRaises(PrimeBackendError) as caught:
+            await backend.attach(identity).execute_prompt(self._prompt('PRIVATE-operation', 'PRIVATE-input'))
+        self.assertEqual(len(sink.alarms), 1)
+        self.assertEqual(len(visible), 1)
+        self.assertEqual(len(path.read_text().splitlines()), 1)
+        alarm = sink.alarms[0]
+        self.assertEqual((alarm['limit_code'], alarm['observed'], alarm['limit']),
+                         ('prime-model-callback-limit', 9, 8))
+        records = tuple(sink._records.values())
+        self.assertEqual({record.stage for record in records}, {'pi.prompt', 'prime.prompt'})
+        self.assertEqual({record.subject_sha256 for record in records},
+                         {sha256(b'PRIVATE-operation').hexdigest()})
+        self.assertIsNotNone(sink.get(caught.exception.diagnostic_id).limit_diagnostic)
+        self.assertIsNotNone(rpc.last_diagnostic.limit_diagnostic)
+        self.assertEqual(backend.snapshot().phase, 'recovery-required')
+        await backend.close()
+        self.assertTrue(backend._cleanup.complete)
+
     async def test_native_cancel_terminal_without_error_severity_reuses_process(self):
         backend, rpc, _host, identity, store = await self._backend("native-rejected")
         attachment = backend.attach(identity)

@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Literal
 
 from asterion.runtime.protocol import ProtocolError
+from asterion.services.diagnostics import LimitDiagnostic
 
 
 def _freeze_json(value: object, active: set[int] | None = None) -> object:
@@ -137,7 +138,10 @@ class PrimeToolLedger:
         if call.call_id in self._calls:
             raise ProtocolError("Asterion-prime emitted a duplicate tool call")
         if self._max_callbacks is not None and len(self._calls) >= self._max_callbacks:
-            raise ProtocolError("Asterion-prime tool callback limit exceeded")
+            error = ProtocolError("Asterion-prime tool callback limit exceeded")
+            error.limit_diagnostic = LimitDiagnostic('prime-tool-callback-limit', 'execution',
+                'stopped', len(self._calls) + 1, self._max_callbacks, 'callbacks', 'exact', 'application')
+            raise error
         self._calls[call.call_id] = call
 
     def record_result(self, result: PrimeToolResult) -> None:
