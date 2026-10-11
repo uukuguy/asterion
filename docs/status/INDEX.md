@@ -24,7 +24,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Final session handoff: Task40 Tasks 1–8 complete and reviewed, packaged/live P7 deployment verified, independent applications and CLI scope recorded; sealed Task39 evidence and dedicated-compaction limits retained. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Live Task43 checkpoint: generic migration versus shared native compatibility/P7 adaptation; repaired native proofs and pending final gate, historical losslessness limits. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
@@ -110,8 +110,8 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - 监督BP35中断实测：[逐关资源、退步与监测缺陷](../reviews/2026-10-11-p7-supervised-bp35-interrupted-trial.md)：5/9用户中断，全部关卡比较、L2死亡重现、被动观察修复已按provider-free边界验证，解题收益未测。
 
-- Task43迁移分层验收：[Prime/P7同输入差分与责任边界](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md)：通用/适配代表性组合链PASS，预设比较不等价已定位；真实原生小验证进行中，整体无损未认证。
+- Task43迁移分层验收：[Prime/P7同输入差分与责任边界](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md)：通用迁移缺陷与共享原生兼容/P7适配缺口已分清并修复；真实打包手动与自动摘要验证通过，最终promotion待修复夹具后重跑；整体历史无损未认证。
 
-- Task43通用关闭修复：[bridge事件循环寿命](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md)：真实native+无模型复现，通用owner关闭失败已定位；修复中。
+- Task43通用关闭修复：[bridge事件循环寿命](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md)：真实native+无模型复现，通用owner关闭失败已修复95397749，真实worker/native与打包验证通过。
 
-- [Prime native system-context compatibility design](../superpowers/specs/2026-10-11-prime-native-system-context-design.md) — active Task43 repair; preserves native system/checkpoint metadata.
+- [Prime native system-context compatibility design](../superpowers/specs/2026-10-11-prime-native-system-context-design.md) — Task43 native compatibility repair; system/checkpoint binding verified on actual guest, final packaged gate pending.

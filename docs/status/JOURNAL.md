@@ -4918,3 +4918,16 @@
 - 18:03 P1原生手动摘要到达触发但witness拒绝，backend未知边界保留；Sol/Astra分查探针契约与生产差异。
 - 18:08 真实Pi首次prompt自动持久system角色，Prime闭合投影拒绝；guest失败实证，Astra设计保真契约修复。
 - 18:10 旧新artifact同Pi均拒system，归共享原生兼容缺口；同步修复系统快照确认及P7计量/归档遗漏。
+- 18:13 固化原生system角色及checkpoint兼容修复，旧新同环境失败证据保留。 [fe92e1c8]
+- 18:14 明确新冻结helper需所有资源同版，旧wire兼容不等于旧extension二进制兼容。
+- 18:23 P7计量/归档/签名保留native系统sections和工具元数据，三项fail-first回归PASS。 [b2d8480d]
+- 18:30 原生manual witness本机ACK/持久化/重开/幂等/worker续接PASS；Sol通用与P7源码APPROVE，待freshwheel guest。
+- 18:30 保留native系统角色与压缩checkpoint，冻结helper/三资源同版；66Python/98TS通过，待guest及最终promotion。 [14d35611]
+- 18:32 freshwheel/Node22原生witness ACK/重开/幂等/worker续接PASS，源码资源同版/零provider；rootTS98PASS6既有skip。
+- 18:34 root重跑freshwheel guest原生witness PASS：摘要/续接/后续prompt/五字段清理完整，零真实模型。
+
+- 2026-10-11 Task43 root guest native P7 system v2/v3 old/current four cases PASS; zero provider/network.
+- 2026-10-11 Task43 final system promotion FAIL: four failures/two errors; installed fixtures and pinned-resource tests under investigation.
+- 2026-10-11 e57f1fbd aligns pinned-loader pi-ai fixture;27tests PASS. No production changes.
+- 2026-10-11 Task43 installed P7 legacy1/2/7 and official fixtures GREEN after staging pi-ai; root reviewed; final promotion rerunning.
+- 2026-10-11 097ae81c stages native pi-ai for isolated installed P7 fixtures; fixes four promotion subtest failures.
