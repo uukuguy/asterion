@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-11. Active Task43 manual-summary budget investigation; not a final handoff.
+Updated: 2026-10-11. Active Task43 application resource-policy design; not a final handoff.
 
 ## Objective
 
@@ -19,6 +19,8 @@ Distinguish generic framework migration regressions from P7 adaptation and quali
 Known defects are separated by responsibility and repaired. Entire historical migration equivalence and long-horizon reasoning remain unverified; old/new game runs used different presets, and historical full requests/SDK bytes are missing. Do not infer causal score recovery from shutdown or metadata repairs. Specialized code-aware native summary remains separately unwired/unverified.
 
 ## Current recovery boundary and next action
+
+User requires generous framework defaults, application-level resource ceiling configuration and explicit runtime over-limit alarms. [Written proposal](../superpowers/specs/2026-10-11-prime-compaction-resource-policy-design.md): compaction total262144 tokens, witness frame16MiB/material64KiB, no additional authority; typed safe measured/limit/source/action diagnostics. Production implementation has not started. Root reran zero-network native provider-wrapper feasibility: actual native summary payload interception, no-send rejection and per-branch usage/unknown-cost tracking PASS with synthetic SSE. This verifies a supported seam, not a tokenizer bound or paid usage. Review written design before implementation plan; actual request-bound certification remains separately dependent on reliable provider input bounds.
 
 Known repair work95397749/14d35611/b2d8480d is complete within tested contracts and independently reviewed. Final `make promotion-check` full PASS25commands/provider0/full_datasetno; log `.asterion-private/task43-system-promotion-recheck.log`. Earlier failures were stale test-owned ESM wiring; fixture-onlye57f1fbd/097ae81c corrected them,27 pinned-resource and2 installed-P7 tests PASS. Documentation links and whitespace checks PASS.
 

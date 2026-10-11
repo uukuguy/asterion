@@ -14,6 +14,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | Purpose |
 |---|---|---|
+| `../superpowers/specs/2026-10-11-prime-compaction-resource-policy-design.md` | 🟡 design proposal | Application-configurable compaction/witness capacities, explicit safe runtime alarms and actual-request accounting dependency; no production implementation yet. |
 | `../architecture/agent-framework.md` | 🟢 active | Core framework contracts and Prime positioning: generic infrastructure plus domain research/data, autonomous falsifiable computation and verifiable research records. |
 | `../reviews/2026-10-08-p7-autonomous-bp35-comparison.md` | 🟢 active | Completed trial:2levels/166committed, stderr diagnostic overflow; L2 exploration regression, source-retrieval gap, exact replay/cleanup boundaries. |
 | `../reviews/2026-10-08-p7-notes-bp35-comparison.md` | 🟢 active | Completed comparison: four levels/335 committed actions plus partial late response; actual ARC process, memory regression, clock limits and redesign direction. |
