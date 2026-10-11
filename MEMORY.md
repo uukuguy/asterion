@@ -105,6 +105,7 @@
 ### feedback — research intensity, not production engineering
 
 - User2026-10-11: current solving work is supervised research. Track resource use and let the outer supervisor decide when to stop; automatic solving may retain fixed budgets.
+- User2026-10-11: record per-level and total resource use for later reasonable caps; inspect regressions across earlier levels too, including recurring death traps. Do not reduce the diagnosis to the unfinished final level.
 
 - Review changed code plus the key boundary assertions, and run **small
   targeted** regressions. Do not re-run full combination gates or full suites,

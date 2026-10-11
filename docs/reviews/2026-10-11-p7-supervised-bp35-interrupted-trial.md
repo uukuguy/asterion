@@ -52,3 +52,7 @@ Repair: explicit immutable scalar resource observation, read by ResearchMonitor 
 ## Budget conclusion
 
 Record completed and incomplete research separately.112 calls is an interrupted five-level observation, not a reasonable nine-level ceiling. Existing128 cap already failed a prior trial, but no complete nine-level resource distribution exists. Keep supervised monitoring and external stop; defer a supposedly validated automatic nine-level cap until completion/repeated evidence. Per-call transport/output/execution and cancellation controls remain valid.
+
+## Repair verification
+
+Source5f50969d adds frozen ArcAccountingSnapshot and passive accounting_snapshot; ResearchMonitor no longer calls status/terminal_snapshot. Real in-flight initialization/sample/event/heartbeat all failed before repair, then passed; true unknown outcomes still block status/observe/act.99focused tests and scopedRuffPASS, independent AstraAPPROVE and13testsPASS. Final full promotion pending. No post-repair model trial or solve-quality claim.
