@@ -101,3 +101,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task40 标准接入设计：[Prime 标准应用入口](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md)。D-2026-10-10-03 确认先迁移 P7/P1/P3–P6 已有真实模型路径的入口与资源所有权；P2 本轮记录目标与边界。书面设计已确认；独立应用无需注册，CLI 定位待定，P1–P6 Flash/P7 Sol 模型要求纳入；[实施计划](../superpowers/plans/2026-10-10-prime-standard-application-entry.md)Tasks 1–7 已实现并复审，Task8清理已提交，取消关闭已修复复审，最终无模型打包检查已通过，有限P7首关部署验收通过，Task40已完成。P3–P6 live 与确定性 witness 并存；专用摘要接通另作行为变更验证。
 
 - 后续专用压缩验证：D-2026-10-10-02 与工作清单补充低阈值 P7 实战触发测试；先接通专用摘要，再验证真实调用与内核/认知连续性，本轮 BP35 不变。
+
+- 监督研究预算设计：[设计](../superpowers/specs/2026-10-11-p7-supervised-research-design.md)、[实施计划](../superpowers/plans/2026-10-11-p7-supervised-research.md)：用户已确认，显式监督模式无总量硬停止，保留单次控制及有限自动预设；实施中。
