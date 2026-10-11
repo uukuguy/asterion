@@ -55,4 +55,4 @@ Record completed and incomplete research separately.112 calls is an interrupted 
 
 ## Repair verification
 
-Source5f50969d adds frozen ArcAccountingSnapshot and passive accounting_snapshot; ResearchMonitor no longer calls status/terminal_snapshot. Real in-flight initialization/sample/event/heartbeat all failed before repair, then passed; true unknown outcomes still block status/observe/act.99focused tests and scopedRuffPASS, independent AstraAPPROVE and13testsPASS. Final full promotion pending. No post-repair model trial or solve-quality claim.
+Source5f50969d adds frozen ArcAccountingSnapshot and passive accounting_snapshot; ResearchMonitor no longer calls status/terminal_snapshot. Real in-flight initialization/sample/event/heartbeat all failed before repair, then passed; true unknown outcomes still block status/observe/act.99focused tests and scopedRuffPASS, independent AstraAPPROVE and13testsPASS. Final-source full `make promotion-check` PASS25commands/provider_operations0/full_datasetno. Root13focused tests, lint anddocs319files/245linksPASS. No post-repair model trial or solve-quality claim.

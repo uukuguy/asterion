@@ -4,7 +4,7 @@
 
 ## 当前实施
 
-用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；此前未启动；用户现已授权一次完整BP35监督实测，运行已启动：worker supervised_live，hostPID59687，run p7-live-20261011081342-32907b2a2f5eb1d3c910cf85，unit asterion-p7-959191c96abc4b338074bbf77bbe34a8.service。私有根 `.asterion-private/p7-supervised-bp35-20261011-161337/trial/`；监测其 `.asterion-private/prime-p7-live/<run_id>/research-status.json`。guest RuntimeMax=infinity/stop180s；用户已中断：最终5/9、236动作/1RESET/112模型调用、约1462秒，封存/重放/清理标记通过。host和监测PID已退出、guestunit空，console保留。禁止重复启动；当前Task42修复已证监测干扰：status()污染在途事务诊断，改为不可变被动计量；修复5f50969d先RED后GREEN，99focusedPASS/AstraAPPROVE；最终promotion运行中（session54150，private p7-monitor-fix-promotion.log）。认知失败与全部关卡比较见新报告95fa1018；不宣称空间推理恢复。
+用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；此前未启动；用户现已授权一次完整BP35监督实测，运行已启动：worker supervised_live，hostPID59687，run p7-live-20261011081342-32907b2a2f5eb1d3c910cf85，unit asterion-p7-959191c96abc4b338074bbf77bbe34a8.service。私有根 `.asterion-private/p7-supervised-bp35-20261011-161337/trial/`；监测其 `.asterion-private/prime-p7-live/<run_id>/research-status.json`。guest RuntimeMax=infinity/stop180s；用户已中断：最终5/9、236动作/1RESET/112模型调用、约1462秒，封存/重放/清理标记通过。host和监测PID已退出、guestunit空，console保留。禁止重复启动；当前Task42修复已证监测干扰：status()污染在途事务诊断，改为不可变被动计量；修复5f50969d先RED后GREEN，99focusedPASS/AstraAPPROVE；最终full promotion25PASS/provider0/full_datasetno；Task42按观察正确性边界关闭，无新模型运行。认知失败与全部关卡比较见新报告95fa1018；不宣称空间推理恢复。
 
 ## 最新实测已结束
 
@@ -15,14 +15,14 @@
 - host已退出、guestunit不存在/0PID/空cgroup、trial临时.env删除，原console保留。
 - [实测报告](../reviews/2026-10-11-p7-bp35-full-game-trial.md)；私有证据 `.asterion-private/p7-full-bp35-20261011-135551/`。
 - 实测报告提交 `134f0ef2`；docs314/232及1973项私有manifest校验通过。
-- Task41已关闭，当前Task42被动监测修复最终打包验证中；专用摘要接通仍独立未完成。用户已授权新的完整监督实测，不能再沿用此前未授权声明。
+- Task41已关闭，Task42已关闭，当前无运行工作包；专用摘要接通仍独立未完成。用户已授权新的完整监督实测，不能再沿用此前未授权声明。
 
 ## 既有交接事实（本次运行不改写历史证据）
 
 
 
 
-- 分支 `feat/prime-research-notes`；Project route: managed。唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39与Task40均已关闭；Task41也已关闭，没有在执行的工作包。
+- 分支 `feat/prime-research-notes`；Project route: managed。唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39与Task40均已关闭；Task41与Task42也已关闭，没有在执行的工作包。
 - Task40标准入口迁移全部完成，独立源码复审、完整打包检查和有限P7首关部署验收通过。最终验收提交 `edd19f62`，日志同步 `d96e323f`；本轮没有push/merge。
 - 下一步候选：专用代码摘要接通及低阈值P7实战验证。先恢复设计与未知边界，确认独立实施范围，再推进；不得自动应用stash或启动BP35。
 
