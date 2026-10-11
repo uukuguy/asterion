@@ -4962,3 +4962,5 @@
 - 2026-10-11 Qualify Task44 as history-assisted execution; trace eight output truncations to bulky P7 history representations.
 - 2026-10-11 e2795610 qualifies history reuse and output loss to prevent overstating BP35 evidence.
 - 2026-10-11 Default historical experience disabled; P7 output capacity and display paging corrected for authorized clean trial.
+- 2026-10-11 b03b2307 isolates historical experience and aligns output transport for clean P7 qualification.
+- 2026-10-11 b03b2307 full promotion25PASS/provider0; clean BP35 trial authorized after output fix.
