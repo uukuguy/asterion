@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from decimal import Decimal
 import hashlib
 import hmac
@@ -21,11 +21,11 @@ import struct
 import time
 from typing import Literal, NoReturn, cast
 
-from .compaction_budget import ModelPrice, quote_compaction_reservation
+from .compaction_budget import ModelPrice, PrimeCompactionPolicy, quote_compaction_reservation
+from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
 from .summarization import (
     MATERIAL_KEYS,
     MATERIAL_VERSION,
-    MAX_MATERIAL_BYTES,
     build_summarization_material,
 )
 
@@ -34,17 +34,13 @@ PROTOCOL = "asterion.prime-context-witness/v1"
 PROJECTION = "asterion.prime-context-projection/v1"
 _ERROR = "invalid Prime context witness"
 _MAX_INTEGER = (1 << 53) - 1
-_MAX_FRAME = 1024 * 1024
 
 
 def _input_token_ceiling(request: str) -> int:
-    """Bound one summarization request's input cost, in tokens.
+    """Estimate request tokens from UTF-8 bytes; this is not a native input bound.
 
-    The reservation arithmetic is denominated in tokens, and a request is
-    measured in bytes. Four bytes per token is the conventional ceiling, so this
-    over-states the reservation rather than under-stating it, which is the
-    fail-closed direction. Feeding byte counts in as tokens instead overstated
-    cost roughly fourfold and silently tightened every cap by the same factor.
+    The inherited bytes/4 convention supports reservation arithmetic only. It
+    cannot certify actual provider token usage or request-bound authorization.
     """
     return (len(request.encode("utf-8")) + 3) // 4
 _HEX = re.compile(r"[0-9a-f]{64}")
@@ -103,6 +99,18 @@ class PrimeContextError(ValueError):
 
 def _fail() -> NoReturn:
     raise PrimeContextError(_ERROR) from None
+
+
+def _validate_policy(policy: PrimeCompactionPolicy, config_source: str) -> None:
+    if (type(policy) is not PrimeCompactionPolicy or type(config_source) is not str
+            or config_source not in {"framework-default", "application", "operator", "authority"}):
+        _fail()
+
+
+def _limit(code: str, observed: int, cap: int, source: str, *,
+           phase: str = "admission", action: str = "rejected") -> NoReturn:
+    raise ResourceLimitExceeded(LimitDiagnostic(
+        code, phase, action, observed, cap, "bytes", "exact", source))
 
 
 def _string(value: object) -> str:
@@ -299,14 +307,12 @@ def _validate_projection(value: object) -> dict:
     return projection
 
 
-def _validate_summarization(value: object) -> dict:
-    """Validate the Asterion-owned summarization material the extension composes from.
-
-    The native side is the authority for the prompt text: the extension holds no
-    prompt of its own, and every request body it reports back is assembled from
-    exactly these strings. The shape is closed here as tightly as the projection
-    format is.
-    """
+def _validate_summarization(value: object, *,
+    policy: PrimeCompactionPolicy = PrimeCompactionPolicy(),
+    config_source: str = "framework-default",
+) -> dict:
+    """Validate inherited frozen templates, not proof of native request parity."""
+    _validate_policy(policy, config_source)
 
     material = _record(value, set(MATERIAL_KEYS))
     _domain(material)
@@ -317,8 +323,8 @@ def _validate_summarization(value: object) -> dict:
         if not material[key]:
             _fail()
     encoded = _encode(material)
-    if not 0 < len(encoded) <= MAX_MATERIAL_BYTES:
-        _fail()
+    if len(encoded) > policy.max_material_bytes:
+        _limit("summarization-material-limit", len(encoded), policy.max_material_bytes, config_source)
     for key in MATERIAL_KEYS:
         text = material[key]
         expected = _MARKERS.get(key, ())
@@ -400,8 +406,14 @@ def _real_source(projection: dict) -> bool:
 
 
 def _validate_proposal(
-    proposal: Mapping[str, object], launch: str, command: str
+    proposal: Mapping[str, object], launch: str, command: str, *,
+    policy: PrimeCompactionPolicy = PrimeCompactionPolicy(),
+    config_source: str = "framework-default",
 ) -> dict:
+    _validate_policy(policy, config_source)
+    encoded_size = len(_encode(proposal))
+    if encoded_size > policy.max_frame_bytes:
+        _limit("witness-frame-limit", encoded_size, policy.max_frame_bytes, config_source)
     p = _record(proposal, _PROPOSAL)
     _identity(p, launch, command, "proposal")
     _identifier(p["first_kept_entry_id"])
@@ -464,10 +476,7 @@ def _validate_proposal(
         # The request embeds the serialized conversation being summarized, so a
         # real one exceeds any small constant. The transport frame cap is the
         # only non-arbitrary limit; the channel write enforces the total.
-        if (
-            encode_prime_context_v1(parsed).decode() != request
-            or count_rebuilt_context(parsed) > _MAX_FRAME
-        ):
+        if encode_prime_context_v1(parsed).decode() != request:
             _fail()
     diagnostics = _record(p["private_diagnostics"], {"tokensBefore"})
     _integer(diagnostics["tokensBefore"])
@@ -493,11 +502,18 @@ def validate_compaction_witness(
     *,
     expected_launch_nonce: str = "",
     expected_command_nonce: str = "",
+    policy: PrimeCompactionPolicy = PrimeCompactionPolicy(),
+    config_source: str = "framework-default",
 ) -> PrimeCompactionEvidence:
     """Validate exact private material; a session enforces the authenticated order."""
     try:
-        p = _validate_proposal(proposal, expected_launch_nonce, expected_command_nonce)
+        p = _validate_proposal(proposal, expected_launch_nonce, expected_command_nonce,
+            policy=policy, config_source=config_source)
         s = _record(persisted, _PERSISTED)
+        persisted_size = len(_encode(s))
+        if persisted_size > policy.max_frame_bytes:
+            _limit("witness-frame-limit", persisted_size, policy.max_frame_bytes,
+                config_source, phase="settlement", action="recovery-required")
         _identity(s, expected_launch_nonce, expected_command_nonce, "persisted")
         for key in (
             "authority_sha256",
@@ -591,6 +607,8 @@ def validate_compaction_witness(
             s["summary_sha256"],
             s["compaction_entry_sha256"],
         )
+    except ResourceLimitExceeded:
+        raise
     except (KeyError, TypeError, ValueError, RecursionError):
         _fail()
 
@@ -610,8 +628,20 @@ class PrimeContextWitnessSession:
         launch_nonce: str,
         mark_uncertain: Callable[[], object],
         timeout_seconds: float = 5.0,
-        max_frame_bytes: int = _MAX_FRAME,
+        policy: PrimeCompactionPolicy = PrimeCompactionPolicy(),
+        config_source: str = "framework-default",
+        max_frame_bytes: int | None = None,
     ):
+        _validate_policy(policy, config_source)
+        if max_frame_bytes is not None:
+            if type(max_frame_bytes) is not int:
+                _fail()
+            if policy != PrimeCompactionPolicy() and max_frame_bytes != policy.max_frame_bytes:
+                _fail()
+            try:
+                policy = replace(policy, max_frame_bytes=max_frame_bytes)
+            except ValueError:
+                _fail()
         if (
             type(channel) is not socket.socket
             or channel.family != socket.AF_UNIX
@@ -620,8 +650,6 @@ class PrimeContextWitnessSession:
             or type(timeout_seconds) not in {int, float}
             or not math.isfinite(timeout_seconds)
             or not 0 < timeout_seconds <= 60
-            or type(max_frame_bytes) is not int
-            or not 128 <= max_frame_bytes <= _MAX_FRAME
         ):
             _fail()
         self._launch = _hex(launch_nonce)
@@ -629,7 +657,8 @@ class PrimeContextWitnessSession:
         channel.setblocking(False)
         self._mark_uncertain = mark_uncertain
         self._timeout = timeout_seconds
-        self._cap = max_frame_bytes
+        self._policy, self._config_source = policy, config_source
+        self._cap = policy.max_frame_bytes
         self._state = "idle"
         self._nonce = ""
         self._authority = ""
@@ -668,6 +697,54 @@ class PrimeContextWitnessSession:
             except Exception:
                 pass
 
+    def _validate_arm_capacity(self) -> None:
+        # Establish complete arm admission before the owner activates any process.
+        arm = {"protocol": PROTOCOL, "launch_nonce": self._launch,
+            "command_nonce": self._launch, "authority_sha256": self._launch,
+            "phase": "arm", "compaction_policy": self._policy_payload(),
+            "summarization": _validate_summarization(build_summarization_material(),
+                policy=self._policy, config_source=self._config_source)}
+        self._check_frame_size(len(_encode(arm)))
+
+    def _policy_payload(self) -> dict:
+        return {**asdict(self._policy), "config_source": self._config_source}
+
+    def _check_frame_size(self, size: int) -> None:
+        if size <= 0:
+            _fail()
+        if size > self._cap:
+            _limit("witness-frame-limit", size, self._cap, self._config_source,
+                phase="settlement" if self._state == "approved" else "admission",
+                action="recovery-required" if self._state == "approved" else "rejected")
+
+    def _peer_limit(self, value: dict) -> None:
+        if value.get("phase") != "limit":
+            return
+        frame = _record(value, _BASE | {"limit_diagnostic"})
+        _identity(frame, self._launch, self._nonce, "limit")
+        if frame["authority_sha256"] != self._authority or not self._nonce:
+            _fail()
+        raw = _record(frame["limit_diagnostic"], {
+            "limit_code", "phase", "action", "observed", "limit", "unit",
+            "measurement", "config_source"})
+        try:
+            diagnostic = LimitDiagnostic(**raw)
+        except (TypeError, ValueError):
+            _fail()
+        # This peer only measures its injected transport and template capacities.
+        limits = {"witness-frame-limit": self._cap,
+            "summarization-material-limit": self._policy.max_material_bytes}
+        if (diagnostic.limit_code not in limits
+                or diagnostic.limit != limits[diagnostic.limit_code]
+                or diagnostic.config_source != self._config_source
+                or diagnostic.measurement != "exact" or diagnostic.observed is None
+                or diagnostic.observed <= diagnostic.limit
+                or (diagnostic.phase, diagnostic.action) != (
+                    ("settlement", "recovery-required") if self._state == "approved"
+                    else ("admission", "rejected"))):
+            _fail()
+        raise ResourceLimitExceeded(diagnostic)
+
     def _base(self, phase: str) -> dict:
         return {
             "protocol": PROTOCOL,
@@ -690,10 +767,10 @@ class PrimeContextWitnessSession:
         return min(self._timeout, max(0.0, self._deadline - time.monotonic()))
 
     async def _send(self, value: dict) -> None:
-        raw = bytearray(_encode(value))
+        encoded = _encode(value)
+        self._check_frame_size(len(encoded))
+        raw = bytearray(encoded)
         try:
-            if not 0 < len(raw) <= self._cap:
-                _fail()
             self._no_pending()
             wire = bytearray(struct.pack("!I", len(raw))) + raw
             try:
@@ -737,14 +814,14 @@ class PrimeContextWitnessSession:
                 size = struct.unpack("!I", header)[0]
             finally:
                 header[:] = b"\x00" * len(header)
-            if not 0 < size <= self._cap:
-                _fail()
+            self._check_frame_size(size)
             raw = await exact(size)
             try:
                 self._no_pending()
                 value = _record(_json(raw.decode("utf-8")))
                 if _encode(value) != raw:
                     _fail()
+                self._peer_limit(value)
                 return value
             finally:
                 raw[:] = b"\x00" * len(raw)
@@ -782,12 +859,17 @@ class PrimeContextWitnessSession:
             await self._send(
                 {
                     **self._base("arm"),
+                    "compaction_policy": self._policy_payload(),
                     "summarization": _validate_summarization(
-                        build_summarization_material()
+                        build_summarization_material(), policy=self._policy,
+                        config_source=self._config_source
                     ),
                 }
             )
             self._state = "armed"
+        except ResourceLimitExceeded:
+            self._fence()
+            raise
         except BaseException:
             self._fence()
             _fail()
@@ -804,7 +886,8 @@ class PrimeContextWitnessSession:
     ) -> bool:
         self._enter("armed")
         try:
-            p = _validate_proposal(await self._receive(), self._launch, self._nonce)
+            p = _validate_proposal(await self._receive(), self._launch, self._nonce,
+                policy=self._policy, config_source=self._config_source)
             if p["authority_sha256"] != self._authority:
                 _fail()
             approved = False
@@ -825,7 +908,7 @@ class PrimeContextWitnessSession:
                 quote = quote_compaction_reservation(
                     branch_input_caps=cast(tuple[int, int], caps),
                     branch_output_caps=(3276, 3276),
-                    price=price,
+                    price=price, policy=self._policy, config_source=self._config_source,
                 )
                 result = reserve(quote)
                 if inspect.isawaitable(result):
@@ -853,6 +936,9 @@ class PrimeContextWitnessSession:
             self._proposal = p if approved else None
             self._state = "approved" if approved else "idle"
             return approved
+        except ResourceLimitExceeded:
+            self._fence()
+            raise
         except BaseException:
             self._fence()
             _fail()
@@ -876,6 +962,7 @@ class PrimeContextWitnessSession:
                 persisted,
                 expected_launch_nonce=self._launch,
                 expected_command_nonce=self._nonce,
+                policy=self._policy, config_source=self._config_source,
             )
             if not callable(persist):
                 _fail()
@@ -890,6 +977,9 @@ class PrimeContextWitnessSession:
             self._proposal = None
             self._state = "idle"
             return evidence
+        except ResourceLimitExceeded:
+            self._fence()
+            raise
         except BaseException:
             self._fence()
             _fail()

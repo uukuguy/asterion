@@ -944,7 +944,7 @@ function readWitnessFrame(socket, timeoutMs = 5000) {
   });
 }
 
-test("the arm frame's native material drives the request the witness proposes", async () => {
+test("the arm frame's inherited material drives the request the witness proposes", async () => {
   const launch = "a".repeat(64);
   const pair = await socketPair();
   try {
@@ -952,7 +952,8 @@ test("the arm frame's native material drives the request the witness proposes", 
     pair.peer.write(witnessFrame({
       protocol: "asterion.prime-context-witness/v1",
       launch_nonce: launch, command_nonce: "b".repeat(64), authority_sha256: "c".repeat(64),
-      phase: "arm", summarization: material,
+      phase: "arm", summarization: material, compaction_policy: {max_total_tokens:262144,
+        max_frame_bytes:16777216,max_material_bytes:65536,config_source:"framework-default"},
     }));
     const proposal = await readWitnessFrame(pair.peer);
     assert.equal(proposal.phase, "proposal");
@@ -961,8 +962,8 @@ test("the arm frame's native material drives the request the witness proposes", 
     assert.equal(proposal.source_kind, "messages");
     assert.equal(proposal.turn_prefix_summary_request, null);
     assert.equal(proposal.private_diagnostics.tokensBefore, 12);
-    // The body is assembled from the material the native side sent, not from
-    // any prompt this extension carries.
+    // The body is assembled from the inherited material the Python host sent.
+    // This checks transport equality, not actual provider request parity.
     assert.equal(
       proposal.main_summary_request,
       composeSummarizationRequest(material, "SERIALIZED-CONVERSATION", material.initial_instruction, null),
@@ -985,7 +986,8 @@ test("system instructions alone cannot authorize a compaction proposal", async (
     event.preparation.messagesToSummarize = [{role:"system",content:"Only instructions",sections:{policy:"Keep safe"}}];
     const running = runInheritedWitness(pair, {event, launch});
     pair.peer.write(witnessFrame({protocol:"asterion.prime-context-witness/v1",launch_nonce:launch,
-      command_nonce:"b".repeat(64),authority_sha256:"c".repeat(64),phase:"arm",summarization:material}));
+      command_nonce:"b".repeat(64),authority_sha256:"c".repeat(64),phase:"arm",summarization:material,compaction_policy:{max_total_tokens:262144,
+        max_frame_bytes:16777216,max_material_bytes:65536,config_source:"framework-default"}}));
     await assert.rejects(readWitnessFrame(pair.peer, 400));
     assert.deepEqual(await running.result, {outcome:{cancel:true},closed:true});
   } finally { pair.close(); }
@@ -1005,7 +1007,8 @@ test("tampered arm material is rejected before any proposal", async () => {
       pair.peer.write(witnessFrame({
         protocol: "asterion.prime-context-witness/v1",
         launch_nonce: launch, command_nonce: "b".repeat(64), authority_sha256: "c".repeat(64),
-        phase: "arm", summarization: tampered,
+        phase: "arm", summarization: tampered, compaction_policy: {max_total_tokens:262144,
+          max_frame_bytes:16777216,max_material_bytes:65536,config_source:"framework-default"},
       }));
       await assert.rejects(readWitnessFrame(pair.peer, 400));
       assert.deepEqual(await running.result, { outcome: { cancel: true }, closed: true });

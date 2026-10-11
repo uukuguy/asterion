@@ -541,6 +541,18 @@ class _Services:
 
 
 class TestPrimePersistentOwner(unittest.TestCase):
+    def test_backend_spec_old_positional_construction_and_policy_validation(self):
+        from asterion.agents.prime.application import PrimeBackendSpec
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        from dataclasses import replace
+        spec = PrimeBackendSpec('session-1', 1, Path('/tmp/private'), 'continue-1',
+            AsterionPrimeLimits(8, 4, 600000), 64000, 500000, None, None, None)
+        self.assertEqual(spec.compaction_policy, PrimeCompactionPolicy())
+        self.assertEqual(spec.compaction_policy_source, 'framework-default')
+        for changes in ({'compaction_policy': {}}, {'compaction_policy_source': 'unknown'}):
+            with self.subTest(changes=changes), self.assertRaises(ProtocolError):
+                replace(spec, **changes)
+
     def test_runtime_observation_exposes_only_scalar_counters_and_safe_diagnostics(self):
         from types import SimpleNamespace
         app = self._persistent_app()

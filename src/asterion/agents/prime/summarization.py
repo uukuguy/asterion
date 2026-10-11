@@ -2,7 +2,9 @@
 
 Asterion prime is a reimplementation of the persistent-kernel coding agent, so
 this module owns the summarization text rather than importing it from any host
-build. It carries the same design as the kernel it reproduces:
+build. These inherited frozen templates do not certify actual native request
+parity or provider token bounds. It carries the same design as the kernel it
+reproduces:
 
 * one system prompt that forbids continuing the conversation;
 * an initial template and an update template over one fixed section format
@@ -37,7 +39,6 @@ _SEPARATOR = "\n\n"
 _ERROR = "invalid prime summarization material"
 # The whole material is one arm frame; a bloated constant set must fail closed
 # rather than push the witness frame toward its transport cap.
-MAX_MATERIAL_BYTES = 8_192
 
 
 SUMMARY_SYSTEM_PROMPT = (
@@ -348,7 +349,6 @@ def assert_material_shape(material: Mapping[str, object]) -> None:
 __all__ = (
     "CONVERSATION_BLOCK",
     "MATERIAL_KEYS",
-    "MAX_MATERIAL_BYTES",
     "MATERIAL_VERSION",
     "PREVIOUS_SUMMARY_BLOCK",
     "SUMMARY_INITIAL_TEMPLATE",

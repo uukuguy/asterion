@@ -1,3 +1,4 @@
+import { constants as bufferConstants } from "node:buffer";
 import { createHash, randomBytes } from "node:crypto";
 import { closeSync, fstatSync } from "node:fs";
 import { Socket } from "node:net";
@@ -7,12 +8,17 @@ import { countRebuiltContext } from "./context-counter.js";
 
 export const CONTEXT_WITNESS_PROTOCOL = "asterion.prime-context-witness/v1";
 export const SUMMARIZATION_MATERIAL_VERSION = "asterion.prime-summarization/v1";
-const MAX_FRAME = 1024 * 1024;
+const STRUCTURAL_FRAME_MAX = Math.min(0xffffffff, bufferConstants.MAX_LENGTH - 4);
+const DEFAULT_POLICY: Readonly<PrimeCompactionPolicy> = Object.freeze({
+  max_total_tokens: 262144, max_frame_bytes: 16777216, max_material_bytes: 65536 });
+const POLICY_KEYS = ["max_total_tokens", "max_frame_bytes", "max_material_bytes"];
+const CONFIG_SOURCES = ["framework-default", "application", "operator", "authority"] as const;
+const POLICY_ENV = "ASTERION_PRIME_IPYTHON_COMPACTION_POLICY";
 const NONCE = /^[0-9a-f]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SETTINGS = Object.freeze({ enabled: false, reserveTokens: 16384, keepRecentTokens: 256 });
 const BASE_KEYS = ["authority_sha256", "command_nonce", "launch_nonce", "phase", "protocol"];
-const ARM_KEYS = [...BASE_KEYS, "summarization"];
+const ARM_KEYS = [...BASE_KEYS, "summarization", "compaction_policy"];
 // Pi host mechanics this pinned source may not import for itself: the source is
 // validated to contain only `node:` specifiers and is loaded from a data: URL,
 // where the host package cannot resolve. The Asterion loader is a real module in
@@ -31,7 +37,6 @@ const MARKERS: Record<string, readonly string[]> = Object.freeze({
   user_instructions_template: [INSTRUCTIONS_MARKER],
 });
 const ALL_MARKERS = [CONVERSATION_MARKER, PREVIOUS_MARKER, INSTRUCTIONS_MARKER];
-const MAX_MATERIAL_BYTES = 8192;
 // The host accepts exactly these entry fields, rejects any other, and digests
 // the entry it receives. Pi's own entry additionally carries token accounting
 // (`usage.cost`) whose values are floats: the integer-only wire canonical form
@@ -72,10 +77,66 @@ export interface ContextExtensionApi {
   on(event: string, handler: (event: unknown, context: unknown) => Promise<unknown> | void): void;
 }
 
+export interface PrimeCompactionPolicy {
+  readonly max_total_tokens: number;
+  readonly max_frame_bytes: number;
+  readonly max_material_bytes: number;
+}
+export type ConfigSource = typeof CONFIG_SOURCES[number];
+interface LimitDiagnostic {
+  readonly limit_code: "witness-frame-limit" | "summarization-material-limit";
+  readonly phase: "admission" | "settlement";
+  readonly action: "rejected" | "recovery-required";
+  readonly observed: number;
+  readonly limit: number;
+  readonly unit: "bytes";
+  readonly measurement: "exact";
+  readonly config_source: ConfigSource;
+}
+class ResourceLimitError extends Error {
+  constructor(readonly diagnostic: Readonly<LimitDiagnostic>) { super("resource limit exceeded"); }
+}
+function resourceLimit(code: LimitDiagnostic["limit_code"], observed: number, limit: number,
+                       source: ConfigSource): never {
+  throw new ResourceLimitError(Object.freeze({limit_code: code, phase: "admission", action: "rejected",
+    observed: integer(observed), limit: integer(limit), unit: "bytes", measurement: "exact", config_source: source}));
+}
+function configSource(raw: unknown): ConfigSource {
+  const value = string(raw);
+  if (!CONFIG_SOURCES.includes(value as ConfigSource)) fail();
+  return value as ConfigSource;
+}
+function validatePolicy(raw: unknown): Readonly<PrimeCompactionPolicy> {
+  const value = object(raw);
+  keys(value, POLICY_KEYS);
+  const total = integer(value.max_total_tokens), frame = integer(value.max_frame_bytes),
+    material = integer(value.max_material_bytes);
+  if (total < 1 || frame < 1 || frame > STRUCTURAL_FRAME_MAX || material < 1 || material >= frame) fail();
+  return Object.freeze({max_total_tokens: total, max_frame_bytes: frame, max_material_bytes: material});
+}
+function transportedPolicy(raw: unknown): {policy: Readonly<PrimeCompactionPolicy>; source: ConfigSource} {
+  const value = object(raw);
+  keys(value, [...POLICY_KEYS, "config_source"]);
+  return {policy: validatePolicy({max_total_tokens:value.max_total_tokens,
+    max_frame_bytes:value.max_frame_bytes,max_material_bytes:value.max_material_bytes}),
+    source:configSource(value.config_source)};
+}
+function effectivePolicy(options: ContextWitnessOptions): Readonly<PrimeCompactionPolicy> {
+  let policy = validatePolicy(options.policy ?? DEFAULT_POLICY);
+  if (options.maxFrameBytes !== undefined) {
+    const alias = integer(options.maxFrameBytes);
+    if (options.policy !== undefined && alias !== policy.max_frame_bytes) fail();
+    policy = validatePolicy({...policy, max_frame_bytes:alias});
+  }
+  return policy;
+}
+
 export interface ContextWitnessOptions {
   descriptor: number;
   launchNonce: string;
   maxFrameBytes?: number;
+  policy?: Readonly<PrimeCompactionPolicy>;
+  configSource?: ConfigSource;
   timeoutMs?: number;
 }
 
@@ -115,8 +176,8 @@ function dependencies(value: unknown): ContextDependencies {
   return selected as unknown as ContextDependencies;
 }
 
-/** Validate the Asterion-owned prompt material the native side is authoritative for. */
-function summarization(value: unknown): SummarizationMaterial {
+/** Validate inherited templates; their equality does not prove native request parity. */
+function summarization(value: unknown, policy: Readonly<PrimeCompactionPolicy>, source: ConfigSource): SummarizationMaterial {
   const material = object(value);
   keys(material, SUMMARIZATION_KEYS);
   if (material.version !== SUMMARIZATION_MATERIAL_VERSION) fail();
@@ -124,7 +185,7 @@ function summarization(value: unknown): SummarizationMaterial {
     if (string(material[key]).length === 0) fail();
   }
   const size = Buffer.byteLength(canonicalJson(material), "utf8");
-  if (size === 0 || size > MAX_MATERIAL_BYTES) fail();
+  if (size > policy.max_material_bytes) resourceLimit("summarization-material-limit", size, policy.max_material_bytes, source);
   for (const key of SUMMARIZATION_KEYS) {
     const text = material[key] as string;
     const expected = MARKERS[key] ?? [];
@@ -175,6 +236,7 @@ class FramedSocket {
   readonly #socket: Socket;
   readonly #cap: number;
   readonly #timeout: number;
+  readonly #source: ConfigSource;
   #pending = Buffer.alloc(0);
   #frame: RecordValue | undefined;
   #waiting: { resolve(value: RecordValue): void; reject(error: Error): void } | undefined;
@@ -182,9 +244,10 @@ class FramedSocket {
 
   constructor(options: ContextWitnessOptions) {
     const descriptor = integer(options.descriptor);
-    this.#cap = integer(options.maxFrameBytes ?? MAX_FRAME);
+    this.#cap = effectivePolicy(options).max_frame_bytes;
+    this.#source = configSource(options.configSource ?? "framework-default");
     this.#timeout = integer(options.timeoutMs ?? 5000);
-    if (descriptor < 3 || this.#cap < 128 || this.#cap > MAX_FRAME || this.#timeout < 1 || this.#timeout > 60000) fail();
+    if (descriptor < 3 || this.#timeout < 1 || this.#timeout > 60000) fail();
     if (!fstatSync(descriptor).isSocket()) fail();
     this.#socket = new Socket({ fd: descriptor, readable: true, writable: true });
     this.#socket.on("error", () => this.close());
@@ -209,6 +272,16 @@ class FramedSocket {
   #data(chunk: Buffer): void {
     try {
       if (this.#closed || this.#frame !== undefined || this.#pending.length + chunk.length > this.#cap + 4) fail();
+      // Inspect a split or complete unsigned header before copying any body.
+      if (this.#pending.length < 4 && this.#pending.length + chunk.length >= 4) {
+        const header = Buffer.alloc(4);
+        try {
+          this.#pending.copy(header);
+          chunk.copy(header, this.#pending.length, 0, 4 - this.#pending.length);
+          const declared = header.readUInt32BE(0);
+          if (declared === 0 || declared > this.#cap) fail();
+        } finally { header.fill(0); }
+      }
       const combined = Buffer.concat([this.#pending, chunk]);
       this.#pending.fill(0);
       chunk.fill(0);
@@ -228,6 +301,7 @@ class FramedSocket {
       if (waiting) waiting.resolve(frame);
       else this.#frame = frame;
     } catch { this.close(); }
+    finally { chunk.fill(0); }
   }
 
   async #bounded<T>(operation: Promise<T>): Promise<T> {
@@ -247,7 +321,10 @@ class FramedSocket {
 
   async write(value: RecordValue): Promise<void> {
     if (this.#closed || this.#frame || this.#pending.length) fail();
-    const raw = Buffer.from(canonicalJson(value), "utf8");
+    const text = canonicalJson(value);
+    const size = Buffer.byteLength(text, "utf8");
+    if (size > this.#cap) resourceLimit("witness-frame-limit", size, this.#cap, this.#source);
+    const raw = Buffer.from(text, "utf8");
     let wire: Buffer | undefined;
     try {
       if (raw.length === 0 || raw.length > this.#cap) fail();
@@ -332,6 +409,8 @@ export class ContextWitness {
   readonly #channel: FramedSocket;
   readonly #deps: ContextDependencies;
   readonly #launch: string;
+  readonly #policy: Readonly<PrimeCompactionPolicy>;
+  readonly #source: ConfigSource;
   readonly #seen = new Set<string>();
   #identity: RecordValue | undefined;
   #proposal: RecordValue | undefined;
@@ -339,6 +418,8 @@ export class ContextWitness {
   #active = false;
 
   constructor(deps: ContextDependencies, options: ContextWitnessOptions) {
+    this.#policy = effectivePolicy(options);
+    this.#source = configSource(options.configSource ?? "framework-default");
     this.#deps = dependencies(deps);
     this.#launch = nonce(options.launchNonce);
     this.#channel = new FramedSocket(options);
@@ -354,17 +435,29 @@ export class ContextWitness {
     if (this.#identity && (frame.command_nonce !== this.#identity.command_nonce || frame.authority_sha256 !== this.#identity.authority_sha256)) fail();
   }
 
+  async #refuseLimit(error: unknown, settled: boolean): Promise<void> {
+    if (!(error instanceof ResourceLimitError) || !this.#identity || this.closed) return;
+    const diagnostic = settled ? Object.freeze({...error.diagnostic,
+      phase: "settlement", action: "recovery-required"}) : error.diagnostic;
+    try {
+      // Complete arm admission leaves room for this tiny, authenticated refusal.
+      await this.#channel.write({...this.#identity, phase:"limit", limit_diagnostic:diagnostic});
+    } catch { /* A refusal that cannot fit closes safely without approval. */ }
+  }
+
   async before(rawEvent: unknown, rawContext: unknown): Promise<undefined | { cancel: true }> {
     try {
       if (this.closed || this.#active || this.#proposal) fail();
       this.#active = true;
       const arm = await this.#channel.read();
       this.#authenticate(arm, "arm", ARM_KEYS);
-      const summaryMaterial = summarization(arm.summarization);
+      const configured = transportedPolicy(arm.compaction_policy);
+      if (canonicalJson(configured.policy) !== canonicalJson(this.#policy) || configured.source !== this.#source) fail();
       if (this.#seen.has(string(arm.command_nonce))) fail();
       this.#seen.add(string(arm.command_nonce));
       this.#identity = { protocol: CONTEXT_WITNESS_PROTOCOL, launch_nonce: this.#launch,
         command_nonce: arm.command_nonce, authority_sha256: arm.authority_sha256 };
+      const summaryMaterial = summarization(arm.summarization, this.#policy, this.#source);
       const event = object(rawEvent), context = object(rawContext);
       if (event.type !== "session_before_compact") fail();
       const signal = event.signal as AbortSignal | undefined;
@@ -385,7 +478,6 @@ export class ContextWitness {
       // The request embeds the serialized conversation being summarized, so a
       // real one exceeds any small constant; the transport frame cap is the
       // only non-arbitrary limit, and the channel write enforces the total.
-      if (Buffer.byteLength(main) > MAX_FRAME || (prefix !== null && Buffer.byteLength(prefix) > MAX_FRAME)) fail();
       const preJson = canonicalJson(pre);
       this.#proposal = { ...this.#identity, phase: "proposal", first_kept_entry_id: proposed.first_kept_entry_id,
         covered_leaf_id: proposed.covered_leaf_id, preparation: proposed, preparation_sha256: digest(proposed),
@@ -403,7 +495,8 @@ export class ContextWitness {
       }
       if (decision.status !== "approve" || signal?.aborted || this.closed) fail();
       return undefined;
-    } catch {
+    } catch (error) {
+      await this.#refuseLimit(error, false);
       // Pi's extension runner can swallow exceptions. Positive cancellation is
       // required here to prevent its built-in summary or append from running.
       this.close();
@@ -453,7 +546,8 @@ export class ContextWitness {
       const ack = await this.#channel.read();
       this.#authenticate(ack, "ack", BASE_KEYS);
       this.#proposal = this.#branch = this.#identity = undefined;
-    } catch {
+    } catch (error) {
+      await this.#refuseLimit(error, true);
       this.close();
       // The owner observes EOF/missing persisted acknowledgement and fences even
       // when Pi catches an extension error after its session already mutated.
@@ -485,6 +579,7 @@ export function discardContextWitnessEnvironment(): void {
   const fd = process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD;
   delete process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD;
   delete process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE;
+  delete process.env[POLICY_ENV];
   try {
     if (fd !== undefined && /^[1-9][0-9]*$/.test(fd) && Number.isSafeInteger(Number(fd)) && Number(fd) >= 3) closeSync(Number(fd));
   } catch {}
@@ -493,16 +588,22 @@ export function discardContextWitnessEnvironment(): void {
 export function registerContextWitnessFromEnvironment(pi: unknown, deps: unknown): ContextWitness | undefined {
   const fd = process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD;
   const launch = process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE;
+  const bootstrap = process.env[POLICY_ENV];
   delete process.env.ASTERION_PRIME_IPYTHON_CONTEXT_FD;
   delete process.env.ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE;
-  // The host-injected existing extension binding decides whether this extension
-  // witnesses compaction at all. The Pi mechanics are supplied by the loader on
-  // every launch, so their presence says nothing about that binding.
-  if (fd === undefined && launch === undefined) return;
-  if (fd === undefined || !/^[1-9][0-9]*$/.test(fd) || launch === undefined) {
+  delete process.env[POLICY_ENV];
+  // Only the existing host binding supplies this private transport, never .env.
+  if (fd === undefined && launch === undefined && bootstrap === undefined) return;
+  try {
+    if (fd === undefined || !/^[1-9][0-9]*$/.test(fd) || launch === undefined ||
+        bootstrap === undefined || Buffer.byteLength(bootstrap, "utf8") > 512) fail();
+    const raw = JSON.parse(bootstrap);
+    if (canonicalJson(raw) !== bootstrap) fail();
+    const configured = transportedPolicy(raw);
+    return registerContextWitness(pi as ContextExtensionApi, deps as ContextDependencies,
+      {descriptor:Number(fd), launchNonce:launch, policy:configured.policy, configSource:configured.source});
+  } catch {
     try { if (fd !== undefined && /^[1-9][0-9]*$/.test(fd) && Number.isSafeInteger(Number(fd)) && Number(fd) >= 3) closeSync(Number(fd)); } catch {}
     fail();
   }
-  return registerContextWitness(pi as ContextExtensionApi, deps as ContextDependencies,
-    { descriptor: Number(fd), launchNonce: launch });
 }

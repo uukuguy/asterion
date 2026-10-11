@@ -83,7 +83,7 @@ def quote_compaction_reservation(*, branch_input_caps: tuple[int, int],
 
 These declarations specify public contracts; the implementation steps below supply concrete behavior. `LimitDiagnostic` validates closed sets: codes `compaction-token-limit`, `compaction-cost-limit`, `compaction-callback-limit`, `compaction-deadline`, `compaction-input-bound-unavailable`, `prime-session-token-limit`, `prime-session-cost-limit`, `prime-parent-token-limit`, `prime-parent-cost-limit`, `witness-frame-limit`, `summarization-material-limit`, `ipython-output-limit`, `context-memory-limit`, `context-archive-limit`, `prime-model-callback-limit`, `prime-tool-callback-limit`, `prime-deadline`, `pi-output-limit`; phases `admission/execution/settlement`; actions `observed/rejected/stopped/recovery-required`; units `tokens/bytes/callbacks/milliseconds/cost-micros`; measurements `exact/conservative-bound/estimate/unavailable`; sources `framework-default/application/operator/authority`. Task3 extends the closed code set with the four session/parent codes listed here and adds accepted-code/wrong-unit validation rows; no additional diagnostic fields are introduced. Code/unit mapping must agree (frame/material/output/memory/archive -> bytes; callback -> callbacks; deadline -> milliseconds; compaction/session/parent cost -> cost-micros; session/parent token and other compaction codes -> tokens). `observed=None` iff measurement is `unavailable`. Validate exact `int` (reject bool), `0 <= observed <= 2**53-1`, `0 <= limit <= 2**53-1`. Never accept arbitrary strings through exception attributes.
 
-- [ ] **Step 1: Add failing primitive tests.**
+- [x] **Step 1: Add failing primitive tests.**
 
 ```python
 from dataclasses import FrozenInstanceError, asdict
@@ -150,12 +150,12 @@ class TestLimitDiagnostics(unittest.TestCase):
 
 Also add `subTest` validation rows for every enum field, bool/negative/unsafe numeric values, observed/measurement mismatch, wrong code/unit, and old seven-positional-field `FailureDiagnostic` construction. Use `dataclasses.replace(self.diagnostic(), **changes)` to drive invalid rows.
 
-- [ ] **Step 2: Verify tests fail because the new imports/interfaces do not exist.**
+- [x] **Step 2: Verify tests fail because the new imports/interfaces do not exist.**
 
 Run: `uv run python -m unittest -v tests.test_prime_resource_policy tests.test_prime_diagnostics`.
 Expected: import failure for `PrimeCompactionPolicy`/`LimitDiagnostic`; existing tests remain unchanged at this step.
 
-- [ ] **Step 3: Implement validated primitives and preserve legacy CLI input shape.**
+- [x] **Step 3: Implement validated primitives and preserve legacy CLI input shape.**
 
 Use this policy validation body and quote arithmetic:
 
@@ -186,12 +186,12 @@ raise ResourceLimitExceeded(LimitDiagnostic(
 
 The quote API receives supplied bounds; its caller must label byte-derived estimates correctly when projecting an admission alarm. `_quote_from_json` continues to accept exactly `branch_input_caps`, `branch_output_caps`, `price`; no new mandatory CLI key. `ResourceLimitExceeded` subclasses `ValueError` for existing handlers, stores only exact validated `LimitDiagnostic`, sets fixed message `resource limit exceeded` and code from that diagnostic. Add typed cause-chain extraction parallel to `failure_metadata` with cycle detection. `capture_failure` attaches the typed diagnostic and prefers its closed code; `capture_limit` calls `capture_failure` with `ResourceLimitExceeded(diagnostic)`. Sink failures return `None` exactly as before.
 
-- [ ] **Step 4: Run focused tests and adapt obsolete fixed-cap assertions.**
+- [x] **Step 4: Run focused tests and adapt obsolete fixed-cap assertions.**
 
 Run: `uv run python -m unittest -v tests.test_prime_resource_policy tests.test_prime_diagnostics tests.test_asterion_prime_context`.
 Expected: PASS after changing former fixed-16000 tests to explicitly supply `PrimeCompactionPolicy(max_total_tokens=16000)`. Preserve existing request-estimate assertions and document that they prove arithmetic only. No claim of provider token accounting.
 
-- [ ] **Step 5: Review and commit this independently testable primitive boundary.**
+- [x] **Step 5: Review and commit this independently testable primitive boundary.**
 
 ```bash
 git add src/asterion/services/diagnostics.py src/asterion/agents/prime/compaction_budget.py tests/test_prime_resource_policy.py tests/test_prime_diagnostics.py tests/test_asterion_prime_context.py
@@ -576,3 +576,5 @@ A separate plan is required after reliable provider-specific input-bound evidenc
 - Review focuses on code and fail-closed boundary assertions. Avoid exhaustive invented stress suites or extra architectural refactors.
 - Root owns integration/commits and performs repository journal updates after each actual commit; plan commands are execution instructions, not commits already made by the planning worker.
 
+
+Execution receipt: Task1 committed739f2caf; root80tests PASS and independent specification/code-quality review PASS. Task2 capacity transport in progress; no provider calls.

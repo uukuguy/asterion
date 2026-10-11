@@ -408,6 +408,138 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
             self.session.close()
             self.peer.close()
 
+    async def test_arm_contains_injected_policy(self):
+        await self.session.arm(command_nonce=COMMAND, authority_sha256=AUTHORITY)
+        observed = await receive(self.peer)
+        self.assertEqual(observed['compaction_policy'], {
+            'max_total_tokens': 262144, 'max_frame_bytes': 16777216,
+            'max_material_bytes': 65536, 'config_source': 'framework-default'})
+
+    async def test_incoming_frame_header_rejects_before_body_allocation(self):
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        from asterion.services.diagnostics import ResourceLimitExceeded
+        self.session.close()
+        self.peer.close()
+        self.host, self.peer = socket.socketpair()
+        self.peer.setblocking(False)
+        self.session = self.context.PrimeContextWitnessSession(self.host,
+            launch_nonce=LAUNCH, mark_uncertain=lambda: None,
+            policy=PrimeCompactionPolicy(max_frame_bytes=8192, max_material_bytes=4096))
+        await asyncio.get_running_loop().sock_sendall(self.peer, struct.pack('!I', 8193))
+        with self.assertRaises(ResourceLimitExceeded) as caught:
+            await self.session._receive()
+        self.assertEqual(caught.exception.limit_diagnostic.observed, 8193)
+        self.assertEqual(caught.exception.limit_diagnostic.limit, 8192)
+
+    async def test_whole_frame_capacity_and_large_default_frame(self):
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        from asterion.services.diagnostics import ResourceLimitExceeded
+        for size in (8191, 8192, 8193, 1024 * 1024 + 1):
+            with self.subTest(size=size):
+                self.session.close()
+                self.peer.close()
+                self.host, self.peer = socket.socketpair()
+                self.peer.setblocking(False)
+                policy = (PrimeCompactionPolicy() if size > 8193 else
+                    PrimeCompactionPolicy(max_frame_bytes=8192, max_material_bytes=4096))
+                self.session = self.context.PrimeContextWitnessSession(self.host,
+                    launch_nonce=LAUNCH, mark_uncertain=lambda: None, policy=policy)
+                payload = {'text': 'x' * (size - len(encode({'text': ''})))}
+                sending = asyncio.create_task(send(self.peer, payload))
+                if size == 8193:
+                    with self.assertRaises(ResourceLimitExceeded):
+                        await self.session._receive()
+                    self.session.close()
+                else:
+                    self.assertEqual(await self.session._receive(), payload)
+                await asyncio.gather(sending, return_exceptions=True)
+
+    async def test_outgoing_capacity_checks_complete_frame_before_write(self):
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        from asterion.services.diagnostics import ResourceLimitExceeded
+        self.session.close()
+        self.peer.close()
+        self.host, self.peer = socket.socketpair()
+        self.peer.setblocking(False)
+        self.session = self.context.PrimeContextWitnessSession(self.host,
+            launch_nonce=LAUNCH, mark_uncertain=lambda: None,
+            policy=PrimeCompactionPolicy(max_frame_bytes=8192, max_material_bytes=4096))
+        for size in (8191, 8192, 8193):
+            with self.subTest(size=size):
+                payload = {'text': 'x' * (size - len(encode({'text': ''})))}
+                if size > 8192:
+                    with self.assertRaises(ResourceLimitExceeded) as caught:
+                        await self.session._send(payload)
+                    self.assertEqual(caught.exception.limit_diagnostic.observed, size)
+                else:
+                    reading = asyncio.create_task(receive(self.peer))
+                    await self.session._send(payload)
+                    self.assertEqual(await reading, payload)
+
+    async def test_legacy_frame_alias_has_one_effective_capacity(self):
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        self.session.close()
+        self.peer.close()
+        self.host, self.peer = socket.socketpair()
+        self.peer.setblocking(False)
+        self.session = self.context.PrimeContextWitnessSession(self.host,
+            launch_nonce=LAUNCH, mark_uncertain=lambda: None, max_frame_bytes=1048576)
+        self.assertEqual(self.session._policy.max_frame_bytes, 1048576)
+        with self.assertRaises(self.context.PrimeContextError):
+            self.context.PrimeContextWitnessSession(self.host, launch_nonce=LAUNCH,
+                mark_uncertain=lambda: None, max_frame_bytes=1048576,
+                policy=PrimeCompactionPolicy(max_frame_bytes=2000000))
+
+    async def test_limit_after_approval_retains_typed_error_and_recovery_fence(self):
+        from dataclasses import asdict
+        from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
+        await self.arm()
+        await self.decision()
+        diagnostic = LimitDiagnostic('witness-frame-limit', 'settlement',
+            'recovery-required', 17000000, 16777216, 'bytes', 'exact', 'framework-default')
+        await send(self.peer, {**self.session._base('limit'), 'limit_diagnostic': asdict(diagnostic)})
+        with self.assertRaises(ResourceLimitExceeded) as caught:
+            await self.session.receive_persisted(persist=lambda _raw: None)
+        self.assertEqual(caught.exception.limit_diagnostic, diagnostic)
+        self.assertTrue(self.session.uncertain)
+
+    async def test_local_frame_limit_after_approval_labels_recovery(self):
+        from asterion.services.diagnostics import ResourceLimitExceeded
+        await self.arm()
+        await self.decision()
+        await asyncio.get_running_loop().sock_sendall(self.peer, struct.pack('!I', 16777217))
+        with self.assertRaises(ResourceLimitExceeded) as caught:
+            await self.session.receive_persisted(persist=lambda _raw: None)
+        self.assertEqual(caught.exception.limit_diagnostic.phase, 'settlement')
+        self.assertEqual(caught.exception.limit_diagnostic.action, 'recovery-required')
+        self.assertTrue(self.session.uncertain)
+
+    async def test_authenticated_peer_limit_is_typed_and_malformed_is_protocol_error(self):
+        from dataclasses import asdict
+        from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
+        diagnostic = asdict(LimitDiagnostic('witness-frame-limit', 'admission', 'rejected',
+            17000000, 16777216, 'bytes', 'exact', 'framework-default'))
+        for changes in ({}, {'launch_nonce': 'd' * 64},
+                {'limit_diagnostic': {**diagnostic, 'observed': True}},
+                {'limit_diagnostic': {**diagnostic, 'extra': 'sentinel'}}):
+            with self.subTest(changes=changes):
+                self.session.close()
+                self.peer.close()
+                self.host, self.peer = socket.socketpair()
+                self.peer.setblocking(False)
+                self.session = self.context.PrimeContextWitnessSession(self.host,
+                    launch_nonce=LAUNCH, mark_uncertain=lambda: None)
+                await self.arm()
+                await send(self.peer, {**self.session._base('limit'),
+                    'limit_diagnostic': diagnostic, **changes})
+                expected = ResourceLimitExceeded if not changes else self.context.PrimeContextError
+                with self.assertRaises(expected) as caught:
+                    await self.session.receive_proposal_and_decide(price=ModelPrice(0, 0),
+                        remaining_callbacks=2, deadline=time.monotonic() + 1,
+                        reserve=lambda _quote: None)
+                if not changes:
+                    self.assertEqual(caught.exception.limit_diagnostic.observed, 17000000)
+
     async def arm(self):
         await self.session.arm(command_nonce=COMMAND, authority_sha256=AUTHORITY)
         arm = await receive(self.peer)
@@ -656,6 +788,27 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
             )
         self.assertTrue(self.session.uncertain)
         await asyncio.gather(sending, return_exceptions=True)
+
+
+class TestCompactionMaterialPolicy(ContextMixin, unittest.TestCase):
+    def test_material_capacity_is_measured_from_canonical_bytes(self):
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        from asterion.agents.prime.summarization import build_summarization_material
+        from asterion.services.diagnostics import ResourceLimitExceeded
+        context = self.module()
+        material = build_summarization_material()
+        cap = 12000
+        policy = PrimeCompactionPolicy(max_frame_bytes=24000, max_material_bytes=cap)
+        initial = len(encode(material))
+        for size in (cap - 1, cap, cap + 1):
+            with self.subTest(size=size):
+                padded = {**material, 'system_prompt': material['system_prompt'] + 'x' * (size - initial)}
+                if size <= cap:
+                    self.assertEqual(context._validate_summarization(padded, policy=policy), padded)
+                else:
+                    with self.assertRaises(ResourceLimitExceeded) as caught:
+                        context._validate_summarization(padded, policy=policy)
+                    self.assertEqual(caught.exception.limit_diagnostic.observed, size)
 
 
 class TestCompactionInputTokenCeiling(unittest.TestCase):

@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from asterion.agents.prime.backend import PrimePromptRequest, PrimeSessionBackend
-from asterion.agents.prime.compaction_budget import ModelPrice
+from asterion.agents.prime.compaction_budget import ModelPrice, PrimeCompactionPolicy
 from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.session import AsterionPrimeLimits
 from asterion.agents.prime.state import PrimeBackendIdentity
@@ -225,6 +225,8 @@ class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
                     **asdict(limits),
                     "aggregate_tokens": 64000,
                     "cost_micros": 500000,
+                    "compaction_policy": asdict(PrimeCompactionPolicy()),
+                    "compaction_policy_source": "framework-default",
                 }
             ),
         )

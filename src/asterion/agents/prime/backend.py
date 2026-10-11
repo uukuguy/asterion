@@ -19,6 +19,7 @@ from typing import Literal, Protocol
 from asterion.agents.prime.compaction_budget import (
     CompactionReservationQuote,
     ModelPrice,
+    PrimeCompactionPolicy,
 )
 from asterion.agents.prime.context import (
     PrimeContextWitnessSession,
@@ -275,8 +276,15 @@ class PrimeSessionBackend:
         compaction_instructions: Mapping[str, str] | None = None,
         diagnostics: DiagnosticSink | None = None,
         task_deadline: TaskDeadline | None = None,
+        compaction_policy: PrimeCompactionPolicy = PrimeCompactionPolicy(),
+        compaction_policy_source: str = "framework-default",
     ) -> None:
         try:
+            if (type(compaction_policy) is not PrimeCompactionPolicy
+                    or type(compaction_policy_source) is not str
+                    or compaction_policy_source not in {
+                        "framework-default", "application", "operator", "authority"}):
+                raise ValueError
             if type(identity) is not PrimeBackendIdentity or store.identity != identity:
                 raise ValueError
             if any(
@@ -294,6 +302,8 @@ class PrimeSessionBackend:
                         **asdict(limits),
                         "aggregate_tokens": aggregate_tokens,
                         "cost_micros": cost_micros,
+                        "compaction_policy": asdict(compaction_policy),
+                        "compaction_policy_source": compaction_policy_source,
                     }
                 )
             ):

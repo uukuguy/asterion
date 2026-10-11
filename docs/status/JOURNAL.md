@@ -4948,3 +4948,4 @@
 - 2026-10-11 35c35520 records configurable Prime resource ceilings and explicit runtime alarm design; preserves authority and request-certification limitations.
 - 2026-10-11 80c17476 records resource-policy design receipt; user approves implementation with configuration, explicit alarms and unchanged authority.
 - 2026-10-11 739f2caf adds application-configurable compaction arithmetic and safe typed limit diagnostics;80tests and independent review pass.
+- 2026-10-11 b73baf17 commits approved resource implementation plan; distinguishes command, session and parent authority alarms before approval.

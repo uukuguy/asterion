@@ -17,7 +17,7 @@ from asterion.agents.prime.backend import (
     PrimeSessionBackend,
 )
 from asterion.agents.prime.execution import PrimeExecutionKernel
-from asterion.agents.prime.compaction_budget import ModelPrice
+from asterion.agents.prime.compaction_budget import ModelPrice, PrimeCompactionPolicy
 from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.session import AsterionPrimeLimits
 from asterion.agents.prime.state import PrimeBackendIdentity
@@ -223,7 +223,9 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
             "continuation-1",
             private_root_identity(private),
             digest(
-                {**asdict(limits), "aggregate_tokens": 64000, "cost_micros": 500000}
+                {**asdict(limits), "aggregate_tokens": 64000, "cost_micros": 500000,
+                 "compaction_policy": asdict(PrimeCompactionPolicy()),
+                 "compaction_policy_source": "framework-default"}
             ),
         )
         self.store = FilePrimeSessionStore(private, self.identity)
@@ -295,6 +297,19 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         )
         for secret in ("PRIVATE-PROMPT", "PRIVATE-ANSWER", str(self.root)):
             self.assertNotIn(secret, public)
+
+    async def test_changed_policy_or_source_rejects_existing_backend_identity(self):
+        for changes in ({'compaction_policy': PrimeCompactionPolicy(max_total_tokens=48000)},
+                {'compaction_policy_source': 'application'}):
+            with self.subTest(changes=changes):
+                backend = self.backend
+                with self.assertRaises(PrimeBackendError):
+                    PrimeSessionBackend(identity=self.identity, store=self.store,
+                        rpc_session=self.rpc, extension_binding=backend._binding,
+                        extension_lease=self.lease, approved_command=backend._approved_command,
+                        limits=backend._limits, aggregate_tokens=64000, cost_micros=500000,
+                        **changes)
+                self.assertEqual(self.rpc.opens, 0)
 
     async def test_divergent_duplicate_identity_generation_and_cursor_reject(self):
         await self.backend.execute_prompt(self.request())
@@ -1019,7 +1034,8 @@ if __name__ == "__main__":
 
 
 class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
-    async def fixture(self):
+    async def fixture(self, *, compaction_policy=PrimeCompactionPolicy(),
+                      compaction_policy_source='framework-default', environment=None, diagnostics=None):
         import time
         from asterion.agents.prime.application import (
             PrimeApplicationSpec, PrimeOperatorContext, PrimeBackendSpec,
@@ -1037,10 +1053,12 @@ class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
         self.spec = PrimeBackendSpec('owner-session', 1, private, 'continue-one',
             AsterionPrimeLimits(8, 4, 600000), 64000, 500000,
             ModelPrice(300000, 1200000), 'authority-1', {},
-            compat_provider_id='prime-applications')
+            compat_provider_id='prime-applications', compaction_policy=compaction_policy,
+            compaction_policy_source=compaction_policy_source)
         operator = PrimeOperatorContext(Path('/usr/bin/true'), None, root,
-            'deepseek', 'deepseek-flash', 'off', {},
-            TaskDeadline(deadline_monotonic=time.monotonic()+60, deadline_epoch=time.time()+60))
+            'deepseek', 'deepseek-flash', 'off', {} if environment is None else environment,
+            TaskDeadline(deadline_monotonic=time.monotonic()+60, deadline_epoch=time.time()+60),
+            diagnostics=diagnostics)
         self.app = prepare_prime_application(
             PrimeApplicationSpec('prime.ipython-coding', '1.0.0', 'persistent-code-tools',
                                  tools=PrimeToolModuleArtifact(extension, CORE_TOOL_REGISTRY)),
@@ -1058,6 +1076,65 @@ class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
             return self.rpc
         with patch('asterion.runtime.native_rpc.build_rpc_session', side_effect=rpc):
             self.attachment = await self.app.open_backend(spec=self.spec, services=self.executor)
+
+    async def test_injected_policy_bootstrap_and_identity_resume_mismatch(self):
+        selected = PrimeCompactionPolicy(max_total_tokens=48000, max_frame_bytes=20000,
+            max_material_bytes=10000)
+        await self.fixture(compaction_policy=selected, compaction_policy_source='application')
+        resource = self.app._persistent
+        bootstrap = resource.environment['ASTERION_PRIME_IPYTHON_COMPACTION_POLICY']
+        self.assertLessEqual(len(bootstrap.encode()), 512)
+        self.assertEqual(json.loads(bootstrap), {**asdict(selected), 'config_source': 'application'})
+        identity = self.attachment.snapshot().identity
+        expected = {**asdict(self.spec.limits), 'aggregate_tokens': self.spec.aggregate_tokens,
+            'cost_micros': self.spec.cost_micros, 'compaction_policy': asdict(selected),
+            'compaction_policy_source': 'application'}
+        self.assertEqual(identity.ceilings_sha256, digest(expected))
+        old = replace(identity, ceilings_sha256=digest({**expected,
+            'compaction_policy': asdict(PrimeCompactionPolicy())}))
+        self.assertNotEqual(old.ceilings_sha256, identity.ceilings_sha256)
+        resource.store.close()
+        from asterion.agents.prime.store import PrimeStoreError
+        with self.assertRaises(PrimeStoreError):
+            FilePrimeSessionStore(self.spec.private_root, old)
+        self.assertEqual(self.rpc.opens, 0)
+
+    async def test_operator_cannot_replace_trusted_policy_transport(self):
+        from asterion.runtime.protocol import ProtocolError
+        with patch('asterion.runtime.native_rpc.build_rpc_session') as build:
+            with self.assertRaises(ProtocolError):
+                await self.fixture(environment={
+                    'ASTERION_PRIME_IPYTHON_COMPACTION_POLICY': 'private-sentinel'})
+            build.assert_not_called()
+
+    async def test_complete_arm_is_checked_before_rpc_process_construction(self):
+        from asterion.runtime.protocol import ProtocolError
+        from asterion.services.diagnostics import limit_diagnostic
+        from asterion.agents.prime.context import _encode
+        from asterion.agents.prime.summarization import build_summarization_material
+        sink = MemoryDiagnosticSink()
+        size = len(_encode(build_summarization_material()))
+        cap = size + 100
+        with patch('asterion.runtime.native_rpc.build_rpc_session') as build:
+            with self.assertRaises(ProtocolError) as failure:
+                await self.fixture(compaction_policy=PrimeCompactionPolicy(
+                    max_frame_bytes=cap, max_material_bytes=size),
+                    compaction_policy_source='application', diagnostics=sink)
+            build.assert_not_called()
+        diagnostic = limit_diagnostic(failure.exception)
+        self.assertIsNotNone(diagnostic)
+        self.assertEqual(diagnostic.limit_code, 'witness-frame-limit')
+        self.assertEqual((diagnostic.limit, diagnostic.phase, diagnostic.action),
+            (cap, 'admission', 'rejected'))
+        self.assertEqual(diagnostic.config_source, 'application')
+        self.assertGreater(diagnostic.observed, cap)
+        self.assertEqual(len(sink._records), 1)
+        record = next(iter(sink._records.values()))
+        self.assertEqual(record.stage, 'prime.backend.startup')
+        self.assertEqual(record.limit_diagnostic, diagnostic)
+        self.assertEqual(record.subject_sha256, hashlib.sha256(self.spec.session_id.encode()).hexdigest())
+        self.assertNotIn(str(self.spec.private_root), repr(record))
+        self.assertTrue(self.executor.closed)
 
     async def test_attachment_close_keeps_owner_and_generation_without_model_effect(self):
         await self.fixture()

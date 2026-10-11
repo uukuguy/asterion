@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from .compaction_budget import PrimeCompactionPolicy
+
 from asterion.runtimes.pi_rpc import PiRpcConfig, PiRpcSession
 
 if TYPE_CHECKING:
@@ -53,11 +55,14 @@ def persistent_command(operator, spec, lease):
     return (*command, *lease.command_args())
 
 
-def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=None, durable=False):
+def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=None, durable=False,
+                      compaction_policy=PrimeCompactionPolicy(),
+                      compaction_policy_source='framework-default'):
     """Acquire the explicit artifact and bridge without any application discovery."""
     import socket
+    import json
     import secrets
-    from dataclasses import fields
+    from dataclasses import asdict, fields
     from asterion.agents.prime._tool_bridge import ToolBridgeServer
     from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile, ProviderPrefixMetricsFile
     from asterion.agents.prime.session import AsterionPrimeSession
@@ -65,6 +70,12 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
     from asterion.runtime.pinned_extension import ExtensionBinding
     from asterion.runtime.native_rpc import build_rpc_session
 
+    from asterion.agents.prime.context import _validate_policy
+    _validate_policy(compaction_policy, compaction_policy_source)
+    policy_json = json.dumps({**asdict(compaction_policy),
+        'config_source': compaction_policy_source}, sort_keys=True, separators=(',', ':'))
+    if len(policy_json.encode('utf-8')) > 512:
+        raise ValueError('Prime compaction policy is invalid')
     resource = PersistentLaunch()
     parent = child = witness_parent = witness_child = None
     try:
@@ -78,9 +89,12 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
             nonce = secrets.token_hex(32)
             descriptors.append(witness_child.fileno())
             environment.update({'ASTERION_PRIME_IPYTHON_CONTEXT_FD': str(witness_child.fileno()),
-                                'ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE': nonce})
+                                'ASTERION_PRIME_IPYTHON_CONTEXT_LAUNCH_NONCE': nonce,
+                                'ASTERION_PRIME_IPYTHON_COMPACTION_POLICY': policy_json})
             resource.witness = PrimeContextWitnessSession(
-                witness_parent, launch_nonce=nonce, timeout_seconds=60, mark_uncertain=lambda: None)
+                witness_parent, launch_nonce=nonce, timeout_seconds=60, mark_uncertain=lambda: None,
+                policy=compaction_policy, config_source=compaction_policy_source)
+            resource.witness._validate_arm_capacity()
             witness_parent = None
         if metrics_root is not None:
             resource.metrics = ContextViewMetricsFile(metrics_root / 'context-view-metrics.json')

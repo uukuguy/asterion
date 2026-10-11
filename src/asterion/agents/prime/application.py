@@ -28,7 +28,7 @@ from asterion.agents.prime.store import FilePrimeSessionStore, private_root_iden
 from asterion.agents.prime.ipython import (
     KernelBootstrap, KernelExport, KernelLimits, PersistentIpythonHost,
 )
-from asterion.agents.prime.compaction_budget import ModelPrice
+from asterion.agents.prime.compaction_budget import ModelPrice, PrimeCompactionPolicy
 from asterion.agents.prime.deadline import TaskDeadline
 from asterion.agents.prime.execution import (
     AsterionPrimeLimits,
@@ -44,6 +44,8 @@ from asterion.services.diagnostics import (
     DiagnosticSink,
     FailureDiagnostic,
     PrivateFailureSink,
+    ResourceLimitExceeded,
+    capture_limit,
 )
 
 
@@ -227,8 +229,15 @@ class PrimeBackendSpec:
     authority_id: str | None
     compaction_instructions: Mapping[str, str] | None
     compat_provider_id: str | None = None
+    compaction_policy: PrimeCompactionPolicy = PrimeCompactionPolicy()
+    compaction_policy_source: str = "framework-default"
 
     def __post_init__(self) -> None:
+        if (type(self.compaction_policy) is not PrimeCompactionPolicy
+                or type(self.compaction_policy_source) is not str
+                or self.compaction_policy_source not in {
+                    'framework-default', 'application', 'operator', 'authority'}):
+            _invalid()
         # Existing backend session/authority IDs allow opaque mixed-case IDs.
         from asterion.control.protocol import OPAQUE_ID
 
@@ -589,7 +598,9 @@ class PrimeApplication:
         self._services = services
         try:
             resource = _launch.persistent_launch(
-                self._operator, self._spec, services, spec.limits, PrimeRunHooks(), durable=True)
+                self._operator, self._spec, services, spec.limits, PrimeRunHooks(), durable=True,
+                compaction_policy=spec.compaction_policy,
+                compaction_policy_source=spec.compaction_policy_source)
             self._persistent = resource
             identity = PrimeBackendIdentity(
                 spec.session_id, spec.generation, spec.compat_provider_id or 'prime.direct',
@@ -598,7 +609,9 @@ class PrimeApplication:
                 services.identity_sha256, spec.continuation_policy_id,
                 private_root_identity(spec.private_root),
                 _digest({**asdict(spec.limits), 'aggregate_tokens': spec.aggregate_tokens,
-                         'cost_micros': spec.cost_micros}),
+                         'cost_micros': spec.cost_micros,
+                         'compaction_policy': asdict(spec.compaction_policy),
+                         'compaction_policy_source': spec.compaction_policy_source}),
             )
             resource.store = FilePrimeSessionStore(spec.private_root, identity)
             self._backend = PrimeSessionBackend(
@@ -606,6 +619,8 @@ class PrimeApplication:
                 extension_binding=resource.binding, extension_lease=resource.lease,
                 approved_command=resource.command, approved_environment=resource.environment,
                 limits=spec.limits, aggregate_tokens=spec.aggregate_tokens, cost_micros=spec.cost_micros,
+                compaction_policy=spec.compaction_policy,
+                compaction_policy_source=spec.compaction_policy_source,
                 model_price=spec.model_price, witness=resource.witness, tool_executor=services,
                 compaction_instructions=spec.compaction_instructions, authority_id=spec.authority_id,
                 diagnostics=self._operator.diagnostics, task_deadline=self._operator.task_deadline,
@@ -614,9 +629,15 @@ class PrimeApplication:
             self._activate()
             return self.attach_backend(identity)
         except BaseException as error:
+            if type(error) is ResourceLimitExceeded:
+                capture_limit(self._operator.diagnostics, stage='prime.backend.startup',
+                    diagnostic=error.limit_diagnostic, subject_id=spec.session_id)
             await self.close()
             if isinstance(error, (asyncio.CancelledError, KeyboardInterrupt, SystemExit)):
                 raise
+            if type(error) is ResourceLimitExceeded:
+                # Only validated numeric metadata survives this safe startup wrapper.
+                raise ProtocolError('Prime durable application is unavailable') from error
             raise ProtocolError('Prime durable application is unavailable') from None
 
     def attach_backend(self, identity: PrimeBackendIdentity) -> PrimeAttachment:
