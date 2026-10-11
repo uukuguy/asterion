@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-11 16:02 CST. Session remains active — not a final handoff.
+> Updated: 2026-10-11 16:03 CST. Session remains active — not a final handoff.
 
 ## 当前实施
 
-用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；本轮未启动。此次未授权新BP35模型实测。
+用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。最终30c454cf full promotion25PASS/provider0/full_datasetno；Task41按provider-free边界关闭（0f23ddae）。使用 `make asterion-prime-p7-research GAME=bp35`，默认完整游戏；本轮未启动。此次未授权新BP35模型实测。
 
 ## 最新实测已结束
 
