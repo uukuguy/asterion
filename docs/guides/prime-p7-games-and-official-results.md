@@ -23,6 +23,22 @@ make asterion-prime-p7-games
 
 ## 2. 本地选择题目和关卡
 
+### 监督研究
+
+由外围持续观察并决定停止时，使用显式监督入口：
+
+```bash
+make asterion-prime-p7-research GAME=bp35
+```
+
+默认从第1关研究完整游戏；可显式提供 `LEVEL=9` 等目标。监督模式没有总模型/工具调用、总时长或总动作硬上限。累计动作、RESET、tokens和运行时间持续记录，暂停与续轮不重置计量。人类动作基准仍用于评分事实，不再作为研究停止线。该入口不继承已保存路线；已有经验仍按operator根目录内的历史来源规则读取，冷测应使用独立空历史根目录。
+
+按 Ctrl-C 停止。运行控制先阻止新工作，结算已派发动作，再做有限清理；guest保留180秒退出宽限，最终确认cgroup无遗留。结果未知的动作保留未知状态，不自动重放。单次计算、工具、传输和输出容量限制仍有效。
+
+内容安全的监测文件位于 `.asterion-private/prime-p7-live/<run_id>/research-status.json`，每秒更新，包括累计model/tool callbacks、输入输出tokens、primitive actions、RESET、已完成关数、运行时长，以及running/settling/closed和停止/清理状态。文件不包含prompt、答案、认证、原始工具正文或估算付款；读监测文件不授予执行权限。
+
+原有 `asterion-prime-p7-solve`、`level-witness`、`autonomy`和官方运行继续采用各自有限预设。新入口的无模型验证不等于九关解题能力或真实模型部署验收。专用手工 trace-race / animation recovery 执行工具本轮不支持监督模式，遇到该模式会拒绝；不要将记录重新标成有限模式来绕过校验。
+
 ### P7 自主求解控制台
 
 一条命令打开本地工作区：

@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-11 14:26 CST. Session remains active — not a final handoff.
+> Updated: 2026-10-11 15:53 CST. Session remains active — not a final handoff.
 
 ## 当前实施
 
-用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain与entry workers并行实施，Astra复审。此次未授权新BP35模型实测。
+用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain提交036226a5，run-story提交3fedfc2b；entry提交1d4b1e08，Prime计数接口9b2af8f0；Astra最终复审APPROVE（至76b9b9a0），最终20项domain/entry/RPC边界检查通过。实际guest无模型停止探针PASS（无限总时长/180秒宽限/退出130/无遗留）。等待最终promotion与状态收口。此次未授权新BP35模型实测。
 
 ## 最新实测已结束
 
@@ -15,14 +15,14 @@
 - host已退出、guestunit不存在/0PID/空cgroup、trial临时.env删除，原console保留。
 - [实测报告](../reviews/2026-10-11-p7-bp35-full-game-trial.md)；私有证据 `.asterion-private/p7-full-bp35-20261011-135551/`。
 - 实测报告提交 `134f0ef2`；docs314/232及1973项私有manifest校验通过。
-- 当前无运行工作包。下一候选：核对完整评估回调预设及失败原因保留；专用摘要接通仍独立未完成。本次不授权新一轮评估。
+- 当前工作包Task41：监督预算实现已完成，最终打包收口中；专用摘要接通仍独立未完成。本次不授权新一轮评估。
 
 ## 既有交接事实（本次运行不改写历史证据）
 
 
 
 
-- 分支 `feat/prime-research-notes`；Project route: managed。唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39与Task40均已关闭；没有在执行的工作包。
+- 分支 `feat/prime-research-notes`；Project route: managed。唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39与Task40均已关闭；当前Task41监督研究预算模式收口中。
 - Task40标准入口迁移全部完成，独立源码复审、完整打包检查和有限P7首关部署验收通过。最终验收提交 `edd19f62`，日志同步 `d96e323f`；本轮没有push/merge。
 - 下一步候选：专用代码摘要接通及低阈值P7实战验证。先恢复设计与未知边界，确认独立实施范围，再推进；不得自动应用stash或启动BP35。
 
