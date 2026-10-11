@@ -1,5 +1,5 @@
 import { normalizeFunctionParameters } from "./tool-schema.js";
-import { MemoryContextController, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
+import { MemoryContextController, contextMessageBytes, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
 import { nativeContextArchive, createContextCheckpoint, contextArchiveOperation } from "./context-archive.js";
 import { ContextViewTelemetry, type ContextViewNumbers } from "./context-metrics.js";
 import { admitToolStateView, projectToolStateViewContext } from "./tool-state-view.js";
@@ -522,6 +522,43 @@ interface MemoryExtensionApi {
 
 const MEMORY_DIAGNOSTIC_LIMIT = 4 * 1024;
 const MEMORY_DIAGNOSTIC_SUPPRESSED = '[prime-context-memory] {"status":"diagnostics-suppressed"}';
+const P7_CAPACITY_NOTICE = "asterion_p7_context_capacity";
+const P7_CAPACITY_ENVIRONMENT = "ASTERION_PRIME_P7_CONTEXT_CAPACITY_BYTES";
+const P7_DEFAULT_CONTEXT_CAPACITY = 128 * 1024;
+interface P7ContextCapacityOptions {
+  readonly capacityBytes?: number;
+  readonly enabled?: boolean;
+  readonly configurationUnavailable?: boolean;
+}
+
+function p7CapacityOptionsFromEnvironment(): P7ContextCapacityOptions {
+  const raw=process.env[P7_CAPACITY_ENVIRONMENT];
+  delete process.env[P7_CAPACITY_ENVIRONMENT];
+  if(raw===undefined) return {};
+  const value=/^[0-9]+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isSafeInteger(value) && value>=1 && value<=8*1024*1024
+    ? {capacityBytes:value} : {configurationUnavailable:true};
+}
+
+/** Request a new explicit NOTES summary; never retire or truncate additional evidence. */
+function p7CapacityView(messages:readonly unknown[],options:P7ContextCapacityOptions,projectionStatus:string):readonly unknown[] {
+  if(options.enabled===false) return messages;
+  const capacity=options.capacityBytes??P7_DEFAULT_CONTEXT_CAPACITY;
+  const invalid=options.configurationUnavailable===true || !Number.isSafeInteger(capacity) || capacity<1 || capacity>8*1024*1024;
+  let bytes:number|null=null;
+  try {bytes=messages.reduce<number>((total,message)=>total+contextMessageBytes(message),0);} catch {}
+  const projectionUnavailable=["primary-unavailable","projection-unavailable","unsafe-boundary"].includes(projectionStatus);
+  const selectedCapacity=invalid?P7_DEFAULT_CONTEXT_CAPACITY:capacity;
+  if(!invalid && !projectionUnavailable && bytes!==null && bytes<=selectedCapacity) return messages;
+  const instruction=(projectionUnavailable?"上下文摘要投影未能建立；全部原始历史仍保留。 ":"")
+    +(invalid?"上下文容量配置不可用，当前采用默认提醒阈值。 ":"")
+    +"请尽快用 p7_workspace op notes 更新 NOTES，保留危险及条件、死亡反例、模型/程序/轨迹引用、未覆盖分支和下一步判断。成功且可验证的 NOTES 才能退休已总结历史；未总结推理、未知/错误证据和当前完整棋盘仍保留，原始记录可按需读取。计量为 hook JSON UTF-8 bytes，不是 token 硬上限。";
+  const notice={role:"custom",customType:P7_CAPACITY_NOTICE,display:false,timestamp:0,content:JSON.stringify({
+    version:"asterion.prime-p7-context-capacity/v1",status:bytes===null?"measurement-unavailable":bytes>selectedCapacity?"over_capacity":"attention",
+    measured_bytes:bytes,capacity_bytes:selectedCapacity,projection_status:projectionStatus,
+    configuration_status:invalid?"configuration-unavailable":"configured",instruction})};
+  return [...messages,notice];
+}
 const MEMORY_DIAGNOSTIC_SUPPRESSED_BYTES = Buffer.byteLength(MEMORY_DIAGNOSTIC_SUPPRESSED+"\n","utf8");
 // All registered hooks in this module instance share the process log budget.
 let memoryDiagnosticBytes = 0;
@@ -541,7 +578,8 @@ function emitMemoryDiagnostic(line: string): void {
 }
 
 /** Pi owns prompt/tools; this hook changes only its cloned conversation view. */
-export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: ContextViewNumbers) => void): boolean {
+export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: ContextViewNumbers) => void,
+  capacityOptions:P7ContextCapacityOptions={}): boolean {
   const api = memoryRecord(pi);
   if (!api || typeof api.on !== "function") return false;
   let lastOutcome: string | undefined;
@@ -552,36 +590,42 @@ export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: Conte
   (pi as MemoryExtensionApi).on("context", (rawEvent,rawContext) => {
     const event = memoryRecord(rawEvent);
     if (event?.type !== "context" || !Array.isArray(event.messages)) return undefined;
+    // Notices exist only in this request's cloned view, never the native archive.
+    const messages=event.messages.filter(raw=>{
+      const message=memoryRecord(raw);
+      return !(message?.role==="custom" && message.customType===P7_CAPACITY_NOTICE);
+    });
+    const finish=(view:readonly unknown[],status:string):{messages:readonly unknown[]}=>{
+      const finalView=p7CapacityView(view,capacityOptions,status);observe(finalView);return {messages:finalView};
+    };
     try {
       // Rebuild from the selected branch on each request: navigation/reload must
       // not inherit a checkpoint belonging to another branch.
       const controller = new MemoryContextController();
       const context = memoryRecord(rawContext);
       const manager = memoryRecord(context?.sessionManager);
-      let entries: unknown = event.messages.map(message => ({type:"message",message}));
+      let entries: unknown = messages.map(message => ({type:"message",message}));
       if (manager && typeof manager.getBranch === "function") entries = manager.getBranch();
-      if (!Array.isArray(entries)) {observe(event.messages); return {messages:event.messages};}
+      if (!Array.isArray(entries)) return finish(messages,"projection-unavailable");
       recoverP7MemoryContext(controller,entries);
       const branchMessages = entries.flatMap(raw => {
         const entry = memoryRecord(raw);
         return entry?.type === "message" ? [entry.message] : [];
       });
-      const stateView = controller.primaryMode ? {messages:event.messages,outcome:{replaced_results:0,replaced_bytes:0}}
-        : projectToolStateViewContext(event.messages,branchMessages);
+      const stateView = controller.primaryMode ? {messages,outcome:{replaced_results:0,replaced_bytes:0}}
+        : projectToolStateViewContext(messages,branchMessages);
       const projected = controller.project(stateView.messages,nativeContextArchive(rawContext));
       const safeOutcome = JSON.stringify({...projected.outcome,state_view:stateView.outcome});
       if ((projected.outcome.status !== "inactive" || stateView.outcome.replaced_results > 0) && safeOutcome !== lastOutcome) {
         emitMemoryDiagnostic("[prime-context-memory] " + safeOutcome);
         lastOutcome = safeOutcome;
       }
-      observe(projected.messages);
-      return {messages:projected.messages};
+      return finish(projected.messages,projected.outcome.status);
     } catch {
       // Pi catches extension exceptions, so an exception is not a request fence.
       // A projection failure explicitly preserves every original message.
       emitMemoryDiagnostic('[prime-context-memory] {"status":"projection-unavailable"}');
-      observe(event.messages);
-      return {messages:event.messages};
+      return finish(messages,"projection-unavailable");
     }
   });
   return true;
@@ -594,12 +638,16 @@ export const p7ResearchModule: PrimeToolModule = Object.freeze({
   createTools: createAppLevelTools,
   registerContextHooks(pi: ExtensionApi, dependencies: unknown) {
     const metrics = (dependencies as PrimeToolModuleDependencies).contextMetrics;
-    if (!registerP7MemoryContext(pi, metrics)) metrics?.close();
+    if (!registerP7MemoryContext(pi, metrics,p7CapacityOptionsFromEnvironment())) metrics?.close();
   },
 });
 export const p7LegacyModule: PrimeToolModule = Object.freeze({
   registry: Object.freeze({...registryIdentity,
     tool_names: Object.freeze(["ipython", ...P7_LEGACY_TOOL_SPECS.map(spec => spec.name)].sort())}),
   createTools: createLegacyAppLevelTools,
-  registerContextHooks: p7ResearchModule.registerContextHooks!,
+  registerContextHooks(pi: ExtensionApi,dependencies:unknown) {
+    delete process.env[P7_CAPACITY_ENVIRONMENT];
+    const metrics=(dependencies as PrimeToolModuleDependencies).contextMetrics;
+    if(!registerP7MemoryContext(pi,metrics,{enabled:false})) metrics?.close();
+  },
 });

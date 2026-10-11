@@ -87,3 +87,10 @@ User authorizes fixes; no new live trial. Scope remains P7 research and existing
 - Promotion isolated snapshot precedes only the final Solver archive-failure fallback alignment (raw nondead outcome for mismatch, added frame hash/level); other source is unchanged. The exact final fallback is separately14tests PASS and included in the hash-matched installed-wheel witness. Do not describe the isolated broad test as running this later fallback.
 
 - `make promotion-check` PASS:25commands/provider_operations0/full_datasetno. Logs `.asterion-private/task49-p7-auto-rollout/repair-promotion.stdout.log` and stderr. This broad promotion snapshot includes all repairs except the final fallback field/condition alignment explicitly scoped above; final installed wheel and14Solver tests verify that alignment. No repeated broad suite. Final changed-file Ruff/docs327files267links/diffcheck PASS. All owned verification processes have exited.
+
+## Task50 offline follow-up
+
+- [x] Reproduce bound conditional-fatal → new registration/unchanged initial state → unknown downgrade with no real game.
+- [x] Add append-only witness/scope retention in p7/rollout_runtime.py; existing fatal gate receives preserved evidence, other state/action/level stays distinct. Verify original extractor availability rather than trusting revised initializer.
+- [x] Add P7 context pressure warning through existing application configuration and context hook, with exact byte units/default/override validation; no hard truncation, raw observations remain. Tests cover warning onset, NOTES projection recovery and protected unknown/error evidence.
+- [x] Scoped Python/TypeScript checks, independent source review and installed kernel witness passed. Full4730 regression had one stale appendix fixture failure; fixture aligned, focused replacement plus remaining25 isolated packaged gates passed; original fullFAIL retained. User later authorizes direct fresh trial.

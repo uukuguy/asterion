@@ -23,8 +23,11 @@ class TestAutonomousResearchInterface(unittest.TestCase):
             with self.subTest(mode=mode):
                 environment = {} if mode is None else {'ASTERION_PRIME_P7_RUN_MODE': mode}
                 text = append('selected application guidance', environment)
-                self.assertEqual(text, 'selected application guidance' + (
-                    '\n\n' + experiment if mode == 'research' else ''))
+                if mode == 'research':
+                    self.assertTrue(text.startswith('selected application guidance\n\n' + experiment))
+                    self.assertIn('asterion_p7_context_capacity', text)
+                else:
+                    self.assertEqual(text, 'selected application guidance')
 
     def test_rollout_experiment_keeps_public_guidance_and_authority_unchanged(self):
         experiment = getattr(prompt, 'P7_ROLLOUT_EXPERIMENT_PROMPT', '')

@@ -225,7 +225,7 @@ test("registered context hooks share a 4 KiB diagnostic budget without changing 
     assert.equal(bounded.registerP7MemoryContext({on:(event,handler) => {
       assert.equal(event,"context");
       hooks.push(handler);
-    }}),true);
+    }},undefined,{enabled:false}),true);
   }
   const content = "当前研究状态";
   const entries = [{type:"message",message:{...result("read"),toolName:"p7_workspace",
@@ -544,6 +544,66 @@ const admitPrimary = fixture => {
   assert.equal(controller.accept("note",primaryEnvelope(),true,receipt),true);
   return {archive,receipt,controller};
 };
+
+test("P7 context capacity reminder preserves complete observations and does not accumulate",()=>{
+  let hook;const records=[];
+  extension.registerP7MemoryContext({on:(_event,handler)=>{hook=handler;}},n=>records.push(n),{capacityBytes:1024});
+  const source=[user("CURRENT_COMPLETE_BOARD "+"像素".repeat(800)),assistant("unknown"),
+    {...result("unknown","UNRESOLVED_CONTACT"),details:{context_interaction:{version:"asterion.prime-context-interaction/v1",effect:"unknown",feedback:"ordinary"}}}];
+  const original=structuredClone(source), first=hook({type:"context",messages:source},{}).messages;
+  const notice=first.find(m=>m.customType==="asterion_p7_context_capacity");
+  assert.ok(notice);const body=JSON.parse(notice.content);
+  assert.equal(body.capacity_bytes,1024);assert.equal(body.status,"over_capacity");
+  assert.match(body.instruction,/NOTES/);assert.match(body.instruction,/危险|反例/);
+  assert.deepEqual(first.filter(m=>m!==notice),source);assert.deepEqual(source,original);
+  const repeated=hook({type:"context",messages:first},{}).messages;
+  assert.equal(repeated.filter(m=>m.customType==="asterion_p7_context_capacity").length,1);
+  assert.deepEqual(repeated,first);assert.equal(records[0].total_bytes,new extension.ContextViewTelemetry().observe(first).total_bytes);
+  assert.deepEqual(hook({type:"context",messages:[user("small")]},{}).messages,[user("small")]);
+  const native={...user("NATIVE_CONSTRAINT"),customType:"asterion_p7_context_capacity"};
+  assert.deepEqual(hook({type:"context",messages:[native]},{}).messages,[native]);
+});
+
+test("P7 capacity uses the measured JSON byte boundary and default128KiB",()=>{
+  const source=[user("boundary")],bytes=new extension.ContextViewTelemetry().observe(source).total_bytes;
+  let hook;extension.registerP7MemoryContext({on:(_event,h)=>{hook=h;}},undefined,{capacityBytes:bytes});
+  assert.deepEqual(hook({type:"context",messages:source},{}).messages,source);
+  extension.registerP7MemoryContext({on:(_event,h)=>{hook=h;}});
+  assert.equal(hook({type:"context",messages:[user("x".repeat(131072))]},{}).messages.at(-1).customType,"asterion_p7_context_capacity");
+});
+
+test("P7 projection failure warns while retaining history and successful notes still retire normally",()=>{
+  let hook;extension.registerP7MemoryContext({on:(_event,h)=>{hook=h;}},undefined,{capacityBytes:1024});
+  const fixture=primaryFixture();admitPrimary(fixture);
+  const projected=hook({type:"context",messages:fixture.messages},{sessionManager:fixture.manager}).messages;
+  assert.doesNotMatch(JSON.stringify(projected),/FULL_EVIDENCE_0/);
+  assert.match(JSON.stringify(projected),/FULL_EVIDENCE_5|EXACT_USER_CONSTRAINT/);
+  fixture.entries.pop();fixture.messages.pop();
+  const fallback=hook({type:"context",messages:fixture.messages},{sessionManager:fixture.manager}).messages;
+  const notice=fallback.find(m=>m.customType==="asterion_p7_context_capacity");
+  assert.equal(JSON.parse(notice.content).projection_status,"primary-unavailable");
+  assert.match(JSON.parse(notice.content).instruction,/未能|不可用/);
+  assert.deepEqual(fallback.filter(m=>!["asterion_context_memory","asterion_p7_context_capacity"].includes(m.customType)),fixture.messages);
+  const broken=hook({type:"context",messages:[user("EXACT_RAW")]},{sessionManager:{getBranch:()=>{throw Error("PRIVATE_FAILURE");}}}).messages;
+  assert.equal(JSON.parse(broken.at(-1).content).projection_status,"projection-unavailable");
+  assert.doesNotMatch(JSON.stringify(broken),/PRIVATE_FAILURE/);assert.deepEqual(broken[0],user("EXACT_RAW"));
+});
+
+test("P7 research consumes its application capacity override while legacy keeps its prior view",()=>{
+  const key="ASTERION_PRIME_P7_CONTEXT_CAPACITY_BYTES",saved=process.env[key];let hook;
+  try {
+    process.env[key]="64";
+    extension.p7ResearchModule.registerContextHooks({on:(_event,h)=>{hook=h;}},{});
+    assert.equal(process.env[key],undefined);
+    assert.equal(JSON.parse(hook({type:"context",messages:[user("x".repeat(100))]},{}).messages.at(-1).content).capacity_bytes,64);
+    process.env[key]="invalid";
+    extension.p7ResearchModule.registerContextHooks({on:(_event,h)=>{hook=h;}},{});
+    assert.equal(JSON.parse(hook({type:"context",messages:[user("small")]},{}).messages.at(-1).content).configuration_status,"configuration-unavailable");
+    process.env[key]="64";
+    extension.p7LegacyModule.registerContextHooks({on:(_event,h)=>{hook=h;}},{});
+    const source=[user("x".repeat(131073))];assert.deepEqual(hook({type:"context",messages:source},{}).messages,source);
+  } finally {if(saved===undefined) delete process.env[key];else process.env[key]=saved;}
+});
 
 test("normal v3 notes establish a primary epoch with exact readable complete-group retirement",()=>{
   assert.equal(typeof extension.nativeContextArchive,"function");

@@ -17,6 +17,31 @@ from tests.test_prime_p7_research_runtime import _Signal, _TraceClient
 
 
 class TestRolloutFeedback(unittest.TestCase):
+    def test_retained_witness_generation_and_canonical_action_boundaries(self):
+        from asterion.applications.prime.p7.score import digest
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = RolloutRuntime(SimpleNamespace(kernel=SimpleNamespace(generation='new')), Path(directory))
+            action = {'name':'ACTION6','data':{'x':21,'y':33}}
+            reference = {'run_id':'run','level':2,'sequence':43}
+            frame_hash = digest([[0]])
+            runtime._retain_fatal({'risk':'conditional_fatal','findings':[{'evidence':'original'}],
+                                   'initial_state_sha256':digest({'tick':0}),'scope_extractor_id':'1:old'},
+                                  reference,action,frame_hash,
+                                  {'generation':'old','registration_id':1},'sha256:'+'a'*64,'actor')
+            for ref, candidate, frame, expected in (
+                    ({**reference,'sequence':45}, {'data':{'y':33,'x':21},'name':'ACTION6'}, [[1]], 'unavailable'),
+                    (reference, action, [[0]], 'fatal'),
+                    ({**reference,'level':3}, action, [[1]], None),
+                    ({**reference,'run_id':'other'}, action, [[1]], None),
+                    (reference, {'name':'ACTION6','data':{'x':22,'y':33}}, [[1]], None)):
+                with self.subTest(ref=ref,candidate=candidate,frame=frame):
+                    result = {'risk':'unassessed','frame_sha256':digest(frame),
+                              '_retained_scope_assessments':{'1:old':{'status':'available','initial_state_sha256':digest({'tick':0})}}}
+                    runtime._apply_retained_fatal(result,ref,candidate)
+                    self.assertEqual(result.get('hard_stop'), 'risk_applicability_unavailable' if expected == 'unavailable' else None)
+                    self.assertEqual(result['risk'], 'conditional_fatal' if expected == 'fatal' else 'unassessed')
+            self.assertEqual(len(runtime.retained_fatal_risks), 1)
+
     def test_known_actual_death_preserves_mismatch_and_uncertainty_with_archive_failure(self):
         from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:
@@ -151,7 +176,7 @@ class TestP7AutoRollout(unittest.IsolatedAsyncioTestCase):
         result = await self.plan()
         item = result['auto_rollouts'][0]
         self.assertEqual((item['status'], item['risk'], item['reason']), ('not_evaluated', 'unassessed', 'model_missing'))
-        self.assertEqual(result['applied_count'], 1)
+        self.assertEqual(result['applied_count'], 1, result)
         self.assertEqual(result['rollout_accounting']['auto_evaluated'], 0)
 
     async def test_conditional_fatal_stops_without_dispatch(self):
@@ -159,6 +184,139 @@ class TestP7AutoRollout(unittest.IsolatedAsyncioTestCase):
         result = await self.plan()
         self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-conditional-fatal'))
         self.assertEqual(self.engine.calls, [])
+
+    async def retained_model(self, *, fatal=False, initializer="return {'tick':0,'private':'retained-state-sentinel'}", extra='', covered=True, terminal='return None'):
+        finding = "[{'id':'prior.contact','type':'conditional_fatal','condition':'contact hypothesis','evidence':'original witness'}]" if fatal else '[]'
+        source = ("import p7_research as r\nimport json\n"
+                  f"def init(board,ref): {initializer}\n"
+                  "def move(state,action): state['tick']+=1; return state\n"
+                  "def rest(state): return state['tick']>=1\n"
+                  f"def end(state): {terminal}\n"
+                  f"def risk(before,after,action): return {finding}\n"
+                  f"r.register_rollout_model(from_frame=init,transition=move,settled=rest,terminal=end,risk_check=risk,supported_actions={['ACTION1','ACTION2'] if covered else None!r})\n") + extra
+        return await self.host.execute('retained-model-' + str(self.host._rollouts.actor_cell_count), source, _Signal())
+
+    async def test_retained_actor_fatal_survives_new_schema_and_different_frame(self):
+        actor = await self.retained_model(fatal=True, extra="print(json.dumps(r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})))\n")
+        summary = json.loads(json.loads(actor.content[0]['text'])['stdout'])
+        self.assertNotIn('retained-state-sentinel', json.dumps(summary))
+        first_ref = self.host.current_context()['observation_ref']
+        first_revision = self.host._rollouts.actor_calls[0]['model_revision']
+        # A different action changes the public frame and must remain allowed.
+        await self.retained_model(initializer="return {'tick':0,'new_schema':True}")
+        other = await self.plan('other-action', ('ACTION2',))
+        self.assertEqual(other['applied_count'], 1, other)
+        result = await self.plan('retained-action')
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-conditional-fatal'))
+        assessment = result['auto_rollouts'][0]
+        witness = assessment['retained_fatal_risks'][0]
+        self.assertEqual(witness['observation_ref'], first_ref)
+        self.assertEqual(witness['model_revision'], first_revision)
+        self.assertEqual(witness['full_trace_ref'], summary['full_trace_ref'])
+        self.assertEqual(witness['findings'][0]['evidence'], 'original witness')
+        self.assertEqual(witness['match'], 'initial_state')
+        self.assertRegex(summary['initial_state_sha256'], r'^sha256:[0-9a-f]{64}$')
+        self.assertNotIn('retained-state-sentinel', json.dumps(result))
+        self.assertEqual(self.engine.calls, ['ACTION2'])
+
+    async def test_changed_scope_dependency_pauses_only_affected_action(self):
+        await self.retained_model(fatal=True,
+            initializer="return {'tick':0,'dep':scope_value}",
+            extra="scope_value=1\nr.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})\n")
+        await self.retained_model(extra='scope_value=2\n')
+        self.assertEqual((await self.plan('scope-other', ('ACTION2',)))['applied_count'], 1)
+        result = await self.plan('scope-unavailable')
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'risk-applicability-unavailable'))
+        self.assertEqual(result['auto_rollouts'][0]['hard_stop'], 'risk_applicability_unavailable')
+        self.assertEqual(result['auto_rollouts'][0]['risk'], 'no_identified_fatal')
+        self.assertEqual(self.engine.calls, ['ACTION2'])
+
+    async def test_retained_scope_different_initial_state_does_not_block(self):
+        await self.retained_model(fatal=True,
+            initializer="return {'tick':0,'pixel':board[0][0]}",
+            extra="r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})\n")
+        await self.retained_model()
+        self.assertEqual((await self.plan('different-state', ('ACTION2',)))['applied_count'], 1)
+        result = await self.plan('different-state-action')
+        self.assertEqual(result['applied_count'], 1)
+        self.assertEqual(len(self.host._rollouts.retained_fatal_risks), 1)
+
+    async def test_host_predicted_death_is_retained_after_unknown_revision(self):
+        await self.retained_model(terminal="return 'dead' if state['tick'] else None")
+        original = await self.plan('host-fatal')
+        self.assertEqual(original['stop_reason'], 'model-predicted-death')
+        original_revision = original['auto_rollouts'][0]['model_revision']
+        await self.retained_model(covered=False)
+        self.assertEqual((await self.plan('host-other', ('ACTION2',)))['applied_count'], 1)
+        result = await self.plan('host-retained')
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-predicted-death'))
+        assessment = result['auto_rollouts'][0]
+        self.assertEqual(assessment['model_risk'], 'unassessed')
+        self.assertEqual(assessment['retained_fatal_risks'][0]['model_revision'], original_revision)
+        self.assertEqual(len(self.host._rollouts.retained_fatal_risks), 1)
+
+    async def test_registration_invalidation_keeps_retained_scope_and_deduplicates(self):
+        await self.retained_model(fatal=True, extra="r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})\n")
+        await self.plan('same-fatal')
+        self.assertEqual(len(self.host._rollouts.retained_fatal_risks), 1)
+        await self.host._rollouts.invalidate(_Signal())
+        await self.retained_model()
+        self.assertEqual((await self.plan('after-invalidation-other', ('ACTION2',)))['applied_count'], 1)
+        result = await self.plan('after-invalidation-retained')
+        self.assertEqual(result['stop_reason'], 'model-conditional-fatal')
+
+    async def test_unbound_helper_fatal_does_not_create_host_witness(self):
+        await self.retained_model(fatal=True, extra="r.rollout(init(r.frame(),r.current()['observation_ref']),[{'name':'ACTION1','data':{}}],transition=move,settled=rest,terminal=end,risk_check=risk)\n")
+        self.assertEqual(self.host._rollouts.retained_fatal_risks, [])
+        await self.retained_model()
+        self.assertEqual((await self.plan('unbound'))['applied_count'], 1)
+
+    async def test_scope_extractor_loss_pauses_but_exact_frame_still_blocks(self):
+        await self.retained_model(fatal=True, extra="r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})\n")
+        await self.retained_model(extra='r._rollout_scope_extractors.clear()\n')
+        same = await self.plan('lost-extractor-same-frame')
+        self.assertEqual(same['stop_reason'], 'model-conditional-fatal')
+        self.assertEqual(same['auto_rollouts'][0]['retained_fatal_risks'][0]['match'], 'public_frame')
+        self.assertEqual((await self.plan('lost-extractor-other', ('ACTION2',)))['applied_count'], 1)
+        changed = await self.plan('lost-extractor-changed-frame')
+        self.assertEqual(changed['stop_reason'], 'risk-applicability-unavailable')
+        self.assertEqual(self.engine.calls, ['ACTION2'])
+
+    async def test_same_pixels_with_different_reference_state_does_not_match(self):
+        observe = self.engine.observe
+        def same_pixels():
+            observation = observe()
+            observation['frame'] = [[[0, 1]]]
+            return observation
+        self.engine.observe = same_pixels
+        await self.retained_model(fatal=True,
+            initializer="return {'tick':0,'sequence':ref['sequence']}",
+            extra="r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})\n")
+        await self.retained_model()
+        self.assertEqual((await self.plan('same-pixels-other', ('ACTION2',)))['applied_count'], 1)
+        result = await self.plan('same-pixels-different-reference')
+        self.assertEqual(result['applied_count'], 1)
+        self.assertEqual(self.engine.calls, ['ACTION2', 'ACTION1'])
+        self.assertEqual(len(self.host._rollouts.retained_fatal_risks), 1)
+
+    async def test_predicted_death_frame_fallback_is_only_conditional_fatal(self):
+        await self.retained_model(terminal="return 'dead' if state['tick'] else None")
+        self.assertEqual((await self.plan('original-prediction'))['stop_reason'], 'model-predicted-death')
+        await self.retained_model(extra='r._rollout_scope_extractors.clear()\n')
+        result = await self.plan('prediction-frame-fallback')
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-conditional-fatal'))
+        witness = result['auto_rollouts'][0]['retained_fatal_risks'][0]
+        self.assertEqual((witness['risk'], witness['match']), ('predicted_death', 'public_frame'))
+        self.assertEqual(self.engine.calls, [])
+
+    async def test_retained_scope_supports_nested_comprehension_builtins(self):
+        await self.retained_model(fatal=True,
+            initializer="return {'tick':0,'pixels':[min(row[1:]) for row in board if len(row)]}",
+            extra="r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}})\n")
+        await self.retained_model()
+        self.assertEqual((await self.plan('comprehension-other', ('ACTION2',)))['applied_count'], 1)
+        result = await self.plan('comprehension-retained')
+        self.assertEqual(result['stop_reason'], 'model-conditional-fatal')
 
     async def test_proactive_registered_candidate_matches_but_raw_helper_does_not(self):
         await self.model('return None', extra="print(r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION1','data':{}}))\n")

@@ -5006,3 +5006,7 @@
 - 2026-10-12 User authorizes fresh Task50 compact-risk BP35 trial; p7-live-20261011191917-2696469a8b5a8114f640ab86 sourcea324ab57/historyoff/seed0/target9, fresh wheel1d535f10 matches installed witness; per-level/resources/risk monitored.
 
 - 2026-10-12 Task50 user-stopped: 3/9,133 actions,1 death; cleaned and recorded input reduction plus model-revision fatal-risk leak.
+
+- 2026-10-12 39c952b1 Recorded Task50 stop and fatal-risk demotion evidence to preserve recovery boundary.
+
+- 2026-10-12 Retained fatal witnesses and input reminders verified offline; archived predeath downgrade blocked, original full fixture failure explicitly retained.

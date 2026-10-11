@@ -1026,6 +1026,8 @@ class Solver:
                     self.control.poll(current_reference['sequence'], current_reference['observation_sha256'])
                     if assessment.get('hard_stop') == 'cancelled':
                         stop_reason = 'cancelled'
+                    elif assessment.get('hard_stop') == 'risk_applicability_unavailable':
+                        stop_reason = 'risk-applicability-unavailable'
                     elif not self.control.action_allowed():
                         stop_reason = self.control.snapshot().get('state', 'stopped')
                     elif current_reference != reference or self.kernel.generation != generation:

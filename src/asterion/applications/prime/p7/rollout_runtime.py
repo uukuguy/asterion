@@ -23,7 +23,14 @@ import base64 as _rollout_base64
 import contextlib as _rollout_contextlib
 import io as _rollout_io
 import hashlib as _rollout_hashlib
+import builtins as _rollout_builtins
+import dis as _rollout_dis
+import types as _rollout_types
 _registered_rollout_model = None
+_rollout_scope_extractors = {}
+_rollout_scope_builtins = {name:getattr(_rollout_builtins,name) for name in
+    ('range','len','min','max','enumerate','sorted','zip','sum','abs',
+     'all','any','int','float','bool','str','list','dict','tuple','set')}
 _rollout_registration_sequence = 0
 _rollout_calls = []
 _rollout_call_sequence = 0
@@ -138,6 +145,82 @@ def read_rollout_trace(full_trace_ref, *, section=None, start=0, limit=8):
         return _rollout_trace_page(_json.loads(_rollout_zlib.decompress(packed)),full_trace_ref,section,start,limit)
     return _read('rollout_trace',[full_trace_ref,section,start,limit])
 
+def _rollout_state_digest(state):
+    return 'sha256:' + _rollout_hashlib.sha256(_json.dumps(_p7_rollout_copy(state),
+        allow_nan=False,ensure_ascii=False,sort_keys=True,separators=(',',':')).encode()).hexdigest()
+
+def _rollout_scope_fingerprint(function, seen=()):
+    # A deliberately narrow dependency contract, not a sandbox or general
+    # purity proof. Unsupported dependencies leave applicability unavailable.
+    if type(function) is not _rollout_types.FunctionType or id(function) in seen or len(seen)>=8:
+        raise ValueError('scope dependency unsupported')
+    seen = (*seen,id(function))
+    names = set()
+    def inspect_code(code):
+        for instruction in _rollout_dis.get_instructions(code):
+            if instruction.opname in ('IMPORT_NAME','STORE_GLOBAL','DELETE_GLOBAL','STORE_DEREF','DELETE_DEREF'):
+                raise ValueError('scope dependency unsupported')
+            if instruction.opname == 'LOAD_GLOBAL':
+                names.add(instruction.argval)
+        for constant in code.co_consts:
+            if type(constant) is _rollout_types.CodeType:
+                inspect_code(constant)
+    inspect_code(function.__code__)
+    def code_value(value):
+        if type(value) is _rollout_types.CodeType:
+            return {'code':value.co_code.hex(),'exceptiontable':value.co_exceptiontable.hex(),
+                'names':list(value.co_names),'varnames':list(value.co_varnames),
+                'freevars':list(value.co_freevars),'cellvars':list(value.co_cellvars),
+                'argcount':value.co_argcount,'posonly':value.co_posonlyargcount,
+                'kwonly':value.co_kwonlyargcount,'flags':value.co_flags,
+                'constants':[code_value(v) for v in value.co_consts]}
+        if type(value) is tuple:
+            return {'tuple':[code_value(v) for v in value]}
+        if type(value) is frozenset:
+            items = [code_value(v) for v in value]
+            return {'frozenset':sorted(items,key=lambda v:_json.dumps(v,sort_keys=True))}
+        if type(value) is slice:
+            return {'slice':[code_value(value.start),code_value(value.stop),code_value(value.step)]}
+        if type(value) is bytes:
+            return {'bytes':value.hex()}
+        if value is Ellipsis:
+            return {'ellipsis':True}
+        return {'scalar':_p7_rollout_copy(value)}
+    def dependency(value):
+        if type(value) is _rollout_types.FunctionType:
+            return {'function':_rollout_scope_fingerprint(value,seen)}
+        return {'json':_p7_rollout_copy(value)}
+    dependencies = {}
+    for name in sorted(names):
+        if name in function.__globals__:
+            dependencies[name] = dependency(function.__globals__[name])
+        elif name not in _rollout_scope_builtins or function.__builtins__.get(name) is not _rollout_scope_builtins[name]:
+            raise ValueError('scope dependency unsupported')
+    # Describe code structurally: marshal reference flags can depend on object
+    # retention, and old marshal versions cannot encode Python 3.14 slices.
+    payload = {'code':code_value(function.__code__),
+        'defaults':dependency(list(function.__defaults__ or ())),
+        'kwdefaults':dependency(function.__kwdefaults__),
+        'closure':[dependency(cell.cell_contents) for cell in function.__closure__ or ()],
+        'globals':dependencies}
+    return _rollout_state_digest(payload)
+
+def _rollout_extract_retained_scope(extractor_id, frame, reference):
+    retained = _rollout_scope_extractors.get(extractor_id)
+    try:
+        if retained is None or retained['fingerprint'] is None:
+            raise ValueError('scope unavailable')
+        function = retained['function']
+        if _rollout_scope_fingerprint(function) != retained['fingerprint']:
+            raise ValueError('scope dependencies changed')
+        state = function(_p7_rollout_copy(frame),_p7_rollout_copy(reference))
+        digest = _rollout_state_digest(state)
+        if _rollout_scope_fingerprint(function) != retained['fingerprint']:
+            raise ValueError('scope dependencies changed')
+        return {'status':'available','initial_state_sha256':digest}
+    except Exception:
+        return {'status':'unavailable'}
+
 def _rollout_compact(result):
     risk = result.get('risk', {})
     if type(risk) is not dict:
@@ -146,7 +229,8 @@ def _rollout_compact(result):
             'reason': result.get('reason', 'model-relative'), 'outcome': result.get('outcome'),
             'ticks': result.get('ticks', 0), 'coverage': risk.get('coverage'),
             'findings': risk.get('findings', []), 'execution_authority': 'none',
-            'claims': 'model-relative'}
+            'claims': 'model-relative', 'initial_state_sha256':result.get('initial_state_sha256'),
+            'scope_extractor_id':result.get('scope_extractor_id')}
 
 def _remember_rollout_call(operation, reference, candidates, result, registration=None, frame_sha256=None, trace_ref=None):
     global _rollout_call_sequence
@@ -156,6 +240,8 @@ def _remember_rollout_call(operation, reference, candidates, result, registratio
         'observation_ref': _p7_rollout_copy(reference),
         'candidate_actions': _p7_rollout_copy(candidates),
         'registration': registration, 'frame_sha256': frame_sha256,
+        'initial_state_sha256':result.get('initial_state_sha256'),
+        'scope_extractor_id':result.get('scope_extractor_id'),
         'full_trace_ref': trace_ref,
         'result': _rollout_compact(result)})
 
@@ -210,11 +296,28 @@ def _evaluate_registered(frame, reference, action, boundary):
         _registered_rollout_model = None
         return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': 'model_boundary_invalidated', 'ticks': 0}, None
     try:
+        try:
+            fingerprint = _rollout_scope_fingerprint(model['from_frame'])
+        except Exception:
+            fingerprint = None
         initial = model['from_frame'](_p7_rollout_copy(frame), _p7_rollout_copy(reference))
+        initial_digest = _rollout_state_digest(initial)
+        if fingerprint is not None:
+            try:
+                if _rollout_scope_fingerprint(model['from_frame']) != fingerprint:
+                    fingerprint = None
+            except Exception:
+                fingerprint = None
         result = _raw_rollout(initial, [action], transition=model['transition'],
             settled=model['settled'], terminal=model['terminal'],
             collision=model['collision'], max_ticks_per_action=model['max_ticks_per_action'],
             risk_check=model['risk_check'], supported_actions=model['supported_actions'])
+        result['initial_state_sha256'] = initial_digest
+        if result['risk']['status'] in ('predicted_death','conditional_fatal'):
+            extractor_id = str(model['registration_id']) + ':' + (fingerprint or 'unavailable')
+            if extractor_id not in _rollout_scope_extractors:
+                _rollout_scope_extractors[extractor_id] = {'function':model['from_frame'],'fingerprint':fingerprint}
+            result['scope_extractor_id'] = extractor_id
         return _rollout_compact(result), result
     except Exception:
         return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': 'model_callback_failed', 'ticks': 0}, None
@@ -259,13 +362,15 @@ def _drain_rollout_calls():
     _rollout_pending_traces.clear()
     return {'calls': calls, 'registration': _model_registration(), 'traces':traces}
 
-def _host_evaluate_action(frame, reference, action, boundary):
+def _host_evaluate_action(frame, reference, action, boundary, scope_extractor_ids=None):
     global _last_auto_rollout_result, _rollout_call_depth
     _rollout_call_depth += 1
     try:
         # Model diagnostics cannot replace the structured host assessment.
         with _rollout_contextlib.redirect_stdout(_rollout_io.StringIO()), _rollout_contextlib.redirect_stderr(_rollout_io.StringIO()):
             assessment, result = _evaluate_registered(frame, reference, action, boundary)
+            scopes = {key:_rollout_extract_retained_scope(key,frame,reference)
+                      for key in scope_extractor_ids or []}
     finally:
         _rollout_call_depth -= 1
     _last_auto_rollout_result = result
@@ -277,6 +382,7 @@ def _host_evaluate_action(frame, reference, action, boundary):
         except Exception:
             assessment['evidence_status'] = 'result_artifact_unavailable'
     return {'assessment': assessment, 'registration': _model_registration(),
+            'retained_scope_assessments':scopes,
             'result_zlib_base64': packed}
 
 def last_auto_rollout():
@@ -309,6 +415,11 @@ class RolloutRuntime:
         self.telemetry_failures = 0
         self.counterexample_revisions = set()
         self.observed_death_cases = {}
+        # Append-only host witnesses survive registration, RESET and kernel
+        # replacement. Matching is exact model-state/action or public-frame;
+        # neither asserts generalized dangerous-region or hidden-state rules.
+        self.retained_fatal_risks = []
+        self._retained_fatal_keys = set()
         self._record_lock = threading.Lock()
 
     def _append(self, value):
@@ -367,6 +478,12 @@ class RolloutRuntime:
             self.actor_helper_calls += 1
             self.actor_calls.append(record)
             self.actor_calls = self.actor_calls[-128:]
+            if binding_verified:
+                for candidate in item.get('candidate_actions', []):
+                    if len(candidate) == 1:
+                        self._retain_fatal(record['result'], record['observation_ref'], candidate[0],
+                                           record['frame_sha256'], record['model_revision'],
+                                           record.get('full_trace_ref'), 'actor')
             self._append(record)
 
     def read_trace(self, reference, section, start, limit):
@@ -399,6 +516,69 @@ class RolloutRuntime:
     @staticmethod
     def _registration_key(revision):
         return None if revision is None else (revision['generation'], revision['registration_id'])
+
+    @staticmethod
+    def _action_key(action):
+        return json.dumps(action, allow_nan=False, sort_keys=True, separators=(',', ':'))
+
+    def _retain_fatal(self, assessment, reference, action, frame_hash, revision, trace_ref, origin):
+        if assessment.get('risk') not in ('predicted_death', 'conditional_fatal'):
+            return
+        identity = (self._registration_key(revision), reference.get('run_id'), reference.get('level'),
+                    self._action_key(action), assessment.get('initial_state_sha256') or frame_hash,
+                    assessment['risk'], self._action_key(assessment.get('findings', [])))
+        if identity in self._retained_fatal_keys:
+            return
+        witness = {'origin': origin, 'risk': assessment['risk'],
+                   'findings': assessment.get('findings', []), 'observation_ref': reference,
+                   'action': action, 'model_revision': revision, 'full_trace_ref': trace_ref,
+                   'initial_state_sha256': assessment.get('initial_state_sha256'),
+                   'frame_sha256': frame_hash, 'scope_extractor_id': assessment.get('scope_extractor_id'),
+                   'claims': 'retained-model-relative-finding', 'execution_authority': 'none'}
+        self.retained_fatal_risks.append(json.loads(json.dumps(witness, allow_nan=False)))
+        self._retained_fatal_keys.add(identity)
+
+    def _candidate_witnesses(self, reference, action):
+        # A run ID is part of the authority scope. Older unit-test references
+        # without a run ID may still exercise observed deaths separately.
+        return [w for w in self.retained_fatal_risks
+                if w['observation_ref'].get('run_id') == reference.get('run_id')
+                and w['observation_ref'].get('level') == reference.get('level')
+                and self._action_key(w['action']) == self._action_key(action)]
+
+    def _apply_retained_fatal(self, result, reference, action):
+        matches, unavailable = [], []
+        scopes = result.pop('_retained_scope_assessments', {})
+        generation = str(self.owner.kernel.generation) if getattr(self.owner, 'kernel', None) is not None else None
+        for witness in self._candidate_witnesses(reference, action):
+            revision = witness.get('model_revision')
+            scope = scopes.get(witness.get('scope_extractor_id'), {}) if revision and revision['generation'] == generation else {}
+            if scope.get('status') == 'available':
+                if scope.get('initial_state_sha256') != witness['initial_state_sha256']:
+                    continue
+                match = 'initial_state'
+            elif witness['frame_sha256'] == result['frame_sha256']:
+                # Pixels cannot establish equivalence of reference-dependent
+                # or hidden state when the original extractor is unavailable.
+                match = 'public_frame'
+            else:
+                unavailable.append(witness)
+                continue
+            matches.append({**witness, 'match': match})
+        if matches:
+            result['model_risk'] = result['risk']
+            if any(w['risk'] == 'predicted_death' and w['match'] == 'initial_state' for w in matches):
+                result['risk'] = 'predicted_death'
+            elif result['risk'] != 'predicted_death':
+                result['risk'] = 'conditional_fatal'
+            # Preserve the original finding independently of the new model's
+            # conclusion. Full state remains behind its original trace ref.
+            result['retained_fatal_risks'] = matches
+            result['reason'] = 'retained_fatal_risk'
+        if unavailable and not matches and result['risk'] not in ('predicted_death', 'conditional_fatal'):
+            result['hard_stop'] = 'risk_applicability_unavailable'
+            result['reason'] = 'risk_applicability_unavailable'
+            result['retained_fatal_risks'] = [{**w, 'match': 'unavailable'} for w in unavailable]
 
     def record_feedback(self, assessment, before_ref, after_ref, action, actual_state):
         """Record an observed death against its exact pre-action model result."""
@@ -441,12 +621,17 @@ class RolloutRuntime:
         try:
             boundary = {'run_id': reference['run_id'], 'attempt_id': reference['attempt_id'],
                         'level': reference['level'], 'reset_sequence': owner.solver._notes_boundary(reference)['reset_sequence']}
-            payload = json.dumps([observation['frame'][-1], reference, action, boundary], allow_nan=False, separators=(',', ':')).encode()
+            generation = str(owner.kernel.generation)
+            scope_ids = sorted({w['scope_extractor_id'] for w in self._candidate_witnesses(reference, action)
+                                if w.get('scope_extractor_id') is not None and w.get('model_revision')
+                                and w['model_revision']['generation'] == generation})
+            payload = json.dumps([observation['frame'][-1], reference, action, boundary, scope_ids], allow_nan=False, separators=(',', ':')).encode()
             packed_input = base64.b64encode(zlib.compress(payload)).decode()
             code = "import p7_research as _p7_r\nimport json as _p7_j\nimport zlib as _p7_z\nimport base64 as _p7_b\nprint(_p7_j.dumps(_p7_r._host_evaluate_action(*_p7_j.loads(_p7_z.decompress(_p7_b.b64decode(" + repr(packed_input) + ")))),allow_nan=False))"
             value, cell_id = await self._cell(code, combined, 'p7-auto-')
             self.registration = value['registration']
             result = value['assessment']
+            result['_retained_scope_assessments'] = value.get('retained_scope_assessments', {})
             result.update(model_revision=self.revision(self.registration), cell_id=cell_id)
             result['model_case_status'] = self.model_case_status(result['model_revision'])
             packed = value.get('result_zlib_base64')
@@ -484,6 +669,12 @@ class RolloutRuntime:
                     break
         from .score import digest
         result['frame_sha256'] = digest(observation['frame'][-1])
+        # Retain only this fresh model result, before applying earlier witnesses;
+        # reapplication must not fabricate a new witness in the new revision.
+        if action['name'] != 'RESET':
+            self._retain_fatal(result, reference, action, result['frame_sha256'],
+                               result.get('model_revision'), result.get('result_artifact_id'), 'host_auto')
+            self._apply_retained_fatal(result, reference, action)
         key = (result['frame_sha256'], reference.get('level'), json.dumps(action, sort_keys=True, separators=(',', ':')))
         observed_death = self.observed_death_cases.get(key)
         if observed_death is not None and action['name'] != 'RESET':

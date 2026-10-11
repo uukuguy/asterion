@@ -134,6 +134,7 @@ P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
 P7_RESUME_RUN_ID_ENV = "ASTERION_PRIME_P7_RESUME_RUN_ID"
 P7_EXPERIENCE_MODE_ENV = "ASTERION_PRIME_P7_EXPERIENCE_MODE"
 P7_OUTPUT_BYTES_ENV = "ASTERION_PRIME_P7_OUTPUT_BYTES"
+P7_CONTEXT_CAPACITY_BYTES_ENV = "ASTERION_PRIME_P7_CONTEXT_CAPACITY_BYTES"
 P7_COGNITION_MODE_ENV = "ASTERION_PRIME_P7_COGNITION_MODE"
 P7_FRESH_TARGET_POLICY_ENV = "ASTERION_PRIME_P7_FRESH_TARGET_POLICY"
 P7_RESEARCH_PYTHON_ENV = "ASTERION_PRIME_P7_RESEARCH_PYTHON"
@@ -319,7 +320,11 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
 def _append_research_experiment(prompt: str, environment: Mapping[str, str]) -> str:
     """Keep unverified guidance at the explicit supervised experiment entry."""
     if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "research":
-        return prompt + "\n\n" + P7_DEATH_RISK_EXPERIMENT_PROMPT + "\n\n" + P7_ROLLOUT_EXPERIMENT_PROMPT
+        return (prompt + "\n\n" + P7_DEATH_RISK_EXPERIMENT_PROMPT + "\n\n" + P7_ROLLOUT_EXPERIMENT_PROMPT
+                + "\n\n当出现 asterion_p7_context_capacity 容量提醒时，尽快更新简明 NOTES，"
+                  "保留已识别危险及条件、死亡反例、模型/程序/轨迹引用、未覆盖分支和下一步判断。"
+                  "提醒不删除未总结推理或当前完整观察，只有已接受且可验证的 NOTES 才能退休已总结历史；"
+                  "原始证据仍可按需读取。容量按 hook JSON UTF-8 bytes 计量，不是 token 硬上限。")
     return prompt
 
 
@@ -3363,6 +3368,19 @@ def _resolve_output_bytes(environment: Mapping[str, str]) -> int | None:
     raise P7OperatorError("P7 output capacity is invalid")
 
 
+def _resolve_context_capacity_bytes(environment: Mapping[str, str]) -> int:
+    """Validate the application's reminder threshold before starting services."""
+    value = environment.get(P7_CONTEXT_CAPACITY_BYTES_ENV, '131072')
+    if type(value) is str and re.fullmatch(r"[0-9]+", value):
+        try:
+            selected = int(value)
+            if 1 <= selected <= 8 * 1024 * 1024:
+                return selected
+        except ValueError:
+            pass
+    raise P7OperatorError("P7 context capacity is invalid")
+
+
 def _research_python(environment: Mapping[str, str]) -> Path | None:
     """Consume an explicit trusted worker executable only for cold autonomy."""
     if P7_RESEARCH_PYTHON_ENV not in environment:
@@ -3537,12 +3555,14 @@ def build_p7_operator_resources(
     if type(cognition_mode) is not bool:
         raise P7OperatorError("P7 host services are unavailable")
     output_bytes = _resolve_output_bytes(environment)
+    variant = _resolve_history_variant(environment, game)
+    research_mode = variant == "verified" and not cognition_mode
+    context_capacity_bytes = _resolve_context_capacity_bytes(environment) if research_mode else None
 
     trace = None
     application = None
     ipython = None
     try:
-        variant = _resolve_history_variant(environment, game)
         research_python = _research_python(environment)
         selection = resolve_p7_runtime(environment, game)
         witness_deadline = _witness_deadline(environment)
@@ -3577,7 +3597,6 @@ def build_p7_operator_resources(
             evidence_control(cancelled=evidence_cancelled,
                              deadline=task_deadline if task_deadline is not None else (
                                  None if deadline_ms is None else time.monotonic() + deadline_ms / 1000))
-        research_mode = variant == "verified" and not cognition_mode
         selected_tools = P7_TOOL_REGISTRY if research_mode else P7_LEGACY_TOOL_REGISTRY
         extension_path = live.select_extension_path(extension_path, research_mode=research_mode)
         # The ARC credential belongs only to the SDK session. The Pi model
@@ -3595,6 +3614,10 @@ def build_p7_operator_resources(
             }
         }
         provider_environment.pop("ASTERION_PRIME_P7_TOOL_MODE", None)
+        if research_mode:
+            provider_environment[P7_CONTEXT_CAPACITY_BYTES_ENV] = str(context_capacity_bytes)
+        else:
+            provider_environment.pop(P7_CONTEXT_CAPACITY_BYTES_ENV, None)
         provider_environment.pop(TOOL_REGISTRY_ENV, None)
         provider_environment.pop("ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD", None)
         provider_environment.pop("ASTERION_PRIME_IPYTHON_PREFIX_METRICS_FD", None)
@@ -4122,6 +4145,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             _resolve_history_variant(resolved, game) == "verified"
             and environment.get("ASTERION_PRIME_P7_RUN_MODE") != "cognition"
         )
+        if research_mode:
+            _resolve_context_capacity_bytes(resolved)
         if experience_mode == "on" and not research_mode:
             raise P7OperatorError("P7 experience mode is invalid")
         return P7Invocation(
@@ -4385,6 +4410,8 @@ async def run_live(
     research_mode = variant == "verified" and not cognition_mode
     experience_mode = _resolve_experience_mode(invocation.environment)
     output_bytes = _resolve_output_bytes(invocation.environment)
+    if research_mode:
+        _resolve_context_capacity_bytes(invocation.environment)
     if experience_mode == "on" and not research_mode:
         raise P7OperatorError("P7 experience mode is invalid")
     effective_experience_mode = "resume" if invocation.resume_run_id is not None else experience_mode

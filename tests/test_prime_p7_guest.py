@@ -17,6 +17,14 @@ class TestPrimeP7Guest(unittest.TestCase):
                 launch('asterion-p7-' + 'a' * 32 + '.service', 30, ['python3', '-V'])
         self.assertIn('--setenv=ASTERION_PRIME_EFFORT=high', execute.call_args.args[1])
 
+    def test_application_context_capacity_reaches_guest_service(self) -> None:
+        with patch.dict(os.environ, {"ASTERION_PRIME_P7_CONTEXT_CAPACITY_BYTES": "65536"}, clear=True), \
+             patch('tools.run_prime_p7_guest.Path.is_file', return_value=True), \
+             patch('tools.run_prime_p7_guest.os.execvp', side_effect=SystemExit(0)) as execute:
+            with self.assertRaises(SystemExit):
+                launch('asterion-p7-' + 'a' * 32 + '.service', 30, ['python3', '-V'])
+        self.assertIn('--setenv=ASTERION_PRIME_P7_CONTEXT_CAPACITY_BYTES=65536', execute.call_args.args[1])
+
     def test_console_containment_requires_fixed_complete_contract(self) -> None:
         unit = 'asterion-p7-' + 'a' * 32 + '.service'
         base = {'ASTERION_PRIME_P7_RUN_MODE': 'witness',
