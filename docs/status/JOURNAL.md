@@ -4966,3 +4966,6 @@
 - 2026-10-11 b03b2307 full promotion25PASS/provider0; clean BP35 trial authorized after output fix.
 - 2026-10-11 cf44afaa records promotion; clean BP35 started with experienceoff and fresh output policy.
 - 2026-10-11 User requests generic death-risk introduction; future P7 prompts updated, active cold-run prompt unchanged.
+- 2026-10-11 f5d9ef0f adds future P7 death-risk guidance; active clean trial retains original prompt.
+- 2026-10-11 User authorizes stop after L4 then fresh trial with death-risk guidance; exact-run watcher started.
+- 2026-10-11 Clean trial stopped per user after4levels;179actions/2RESET, replay/cleanup verified; renewed cold run authorized.

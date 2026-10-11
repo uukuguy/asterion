@@ -34,6 +34,10 @@ Run `p7-live-20261011144019-094b31b6fdf830482d7ecce6`, host session61293, source
 
 User asks to report total per-level actions and final successful attempt after last RESET separately. L2 total67=26predeath+1RESET+40success; reset global45 after GAME_OVER global44. User requests generic rule introduction death-risk warning. Future modern P7 prompt now explicitly describes death/continuous hazards, retaining counterexamples and evaluating alternative routes; active run's injected prompt remains sourcecf44afaa unchanged. Do not attribute this run's behavior to the later prompt edit or silently restart it.
 
+## L4 stop completed; renewed clean trial authorized
+
+User requested stop after L4 and restart with generic death-risk guidance. Task45 run `p7-live-20261011144019-094b31b6fdf830482d7ecce6` stopped; terminal interrupted/unsuccessful(target9), prefix4completed, replay_verified/sealed_trace/cleanup_complete true, hostexit2. Total per-level18/67/39/50; final successful18/40/39/37. L2 reset after26actions+RESET+40success; L4 reset after12+RESET+37success. L5 partial5 actions before stop, total179/reset2. Elapsed1159.157s/reportedinput3200725/output27510/modelcallbacks87/toolcallbacks85; zero alarms, no experience artifacts. Watcher34320 exited1 because closed solver control supports pause/resume only (stop operation invalid); actual stop via Ctrl-C main61293 completed. This was operator watcher misuse, not framework regression. No watcher/main process remains. Final summary/logs `.asterion-private/task45-clean-bp35/`. User authorizes new full-game clean trial, new session, historyoff/noresume, fresh wheel with death-risk guidancef5d9ef0f. Do not count interrupted partial as full-game capability failure or fold L5extra into L4.
+
 ## Current judgment
 
 Known defects are separated by responsibility and repaired. Entire historical migration equivalence and long-horizon reasoning remain unverified; old/new game runs used different presets, and historical full requests/SDK bytes are missing. Do not infer causal score recovery from shutdown or metadata repairs. Specialized code-aware native summary remains separately unwired/unverified.
