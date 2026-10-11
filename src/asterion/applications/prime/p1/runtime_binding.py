@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .compaction_policy import P1_COMPACTION_RESERVED_TOKENS
+
 import asyncio
 from collections.abc import AsyncIterator, Mapping
 import re
@@ -51,7 +53,7 @@ _BUDGET_MESSAGE = "P1 verification exceeded its fixed budget."
 _RECOVERY_MESSAGE = "P1 verification requires operator recovery."
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 _MAX_AGGREGATE_TOKENS = 64_000
-_MAX_COMPACT_RESERVED_TOKENS = 16_000
+_MAX_COMPACT_RESERVED_TOKENS = P1_COMPACTION_RESERVED_TOKENS
 
 
 class _P1BudgetExceeded(Exception):

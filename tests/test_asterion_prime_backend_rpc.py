@@ -93,21 +93,28 @@ for line in sys.stdin:
         send_frame(proposal)
         decision = receive_frame()
         if decision["status"] == "reject":
-            assert mode == "rejected"
-            emit({
+            assert mode in ("rejected", "native-rejected", "native-extra-response", "native-bad-terminal")
+            terminal = {
                 "type": "compaction_end",
                 "reason": "manual",
                 "aborted": True,
                 "willRetry": False,
-                "errorSeverity": "error",
-            })
-            emit({
+            }
+            if mode == "rejected":
+                terminal["errorSeverity"] = "error"
+            if mode == "native-bad-terminal":
+                terminal["errorMessage"] = "PRIVATE-NATIVE-ERROR"
+            emit(terminal)
+            response = {
                 "type": "response",
                 "id": request["id"],
                 "command": "compact",
                 "success": False,
                 "error": "ARBITRARY-PRIVATE-COMPACTION-ERROR",
-            })
+            }
+            if mode == "native-extra-response":
+                response["data"] = {}
+            emit(response)
         else:
             assert mode == "completed" and decision["status"] == "approve"
             send_frame(persisted)
@@ -364,10 +371,51 @@ class TestPrimeBackendRealRpc(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             tuple(event.cursor for event in events), tuple(range(1, len(events) + 1))
         )
+
         self.assertNotIn(
             "ARBITRARY-PRIVATE-COMPACTION-ERROR",
             repr((rejected, events, backend.snapshot())),
         )
+
+class TestPrimeBackendNativeCancelRpc(unittest.IsolatedAsyncioTestCase):
+    """Local Python RPC peer; no installed Pi, Node or provider is required."""
+
+    setUp = TestPrimeBackendRealRpc.setUp
+    _backend = TestPrimeBackendRealRpc._backend
+    _prompt = staticmethod(TestPrimeBackendRealRpc._prompt)
+    _compact = staticmethod(TestPrimeBackendRealRpc._compact)
+
+    async def test_native_cancel_terminal_without_error_severity_reuses_process(self):
+        backend, rpc, _host, identity, store = await self._backend("native-rejected")
+        attachment = backend.attach(identity)
+        await attachment.execute_prompt(self._prompt("prompt-1", "stage-one"))
+        before = store.recover_checkpoint()
+        process = rpc.process
+        rejected = await attachment.execute_context(self._compact(tokens=1))
+        self.assertEqual((rejected.status, rejected.reason_code), ("rejected", "compaction-token-limit"))
+        self.assertEqual(store.recover_checkpoint(), before)
+        self.assertEqual(backend.snapshot().phase, "open")
+        continued = await attachment.execute_prompt(self._prompt("prompt-2", "stage-two"))
+        self.assertEqual(continued.status, "completed")
+        self.assertIs(rpc.process, process)
+        self.assertNotIn(
+            "ARBITRARY-PRIVATE-COMPACTION-ERROR",
+            repr((rejected, attachment.replay_events(), backend.snapshot())),
+        )
+
+    async def test_ambiguous_native_cancel_pairing_remains_uncertain(self):
+        for mode in ("native-extra-response", "native-bad-terminal"):
+            with self.subTest(mode=mode):
+                backend, _rpc, _host, identity, store = await self._backend(mode)
+                attachment = backend.attach(identity)
+                await attachment.execute_prompt(self._prompt("prompt-1", "stage-one"))
+                usage = backend.usage
+                rejected = await attachment.execute_context(self._compact(tokens=1))
+                self.assertEqual((rejected.status, rejected.reason_code), ("uncertain", "recovery-required"))
+                self.assertEqual(backend.snapshot().phase, "recovery-required")
+                self.assertEqual(backend.usage, usage)
+                self.assertFalse(any(record.kind == "context-reservation" for record in store.records()))
+                self.assertNotIn("PRIVATE-NATIVE-ERROR", repr(rejected.to_mapping()))
 
 
 if __name__ == "__main__":

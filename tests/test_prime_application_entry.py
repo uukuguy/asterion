@@ -549,6 +549,14 @@ class TestPrimePersistentOwner(unittest.TestCase):
             AsterionPrimeLimits(8, 4, 600000), 64000, 500000, None, None, None)
         self.assertEqual(spec.compaction_policy, PrimeCompactionPolicy())
         self.assertEqual(spec.compaction_policy_source, 'framework-default')
+        for policy in (PrimeCompactionPolicy(), PrimeCompactionPolicy(max_total_tokens=48000)):
+            with self.subTest(policy=policy):
+                explicit = PrimeBackendSpec('session-1', 1, Path('/tmp/private'), 'continue-1',
+                    AsterionPrimeLimits(8, 4, 600000), 64000, 500000, None, None, None,
+                    compaction_policy=policy)
+                self.assertEqual(explicit.compaction_policy_source, 'application')
+                self.assertIs(explicit.compaction_policy, policy)
+                self.assertEqual(replace(explicit, compaction_policy_source='operator').compaction_policy_source, 'operator')
         for changes in ({'compaction_policy': {}}, {'compaction_policy_source': 'unknown'}):
             with self.subTest(changes=changes), self.assertRaises(ProtocolError):
                 replace(spec, **changes)

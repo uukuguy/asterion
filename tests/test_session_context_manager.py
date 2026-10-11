@@ -689,6 +689,35 @@ class TestSessionContextManager(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ledger.reserved_session_context_ids, ())
         self.assertEqual(ledger.usage, BudgetUsage(40, 0, 0, 40, 400))
 
+    async def test_snapshot_carries_only_current_exact_admitted_reservation(self) -> None:
+        store = journal()
+        ledger = authority("session.compact")
+        command = compact_command()
+        client = FakeSessionContextClient()
+        client.response = receipt(command)
+        observed = []
+        async def snapshot(admission):
+            observed.append(admission)
+            if admission is not None:
+                self.assertEqual(admission, ledger.session_context_reservations[command.command_id])
+                self.assertEqual(admission.reservation.aggregate_tokens, 100)
+                self.assertEqual(ledger.remaining_budget(now_ms=100).aggregate_tokens, 2800)
+        manager = SessionContextManager(session_id="session-1", generation=1,
+            authority=ledger, journal=store, client=client, clock_ms=lambda: 100,
+            cancellation_signal=MutableSignal(), session_status=lambda: "running",
+            authority_snapshot_sink=snapshot)
+        # Independently owned existing reservation stays deducted. This unit
+        # checks the live snapshot hook, not recovery of that owner's journal.
+        other = replace(command, command_id="other-reservation", idempotency_key="other-key")
+        other_decision = ledger.evaluate_session_context(other, now_ms=100)
+        ledger.reserve_session_context(other_decision)
+        result = await manager.execute(command)
+        self.assertEqual(result.status, "succeeded")
+        self.assertEqual(len(observed), 2)
+        self.assertEqual(observed[0].command_id, command.command_id)
+        self.assertIsNone(observed[1])
+        self.assertEqual(ledger.reserved_session_context_ids, (other.command_id,))
+
     async def test_cancelled_before_dispatch_is_durable_and_releases_budget(self) -> None:
         store = journal()
         ledger = authority("session.compact")

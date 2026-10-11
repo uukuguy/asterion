@@ -286,6 +286,12 @@ function capacityChild(sockets, options = {}) {
       branchEntries:[{id:'entry-1',parentId:null,type:'message'},
         {id:'entry-2',parentId:'entry-1',type:'message'}]};
     const result=await hooks.get('session_before_compact')(event, {getSystemPrompt:()=> 'system'});
+    let followupCancel;
+    if(options.followupConversation !== undefined && result?.cancel && !witness.closed) {
+      options.conversation=options.followupConversation;
+      const followup=await hooks.get('session_before_compact')(event, {getSystemPrompt:()=> 'system'});
+      followupCancel=followup?.cancel??false;
+    }
     let persistedError;
     if(options.persistedSummary && result===undefined) {
       const entry={type:'compaction',id:'entry-3',parentId:'entry-2',timestamp:'2000-01-01T00:00:00.000Z',
@@ -294,7 +300,8 @@ function capacityChild(sockets, options = {}) {
         {getSystemPrompt:()=> 'system',sessionManager:{getBranch:()=> [...event.branchEntries,entry]}})}
       catch(error){persistedError=error.message}
     }
-    process.stdout.write(JSON.stringify({cancel:result?.cancel??false,closed:witness.closed,concats,...persistedError?{persistedError}:{}}));
+    process.stdout.write(JSON.stringify({cancel:result?.cancel??false,closed:witness.closed,concats,
+      ...followupCancel!==undefined?{followupCancel}:{},...persistedError?{persistedError}:{}}));
     process.exit(0);`;
   const child=spawn(process.execPath,['--input-type=module','-e',source,JSON.stringify(options)],
     {stdio:['ignore','pipe','pipe',sockets.client]});
@@ -331,7 +338,7 @@ test('whole proposal frame capacity has inclusive boundaries and no hidden 1 MiB
       phase:'admission',action:'rejected',observed:bytes,limit:cap,unit:'bytes',
       measurement:'exact',config_source:'application'});
     assert.equal(outcome.cancel,true);
-    assert.equal(outcome.closed,cap<bytes);
+    assert.equal(outcome.closed,false);
   }
   const large=await proposalCapacity(policy,1024*1024+1);
   assert.equal(large.reply.phase,'proposal');
@@ -348,8 +355,28 @@ test('injected material capacity reports exact canonical byte measurement',async
     if(size>12000)assert.deepEqual(reply.limit_diagnostic,{limit_code:'summarization-material-limit',
       phase:'admission',action:'rejected',observed:size,limit:12000,unit:'bytes',
       measurement:'exact',config_source:'application'});
-    assert.equal(outcome.closed,size>12000);
+    assert.equal(outcome.closed,false);
   }
+});
+
+test('authenticated capacity refusal permits a fresh smaller transaction on the same channel',async()=>{
+  const sockets=await pair();
+  const selected={...policy,max_frame_bytes:20000,max_material_bytes:8000};
+  try {
+    const result=capacityChild(sockets,{policy:selected,conversation:50000,
+      followupConversation:1,source:'application'});
+    const first=readFrame(sockets.peer);
+    sockets.peer.write(frame({...arm,compaction_policy:{...selected,config_source:'application'}}));
+    assert.equal((await first).phase,'limit');
+    const nextBase={...base,command_nonce:'d'.repeat(64)};
+    const second=readFrame(sockets.peer);
+    sockets.peer.write(frame({...arm,...nextBase,compaction_policy:{...selected,config_source:'application'}}));
+    const proposal=await second;
+    assert.equal(proposal.phase,'proposal');
+    assert.equal(proposal.command_nonce,nextBase.command_nonce);
+    sockets.peer.write(frame({...nextBase,phase:'decision',status:'reject'}));
+    assert.deepEqual(await result,{cancel:true,closed:false,concats:0,followupCancel:true});
+  } finally {sockets.close();}
 });
 
 test('oversized header rejects before concatenating any declared body',async()=>{

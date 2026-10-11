@@ -167,6 +167,17 @@ class TestAsterionPrimeP1Runtime(unittest.TestCase):
         with self.assertRaises(TypeError):
             P1_RUNTIME_OPTIONS["deadline_ms"] = "1"  # type: ignore[index]
 
+    def test_compaction_preset_has_an_inclusive_48k_runtime_boundary(self) -> None:
+        for reserved, final in ((48000, "completed"), (48001, "budget-limited")):
+            with self.subTest(reserved=reserved):
+                class PresetService(_Service):
+                    async def wait_stage_two_release(self, *, run_id, stage_one, signal):
+                        return P1StageTwoRelease(DIGESTS[1], DIGESTS[2], 300, 120, 2, reserved)
+                service = PresetService(final=final)
+                events = asyncio.run(_events(service))
+                self.assertEqual(events[-1].type, "run.completed" if reserved == 48000 else "run.failed")
+                self.assertEqual(any(call[0] == "stage-two" for call in service.calls), reserved == 48000)
+
     def test_worker_owner_adapter_preserves_lifecycle_token_and_close_receipt(
         self,
     ) -> None:

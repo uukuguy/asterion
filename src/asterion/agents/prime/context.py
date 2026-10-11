@@ -667,6 +667,7 @@ class PrimeContextWitnessSession:
         self._uncertain = False
         self._active = False
         self._deadline: float | None = None
+        self._last_refusal: LimitDiagnostic | None = None
 
     def __repr__(self) -> str:
         return "<PrimeContextWitnessSession redacted>"
@@ -674,6 +675,10 @@ class PrimeContextWitnessSession:
     @property
     def uncertain(self) -> bool:
         return self._uncertain
+
+    @property
+    def last_refusal(self) -> LimitDiagnostic | None:
+        return self._last_refusal
 
     def close(self) -> None:
         if self._state == "approved":
@@ -743,6 +748,8 @@ class PrimeContextWitnessSession:
                     ("settlement", "recovery-required") if self._state == "approved"
                     else ("admission", "rejected"))):
             _fail()
+        if self._state != "approved":
+            self._last_refusal = diagnostic
         raise ResourceLimitExceeded(diagnostic)
 
     def _base(self, phase: str) -> dict:
@@ -846,6 +853,7 @@ class PrimeContextWitnessSession:
     ) -> None:
         """Bind an optional absolute deadline through the final persisted ack."""
         self._enter("idle")
+        self._last_refusal = None
         try:
             if deadline is not None and (
                 type(deadline) not in {int, float} or not math.isfinite(deadline)
@@ -885,8 +893,11 @@ class PrimeContextWitnessSession:
         reserve: Callable,
     ) -> bool:
         self._enter("armed")
+        proposal_received = False
         try:
-            p = _validate_proposal(await self._receive(), self._launch, self._nonce,
+            incoming = await self._receive()
+            proposal_received = True
+            p = _validate_proposal(incoming, self._launch, self._nonce,
                 policy=self._policy, config_source=self._config_source)
             if p["authority_sha256"] != self._authority:
                 _fail()
@@ -894,22 +905,35 @@ class PrimeContextWitnessSession:
             try:
                 if (
                     type(remaining_callbacks) is not int
-                    or remaining_callbacks < 2
+                    or remaining_callbacks < 0
                     or type(deadline) not in {int, float}
                     or not math.isfinite(deadline)
-                    or deadline <= time.monotonic()
                     or not callable(reserve)
                 ):
                     _fail()
+                if remaining_callbacks < 2:
+                    raise ResourceLimitExceeded(LimitDiagnostic(
+                        "compaction-callback-limit", "admission", "rejected", 2,
+                        remaining_callbacks, "callbacks", "exact", "authority"))
+                if deadline <= time.monotonic():
+                    raise ResourceLimitExceeded(LimitDiagnostic(
+                        "compaction-deadline", "admission", "rejected", 1, 0,
+                        "milliseconds", "exact", "authority"))
                 caps = tuple(
                     _input_token_ceiling(_string(p[key])) if p[key] is not None else 0
                     for key in ("main_summary_request", "turn_prefix_summary_request")
                 )
-                quote = quote_compaction_reservation(
-                    branch_input_caps=cast(tuple[int, int], caps),
-                    branch_output_caps=(3276, 3276),
-                    price=price, policy=self._policy, config_source=self._config_source,
-                )
+                try:
+                    # Both the byte-derived inputs and the inherited legacy
+                    # output allowances are estimates, not certified native caps.
+                    quote = quote_compaction_reservation(
+                        branch_input_caps=cast(tuple[int, int], caps),
+                        branch_output_caps=(3276, 3276),
+                        price=price, policy=self._policy, config_source=self._config_source,
+                    )
+                except ResourceLimitExceeded as error:
+                    raise ResourceLimitExceeded(replace(
+                        error.limit_diagnostic, measurement="estimate")) from None
                 result = reserve(quote)
                 if inspect.isawaitable(result):
                     result = await asyncio.wait_for(
@@ -918,9 +942,16 @@ class PrimeContextWitnessSession:
                             self._wait_seconds(), max(0.0, deadline - time.monotonic())
                         ),
                     )
-                if result is False or deadline <= time.monotonic():
+                if deadline <= time.monotonic():
+                    raise ResourceLimitExceeded(LimitDiagnostic(
+                        "compaction-deadline", "admission", "rejected", 1, 0,
+                        "milliseconds", "exact", "authority"))
+                if result is False:
                     _fail()
                 approved = True
+            except ResourceLimitExceeded as error:
+                self._last_refusal = error.limit_diagnostic
+                approved = False
             except (ValueError, TypeError):
                 approved = False
             # Once approval bytes may be sent, shutdown must retain the uncertain
@@ -936,9 +967,24 @@ class PrimeContextWitnessSession:
             self._proposal = p if approved else None
             self._state = "approved" if approved else "idle"
             return approved
-        except ResourceLimitExceeded:
-            self._fence()
-            raise
+        except ResourceLimitExceeded as error:
+            if self._state == "approved":
+                self._fence()
+                raise
+            peer_refused = self._last_refusal is error.limit_diagnostic
+            self._last_refusal = error.limit_diagnostic
+            if proposal_received:
+                await self._send({**self._base("decision"), "status": "reject"})
+                self._proposal, self._state = None, "idle"
+            elif peer_refused:
+                # Authenticated peer refusal already cancels native compaction.
+                # Its fresh next arm must not encounter a stray decision frame.
+                self._proposal, self._state = None, "idle"
+            else:
+                # A locally rejected partial frame cannot be reused; closing
+                # requests native cancellation without inventing paid work.
+                self._close_transport()
+            return False
         except BaseException:
             self._fence()
             _fail()

@@ -29,6 +29,9 @@ from asterion.agents.prime.compaction_budget import (
 from asterion.agents.prime.execution import AsterionPrimeLimits
 from asterion.agents.prime.store import private_root_identity
 from asterion.agents.prime.summarization import compaction_custom_instructions
+from .compaction_policy import (
+    P1_COMPACTION_RESERVED_TOKENS, P1_COMPACTION_COST_MICROS, P1_COMPACTION_POLICY,
+)
 from asterion.agents.prime.tool_registry import CORE_TOOL_REGISTRY
 from asterion.applications.first_party_packages import (
     create_prime_ipython_coding_native_package,
@@ -514,11 +517,11 @@ class P1OperatorResources:
                 "continuation_id": self.identity.continuation_id,
                 "instructions_ref": _COMPACTION_INSTRUCTION_REF,
                 "budget": {
-                    "controller_tokens": 16_000,
+                    "controller_tokens": P1_COMPACTION_RESERVED_TOKENS,
                     "application_tokens": 0,
                     "child_tokens": 0,
-                    "aggregate_tokens": 16_000,
-                    "cost_micros": 125_000,
+                    "aggregate_tokens": P1_COMPACTION_RESERVED_TOKENS,
+                    "cost_micros": P1_COMPACTION_COST_MICROS,
                     "deadline_ms": max(
                         1,
                         min(
@@ -584,7 +587,7 @@ class P1OperatorResources:
             )
         )
         self._release = P1StageTwoRelease(
-            checkpoint_digest, compact_digest, before, after, self._host_number, 16_000
+            checkpoint_digest, compact_digest, before, after, self._host_number, P1_COMPACTION_RESERVED_TOKENS
         )
         self.coordination.release_stage_two(self._release)
         self.observe("stage2.release")
@@ -861,8 +864,8 @@ _LIMITS = AsterionPrimeLimits(8, 4, 600_000)
 # Exact deepseek/deepseek-flash rates from the approved shipped Pi metadata:
 # USD 0.30 input / 1.20 output per million; cached input is charged in full.
 _PRICE = ModelPrice(300_000, 1_200_000)
-# The two compaction callbacks this application reserves, capped exactly as the
-# reservation arithmetic requires.
+# Supplied branch estimates for preflight arithmetic; these are not native
+# input/output caps. The legacy output quote remains an inherited estimate.
 _COMPACTION_INPUT_CAPS = (4096, 4096)
 _COMPACTION_OUTPUT_CAPS = (3276, 3276)
 # The one private instruction this application sends with a compaction. Pi owns
@@ -965,12 +968,12 @@ def _preflight(environment: Mapping[str, str]) -> _Preflight:
         extension = _extension_path()
     except live.P7LiveSolveError:
         raise P1OperatorError() from None
-    # Bound the two compaction callbacks before any model process can start.
+    # Check supplied branch estimates under the injected application policy.
     try:
         quote_compaction_reservation(
             branch_input_caps=_COMPACTION_INPUT_CAPS,
             branch_output_caps=_COMPACTION_OUTPUT_CAPS,
-            price=_PRICE,
+            price=_PRICE, policy=P1_COMPACTION_POLICY, config_source="application",
         )
     except (TypeError, ValueError):
         raise P1OperatorError() from None
@@ -999,7 +1002,8 @@ async def _build_resources(preflight: _Preflight) -> P1OperatorResources:
         backend_spec = PrimeBackendSpec(
             run_id, 1, private, "p1-continuation", _LIMITS, _AGGREGATE_TOKENS,
             _COST_MICROS, _PRICE, "authority-1", _COMPACTION_INSTRUCTIONS,
-            compat_provider_id="prime-applications")
+            compat_provider_id="prime-applications",
+            compaction_policy=P1_COMPACTION_POLICY, compaction_policy_source="application")
         application = prepare_prime_application(
             PrimeApplicationSpec("prime.ipython-coding", "1.0.0", "persistent-code-tools",
                 tools=PrimeToolModuleArtifact(preflight.extension_path, CORE_TOOL_REGISTRY)),

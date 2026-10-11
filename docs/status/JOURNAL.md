@@ -4949,3 +4949,4 @@
 - 2026-10-11 80c17476 records resource-policy design receipt; user approves implementation with configuration, explicit alarms and unchanged authority.
 - 2026-10-11 739f2caf adds application-configurable compaction arithmetic and safe typed limit diagnostics;80tests and independent review pass.
 - 2026-10-11 b73baf17 commits approved resource implementation plan; distinguishes command, session and parent authority alarms before approval.
+- 2026-10-11 cc4e834a configures witness capacities and identity binding; independent review and native1.35MiB proposal/resume pass, network0.

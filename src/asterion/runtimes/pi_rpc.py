@@ -540,7 +540,9 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
             or end.payload.get("aborted") is not True
             or end.payload.get("result") is not None
             or end.payload.get("errorMessage") is not None
-            or end.payload.get("errorSeverity") != "error"
+            # Native manual cancellation omits severity; the inherited terminal
+            # may carry "error". Neither shape permits an error body or result.
+            or end.payload.get("errorSeverity") not in {None, "error"}
             or response.payload.get("success") is not False
         ):
             raise ValueError
@@ -1549,6 +1551,11 @@ class PiRpcSession:
                             )
                         if raw.get("command") != "compact":
                             raise RuntimeError("Pi RPC compact response command is invalid")
+                        if raw.get("success") is False and (
+                            set(raw) != {"type", "id", "command", "success", "error"}
+                            or type(raw.get("error")) is not str or not raw["error"]
+                        ):
+                            raise RuntimeError("Pi RPC compact cancellation response is invalid")
                         if raw.get("success") is True and (
                             not events
                             or events[-1].type != "compaction_end"

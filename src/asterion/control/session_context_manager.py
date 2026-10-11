@@ -64,7 +64,7 @@ class SessionContextManager:
         session_status: Callable[[], str | None],
         position_sink: Callable[[int], None] | None = None,
         recovery_sink: Callable[[], None] | None = None,
-        authority_snapshot_sink: Callable[[], Awaitable[None]] | None = None,
+        authority_snapshot_sink: Callable[[SessionContextDecision | None], Awaitable[None]] | None = None,
     ) -> None:
         if (
             not isinstance(authority, AuthorityLedger)
@@ -188,7 +188,15 @@ class SessionContextManager:
 
         try:
             if self._authority_snapshot_sink is not None:
-                await self._authority_snapshot_sink()
+                admission = None
+                if command.operation == "session.compact":
+                    admission = self._authority.session_context_reservations.get(command.command_id)
+                    if (type(admission) is not SessionContextDecision or admission != decision
+                            or admission.status != "admitted" or admission.reservation is None
+                            or admission.authority_id != self._authority.envelope.authority_id
+                            or admission.authority_revision != self._authority.envelope.revision):
+                        raise SessionContextManagerError("session context authority reservation mismatches")
+                await self._authority_snapshot_sink(admission)
             if self._cancellation_signal.cancelled:
                 receipt = self._seal_host_receipt(
                     command,
@@ -196,7 +204,7 @@ class SessionContextManager:
                     reason_code="cancelled-before-dispatch",
                 )
                 if self._authority_snapshot_sink is not None:
-                    await self._authority_snapshot_sink()
+                    await self._authority_snapshot_sink(None)
                 return receipt
             receipt = await self._client.execute_session_context(command)
             if (
@@ -209,7 +217,7 @@ class SessionContextManager:
                 raise SessionContextManagerError("session context receipt is invalid")
             sealed = self._seal_provider_receipt(command, decision, receipt)
             if sealed.status != "uncertain" and self._authority_snapshot_sink is not None:
-                await self._authority_snapshot_sink()
+                await self._authority_snapshot_sink(None)
             return sealed
         except (asyncio.CancelledError, Exception):
             self._seal_delivery_uncertain(command, decision)

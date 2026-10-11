@@ -221,7 +221,7 @@ git commit -m "feat(prime): add validated resource policy and limit diagnostics"
 - Private `arm` envelope adds `compaction_policy` with those same four keys. Receiver verifies exact equality with the constructor policy before accepting material or initiating native summaries.
 - Private resource-refusal envelope: base identity fields + `phase='limit'` + `limit_diagnostic` containing exactly the eight Task 1 fields. Only closed resource codes and valid numeric fields are accepted; no raw text.
 
-- [ ] **Step 1: Add failing policy plumbing and transport boundary tests.**
+- [x] **Step 1: Add failing policy plumbing and transport boundary tests.**
 
 Add the following Python tests alongside the existing `ContextMixin` helpers; existing fixture material and nonce helpers remain authoritative.
 
@@ -263,7 +263,7 @@ assert.throws(() => new extension.ContextWitness(deps, {
 
 Use the test's actual accepted socket descriptor and frozen `ContextDependencies` object. Add `subTest`/Node cases for config mismatches, Buffer `constants.MAX_LENGTH`, exact JSON keys, unsafe integers, malformed bootstrap, missing one witness bootstrap key, consumed transport environment, and conflict with operator environment. A Node child tests rejected startup without a provider. Add application tests constructing the old positional `PrimeBackendSpec` and tests that changing policy changes the identity hash, then causes an old stored identity/resume to fail closed.
 
-- [ ] **Step 2: Run the exact focused checks and observe missing fields/old 1MiB checks.**
+- [x] **Step 2: Run the exact focused checks and observe missing fields/old 1MiB checks.**
 
 ```bash
 uv run python -m unittest -v tests.test_prime_application_entry tests.test_asterion_prime_backend tests.test_asterion_prime_context
@@ -272,7 +272,7 @@ npm --prefix packages/typescript/asterion-prime-extension test
 
 Expected: new tests fail on missing policy constructor/arm fields, >1MiB frames, and missing safe peer limit metadata. Historical missing-mechanics tests may remain SKIP; do not count them as native proof.
 
-- [ ] **Step 3: Implement policy identity, bootstrap and private refusal.**
+- [x] **Step 3: Implement policy identity, bootstrap and private refusal.**
 
 At both identity producers/validators use exactly this payload:
 
@@ -310,7 +310,7 @@ Remove the hidden `_MAX_FRAME`/`MAX_FRAME` 1MiB ceiling everywhere, including pr
 
 For Python limit violations construct `ResourceLimitExceeded` with exact byte length and injected source. For Node use an internal error storing only the validated numeric limit record. When `before()` catches that exact error, send an authenticated `phase='limit'` frame, then return `{cancel:true}`. The tiny refusal must fit the effective cap; Python's complete-arm admission implies space for it, and a refusal that itself cannot fit causes safe transport closure without approval. For `persisted()` after approval, send the record when possible, close and preserve the host recovery fence. On Python `_receive`, authenticate a `limit` envelope against launch/command/authority first, validate closed diagnostic shape, raise the typed error and preserve it through wrapping; never convert it to generic EOF. Invalid refusal shape is a protocol error, not trusted resource exhaustion. In Task3, catch typed refusal in `receive_proposal_and_decide` before the general fence path: an authenticated peer refusal before any approve bytes returns false/idle and retains `last_refusal`; a post-approval limit preserves recovery-required. A direct `_receive` test proves typed wire metadata only, not recovery behavior.
 
-- [ ] **Step 4: Run focused checks, rebuild shipped resources, then review.**
+- [x] **Step 4: Run focused checks, rebuild shipped resources, then review.**
 
 ```bash
 npm --prefix packages/typescript/asterion-prime-extension test
@@ -321,7 +321,7 @@ npm --prefix packages/typescript/asterion-prime-extension run check-resource
 
 Expected: PASS; generated generic, P7 research and P7 legacy resources contain the same witness implementation. `max_material_bytes=65536` and frame=16MiB are real policy capacities on both sides; custom limits have exact safe refusal values.
 
-- [ ] **Step 5: Commit capacity plumbing separately.**
+- [x] **Step 5: Commit capacity plumbing separately.**
 
 ```bash
 git add src/asterion/agents/prime/application.py src/asterion/agents/prime/_launch.py src/asterion/agents/prime/backend.py src/asterion/agents/prime/context.py src/asterion/agents/prime/summarization.py packages/typescript/asterion-prime-extension/src/context-witness.ts packages/typescript/asterion-prime-extension/test/context-witness.test.mjs tests/test_prime_application_entry.py tests/test_asterion_prime_backend.py tests/test_asterion_prime_context.py src/asterion/applications/prime/resources
@@ -331,6 +331,8 @@ git commit -m "feat(prime): inject compaction capacities across witness transpor
 ### Task 3: Preserve authority and give P1 one 48k compaction preset
 
 **Files:**
+- Modify: `src/asterion/agents/prime/application.py`, `tests/test_prime_application_entry.py` (infer policy source at the standard entry).
+- Modify: TypeScript `context-witness.ts`, its targeted tests and the three bundled resources (retain the authenticated channel after a successfully reported preapproval resource refusal).
 - Create: `src/asterion/applications/prime/p1/compaction_policy.py`.
 - Modify: `src/asterion/applications/prime/p1/operator.py` (command budget, release, preflight/backend spec).
 - Modify: `src/asterion/applications/prime/p1/runtime_binding.py` (reservation guard).
@@ -341,11 +343,16 @@ git commit -m "feat(prime): inject compaction capacities across witness transpor
 
 **Interfaces:**
 - Consumes: prior immutable policy/source and typed refusal.
+- `PrimeBackendSpec.compaction_policy_source` defaults to `None` and resolves in `__post_init__`: omitted shared default policy means `framework-default`; any explicit policy instance means `application`. Validate explicit source overrides and resolve before launch or identity hashing.
 - Produces: `P1_COMPACTION_RESERVED_TOKENS = 48000`, `P1_COMPACTION_COST_MICROS = 125000`, `P1_COMPACTION_POLICY = PrimeCompactionPolicy()` in the application module; use these symbols in command creation, P1StageTwoRelease and runtime checks.
 - `PrimeContextWitnessSession.last_refusal: LimitDiagnostic | None` reset at each arm and retained through rejected decision.
 - `reserve(quote: CompactionReservationQuote) -> bool` may raise `ResourceLimitExceeded` to preserve the binding limit. `receive_proposal_and_decide` returns the same bool and sends the unchanged approve/reject decision shape; typed refusal stays host-private.
 
-- [ ] **Step 1: Add failing authority and safe reason tests.**
+Integration correction: the host already reserves the admitted command before publishing its remaining-authority snapshot. Preserve that ordering and the unchanged post-reservation remainder. A narrow private command-bound admitted grant accompanies dispatch, validated against the host's exact stored decision and active ledger reservation. Only the matching compact command may include its own already reserved amounts in admission availability; other reservations and ordinary prompts receive no add-back. Match command digest, ID, revision, operation and reservation; consume the grant once at compact start, clear it on ordinary snapshot synchronization, and do not restore it across recovery. This requires narrowly scoped context-manager, control-host/client and backend wiring with last-reservation, replay/mismatch, other-reservation and ordinary-prompt boundary tests; it changes none of the four closed public protocols. Moving the asynchronous snapshot before reservation is rejected because it introduces a concurrency gap.
+
+Native refusal correction: the installed Pi manual-compaction cancellation emits `compaction_end` with `aborted=true` and no `errorSeverity`. Permit that exact cancellation alongside the already supported error severity while keeping absent result/error payload, matching start/end/response command and request identity, contiguous events, and a closed failed wire response. Test through a provider-free RPC subprocess and real native owner; arbitrary response fields, mismatched identities or uncertain aborts must remain fenced. This adds narrowly scoped `runtimes/pi_rpc.py` and RPC tests to Task3 ownership.
+
+- [x] **Step 1: Add failing authority and safe reason tests.**
 
 ```python
 class TestP1CompactionPreset(unittest.TestCase):
@@ -364,12 +371,12 @@ class TestP1CompactionPreset(unittest.TestCase):
 
 Extend the existing mocked backend compact harness with rows: quote tokens 48001/reservation48000; quote cost125001/reservation125000; reservation48000/session remaining tokens47999; reservation48000/parent controller or aggregate tokens47999; reservation125000/parent cost124999; parent token/cost balances zero; callbacks remaining1; expired deadline; malformed proposal; reserve sink failure. Assert rejected receipt reasons respectively `compaction-token-limit`, `compaction-cost-limit`, `prime-session-token-limit`, `prime-parent-token-limit`, `prime-parent-cost-limit`, the applicable `prime-parent-token-limit`/`prime-parent-cost-limit` for zero balances, `compaction-callback-limit`, `compaction-deadline`, existing protocol failure, and the original limit reason. Assert no reservation journal entry for refusals, no extra callback charge, and no approve bytes. For command-reservation failures `limit=48000`/`125000`, `config_source='authority'`; never report the larger framework default. For session/parent refusals assert the exact effective remaining balance and distinct code, not the command-budget configuration. Cover ample session capacity with insufficient parent controller, aggregate and cost grants; test zero balances and exact equal-boundary admission before any reservation/approve. For unknown post-approval transport outcomes assert charge retained and recovery-required.
 
-- [ ] **Step 2: Verify the new cases fail against old literal/reason collapse.**
+- [x] **Step 2: Verify the new cases fail against old literal/reason collapse.**
 
 Run: `uv run python -m unittest -v tests.test_asterion_prime_p1_operator tests.test_asterion_prime_p1_runtime tests.test_asterion_prime_backend tests.test_asterion_prime_context`.
 Expected: FAIL on old16000, `context-not-admitted` collapse or missing typed refusal.
 
-- [ ] **Step 3: Implement the shared preset and ordered authority checks.**
+- [x] **Step 3: Implement the shared preset and ordered authority checks.**
 
 ```python
 # applications/prime/p1/compaction_policy.py
@@ -416,12 +423,12 @@ Effective remaining authority can be exactly zero; diagnostics accept a zero lim
 
 Quote under the injected policy, not old generic16k/cost maxima. Byte-derived input quotes and inferred legacy output quote are `estimate`; `_input_token_ceiling` docstring/tests must stop describing `/4` as a proven ceiling. Do not enable strict certification, synthesize a reliable input bound or settle synthetic usage as provider usage. Typed callback/deadline exceptions populate `last_refusal`, send reject and return false; catch malformed `ValueError/TypeError` separately and retain protocol refusal behavior. The backend captures the diagnostic with command ID, preserves its reason code in the rejected receipt and only then returns to open when native aborted compact is authenticated. Transport limits before approval yield typed rejected receipts if native cancellation is known; after approval remain recovery-required.
 
-- [ ] **Step 4: Run focused checks and inspect the reservation boundary.**
+- [x] **Step 4: Run focused checks and inspect the reservation boundary.**
 
 Run: `uv run python -m unittest -v tests.test_asterion_prime_p1_operator tests.test_asterion_prime_p1_runtime tests.test_asterion_prime_backend tests.test_asterion_prime_context tests.test_prime_resource_policy tests.test_prime_diagnostics`.
 Expected: PASS. Explicit48k reservation fits existing64k authority; a later stage with insufficient remainder is budget-limited. No permission/budget controls appear in the user-facing preset.
 
-- [ ] **Step 5: Commit application preset and admission changes.**
+- [x] **Step 5: Commit application preset and admission changes.**
 
 ```bash
 git add src/asterion/applications/prime/p1/compaction_policy.py src/asterion/applications/prime/p1/operator.py src/asterion/applications/prime/p1/runtime_binding.py src/asterion/agents/prime/backend.py src/asterion/agents/prime/context.py tests/test_asterion_prime_p1_operator.py tests/test_asterion_prime_p1_runtime.py tests/test_asterion_prime_backend.py tests/test_asterion_prime_context.py tests/test_prime_resource_policy.py src/asterion/services/diagnostics.py tests/test_prime_diagnostics.py
@@ -578,3 +585,7 @@ A separate plan is required after reliable provider-specific input-bound evidenc
 
 
 Execution receipt: Task1 committed739f2caf; root80tests PASS and independent specification/code-quality review PASS. Task2 capacity transport in progress; no provider calls.
+
+Execution receipt: Task2 committedcc4e834a; Astra specification/code-quality review APPROVE, root132Python PASS+2existing skips and106Node PASS+6existing skips. Actual local native witness proposal1351538bytes, persist/resume/worker continuity and cleanup PASS; provider/network0. Fresh-wheel proof remains pending after admission/presentation integration.
+
+Execution receipt: Task3 reviewed specification PASS / quality APPROVE by Astra; 259 Python PASS + 2 historical skips, 107 Node PASS + 6 historical skips. Root independently verified 25 control recovery tests and actual native small-frame refusal / same-process continuation, network0. Alarm presentation and fresh-wheel proof remain pending.

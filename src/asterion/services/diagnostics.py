@@ -24,6 +24,10 @@ _SAFE_INTEGER_MAX = (1 << 53) - 1
 _LIMIT_UNITS = {
     "compaction-token-limit": "tokens",
     "compaction-cost-limit": "cost-micros",
+    "prime-session-token-limit": "tokens",
+    "prime-session-cost-limit": "cost-micros",
+    "prime-parent-token-limit": "tokens",
+    "prime-parent-cost-limit": "cost-micros",
     "compaction-callback-limit": "callbacks",
     "compaction-deadline": "milliseconds",
     "compaction-input-bound-unavailable": "tokens",

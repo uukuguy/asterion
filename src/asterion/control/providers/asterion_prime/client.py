@@ -8,7 +8,7 @@ from typing import NoReturn
 
 from asterion.agents.prime.backend import PrimeAttachment
 from asterion.agents.prime.state import PrimeBackendIdentity, PrimeBackendSnapshot
-from asterion.control.authority import RemainingBudget
+from asterion.control.authority import RemainingBudget, SessionContextDecision
 from asterion.control.host import (
     ControlCommand,
     ControlEvent,
@@ -200,7 +200,15 @@ class AsterionPrimeControlPlaneClient:
         if failed:
             _raise_control_error()
 
-    async def sync_authority_snapshot(self, budget: RemainingBudget) -> None:
+    async def sync_session_context_admission(
+        self, budget: RemainingBudget, decision: SessionContextDecision,
+    ) -> None:
+        """Carry only the host's exact durable compact reservation to its owner."""
+        await self.sync_authority_snapshot(budget, admitted_context=decision)
+
+    async def sync_authority_snapshot(
+        self, budget: RemainingBudget, *, admitted_context: SessionContextDecision | None = None,
+    ) -> None:
         cancelled = False
         failed = False
         try:
@@ -210,6 +218,7 @@ class AsterionPrimeControlPlaneClient:
             self._attachment.sync_authority_snapshot(
                 budget,
                 authority_revision=self._authority_revision,
+                admitted_context=admitted_context,
             )
         except asyncio.CancelledError:
             cancelled = True

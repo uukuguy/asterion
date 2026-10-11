@@ -81,8 +81,9 @@ class TestLimitDiagnostics(unittest.TestCase):
 
     def test_code_unit_mapping_and_closed_enum_values(self):
         codes = {
-            "tokens": ("compaction-token-limit", "compaction-input-bound-unavailable"),
-            "cost-micros": ("compaction-cost-limit",),
+            "tokens": ("compaction-token-limit", "compaction-input-bound-unavailable",
+                       "prime-session-token-limit", "prime-parent-token-limit"),
+            "cost-micros": ("compaction-cost-limit", "prime-session-cost-limit", "prime-parent-cost-limit"),
             "callbacks": ("compaction-callback-limit", "prime-model-callback-limit", "prime-tool-callback-limit"),
             "milliseconds": ("compaction-deadline", "prime-deadline"),
             "bytes": ("witness-frame-limit", "summarization-material-limit", "ipython-output-limit",

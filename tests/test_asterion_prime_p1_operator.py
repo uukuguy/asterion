@@ -225,7 +225,7 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(resources.worker.cleanup_receipt.reap_count, 1)
         assert resources.host is not None
         self.assertEqual(
-            resources.host.snapshot().authority_usage.aggregate_tokens, 16_015
+            resources.host.snapshot().authority_usage.aggregate_tokens, 48_015
         )
         self.assertNotIn("SENTINEL_PRIVATE", repr(result))
         self.assertEqual(
@@ -240,6 +240,39 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(events[-1].payload, {"status": "completed"})
         self.assertEqual([event.sequence for event in events], [1, 2, 3, 4, 5])
+
+    async def test_host_reserved_last_compaction_grant_does_not_authorize_prompts(self):
+        from asterion.agents.prime.backend import PrimeBackendError, PrimePromptRequest
+        from asterion.control.authority import BudgetLimit
+        resources, rpc, _trace = await self.fixture()
+        resources.authority = replace(resources.authority,
+            budget_limit=BudgetLimit(48000, 5, 0, 48005, 125005))
+        await resources.open()
+        await resources._prompt("prepare", "prepare local state")
+        await resources.host.pump()
+        owner = resources.backend._owner()
+        client = resources.host._client
+        original = client.sync_session_context_admission
+        seen = []
+
+        async def observe_grant(budget, decision):
+            self.assertEqual((budget.controller_tokens, budget.aggregate_tokens, budget.cost_micros), (0, 0, 0))
+            self.assertEqual(resources.host._authority.session_context_reservations[decision.command_id], decision)
+            await original(budget, decision)
+            seen.append(decision)
+            self.assertEqual(owner._budget, budget)
+            with self.assertRaises(PrimeBackendError):
+                await owner.execute_prompt(PrimePromptRequest("forbidden-prompt", "session-1", 1, "unused"))
+
+        with patch.object(client, "sync_session_context_admission", side_effect=observe_grant):
+            compact = await resources.compact()
+        self.assertEqual(compact.status, "succeeded")
+        self.assertEqual(len(seen), 1)
+        self.assertEqual((rpc.calls, rpc.compacts), (1, 1))
+        self.assertEqual(resources.host._authority.reserved_session_context_ids, ())
+        self.assertEqual(resources.host.snapshot().authority_usage.aggregate_tokens, 48005)
+        self.assertIsNone(owner._context_admission)
+        await resources.close_in_owner_order()
 
     async def test_rejected_and_authenticated_no_mutation_preserve_checkpoint(self):
         from asterion.applications.prime.p1.operator import run_fixed_small_verification
@@ -879,11 +912,28 @@ class TestP1LaunchPreflight(unittest.TestCase):
             branch_input_caps=operator._COMPACTION_INPUT_CAPS,
             branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
             price=operator._PRICE,
-            policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+            policy=operator.P1_COMPACTION_POLICY,
             config_source="application",
         )
-        self.assertLessEqual(quote.reserved_tokens, 16_000)
+        self.assertLessEqual(quote.reserved_tokens, operator.P1_COMPACTION_RESERVED_TOKENS)
         self.assertLessEqual(quote.cost_micro_units, 125_000)
+
+    def test_one_compaction_preset_preserves_total_authority(self) -> None:
+        from asterion.applications.prime.p1.compaction_policy import (
+            P1_COMPACTION_RESERVED_TOKENS, P1_COMPACTION_COST_MICROS,
+            P1_COMPACTION_POLICY,
+        )
+        from asterion.applications.prime.p1 import operator, runtime_binding
+
+        self.assertEqual(P1_COMPACTION_RESERVED_TOKENS, 48000)
+        self.assertEqual(P1_COMPACTION_COST_MICROS, 125000)
+        self.assertEqual(P1_COMPACTION_POLICY, PrimeCompactionPolicy())
+        self.assertEqual(operator._AGGREGATE_TOKENS, 64000)
+        self.assertEqual(operator._COST_MICROS, 500000)
+        self.assertEqual(operator._DEADLINE_SECONDS, 600.0)
+        self.assertEqual((operator._LIMITS.model_callbacks, operator._LIMITS.tool_callbacks), (8, 4))
+        self.assertEqual(runtime_binding._MAX_COMPACT_RESERVED_TOKENS, 48000)
+        self.assertEqual(64000 - P1_COMPACTION_RESERVED_TOKENS, 16000)
 
     def test_asymmetric_branch_caps_fit_the_reservation(self) -> None:
         from asterion.applications.prime.p1 import operator
@@ -895,24 +945,21 @@ class TestP1LaunchPreflight(unittest.TestCase):
             branch_input_caps=(7_114, 1_041),
             branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
             price=operator._PRICE,
-            policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+            policy=operator.P1_COMPACTION_POLICY,
             config_source="application",
         )
-        self.assertLessEqual(quote.reserved_tokens, 16_000)
+        self.assertLessEqual(quote.reserved_tokens, operator.P1_COMPACTION_RESERVED_TOKENS)
 
-    def test_a_single_branch_cannot_take_more_than_the_total_leaves(self) -> None:
+    def test_framework_policy_does_not_replace_the_command_reservation(self) -> None:
         from asterion.applications.prime.p1 import operator
 
-        for caps in ((16_000, 0), (9_449, 0)):
-            with self.subTest(caps=caps):
-                with self.assertRaises(ValueError):
-                    quote_compaction_reservation(
-                        branch_input_caps=caps,
-                        branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
-                        price=operator._PRICE,
-                        policy=PrimeCompactionPolicy(max_total_tokens=16_000),
-                        config_source="application",
-                    )
+        quote = quote_compaction_reservation(
+            branch_input_caps=(41_449, 0),
+            branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
+            price=operator._PRICE, policy=operator.P1_COMPACTION_POLICY,
+            config_source="application",
+        )
+        self.assertEqual(quote.reserved_tokens, operator.P1_COMPACTION_RESERVED_TOKENS + 1)
 
     def test_the_total_reservation_remains_the_binding_limit(self) -> None:
         from asterion.applications.prime.p1 import operator
@@ -921,10 +968,10 @@ class TestP1LaunchPreflight(unittest.TestCase):
         # stay within the application's explicit total policy.
         with self.assertRaises(ValueError):
             quote_compaction_reservation(
-                branch_input_caps=(9_448, 9_448),
+                branch_input_caps=(operator.P1_COMPACTION_POLICY.max_total_tokens, 0),
                 branch_output_caps=operator._COMPACTION_OUTPUT_CAPS,
                 price=operator._PRICE,
-                policy=PrimeCompactionPolicy(max_total_tokens=16_000),
+                policy=operator.P1_COMPACTION_POLICY,
                 config_source="application",
             )
 

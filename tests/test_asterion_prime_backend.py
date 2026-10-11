@@ -17,12 +17,16 @@ from asterion.agents.prime.backend import (
     PrimeSessionBackend,
 )
 from asterion.agents.prime.execution import PrimeExecutionKernel
-from asterion.agents.prime.compaction_budget import ModelPrice, PrimeCompactionPolicy
+from asterion.agents.prime.compaction_budget import (
+    CompactionReservationQuote, ModelPrice, PrimeCompactionPolicy,
+)
 from asterion.agents.prime.context import PrimeContextWitnessSession
 from asterion.agents.prime.session import AsterionPrimeLimits
 from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import FilePrimeSessionStore, private_root_identity
-from asterion.control.authority import RemainingBudget
+from asterion.control.authority import (
+    BudgetRequest, RemainingBudget, SessionContextDecision, session_context_command_digest,
+)
 from asterion.control.host import ControlCommand
 from asterion.control.state import ControlState, reduce_control_event
 from asterion.control.session_context import SessionContextCommand
@@ -33,7 +37,7 @@ from asterion.runtimes.pi_rpc import (
     PiRpcEvent,
     PiRpcResult,
 )
-from asterion.services.diagnostics import MemoryDiagnosticSink
+from asterion.services.diagnostics import LimitDiagnostic, MemoryDiagnosticSink
 from tests.test_asterion_prime_context import LAUNCH, material, receive, send
 
 
@@ -63,6 +67,10 @@ class FakeReusablePi:
         self.compact_persist_delay = 0
         self.compact_cancelled = False
         self.compact_native_overrides = {}
+        self.compact_decisions = []
+        self.compact_limit = None
+        self.compact_abort_unknown = False
+        self.compact_proposal_overrides = {}
 
     def validate_lifecycle(self, *, opened):
         if self.dead or self.closes or bool(self.opens) != opened or self.pending_abort:
@@ -111,8 +119,16 @@ class FakeReusablePi:
         for frame in (proposal, persisted):
             frame["command_nonce"] = arm["command_nonce"]
             frame["authority_sha256"] = arm["authority_sha256"]
-        await send(self.peer, proposal)
-        decision = await receive(self.peer)
+        proposal.update(self.compact_proposal_overrides)
+        if self.compact_limit is not None:
+            await send(self.peer, {key: proposal[key] for key in
+                ("protocol", "launch_nonce", "command_nonce", "authority_sha256")} |
+                {"phase": "limit", "limit_diagnostic": asdict(self.compact_limit)})
+            decision = {"status": "reject"}
+        else:
+            await send(self.peer, proposal)
+            decision = await receive(self.peer)
+        self.compact_decisions.append(decision["status"])
         if decision["status"] == "approve":
             try:
                 await asyncio.sleep(self.compact_persist_delay)
@@ -158,7 +174,7 @@ class FakeReusablePi:
             "compact",
             tuple(events),
             b"",
-            "completed" if approved else "aborted",
+            "completed" if approved or self.compact_abort_unknown else "aborted",
         )
         if not approved:
             self.pending_abort = result
@@ -685,11 +701,48 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
 
     async def test_admitted_compact_can_consume_reserved_last_tokens(self):
         await self.backend.execute_prompt(self.request())
+        command = self.compact_command()
         self.backend.sync_authority_snapshot(
-            RemainingBudget(0, 0, 0, 0, 0, 500000), authority_revision=1
+            RemainingBudget(0, 0, 0, 0, 0, 500000), authority_revision=1,
+            admitted_context=self.admission(command),
         )
-        receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual(self.backend._budget.aggregate_tokens, 0)
+        with self.assertRaises(PrimeBackendError):
+            await self.backend.execute_prompt(self.request("prompt-blocked"))
+        receipt = await self.backend.execute_context(command)
         self.assertEqual(receipt.status, "succeeded")
+        self.assertIsNone(self.backend._context_admission)
+        self.assertIs(await self.backend.execute_context(command), receipt)
+
+    def admission(self, command):
+        return SessionContextDecision(command.command_id, command.idempotency_key,
+            "authority-1", command.authority_revision, command.operation,
+            session_context_command_digest(command), "admitted", "admitted",
+            BudgetRequest.from_mapping(command.payload["budget"]))
+
+    async def test_compact_grant_is_exact_consumed_once_and_cleared_by_plain_sync(self):
+        await self.backend.execute_prompt(self.request())
+        command = self.compact_command()
+        empty = RemainingBudget(0, 0, 0, 0, 0, 500000)
+        decision = self.admission(command)
+        for changes in ({"command_id": "other-command"}, {"command_digest": "0" * 64},
+                        {"idempotency_key": "other-key"},
+                        {"reservation": replace(decision.reservation, aggregate_tokens=16001)}):
+            with self.subTest(changes=changes):
+                self.backend.sync_authority_snapshot(empty, admitted_context=replace(decision, **changes))
+                with self.assertRaises(PrimeBackendError):
+                    await self.backend.execute_context(command)
+                self.assertIsNone(self.backend._context_admission)
+                self.assertEqual(self.rpc.compacts, 0)
+        for changes in ({"authority_revision": 2}, {"authority_id": "authority-other"},
+                        {"status": "rejected", "reservation": None}):
+            with self.subTest(changes=changes), self.assertRaises(PrimeBackendError):
+                self.backend.sync_authority_snapshot(empty, admitted_context=replace(decision, **changes))
+        self.backend.sync_authority_snapshot(empty, admitted_context=decision)
+        self.backend.sync_authority_snapshot(empty)
+        self.assertIsNone(self.backend._context_admission)
+        rejected = await self.backend.execute_context(command)
+        self.assertEqual((rejected.status, rejected.reason_code), ("rejected", "prime-parent-token-limit"))
 
     async def test_compact_resolves_the_instruction_reference_for_the_rpc(self):
         await self.backend.execute_prompt(self.request())
@@ -852,6 +905,194 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.rpc.acked)
         with self.assertRaises(PrimeBackendError):
             await self.backend.execute_prompt(self.request("prompt-2"))
+
+    async def test_compact_authority_refusals_precede_reservation_and_approval(self):
+        await self.backend.execute_prompt(self.request())
+        sink = MemoryDiagnosticSink()
+        self.backend._diagnostics = sink
+        rows = (
+            ("quote-token", 48001, 125000, {}, {}, "compaction-token-limit", 48000, "estimate"),
+            ("quote-cost", 48000, 125001, {}, {}, "compaction-cost-limit", 125000, "estimate"),
+            ("session-token", 48000, 125000, {"aggregate_tokens": 16001}, {}, "prime-session-token-limit", 47999, "exact"),
+            ("session-cost", 48000, 125000, {"cost_micros": 375001}, {}, "prime-session-cost-limit", 124999, "exact"),
+            ("parent-controller", 48000, 125000, {}, {"controller_tokens": 47999}, "prime-parent-token-limit", 47999, "exact"),
+            ("parent-aggregate", 48000, 125000, {}, {"aggregate_tokens": 47999}, "prime-parent-token-limit", 47999, "exact"),
+            ("parent-cost", 48000, 125000, {}, {"cost_micros": 124999}, "prime-parent-cost-limit", 124999, "exact"),
+            ("parent-controller-zero", 48000, 125000, {}, {"controller_tokens": 0}, "prime-parent-token-limit", 0, "exact"),
+            ("parent-aggregate-zero", 48000, 125000, {}, {"aggregate_tokens": 0}, "prime-parent-token-limit", 0, "exact"),
+            ("parent-cost-zero", 48000, 125000, {}, {"cost_micros": 0}, "prime-parent-cost-limit", 0, "exact"),
+        )
+        initial_usage = self.backend.usage
+        for name, quoted_tokens, quoted_cost, used, parent, code, available, measurement in rows:
+            with self.subTest(name=name):
+                self.backend._usage = initial_usage
+                grant = replace(RemainingBudget(64000, 64000, 0, 64000, 500000, 600000), **parent)
+                self.backend.sync_authority_snapshot(grant)
+                self.backend._usage = replace(initial_usage, **used)
+                before_usage = self.backend.usage
+                callbacks = self.backend._kernel.model_callbacks
+                command = self.compact_command(name, tokens=48000)
+                quote = CompactionReservationQuote(quoted_tokens, quoted_cost, ())
+                with patch("asterion.agents.prime.context.quote_compaction_reservation", return_value=quote):
+                    receipt = await self.backend.execute_context(command)
+                self.assertEqual((receipt.status, receipt.reason_code), ("rejected", code))
+                diagnostic = self.backend._witness.last_refusal
+                self.assertEqual((diagnostic.limit_code, diagnostic.limit, diagnostic.measurement,
+                                  diagnostic.config_source), (code, available, measurement, "authority"))
+                self.assertEqual(self.backend.usage, before_usage)
+                self.assertEqual(self.backend._kernel.model_callbacks, callbacks)
+                self.assertEqual(self.rpc.compact_decisions[-1], "reject")
+                self.assertFalse(any(record.kind == "context-reservation" for record in self.store.records()))
+                self.assertEqual(self.backend.snapshot().phase, "open")
+                self.assertEqual(sink.get(next(reversed(sink._records))).limit_diagnostic, diagnostic)
+
+    async def test_compact_parent_consumption_since_snapshot_is_subtracted(self):
+        await self.backend.execute_prompt(self.request())
+        for field, code in (("controller_tokens", "prime-parent-token-limit"),
+                            ("aggregate_tokens", "prime-parent-token-limit"),
+                            ("cost_micros", "prime-parent-cost-limit")):
+            with self.subTest(field=field):
+                self.backend.sync_authority_snapshot(RemainingBudget(64000, 64000, 0, 64000, 500000, 600000))
+                requested = 125000 if field == "cost_micros" else 48000
+                consumed = (500000 if field == "cost_micros" else 64000) - requested + 1
+                self.backend._usage = replace(self.backend.usage, **{field: getattr(self.backend.usage, field) + consumed})
+                # Keep the session cap ample, independently of the parent grant.
+                self.backend._token_cap = 1000000
+                self.backend._cost_cap = 1000000
+                receipt = await self.backend.execute_context(self.compact_command(field, tokens=48000))
+                self.assertEqual((receipt.status, receipt.reason_code), ("rejected", code))
+                self.assertEqual(self.backend._witness.last_refusal.limit, requested - 1)
+
+    async def test_compact_exact_remaining_authority_admits_before_approve(self):
+        await self.backend.execute_prompt(self.request())
+        self.backend.sync_authority_snapshot(RemainingBudget(48000, 0, 0, 48000, 125000, 600000))
+        self.backend._token_cap = self.backend.usage.aggregate_tokens + 48000
+        self.backend._cost_cap = self.backend.usage.cost_micros + 125000
+        quote = CompactionReservationQuote(48000, 125000, ())
+        with patch("asterion.agents.prime.context.quote_compaction_reservation", return_value=quote):
+            receipt = await self.backend.execute_context(self.compact_command(tokens=48000))
+        self.assertEqual(receipt.status, "succeeded")
+        self.assertEqual(self.rpc.compact_decisions, ["approve"])
+        self.assertIsNone(self.backend._witness.last_refusal)
+
+    async def test_compact_callback_refusal_retains_zero_and_one_authority(self):
+        await self.backend.execute_prompt(self.request())
+        for remaining in (0, 1):
+            with self.subTest(remaining=remaining):
+                self.backend._kernel.model_callbacks = self.backend._limits.model_callbacks - remaining
+                usage = self.backend.usage
+                receipt = await self.backend.execute_context(self.compact_command(f"callbacks-{remaining}"))
+                self.assertEqual((receipt.status, receipt.reason_code), ("rejected", "compaction-callback-limit"))
+                self.assertEqual(self.backend._witness.last_refusal.limit, remaining)
+                self.assertEqual(self.backend.usage, usage)
+                self.assertEqual(self.backend._kernel.model_callbacks, 8 - remaining)
+                self.assertEqual(self.rpc.compact_decisions[-1], "reject")
+
+    async def test_known_peer_limit_waits_for_native_abort_and_allows_next_effect(self):
+        await self.backend.execute_prompt(self.request())
+        usage = self.backend.usage
+        callbacks = self.backend._kernel.model_callbacks
+        diagnostic = LimitDiagnostic("witness-frame-limit", "admission", "rejected",
+            16777217, 16777216, "bytes", "exact", "framework-default")
+        self.rpc.compact_limit = diagnostic
+        receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual((receipt.status, receipt.reason_code), ("rejected", diagnostic.limit_code))
+        self.assertEqual(self.backend._witness.last_refusal, diagnostic)
+        self.assertEqual(self.backend.usage, usage)
+        self.assertEqual(self.backend._kernel.model_callbacks, callbacks)
+        self.assertEqual(self.backend.snapshot().phase, "open")
+        self.assertIsNone(self.backend.snapshot().outstanding_effect)
+        self.assertFalse(any(record.kind == "context-reservation" for record in self.store.records()))
+        self.assertIsNone(self.rpc.pending_abort)
+        self.rpc.compact_limit = None
+        await self.backend.execute_prompt(self.request("prompt-2"))
+        followup = await self.backend.execute_context(self.compact_command("compact-2"))
+        self.assertEqual(followup.status, "succeeded")
+        self.assertIsNone(self.backend._witness.last_refusal)
+
+    async def test_peer_limit_without_matching_native_abort_still_fences(self):
+        await self.backend.execute_prompt(self.request())
+        usage = self.backend.usage
+        self.rpc.compact_limit = LimitDiagnostic("witness-frame-limit", "admission", "rejected",
+            16777217, 16777216, "bytes", "exact", "framework-default")
+        self.rpc.compact_abort_unknown = True
+        receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual((receipt.status, receipt.reason_code), ("uncertain", "recovery-required"))
+        self.assertEqual(self.backend.usage, usage)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_unknown_after_approval_retains_reservation_and_callbacks(self):
+        await self.backend.execute_prompt(self.request())
+        usage = self.backend.usage
+        callbacks = self.backend._kernel.model_callbacks
+        self.rpc.corrupt_compact = True
+        receipt = await self.backend.execute_context(self.compact_command(tokens=48000))
+        self.assertEqual((receipt.status, receipt.reason_code), ("uncertain", "recovery-required"))
+        self.assertEqual(self.backend.usage.aggregate_tokens, usage.aggregate_tokens + 48000)
+        self.assertEqual(self.backend.usage.cost_micros, usage.cost_micros + 125000)
+        self.assertEqual(self.backend._kernel.model_callbacks, callbacks + 2)
+        self.assertEqual(self.backend.snapshot().phase, "recovery-required")
+
+    async def test_expired_compact_authority_is_typed_before_rpc_or_reservation(self):
+        await self.backend.execute_prompt(self.request())
+        self.backend.sync_authority_snapshot(RemainingBudget(64000, 64000, 0, 64000, 500000, 0))
+        usage = self.backend.usage
+        receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual((receipt.status, receipt.reason_code), ("rejected", "compaction-deadline"))
+        self.assertEqual(self.rpc.compacts, 0)
+        self.assertEqual(self.backend.usage, usage)
+        self.assertFalse(any(record.kind == "context-reservation" for record in self.store.records()))
+
+    async def test_reserve_limit_and_failed_alarm_sink_keep_original_reason(self):
+        from asterion.services.diagnostics import ResourceLimitExceeded
+        await self.backend.execute_prompt(self.request())
+        class BrokenSink:
+            def record(self, _record):
+                raise RuntimeError("PRIVATE-ALARM-SINK")
+        self.backend._diagnostics = BrokenSink()
+        diagnostic = LimitDiagnostic("prime-parent-cost-limit", "admission", "rejected",
+            125000, 7, "cost-micros", "exact", "authority")
+        original = self.backend._append
+        def refuse(record_id, kind, payload):
+            if kind == "context-reservation":
+                raise ResourceLimitExceeded(diagnostic)
+            return original(record_id, kind, payload)
+        usage = self.backend.usage
+        with patch.object(self.backend, "_append", side_effect=refuse):
+            receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual((receipt.status, receipt.reason_code), ("rejected", diagnostic.limit_code))
+        self.assertEqual(self.backend._witness.last_refusal, diagnostic)
+        self.assertEqual(self.backend.usage, usage)
+        self.assertEqual(self.rpc.compact_decisions, ["reject"])
+
+    async def test_malformed_compact_proposal_retains_protocol_fence_without_charge(self):
+        await self.backend.execute_prompt(self.request())
+        self.rpc.compact_proposal_overrides = {"extra": "PRIVATE-PROPOSAL"}
+        usage = self.backend.usage
+        callbacks = self.backend._kernel.model_callbacks
+        receipt = await self.backend.execute_context(self.compact_command())
+        self.assertEqual((receipt.status, receipt.reason_code), ("uncertain", "recovery-required"))
+        self.assertIsNone(self.backend._witness.last_refusal)
+        self.assertEqual(self.backend.usage, usage)
+        self.assertEqual(self.backend._kernel.model_callbacks, callbacks)
+        self.assertEqual(self.rpc.compact_decisions, [])
+        self.assertFalse(any(record.kind == "context-reservation" for record in self.store.records()))
+        self.assertNotIn("PRIVATE-PROPOSAL", repr(receipt.to_mapping()))
+
+    async def test_nonzero_application_or_child_compact_authority_is_malformed(self):
+        await self.backend.execute_prompt(self.request())
+        for field in ("application_tokens", "child_tokens"):
+            with self.subTest(field=field):
+                command = self.compact_command(field)
+                command = replace(command, payload={**command.payload,
+                    "budget": {**command.payload["budget"], field: 1}})
+                usage = self.backend.usage
+                receipt = await self.backend.execute_context(command)
+                self.assertEqual((receipt.status, receipt.reason_code), ("rejected", "context-not-admitted"))
+                self.assertIsNone(self.backend._witness.last_refusal)
+                self.assertEqual(self.backend.usage, usage)
+                self.assertEqual(self.rpc.compact_decisions[-1], "reject")
+                self.assertFalse(any(record.kind == "context-reservation" for record in self.store.records()))
 
 
 class TestPrimeBackendBeforeCreate(unittest.IsolatedAsyncioTestCase):

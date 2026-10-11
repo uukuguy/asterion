@@ -26,6 +26,8 @@ All values are positive exact JSON-safe integers. Frame capacity additionally ca
 
 Application/operator resolves configuration and injects it through the standard Prime entry. Core code reads no environment, credentials or provider profile. Add policy to both backend identity ceiling hashes so recovery cannot silently change capacity. Policy is not placed in compatibility manifests and does not change the four public closed protocols.
 
+The standard entry infers `framework-default` when the policy is omitted and `application` when a policy is explicitly supplied, including an explicit policy with default values. An explicit validated source override remains available to operator integration; applications need not supply a separate origin flag merely to configure a capacity.
+
 Delete generic fixed per-branch input/output and monetary policy constants. Quote inputs use supplied branch bounds; total is checked against policy. Cost uses injected `ModelPrice`, command reservation and remaining authority. Effective admission requires quote <= policy, quote <= command reservation, and reservation <= remaining session/parent authority. A larger default never increases authority.
 
 ## P1 compatibility and authority

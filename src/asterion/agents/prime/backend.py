@@ -36,7 +36,10 @@ from asterion.agents.prime.state import (
     PrimeCheckpoint,
 )
 from asterion.agents.prime.store import FilePrimeSessionStore
-from asterion.control.authority import BudgetUsage, RemainingBudget
+from asterion.control.authority import (
+    BudgetRequest, BudgetUsage, RemainingBudget, SessionContextDecision,
+    session_context_command_digest,
+)
 from asterion.control.host import ControlCommand, ControlEvent
 from asterion.control.state import (
     ControlState,
@@ -53,7 +56,9 @@ from asterion.control.session_context import (
 from asterion.runtime.host import CancellationSignal, RunRequest
 from asterion.runtimes.pi_extensions import PiExtensionBinding, PiExtensionLease
 from asterion.runtimes.pi_rpc import PiRpcCompactResult, PiRpcEvent, PiRpcSession
-from asterion.services.diagnostics import DiagnosticSink, capture_failure
+from asterion.services.diagnostics import (
+    DiagnosticSink, LimitDiagnostic, ResourceLimitExceeded, capture_failure, capture_limit,
+)
 
 
 _PRIME_PROMPT_BYTES = 256 * 1024
@@ -240,10 +245,11 @@ class PrimeAttachment:
         await self._owner().accept_control(command)
 
     def sync_authority_snapshot(
-        self, budget: RemainingBudget, *, authority_revision: int | None = None
+        self, budget: RemainingBudget, *, authority_revision: int | None = None,
+        admitted_context: SessionContextDecision | None = None,
     ) -> None:
         self._owner().sync_authority_snapshot(
-            budget, authority_revision=authority_revision
+            budget, authority_revision=authority_revision, admitted_context=admitted_context,
         )
 
     async def cancel_context(self, command_id: str) -> None:
@@ -362,6 +368,7 @@ class PrimeSessionBackend:
         self._budget: RemainingBudget | None = None
         self._usage = BudgetUsage.zero()
         self._snapshot_usage = self._usage
+        self._context_admission: SessionContextDecision | None = None
         self._phase: Literal[
             "created",
             "open",
@@ -551,7 +558,8 @@ class PrimeSessionBackend:
         return previous[1]
 
     def sync_authority_snapshot(
-        self, budget: RemainingBudget, *, authority_revision: int | None = None
+        self, budget: RemainingBudget, *, authority_revision: int | None = None,
+        admitted_context: SessionContextDecision | None = None,
     ) -> None:
         self._ready(read_only=True)
         revision = (
@@ -568,6 +576,15 @@ class PrimeSessionBackend:
             raise PrimeBackendError("Prime backend authority mismatch")
         if self._lock.locked():
             raise PrimeBackendError("Prime backend already has an active effect")
+        if admitted_context is not None and (
+            type(admitted_context) is not SessionContextDecision
+            or admitted_context.status != "admitted"
+            or admitted_context.operation != "session.compact"
+            or admitted_context.authority_id != self._authority_id
+            or admitted_context.authority_revision != revision
+            or type(admitted_context.reservation) is not BudgetRequest
+        ):
+            raise PrimeBackendError("Prime backend context authority mismatch")
         try:
             self._append(
                 f"authority-{self._store.position + 1}",
@@ -579,6 +596,9 @@ class PrimeSessionBackend:
             raise PrimeBackendError("Prime backend recovery required") from None
         self._budget, self._authority_revision = budget, revision
         self._snapshot_usage = self._usage
+        # This live-only grant never changes the post-reservation parent budget
+        # and cannot survive an ordinary snapshot or owner reconstruction.
+        self._context_admission = admitted_context
         self._authority_deadline = time.monotonic() + budget.deadline_ms / 1000
 
     def _begin(self, command_id: str, digest: str, kind: str) -> None:
@@ -612,8 +632,10 @@ class PrimeSessionBackend:
                 )
             )
             or self._budget.deadline_ms == 0
-            or self._usage.aggregate_tokens >= self._token_cap
-            or self._usage.cost_micros >= self._cost_cap
+            or (kind != "context" and (
+                self._usage.aggregate_tokens >= self._token_cap
+                or self._usage.cost_micros >= self._cost_cap
+            ))
         ):
             raise PrimeBackendBudgetError()
         if self._remaining_seconds() <= 0:
@@ -914,7 +936,17 @@ class PrimeSessionBackend:
                     },
                 )
             elif command.operation == "session.compact":
-                return await self._compact(command, digest)
+                admission, self._context_admission = self._context_admission, None
+                if admission is not None and (
+                    admission.command_id != command.command_id
+                    or admission.idempotency_key != command.idempotency_key
+                    or admission.command_digest != session_context_command_digest(command)
+                    or admission.authority_revision != command.authority_revision
+                    or admission.operation != command.operation
+                    or admission.reservation != BudgetRequest.from_mapping(command.payload["budget"])
+                ):
+                    raise PrimeBackendError("Prime backend context authority mismatch")
+                return await self._compact(command, digest, admitted_context=admission)
             else:
                 receipt = self._receipt(
                     command, "rejected", None, "unsupported-operation"
@@ -933,7 +965,8 @@ class PrimeSessionBackend:
             return receipt
 
     async def _compact(
-        self, command: SessionContextCommand, digest: str
+        self, command: SessionContextCommand, digest: str, *,
+        admitted_context: SessionContextDecision | None = None,
     ) -> SessionContextReceipt:
         # Native compaction needs the authenticated witness and operator price.
         if self._witness is None or self._price is None or not self._opened:
@@ -969,6 +1002,13 @@ class PrimeSessionBackend:
             time.monotonic() + self._remaining_seconds(),
             time.monotonic() + int(budget["deadline_ms"]) / 1000,
         )
+        if deadline <= time.monotonic():
+            refusal = LimitDiagnostic("compaction-deadline", "admission", "rejected",
+                1, 0, "milliseconds", "exact", "authority")
+            capture_limit(self._diagnostics, stage="prime.compaction",
+                          diagnostic=refusal, subject_id=command.command_id)
+            return self._commit_context(command, digest,
+                self._receipt(command, "rejected", None, refusal.limit_code))
         self._begin(command.command_id, digest, "context")
         rpc_task: asyncio.Task[PiRpcCompactResult] | None = None
         native: list[PiRpcEvent] = []
@@ -985,6 +1025,7 @@ class PrimeSessionBackend:
                         "remaining": None
                         if self._budget is None
                         else asdict(self._budget),
+                        "admitted_context": None if admitted_context is None else asdict(admitted_context),
                     }
                 ),
             )
@@ -997,18 +1038,37 @@ class PrimeSessionBackend:
             )
 
             def reserve(quote: CompactionReservationQuote) -> bool:
-                if (
-                    int(budget["aggregate_tokens"]) < quote.reserved_tokens
-                    or int(budget["controller_tokens"]) < quote.reserved_tokens
-                    or int(budget["application_tokens"]) != 0
-                    or int(budget["child_tokens"]) != 0
-                    or int(budget["cost_micros"]) < quote.cost_micro_units
-                    or self._usage.aggregate_tokens + int(budget["aggregate_tokens"])
-                    > self._token_cap
-                    or self._usage.cost_micros + int(budget["cost_micros"])
-                    > self._cost_cap
-                ):
-                    return False
+                if int(budget["application_tokens"]) != 0 or int(budget["child_tokens"]) != 0:
+                    raise ValueError("Prime compaction authority is invalid")
+                checks = [
+                    ("compaction-token-limit", quote.reserved_tokens,
+                     min(int(budget["controller_tokens"]), int(budget["aggregate_tokens"])), "tokens", "estimate"),
+                    ("compaction-cost-limit", quote.cost_micro_units, int(budget["cost_micros"]), "cost-micros", "estimate"),
+                    ("prime-session-token-limit", int(budget["aggregate_tokens"]),
+                     self._token_cap - self._usage.aggregate_tokens, "tokens", "exact"),
+                    ("prime-session-cost-limit", int(budget["cost_micros"]),
+                     self._cost_cap - self._usage.cost_micros, "cost-micros", "exact"),
+                ]
+                if self._budget is not None:
+                    for field, code, unit in (
+                        ("controller_tokens", "prime-parent-token-limit", "tokens"),
+                        ("aggregate_tokens", "prime-parent-token-limit", "tokens"),
+                        ("cost_micros", "prime-parent-cost-limit", "cost-micros"),
+                    ):
+                        consumed = getattr(self._usage, field) - getattr(self._snapshot_usage, field)
+                        available = getattr(self._budget, field) - consumed
+                        if consumed < 0 or available < 0:
+                            raise PrimeBackendError("Prime backend authority accounting is invalid")
+                        if admitted_context is not None:
+                            assert admitted_context.reservation is not None
+                            available += getattr(admitted_context.reservation, field)
+                        checks.append((code, int(budget[field]), available, unit, "exact"))
+                for code, requested, available, unit, measurement in checks:
+                    if available < 0:
+                        raise PrimeBackendError("Prime backend authority accounting is invalid")
+                    if requested > available:
+                        raise ResourceLimitExceeded(LimitDiagnostic(code, "admission", "rejected",
+                            requested, available, unit, measurement, "authority"))
                 self._append(
                     f"reserved-{command.command_id}",
                     "context-reservation",
@@ -1031,6 +1091,10 @@ class PrimeSessionBackend:
                 reserve=reserve,
             )
             if not approved:
+                refusal = self._witness.last_refusal
+                if refusal is not None:
+                    capture_limit(self._diagnostics, stage="prime.compaction",
+                                  diagnostic=refusal, subject_id=command.command_id)
                 native_result = await asyncio.wait_for(
                     rpc_task, max(0.0, deadline - time.monotonic())
                 )
@@ -1043,7 +1107,8 @@ class PrimeSessionBackend:
                 self._kernel.observe_context_events(native_result)
                 self._rpc.settle_rejected_compact(native_result)
                 receipt = self._receipt(
-                    command, "rejected", None, "context-not-admitted"
+                    command, "rejected", None,
+                    "context-not-admitted" if refusal is None else refusal.limit_code,
                 )
                 result = self._commit_context(command, digest, receipt)
                 self._outstanding, self._phase = None, "open"
@@ -1120,7 +1185,9 @@ class PrimeSessionBackend:
         except asyncio.CancelledError:
             self._fence(command.command_id)
             raise
-        except Exception:
+        except Exception as error:
+            capture_failure(self._diagnostics, stage="prime.compaction",
+                            error=error, subject_id=command.command_id)
             self._fence(command.command_id)
             # A durable definitive receipt must never be replaced by a conflicting one.
             if command.command_id in self._commands:

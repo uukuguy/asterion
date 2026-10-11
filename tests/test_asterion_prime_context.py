@@ -516,12 +516,16 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
 
     async def test_authenticated_peer_limit_is_typed_and_malformed_is_protocol_error(self):
         from dataclasses import asdict
-        from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
+        from asterion.services.diagnostics import LimitDiagnostic
         diagnostic = asdict(LimitDiagnostic('witness-frame-limit', 'admission', 'rejected',
             17000000, 16777216, 'bytes', 'exact', 'framework-default'))
         for changes in ({}, {'launch_nonce': 'd' * 64},
                 {'limit_diagnostic': {**diagnostic, 'observed': True}},
-                {'limit_diagnostic': {**diagnostic, 'extra': 'sentinel'}}):
+                {'limit_diagnostic': {**diagnostic, 'extra': 'sentinel'}},
+                {'limit_diagnostic': {**diagnostic, 'config_source': 'application'}},
+                {'limit_diagnostic': {**diagnostic, 'limit': 16777215}},
+                {'limit_diagnostic': {**diagnostic, 'limit_code': 'compaction-token-limit', 'unit': 'tokens'}},
+                {'limit_diagnostic': {**diagnostic, 'phase': 'settlement', 'action': 'recovery-required'}}):
             with self.subTest(changes=changes):
                 self.session.close()
                 self.peer.close()
@@ -532,13 +536,56 @@ class TestPrimeContextWitnessSession(ContextMixin, unittest.IsolatedAsyncioTestC
                 await self.arm()
                 await send(self.peer, {**self.session._base('limit'),
                     'limit_diagnostic': diagnostic, **changes})
-                expected = ResourceLimitExceeded if not changes else self.context.PrimeContextError
-                with self.assertRaises(expected) as caught:
-                    await self.session.receive_proposal_and_decide(price=ModelPrice(0, 0),
+                args = dict(price=ModelPrice(0, 0),
                         remaining_callbacks=2, deadline=time.monotonic() + 1,
                         reserve=lambda _quote: None)
                 if not changes:
-                    self.assertEqual(caught.exception.limit_diagnostic.observed, 17000000)
+                    self.assertFalse(await self.session.receive_proposal_and_decide(**args))
+                    self.assertEqual(self.session.last_refusal, LimitDiagnostic(**diagnostic))
+                    self.assertFalse(self.session.uncertain)
+                    self.assertEqual(self.session._state, 'idle')
+                else:
+                    with self.assertRaises(self.context.PrimeContextError):
+                        await self.session.receive_proposal_and_decide(**args)
+                    self.assertTrue(self.session.uncertain)
+
+    async def test_typed_callback_deadline_and_reserve_refusals_preserve_reason(self):
+        from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
+        cases = (
+            ({'remaining_callbacks': 1}, 'compaction-callback-limit', 1),
+            ({'remaining_callbacks': 0}, 'compaction-callback-limit', 0),
+            ({'deadline': time.monotonic() - 1}, 'compaction-deadline', 0),
+            ({'reserve': lambda _quote: (_ for _ in ()).throw(ResourceLimitExceeded(
+                LimitDiagnostic('prime-parent-token-limit', 'admission', 'rejected',
+                                48000, 17, 'tokens', 'exact', 'authority')))},
+             'prime-parent-token-limit', 17),
+        )
+        for index, (overrides, code, limit) in enumerate(cases):
+            with self.subTest(code=code, limit=limit):
+                await self.session.arm(command_nonce=f'{index + 10:064x}', authority_sha256=AUTHORITY)
+                await receive(self.peer)
+                self.assertIsNone(self.session.last_refusal)
+                proposal = material()[0]
+                proposal['command_nonce'] = self.session._nonce
+                approved, decision, reserved = await self.decision(proposal, **overrides)
+                self.assertFalse(approved)
+                self.assertEqual(decision['status'], 'reject')
+                self.assertEqual(reserved, [])
+                self.assertEqual((self.session.last_refusal.limit_code, self.session.last_refusal.limit), (code, limit))
+                self.assertFalse(self.session.uncertain)
+
+    async def test_byte_derived_quote_refusal_is_estimate(self):
+        from asterion.agents.prime.compaction_budget import PrimeCompactionPolicy
+        self.session._policy = PrimeCompactionPolicy(max_total_tokens=100)
+        self.session._config_source = 'application'
+        await self.arm()
+        approved, decision, reserved = await self.decision()
+        self.assertFalse(approved)
+        self.assertEqual(decision['status'], 'reject')
+        self.assertEqual(reserved, [])
+        diagnostic = self.session.last_refusal
+        self.assertEqual((diagnostic.limit_code, diagnostic.limit, diagnostic.measurement,
+                          diagnostic.config_source), ('compaction-token-limit', 100, 'estimate', 'application'))
 
     async def arm(self):
         await self.session.arm(command_nonce=COMMAND, authority_sha256=AUTHORITY)

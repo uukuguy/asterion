@@ -14,6 +14,7 @@ from asterion.control.authority import (
     BudgetUsage,
     RemainingBudget,
     ProviderUsageReport,
+    SessionContextDecision,
 )
 from asterion.control.execution import (
     ActionExecutionFailure,
@@ -1310,7 +1311,16 @@ class ControlHost:
                 "control action private input release failed"
             ) from None
 
-    async def _sync_authority_snapshot(self) -> None:
+    async def _sync_authority_snapshot(self, admitted_context: SessionContextDecision | None = None) -> None:
+        sink = getattr(self._client, "sync_session_context_admission", None) if admitted_context is not None else None
+        if callable(sink):
+            try:
+                await cast(Callable[[RemainingBudget, SessionContextDecision], Awaitable[None]], sink)(
+                    self._authority.remaining_budget(now_ms=self._clock_ms()), admitted_context)
+            except Exception:
+                raise ControlHostTransportError(
+                    "control authority snapshot delivery is uncertain") from None
+            return
         sink = getattr(self._client, "sync_authority_snapshot", None)
         if not callable(sink):
             return

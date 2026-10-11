@@ -435,14 +435,15 @@ export class ContextWitness {
     if (this.#identity && (frame.command_nonce !== this.#identity.command_nonce || frame.authority_sha256 !== this.#identity.authority_sha256)) fail();
   }
 
-  async #refuseLimit(error: unknown, settled: boolean): Promise<void> {
-    if (!(error instanceof ResourceLimitError) || !this.#identity || this.closed) return;
+  async #refuseLimit(error: unknown, settled: boolean): Promise<boolean> {
+    if (!(error instanceof ResourceLimitError) || !this.#identity || this.closed) return false;
     const diagnostic = settled ? Object.freeze({...error.diagnostic,
       phase: "settlement", action: "recovery-required"}) : error.diagnostic;
     try {
       // Complete arm admission leaves room for this tiny, authenticated refusal.
       await this.#channel.write({...this.#identity, phase:"limit", limit_diagnostic:diagnostic});
-    } catch { /* A refusal that cannot fit closes safely without approval. */ }
+      return true;
+    } catch { return false; }
   }
 
   async before(rawEvent: unknown, rawContext: unknown): Promise<undefined | { cancel: true }> {
@@ -496,10 +497,11 @@ export class ContextWitness {
       if (decision.status !== "approve" || signal?.aborted || this.closed) fail();
       return undefined;
     } catch (error) {
-      await this.#refuseLimit(error, false);
+      const refused = await this.#refuseLimit(error, false);
       // Pi's extension runner can swallow exceptions. Positive cancellation is
       // required here to prevent its built-in summary or append from running.
-      this.close();
+      if (refused) this.#proposal = this.#branch = this.#identity = undefined;
+      else this.close();
       return { cancel: true };
     } finally { this.#active = false; }
   }

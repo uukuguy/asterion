@@ -216,6 +216,9 @@ class PrimeRunHooks:
         return '<PrimeRunHooks redacted>'
 
 
+_DEFAULT_COMPACTION_POLICY = PrimeCompactionPolicy()
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class PrimeBackendSpec:
     session_id: str
@@ -229,10 +232,13 @@ class PrimeBackendSpec:
     authority_id: str | None
     compaction_instructions: Mapping[str, str] | None
     compat_provider_id: str | None = None
-    compaction_policy: PrimeCompactionPolicy = PrimeCompactionPolicy()
-    compaction_policy_source: str = "framework-default"
+    compaction_policy: PrimeCompactionPolicy = _DEFAULT_COMPACTION_POLICY
+    compaction_policy_source: str | None = None
 
     def __post_init__(self) -> None:
+        if self.compaction_policy_source is None:
+            object.__setattr__(self, "compaction_policy_source",
+                "framework-default" if self.compaction_policy is _DEFAULT_COMPACTION_POLICY else "application")
         if (type(self.compaction_policy) is not PrimeCompactionPolicy
                 or type(self.compaction_policy_source) is not str
                 or self.compaction_policy_source not in {
