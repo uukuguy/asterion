@@ -5020,3 +5020,7 @@
 - cb0ba4ec: Support ordinary retained-scope initializers and hide private host cells to prevent stalled plans and redundant model input.
 
 - 2026-10-12: Preserve Prime cache fractions and labelled SDK costs; throughput no longer hides missing expense observations.
+
+- d1c96cf1: Preserve cache fractions and labelled SDK costs so throughput is not mistaken for spending.
+
+2026-10-12 Task52 user-stopped: 5/9,225 actions,3887s; cleanup complete. Cache statistics commit d1c96cf1 remains undeployed.
