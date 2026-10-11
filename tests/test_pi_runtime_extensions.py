@@ -20,9 +20,9 @@ from asterion.runtimes.pi_extensions import PiExtensionBinding
 # resolver, and Pi supplies it with jiti aliases. Running the loader outside Pi
 # therefore needs the same mapping, which this resolve hook supplies.
 NODE_PI_HOST_HOOK = r"""
-const HOST = "@earendil-works/pi-coding-agent";
+const HOSTS = new Set(["@earendil-works/pi-coding-agent", "@earendil-works/pi-ai"]);
 export async function resolve(specifier, context, next) {
-  if (specifier === HOST) return { url: HOST_STUB_URL, shortCircuit: true };
+  if (HOSTS.has(specifier)) return { url: HOST_STUB_URL, shortCircuit: true };
   return next(specifier, context);
 }
 """
@@ -36,6 +36,7 @@ NODE_PI_HOST_STUB = r"""
 export const buildSessionContext = () => ({ messages: [] });
 export const convertToLlm = (messages) => messages;
 export const serializeConversation = () => "";
+export const getCurrentSystemMessage = () => undefined;
 """
 
 NODE_PI_HARNESS = r"""
