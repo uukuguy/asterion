@@ -276,6 +276,57 @@ def animation(observation_ref, start=0, limit=32):
 def artifact(export_id): return _read("artifact", [export_id])
 def experience(source_run_id, kind, start=0, limit=32, artifact_id=None):
     return _read("experience", [source_run_id, kind, start, limit, artifact_id])
+def _display_projection(value):
+    if isinstance(value, dict):
+        result = {{}}
+        for key, item in value.items():
+            if key in ("frame", "frames") and isinstance(item, (list, tuple)):
+                shape, current = [], item
+                while isinstance(current, (list, tuple)):
+                    shape.append(len(current))
+                    if not current:
+                        break
+                    current = current[0]
+                result[key] = {{"display_omitted": "pixels", "shape": shape}}
+            else:
+                result[key] = _display_projection(item)
+        return result
+    if isinstance(value, (list, tuple)):
+        return [_display_projection(item) for item in value]
+    return value
+def display(value, start=0, limit=8):
+    """Display a <=16 KiB repr page, with pixels explicitly omitted only here.
+
+    Lists page records; mappings page key/value pairs; read envelopes page items
+    and retain their metadata (original total is read_page_total). next_start
+    indexes this retained value, not the remote evidence history. Full arrays
+    remain in value for calculations and frame/experience reads.
+    """
+    if type(start) is not int or start < 0 or type(limit) is not int or not 1 <= limit <= 32:
+        raise ValueError("display requires start >= 0 and limit 1..32")
+    metadata = {{}}
+    if isinstance(value, dict) and isinstance(value.get("items"), list):
+        items = value["items"]
+        metadata = _display_projection({{key: item for key, item in value.items() if key != "items"}})
+        if "total" in metadata:
+            metadata["read_page_total"] = metadata.pop("total")
+    elif isinstance(value, (list, tuple)):
+        items = value
+    elif isinstance(value, dict):
+        items = [{{"key": key, "value": item}} for key, item in value.items()]
+    else:
+        raise ValueError("display requires a list or mapping; inspect selected fields")
+    end = min(start + limit, len(items))
+    while True:
+        next_start = end if end < len(items) else None
+        result = {{**metadata, "display_only": True, "start": start, "total": len(items),
+                  "items": _display_projection(items[start:end]), "next_start": next_start,
+                  "continuation": "p7_research.display(value, start=next_start, limit=limit) when next_start is not None; raw pixels remain in value."}}
+        if len(repr(result).encode("utf-8")) <= 16 * 1024:
+            return result
+        if end <= start + 1:
+            raise ValueError("display record exceeds 16 KiB; inspect selected fields or page a nested list")
+        end -= 1
 '''
 
     def close(self) -> None:

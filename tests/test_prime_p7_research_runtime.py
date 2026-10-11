@@ -37,6 +37,20 @@ async def _wait_until(predicate, message):
 
 
 class TestP7ResearchRuntime(unittest.IsolatedAsyncioTestCase):
+    async def test_p7_default_output_capacity_keeps_full_frame_bearing_route_print(self):
+        from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
+        self.assertEqual(self.host._limits.max_output_bytes, 2 * 1024 * 1024)
+        services = P7ToolDispatch(self.host, self.trace, run_id=self.run_id)
+        self.assertEqual(getattr(services, 'bridge_output_bytes', None), self.host._limits.max_output_bytes)
+        result = await self.host.execute('full-route-print',
+            "routes = [{'action': 'ACTION1', 'frame': [[255]*64 for _ in range(64)]} for _ in range(32)]\n"
+            "print(routes)\nprint('final-action-visible', len(routes), routes[-1]['action'])", _Signal())
+        self.assertEqual(result.status, 'ok')
+        envelope = json.loads(result.content[0]['text'])
+        self.assertFalse(envelope['stdout_truncated'])
+        self.assertIn('final-action-visible 32 ACTION1', envelope['stdout'])
+        self.assertGreater(len(envelope['stdout'].encode()), 64 * 1024)
+
     async def test_maximal_observation_measurements_fit_runtime_and_historical_projection(self):
         import copy
         import random
@@ -600,6 +614,12 @@ class TestResearchOperatorBridge(unittest.TestCase):
 
                 first = execute('first', 'retained = 41; print(retained)')
                 self.assertEqual(first['status'], 'ok')
+                large = execute('large', "print(chr(1) * (320 * 1024)); print('FINAL_ACTION')")
+                self.assertEqual(large['status'], 'ok')
+                metadata = json.loads(large['output'])
+                self.assertFalse(metadata['stdout_truncated'])
+                self.assertTrue(metadata['stdout'].endswith('FINAL_ACTION\n'))
+                self.assertEqual(metadata['stdout'].count(chr(1)), 320 * 1024)
                 failed = execute('bad', 'print(missing_name)')
                 self.assertEqual(failed['status'], 'error')
                 self.assertIn('NameError', failed['output'])

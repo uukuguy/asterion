@@ -151,7 +151,7 @@ help:
 	@echo "Asterion Prime local ARC-AGI-3 L1/L2 breadth resweep: p7-breadth"
 	@echo "Asterion Prime one supervised same-game retry: p7-retry GAME=<alias-or-exact-id>"
 	@echo "Asterion Prime one offline next-level attempt: asterion-prime-p7-next GAME=<alias-or-exact-id>"
-	@echo "Asterion Prime supervised research: asterion-prime-p7-research GAME=<alias-or-exact-id> [LEVEL=N] (default: full game; Ctrl-C stops descendants)"
+	@echo "Asterion Prime supervised research: asterion-prime-p7-research GAME=<alias-or-exact-id> [LEVEL=N] (default: full game, no historical experience; explicit experiment: ASTERION_PRIME_P7_EXPERIENCE_MODE=on; Ctrl-C stops descendants)"
 	@echo "Asterion Prime ARC-AGI-3 partial witness: asterion-prime-p7-level-witness GAME=<alias-or-exact-id> LEVEL=N"
 	@echo "Asterion Prime local ARC-AGI-3 games and verified progress: asterion-prime-p7-games"
 	@echo "Asterion Prime local ARC-AGI-3 solved-game story pages: asterion-prime-p7-stories"

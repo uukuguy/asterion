@@ -9,6 +9,7 @@ const DEFAULT_OUTPUT_CAP = 64 * 1024;
 const DEFAULT_LINE_CAP = 256 * 1024;
 const DEFAULT_DEADLINE_MS = 60_000;
 const FD_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_FD";
+const OUTPUT_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_OUTPUT_BYTES";
 // Pi passes OpenAI's call_id|item_id verbatim. Require the actual end of
 // input as JavaScript's bare $ also matches before a final newline.
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:|-]{0,255}$(?![\s\S])/;
@@ -92,6 +93,20 @@ export function descriptorFromEnvironment(): number {
   const descriptor = Number(raw);
   if (!Number.isSafeInteger(descriptor) || descriptor < 3) throw unavailable();
   return descriptor;
+}
+
+export function bridgeOptionsFromEnvironment(): BridgeOptions {
+  const raw = process.env[OUTPUT_ENVIRONMENT];
+  delete process.env[OUTPUT_ENVIRONMENT];
+  if (raw === undefined) return {};
+  if (!/^[1-9][0-9]*$(?![\s\S])/.test(raw)) throw unavailable();
+  const maxOutputBytes = Number(raw);
+  // JSON can escape one output byte as six ASCII bytes. Keep protocol and
+  // request identity overhead outside the application's exact output capacity.
+  const maxLineBytes = Math.max(DEFAULT_LINE_CAP, 6 * maxOutputBytes + 8192);
+  if (!Number.isSafeInteger(maxOutputBytes) || maxOutputBytes < 256
+    || !Number.isSafeInteger(maxLineBytes)) throw unavailable();
+  return { maxOutputBytes, maxLineBytes };
 }
 
 function readChunk(descriptor: number, size: number): Promise<Buffer> {

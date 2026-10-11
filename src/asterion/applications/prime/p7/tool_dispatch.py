@@ -23,6 +23,13 @@ class P7ToolDispatch:
         self.identity_sha256 = hashlib.sha256(('p7-services/v1:' + run_id).encode()).hexdigest()
         self._closed = False
 
+    @property
+    def bridge_output_bytes(self):
+        """Transport the application's exact computation output capacity."""
+        limits = getattr(self._host, '_limits', None)
+        return (limits.max_output_bytes if limits is not None
+                else getattr(self._host, '_max_output_bytes', 64 * 1024))
+
     def validate_lifecycle(self):
         if self._closed or getattr(self._host, '_closed', True) or getattr(self._host, '_lost', True):
             raise ValueError('P7 services are unavailable')

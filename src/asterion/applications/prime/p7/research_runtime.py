@@ -28,6 +28,11 @@ from asterion.agents.prime.continuation import (
 )
 
 
+# P7 raw evidence pages carry full board pixels. Keep their ordinary Python
+# representation readable; bulk display remains separately bounded and paged.
+P7_KERNEL_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+
+
 class _EvidenceBroker:
     """Retain the existing broker's dispatch and trace receipt boundary."""
 
@@ -150,7 +155,7 @@ class P7ResearchRuntime:
                 modules={"p7_research": module_source}, initial_data={},
                 workspace=run_root / "research-kernel",
             )
-            self._limits = limits or KernelLimits()
+            self._limits = limits or KernelLimits(max_output_bytes=P7_KERNEL_MAX_OUTPUT_BYTES)
             self.kernel = self._new_kernel()
             self.solver = Solver(
                 broker=self._broker, kernel=_KernelHandle(self), control=self.control,

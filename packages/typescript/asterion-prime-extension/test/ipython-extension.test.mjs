@@ -241,6 +241,43 @@ test("core-only registration installs no P7 tools or memory context hook", () =>
   assert.equal(process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY, undefined);
 });
 
+test("registered bridge uses injected output capacity for escaped large output and the next cell", async () => {
+  const pair = await socketPair();
+  const tools = [];
+  const cap = 2 * 1024 * 1024;
+  const environment = "ASTERION_PRIME_IPYTHON_OUTPUT_BYTES";
+  const previous = process.env[environment];
+  let pending = "";
+  pair.peer.on("data", chunk => {
+    pending += chunk.toString("utf8");
+    for (;;) {
+      const end = pending.indexOf("\n");
+      if (end < 0) break;
+      const request = JSON.parse(pending.slice(0, end));
+      pending = pending.slice(end + 1);
+      const output = request.request_id === "large" ? "\u0001".repeat(320 * 1024) + "FINAL_ACTION" : "retained-42";
+      pair.peer.write(JSON.stringify({protocol: PROTOCOL, request_id: request.request_id,
+        type: "result", status: "ok", output}) + "\n");
+    }
+  });
+  try {
+    process.env[environment] = String(cap);
+    process.env.ASTERION_PRIME_IPYTHON_FD = String(pair.descriptor);
+    process.env.ASTERION_PRIME_IPYTHON_TOOL_REGISTRY = JSON.stringify(coreOnlyModule.registry);
+    register({registerTool: tool => tools.push(tool)});
+    assert.equal(process.env[environment], undefined);
+    const first = await tools[0].execute("large", {code: "print(routes)"});
+    assert.equal(first.isError, undefined);
+    assert.equal(first.content[0].text, "\u0001".repeat(320 * 1024) + "FINAL_ACTION");
+    const next = await tools[0].execute("followup", {code: "print(retained + 1)"});
+    assert.equal(next.content[0].text, "retained-42");
+  } finally {
+    if (previous === undefined) delete process.env[environment];
+    else process.env[environment] = previous;
+    pair.close();
+  }
+});
+
 test("explicit legacy artifact preserves its complete historical tool set", () => {
   const names = [], hooks = [];
   process.env.ASTERION_PRIME_IPYTHON_FD = "77";

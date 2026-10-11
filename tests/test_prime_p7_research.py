@@ -7,6 +7,77 @@ from tests.test_prime_p7_solver import P7SolverFixture, draft
 
 
 class TestP7Research(P7SolverFixture):
+    def test_bulk_display_pages_actions_without_changing_frame_evidence(self):
+        from copy import deepcopy
+
+        records = [{'sequence': sequence, 'action': {'name': 'ACTION1', 'data': {}},
+                    'result': {'state': 'NOT_FINISHED'},
+                    'observation': {'frame': [[[sequence] * 64 for _ in range(64)]],
+                                    'observation_ref': {'sequence': sequence}}}
+                   for sequence in range(32)]
+        original = deepcopy(records)
+        server = ResearchReadServer(context=lambda: {}, history=lambda *a: records,
+                                    frame=lambda *a: [], artifact=lambda *a: {})
+        self.addCleanup(server.close)
+        module = {}
+        exec(server.start(), module)
+        self.assertIn('display', module)
+        raw = module['history'](0, 32)
+        self.assertIs(type(raw), list)
+        page = module['display'](raw)
+        self.assertLessEqual(len(repr(page).encode()), 16 * 1024)
+        self.assertTrue(page['display_only'])
+        self.assertEqual((page['total'], page['next_start']), (32, 8))
+        self.assertIn('p7_research.display', page['continuation'])
+        self.assertEqual(page['items'][-1]['action'], records[7]['action'])
+        self.assertEqual(page['items'][-1]['result'], records[7]['result'])
+        self.assertEqual(page['items'][-1]['observation']['observation_ref'], {'sequence': 7})
+        self.assertEqual(page['items'][0]['observation']['frame'],
+                         {'display_omitted': 'pixels', 'shape': [1, 64, 64]})
+        following = module['display'](raw, start=page['next_start'], limit=32)
+        self.assertEqual(following['items'][0]['sequence'], 8)
+        self.assertIsNone(following['next_start'])
+        self.assertEqual(raw, original)
+        self.assertEqual(sum(raw[-1]['observation']['frame'][0][0]), 31 * 64)
+        self.assertEqual(records, original)
+
+    def test_display_keeps_read_page_metadata_and_refuses_unpageable_record(self):
+        server = ResearchReadServer(context=lambda: {}, history=lambda *a: [],
+                                    frame=lambda *a: [], artifact=lambda *a: {})
+        self.addCleanup(server.close)
+        module = {}
+        exec(server.start(), module)
+        self.assertIn('display', module)
+        payload = {'items': [{'sequence': n} for n in range(12)],
+                   'total': 100, 'source_run_id': 'prior-run', 'truncated': True}
+        page = module['display'](payload)
+        self.assertEqual(page['source_run_id'], 'prior-run')
+        self.assertEqual(page['total'], 12)
+        self.assertEqual(page['read_page_total'], 100)
+        self.assertTrue(page['truncated'])
+        self.assertEqual(page['next_start'], 8)
+        with self.assertRaisesRegex(ValueError, 'inspect selected fields'):
+            module['display']([{'text': 'x' * (32 * 1024)}])
+
+    def test_display_pages_integer_route_keys_and_adjusts_page_to_repr_budget(self):
+        server = ResearchReadServer(context=lambda: {}, history=lambda *a: [],
+                                    frame=lambda *a: [], artifact=lambda *a: {})
+        self.addCleanup(server.close)
+        module = {}
+        exec(server.start(), module)
+        routes = {sequence: [{'action': 'ACTION1', 'result': '🙂' * 1000,
+                              'frame': [[sequence] * 64 for _ in range(64)]}]
+                  for sequence in range(12)}
+        start, visible = 0, []
+        while start is not None:
+            page = module['display'](routes, start=start, limit=8)
+            self.assertLessEqual(len(repr(page).encode()), 16 * 1024)
+            visible.extend(item['key'] for item in page['items'])
+            self.assertTrue(all(item['value'][0]['action'] == 'ACTION1' for item in page['items']))
+            start = page['next_start']
+        self.assertEqual(visible, list(routes))
+        self.assertEqual(routes[11][0]['frame'][-1][-1], 11)
+
     def test_actor_action_labels_are_optional_detached_and_current_evidence_bound(self):
         from copy import deepcopy
         from asterion.applications.prime.p7.research import worldmap

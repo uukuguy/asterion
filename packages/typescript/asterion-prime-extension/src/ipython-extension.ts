@@ -1,5 +1,5 @@
 import { closeSync } from "node:fs";
-import { createIpythonBridge, createIpythonTool, descriptorFromEnvironment, unavailable,
+import { bridgeOptionsFromEnvironment, createIpythonBridge, createIpythonTool, descriptorFromEnvironment, unavailable,
   type IpythonBridge, type MethodTool } from "./tool-bridge.js";
 export { PROTOCOL, IPYTHON_PARAMETERS, createIpythonBridge, createIpythonTool, IpythonBridge } from "./tool-bridge.js";
 export type { IpythonToolResult, ToolExecutionMode } from "./tool-bridge.js";
@@ -76,12 +76,13 @@ export function registerPrime(pi: ExtensionApi, dependencies: unknown, module: P
     metrics = contextViewMetricsFromEnvironment();
     prefixMetrics = providerPrefixMetricsFromEnvironment();
     descriptor = descriptorFromEnvironment();
+    const bridgeOptions = bridgeOptionsFromEnvironment();
     const expected = expectedRegistryFromEnvironment();
     const declared = validateRegistry(module.registry);
     if (expected.module_id !== declared.module_id || expected.capability_id !== declared.capability_id
       || JSON.stringify(expected.tool_names) !== JSON.stringify(declared.tool_names)) throw unavailable();
     if (typeof pi !== "object" || pi === null || typeof pi.registerTool !== "function") throw unavailable();
-    const bridge = createIpythonBridge(descriptor);
+    const bridge = createIpythonBridge(descriptor, bridgeOptions);
     const tools = [createIpythonTool(bridge), ...module.createTools(bridge)];
     if (JSON.stringify(tools.map(tool => tool.name).sort()) !== JSON.stringify(declared.tool_names)) throw unavailable();
     witness = registerContextWitnessFromEnvironment(pi, dependencies);
@@ -96,6 +97,8 @@ export function registerPrime(pi: ExtensionApi, dependencies: unknown, module: P
     }
     for (const tool of tools) pi.registerTool(tool as unknown as ReturnType<typeof createIpythonTool>);
   } catch {
+    // Consume trusted bootstrap configuration even if the descriptor failed.
+    delete process.env.ASTERION_PRIME_IPYTHON_OUTPUT_BYTES;
     delete process.env[REGISTRY_ENVIRONMENT];
     witness?.close();
     metrics?.close();

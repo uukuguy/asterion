@@ -1283,7 +1283,8 @@ if __name__ == "__main__":
 
 class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
     async def fixture(self, *, compaction_policy=PrimeCompactionPolicy(),
-                      compaction_policy_source='framework-default', environment=None, diagnostics=None):
+                      compaction_policy_source='framework-default', environment=None, diagnostics=None,
+                      bridge_output_bytes=None):
         import time
         from asterion.agents.prime.application import (
             PrimeApplicationSpec, PrimeOperatorContext, PrimeBackendSpec,
@@ -1313,6 +1314,8 @@ class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
             operator, authorization=self.spec)
         self.addAsyncCleanup(self.app.close)
         self.executor = FakeToolExecutor()
+        if bridge_output_bytes is not None:
+            self.executor.bridge_output_bytes = bridge_output_bytes
         self.executor.execute = lambda *args: None
         self.executor.call = lambda *args: None
         self.executor.request_stop = lambda: None
@@ -1324,6 +1327,14 @@ class TestPrimeOwnedBackend(unittest.IsolatedAsyncioTestCase):
             return self.rpc
         with patch('asterion.runtime.native_rpc.build_rpc_session', side_effect=rpc):
             self.attachment = await self.app.open_backend(spec=self.spec, services=self.executor)
+
+    async def test_injected_output_capacity_reaches_launch_and_python_bridge(self):
+        capacity = 2 * 1024 * 1024
+        await self.fixture(bridge_output_bytes=capacity)
+        resource = self.app._persistent
+        self.assertEqual(resource.environment.get('ASTERION_PRIME_IPYTHON_OUTPUT_BYTES'), str(capacity))
+        self.assertEqual(getattr(resource.bridge, '_max_output_bytes', None), capacity)
+        self.assertEqual(getattr(resource.bridge, '_max_line_bytes', None), 6 * capacity + 8192)
 
     async def test_injected_policy_bootstrap_and_identity_resume_mismatch(self):
         selected = PrimeCompactionPolicy(max_total_tokens=48000, max_frame_bytes=20000,

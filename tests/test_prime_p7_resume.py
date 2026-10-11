@@ -151,6 +151,7 @@ class TestP7ExplicitResume(unittest.TestCase):
     def test_recovery_precedes_model_and_keeps_new_worldmap_admission(self):
         summary = self._run_resume()
         diagnostics = summary["diagnostics"]
+        self.assertEqual(diagnostics.get("experience_mode"), "resume")
         self.assertEqual(diagnostics["execution_mode"], "resumed")
         self.assertFalse(diagnostics["fresh"])
         self.assertEqual(diagnostics["start_level"], 3)

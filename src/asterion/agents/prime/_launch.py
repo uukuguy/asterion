@@ -63,7 +63,9 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
     import json
     import secrets
     from dataclasses import asdict, fields
-    from asterion.agents.prime._tool_bridge import ToolBridgeServer
+    from asterion.agents.prime._tool_bridge import (
+        OUTPUT_BYTES_ENVIRONMENT, ToolBridgeServer, output_capacity,
+    )
     from asterion.agents.prime.context_view_metrics import ContextViewMetricsFile, ProviderPrefixMetricsFile
     from asterion.agents.prime.session import AsterionPrimeSession
     from asterion.agents.prime.tool_registry import TOOL_REGISTRY_ENV
@@ -81,6 +83,7 @@ def persistent_launch(operator, spec, services, limits, hooks, *, metrics_root=N
     try:
         parent, child = socket.socketpair(socket.AF_UNIX, socket.SOCK_STREAM)
         environment = {'ASTERION_PRIME_IPYTHON_FD': str(child.fileno()),
+                       OUTPUT_BYTES_ENVIRONMENT: str(output_capacity(services)),
                        TOOL_REGISTRY_ENV: spec.tools.registry.environment_value()}
         descriptors = [child.fileno()]
         if durable:

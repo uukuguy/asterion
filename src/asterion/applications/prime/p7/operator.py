@@ -130,6 +130,8 @@ P7_HISTORY_VARIANT_ENV = "ASTERION_PRIME_P7_HISTORY_VARIANT"
 P7_STRATEGY_ENV = "ASTERION_PRIME_P7_STRATEGY"
 P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
 P7_RESUME_RUN_ID_ENV = "ASTERION_PRIME_P7_RESUME_RUN_ID"
+P7_EXPERIENCE_MODE_ENV = "ASTERION_PRIME_P7_EXPERIENCE_MODE"
+P7_OUTPUT_BYTES_ENV = "ASTERION_PRIME_P7_OUTPUT_BYTES"
 P7_COGNITION_MODE_ENV = "ASTERION_PRIME_P7_COGNITION_MODE"
 P7_FRESH_TARGET_POLICY_ENV = "ASTERION_PRIME_P7_FRESH_TARGET_POLICY"
 P7_RESEARCH_PYTHON_ENV = "ASTERION_PRIME_P7_RESEARCH_PYTHON"
@@ -3327,6 +3329,31 @@ _WITNESS_STARTED_ENV = "ASTERION_PRIME_P7_ATTEMPT_STARTED_MONOTONIC"
 _WITNESS_EPOCH_ENV = "ASTERION_PRIME_P7_ATTEMPT_STARTED_EPOCH"
 
 
+def _resolve_experience_mode(environment: Mapping[str, str]) -> str:
+    """Only an explicit experiment may read history for a new research run."""
+    mode = environment.get(P7_EXPERIENCE_MODE_ENV, "off")
+    if (type(mode) is not str or mode not in {"off", "on"}
+        or (mode == "on" and environment.get("ASTERION_PRIME_P7_RUN_MODE") in {"autonomy", "cognition"})):
+        raise P7OperatorError("P7 experience mode is invalid")
+    return mode
+
+
+def _resolve_output_bytes(environment: Mapping[str, str]) -> int | None:
+    """Select a finite application output capacity before creating services."""
+    if P7_OUTPUT_BYTES_ENV not in environment:
+        return None
+    value = environment[P7_OUTPUT_BYTES_ENV]
+    try:
+        if type(value) is str and re.fullmatch(r"[0-9]+", value):
+            selected = int(value)
+            # Match the bridge's sixfold JSON expansion within JS safe integers.
+            if 256 <= selected <= ((2**53 - 1) - 8192) // 6:
+                return selected
+    except ValueError:
+        pass
+    raise P7OperatorError("P7 output capacity is invalid")
+
+
 def _research_python(environment: Mapping[str, str]) -> Path | None:
     """Consume an explicit trusted worker executable only for cold autonomy."""
     if P7_RESEARCH_PYTHON_ENV not in environment:
@@ -3500,6 +3527,7 @@ def build_p7_operator_resources(
 
     if type(cognition_mode) is not bool:
         raise P7OperatorError("P7 host services are unavailable")
+    output_bytes = _resolve_output_bytes(environment)
 
     trace = None
     application = None
@@ -3551,6 +3579,8 @@ def build_p7_operator_resources(
                 "ARC_API_KEY", "ARC_BASE_URL", "OPERATION_MODE",
                 P7_HISTORY_VARIANT_ENV, P7_STRATEGY_ENV,
                 P7_RESUME_RUN_ID_ENV,
+                P7_EXPERIENCE_MODE_ENV,
+                P7_OUTPUT_BYTES_ENV,
                 P7_COGNITION_MODE_ENV, P7_FRESH_TARGET_POLICY_ENV,
                 _WITNESS_STARTED_ENV, _WITNESS_EPOCH_ENV, P7_RESEARCH_PYTHON_ENV,
             }
@@ -3624,6 +3654,7 @@ def build_p7_operator_resources(
             console_writer=console_writer,
         )
         if research_mode:
+            from asterion.agents.prime.ipython import KernelLimits
             from .research_runtime import P7ResearchRuntime
             ipython = P7ResearchRuntime(
                 broker=broker, trace_client=prediction_client,
@@ -3634,6 +3665,7 @@ def build_p7_operator_resources(
                 event_sink=prediction_client._emit_console,
                 workspace_owner=application, python=research_python,
                 experience=experience,
+                limits=None if output_bytes is None else KernelLimits(max_output_bytes=output_bytes),
                 learner_profile="autonomous",
             )
             if selection.supervised_research:
@@ -4020,6 +4052,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
 
     import asterion
 
+    experience_mode = _resolve_experience_mode(environment)
+    output_bytes = _resolve_output_bytes(environment)
     root = Path(environment[live.OPERATOR_ROOT_ENV]).resolve(strict=True)
     package = Path(str(asterion.__file__)).resolve(strict=True)
     if package.is_relative_to(root) or "site-packages" not in package.parts:
@@ -4028,6 +4062,11 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
         raise P7OperatorError("P7 operator root is invalid")
     try:
         resolved = dict(live.load_operator_environment(root))
+        # Operator files cannot authorize a historical-experience experiment.
+        resolved[P7_EXPERIENCE_MODE_ENV] = experience_mode
+        resolved.pop(P7_OUTPUT_BYTES_ENV, None)
+        if output_bytes is not None:
+            resolved[P7_OUTPUT_BYTES_ENV] = str(output_bytes)
         # Only the operator process can authorize supervised research.
         resolved["ASTERION_PRIME_P7_RUN_MODE"] = environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve")
         _research_python(resolved)
@@ -4073,6 +4112,8 @@ def _preflight(environment: Mapping[str, str]) -> P7Invocation:
             _resolve_history_variant(resolved, game) == "verified"
             and environment.get("ASTERION_PRIME_P7_RUN_MODE") != "cognition"
         )
+        if experience_mode == "on" and not research_mode:
+            raise P7OperatorError("P7 experience mode is invalid")
         return P7Invocation(
             operator_root=root,
             environment=resolved,
@@ -4332,6 +4373,14 @@ async def run_live(
     variant = _resolve_history_variant(invocation.environment, invocation.game)
     cognition_mode = invocation.environment.get("ASTERION_PRIME_P7_RUN_MODE") == "cognition"
     research_mode = variant == "verified" and not cognition_mode
+    experience_mode = _resolve_experience_mode(invocation.environment)
+    output_bytes = _resolve_output_bytes(invocation.environment)
+    if experience_mode == "on" and not research_mode:
+        raise P7OperatorError("P7 experience mode is invalid")
+    effective_experience_mode = "resume" if invocation.resume_run_id is not None else experience_mode
+    if research_mode and output_bytes is None:
+        from .research_runtime import P7_KERNEL_MAX_OUTPUT_BYTES
+        output_bytes = P7_KERNEL_MAX_OUTPUT_BYTES
     fresh_target_policy = invocation.fresh_target_policy
     if P7_COGNITION_MODE_ENV in invocation.environment or P7_FRESH_TARGET_POLICY_ENV in invocation.environment:
         selected_policy = _resolve_fresh_target_policy(invocation.environment, resume_run_id=invocation.resume_run_id)
@@ -4521,6 +4570,8 @@ async def run_live(
                     "target_level": invocation.game.target_level,
                     "strategy": "worldmap" if research_mode else strategy,
                     "cognition_mode": cognition_mode,
+                    "experience_mode": effective_experience_mode,
+                    **({"max_output_bytes": output_bytes} if research_mode else {}),
                 },
                 sort_keys=True,
                 separators=(",", ":"),
@@ -4531,7 +4582,7 @@ async def run_live(
         flush=True,
     )
     experience = None
-    if research_mode and autonomy_deadline is None:
+    if research_mode and autonomy_deadline is None and effective_experience_mode != "off":
         from .experience import load_experience
         experience = load_experience(
             root / ".asterion-private" / "prime-p7-live",
@@ -4608,6 +4659,9 @@ async def run_live(
                                   "cold_history_excluded": True,
                                   "research_python_configured": _research_python(invocation.environment) is not None}
     diagnostics["prediction_variant"] = variant
+    diagnostics["experience_mode"] = effective_experience_mode
+    if research_mode:
+        diagnostics["max_output_bytes"] = output_bytes
     diagnostics["budget"] = {
         "target_level": invocation.game.target_level,
         "level_baseline": invocation.game.baseline_actions[invocation.game.target_level - 1],

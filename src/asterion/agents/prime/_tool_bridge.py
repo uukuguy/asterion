@@ -9,6 +9,22 @@ import threading
 from asterion.agents.prime.tools import PrimeToolResult
 
 PROTOCOL = 'asterion.prime-ipython/v1'
+OUTPUT_BYTES_ENVIRONMENT = 'ASTERION_PRIME_IPYTHON_OUTPUT_BYTES'
+_DEFAULT_OUTPUT_BYTES = 64 * 1024
+
+
+def output_capacity(services):
+    """Optional application-owned output capacity, never provider configuration."""
+    value = getattr(services, 'bridge_output_bytes', _DEFAULT_OUTPUT_BYTES)
+    if (type(value) is not int or value < 256
+            or value > ((2 ** 53 - 1) - 8192) // 6):
+        raise ValueError('Prime tool output capacity is invalid')
+    return value
+
+
+def line_capacity(output_bytes):
+    """Match the extension's worst-case JSON escaping plus protocol overhead."""
+    return max(256 * 1024, 6 * output_bytes + 8192)
 
 
 class _BridgeSignal:
@@ -23,6 +39,8 @@ class _BridgeSignal:
 class ToolBridgeServer:
     def __init__(self, channel, services):
         self._channel, self._services = channel, services
+        self._max_output_bytes = output_capacity(services)
+        self._max_line_bytes = line_capacity(self._max_output_bytes)
         self._channel.setblocking(False)
         self._stop = threading.Event()
         self._signal = _BridgeSignal(self._stop)
@@ -88,6 +106,9 @@ class ToolBridgeServer:
                 if not chunk:
                     return
                 pending.extend(chunk)
+                if (len(pending) > self._max_line_bytes
+                        and (b'\n' not in pending or pending.index(b'\n') > self._max_line_bytes)):
+                    return
                 while b'\n' in pending:
                     raw, _, trailing = pending.partition(b'\n')
                     pending = bytearray(trailing)
@@ -106,11 +127,14 @@ class ToolBridgeServer:
         request_id = 'invalid'
         response_type = 'result'
         try:
+            if len(raw) > self._max_line_bytes:
+                raise ValueError
             value = json.loads(raw.decode('utf-8', 'strict'))
             if type(value) is not dict or value.get('protocol') != PROTOCOL:
                 raise ValueError
             request_id = value.get('request_id')
-            if type(request_id) is not str or not request_id:
+            if (type(request_id) is not str or not request_id
+                    or len(request_id.encode('utf-8')) > 256):
                 request_id = 'invalid'
                 raise ValueError
             if value.get('type') == 'execute':
@@ -138,7 +162,8 @@ class ToolBridgeServer:
                     or set(response) != {'output', 'protocol', 'request_id', 'status', 'type'}
                     or response['protocol'] != PROTOCOL or response['request_id'] != request_id
                     or response['type'] != response_type or response['status'] not in ('ok', 'error', 'uncertain')
-                    or type(response['output']) is not str):
+                    or type(response['output']) is not str
+                    or len(response['output'].encode('utf-8')) > self._max_output_bytes):
                 raise ValueError
             response = dict(response)
         except BaseException:
