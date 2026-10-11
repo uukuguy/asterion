@@ -26,7 +26,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Live Task43 checkpoint: generic migration versus shared native compatibility/P7 adaptation; repaired native proofs and final packaged PASS, historical losslessness limits. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Task44 BP35 full-game9/9 PASS with per-level actions/resources/replay/cleanup; Task43 migration proofs and remaining historical losslessness limits. |
 | `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |

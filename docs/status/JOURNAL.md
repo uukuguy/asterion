@@ -4955,3 +4955,6 @@
 - 2026-10-11 58856eba updates control fixture policy identity; all14control/recovery errors pass without relaxing production identity checks.
 - 2026-10-11 Resource policy final promotion25/provider0 and installed-wheel native capacity/refusal/continuity PASS; actual request certification remains open.
 - 2026-10-11 b321c71e records final resource-policy qualification and open request-certification boundary; enables evidence-based resume without chat memory.
+- 2026-10-11 User authorizes BP35 full-game supervised research; currentc81cef4f launch logs task44-bp35-live-89da8095, resource monitoring enabled.
+
+- 2026-10-11 Task44 BP359/9 PASS;346actions/0RESET, replay/cleanup verified; resources recorded, sourcec81cef4f.
