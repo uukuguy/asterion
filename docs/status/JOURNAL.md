@@ -4992,3 +4992,4 @@
 - 2026-10-12 Started Task48 clean BP35 p7-live-20261011170039-49bccebfe0294f2d19c53dcf, source de699a7a, uncertainty-guided rollout; passive action/resource/use tracking active.
 - 2026-10-12 User stopped Task48 at2/9,99actions,595.9309268s; L1 17/L2 67=26+RESET+40/L3 15=8+RESET+6; reported tokens2215860/15224, cleanup/replay verified.
 - 2026-10-12 Exact predeath LLM model replay PASS/Astra APPROVE: death43 unknown3ticks (cell4), death92 false settled1tick (cell4+8+14); frozen inputs/source hashes archived, zero new model/SDK/game calls. Exact death candidates lacked rollout coverage and sufficient safety basis; L3 lethal branch already identified, triggering X-passability unconfirmed; internal non-call reason unproven. User prioritizes safety filtering before pathfinding; implementation and live efficacy remain open.
+- 2026-10-12 e0b2c854 records Task48 death causes and stopped state to separate missing rollout coverage from model errors.
