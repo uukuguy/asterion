@@ -4942,3 +4942,4 @@
 - 2026-10-11 Manual-summary investigation confirms inherited output-cap mismatch; native reserve16384, ledger output3276; actual billing not inferred.
 - 2026-10-11 Root native DeepSeek interception confirms wire max_tokens13107/8192 and witness prompt mismatch; network0.
 - 2026-10-11 Manual budget receipt charges reservation, not actual usage; no measured overspend; P7 supervised path distinct.
+- 2026-10-11 d6a0f38f records zero-network manual-summary cap/request mismatch and reservation-only accounting; policy repair remains open.
