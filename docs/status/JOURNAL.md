@@ -4969,3 +4969,6 @@
 - 2026-10-11 f5d9ef0f adds future P7 death-risk guidance; active clean trial retains original prompt.
 - 2026-10-11 User authorizes stop after L4 then fresh trial with death-risk guidance; exact-run watcher started.
 - 2026-10-11 Clean trial stopped per user after4levels;179actions/2RESET, replay/cleanup verified; renewed cold run authorized.
+- 2026-10-11 c2df0c91 records L4 interruption; Task46 fresh BP35 starts historyoff with death-risk guidance.
+- 2026-10-11 Task46 cold BP35 first5PASS, resets2; known-risk fatal-action case retained; L6 running.
+- 2026-10-11 Audited Task39/46 non-adaptation differences; NOTES remains primary, WorldMap reporting clarified; L6 voluntary RESET distinguished.

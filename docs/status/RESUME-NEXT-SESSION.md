@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-11. Active Task45 clean BP35 supervised live trial; not a final handoff.
+Updated: 2026-10-11. Active Task46 clean BP35 with death-risk guidance; not a final handoff.
 
 ## Objective
 
@@ -28,7 +28,7 @@ User requires history OFF by default and explicitly authorizes a fresh BP35 full
 
 ## Active clean BP35 run
 
-Run `p7-live-20261011144019-094b31b6fdf830482d7ecce6`, host session61293, sourcecf44afaa. Logs `.asterion-private/task45-clean-bp35/operator.*`; status/evidence exact run under `.asterion-private/prime-p7-live/`. Actual startup experience_mode=off/max_output_bytes2097152/seed0/target9/verified worldmap/new session; no resume. Initial check confirms no experience-manifest or experience-consumption artifacts. Follow real per-level transition action counts/resources and user stop requests; preserve consolePID52024. No parallel game runs or additional repairs.
+Task46 run `p7-live-20261011150106-ad0b3e9e4c51491e3768fb14`, hostsession14379, sourcec2df0c91 including death-risk promptf5d9ef0f. Logs `.asterion-private/task46-bp35-danger-awareness/operator.*`; status/evidence exact run under `.asterion-private/prime-p7-live/`. Actual startup experience_mode=off/max_output_bytes2097152/seed0/target9/verified worldmap/new session; no resume. Initial check confirms no experience-manifest or experience-consumption artifacts. Follow real per-level transition total/final-successful actions, deaths/RESET and resources; user stop remains available. Preserve consolePID52024. No parallel game runs or additional repairs.
 
 ## During-run steering
 
@@ -37,6 +37,10 @@ User asks to report total per-level actions and final successful attempt after l
 ## L4 stop completed; renewed clean trial authorized
 
 User requested stop after L4 and restart with generic death-risk guidance. Task45 run `p7-live-20261011144019-094b31b6fdf830482d7ecce6` stopped; terminal interrupted/unsuccessful(target9), prefix4completed, replay_verified/sealed_trace/cleanup_complete true, hostexit2. Total per-level18/67/39/50; final successful18/40/39/37. L2 reset after26actions+RESET+40success; L4 reset after12+RESET+37success. L5 partial5 actions before stop, total179/reset2. Elapsed1159.157s/reportedinput3200725/output27510/modelcallbacks87/toolcallbacks85; zero alarms, no experience artifacts. Watcher34320 exited1 because closed solver control supports pause/resume only (stop operation invalid); actual stop via Ctrl-C main61293 completed. This was operator watcher misuse, not framework regression. No watcher/main process remains. Final summary/logs `.asterion-private/task45-clean-bp35/`. User authorizes new full-game clean trial, new session, historyoff/noresume, fresh wheel with death-risk guidancef5d9ef0f. Do not count interrupted partial as full-game capability failure or fold L5extra into L4.
+
+## Task46 live milestone
+
+First5levels passed at ~1446s, total per-level18/49/47/24/44, final successful18/42/36/24/44, resets2, history remainsoff. L2 earlydeath after6+RESET+42success accepted by user as reasonable unknown-mechanism discovery. L3 died atglobal77 after10local actions, RESETglobal78, then36success. Before death model explicitly knew33-column upward hazard, tested alternate mechanisms, then chose dangerous left step because “只执行一步”; one step triggered continuous fatal motion. Preserve this as risk recognized but incompletely applied decision evidence, not generic framework failure or proof prompt causes behavior. L4 andL5 no deaths. NowL6 running; report total/current sinceRESET separately and actual per-level events. Milestone resource/details `.asterion-private/task46-bp35-danger-awareness/milestone-five-levels.json`.
 
 ## Current judgment
 
@@ -71,3 +75,8 @@ Task43 overall historical losslessness remains open because historical full requ
 ## Historical archive
 
 Original native system failures and failed migrated cleanup retained. Rejected subpath resolver/Jiti experiments removed; supported native root helper import retained with no deadline increase. Earlier append-only compaction fixtures lacked native first-prompt system coverage; the newer four-case probe closes that blindspot. No system filtering or weakened ACK boundary is permitted.
+
+
+## Task46 comparison clarification
+
+Source audit baseline2930fbd8→actual runc2df0c91 is recorded in the formal migration audit Task46 section. Both actual paths use autonomous learner/NOTES primary cognition; startup worldmap is a reporting label and does not establish legacy learner. WorldMap structured research remains available, not removed by migration. Non-adaptation differences include target6→9, supervised aggregate controls, prompt appendix/death guidance, output64KiB→2MiB and native outer-session reuse/recovery. Both actual trials are experienceoff and use6.1-sol; actual Task46 effort not separately certified by startup. Actual autonomous prompt still contains fixed-total-budget wording; do not claim null-budget guidance is complete. No code fix or restart during read-only audit. Latest observed global233/L6 unfinished/RESET4; global217 is voluntary after NOT_FINISHED, whereas global198 follows GAME_OVER197. Do not label allRESET as deaths.
