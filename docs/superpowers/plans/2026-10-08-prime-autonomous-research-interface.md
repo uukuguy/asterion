@@ -339,7 +339,7 @@ The default dedicated-summary gap is real but is a separate behavior change. Pre
 
 ## Task41 — Supervised research budget mode
 
-Status: user approved design2026-10-11; implemented and independently APPROVE through76b9b9a0; test-only30c454cf also APPROVE. Final full packaging verification pending. Depends on completedTask40. [Design](../specs/2026-10-11-p7-supervised-research-design.md), [plan](2026-10-11-p7-supervised-research.md).
+Status: user approved design2026-10-11; implemented and independently APPROVE through76b9b9a0; test-only30c454cf also APPROVE. CLOSED: final full promotion25PASS/provider_operations0/full_datasetno; actual guest no-model cancellation verified. No new model trial. Depends on completedTask40. [Design](../specs/2026-10-11-p7-supervised-research-design.md), [plan](2026-10-11-p7-supervised-research.md).
 
 Scope: explicit P7 supervised research entry, no aggregate callbacks/deadline/action cap; cumulative safe resource monitor and outer stop with bounded settlement. Existing finite solve/witness/autonomy/official remain finite. Generic runner/kernel reused, no new model behavior/prompt/NOTES change.
 

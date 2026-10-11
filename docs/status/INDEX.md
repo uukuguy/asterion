@@ -102,6 +102,6 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - 后续专用压缩验证：D-2026-10-10-02 与工作清单补充低阈值 P7 实战触发测试；先接通专用摘要，再验证真实调用与内核/认知连续性，本轮 BP35 不变。
 
-- 监督研究预算设计：[设计](../superpowers/specs/2026-10-11-p7-supervised-research-design.md)、[实施计划](../superpowers/plans/2026-10-11-p7-supervised-research.md)：用户已确认，显式监督模式无总量硬停止，保留单次控制及有限自动预设；实施中。
+- 监督研究预算设计：[设计](../superpowers/specs/2026-10-11-p7-supervised-research-design.md)、[实施计划](../superpowers/plans/2026-10-11-p7-supervised-research.md)：用户已确认，显式监督模式无总量硬停止，保留单次控制及有限自动预设；Task41已实现并按provider-free边界关闭，full promotion25PASS。
 
-- 监督研究实施复审：[2026-10-11监督模式代码与验证](../reviews/2026-10-11-p7-supervised-research-review.md)：AstraAPPROVE、provider-free控制与真实guest停止证据；最终promotion收口中，无新模型实测。
+- 监督研究实施复审：[2026-10-11监督模式代码与验证](../reviews/2026-10-11-p7-supervised-research-review.md)：AstraAPPROVE、provider-free控制与真实guest停止证据；最终full promotion25PASS，无新模型实测。

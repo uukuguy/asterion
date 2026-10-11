@@ -39,5 +39,7 @@ Interface: research mode requires supervised game; model/tool/deadline allNone, 
 Files: guides, DECISIONS, INDEX, CURRENT-STATE, JOURNAL, RESUME; root integration.
 - [x] Review changed implementation for explicit authority, nullable domain consumers, cancellation and redaction.
 - [x] Fix material findings, run focused unittest and lint/docs.
-- [ ] Run make promotion-check for changed distribution/entry assumptions, preserve any External-limited status.
-- [ ] Record actual boundaries and commit; no claim of real nine-level completion.
+- [x] Run make promotion-check for changed distribution/entry assumptions, preserve any External-limited status.
+- [x] Record actual boundaries and commit; no claim of real nine-level completion.
+
+Result: production76b9b9a0, test compatibility30c454cf, independent AstraAPPROVE; final full promotion25PASS/provider_operations0/full_datasetno. Root20domain/entry/RPC and69Make/sweep checksPASS, lint/docsPASS; actual guest stop probePASS. No new real-model trial. See [review](../../reviews/2026-10-11-p7-supervised-research-review.md).

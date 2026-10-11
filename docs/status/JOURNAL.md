@@ -4882,3 +4882,6 @@
 - 15:53 最终代码lint通过，docs-check317文件/240链接通过；启动最终源码独立full promotion（无提供商操作）。
 - 15:55 首次full promotion失败：4582检查中3fail/1error，均为Make目标列表新增research后旧测试固定文本匹配失效；保留失败记录，修复后重跑。
 - 15:55 旧Make测试目标文本补research，69项通过；生产有限预设未变，启动修正后full promotion。 [30c454cf]
+- 15:57 记录监督研究实现、独立复审与使用入口；保留首次打包失败及最终检查待完成边界。 [10e1525e]
+- 16:00 修正前第二份snapshot同样3fail/1error（4583检查），不能记PASS；30c454cf修正后的独立promotion继续。
+- 16:02 最终30c454cf源代码full promotion25命令PASS，provider_operations=0/full_dataset=no；保留此前失败，Task41按无模型边界关闭。

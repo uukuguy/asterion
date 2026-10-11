@@ -19,7 +19,7 @@ Prime复用既有执行器及all-None总量合同；通用层仅在runtime_obser
 
 ## 打包验证
 
-最终promotion尚在收口；未将初次运行或旧版本打包结果作为最终版本PASS。首次full检查4582项中3fail/1error，原因是既有测试用固定Make分组目标行定位recipe，新增research使该定位失效。30c454cf仅更新两处定位文本；root重跑69项相关检查PASS。最终代码lint、docs-check317文件/240链接通过。
+最终30c454cf源代码 `make promotion-check` full PASS：25命令、provider_operations=0、full_dataset=no，覆盖独立复制、全量Python、安装wheel及资源、TS和Rust检查。未将初次运行或旧版本打包结果作为最终版本PASS。首次full检查4582项中3fail/1error，原因是既有测试用固定Make分组目标行定位recipe，新增research使该定位失效。30c454cf仅更新两处定位文本；root重跑69项相关检查PASS。最终代码lint、docs-check317文件/240链接通过。
 
 ## 未完成边界
 
