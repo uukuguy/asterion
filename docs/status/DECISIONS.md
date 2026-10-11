@@ -27,7 +27,7 @@
 | D-2026-09-27-01 | 🔴 superseded | Historical P7-owned Pi initialization; D-2026-10-10-02 defines the target boundary |
 | D-2026-09-17-01 | 🟢 active; bound proof open | Token-denominated reservation; bytes/4 conversion is an estimate, not a verified ceiling |
 | D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
-| D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
+| D-2026-09-17-03 | 🟢 active; budget alignment open | Keep native reserve16384; manual quote/output/request accounting mismatch remains unresolved |
 | D-2026-09-17-04 | 🟢 active | Keep the witness rebuild equality; drop the byte shrink bound |
 | D-2026-09-18-01 | 🟢 active | Cross-process continuity inherits runtime-binding SHAs from prior identity |
 | D-2026-09-18-02 | 🟢 active | P3 child-runner is in-process by default; subprocess is fallback-only |
@@ -584,6 +584,8 @@
   deliberately left that way rather than silently widened.
 - Evidence: commit `0f1a7d98`; `compaction_end` carrying a full result with no
   `errorMessage` at 16384, and the token-cap error at 4096.
+
+- 2026-10-11 root-cause verification: actual installed P1 DeepSeek requests use max_tokens13107/8192, versus quote3276/3276. A split pair can allow21299 output tokens before inputs, beyond the16000 token reservation. Witness frozen prompt material also differs from current native actual requests; receipts charge reservation, not actual provider usage. Zero-network proof, no actual overspend observed. Native mechanics PASS does not certify budget proof. [Investigation](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md#manual-summary-budget-root-cause-investigation).
 
 ## D-2026-09-17-04 — Keep the witness rebuild equality; drop the byte shrink bound
 

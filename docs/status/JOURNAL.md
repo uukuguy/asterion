@@ -4939,3 +4939,6 @@
 - 2026-10-11 Inherited manual-summary bytes/4 token-ceiling proof remains open; no actual overspend or migration attribution.
 - 2026-10-11 Clarified live P7 context metrics cover conversation; native-system archive and direct telemetry probes have separate scope.
 - 2026-10-11 b800346b records independent migration re-review and inherited token-reservation proof gap; preserves qualified acceptance boundaries.
+- 2026-10-11 Manual-summary investigation confirms inherited output-cap mismatch; native reserve16384, ledger output3276; actual billing not inferred.
+- 2026-10-11 Root native DeepSeek interception confirms wire max_tokens13107/8192 and witness prompt mismatch; network0.
+- 2026-10-11 Manual budget receipt charges reservation, not actual usage; no measured overspend; P7 supervised path distinct.

@@ -154,3 +154,27 @@ node --test packages/typescript/asterion-prime-extension/test/context-memory.tes
 make docs-check
 git diff --check
 ```
+
+## Manual-summary budget root-cause investigation
+
+User follow-up asked to investigate the manual-summary cap. The earlier medium estimate finding was incomplete: the authorization/request/output chain has additional concrete mismatches. Root independently reran the installed native DeepSeek adapter probe and the Python quote probe; no network, paid model or ARC operation occurred. Evidence: `.asterion-private/task43-manual-summary-budget/quote-proof.safe.json` and `native/root-deepseek-proof.safe.json`, with replay scripts/material/fingerprints.
+
+| Layer | Current actual behavior | Consequence |
+|---|---|---|
+| Witness input quote | ceil(canonical request UTF-8 bytes/4) | Estimate without tokenizer proof; not a strict input-token ceiling |
+| Request identity | Witness frozen Asterion material differs from current native Pi system/user strings in both branches | Quote is not bound to the actual provider request; system is included in witness, so this is independent-template mismatch, not system omission |
+| Quoted output |3276 tokens for each of two potential branches | Stale since native reserve was increased from4096 to16384 |
+| Actual P1 native/API output option |13107 main,8192 prefix; both appear as actual DeepSeek wire max_tokens | Potential split outputs total21299 before inputs, exceeding16000 reservation |
+| Backend charge/receipt | Approves quote, precharges16000tokens/125000micros, returns those reservation values on success | Enforces internal authorization accounting; does not reconcile actual summary provider usage |
+
+Installed current DeepSeek exact model is deepseek/deepseek-flash via openai-completions, model.maxTokens384000/contextWindow1000000. Thus model clipping does not lower the native reserve-derived13107/8192. The native adapter intercept was stopped at onPayload before fetch: networkAttempts0; main/prefix max_tokens exactly match options. For identical synthetic history/custom instructions, native/witness system sizes310/309bytes, main user1240/1756bytes and prefix user711/452bytes; hashes differ for all pairs. This is actual installed native compact plus adapter body inspection, not just copied formulas. It is not real generated output, provider tokenization or billing evidence.
+
+Python quote reproduction: inputs(9448,0)+outputs(3276,3276) admits16000tokens/10699micros;9449 rejects. Historical-style inputs(1740,261) quote8553tokens/8465micros under current preset prices. Correct native outputs(13107,8192) are rejected even with zero input by the current quote contract. Fixed charged125000micros is substantially above the quoted10699; the output mismatch does not establish dollar overspend. No actual overspend is observed.
+
+Hard controls that remain valid: private witness frame1MiB, finite task/RPC deadline, internal callback reservation2, native DeepSeek output options, immutable reservation persistence and unknown-effect fences. These controls do not convert an estimated/mismatched quote into proof of actual cumulative tokens or billing. P1 `_COMPACTION_INPUT_CAPS=(4096,4096)` is a preflight arithmetic check only, not a provider input limit. Receipt/evidence correctly labels accounting reservation-charged. Current native success results expose combined usage, but the backend does not reconcile it; failed summary results may omit usage, so any future settlement must preserve unknown costs.
+
+Scope and attribution: this16000/125000 manual backend witness path is used by P1 durable entry. P7 research/supervised uses nondurable persistent entry and does not inherit that manual cap; no BP35 failure is attributed to it. Input estimator and stale output constants predate2930fbd8. D-2026-09-17-03 explicitly documented output under-reservation after native reserve restoration. Native template mismatch is proven against the current SDK; missing historical SDK bytes prevent dating or blaming Task40. Earlier native manual ACK/checkpoint/persistence/resume/cleanup PASS remains valid for those mechanics; actual request-bound budget proof is NOT VERIFIED/contract mismatch, and must not be inferred from them.
+
+Repair boundary: merely renaming bytes/4, increasing a ledger number, or restoring reserve4096 cannot establish the complete promise. A repair must bind authorization to the actual native request/options, obtain defensible input accounting, align permitted branch outputs with the approved total, and distinguish reserved versus actual usage while retaining unknown-effect fences. Preserving16000 versus preserving current larger native output capacity is a real policy tradeoff; historical4096 caused truncation. This investigation changes no execution policy or provider budget and does not claim a repair.
+
+Native API-specific adjunct: the installed Codex adapter was also shown to omit maxTokens from its wire payload. That is a separate backend limitation, not current P1 DeepSeek behavior and not evidence that the P7 automatic path uses this manual budget. A future generic implementation cannot assume every backend enforces an output option identically.
