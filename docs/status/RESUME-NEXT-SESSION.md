@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-11. Active Task43 migration audit; not a final handoff.
+Updated: 2026-10-11. Active Task43 independent re-review at5e91a056; not a final handoff.
 
 ## Objective
 
@@ -21,6 +21,10 @@ Known defects are separated by responsibility and repaired. Entire historical mi
 ## Current recovery boundary and next action
 
 Known repair work95397749/14d35611/b2d8480d is complete within tested contracts and independently reviewed. Final `make promotion-check` full PASS25commands/provider0/full_datasetno; log `.asterion-private/task43-system-promotion-recheck.log`. Earlier failures were stale test-owned ESM wiring; fixture-onlye57f1fbd/097ae81c corrected them,27 pinned-resource and2 installed-P7 tests PASS. Documentation links and whitespace checks PASS.
+
+Second independent review at5e91a056 complete: Astra generic and Sol P7 bounded APPROVE; no new reproducible migration or blocking adaptation defect. Generic72Python/9Node PASS+6existing external skips; P797Python/38Node PASS, three bundles byte-equal dist. Root cross-domain review and Luna evidence mapping complete; no model/network/ARC. P1 full native oracle-stage continuation and narrator behavior pairing remain uncovered.
+
+Inherited MEDIUM finding: manual-compaction `_input_token_ceiling` uses UTF-8 bytes/4 without a verified tokenizer/native input cap; this cannot establish the advertised hard token ceiling. Baseline code and D-2026-09-17-01 already contain it; no actual overspend measured. Repair/proof remains open, separate from migration and P7 supervised aggregate controls. Live P7 context-hook bytes are conversation-only; Pi reinstates system metadata separately. See formal audit second-review section for exact evidence and rejected cleanup suspicion.
 
 Task43 overall historical losslessness remains open because historical full requests/SDK identity and actual long-horizon equivalence cannot be reconstructed from these probes. For any future qualification, preserve exact autonomy preset/model/effort/start state/experience/resource policy and separate deliberate configuration changes from regressions. Dedicated code-aware summary integration remains separate. Do not automatically relaunch ARC/model experiments from this checkpoint. No probe/promotion process remains; user consolePID52024 is preserved.
 

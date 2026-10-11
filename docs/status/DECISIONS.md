@@ -25,7 +25,7 @@
 | D-2026-09-14-02 | 🟢 active | Supply research-preset external engines as operator-owned roots plus wheels, never as checkout-relative paths |
 | D-2026-09-14-03 | 🟢 active | Inject the Pi runtime as an operator-owned entry path, satisfied by an independently installed upstream Pi |
 | D-2026-09-27-01 | 🔴 superseded | Historical P7-owned Pi initialization; D-2026-10-10-02 defines the target boundary |
-| D-2026-09-17-01 | 🟢 active | Denominate the compaction reservation in tokens and convert at the call site |
+| D-2026-09-17-01 | 🟢 active; bound proof open | Token-denominated reservation; bytes/4 conversion is an estimate, not a verified ceiling |
 | D-2026-09-17-02 | 🟢 active | Treat `retained_message_count` as nullable; Pi states retention by entry id |
 | D-2026-09-17-03 | 🟢 active | Keep Pi's compaction reserve at upstream's default |
 | D-2026-09-17-04 | 🟢 active | Keep the witness rebuild equality; drop the byte shrink bound |
@@ -540,6 +540,8 @@
 - Evidence: commit `2f744bf5`; the host approved a proposal for the first time
   (`host-quote caps=(1740, 261) approved=True`); `test_asterion_prime_context`
   and `test_asterion_prime_p1_operator` boundary assertions.
+
+- 2026-10-11 independent review correction: the above four-bytes-per-token ceiling claim is unproved. The current caller uses an estimate without a verified tokenizer/native input cap. No actual overspend was measured; this inherited issue is not Task40 regression. Token/billing hard-ceiling certification remains open; see [second migration review](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md#second-independent-review-at5e91a056).
 
 ## D-2026-09-17-02 — `retained_message_count` is nullable
 

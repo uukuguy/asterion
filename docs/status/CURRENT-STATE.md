@@ -61,6 +61,8 @@ Task37 unchanged94dabe66 repeat L121/Q100/161.361755s vsTask36 24/Q76.5625/247.1
 
 ## Open Problems
 
+- Second independent migration review found no new reproducible generic/P7 regression. Inherited manual-compaction reservation uses UTF-8 bytes/4 as a claimed input-token ceiling without a verified tokenizer/native input cap; strict token/billing-bound proof remains open. No actual overspend is demonstrated. Live P7 context history bytes cover the conversation view; Pi adds authoritative system state separately.
+
 - 完整BP35冷评估的回调容量与失败原因保留：既有full-solve限制128回调；当前九关试验只完成五关，128已结算usage与第129轮边界强烈支持回调拒绝，但summary丢失细分原因码。九关冷完成尚无本次证据。见2026-10-11完整实测报告。
 
 - Historical6ca stderr overflow and missing current-computation readback were repaired: bounded diagnostics, archived source/output read APIs and linecache-backed inspection are deployed. The remaining context problem is cumulative model input and cache-compatible layout; causal latency contributions and reliable research efficiency remain unverified. See the current BP35 comparison.

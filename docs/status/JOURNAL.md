@@ -4934,3 +4934,7 @@
 - 2026-10-11 d7e3a18e records repaired native contracts, actual guest proofs and live final-gate checkpoint.
 - 2026-10-11 Task43 final system promotion full PASS:25commands/provider0; fixture-only repair, native production proofs remain byte-identical.
 - 2026-10-11 f56ba89e records final promotion PASS and responsibility boundaries; preserves historical losslessness and cognition limits.
+- 2026-10-11 Task43 independent re-review starts at5e91a056: generic/P7 source plus evidence; no provider or ARC relaunch.
+- 2026-10-11 Second independent generic/P7 review bounded APPROVE;72/97Python and9/38Node PASS; source unchanged.
+- 2026-10-11 Inherited manual-summary bytes/4 token-ceiling proof remains open; no actual overspend or migration attribution.
+- 2026-10-11 Clarified live P7 context metrics cover conversation; native-system archive and direct telemetry probes have separate scope.

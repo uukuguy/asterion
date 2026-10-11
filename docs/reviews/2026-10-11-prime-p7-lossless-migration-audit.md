@@ -120,3 +120,37 @@ The first final system promotion ran4589 tests and reported four failures/two er
 - **P7 adaptation omissions:** shared old/current metadata byte counts/archive/primary signatures lose native sections/tool metadata; b2d8480d repairs them, and real-first-prompt automatic v2/v3 probes verify preserved fields.
 
 Known repair work is committed, independently reviewed, packaged and native-verified. Final full promotion25/provider0 PASS. Tested generic/session/kernel/recovery/manual/automatic-compaction and P7 composition boundaries are qualified. Whole historical migration losslessness remains UNDETERMINED because historical SDK/full provider bodies are missing; long-horizon model reasoning and BP35 improvement remain NOT VERIFIED. No automatic game relaunch or specialized-summary capability claim follows from this receipt.
+
+## Second independent review at5e91a056
+
+The user requested another foundational migration/P7 adaptation review after the final passing gate. Baseline2930fbd8 was independently compared with5e91a056. Astra reviewed generic entry/owner/launch/bridge/workspace/worker/session/text/durable backend/system projection/witness/native loader; Sol reviewed P7 operator/direct assembly/research bridge/workspace recovery/continuation/tool registration/allowlists/all three packaged resources/NOTESv2-v3/archive/monitor/finite-supervised controls/replay/narrator. Root reviewed P1 host stages and P3–P6 consumer/deadline/accounting changes; Luna mapped source scope and retained evidence identities. All review work was read-only apart from this documentation.
+
+| Surface | Verdict | Qualification |
+|---|---|---|
+| Generic Task40 migration and95397749/14d35611 repairs | Bounded APPROVE | No new reproducible migration regression; owner failure/unknown/cleanup boundaries retained |
+| P7 migration/adaptation andb2d8480d repair | Bounded APPROVE | No reproducible blocking defect; native system metadata, tool/allowlist/resource parity and conversation projection reviewed |
+| Universal defect freedom or whole historical losslessness | NOT CERTIFIED | A review cannot certify untested inference; historical SDK/request bodies remain absent |
+| Inherited manual-compaction token reservation proof | MEDIUM / open | Four UTF-8 bytes per token is an estimate, not a strict upper bound; predates migration |
+
+The inherited finding is `context.py` `_input_token_ceiling` at line40 and witness quote construction at line822, consumed by `backend.py` reservation admission near line989. `ceil(UTF-8 bytes/4)` is described as fail-closed, but no verified tokenizer or matching native input-token cap proves that claim. This code is byte-identical to2930fbd8 and was explicitly adopted in D-2026-09-17-01. No actual deployed-tokenizer overrun or paid-budget excess was measured. Keep it distinct from Task40 regression and from supervised P7 aggregate control. Correct proof/implementation is a separate unresolved repair; current reservation must not be advertised as a guaranteed actual token or billing ceiling.
+
+Metrics scope correction: installed Pi ExtensionRunner.emitContext strips system messages before the P7 `context` hook and reinstates authoritative current system state afterward. The native first-prompt probe obtains real system entries and exercises the actual local archive tool, but its 4000-byte growth comparison feeds those entries directly to telemetry. Thus native-system archive preservation and standalone metadata accounting are verified; live P7 hook `history_bytes` measures the conversation view, not all provider input/system bytes. No system loss through the hook is demonstrated.
+
+An initialization cleanup suspicion was rejected: prepare/runtime-view registration is lazy and has not acquired native descriptors/workers at P7 builder failure; the already-created read server has explicit exception cleanup. Preflight failures before owner acquisition still leave caller-owned prior workspaces for the caller to close; this is the owner contract, not implicit transfer.
+
+Evidence mapping correction: migration-parity/summary.json binds originale36a74ac, not finalHEAD. Later repair/native receipts and the final promotion log establish their separate source/resource boundaries. The latest wheel19211620…cf6b010 and research resourced8078c…84ce9c remain byte-bound. Full P1 actual-native oracle-stage workflow and paired narrator behavior were not run. P1 host reconstruction keeps the same owner/worker; a cold new-owner restart is not its promised contract. P4 cold-process JSON continuation is separate. Real summary quality, specialized code-aware summary and BP35 cognition remain unverified.
+
+Independent checks: generic72Python PASS in3.557s and9context-witness Node PASS/6existing external-harness skips; P7 focused97Python PASS in36.824s and38context-memory Node PASS; all three bundled resources byte-equal current dist. Existing final full promotion25/provider0 remains valid because executable source was unchanged. No model/network/ARC operations in this second review.
+
+Named second-review commands (all provider-free):
+
+```bash
+uv run python -m unittest -q tests.test_prime_application_entry tests.test_asterion_prime_context tests.test_pi_rpc_model_identity
+# cwd: packages/typescript/asterion-prime-extension
+node --test test/context-witness.test.mjs
+# cwd: repository root
+uv run python -m unittest -q tests.test_prime_p7_native_provider tests.test_prime_p7_research_runtime tests.test_prime_p7_research_monitor tests.test_prime_p7_supervised_entry tests.test_prime_p7_supervised_domain tests.test_prime_p7_bridge_dispatch tests.test_prime_p7_tool_registry
+node --test packages/typescript/asterion-prime-extension/test/context-memory.test.mjs
+make docs-check
+git diff --check
+```
