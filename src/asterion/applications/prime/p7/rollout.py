@@ -31,12 +31,28 @@ def _p7_rollout_key(state):
     return _p7_rollout_json.dumps(state, sort_keys=True, allow_nan=False)
 
 
-def _p7_rollout_risk_new(checker):
+def _p7_rollout_supported_actions(value):
+    if value is Ellipsis or value is None:
+        return value
+    names = [f"ACTION{i}" for i in range(1, 8)] + ["RESET"]
+    if type(value) not in (list, tuple) or any(
+        type(name) is not str or name not in names for name in value
+    ):
+        raise ValueError("supported_actions must be a list or tuple of action names")
+    return list(value)
+
+
+def _p7_rollout_risk_new(checker, supported_actions=...):
+    action_coverage = (
+        "unchecked" if supported_actions is Ellipsis else
+        "undeclared" if supported_actions is None else "declared"
+    )
     return {
         "status": "unassessed", "findings": [],
         "coverage": {
             "checker_supplied": checker is not None, "evaluated_ticks": 0,
             "unassessed_ticks": 0, "errors": [], "partial": True,
+            "action_coverage": action_coverage,
         },
     }
 
@@ -67,16 +83,23 @@ def _p7_rollout_risk_check(risk, checker, before, after, action, tick):
         risk["coverage"]["unassessed_ticks"] += 1
         return
     try:
-        findings = _p7_rollout_copy(checker(
+        payload = _p7_rollout_copy(checker(
             _p7_rollout_copy(before), _p7_rollout_copy(after), _p7_rollout_copy(action),
         ))
     except Exception as error:
         _p7_rollout_risk_error(risk, tick, f"risk_check_exception:{type(error).__name__}")
         return
+    envelope = payload if type(payload) is dict else None
+    findings = envelope.get("findings") if envelope is not None else payload
     if type(findings) is not list:
         _p7_rollout_risk_error(risk, tick, "risk_check_invalid")
         return
-    invalid = False
+    invalid = envelope is not None and (
+        set(envelope) != {"findings", "coverage", "reason"}
+        or envelope.get("coverage") not in ("covered", "unknown")
+        or type(envelope.get("reason")) is not str
+        or not envelope["reason"].strip()
+    )
     for finding in findings:
         if (
             type(finding) is not dict
@@ -93,6 +116,9 @@ def _p7_rollout_risk_check(risk, checker, before, after, action, tick):
             risk["findings"].append(finding)
     if invalid:
         _p7_rollout_risk_error(risk, tick, "risk_check_invalid")
+    elif envelope is not None and envelope["coverage"] == "unknown":
+        _p7_rollout_risk_error(risk, tick, "risk_coverage_unknown")
+        risk["coverage"]["errors"][-1]["model_reason"] = envelope["reason"]
     else:
         risk["coverage"]["evaluated_ticks"] += 1
 
@@ -109,6 +135,7 @@ def _p7_rollout_finish(result):
     result["risk"]["coverage"]["partial"] = (
         result["outcome"] == "unknown"
         or result["evaluated_actions"] < len(result["actions"])
+        or bool(result["risk"]["coverage"]["errors"])
     )
     _p7_rollout_risk_refresh(result["risk"])
     return result
@@ -152,7 +179,7 @@ def _p7_rollout_classify(state, terminal, settled, collision):
 
 def rollout(
     initial_state, actions, *, transition, settled, terminal, collision=None,
-    max_ticks_per_action=128, risk_check=None,
+    max_ticks_per_action=128, risk_check=None, supported_actions=...,
 ):
     """Apply one input per action, then None until a consequence is known.
 
@@ -163,16 +190,29 @@ def rollout(
     risk_check(before, after, action_or_none) declares explicit findings with
     id/type/condition/evidence; type is predicted_death or conditional_fatal.
     It runs before terminal/settled acceptance, with independent coverage.
+    A checker may also return {findings, coverage: covered|unknown, reason}.
+    Unknown coverage leaves dynamics unchanged and risk unassessed, unless a
+    fatal finding exists. No state fields or game rules are inferred here.
+    supported_actions omission preserves the legacy API without checking its
+    action coverage. Explicit None means undeclared coverage but still runs
+    callbacks to retain death warnings. A list/tuple declares canonical action
+    names; unsupported inputs stop before transition with an unknown result.
+    Declarations describe the model's scope, never verified real rules.
     """
     if type(max_ticks_per_action) is not int or max_ticks_per_action <= 0:
         raise ValueError("max_ticks_per_action must be a positive integer")
+    supported_actions = _p7_rollout_supported_actions(supported_actions)
     result = {
         "outcome": "unknown", "reason": "invalid_initial_state", "ticks": 0,
         "limit": max_ticks_per_action, "state": None, "states": [],
         "actions": [], "evaluated_actions": 0, "segments": [],
         "execution_authority": "none", "claims": "model-relative",
-        "risk": _p7_rollout_risk_new(risk_check),
+        "risk": _p7_rollout_risk_new(risk_check, supported_actions),
     }
+    if supported_actions is None:
+        result["risk"]["coverage"]["errors"].append({
+            "tick": 0, "reason": "action_coverage_undeclared",
+        })
     try:
         state = _p7_rollout_copy(initial_state)
     except Exception:
@@ -207,6 +247,17 @@ def rollout(
         return _p7_rollout_finish(result)
 
     for action_index, action in enumerate(copied_actions):
+        if (
+            supported_actions is not Ellipsis and supported_actions is not None
+            and action["name"] not in supported_actions
+        ):
+            result.update(outcome="unknown", reason="unsupported_action")
+            result["risk"]["coverage"]["action_coverage"] = "unsupported"
+            result["risk"]["coverage"]["errors"].append({
+                "tick": result["ticks"], "reason": "unsupported_action",
+                "action_index": action_index, "action": action["name"],
+            })
+            break
         # The input tick and subsequent None ticks have different dynamics.
         # An unchanged input state alone is not an autonomous-state cycle.
         seen = set()
@@ -261,7 +312,7 @@ def rollout(
 
 def replay_cases(
     cases, *, transition, settled, terminal, collision=None, max_ticks_per_action=128,
-    risk_check=None,
+    risk_check=None, supported_actions=...,
 ):
     """Backtest all recorded cases, preserving uncertainty and counterexamples.
 
@@ -285,6 +336,7 @@ def replay_cases(
             collision=collision,
             max_ticks_per_action=max_ticks_per_action,
             risk_check=risk_check,
+            supported_actions=supported_actions,
         )
         if missing_state:
             result["reason"] = "missing_initial_state"
@@ -326,7 +378,7 @@ def replay_cases(
 
 def evaluate_candidates(
     initial_state, candidates, *, transition, settled, terminal, collision=None,
-    max_ticks_per_action=128, backtest=None, risk_check=None,
+    max_ticks_per_action=128, backtest=None, risk_check=None, supported_actions=...,
 ):
     """Exclude only model-predicted death; retain unknown and other boundaries.
 
@@ -337,7 +389,8 @@ def evaluate_candidates(
     predicted_dead = []
     unknown = []
     remaining = []
-    combined_risk = _p7_rollout_risk_new(risk_check)
+    supported_actions = _p7_rollout_supported_actions(supported_actions)
+    combined_risk = _p7_rollout_risk_new(risk_check, supported_actions)
     combined_risk["coverage"]["partial"] = False
     backtest_status = (
         "not_backtested" if backtest is None else
@@ -352,6 +405,7 @@ def evaluate_candidates(
             terminal=terminal, collision=collision,
             max_ticks_per_action=max_ticks_per_action,
             risk_check=risk_check,
+            supported_actions=supported_actions,
         )
         outcome = result["outcome"] if checked else "unknown"
         evaluations.append({
@@ -374,6 +428,8 @@ def evaluate_candidates(
             {**error, "candidate_index": index} for error in source_coverage["errors"]
         ])
         coverage["partial"] |= source_coverage["partial"]
+        if source_coverage["action_coverage"] == "unsupported":
+            coverage["action_coverage"] = "unsupported"
         if outcome == "dead":
             predicted_dead.append(index)
         else:

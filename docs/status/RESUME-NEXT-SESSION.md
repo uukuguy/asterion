@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-12. Task48 stopped; exact predeath model diagnosis complete. Task49 implemented (8e89582b); scoped and packaged checks verified. Full regression retains one console timing failure with passing isolated/module retries. Live-session checkpoint, not a final handoff.
+Updated: 2026-10-12. Task49 renewed live trial stopped and cleaned; user authorizes input/rollout repairs; Task48 stopped; exact predeath model diagnosis complete. Task49 implemented (8e89582b); scoped and packaged checks verified. Full regression retains one console timing failure with passing isolated/module retries. Live-session checkpoint, not a final handoff.
 
 ## Objective
 
@@ -113,3 +113,17 @@ User identifies mandatory compact-display prompt as first regression suspect. Re
 Correction implemented: public autonomous prompt excludes compact-display instruction; no entry appends its reserved experiment constant.43relatedtestsPASS, root boundary assertionPASS; no paid rerun.
 
 Death visibility review completed offline: L2 saw15but misread contact mechanism; L3 explicitly recognized lethal ascent yet chose one step; L6death197/L7death324 hazards outside current viewport, assumed empty visible passage safe; L6death270 visible spike but intermediate descent missed. Full provider request bodies absent; archived plans/NOTES/cell outputs plus delivery source and sealed boards support stated boundary. Do not claim compact-display causes all deaths or that offscreen means truncated. Formal audit has per-death table. No new run.
+
+## Task49 renewed live authorization
+
+User says “继续” after implementation report. Fresh standard packaged supervised BP35 trial started: `p7-live-20261011181335-fd40bbf52e1f781bcd4a1378`, source `2551b318`, seed0/target9/historyoff/output2097152; PTY10027 owned by bp35_preset. Private live stdout/stderr under `.asterion-private/task49-p7-auto-rollout/`. Earlier no-new-run authorization statements above describe the pre-start boundary and are superseded for this one trial. Per-level actions/RESET/resources and actor-vs-host risk coverage are monitored. User subsequently stopped the trial; final result below. No capability claim.
+
+## Task49 stopped; input and model repairs authorized
+
+已验证事实：用户中止；PTY10027退出2、采样90898退出130、unit inactive/dead，console未动。最终5/9、184动作、1898.954秒；L1–5为16/51/36/34/33动作、153.631/296.266/380.626/323.169/344.402秒；L6未完14动作/400.860秒。唯一死亡L2全局26（本关10）、RESET27，成功段40。sealed_trace/replay_verified/cleanup_complete均true。199callback/198已结算usage，累计input17756580/output50468；单次峰202589。host_auto184/actor108/匹配54，缺模型0、实际host致命拦截0。证据 `.asterion-private/task49-p7-auto-rollout/final-resource-receipt.json` 与 `final-summary.json`。
+
+L2死亡前模型将自动上浮接触特殊块当普通静止，risk只检查点击目标，4微步漏报；不是执行器未调用。死后actor补接触死亡规则并回测成功。L3 before73及L5 before148主动预测候选死亡后改选，危险候选未执行，不能证明其真实必死。L6未专门建模ACTION7仍默认settled暴露覆盖缺口。五次完整死亡回测stdout461616字符，占actor729259字符63.3%，含重复完整棋盘，实际IPython未裁剪；不能把输出字符等同tokens。前60单请求平均96478，对比Task48平均36931约2.61倍；当前单次有周期收拢，usage无cache计费细分。只读receipt及input-size-review在同private目录。
+
+用户授权修正输入明显变大及推演漏报：默认研究助手摘要+完整证据引用，保留原像素和计算访问；显式模型动作/接触覆盖，未声明或未知不默认已评估；真实死亡对照推演并记录模型失配。属于P7能力和校验修正，不能自动判定任意错误模型或保证未知不死亡。当前正在离线实现，不再启动实测。
+
+Repair implementation now reviewed APPROVE and141focused tests PASS; final fallback alignment then14Solver tests PASS. Fresh final wheel1d535f1068908f0be66fb896916fec7f9d0054d4803e2093c4ca93941078f739 actual installed-kernel PASS, all7source/worker hashes match, model/SDK/realARC0 and complete close. Default actor summary642 versus full56421chars; retained pixel hash equal. Exact current-run death recurrence blocks before synthetic dispatch,7→7 unchanged; model_mismatch is linked. Receipt `.asterion-private/task49-p7-auto-rollout/repair-installed-kernel-witness/receipt.json`; previous shared receipt overwritten, copied new results preserve original command paths and explicitly mark absent oldc605receipt. Original Task49 historical witness claims refer to prior records, not current receipt. Promotion completed PASS25/provider0/full_datasetno; its snapshot differs only in later fallback alignment separately verified above. No owned live/verification/sampler processes remain. No new live-run authorization.

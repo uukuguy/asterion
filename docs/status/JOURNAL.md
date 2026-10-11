@@ -4998,3 +4998,7 @@
 - 2026-10-12 Task49 focused123/restore28 and final installed-kernel PASS; Astra APPROVE; explicit fatal veto and proactive attribution verified, real gameplay untested.
 - 2026-10-12 8e89582b adds automatic fatal-risk veto and proactive attribution; installed kernel verified, promotion pending.
 - 2026-10-12 Full4702 regression retained one console timing FAIL; isolated/module retry and other24 packaging checks PASS; provider/game0, no third suite.
+- 2026-10-12 2551b318 records scoped/package verification and retained full-suite failure for accurate recovery; no live run authorized.
+- 2026-10-12 User authorizes continued clean Task49 BP35 live trial; started p7-live-20261011181335-fd40bbf52e1f781bcd4a1378, source2551b318/historyoff/seed0/target9; automatic fatal-risk checks and proactive attribution monitored separately.
+- 2026-10-12 User stopped Task49 clean BP35 at5/9,184actions/1deathRESET/1898.954s; cleanup/replay true. L2 model contact-risk omission and repeated full death-replay output diagnosed; input17756580/output50468. User authorizes offline input/coverage/model-mismatch repairs, no new live run.
+- 2026-10-12 Input/coverage repairs reviewed APPROVE: default death replay86592→2915chars, full trace/pixels retained;141focused/final14Solver/fresh installed kernel PASS, promotion25/provider0 PASS with final fallback separately qualified. Exact current-run observed fatal recurrence now conditional-vetoed; no new live run, all owned processes closed.

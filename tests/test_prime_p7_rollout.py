@@ -379,5 +379,127 @@ class TestPrimeP7RolloutRisk(unittest.TestCase):
         self.assertEqual(result["risk"]["findings"], [self.finding()])
 
 
+class TestPrimeP7RolloutCoverage(unittest.TestCase):
+    @staticmethod
+    def model():
+        return {
+            "transition": lambda state, action: {"settled": True},
+            "terminal": lambda state: state.get("terminal"),
+            "settled": lambda state: state.get("settled", False),
+            "risk_check": lambda before, after, action: [],
+        }
+
+    @staticmethod
+    def declared(actions):
+        # Exercise the former silent fallback as well as the new declaration.
+        if "supported_actions" in inspect.signature(rollout_module.rollout).parameters:
+            return {"supported_actions": actions}
+        return {}
+
+    def test_unsupported_action_cannot_be_a_silently_settled_noop(self):
+        calls = []
+        kwargs = self.model()
+        kwargs["transition"] = lambda state, action: calls.append(action) or {"settled": True}
+        action = {"name": "ACTION7", "data": {}}
+        result = rollout_module.rollout(
+            {}, [action], **self.declared(["ACTION1"]), **kwargs,
+        )
+        self.assertEqual(result["outcome"], "unknown")
+        self.assertEqual(result["reason"], "unsupported_action")
+        self.assertEqual(result["risk"]["status"], "unassessed")
+        self.assertEqual(result["risk"]["coverage"]["action_coverage"], "unsupported")
+        self.assertEqual(calls, [])
+        self.assertEqual(result["evaluated_actions"], 0)
+        self.assertEqual(result["states"], [{}])
+        self.assertEqual(result["actions"], [action])
+
+    def test_undeclared_actions_remain_unassessed_without_losing_raw_death(self):
+        kwargs = self.model()
+        result = rollout_module.rollout({}, [ACTION], **self.declared(None), **kwargs)
+        self.assertEqual(result["risk"]["status"], "unassessed")
+        self.assertEqual(result["outcome"], "settled")
+        self.assertEqual(result["risk"]["coverage"]["action_coverage"], "undeclared")
+        self.assertTrue(result["risk"]["coverage"]["partial"])
+        self.assertEqual(result["ticks"], 1)
+        kwargs["transition"] = lambda state, action: {"terminal": "dead"}
+        dead = rollout_module.rollout({}, [ACTION], **self.declared(None), **kwargs)
+        self.assertEqual(dead["outcome"], "dead")
+        self.assertEqual(dead["risk"]["status"], "predicted_death")
+
+    def test_unknown_contact_coverage_is_independent_of_settled_dynamics(self):
+        kwargs = self.model()
+        kwargs["risk_check"] = lambda before, after, action: {
+            "findings": [], "coverage": "unknown",
+            "reason": "contact consequence not modeled",
+        }
+        result = rollout_module.rollout({}, [ACTION], **kwargs)
+        self.assertEqual(result["outcome"], "settled")
+        self.assertEqual(result["risk"]["status"], "unassessed")
+        self.assertEqual(result["risk"]["coverage"]["errors"], [{
+            "tick": 1, "reason": "risk_coverage_unknown",
+            "model_reason": "contact consequence not modeled",
+        }])
+        self.assertEqual(result["risk"]["coverage"]["evaluated_ticks"], 0)
+        self.assertTrue(result["risk"]["coverage"]["partial"])
+
+    def test_covered_envelope_preserves_full_trace_and_legacy_omission(self):
+        kwargs = self.model()
+        legacy = rollout_module.rollout({}, [ACTION], **kwargs)
+        self.assertEqual(legacy["risk"]["status"], "no_identified_fatal")
+        kwargs["risk_check"] = lambda before, after, action: {
+            "findings": [], "coverage": "covered", "reason": "declared local scope",
+        }
+        result = rollout_module.rollout(
+            {}, [ACTION], supported_actions=("ACTION1",), **kwargs,
+        )
+        self.assertEqual(result["risk"]["status"], "no_identified_fatal")
+        self.assertEqual(result["states"], [{}, {"settled": True}])
+        self.assertFalse(result["risk"]["coverage"]["partial"])
+
+    def test_unknown_or_invalid_envelope_does_not_erase_fatal_findings(self):
+        finding = TestPrimeP7RolloutRisk.finding()
+        for coverage in ("unknown", "invalid"):
+            with self.subTest(coverage=coverage):
+                kwargs = self.model()
+                kwargs["risk_check"] = lambda before, after, action: {
+                    "findings": [finding], "coverage": coverage,
+                    "reason": "unmodeled contact",
+                }
+                result = rollout_module.rollout({}, [ACTION], **kwargs)
+                self.assertEqual(result["risk"]["status"], "conditional_fatal")
+                self.assertEqual(result["risk"]["findings"], [finding])
+                self.assertTrue(result["risk"]["coverage"]["partial"])
+
+    def test_candidate_and_replay_forward_action_coverage(self):
+        action = {"name": "ACTION7", "data": {}}
+        result = rollout_module.evaluate_candidates(
+            {}, [[ACTION], [action]], supported_actions=["ACTION1"], **self.model(),
+        )
+        self.assertEqual(result["unknown"], [1])
+        self.assertEqual(result["remaining"], [0, 1])
+        self.assertEqual(result["risk"]["coverage"]["action_coverage"], "unsupported")
+        replay = rollout_module.replay_cases(
+            [{"sequence": 26, "initial_state": {}, "actions": [action],
+              "expected_outcome": "dead"}],
+            supported_actions=["ACTION1"], **self.model(),
+        )
+        self.assertEqual(replay["status"], "unknown")
+        self.assertEqual(replay["predictions"], [])
+
+    def test_unsupported_suffix_preserves_prefix_fatal_finding(self):
+        kwargs = self.model()
+        finding = TestPrimeP7RolloutRisk.finding()
+        kwargs["risk_check"] = lambda before, after, action: [finding]
+        result = rollout_module.rollout(
+            {}, [ACTION, {"name": "ACTION7", "data": {}}],
+            supported_actions=["ACTION1"], **kwargs,
+        )
+        self.assertEqual(result["outcome"], "unknown")
+        self.assertEqual(result["evaluated_actions"], 1)
+        self.assertEqual(result["ticks"], 1)
+        self.assertEqual(result["risk"]["status"], "conditional_fatal")
+        self.assertEqual(result["risk"]["findings"], [finding])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,37 @@ from tests.test_prime_p7_guard_probe import _NoEffectClickEngine
 
 
 class TestP7AutonomousSolver(P7SolverFixture):
+    def test_auto_model_feedback_records_real_death_once_and_keeps_known_action(self):
+        self.engine.game_over_after = 1
+        assessment = {'status': 'evaluated', 'risk': 'no_identified_fatal',
+                      'outcome': 'settled', 'reason': 'settled', 'ticks': 4}
+        self.solver.auto_evaluate = lambda *args: assessment
+        observed = []
+        def record(*args):
+            observed.append(copy.deepcopy(args))
+            return {'status': 'model_mismatch', 'case_sequence': args[2]['sequence']}
+        self.solver.auto_observe = record
+        plan = self.minimal()
+        result = self.solver.execute_plan(plan)
+        self.assertEqual((result['applied_count'], result['stop_reason']), (1, 'game-over'))
+        self.assertEqual(result['model_feedback'][0]['status'], 'model_mismatch')
+        self.assertEqual((observed[0][1]['sequence'], observed[0][2]['sequence']), (0, 1))
+        self.assertEqual(observed[0][4], 'GAME_OVER')
+        self.assertEqual(self.solver.execute_plan(plan), result)
+        self.assertEqual(len(observed), 1)
+
+    def test_auto_model_feedback_archive_failure_does_not_erase_real_death(self):
+        self.engine.game_over_after = 1
+        self.solver.auto_evaluate = lambda *args: {'status': 'evaluated',
+            'risk': 'no_identified_fatal', 'reason': 'settled', 'ticks': 1}
+        def fail(*args):
+            raise OSError('private archive path')
+        self.solver.auto_observe = fail
+        result = self.solver.execute_plan(self.minimal())
+        self.assertEqual((result['applied_count'], result['stop_reason']), (1, 'game-over'))
+        self.assertEqual(result['model_feedback'][0]['evidence_status'], 'feedback_record_unavailable')
+        self.assertNotIn('private archive path', str(result))
+
     def test_auto_rollout_uses_fresh_frame_for_each_primitive_and_stops_fatal_suffix(self):
         seen = []
         def evaluate(observation, reference, action):

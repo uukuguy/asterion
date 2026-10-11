@@ -54,6 +54,7 @@ class Solver:
         self._lock = RLock()
         self._plan_execution_lock = RLock()
         self.auto_evaluate = None
+        self.auto_observe = None
         self._needs_calibration = self._workspace.loaded and learner_profile != 'autonomous'
         self._needs_revision = learner_profile != 'autonomous'
         self._revision_reason = "initial" if self._needs_revision else None
@@ -978,6 +979,7 @@ class Solver:
             all_predictions_matched = True
             unexecuted_start = 0
             for index, native in enumerate(translated):
+                assessment = None
                 self.control.poll(
                     reference["sequence"], reference["observation_sha256"]
                 )
@@ -1088,6 +1090,35 @@ class Solver:
                         "observation_ref": reference,
                     }
                     result["feedback"].append(feedback)
+                    if (count and assessment is not None
+                            and native['action']['name'] != 'RESET'
+                            and observation['state'] == 'GAME_OVER'
+                            and callable(self.auto_observe)):
+                        try:
+                            model_feedback = self.auto_observe(
+                                copy_json(assessment), before_reference, copy_json(reference),
+                                copy_json(native['action']), observation['state'])
+                            model_feedback = copy_json(model_feedback)
+                        except Exception:
+                            mismatch = assessment.get('status') == 'evaluated' and (
+                                assessment.get('outcome') in {'settled', 'goal', 'collision'})
+                            model_feedback = {
+                                'origin': 'host_feedback',
+                                'type': 'model_mismatch' if mismatch else 'death_not_assessed',
+                                'death_case_sequence': reference['sequence'],
+                                'before_observation_ref': before_reference,
+                                'after_observation_ref': copy_json(reference),
+                                'action': copy_json(native['action']), 'actual_state': 'GAME_OVER',
+                                'predicted_risk': assessment.get('risk'),
+                                'predicted_outcome': assessment.get('outcome'),
+                                'model_revision': assessment.get('model_revision'),
+                                'full_trace_ref': assessment.get('result_artifact_id'),
+                                'frame_sha256': assessment.get('frame_sha256'),
+                                'level': before_reference.get('level'),
+                                'claims': 'observed-case-only', 'execution_authority': 'none',
+                                'evidence_status': 'feedback_record_unavailable'}
+                        if model_feedback is not None:
+                            result.setdefault('model_feedback', []).append(model_feedback)
                     self._emit(
                         "feedback",
                         "environment",

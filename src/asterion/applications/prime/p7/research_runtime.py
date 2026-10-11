@@ -151,6 +151,9 @@ class P7ResearchRuntime:
             cell_read=lambda cell_id, field, start, limit: self.kernel.cell_read(
                 cell_id, field=field, start=start, limit=limit),
             diagnostic_sink=self._read_diagnostic,
+            rollout_trace=(lambda ref, section, start, limit:
+                           self._rollouts.read_trace(ref, section, start, limit))
+                          if auto_rollout else None,
         )
         try:
             module_source = self._read_server.start()
@@ -170,6 +173,7 @@ class P7ResearchRuntime:
             self._rollouts = RolloutRuntime(self, run_root) if auto_rollout else None
             if self._rollouts is not None:
                 self.solver.auto_evaluate = self._rollouts.evaluate
+                self.solver.auto_observe = self._rollouts.record_feedback
             self._research_chain = None
             self._research_chain_faults = 0
             try:

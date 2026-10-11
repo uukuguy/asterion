@@ -1,16 +1,70 @@
 """Provider-free automatic evaluation in the existing P7 computation kernel."""
 import asyncio
+import hashlib
 import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+import zlib
 
 from asterion.applications.prime.p7.broker import ArcBroker
 from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
+from asterion.applications.prime.p7.rollout_runtime import RolloutRuntime
 from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
 from tests.test_prime_p7_native_broker import _Engine
 from tests.test_prime_p7_research_runtime import _Signal, _TraceClient
+
+
+class TestRolloutFeedback(unittest.TestCase):
+    def test_known_actual_death_preserves_mismatch_and_uncertainty_with_archive_failure(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = RolloutRuntime(SimpleNamespace(), Path(directory))
+            self.assertTrue(callable(getattr(runtime, 'record_feedback', None)))
+            before, after = {'sequence': 25}, {'sequence': 26}
+            action = {'name': 'ACTION6', 'data': {'x': 39, 'y': 33}}
+            revision = {'generation': 'g', 'registration_id': 1, 'last_actor_cell_id': 'cell:a'}
+            assessment = {'status': 'evaluated', 'risk': 'no_identified_fatal',
+                          'outcome': 'settled',
+                          'model_revision': revision, 'result_artifact_id': 'sha256:'+'a'*64}
+            result = runtime.record_feedback(assessment, before, after, action, 'GAME_OVER')
+            self.assertEqual(result['type'], 'model_mismatch')
+            self.assertEqual(result['before_observation_ref'], before)
+            self.assertEqual(result['after_observation_ref'], after)
+            self.assertEqual(result['full_trace_ref'], assessment['result_artifact_id'])
+            self.assertEqual(result['model_revision'], revision)
+            self.assertEqual(runtime.model_case_status(revision), 'counterexample_observed')
+            self.assertEqual(runtime.model_case_status({**revision,'last_actor_cell_id':'cell:b'}), 'counterexample_observed')
+            self.assertIsNone(runtime.record_feedback(assessment, before, after, action, 'NOT_FINISHED'))
+            with patch.object(runtime, '_append', side_effect=OSError('archive unavailable')):
+                result = runtime.record_feedback({'risk':'unassessed'}, before, after, action, 'GAME_OVER')
+            self.assertEqual(result['type'], 'death_not_assessed')
+            self.assertEqual(result['evidence_status'], 'feedback_record_unavailable')
+            for outcome in ('settled', 'goal', 'collision', 'unknown'):
+                with self.subTest(outcome=outcome):
+                    result = runtime.record_feedback({'status':'evaluated','risk':'unassessed','outcome':outcome}, before, after, action, 'GAME_OVER')
+                    self.assertEqual(result['type'], 'death_not_assessed' if outcome == 'unknown' else 'model_mismatch')
+
+    def test_current_run_death_case_matches_only_same_pixels_level_and_action(self):
+        from asterion.applications.prime.p7.score import digest
+        with tempfile.TemporaryDirectory() as directory:
+            runtime = RolloutRuntime(SimpleNamespace(_closed=False), Path(directory))
+            frame = [[15, 10]]
+            action = {'name':'ACTION6','data':{'x':39,'y':33}}
+            before = {'sequence':25,'level':2}
+            after = {'sequence':26,'level':2}
+            runtime.record_feedback({'status':'evaluated','risk':'unassessed','outcome':'unknown',
+                                     'frame_sha256':digest(frame)}, before, after, action, 'GAME_OVER')
+            for pixels, level, candidate, expected in (
+                    (frame,2,action,True), ([[15,11]],2,action,False),
+                    (frame,3,action,False), (frame,2,{'name':'ACTION3','data':{}},False)):
+                with self.subTest(pixels=pixels,level=level,candidate=candidate):
+                    result = runtime.evaluate({'frame':[pixels]}, {'sequence':99,'level':level}, candidate)
+                    self.assertEqual(result['risk'], 'conditional_fatal' if expected else 'unassessed')
+                    if expected:
+                        self.assertEqual(result['findings'][0]['evidence']['after_observation_ref'], after)
+                        self.assertEqual(result['findings'][0]['evidence']['source'], 'current_run_death_case')
 
 
 class TestRecoveredRolloutRegistration(unittest.IsolatedAsyncioTestCase):
@@ -145,4 +199,45 @@ class TestP7AutoRollout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result['auto_rollouts'][0]['risk'], 'predicted_death')
         self.assertEqual(result['auto_rollouts'][0]['evidence_status'], 'call_record_unavailable')
         self.assertEqual(self.engine.calls, [])
+
+    async def test_actor_death_backtest_summary_retains_full_trace_and_internal_results(self):
+        source = """import p7_research as r
+import json
+def move(s,a): s['tick']+=1; return s
+def rest(s): return s['tick']>=4
+def end(s): return 'dead' if s['tick']>=3 else None
+case={'sequence':26,'initial_state':{'tick':0,'f':[[15]*64 for _ in range(64)]},
+      'actions':[{'name':'ACTION1','data':{}}],'expected_outcome':'dead'}
+result=r.replay_cases([case],transition=move,settled=rest,terminal=end)
+print(json.dumps(result))
+"""
+        result = await self.host.execute('compact', source, _Signal())
+        self.assertEqual(result.status, 'ok')
+        output = json.loads(result.content[0]['text'])['stdout']
+        summary = json.loads(output)
+        self.assertIn('full_trace_ref', summary)
+        self.assertLess(len(output), 8192)
+        backtest = summary['backtests'][0]
+        self.assertEqual((backtest['expected_outcome'], backtest['predicted_outcome'], backtest['status']),
+                         ('dead', 'dead', 'checked'))
+        self.assertNotIn('state', backtest['rollout'])
+        self.assertNotIn('states', backtest['rollout'])
+        path = self.root / 'rollout-evidence' / (summary['full_trace_ref'][7:] + '.json.zlib')
+        packed = path.read_bytes()
+        self.assertEqual('sha256:' + hashlib.sha256(packed).hexdigest(), summary['full_trace_ref'])
+        raw = json.loads(zlib.decompress(packed))
+        self.assertGreater(len(repr(raw)), 86000)
+        self.assertEqual(raw['backtests'][0]['risk'], backtest['risk'])
+        self.assertEqual(raw['backtests'][0]['rollout']['state']['f'][0], [15]*64)
+        calls = [json.loads(line) for line in (self.root/'rollout-evidence/calls.jsonl').read_text().splitlines()]
+        self.assertEqual([item['operation'] for item in calls], ['replay_cases'])
+        self.assertEqual(calls[0]['full_trace_ref'], summary['full_trace_ref'])
+        read = await self.host.execute('read', "print(json.dumps(r.read_rollout_trace(result['full_trace_ref'],section=['backtests',0,'rollout','state','f'],start=32,limit=32)))", _Signal())
+        page = json.loads(json.loads(read.content[0]['text'])['stdout'])
+        self.assertEqual((page['total'], page['next_start']), (64, None))
+        self.assertEqual(page['items'], [[15]*64 for _ in range(32)])
+        full = await self.host.execute('full', "x=r.replay_cases([case],transition=move,settled=rest,terminal=end,full=True)\nprint(len(x['backtests'][0]['rollout']['states']))", _Signal())
+        self.assertEqual(json.loads(full.content[0]['text'])['stdout'].strip(), '4')
+        scalar = await self.host.execute('scalar', "print('state' in r.rollout(1,[],transition=lambda s,a:s,settled=lambda s:True,terminal=lambda s:None))", _Signal())
+        self.assertEqual(json.loads(scalar.content[0]['text'])['stdout'].strip(), 'False')
 

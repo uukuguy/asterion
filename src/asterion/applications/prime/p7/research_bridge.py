@@ -15,7 +15,7 @@ from .rollout_runtime import KERNEL_SOURCE
 
 
 class ResearchReadServer:
-    def __init__(self, *, context, history, frame, artifact, experience=None, animation=None, transition=None, cell_history=None, cell_read=None, diagnostic_sink=None):
+    def __init__(self, *, context, history, frame, artifact, experience=None, animation=None, transition=None, cell_history=None, cell_read=None, rollout_trace=None, diagnostic_sink=None):
         callbacks = {
             "context": context,
             "history": history,
@@ -32,7 +32,7 @@ class ResearchReadServer:
             if not callable(animation):
                 raise ValueError('research readers unavailable')
             callbacks['animation'] = animation
-        for name, callback in (("transition", transition), ("cell_history", cell_history), ("cell_read", cell_read)):
+        for name, callback in (("transition", transition), ("cell_history", cell_history), ("cell_read", cell_read), ("rollout_trace", rollout_trace)):
             if callback is not None:
                 if not callable(callback):
                     raise ValueError("research readers unavailable")
@@ -146,6 +146,14 @@ class ResearchReadServer:
                         or type(args[1]) is not str or args[1] not in {"source", "output"}
                         or type(args[2]) is not int or args[2] < 0
                         or type(args[3]) is not int or not 1 <= args[3] <= 16384):
+                    raise ValueError
+            elif method == 'rollout_trace':
+                if (len(args) != 4 or type(args[0]) is not str
+                        or re.fullmatch(r'sha256:[0-9a-f]{64}', args[0]) is None
+                        or type(args[1]) is not list or len(args[1]) > 16
+                        or any(type(v) not in (str, int) or (type(v) is int and v < 0) for v in args[1])
+                        or type(args[2]) is not int or args[2] < 0
+                        or type(args[3]) is not int or not 1 <= args[3] <= 32):
                     raise ValueError
             elif method == "frame":
                 if len(args) != 1 or (args[0] is not None and (type(args[0]) is not int or args[0] < 0)):
@@ -392,7 +400,7 @@ def death_cases():
     return cases
 
 def replay_deaths(*, initial_state, transition, settled, terminal, collision=None,
-                  max_ticks_per_action=128, risk_check=None):
+                  max_ticks_per_action=128, risk_check=None, supported_actions=...):
     """Backtest the supplied model on every current-run observed death; no certificate.
 
     initial_state(frame, before_observation_ref) constructs your JSON model state.
@@ -408,7 +416,7 @@ def replay_deaths(*, initial_state, transition, settled, terminal, collision=Non
              for item in observed]
     result = replay_cases(cases, transition=transition, settled=settled, terminal=terminal,
                           collision=collision, max_ticks_per_action=max_ticks_per_action,
-                          risk_check=risk_check)
+                          risk_check=risk_check, supported_actions=supported_actions)
     backtests = result.get("backtests")
     if not isinstance(backtests, list) or len(backtests) != len(observed):
         raise ValueError("death backtest coverage unavailable")

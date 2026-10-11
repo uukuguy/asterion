@@ -21,6 +21,12 @@ P7 supervised research 已实现每步自动推演，危险筛选先于行动：
 
 主动实际调用与 host_auto 独立记录；仅真实画面/ref/动作/模型运行时版本吻合的登记模型主动检查计为当前候选覆盖。无模型明确 not_evaluated，不算成功推演。`rollout_runtime.py` 管理同 kernel 接线、证据和时长；执行计算时释放 Solver 状态锁，保持单计划占有，返回后核引用/generation/取消。代码8e89582b，Astra final review APPROVE；123定向回归 PASS，恢复登记清理28相关测试、旧host兼容13相关测试 PASS；fresh隔离wheel真实内核源码对齐与关闭 PASS。完整promotion第二轮4702tests有一项旧进程组清理时序失败，原结果保持FAIL；该用例独立及整console模块重跑PASS，其余24打包检查单独PASS，不冒称完整全量PASS。真实危险漏报率、LLM主动调用一致性及游戏收益未实测，无新实跑授权；详见 INDEX 设计/计划。
 
+## Task49 stopped live trial and authorized repairs
+
+用户授权继续后，source2551b318/fresh wheelc6057d5e/historyoff/seed0/target9 实测 `p7-live-20261011181335-fd40bbf52e1f781bcd4a1378` 已按用户中止，5/9、184动作/1死亡RESET、1898.954秒，cleanup/replay/sealed_trace均true，unit inactive；console未动。逐关16/51/36/34/33，L6部分14；唯一死亡L2本关第10/global26，RESET27，恢复成功40。host_auto184/actor108/匹配54，缺模型0、host致命拦截0。L2模型把自动接触特殊块误判静止、risk检查范围过窄；不是助手未执行。L3与L5有两次绑定危险预测后改选，未执行反事实不证明真实必死。
+
+输入17756580/output50468，198结算usage/199callback，单次峰202589；前60平均96478 vs Task48平均36931，存在单次与累计增大。重复完整death replay占actor输出63.3%，不能将其直接等同全部tokens或计费。用户授权离线修正：研究助手默认summary+完整trace引用、可分页读取原像素；显式动作/接触覆盖，未知不默认为已覆盖；真实死亡失配记录与同局同frame/level/action条件性反例风险。无通用Prime/工具注册变更，不加载历史经验。离线原回测输出86592→2915字符（96.6%减少），raw恢复hash一致；141定向回归及Astra APPROVE，fresh最终安装kernel PASS，wheel1d535f10；promotion25/provider0 PASS，快照仅早于最终fallback字段/判定对齐，该差异另有14Solver及源码哈希对齐安装验证，不称全量已执行后续改动。全部owned检查已结束。模型明示错误规则仍可能漏报，不能声称任意模型自动修对。
+
 ## Task47 continuous-consequence experiment history (2026-10-12)
 
 用户批准延伸推演：P7 的模型程序先执行一次输入，再展开自动运动至静止、碰撞、终局或未知。已实现 `rollout`、`replay_cases`、`evaluate_candidates`；现有 IPython `p7_research` 追加 `death_cases` / `replay_deaths`，完整核对本次运行死亡动作及前后引用，不加载历史运行。模型死亡候选可被筛出，未知保留；结果只相对于模型，不新增真实动作拦截、执行授权或未来安全证书。通用 Prime、工具注册和主提示不变；用法只追加到 research 实验入口。
