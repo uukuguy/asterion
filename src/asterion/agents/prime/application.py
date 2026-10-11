@@ -285,7 +285,11 @@ class PrimeModelView(Protocol):
 
 
 class PrimeApplicationServices(Protocol):
-    """Domain execution only; the core owns transport and process startup."""
+    """Domain execution only; the core owns transport and process startup.
+
+    An optional positive ``bridge_output_bytes`` property selects the trusted
+    tool transport output capacity; absent it, Prime retains its 64 KiB default.
+    """
 
     @property
     def identity_sha256(self) -> str: ...
