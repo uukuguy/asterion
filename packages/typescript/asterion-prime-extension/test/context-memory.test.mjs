@@ -657,13 +657,62 @@ test("existing workspace native archive route returns paged evidence without bri
 
 test("primary retirement preserves native system constraints and archives superseded standalone prose",()=>{
   const fixture=primaryFixture();
-  fixture.messages.unshift({role:"system",content:"EXACT_NATIVE_SYSTEM",toolsAdded:[{name:"document_note"}],timestamp:0});
+  fixture.messages.unshift({role:"system",content:"EXACT_NATIVE_SYSTEM",toolsAdded:[{name:"document_note",description:"note",parameters:{type:"object"}}],timestamp:0});
   fixture.messages.splice(4,0,{role:"assistant",content:[{type:"text",text:"SUPERSEDED_LONG_PROSE"}],stopReason:"stop",timestamp:2});
   fixture.entries.splice(0,fixture.entries.length,...fixture.messages.map((message,index)=>({type:"message",id:"entry-"+index,parentId:index?"entry-"+(index-1):null,message})));
   const {controller,archive}=admitPrimary(fixture),view=controller.project(fixture.messages,archive);
   assert.equal(view.outcome.status,"primary");
   assert.deepEqual(view.messages.find(message=>message.role==="system"),fixture.messages[0]);
   assert.doesNotMatch(JSON.stringify(view.messages),/SUPERSEDED_LONG_PROSE/);
+});
+
+const nativeSystem = () => ({role:"system",content:"",sections:{preamble:"native instructions",cwd:null},
+  toolsAdded:[{name:"ipython",description:"execute",parameters:{type:"object",properties:{ratio:{type:"number",minimum:0.1}}},
+    constrainedSampling:{type:"json_schema",strict:"require"}}],toolsRemoved:[{name:"old_tool"}],timestamp:1});
+
+test("system section bytes and declaration metadata count without private native fields",()=>{
+  const message=nativeSystem(),original=structuredClone(message);
+  const decorated={...message,timestamp:999,details:{private:"PRIVATE_SYSTEM_SENTINEL"}};
+  const small=new extension.ContextViewTelemetry().observe([decorated]);
+  const expanded={...decorated,sections:{...message.sections,preamble:message.sections.preamble+"x".repeat(4000)}};
+  const large=new extension.ContextViewTelemetry().observe([expanded]);
+  const {timestamp,...modelFields}=message;
+  assert.equal(small.other_bytes,Buffer.byteLength(JSON.stringify(modelFields),"utf8"));
+  assert.equal(large.other_bytes-small.other_bytes,4000);
+  assert.equal(small.unmeasurable_requests,0);
+  assert.deepEqual(message,original);
+});
+
+test("native archive tool roundtrips ordered system sections and full tool changes",async()=>{
+  const message={...nativeSystem(),details:{private:"PRIVATE_SYSTEM_SENTINEL"}},original=structuredClone(message);
+  const entries=[{type:"message",id:"system-entry",parentId:null,message}];
+  const context={sessionManager:{getSessionId:()=>"system-session",getBranch:()=>entries}};
+  let dispatches=0;
+  const tool=extension.createAppLevelTools({callMethod:async()=>{dispatches++;throw new Error("unexpected dispatch");}})
+    .find(tool=>tool.name==="p7_workspace");
+  const result=await tool.execute("read-system",{op:"context_archive_read",ref:{session_id:"system-session",entry_id:"system-entry"},limit:16384},undefined,undefined,context);
+  const page=JSON.parse(result.content[0].text), archived=JSON.parse(page.text);
+  const {timestamp,details,...modelFields}=message;
+  assert.equal(page.status,"ok");
+  assert.deepEqual(archived,modelFields);
+  assert.deepEqual(Object.keys(archived.sections),Object.keys(message.sections));
+  assert.equal(archived.toolsAdded[0].parameters.properties.ratio.minimum,0.1);
+  assert.doesNotMatch(page.text,/PRIVATE_SYSTEM_SENTINEL|timestamp|details/);
+  // Sorting the outer response, as a host transport may do, cannot alter the
+  // ordered patch object held inside the archive's opaque JSON text.
+  const transported=JSON.parse(JSON.stringify(Object.fromEntries(Object.entries(page).sort(([a],[b])=>a.localeCompare(b)))));
+  assert.deepEqual(Object.keys(JSON.parse(transported.text).sections),Object.keys(message.sections));
+  assert.equal(dispatches,0);
+  assert.deepEqual(message,original);
+});
+
+test("primary reconstruction does not revive a hidden system with the same empty content",()=>{
+  const fixture=primaryFixture(),hidden=nativeSystem(),visible={...nativeSystem(),sections:{preamble:"new instructions",cwd:null},toolsRemoved:[{name:"other_tool"}]};
+  fixture.messages.unshift(hidden,visible);
+  fixture.entries.splice(0,fixture.entries.length,...fixture.messages.map((message,index)=>({type:"message",id:"entry-"+index,parentId:index?"entry-"+(index-1):null,message})));
+  const {controller,archive}=admitPrimary(fixture),view=controller.project(fixture.messages.filter(message=>message!==hidden),archive);
+  assert.equal(view.outcome.status,"primary");
+  assert.deepEqual(view.messages.filter(message=>message.role==="system"),[visible]);
 });
 
 test("trusted IPython error metadata and transport unknown receipts protect original computations",async()=>{

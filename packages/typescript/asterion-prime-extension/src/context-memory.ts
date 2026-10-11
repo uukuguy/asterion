@@ -1,5 +1,5 @@
 /** Snapshot-only model view; Pi owns conversation history and compaction. */
-import {parseContextCheckpoint,primaryContextHistory,type ContextCheckpointReceipt,type NativeContextArchive} from './context-archive.js';
+import {archiveSystemMessage,parseContextCheckpoint,primaryContextHistory,type ContextCheckpointReceipt,type NativeContextArchive} from './context-archive.js';
 export const CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v2";
 export const PRIMARY_CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v3";
 const LEGACY_VERSION = "asterion.prime-context-memory/v1";
@@ -85,8 +85,7 @@ export function contextMessageBytes(value: unknown): number {
         isError:message.isError,content:message.content};
       break;
     case "system":
-      projection = {role:message.role,content:message.content,
-        toolsAdded:message.toolsAdded,toolsRemoved:message.toolsRemoved};
+      projection = archiveSystemMessage(message);
       break;
     case "bashExecution":
       projection = {role:message.role,command:message.command,output:message.output,

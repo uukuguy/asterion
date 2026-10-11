@@ -1,4 +1,5 @@
 /** Selected-session evidence. No domain rules, filesystem discovery or execution. */
+import {projectPrimeContext} from './context-projection.js';
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:|+-]{0,255}$(?![\s\S])/;
 const REVISION = /^sha256:[0-9a-f]{64}$(?![\s\S])/;
 export const CONTEXT_CHECKPOINT_VERSION = 'asterion.prime-context-checkpoint/v1';
@@ -40,9 +41,21 @@ function publicContent(value:unknown):unknown {
     throw new Error('archive block unavailable');
   });
 }
+/** Preserve native ordered system patches and loadouts without private metadata. */
+export function archiveSystemMessage(raw:unknown):RecordValue {
+  const message=record(raw);
+  if(message?.role!=='system') throw new Error('archive system unavailable');
+  projectPrimeContext([message]);
+  const value:RecordValue={role:'system',content:publicContent(message.content)};
+  for(const key of ['sections','toolsAdded','toolsRemoved']) {
+    if(message[key]!==undefined) value[key]=JSON.parse(JSON.stringify(message[key]));
+  }
+  return value;
+}
 export function archiveMessage(raw:unknown):RecordValue {
   const message=record(raw);
   if(!message || !['user','assistant','toolResult','custom','system'].includes(String(message.role))) throw new Error('archive message unavailable');
+  if(message.role==='system') return archiveSystemMessage(message);
   const value:RecordValue={role:message.role,content:publicContent(message.content)};
   if(message.role==='toolResult') {
     if(typeof message.toolCallId!=='string' || typeof message.toolName!=='string' || typeof message.isError!=='boolean') throw new Error('archive result unavailable');
