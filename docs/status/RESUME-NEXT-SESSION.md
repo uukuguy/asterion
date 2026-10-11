@@ -2,6 +2,10 @@
 
 > Updated: 2026-10-11 14:26 CST. Session remains active — not a final handoff.
 
+## 当前实施
+
+用户已批准监督研究模式：无总回调/总时长/总动作硬上限，外围监测与停止；保留单次边界和自动预设。设计与计划位于2026-10-11-p7-supervised-research；domain与entry workers并行实施，Astra复审。此次未授权新BP35模型实测。
+
 ## 最新实测已结束
 
 - 用户授权一次BP35完整九关冷实测；唯一真实试验已结束，未重跑/续跑。

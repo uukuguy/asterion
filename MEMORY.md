@@ -104,6 +104,8 @@
 
 ### feedback — research intensity, not production engineering
 
+- User2026-10-11: current solving work is supervised research. Track resource use and let the outer supervisor decide when to stop; automatic solving may retain fixed budgets.
+
 - Review changed code plus the key boundary assertions, and run **small
   targeted** regressions. Do not re-run full combination gates or full suites,
   and do not harden tooling past the point where it catches the real violations.

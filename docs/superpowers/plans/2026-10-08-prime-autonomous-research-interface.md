@@ -335,3 +335,12 @@ User clarifications: independent applications must run through the Prime library
 - [x] Execute implementation Tasks 1–8; record code, packaged verification and live evidence separately.
 
 The default dedicated-summary gap is real but is a separate behavior change. Preserve the requested future lower-threshold P7 validation and the isolated draft stash. No new BP35 run, broad capability rebuild or model-quality improvement is authorized or claimed by this design record. Existing public protocols, runner responsibilities, operator authority and packaged-resource verification requirements remain in force.
+
+
+## Task41 — Supervised research budget mode
+
+Status: user approved design2026-10-11; implementation in progress. Depends on completedTask40. [Design](../specs/2026-10-11-p7-supervised-research-design.md), [plan](2026-10-11-p7-supervised-research.md).
+
+Scope: explicit P7 supervised research entry, no aggregate callbacks/deadline/action cap; cumulative safe resource monitor and outer stop with bounded settlement. Existing finite solve/witness/autonomy/official remain finite. Generic runner/kernel reused, no new model behavior/prompt/NOTES change.
+
+Acceptance: model128/actionoldcap crossed in provider-free controlled tests; no hidden1h fallback; finite modes still reject; cancellation/unknowneffects/batchcaps/trace provenance preserved; monitored metrics and heartbeat; packaged entry checks. No real nine-level completion claim and no new paid BP35 trial in this implementation.
