@@ -57,6 +57,8 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
 
+- 当前九关冷实测：[2026-10-11 BP35完整目标实测](../reviews/2026-10-11-p7-bp35-full-game-trial.md)：5/9、255动作/4RESET；独立前五关214动作重放通过，128回调上限为强证据推断，九关目标未达成。
+
 ## Decision history (kept for traceability — verdicts may be outdated)
 
 | File | Status | What it recorded | Outcome / supersession |

@@ -1,18 +1,19 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-11 13:56 CST. Session remains active — not a final handoff.
+> Updated: 2026-10-11 14:26 CST. Session remains active — not a final handoff.
 
-## 当前运行
+## 最新实测已结束
 
-用户授权一次BP35完整九关实测。当前源码不变；标准solve/verified，从空历史L1起跑，无旧路线/经验。内限3600秒、128callbacks、1302动作，guest上限3900秒。
-
-- Host PID: 72631
-- Guest unit: `asterion-p7-880965ba860043669a4f3de38bcd5d4f.service`
-- 私有启动与日志: `.asterion-private/p7-full-bp35-20261011-135551`
-- 恢复入口: `.asterion-private/bp35-current-trial.json`
-- 下一动作: 观察本次运行；终止后核验九关结果、原始receipt、重放/封存/cleanup，删除trial临时.env，提交实测报告。不能以退出0代替全通。
+- 用户授权一次BP35完整九关冷实测；唯一真实试验已结束，未重跑/续跑。
+- 5/9关、255动作/4RESET，L1–L5为20/47/40/62/45，L6未完成41动作。
+- 1581.984秒至summary，128结算模型调用。129次before-request与末turn_start强烈支持128回调上限拒绝；原summary只记录ApplicationRunError，具体原因属推断。
+- 独立386trace seal/255known事务通过；前五关214动作新SDK重放通过。完整失败后缀没有独立SDK重放。
+- host已退出、guestunit不存在/0PID/空cgroup、trial临时.env删除，原console保留。
+- [实测报告](../reviews/2026-10-11-p7-bp35-full-game-trial.md)；私有证据 `.asterion-private/p7-full-bp35-20261011-135551/`。
+- 当前无运行工作包。下一候选：核对完整评估回调预设及失败原因保留；专用摘要接通仍独立未完成。本次不授权新一轮评估。
 
 ## 既有交接事实（本次运行不改写历史证据）
+
 
 
 
