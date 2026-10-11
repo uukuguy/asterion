@@ -1261,3 +1261,7 @@
 - References: [design](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md), [plan](../superpowers/plans/2026-10-12-p7-continuous-rollout.md).
 
 - Task47 live follow-up: optional helper was never invoked before visible-risk death; user stopped the run and explicitly requires mandatory rollout. This supersedes the optional invocation policy for the research experiment. Design execution-before-each-action enforcement without trusting actor-reported receipts; unknown exploration and model-quality boundaries remain explicit. This correction is authorized but not yet implemented; no new live run.
+
+- Later refinement: user questions per-step recomputation and requests runtime measurements plus offline L2 death prediction. Mandatory use at consequential decisions and reuse strategy are under discussion; do not treat the all-step gate proposal as approved implementation or start a new paid trial.
+
+- Final user policy: while solving games, P7 continuously judges certainty of the current situation, mechanisms and consequences; when certainty is not sufficient, prioritize program rollout. Reuse verified stable fragments and reassess after unexpected feedback. Avoid case-specific admonitions or an overly high uncertainty threshold. Implement this only in the research entry; no every-step execution gate. User authorizes a fresh clean trial of this strategy.

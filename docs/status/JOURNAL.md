@@ -4986,3 +4986,5 @@
 - 2026-10-12 9bcfcce3 adds verified model-relative rollout and current-run death backtests to address recognized-risk myopic action errors.
 - 2026-10-12 Started clean Task47 BP35 source9bcfcce3, historyoff; per-level passive resource samples retained for supervised evaluation.
 - 2026-10-12 User stopped Task47 at2/9,87actions/1RESET; helper unused, cleanup/replay verified; mandatory research pre-action rollout now required.
+- 2026-10-12 b11623e9 records stopped optional-rollout trial and user-required enforcement to prevent claiming unused helpers improved action safety.
+- 2026-10-12 L2 offline conditional hazard and rollout costs verified; user selects insufficient-certainty gameplay policy and authorizes fresh clean trial.

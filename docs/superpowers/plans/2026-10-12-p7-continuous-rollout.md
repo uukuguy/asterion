@@ -44,3 +44,9 @@ Files: research_bridge.py, prompt.py, operator.py and existing research/runtime/
 - Private Task46 L3 witness: one input +3 automatic ticks reproduces actual death77; myopic model counterexample; original host observation comparison checked1. Partial operator model, engine/model0, no live efficacy claim.
 - Fresh-wheel isolated installed package + actual PersistentIPython PASS; source hashes match checkout, all4 helpers available, two simulated deaths fully replayed, candidate2ticks, engine/model0, kernel closed. Wheel SHA256 `d7477c1672351699252abf4f6408d4ac63d6d065d11fd49354c3f416d563bd03`; receipt SHA256 `7c6d935c4fd3f5ebddfde0ba345abc4e464509dc13aa84aa1415c35f12f01e61`; exact build/install/witness commands in `.asterion-private/task47-p7-rollout/installed-kernel-witness/receipt.json`.
 - Required `make promotion-check` full PASS:25commands/provider_operations0/full_datasetno. Log `.asterion-private/task47-p7-rollout/promotion.stdout.log`. User later authorizes the next clean trial; this implementation verification made no live game/model calls.
+
+## Follow-up after user-stopped trial
+
+- Stopped optional-helper trial2/9: L1 17/L2 70, one death RESET, helper unused;449.523s/87actions, cleanup/replay verified.
+- L2 before42 offline conditional-risk witness and runtime measurements independently reviewed; unknown boundary remains unknown, hypothesized passable5/0+lethal15 yields dead after7ticks (~24.6ms), model/game0. Human retrospective partial model, no live predictive-capability claim.
+- Final user-directed general uncertainty policy implemented only at research entry.14 existing entry-boundary tests/Ruff PASS; fresh installed wheel source/public separation PASS. No package topology/tools/runtime change; prior full promotion belongs to9bcfcce3. A new clean live trial is user-authorized; default experienceOFF.

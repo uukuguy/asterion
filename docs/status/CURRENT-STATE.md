@@ -21,7 +21,7 @@
 
 已验证：82项定向 Python 测试 PASS（21.930秒），Ruff PASS；Astra 独立复审通过。复审发现并修复输入暂时不变被误判循环、初态已死亡被误算回测成功两处问题。Task46 第三关离线反例：基于公开像素和已有运动观察的人工局部模型，左移后3个自动上浮微步判死，复现真实死亡77；只算输入一步的模型回测不符。零新游戏/模型调用，不能据此声称 LLM 已学会完整动力学或过关改善。证据 `.asterion-private/task47-p7-rollout/l3-offline-receipt.json`。fresh wheel 的隔离安装与真实 PersistentIPython 内核见证 PASS，安装源码哈希一致，死亡1/33全部回测，模型/游戏调用0且关闭完整；证据 `.asterion-private/task47-p7-rollout/installed-kernel-witness/`。`make promotion-check` PASS：25 commands/provider_operations0/full_dataset=no，日志 `.asterion-private/task47-p7-rollout/promotion.stdout.log`。设计与计划见 INDEX。
 
-未完成：真实模型使用率、自主建模质量、通关收益及模型绑定的实时动作防护。Task46仍为用户停止的6/9。用户随后授权打包验证通过后做新一轮干净 BP35 实测；该干净实例 `p7-live-20261011163440-fd567f48be69d7f4b431481c` 已按用户“先中止”停止，source9bcfcce3/historyoff/seed0/target9；进程exit2，cleanup/replay_verified=true，无采样进程。最终2/9、87动作/1RESET、449.523秒；L1 17动作/141.075秒，L2 70动作/302.663秒（死亡前26、死亡RESET1、成功段43），死亡43/RESET44。报告输入1,555,431/输出10,956tokens，model41/tool40。助手未调用；不能认定延伸推演效果失败或成功。证据 `.asterion-private/task47-p7-rollout/live/final-summary.json`。用户明确要求延伸推演必用，下一项是 research-only 的执行前强制程序检查，当前尚未实现；不启动新游戏。
+未完成：真实模型使用率、自主建模质量、通关收益及模型绑定的实时动作防护。Task46仍为用户停止的6/9。用户随后授权打包验证通过后做新一轮干净 BP35 实测；该干净实例 `p7-live-20261011163440-fd567f48be69d7f4b431481c` 已按用户“先中止”停止，source9bcfcce3/historyoff/seed0/target9；进程exit2，cleanup/replay_verified=true，无采样进程。最终2/9、87动作/1RESET、449.523秒；L1 17动作/141.075秒，L2 70动作/302.663秒（死亡前26、死亡RESET1、成功段43），死亡43/RESET44。报告输入1,555,431/输出10,956tokens，model41/tool40。助手未调用；不能认定延伸推演效果失败或成功。证据 `.asterion-private/task47-p7-rollout/live/final-summary.json`。用户明确要求延伸推演必用，用户最终策略：P7过关时持续评估局面、机制和后果的确定性；确定性还不够高时优先实际程序推演，稳定已核对片段可复用。这一策略已写入research实验入口，不实施每步强制门禁。源码14项入口边界测试/Ruff PASS，最终fresh安装wheel提示源码匹配且public提示未加入，model/game0；证据 `.asterion-private/task47-p7-rollout/updated-guidance-receipt.json`。用户已授权按此策略重新干净实测，启动前无游戏活动。
 
 ## Task39 NOTES implementation and measured boundary
 
@@ -137,3 +137,9 @@ Task37 unchanged94dabe66 repeat L121/Q100/161.361755s vsTask36 24/Q76.5625/247.1
 Unverified behavioral guidance belongs to the experiment entry; only demonstrated useful general portions may enter the common P7 prompt (D-2026-10-11-04). Death guidance is isolated to supervised research; primary NOTES and optional WorldMap remain the same core mechanisms. Current source correction is tested at prompt/entry scope; prior Task46 uses its original injected source and is user-interrupted6/9, not proof of guide efficacy or historical migration losslessness.2MiB P7 output capacity is a ceiling, not emitted volume; Task46 actual45cell outputs total149003bytes/max12676/truncation0.
 
 Mandatory compact-display guidance has been withdrawn from the common autonomous prompt; the optional helper and output capacity remain. Its text is a non-default experiment candidate.43relatedtestsPASS plus root prompt-boundary assertion; no new paid trial.
+
+### Task47 offline death and runtime follow-up
+
+本轮L2死亡43之前的42帧能看见同列上方15危险块；离线程序仅用<=42资料建立人工局部假说，封存预测后再比较43终态。严格保留5边界未知规则时返回unknown；假定5/0可通过且15接触致命时，1输入+6自动微步判dead（约24.6ms），吻合实际GAME_OVER。不是盲测、真实动画复刻或LLM自主建模，不能将条件风险称为必死证明。独立复审通过，预测封存读取界限已修正；证据 `.asterion-private/task47-p7-rollout/l2-offline-witness-receipt.json`。
+
+局部64×64棋盘L3 helper benchmark100次：单rollout中位14.58ms/p9515.23ms，一死亡回测14.60/15.13ms，两候选比较24.46/26.15ms；持久计算内核简单16tick调用20次中位1.054ms/p951.658ms，冷首次58.114ms。两者分别计时，不叠加为复杂模型总耗时，未含LLM建模、复杂搜索或全死亡集合回测。模型/游戏0；private receipts同目录。

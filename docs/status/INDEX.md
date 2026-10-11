@@ -118,4 +118,4 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - [Prime native system-context compatibility design](../superpowers/specs/2026-10-11-prime-native-system-context-design.md) — Task43 native compatibility repair; system/checkpoint binding verified on actual guest, final packaged gate25/provider0 PASS.
 
-- Task47 连续后果推演：[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)、[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)：P7模型相对助手及本次死亡回测已实现；离线L3反例复现，不代表自主建模或实战收益；fresh安装kernel与fullpromotion25/provider0通过，用户已授权后续干净实测。
+- Task47 连续后果推演：[设计](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md)、[实施计划](../superpowers/plans/2026-10-12-p7-continuous-rollout.md)：P7模型相对助手及本次死亡回测已实现；离线L3反例复现，不代表自主建模或实战收益；fresh安装kernel与fullpromotion25/provider0通过，首次实测2/9停止、助手未用；L2离线条件风险/时长已复审；确定性不足优先推演的入口策略已修改，用户授权新干净实测。
