@@ -21,7 +21,7 @@
 
 已验证：82项定向 Python 测试 PASS（21.930秒），Ruff PASS；Astra 独立复审通过。复审发现并修复输入暂时不变被误判循环、初态已死亡被误算回测成功两处问题。Task46 第三关离线反例：基于公开像素和已有运动观察的人工局部模型，左移后3个自动上浮微步判死，复现真实死亡77；只算输入一步的模型回测不符。零新游戏/模型调用，不能据此声称 LLM 已学会完整动力学或过关改善。证据 `.asterion-private/task47-p7-rollout/l3-offline-receipt.json`。fresh wheel 的隔离安装与真实 PersistentIPython 内核见证 PASS，安装源码哈希一致，死亡1/33全部回测，模型/游戏调用0且关闭完整；证据 `.asterion-private/task47-p7-rollout/installed-kernel-witness/`。`make promotion-check` PASS：25 commands/provider_operations0/full_dataset=no，日志 `.asterion-private/task47-p7-rollout/promotion.stdout.log`。设计与计划见 INDEX。
 
-未完成：真实模型使用率、自主建模质量、通关收益及模型绑定的实时动作防护。Task46仍为用户停止的6/9。用户随后授权打包验证通过后做新一轮干净 BP35 实测；本次启动前仍无活动游戏。
+未完成：真实模型使用率、自主建模质量、通关收益及模型绑定的实时动作防护。Task46仍为用户停止的6/9。用户随后授权打包验证通过后做新一轮干净 BP35 实测；该干净实例 `p7-live-20261011163440-fd567f48be69d7f4b431481c` 已按用户“先中止”停止，source9bcfcce3/historyoff/seed0/target9；进程exit2，cleanup/replay_verified=true，无采样进程。最终2/9、87动作/1RESET、449.523秒；L1 17动作/141.075秒，L2 70动作/302.663秒（死亡前26、死亡RESET1、成功段43），死亡43/RESET44。报告输入1,555,431/输出10,956tokens，model41/tool40。助手未调用；不能认定延伸推演效果失败或成功。证据 `.asterion-private/task47-p7-rollout/live/final-summary.json`。用户明确要求延伸推演必用，下一项是 research-only 的执行前强制程序检查，当前尚未实现；不启动新游戏。
 
 ## Task39 NOTES implementation and measured boundary
 

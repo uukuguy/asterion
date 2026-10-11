@@ -4983,3 +4983,6 @@
 - 2026-10-12 0778bf31 documents existing application bridge capacity override to clarify generic default versus operator-selected output limit.
 - 2026-10-12 User authorizes clean BP35 rollout experiment after packaged verification, requiring per-level actions and resource tracking.
 - 2026-10-12 Implemented P7 continuous rollout and death replay; offline L3/fresh-wheel kernel/full promotion verified, live efficacy unmeasured.
+- 2026-10-12 9bcfcce3 adds verified model-relative rollout and current-run death backtests to address recognized-risk myopic action errors.
+- 2026-10-12 Started clean Task47 BP35 source9bcfcce3, historyoff; per-level passive resource samples retained for supervised evaluation.
+- 2026-10-12 User stopped Task47 at2/9,87actions/1RESET; helper unused, cleanup/replay verified; mandatory research pre-action rollout now required.

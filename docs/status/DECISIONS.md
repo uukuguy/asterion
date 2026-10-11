@@ -1259,3 +1259,5 @@
 - Every result remains model-relative. Unknown/cycles/limits/errors stay explicit; prediction filtering does not authorize or block real execution. No new compulsory research publication or safety certificate. Future host-bound veto remains unimplemented.
 - Guidance stays in the research experiment entry under D-2026-10-11-04. A local offline death reproduction demonstrates this helper's mechanism, not autonomous learned rules or live efficacy.
 - References: [design](../superpowers/specs/2026-10-12-p7-continuous-rollout-design.md), [plan](../superpowers/plans/2026-10-12-p7-continuous-rollout.md).
+
+- Task47 live follow-up: optional helper was never invoked before visible-risk death; user stopped the run and explicitly requires mandatory rollout. This supersedes the optional invocation policy for the research experiment. Design execution-before-each-action enforcement without trusting actor-reported receipts; unknown exploration and model-quality boundaries remain explicit. This correction is authorized but not yet implemented; no new live run.
