@@ -127,3 +127,5 @@ Task37 unchanged94dabe66 repeat L121/Q100/161.361755s vsTask36 24/Q76.5625/247.1
 ## P7 prompt experimental boundary
 
 Unverified behavioral guidance belongs to the experiment entry; only demonstrated useful general portions may enter the common P7 prompt (D-2026-10-11-04). Death guidance is isolated to supervised research; primary NOTES and optional WorldMap remain the same core mechanisms. Current source correction is tested at prompt/entry scope; prior Task46 uses its original injected source and is user-interrupted6/9, not proof of guide efficacy or historical migration losslessness.2MiB P7 output capacity is a ceiling, not emitted volume; Task46 actual45cell outputs total149003bytes/max12676/truncation0.
+
+Mandatory compact-display guidance has been withdrawn from the common autonomous prompt; the optional helper and output capacity remain. Its text is a non-default experiment candidate.43relatedtestsPASS plus root prompt-boundary assertion; no new paid trial.

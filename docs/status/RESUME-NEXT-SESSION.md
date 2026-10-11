@@ -89,3 +89,10 @@ User stopped the run because performance is unsatisfactory and prompt changes ne
 User requires experimental hints at experiment entry and promotion of their generic portion only after efficacy is verified. Death guidance removed from public three prompts and appended solely by research entry; finite/null autonomous budget wording corrected. Task46 retains its original injectedc2df0c91 prompt; source correction does not change its evidence. Existing autonomy appendix and main research principles are not expanded. DecisionD-2026-10-11-04.
 
 Output measurement:45cells, total149003bytes, largest12676bytes, output_truncated0, none above64KiB.2MiB is a cap, not filled output; it did not enlarge actual retained cell output in this trial. Prior Task44 history-assisted trial had8worker truncations from full-frame history/route repr, a distinct information regime. Do not attribute this trial's slower time to raising capacity on these measurements.
+
+
+## Compact-display hypothesis correction
+
+User identifies mandatory compact-display prompt as first regression suspect. Remove its common prompt instruction and retain it only as an unselected experiment candidate; preserve optional display API,2MiB capacity and truncation facts. No paid restart. Further inspection corrects the initial omission interpretation:5display outputs have no pixel omission markers; history pages here already carry compact changes. Cells5/7 display transition mapping limit1, only sequence printed, other7fields not displayed and no continuation. Actual frame/render/animation access remains. This demonstrates incomplete presentation, not a proven whole-run cause.
+
+Correction implemented: public autonomous prompt excludes compact-display instruction; no entry appends its reserved experiment constant.43relatedtestsPASS, root boundary assertionPASS; no paid rerun.

@@ -26,6 +26,17 @@ class TestAutonomousResearchInterface(unittest.TestCase):
                 self.assertEqual(text, 'selected application guidance' + (
                     '\n\n' + experiment if mode == 'research' else ''))
 
+    def test_public_prompt_excludes_display_experiment_and_retains_pixel_evidence_guidance(self):
+        text = prompt.build_autonomous_prompt()
+        self.assertNotIn('向模型展示时用 print(r.display', text)
+        self.assertNotIn('不要直接打印整个带棋盘的历史或路线列表', text)
+        self.assertIn('stdout 超限时 worker 已丢弃的尾部不在档案中', text)
+        self.assertIn('需要区分形状或核对坐标时，可用完整局部像素检查压缩表示', text)
+        self.assertIn('r.frame() 返回当前完整二维数值像素', text)
+        self.assertIn('r.patches(windows,sequence=None)', text)
+        self.assertIn('不要直接打印整个带棋盘的历史或路线列表',
+                      prompt.P7_DISPLAY_EXPERIMENT_PROMPT)
+
     def test_trusted_current_state_exists_before_first_note(self):
         host = P7ResearchRuntime.__new__(P7ResearchRuntime)
         host._memory_instructions = 'trusted task'
@@ -43,6 +54,7 @@ class TestAutonomousResearchInterface(unittest.TestCase):
         self.addCleanup(server.close)
         namespace = {}
         exec(server.start(), namespace)
+        self.assertTrue(callable(namespace['display']))
         self.assertEqual(namespace['frame'](), frames[1])
         self.assertEqual(namespace['current']()['observation_ref']['sequence'], 1)
         self.assertIn('text', namespace['render']())

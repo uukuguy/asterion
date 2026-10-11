@@ -4974,3 +4974,6 @@
 - 2026-10-11 Audited Task39/46 non-adaptation differences; NOTES remains primary, WorldMap reporting clarified; L6 voluntary RESET distinguished.
 - 2026-10-11 3b75d56b distinguishes P7 behavior/configuration changes to prevent misattributing trial differences to migration.
 - 2026-10-11 User stopped Task46:6/9,331actions,6RESET; cleanup/replay verified, final solution certification pending.
+- 2026-10-11 a4f31e77 isolates unverified death guidance at research entry; records stopped trial and verified prompt boundary.
+- 2026-10-11 Compact-display prompt identified as regression hypothesis; two mapping pages omit7fields; pixel deletion not demonstrated.
+- 2026-10-12 Removed mandatory compact-display guidance from common prompt;43testsPASS, preserving optional helper and capacity for isolated comparison.
