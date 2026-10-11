@@ -1,12 +1,20 @@
-# Recovered Session Checkpoint
+# Live Session Checkpoint
 
-> Updated: 2026-10-11 12:50 CST. 当前会话恢复点，不是最终交接。
+> Updated: 2026-10-11 13:56 CST. Session remains active — not a final handoff.
 
-## 恢复说明
+## 当前运行
 
-JOURNAL 比原交接文件晚 11 秒，按恢复规则补齐最后提交回执。原会话已有明确最终交接；缺失的是最后回执同步，不能据此推断未收口。`5320fba4` 保存最终交接，`ec0d2f3d` 提交其日志回执；恢复前 Git 干净。下文保留原交接事实与未完成边界，本次未启动实现、付费评估或应用 stash。
+用户授权一次BP35完整九关实测。当前源码不变；标准solve/verified，从空历史L1起跑，无旧路线/经验。内限3600秒、128callbacks、1302动作，guest上限3900秒。
 
-## 恢复摘要
+- Host PID: 72631
+- Guest unit: `asterion-p7-880965ba860043669a4f3de38bcd5d4f.service`
+- 私有启动与日志: `.asterion-private/p7-full-bp35-20261011-135551`
+- 恢复入口: `.asterion-private/bp35-current-trial.json`
+- 下一动作: 观察本次运行；终止后核验九关结果、原始receipt、重放/封存/cleanup，删除trial临时.env，提交实测报告。不能以退出0代替全通。
+
+## 既有交接事实（本次运行不改写历史证据）
+
+
 
 - 分支 `feat/prime-research-notes`；Project route: managed。唯一工作清单：[Prime自主研究接口](../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md)。Task39与Task40均已关闭；没有在执行的工作包。
 - Task40标准入口迁移全部完成，独立源码复审、完整打包检查和有限P7首关部署验收通过。最终验收提交 `edd19f62`，日志同步 `d96e323f`；本轮没有push/merge。
