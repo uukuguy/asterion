@@ -541,7 +541,7 @@ Known Python trip sites attach exact numeric records: model callbacks attempted/
 
 A soft threshold creates `action='observed'` and returns to normal execution; the sink never makes authorization decisions. Settlement over an approved bound emits stopped/recovery-required and preserves accounting/unknown-effect fences, but actual native branch usage settlement remains unimplemented in this scope. TS context-memory/archive capacity redesign is a subsequent scoped change: the archive currently uses character counts, which cannot be mislabeled as exact bytes. No statement that all framework ceilings now support this policy is allowed.
 
-- [ ] **Step 4: Add and run the fresh-wheel provider-free witness.**
+- [x] **Step 4: Add and run the fresh-wheel provider-free witness.**
 
 Root owns the already established real native-owner/RPC/persist-worker probe at `.asterion-private/task43-resource-policy/native/replay.py` with `entry.mjs`. Rebuild a fresh wheel, install it outside the source checkout, resolve all three extension resources from that wheel, and rerun this native probe. Do not add a second installed unittest/harness or import unverified native helper exports. Portable Node/Python tests in Tasks2–3 already cover frame and refusal shapes.
 
@@ -563,7 +563,7 @@ make docs-check
 
 Expected: all named portable tests PASS; root-owned fresh-wheel native witness PASS only with installed Pi available, both named cases pass, zero actual model requests. `make promotion-check` proves packaged resources and entry points, not request accounting. Do not replace these checks with an ARC level witness or start another full-model run.
 
-- [ ] **Step 5: Record evidence and commit the completed first-two-increment boundary.**
+- [x] **Step 5: Record evidence and commit the completed first-two-increment boundary.**
 
 State exactly: policy/capacity injection and safe alarm presentation implemented; named portable/fresh-wheel checks verified within their stated boundary; true request input bounds, actual native output limits, actual terminal usage settlement, retries and arbitrary-provider certification remain open. Preserve `External-limited` if native Pi unavailable; no paid run occurred. Existing context-memory/archive capacity expansion and complete shared-record trip coverage remain subsequent scoped work. Update only the current status/resume/index entries; do not invent a parallel status system.
 
@@ -592,3 +592,5 @@ Execution receipt: Task2 committedcc4e834a; Astra specification/code-quality rev
 Execution receipt: Task3 reviewed specification PASS / quality APPROVE by Astra; 259 Python PASS + 2 historical skips, 107 Node PASS + 6 historical skips. Root independently verified 25 control recovery tests and actual native small-frame refusal / same-process continuation, network0. Alarm presentation and fresh-wheel proof remain pending.
 
 Execution receipt: Task4 implementation reviewed specification PASS / quality APPROVE after fixing public alarm validation and canonical operation deduplication. Final changed-surface267PASS+2historical skips; additional47RPCtests PASS; independent11tests PASS. Fresh final wheel, promotion and broad whole-change review remain pending.
+
+Final qualification: whole-change Astra review APPROVE; installed-wheel native large/small cases PASS with zero actual model/network calls and safe alarm persistence/continuity. WheelSHA ac0a4d80995be8b2bc4e5f6c4bdf52a4be4739f4c53803658b8935506bb6275f. First promotion failed14stale control-fixture identity errors; fixture-only58856eba and14focusedtests PASS. Final make promotion-check full PASS25commands/provider0/full_datasetno. Actual-request/usage certification remains open.

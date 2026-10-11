@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-11-03 | 🟢 active | Application-configurable capacities and explicit safe alarms preserve authority and unknown-effect fences |
 | D-2026-10-09-01 | 🟢 active | Position Prime as autonomous, long-horizon, open-ended, falsifiable computational research with a verifiable research chain |
 | D-2026-10-07-04 | 🟢 active | Bounded reusable research implemented; cold target6 failed5/213, actual ARC process audit informs layered candidates |
 | D-2026-10-07-03 | 🟢 active | Distinguish observed model autonomy from outer Codex research and code assistance |
@@ -1230,3 +1231,11 @@
 - Qualification requires same entry, target, configuration, initial state and evidence policy; historical autonomy and later solve/research presets are not equivalent tests. Missing historical request bytes and untested long-horizon model behavior must remain explicit.
 - Follow-up actual native audit found Pi1 system messages/merged compaction snapshots unsupported by both old/current extension artifacts, plus P7 sections/tool metadata omitted in byte counts/archive/signatures. This is a shared current native compatibility gap; historical SDK identity is unknown, so it is not labeled Task40-introduced. Generic14d35611/P7b2d8480d preserve these fields with coordinated closed internal-v1 projection/checkpoint binding, use the native reducer, and retain persist-before-ACK/unknown safeguards. Actual fresh-wheel guest native manual ACK/reopen/idempotence/resume/worker continuity and P7 first-prompt automatic v2/v3 system-metadata preservation pass without real models; final full promotion25/provider0 PASS. These bounded contracts do not certify historical SDK equivalence or model-quality recovery.
 - Reference: [migration qualification](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md), [bridge lifetime design](../superpowers/specs/2026-10-11-prime-bridge-loop-lifetime-design.md), [native system design](../superpowers/specs/2026-10-11-prime-native-system-context-design.md).
+
+
+## D-2026-10-11-03 — Application-configurable capacities and explicit safe runtime alarms
+
+- Authority: the user requires sufficiently generous framework defaults, application-level ceiling configuration and clear runtime over-limit alarms; approved the written resource-policy design.
+- Decision: inject immutable capacity policy through the standard Prime application entry, infer its configuration origin, bind it to runtime/recovery identity, and report the actual binding limit through validated numeric diagnostics. Capacity is not execution authority; command, session and ledger-backed parent grants remain hard boundaries. Supervised monitoring does not authorize unknown effects or remove recovery fencing.
+- Initial scope: manual-compaction admission262144tokens, full witness16MiB/material64KiB; P1 compaction reservation48000tokens/125000micros under unchanged64000tokens/500000micros total. Closed public alarms retain operation correlation, safe projection and independent delivery-failure handling. No new public protocol or provider configuration is introduced.
+- Evidence: implementation through9964fb7f, independent task and integrated review APPROVE, installed-wheel large/small native evidence with model/network0. See [formal audit](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md#configurable-resource-policy-and-safe-runtime-alarms) for final packaged qualification and uncovered boundaries. Actual request/tokenizer/output/settlement certification and full context-memory/archive ceiling expansion remain separate.

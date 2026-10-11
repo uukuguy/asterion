@@ -1,6 +1,6 @@
 # Prime application resource ceilings and runtime alarms
 
-Date: 2026-10-11. Status: user-approved and independently reviewed; first two increments in implementation. Actual request certification remains separately unverified.
+Date: 2026-10-11. Status: user-approved and independently reviewed; first two increments implemented and verified within the named boundary. Actual request certification remains separately unverified.
 
 ## User requirement and scope
 
@@ -69,3 +69,5 @@ Rebuild all shipped Prime extension resources, run TypeScript extension tests, r
 ## Design review receipt
 
 Astra independent review identified the existing unsigned 32-bit frame header as a structural boundary; the proposal now explicitly preserves it and runtime buffer limits. The old1MiB resource choice is not that structural boundary. Remaining design approved within the stated first-two-increment scope; actual request certification remains conditional on separately verified provider bounds. Root native wrapper feasibility rerun passed with zero real network attempts and synthetic usage only.
+
+Implementation receipt:739f2caf/cc4e834a/cf91607d/9964fb7f, fixture-only58856eba; independent review APPROVE, final promotion25/provider0 and installed-wheel native capacity/refusal proof PASS. Actual-request bound and usage settlement certification remains separate.

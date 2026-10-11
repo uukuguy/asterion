@@ -4951,3 +4951,6 @@
 - 2026-10-11 b73baf17 commits approved resource implementation plan; distinguishes command, session and parent authority alarms before approval.
 - 2026-10-11 cc4e834a configures witness capacities and identity binding; independent review and native1.35MiB proposal/resume pass, network0.
 - 2026-10-11 cf91607d preserves command-bound compaction grants and known refusal continuity; prevents double deduction without expanding prompt authority.
+- 2026-10-11 9964fb7f adds validated operator resource alarms and canonical operation correlation; prevents duplicate publication and unsafe exception projection.
+- 2026-10-11 58856eba updates control fixture policy identity; all14control/recovery errors pass without relaxing production identity checks.
+- 2026-10-11 Resource policy final promotion25/provider0 and installed-wheel native capacity/refusal/continuity PASS; actual request certification remains open.

@@ -412,3 +412,5 @@ Follow-up user feedback: when a previously identified defect resurfaces, reconci
 The user wants evaluation against baseline and the115 per-level cap, rather than rewarding ever-shorter successful routes. They want chronological context-token growth watched and the task's observable macro research chain recorded. Death RESET should be assessed for clear avoidability from prior evidence, not treated as failure merely because it occurred; human exploration also includes deaths. Technical criteria and evidence live in D-2026-10-09-02 and the canonical BP35 review.
 
 - **2026-10-11 user feedback:** Migration losslessness is the primary goal. Distinguish generic framework defects from P7 adaptation errors, investigate hidden impact, and repair demonstrated regressions; game completion alone is not acceptance.
+
+- **2026-10-11 user feedback:** Resource-limit work took too long. Keep the implementation scope and verification cost proportional; freeze reviewed code before the final packaged gate. Technical policy/evidence are in D-2026-10-11-03 and the migration audit.
