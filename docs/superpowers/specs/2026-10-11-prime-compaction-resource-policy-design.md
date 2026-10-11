@@ -1,6 +1,6 @@
 # Prime application resource ceilings and runtime alarms
 
-Date: 2026-10-11. Status: independently reviewed design proposal; implementation not started.
+Date: 2026-10-11. Status: user-approved and independently reviewed; first two increments in implementation. Actual request certification remains separately unverified.
 
 ## User requirement and scope
 
@@ -39,7 +39,7 @@ The framework default does not rewrite native Pi `reserveTokens`, model output l
 Add immutable validated `LimitDiagnostic` through `services/diagnostics.py`, attached as an optional trailing field on existing `FailureDiagnostic`. Use fixed codes/enums and numeric values only:
 
 - `limit_code`, `phase` (admission/execution/settlement), `action` (observed/rejected/stopped/recovery-required).
-- `observed` (integer or unavailable), `limit`, `unit` (tokens/bytes/callbacks/milliseconds/cost-micros).
+- `observed` (integer or unavailable), `limit` (nonnegative effective limit; remaining authority can be zero), `unit` (tokens/bytes/callbacks/milliseconds/cost-micros).
 - `measurement` (exact/conservative-bound/estimate/unavailable), `config_source` (framework-default/application/operator/authority).
 
 No prompts, output, raw provider errors, credentials or private paths enter this record. Preserve existing subject digests and correlation IDs. Report the binding limit: a 16000-token command must not be misreported as a 262144-token framework failure. Operator maps stable codes to visible configuration names and emits a concise alarm containing resource, measured/requested amount, effective limit and outcome. Persist the safe alarm alongside existing run evidence. No new notification service is needed.
