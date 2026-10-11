@@ -13,6 +13,43 @@ from tests.test_prime_p7_guard_probe import _NoEffectClickEngine
 
 
 class TestP7AutonomousSolver(P7SolverFixture):
+    def test_auto_rollout_uses_fresh_frame_for_each_primitive_and_stops_fatal_suffix(self):
+        seen = []
+        def evaluate(observation, reference, action):
+            seen.append((reference['sequence'], observation['frame'], action))
+            return {'status': 'evaluated', 'risk': 'predicted_death' if reference['sequence'] else 'no_identified_fatal',
+                    'reason': 'model-relative', 'ticks': 1}
+        self.solver.auto_evaluate = evaluate
+        action = {'action': {'name': 'ACTION1', 'data': {}}}
+        result = self.solver.execute_plan(self.minimal(steps=[action, action]))
+        self.assertEqual([x[0] for x in seen], [0, 1])
+        self.assertNotEqual(seen[0][1], seen[1][1])
+        self.assertEqual((result['applied_count'], result['stop_reason']), (1, 'model-predicted-death'))
+        self.assertEqual(len(result['unexecuted_steps']), 1)
+        self.assertEqual(len(result['auto_rollouts']), 2)
+        self.assertEqual(self.engine.calls, ['ACTION1'])
+
+    def test_auto_unassessed_allows_action_but_conditional_fatal_does_not(self):
+        for risk, applied in [('unassessed', 1), ('conditional_fatal', 0)]:
+            with self.subTest(risk=risk):
+                self.solver.auto_evaluate = lambda *args: {'status': 'not_evaluated', 'risk': risk,
+                                                        'reason': 'model-relative', 'ticks': 0}
+                plan = self.minimal(risk)
+                result = self.solver.execute_plan(plan)
+                self.assertEqual(result['applied_count'], applied)
+                self.assertEqual(result['auto_rollouts'][0]['risk'], risk)
+                self.assertEqual(self.solver.execute_plan(plan), result)
+
+    def test_auto_evaluation_rechecks_kernel_generation_before_dispatch(self):
+        def evaluate(*args):
+            self.kernel.generation = 2
+            return {'status': 'evaluated', 'risk': 'no_identified_fatal', 'reason': 'model-relative', 'ticks': 1}
+        self.solver.auto_evaluate = evaluate
+        result = self.solver.execute_plan(self.minimal())
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-evaluation-boundary-changed'))
+        self.assertEqual(self.engine.calls, [])
+        self.assertEqual(len(result['unexecuted_steps']), 1)
+
     def setUp(self):
         super().setUp()
         self.broker = ArcBroker(engine=self.engine, action_profile='autonomous')

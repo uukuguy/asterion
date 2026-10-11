@@ -17,11 +17,17 @@ P7_DISPLAY_EXPERIMENT_PROMPT = """批量历史和路线保留完整数据供程�
 # Experimental helpers remain model-relative and confer no execution authority.
 P7_ROLLOUT_EXPERIMENT_PROMPT = """本次监督研究提供实验性连续后果推演助手。r.rollout(state,actions,transition=step,settled=rest,terminal=end,collision=hit,max_ticks_per_action=128) 只运行你写的模型：step(state,action_or_none) 返回新的有限 JSON 状态；首个微步传一次真实输入的动作描述，后续自动微步只传 None，直到静止、碰撞、终局或未知。rest(state) 返回 bool 或 None；end(state) 返回 None、'dead'、'goal' 或 'unknown'；可选 hit(state) 返回 bool 或 None。助手不访问隐藏游戏引擎，不代替真实动作，不凭动作数量假定连续后果已结束。所有动力学、危险碰撞、终局和未知条件由你的模型显式表达；循环、微步上限及不可判定结果保持 unknown。
 
-P7 在游戏过关时，应持续评估当前局面、机制及行动后果的确定性；确定性还不够高时，优先通过最小局部模型进行程序推演，展开可能后果，明确假设和未知，并结合实际反馈修正判断。已核对的模型和稳定动作片段可以复用；新观察与预期不符时，重新评估是否需要推演。
+P7 在游戏过关时，推演首先排查致命后果，再比较通路。持续评估当前局面、机制及行动后果的确定性；对拟执行动作的安全性尚无充分依据时，先主动进行程序推演，展开连续后果及已识别的致命分支。触发条件未确认不等于没有危险；不要把存在致命分支的真实操作当作普通辨识探针。已核对的模型和稳定动作片段可以复用；新观察与预期不符时修正模型。
+
+用 r.register_rollout_model(from_frame=from_frame,transition=step,settled=rest,terminal=end,risk_check=check_risk,model_id='local') 登记本关的局部模型；模型修订后重新登记。from_frame(frame,observation_ref) 从完整真实画面构造 JSON 状态。check_risk(before,after,action_or_none) 每个微步返回风险列表；每项为 {id:'条件标识',type:'predicted_death'或'conditional_fatal',condition:'致命触发条件',evidence:'观察依据或尚待核对的假设'}。已识别的条件性致命分支必须进入这个检查函数，不能只留在语言笔记中，也不能被 settled 判定隐藏。没有登记的规则不会由助手自动补全。
+
+主动检查实际候选用 r.evaluate_action(r.frame(),r.current()['observation_ref'],{'name':'ACTION3','data':{}})，动作仅为格式示例，不预设其效果。此调用复用已登记模型，并把真实观察、候选动作和模型版本绑定到主动推演记录。其他 rollout/evaluate_candidates 调用也会记录；未绑定当前观察的计算不算已检查当前实际动作。宿主在每个真实动作前还会自动推演，但自动调用不计为你的主动调用。
+
+推演返回独立 risk：predicted_death 是模型预测死亡；conditional_fatal 是已识别致命分支且触发前提尚未排除；unassessed 是评估不完整；no_identified_fatal 仅表示本次检查未发现致命风险，不是安全保证。findings 保留风险条件和依据，coverage 说明未覆盖部分。回测未通过会降低模型可信度，但不删除死亡警告。真实行动前的自动结果若为 predicted_death 或 conditional_fatal，宿主停止该步及后缀，返回风险证据供你重新计算、补充观察或换路；一般模型不完整明确提示但不阻断探索。RESET、换关或 kernel 重建后旧登记失效，应按新状态重新登记。
 
 用 r.death_cases() 读取本次运行实际发生的全部 GAME_OVER 动作及前后观察引用，不载入过去运行。新建或修改有关模型后，用 r.replay_deaths(initial_state=from_frame,transition=step,settled=rest,terminal=end,collision=hit) 回测本次全部死亡反例；from_frame(frame,before_ref) 将每例真实动作前画面转成你的 JSON 状态。返回每例 predicted_outcome、expected_outcome 与真实引用。例子不可读会明确报错，不能当作已核对。比较模型是否重现死亡及仍缺失的机制，不只回测幸存动作；回测吻合不是安全证书。
 
-候选比较示例：backtest=r.replay_deaths(initial_state=from_frame,transition=step,settled=rest,terminal=end)；state=from_frame(r.frame(),r.current()['observation_ref'])；report=r.evaluate_candidates(state,[[{'name':'ACTION3','data':{}}],[{'name':'ACTION4','data':{}}]],transition=step,settled=rest,terminal=end,backtest=backtest)。predicted_dead 只筛出当前模型预测死亡的候选，不证明环境必死；unknown 与 remaining 也不证明环境安全。未知不等于安全，也不要求消除全部未知才行动：结合真实观察、反例、可恢复性与代价自主选择进一步计算、绕行或有价值探针。真实行动仍只经 p7_execute_plan；不用新增发布、笔记或认证流程，助手结果不授予执行权限。"""
+候选比较示例：backtest=r.replay_deaths(initial_state=from_frame,transition=step,settled=rest,terminal=end,risk_check=check_risk)；state=from_frame(r.frame(),r.current()['observation_ref'])；report=r.evaluate_candidates(state,[[{'name':'ACTION3','data':{}}],[{'name':'ACTION4','data':{}}]],transition=step,settled=rest,terminal=end,risk_check=check_risk,backtest=backtest)。predicted_dead 只筛出当前模型预测死亡的候选，不证明环境必死；unknown 与 remaining 也不证明环境安全。未知不等于安全，也不要求消除全部未知才行动；先区分已识别的致命风险和其他机制未知，再比较计算、观察、绕行与可恢复探针。真实行动仍只经 p7_execute_plan；不用新增发布、笔记或认证流程，助手结果不授予执行权限。"""
 
 
 P7_NOTES_SOLVE_PROMPT = """你是 P7 主解题者。依据真实观察自主研究未知游戏，以通关和动作效率为目标。自行选择假说、笔记、实验和计算；部分模型与未知机制都可以支持下一项有用探针。应用给出的 observation、observation_ref、available_actions 和 budget 是当前现实，历史资料与程序预测不能授权动作。

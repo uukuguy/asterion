@@ -23,6 +23,7 @@ from .research_bridge import ResearchReadServer
 from .research_chain import P7ResearchChain
 from .solver import Solver
 from .solver_control import SolverControl
+from .rollout_runtime import RolloutRuntime
 from asterion.agents.prime.continuation import (
     AUTONOMOUS_RESEARCH_GUIDANCE, RESOURCE_AWARE_RESEARCH_GUIDANCE,
 )
@@ -116,7 +117,7 @@ class P7ResearchRuntime:
                  deadline_seconds: float | None, event_sink, workspace_owner=None, python=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None,
-                 learner_profile='legacy', task_deadline=None):
+                 learner_profile='legacy', task_deadline=None, auto_rollout=False):
         self._workspace_owner = workspace_owner or WorkspaceOwner()
         self._owns_workspace_owner = workspace_owner is None
         self._python = python
@@ -124,6 +125,8 @@ class P7ResearchRuntime:
         self.cell_count = 0
         self._lost = False  # The application can rebuild a computation kernel.
         self._lock = threading.RLock()
+        self._operation_lock = asyncio.Lock()
+        self._auto_rollout_enabled = bool(auto_rollout)
         self._broker = _EvidenceBroker(broker, trace_client)
         self._sink = event_sink
         self._last_control = None
@@ -164,6 +167,9 @@ class P7ResearchRuntime:
                 diagnostics=getattr(trace_client, 'processing_diagnostics', None),
                 learner_profile=learner_profile,
             )
+            self._rollouts = RolloutRuntime(self, run_root) if auto_rollout else None
+            if self._rollouts is not None:
+                self.solver.auto_evaluate = self._rollouts.evaluate
             self._research_chain = None
             self._research_chain_faults = 0
             try:
@@ -321,9 +327,15 @@ class P7ResearchRuntime:
                 if ref is not None:
                     data[name] = previous.read_export(ref)
         self.kernel = await self._workspace_owner.restore_workspace(previous, sources, data, signal)
+        if self._rollouts is not None:
+            await self._rollouts.invalidate(signal)
         self.solver.kernel_recovered()
 
     async def execute(self, call_id, code, signal):
+        async with self._operation_lock:
+            return await self._execute_cell(call_id, code, signal)
+
+    async def _execute_cell(self, call_id, code, signal):
         if not await self.admit_round(0, signal):
             return PrimeToolResult(call_id, "error", ({"type": "text", "text": "Research stopped."},))
         combined = _ResearchSignal(self, signal)
@@ -352,6 +364,14 @@ class P7ResearchRuntime:
                     except (ValueError, KeyError):
                         pass
             self._cell_archive.finished(call_id, generation, result.status, export_ids)
+            if self._rollouts is not None and not self.kernel.status()['lost']:
+                try:
+                    history = self.kernel.cell_history(start=history_start, limit=1)
+                    await self._rollouts.collect_actor_calls(combined, history['items'][0]['cell_id'])
+                except Exception:
+                    # Telemetry failure is explicit and supplies no proactive
+                    # coverage; it cannot change a recorded computation outcome.
+                    self._rollouts.telemetry_failed()
             # A lost read-only computation has no uncertain environment action.
             # Surface the loss as a recoverable tool error, with kernel metadata.
             if result.status == "uncertain":
@@ -443,6 +463,9 @@ class P7ResearchRuntime:
         if self._closed or signal.cancelled:
             return {'status': 'rejected', 'reason': 'stopped'}
         projected = project_actor_result(method, params, result)
+        rollouts = getattr(self, '_rollouts', None)
+        if rollouts is not None:
+            projected['rollout_accounting'] = rollouts.snapshot()
         request = params.get('request', params) if isinstance(params, Mapping) else {}
         commit = method == 'workspace' and request.get('op') == 'notes' and result.get('status') == 'noted'
         try:
@@ -492,6 +515,30 @@ class P7ResearchRuntime:
             # group and removes them from model text. No Pi cursor is invented.
             projected['context_interaction'] = self._context_interaction(result, current)
         return projected
+
+    async def async_method_call(self, method, params, signal):
+        """P7 actor actions run off-loop, so their kernel evaluations can await."""
+        async with self._operation_lock:
+            if self._rollouts is not None:
+                self._rollouts.loop = asyncio.get_running_loop()
+                self._rollouts.signal = signal
+            task = asyncio.create_task(asyncio.to_thread(self.method_call, method, params, signal))
+            try:
+                result = await asyncio.shield(task)
+                if self._rollouts is not None and result.get('stop_reason') in {'reset-applied', 'level-advanced'}:
+                    try:
+                        await self._rollouts.invalidate(_ResearchSignal(self, signal))
+                    except Exception:
+                        self._rollouts.telemetry_failed()
+                return result
+            except asyncio.CancelledError:
+                self.request_stop()
+                await asyncio.shield(task)
+                raise
+            finally:
+                if self._rollouts is not None:
+                    self._rollouts.loop = None
+                    self._rollouts.signal = None
 
     @staticmethod
     def _context_interaction(result, context):

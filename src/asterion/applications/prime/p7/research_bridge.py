@@ -11,6 +11,7 @@ import threading
 
 from .dynamic_evidence import EvidenceProcessingError
 from .processing_diagnostics import public_diagnostic
+from .rollout_runtime import KERNEL_SOURCE
 
 
 class ResearchReadServer:
@@ -391,7 +392,7 @@ def death_cases():
     return cases
 
 def replay_deaths(*, initial_state, transition, settled, terminal, collision=None,
-                  max_ticks_per_action=128):
+                  max_ticks_per_action=128, risk_check=None):
     """Backtest the supplied model on every current-run observed death; no certificate.
 
     initial_state(frame, before_observation_ref) constructs your JSON model state.
@@ -406,7 +407,8 @@ def replay_deaths(*, initial_state, transition, settled, terminal, collision=Non
               "actions": [item["action"]], "expected_outcome": item["expected_outcome"]}
              for item in observed]
     result = replay_cases(cases, transition=transition, settled=settled, terminal=terminal,
-                          collision=collision, max_ticks_per_action=max_ticks_per_action)
+                          collision=collision, max_ticks_per_action=max_ticks_per_action,
+                          risk_check=risk_check)
     backtests = result.get("backtests")
     if not isinstance(backtests, list) or len(backtests) != len(observed):
         raise ValueError("death backtest coverage unavailable")
@@ -417,7 +419,7 @@ def replay_deaths(*, initial_state, transition, settled, terminal, collision=Non
                         after_observation_ref=evidence["after_observation_ref"])
     return {**result, "observed_cases": observed,
             "execution_authority": "none", "claims": "model-relative"}
-'''
+''' + KERNEL_SOURCE
 
     def close(self) -> None:
         self._closed = True

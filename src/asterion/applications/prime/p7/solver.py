@@ -52,6 +52,8 @@ class Solver:
         self._experience = experience
         self._plans = {}
         self._lock = RLock()
+        self._plan_execution_lock = RLock()
+        self.auto_evaluate = None
         self._needs_calibration = self._workspace.loaded and learner_profile != 'autonomous'
         self._needs_revision = learner_profile != 'autonomous'
         self._revision_reason = "initial" if self._needs_revision else None
@@ -888,6 +890,12 @@ class Solver:
         }
 
     def execute_plan(self, plan: Mapping) -> dict:
+        # A computation may need read/observer access to _lock. The separate
+        # execution lock retains one plan owner while that lock is released.
+        with self._plan_execution_lock:
+            return self._execute_plan(plan)
+
+    def _execute_plan(self, plan: Mapping) -> dict:
         with self._lock:
             try:
                 value = copy_json(plan)
@@ -993,6 +1001,37 @@ class Solver:
                     })
                     if differences:
                         stop_reason = "precondition-mismatch"
+                        unexecuted_start = index
+                        break
+                if callable(self.auto_evaluate):
+                    generation = self.kernel.generation
+                    self._lock.release()
+                    try:
+                        assessment = self.auto_evaluate(copy_json(observation), copy_json(reference), copy_json(native['action']))
+                        assessment = copy_json(assessment)
+                        if type(assessment) is not dict or assessment.get('risk') not in {
+                            'predicted_death', 'conditional_fatal', 'unassessed', 'no_identified_fatal'}:
+                            raise ValueError('assessment unavailable')
+                    except Exception:
+                        assessment = {'status': 'not_evaluated', 'risk': 'unassessed',
+                                      'reason': 'model_evaluation_failed', 'ticks': 0}
+                    finally:
+                        self._lock.acquire()
+                    assessment.update(step_index=index, observation_ref=copy_json(reference),
+                                      action=copy_json(native['action']), origin='host_auto')
+                    result.setdefault('auto_rollouts', []).append(assessment)
+                    current_observation, current_reference = self._observation()
+                    self.control.poll(current_reference['sequence'], current_reference['observation_sha256'])
+                    if assessment.get('hard_stop') == 'cancelled':
+                        stop_reason = 'cancelled'
+                    elif not self.control.action_allowed():
+                        stop_reason = self.control.snapshot().get('state', 'stopped')
+                    elif current_reference != reference or self.kernel.generation != generation:
+                        stop_reason = 'model-evaluation-boundary-changed'
+                        observation, reference = current_observation, current_reference
+                    elif assessment['risk'] in {'predicted_death', 'conditional_fatal'}:
+                        stop_reason = 'model-predicted-death' if assessment['risk'] == 'predicted_death' else 'model-conditional-fatal'
+                    if stop_reason != 'matched':
                         unexecuted_start = index
                         break
                 if not self.control.enter("action"):

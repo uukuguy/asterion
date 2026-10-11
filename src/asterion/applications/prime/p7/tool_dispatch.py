@@ -43,6 +43,13 @@ class P7ToolDispatch:
                 raise ValueError('P7 method parameters are unavailable')
             params = {}
         self._signal = signal
+        from .research_runtime import P7ResearchRuntime
+        if isinstance(self._host, P7ResearchRuntime):
+            self._method_calls[method] = min(5000, self._method_calls.get(method, 0) + 1)
+            result = await self._host.async_method_call(method, params, signal)
+            return {'output': json.dumps(result, allow_nan=False, ensure_ascii=False, separators=(',', ':')),
+                    'protocol': _BRIDGE_PROTOCOL, 'request_id': request_id,
+                    'status': 'ok', 'type': 'method_result'}
         return self._dispatch_method_call(request_id, method, params)
 
     def request_stop(self):

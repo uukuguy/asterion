@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-12. Task47 continuous rollout implemented; packaged verification PASS. Task46/Task47 live runs stopped; uncertainty-guided rollout experiment implemented; Task48 stopped; exact predeath LLM model replay and action-safety diagnosis complete. Live-session checkpoint, not a final handoff.
+Updated: 2026-10-12. Task48 stopped; exact predeath model diagnosis complete. Task49 per-action automatic rollout implemented; focused and installed-wheel checks PASS; final promotion running. Live-session checkpoint, not a final handoff.
 
 ## Objective
 
@@ -19,7 +19,7 @@ User approved continuous-consequence rollout beyond prompt guidance. Application
 
 当前判断：确定性指导与未知探针许可的优先级不明确，风险语言未绑定动作选择；提示因果未被隔离实验证明。历史归档：Task47助手未用和人工局部模型结论，不得替代Task48实际使用情况与原模型结果。
 
-未完成边界/下一动作：用户最新原则“安全筛选优先于找路”尚未实现验证；先明确安全确定性外显依据、连续运动停止条件与未知探针边界，分别解决调用覆盖和模型误判，再形成最小方案。没有新增每步门禁，没有自动重启或新实测授权。
+Task49 已实现上述机制，Astra final APPROVE；核心20tests、root123定向回归 PASS，最后恢复登记清理先red两subcases、相关28tests PASS。每个真实 primitive 前自动检查，并单独记录实际 LLM 主动调用；预测死亡或已识别条件性致命风险停当前动作和后缀，一般模型不完整只提示。仅 supervised research 启用。RESET/换关/kernel恢复清登记；主动精确候选覆盖必须匹配真实 frame/ref、动作和模型版本，其他实际调用保留但不冒称覆盖。fresh wheel SHA256c6057d5ee52d7f2de0d84c1bdcf81f54bd24a72a9312c6ab2699c7974c18d6ed，7源码哈希与finalcheckout一致，实际kernel见证PASS：actor3/host_auto6（3模型成功评估）、synthetic4/真实ARC和SDK/provider/model0，kernel/readserver/child关闭完整。private `.asterion-private/task49-p7-auto-rollout/installed-kernel-witness/receipt.json`，14cells/0.724s/warm自动3.458–4.006ms（简单合成局部模型，非实战延迟上限）。当前 full promotion 仍在执行，日志 `.asterion-private/task49-p7-auto-rollout/promotion-rerun.stdout.log`；通过后同步验证状态、提交本轮改动。模型质量、真实游戏收益和LLM在安全不充分时必然主动调用均未验证，没有新实跑授权。
 
 ## Verified facts
 

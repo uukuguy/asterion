@@ -3676,6 +3676,7 @@ def build_p7_operator_resources(
                 experience=experience,
                 limits=None if output_bytes is None else KernelLimits(max_output_bytes=output_bytes),
                 learner_profile="autonomous",
+                auto_rollout=selection.supervised_research,
             )
             if selection.supervised_research:
                 from .research_monitor import ResearchMonitor

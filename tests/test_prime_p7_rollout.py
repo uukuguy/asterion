@@ -2,6 +2,7 @@
 
 import copy
 import importlib
+import inspect
 import unittest
 
 try:
@@ -241,6 +242,141 @@ class TestPrimeP7Rollout(unittest.TestCase):
         self.assertEqual(degraded["remaining"], [0, 1, 2])
         self.assertEqual(degraded["evaluations"][0]["outcome"], "unknown")
         self.assertEqual(degraded["evaluations"][0]["rollout"]["outcome"], "dead")
+
+
+class TestPrimeP7RolloutRisk(unittest.TestCase):
+    def setUp(self):
+        self.assertIn("risk_check", inspect.signature(rollout_module.rollout).parameters)
+
+    @staticmethod
+    def finding():
+        return {
+            "id": "pursuer-contact", "type": "conditional_fatal",
+            "condition": {"when": "pursuer reaches resting actor"},
+            "evidence": {"source": "declared synthetic mechanics"},
+        }
+
+    @staticmethod
+    def model():
+        return {
+            "transition": lambda state, action: {"tick": state["tick"] + 1},
+            "terminal": lambda state: None,
+            "settled": lambda state: True,
+        }
+
+    def test_conditional_fatal_is_checked_before_accepting_settlement(self):
+        order = []
+        kwargs = self.model()
+        kwargs["settled"] = lambda state: order.append("settled") or True
+
+        def risk_check(before, after, action):
+            order.append("risk")
+            return [self.finding()]
+
+        result = rollout_module.rollout(
+            {"tick": 0}, [ACTION], risk_check=risk_check, **kwargs,
+        )
+        self.assertEqual(order, ["risk", "settled"])
+        self.assertEqual(result["outcome"], "settled")
+        self.assertEqual(result["risk"]["status"], "conditional_fatal")
+        self.assertEqual(result["risk"]["findings"], [self.finding()])
+
+    def test_default_exception_and_invalid_checker_are_unassessed(self):
+        def broken(before, after, action):
+            raise ValueError("private checker payload")
+
+        for checker in (None, broken, lambda before, after, action: [{"safe": True}]):
+            with self.subTest(checker=checker):
+                result = rollout_module.rollout(
+                    {"tick": 0}, [ACTION], risk_check=checker, **self.model(),
+                )
+                risk = result["risk"]
+                self.assertEqual(result["outcome"], "settled")
+                self.assertEqual(risk["status"], "unassessed")
+                self.assertEqual(risk["coverage"]["unassessed_ticks"], 1)
+                self.assertNotIn("private checker payload", str(risk))
+
+    def test_empty_findings_are_scoped_coverage_and_unknown_remains_partial(self):
+        kwargs = self.model()
+        kwargs["risk_check"] = lambda before, after, action: []
+        complete = rollout_module.rollout({"tick": 0}, [ACTION], **kwargs)
+        self.assertEqual(complete["risk"]["status"], "no_identified_fatal")
+        self.assertEqual(complete["risk"]["coverage"]["evaluated_ticks"], 1)
+        self.assertFalse(complete["risk"]["coverage"]["partial"])
+        self.assertNotIn("safe", complete["risk"])
+        kwargs["settled"] = lambda state: False
+        partial = rollout_module.rollout(
+            {"tick": 0}, [ACTION], max_ticks_per_action=1, **kwargs,
+        )
+        self.assertEqual(partial["risk"]["status"], "unassessed")
+        self.assertTrue(partial["risk"]["coverage"]["partial"])
+
+    def test_raw_death_warning_survives_unchecked_backtest(self):
+        kwargs = self.model()
+        kwargs["terminal"] = lambda state: "dead" if state["tick"] else None
+        result = rollout_module.evaluate_candidates(
+            {"tick": 0}, [[ACTION]], backtest={"status": "counterexample"},
+            risk_check=lambda before, after, action: [], **kwargs,
+        )
+        evaluation = result["evaluations"][0]
+        self.assertEqual(evaluation["outcome"], "unknown")
+        self.assertEqual(evaluation["risk"]["status"], "predicted_death")
+        self.assertEqual(evaluation["risk"]["findings"][0]["type"], "predicted_death")
+        self.assertEqual(evaluation["model_confidence"]["backtest_status"], "counterexample")
+        self.assertEqual(result["risk"]["status"], "predicted_death")
+        self.assertEqual(result["remaining"], [0])
+
+    def test_aggregate_findings_keep_candidate_provenance(self):
+        finding = self.finding()
+        result = rollout_module.evaluate_candidates(
+            {"tick": 0}, [[ACTION], [ACTION]],
+            risk_check=lambda before, after, action: [finding], **self.model(),
+        )
+        self.assertEqual([item["evidence"] for item in result["risk"]["findings"]], [
+            {"candidate_index": 0, "evidence": finding["evidence"]},
+            {"candidate_index": 1, "evidence": finding["evidence"]},
+        ])
+        self.assertEqual(result["evaluations"][0]["risk"]["findings"], [finding])
+
+    def test_findings_survive_later_checker_failure(self):
+        kwargs = self.model()
+        kwargs["settled"] = lambda state: state["tick"] == 2
+
+        def checker(before, after, action):
+            if action is None:
+                raise RuntimeError("model detail")
+            return [self.finding()]
+
+        result = rollout_module.rollout(
+            {"tick": 0}, [ACTION], risk_check=checker, **kwargs,
+        )
+        self.assertEqual(result["risk"]["status"], "conditional_fatal")
+        self.assertEqual(result["risk"]["findings"], [self.finding()])
+        self.assertEqual(result["risk"]["coverage"]["evaluated_ticks"], 1)
+        self.assertEqual(result["risk"]["coverage"]["unassessed_ticks"], 1)
+        self.assertEqual(result["risk"]["coverage"]["errors"], [
+            {"tick": 2, "reason": "risk_check_exception:RuntimeError"},
+        ])
+
+    def test_checker_inputs_and_returned_findings_are_copied(self):
+        initial = {"tick": 0}
+        actions = copy.deepcopy([ACTION])
+        finding = self.finding()
+
+        def checker(before, after, action):
+            before.clear()
+            after.clear()
+            action["data"]["mutated"] = True
+            return [finding]
+
+        result = rollout_module.rollout(
+            initial, actions, risk_check=checker, **self.model(),
+        )
+        finding["condition"].clear()
+        self.assertEqual(initial, {"tick": 0})
+        self.assertEqual(actions, [ACTION])
+        self.assertEqual(result["states"], [{"tick": 0}, {"tick": 1}])
+        self.assertEqual(result["risk"]["findings"], [self.finding()])
 
 
 if __name__ == "__main__":
