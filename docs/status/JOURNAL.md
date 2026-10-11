@@ -4945,3 +4945,4 @@
 - 2026-10-11 d6a0f38f records zero-network manual-summary cap/request mismatch and reservation-only accounting; policy repair remains open.
 - 2026-10-11 User requires application-configurable generous resource ceilings and explicit runtime alarms; independent design review preserves uint32 framing.
 - 2026-10-11 Root native provider-wrapper feasibility PASS: actual compaction interception, no-send rejection, synthetic usage settlement; real network0.
+- 2026-10-11 35c35520 records configurable Prime resource ceilings and explicit runtime alarm design; preserves authority and request-certification limitations.
