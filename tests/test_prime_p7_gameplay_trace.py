@@ -1,6 +1,7 @@
 """Scoreless gameplay trace seals and accessor identity."""
 
 from pathlib import Path
+import json
 from tempfile import TemporaryDirectory
 import unittest
 
@@ -58,6 +59,20 @@ class _ResetRequiredEngine:
 
 
 class TestPrimeP7GameplayTrace(unittest.TestCase):
+    def test_usage_trace_preserves_cache_and_estimated_cost(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            trace = PrimeGameplayTrace(ArcBroker(engine=_WinningEngine(),
+                                      game=ArcGameContract('zz99-abcdef12', win_levels=1)),
+                                      PrimeTraceRecorder(root), 'guid-zz99')
+            trace.record_usage(input_tokens=100, output_tokens=5,
+                uncached_input_tokens=10, cache_read_tokens=80, cache_write_tokens=10,
+                reported_cost=dict(currency='USD', total=0.012, source='pi_sdk_estimate'))
+            entries = [json.loads(line) for line in (root / 'prime-trace.jsonl').read_text().splitlines()]
+            payload = entries[-1]['payload']
+            self.assertEqual(payload['cache_read_tokens'], 80)
+            self.assertEqual(payload['reported_cost']['source'], 'pi_sdk_estimate')
+
     def test_official_gameplay_uses_session_supported_deadline(self) -> None:
         self.assertEqual(_GAMEPLAY_OPTIONS["deadline_ms"], "3600000")
 

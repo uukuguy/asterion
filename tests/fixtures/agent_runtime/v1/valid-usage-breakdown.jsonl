@@ -1,0 +1,3 @@
+{"protocol":"asterion.agent-runtime/v1","run_id":"usage-breakdown","sequence":1,"type":"run.started","payload":{"capabilities":[]}}
+{"protocol":"asterion.agent-runtime/v1","run_id":"usage-breakdown","sequence":2,"type":"usage.reported","payload":{"input_tokens":20,"output_tokens":4,"uncached_input_tokens":10,"cache_read_tokens":7,"cache_write_tokens":3,"reported_cost":{"currency":"USD","total":0.0125,"source":"pi_sdk_estimate"}}}
+{"protocol":"asterion.agent-runtime/v1","run_id":"usage-breakdown","sequence":3,"type":"run.completed","payload":{"status":"completed"}}

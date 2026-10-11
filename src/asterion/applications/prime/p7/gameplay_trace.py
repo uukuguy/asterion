@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from asterion.runtime.protocol import validate_usage_payload
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
@@ -128,7 +130,7 @@ class PrimeGameplayTrace:
     def matches_runtime_broker(self, broker: object) -> bool:
         return broker is self._broker
 
-    def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
+    def record_usage(self, *, input_tokens: int, output_tokens: int, **details) -> None:
         if (
             self._accessed
             or isinstance(input_tokens, bool)
@@ -140,10 +142,12 @@ class PrimeGameplayTrace:
         ):
             raise PrimeGameplayTraceError("P7 gameplay usage is invalid")
         try:
+            payload = dict(input_tokens=input_tokens, output_tokens=output_tokens, **details)
+            validate_usage_payload(payload)
             self._recorder.append(
                 "arc.usage.reported",
                 self._identities,
-                {"input_tokens": input_tokens, "output_tokens": output_tokens},
+                payload,
             )
         except Exception:
             raise PrimeGameplayTraceError("P7 gameplay usage is invalid") from None

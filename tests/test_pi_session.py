@@ -169,7 +169,7 @@ class PiRpcSessionTests(unittest.TestCase):
                     }
                 }
             ),
-            {"input_tokens": 120, "output_tokens": 31},
+            {"input_tokens": 120, "output_tokens": 31, "uncached_input_tokens": 120},
         )
         self.assertIsNone(normalize_pi_usage({"message": {"role": "user"}}))
         with self.assertRaisesRegex(ValueError, "Pi usage event is invalid"):

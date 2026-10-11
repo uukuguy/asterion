@@ -990,6 +990,7 @@ test("validates shared requests and complete event streams", async () => {
     "valid-research.jsonl",
     "valid-cancelled.jsonl",
     "valid-artifact.jsonl",
+    "valid-usage-breakdown.jsonl",
   ]) {
     const events = await readJsonl(name);
     assert.deepEqual(validateEventStream(events), events);
@@ -1000,9 +1001,25 @@ test("validates shared requests and complete event streams", async () => {
     "invalid-unmatched-tool-call-at-terminal.jsonl",
     "invalid-post-terminal.jsonl",
     "invalid-unsorted-started-capabilities.jsonl",
+    "invalid-usage-breakdown.jsonl",
   ]) {
     const events = await readJsonl(name);
     assert.throws(() => validateEventStream(events), ProtocolValidationError);
+  }
+});
+
+test("validates optional usage cost without treating estimates as invoices", async () => {
+  const events = await readJsonl("valid-usage-breakdown.jsonl");
+  assert.deepEqual(validateEventStream(events), events);
+  for (const [field, value] of [
+    ["cache_write_tokens", -1],
+    ["uncached_input_tokens", "10"],
+    ["reported_cost", {currency:"USD", total:Infinity, source:"pi_sdk_estimate"}],
+    ["reported_cost", {currency:"USD", total:0, source:"actual_bill"}],
+  ]) {
+    const invalid = structuredClone(events);
+    invalid[1].payload[field] = value;
+    assert.throws(() => validateEventStream(invalid), ProtocolValidationError);
   }
 });
 

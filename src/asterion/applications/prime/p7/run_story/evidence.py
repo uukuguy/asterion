@@ -686,18 +686,20 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
         primitive_actions=action_count,
     )
     usage_entries = tuple(entry.payload for entry in trace if entry.kind == "arc.usage.reported")
-    usage: Mapping[str, int] | None = None
+    usage: Mapping[str, object] | None = None
     if usage_entries:
-        input_total = 0
-        output_total = 0
+        from asterion.agents.prime.usage import UsageStatistics
+        statistics = UsageStatistics()
         for value in usage_entries:
-            if set(value) != {"input_tokens", "output_tokens"}:
+            try:
+                statistics.record(value)
+            except ValueError:
                 _reject()
-            input_total += _integer(value["input_tokens"])
-            output_total += _integer(value["output_tokens"])
-        usage = MappingProxyType(
-            {"input_tokens": input_total, "output_tokens": output_total}
-        )
+        snapshot = statistics.snapshot()
+        # Old sealed evidence retains its original two-field projection.
+        if all(set(value) == {'input_tokens', 'output_tokens'} for value in usage_entries):
+            snapshot = {key: snapshot[key] for key in ('input_tokens', 'output_tokens')}
+        usage = MappingProxyType(snapshot)
     if summary.get("replay_verified") is not True or summary.get("sealed_trace") is not True:
         _reject()
     source_paths = (summary_path, trace_path, seal_path, recording_path)

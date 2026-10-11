@@ -5016,3 +5016,7 @@
 - 2026-10-12 Task51 fresh historyOFF BP35 started07d00c1f after explicit user authorization; track retained danger and input pressure.
 
 - 2026-10-12: Task51 stopped4/9; fixed ordinary initializer dependencies and actor-only history; packaged verification ongoing.
+
+- cb0ba4ec: Support ordinary retained-scope initializers and hide private host cells to prevent stalled plans and redundant model input.
+
+- 2026-10-12: Preserve Prime cache fractions and labelled SDK costs; throughput no longer hides missing expense observations.

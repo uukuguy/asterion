@@ -32,6 +32,27 @@ def _jsonl(name: str) -> list[object]:
 
 
 class TestRuntimeProtocol(unittest.TestCase):
+    def test_optional_usage_breakdown_and_cost_preserve_legacy_contract(self) -> None:
+        validate_event_stream(_jsonl("valid-usage-breakdown.jsonl"))
+        with self.assertRaises(ProtocolError):
+            validate_event_stream(_jsonl("invalid-usage-breakdown.jsonl"))
+        events = _jsonl("valid-research.jsonl")
+        validate_event_stream(events)
+        usage = next(event["payload"] for event in events if event["type"] == "usage.reported")
+        usage.update(uncached_input_tokens=10, cache_read_tokens=100, cache_write_tokens=10,
+                     reported_cost={"currency": "USD", "total": 0.0125, "source": "pi_sdk_estimate"})
+        validate_event_stream(events)
+        for field, value in (("cache_read_tokens", True), ("cache_write_tokens", -1),
+                             ("uncached_input_tokens", "10"),
+                             ("reported_cost", {"currency": "USD", "total": float("inf"), "source": "pi_sdk_estimate"}),
+                             ("reported_cost", {"currency": "USD", "total": 0, "source": "actual_bill"})):
+            with self.subTest(field=field, value=value):
+                previous = usage[field]
+                usage[field] = value
+                with self.assertRaises(ProtocolError):
+                    validate_event_stream(events)
+                usage[field] = previous
+
     def test_runtime_protocol_is_asterion_owned(self) -> None:
         self.assertEqual(RUNTIME_PROTOCOL_VERSION, "asterion.agent-runtime/v1")
         for path in (PROJECT / "schemas/agent-runtime/v1").glob("*.json"):

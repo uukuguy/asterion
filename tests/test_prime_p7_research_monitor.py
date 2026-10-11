@@ -38,6 +38,24 @@ class _Engine:
 
 
 class TestResearchMonitor(unittest.TestCase):
+    def test_cache_and_cost_are_preserved_in_safe_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            monitor = ResearchMonitor(root, 'run-test', ArcBroker(engine=_Engine(root)), self.owner())
+            monitor.event('usage.reported', dict(input_tokens=100, output_tokens=5,
+                uncached_input_tokens=10, cache_read_tokens=80, cache_write_tokens=10,
+                reported_cost=dict(currency='USD', total=0.012, source='pi_sdk_estimate')))
+            record = json.loads((root / 'research-status.json').read_text())
+            self.assertEqual(record['cache_read_tokens'], 80)
+            self.assertEqual(record['cache_read_ratio'], 0.8)
+            self.assertEqual(record['reported_cost']['total'], 0.012)
+            monitor.event('usage.reported', dict(input_tokens=20, output_tokens=2))
+            record = json.loads((root / 'research-status.json').read_text())
+            self.assertEqual(record['input_tokens'], 120)
+            self.assertIsNone(record['cache_read_tokens'])
+            self.assertIsNone(record['reported_cost'])
+            self.assertEqual(record['reported_cost_covered_events'], 1)
+
     def owner(self):
         return SimpleNamespace(runtime_observation=lambda: {})
 

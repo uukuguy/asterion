@@ -167,3 +167,7 @@ Mandatory compact-display guidance has been withdrawn from the common autonomous
 本轮L2死亡43之前的42帧能看见同列上方15危险块；离线程序仅用<=42资料建立人工局部假说，封存预测后再比较43终态。严格保留5边界未知规则时返回unknown；假定5/0可通过且15接触致命时，1输入+6自动微步判dead（约24.6ms），吻合实际GAME_OVER。不是盲测、真实动画复刻或LLM自主建模，不能将条件风险称为必死证明。独立复审通过，预测封存读取界限已修正；证据 `.asterion-private/task47-p7-rollout/l2-offline-witness-receipt.json`。
 
 局部64×64棋盘L3 helper benchmark100次：单rollout中位14.58ms/p9515.23ms，一死亡回测14.60/15.13ms，两候选比较24.46/26.15ms；持久计算内核简单16tick调用20次中位1.054ms/p951.658ms，冷首次58.114ms。两者分别计时，不叠加为复杂模型总耗时，未含LLM建模、复杂搜索或全死亡集合回测。模型/游戏0；private receipts同目录。
+
+## Prime cache and cost statistics (2026-10-12)
+
+User requires costs to be distinguished from throughput. Optional runtime usage fields retain uncached input/cache reads/cache writes and reported USD SDK estimate; total input keeps existing semantics and budget authority is unchanged. Shared Python/schema/TS validation agrees, P7 traces and research status retain details and coverage, missing or partially known totals remain unknown. Source review and focused tests pass; no full regression or live deployment. ActiveTask52 uses earlier frozen wheel, its cache details were discarded and cannot be reconstructed; total input includes cache reads/writes and is not uncached cost.

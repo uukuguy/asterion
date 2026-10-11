@@ -54,19 +54,19 @@ def _reject_json_constant(_value: str) -> object:
     raise ValueError("Pi RPC emitted invalid JSONL")
 
 
-def normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
+def normalize_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:
     """Translate one native assistant usage payload to the runtime contract."""
 
     return _normalize_usage(payload)
 
 
-def normalize_pi_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
+def normalize_pi_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:
     """Translate one native Pi assistant usage payload to the runtime contract."""
 
     return _normalize_usage(payload)
 
 
-def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
+def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, object] | None:
     message = payload.get("message")
     if not isinstance(message, Mapping) or message.get("role") != "assistant":
         return None
@@ -94,10 +94,35 @@ def _normalize_usage(payload: Mapping[str, object]) -> Mapping[str, int] | None:
         or cache_write_tokens < 0
     ):
         raise ValueError("Pi usage event is invalid")
-    return {
+    result: dict[str, object] = {
         "input_tokens": input_tokens + cache_read_tokens + cache_write_tokens,
         "output_tokens": output_tokens,
+        "uncached_input_tokens": input_tokens,
     }
+    # Missing cache fields remain unknown; the legacy throughput calculation
+    # above is retained for existing limits and consumers.
+    if "cacheRead" in usage:
+        result["cache_read_tokens"] = cache_read_tokens
+    if "cacheWrite" in usage:
+        result["cache_write_tokens"] = cache_write_tokens
+    cost = usage.get("cost")
+    if cost is not None:
+        if not isinstance(cost, Mapping):
+            raise ValueError("Pi usage event is invalid")
+        if "total" in cost:
+            total = cost["total"]
+            try:
+                valid_total = type(total) in (int, float) and total >= 0 and math.isfinite(total)
+            except OverflowError:
+                valid_total = False
+            if not valid_total:
+                raise ValueError("Pi usage event is invalid")
+            # Pi calculates this from its model price registry. It is neither
+            # an invoice nor evidence about subscription/OAuth billing.
+            result["reported_cost"] = {
+                "currency": "USD", "total": total, "source": "pi_sdk_estimate",
+            }
+    return result
 
 
 def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
@@ -129,6 +154,11 @@ def _compact_rpc_event(payload: dict[str, Any]) -> dict[str, Any]:
                     for key in ("input", "output", "cacheRead", "cacheWrite")
                     if key in usage
                 }
+                if "cost" in usage:
+                    cost = usage["cost"]
+                    compact_message["usage"]["cost"] = (
+                        {"total": cost["total"]} if "total" in cost else {}
+                    ) if isinstance(cost, Mapping) else cost
         return {"type": event_type, "message": compact_message}
     if event_type == "tool_execution_start":
         return {

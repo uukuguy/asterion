@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from asterion.runtime.protocol import validate_usage_payload
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 import re
@@ -211,7 +213,7 @@ class P7PrivateTraceReceipt:
         except Exception:
             raise P7PrivateTraceReceiptError("P7 model-round evidence is unavailable") from None
 
-    def record_usage(self, *, input_tokens: int, output_tokens: int) -> None:
+    def record_usage(self, *, input_tokens: int, output_tokens: int, **details) -> None:
         """Append one validated public runtime usage event to private evidence."""
 
         if (
@@ -225,13 +227,12 @@ class P7PrivateTraceReceipt:
         ):
             raise P7PrivateTraceReceiptError("P7 usage evidence is invalid")
         try:
+            payload = dict(input_tokens=input_tokens, output_tokens=output_tokens, **details)
+            validate_usage_payload(payload)
             self._recorder.append(
                 "arc.usage.reported",
                 self._identities,
-                {
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                },
+                payload,
             )
         except Exception:
             raise P7PrivateTraceReceiptError(

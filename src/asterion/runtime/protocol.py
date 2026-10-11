@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from collections.abc import Iterable, Mapping
 
@@ -150,6 +151,28 @@ def _validate_artifact(payload: Mapping[str, object]) -> None:
             raise ProtocolError("artifact sha256 must be 64 lowercase hexadecimal digits")
 
 
+def validate_usage_payload(payload: Mapping[str, object]) -> None:
+    """Validate usage observations without supplying prices or billing authority."""
+    payload = _require_mapping(payload, "usage.reported payload")
+    _require_keys(
+        payload, label="usage.reported payload", required={"input_tokens", "output_tokens"},
+        optional={"uncached_input_tokens", "cache_read_tokens", "cache_write_tokens", "reported_cost"},
+    )
+    for field in ("input_tokens", "output_tokens", "uncached_input_tokens", "cache_read_tokens", "cache_write_tokens"):
+        if field in payload:
+            _require_non_negative_integer(payload[field], f"usage.reported {field}")
+    if "reported_cost" in payload:
+        cost = _require_mapping(payload["reported_cost"], "usage.reported reported_cost")
+        _require_keys(cost, label="usage.reported reported_cost", required={"currency", "total", "source"})
+        total = cost["total"]
+        try:
+            valid_total = type(total) in (int, float) and total >= 0 and math.isfinite(total)
+        except OverflowError:
+            valid_total = False
+        if cost["currency"] != "USD" or cost["source"] != "pi_sdk_estimate" or not valid_total:
+            raise ProtocolError("usage.reported reported_cost is invalid")
+
+
 def _validate_event(event: Mapping[str, object]) -> tuple[str, str]:
     event = _require_mapping(event, "event")
     _require_keys(
@@ -193,17 +216,7 @@ def _validate_event(event: Mapping[str, object]) -> tuple[str, str]:
         if not isinstance(payload["is_error"], bool):
             raise ProtocolError("tool.result is_error must be a boolean")
     elif event_type == "usage.reported":
-        _require_keys(
-            payload,
-            label="usage.reported payload",
-            required={"input_tokens", "output_tokens"},
-        )
-        _require_non_negative_integer(
-            payload["input_tokens"], "usage.reported input_tokens"
-        )
-        _require_non_negative_integer(
-            payload["output_tokens"], "usage.reported output_tokens"
-        )
+        validate_usage_payload(payload)
     elif event_type == "artifact.created":
         _validate_artifact(payload)
     elif event_type == "run.completed":

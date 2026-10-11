@@ -232,10 +232,7 @@ class _P7SolveEventProjector:
                 continue
             if event.type == "usage.reported":
                 try:
-                    self._trace.record_usage(
-                        input_tokens=cast(int, event.payload["input_tokens"]),
-                        output_tokens=cast(int, event.payload["output_tokens"]),
-                    )
+                    self._trace.record_usage(**event.payload)
                 except (KeyError, P7PrivateTraceReceiptError):
                     sequence += 1
                     yield RunEvent(
@@ -323,10 +320,7 @@ class _P7GameplayEventProjector:
                 continue
             if event.type == "usage.reported":
                 try:
-                    self._trace.record_usage(
-                        input_tokens=cast(int, event.payload["input_tokens"]),
-                        output_tokens=cast(int, event.payload["output_tokens"]),
-                    )
+                    self._trace.record_usage(**event.payload)
                 except (KeyError, PrimeGameplayTraceError):
                     sequence += 1
                     yield RunEvent(

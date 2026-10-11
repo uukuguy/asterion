@@ -967,7 +967,20 @@ export type RunEvent =
     >
   | EventBase<
       "usage.reported",
-      { readonly input_tokens: number; readonly output_tokens: number }
+      {
+        /** Total input throughput, including any reported cache tokens. */
+        readonly input_tokens: number;
+        readonly output_tokens: number;
+        readonly uncached_input_tokens?: number;
+        readonly cache_read_tokens?: number;
+        readonly cache_write_tokens?: number;
+        /** SDK price estimate, not a provider invoice or subscription charge. */
+        readonly reported_cost?: {
+          readonly currency: "USD";
+          readonly total: number;
+          readonly source: "pi_sdk_estimate";
+        };
+      }
     >
   | EventBase<
       "artifact.created",

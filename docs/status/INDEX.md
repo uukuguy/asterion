@@ -126,3 +126,5 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 - Task50 中止与后续离线修正：沿用上述推演设计/计划；已识别致命风险跨模型保留、旧范围不可用明确暂停；128KiB可配置输入容量提醒不截断画面。见[决策 D-2026-10-12-03](DECISIONS.md#d-2026-10-12-03--retain-identified-fatal-risk-and-monitor-p7-input-pressure)及[当前恢复点](RESUME-NEXT-SESSION.md)。实际死亡前模型安装kernel复现并阻断候选，实战收益及token下降未验证。
 
 - Task51 fresh trial and scope/history follow-up: [current state](CURRENT-STATE.md#task51-stopped-trial-and-narrow-follow-up-2026-10-12), [resume evidence](RESUME-NEXT-SESSION.md). Four levels completed; L5 model error and scope builtin/local-cell support gap remain distinct.
+
+- Prime cache/cost statistics: [decision D-2026-10-12-04](DECISIONS.md#d-2026-10-12-04--retain-cache-and-cost-observations-separately-from-throughput), [current state](CURRENT-STATE.md#prime-cache-and-cost-statistics-2026-10-12). Optional native fractions and SDK estimates, missing unknown; current frozen trial cannot be backfilled.

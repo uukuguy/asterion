@@ -103,7 +103,20 @@
             "required": ["input_tokens", "output_tokens"],
             "properties": {
               "input_tokens": {"type": "integer", "minimum": 0},
-              "output_tokens": {"type": "integer", "minimum": 0}
+              "output_tokens": {"type": "integer", "minimum": 0},
+              "uncached_input_tokens": {"type": "integer", "minimum": 0},
+              "cache_read_tokens": {"type": "integer", "minimum": 0},
+              "cache_write_tokens": {"type": "integer", "minimum": 0},
+              "reported_cost": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["currency", "total", "source"],
+                "properties": {
+                  "currency": {"const": "USD"},
+                  "total": {"type": "number", "minimum": 0},
+                  "source": {"const": "pi_sdk_estimate"}
+                }
+              }
             }
           }
         }

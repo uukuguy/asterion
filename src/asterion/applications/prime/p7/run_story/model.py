@@ -62,7 +62,7 @@ class RunEvidence:
     replay_verified: bool
     sealed_trace: bool
     worker_cell_count: int
-    usage: Mapping[str, int] | None
+    usage: Mapping[str, object] | None
     source_digests: Mapping[str, str]
 
     def __post_init__(self) -> None:
@@ -71,7 +71,10 @@ class RunEvidence:
             self, "source_digests", MappingProxyType(dict(self.source_digests))
         )
         if self.usage is not None:
-            object.__setattr__(self, "usage", MappingProxyType(dict(self.usage)))
+            usage = dict(self.usage)
+            if usage.get('reported_cost') is not None:
+                usage['reported_cost'] = MappingProxyType(dict(usage['reported_cost']))
+            object.__setattr__(self, "usage", MappingProxyType(usage))
 
     def __repr__(self) -> str:
         return (
