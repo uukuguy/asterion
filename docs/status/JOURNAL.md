@@ -4977,3 +4977,5 @@
 - 2026-10-11 a4f31e77 isolates unverified death guidance at research entry; records stopped trial and verified prompt boundary.
 - 2026-10-11 Compact-display prompt identified as regression hypothesis; two mapping pages omit7fields; pixel deletion not demonstrated.
 - 2026-10-12 Removed mandatory compact-display guidance from common prompt;43testsPASS, preserving optional helper and capacity for isolated comparison.
+- 2026-10-12 afac1dd3 withdraws unverified compact-display guidance to isolate the leading regression hypothesis; helper and capacity preserved.
+- 2026-10-12 Reviewed five death inputs: visible-risk misjudgments and offscreen assumptions; compact-display common causality not established.

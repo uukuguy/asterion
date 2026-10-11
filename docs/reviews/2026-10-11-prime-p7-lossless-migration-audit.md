@@ -204,3 +204,20 @@ Read-only source comparison: baseline2930fbd8 versus actual Task46 sourcec2df0c9
 - A prompt adaptation omission remains: the actual autonomous prompt still says fixed aggregate budget, while supervised null-budget explanatory text was added to other prompts. Runtime controls are genuinely unbounded; the wording does not establish bounded execution. No fix or restart is performed during this audit.
 
 Task46 live observation: first5 totals18/49/47/24/44; last successful18/42/36/24/44. At global233, level6 remains unfinished, RESET4. Global197 GAME_OVER then198RESET; global216 NOT_FINISHED then217RESET is voluntary. Its stated goal is to restart along a claimed safe downward route and retain the bottom blue block for a direct-passage probe. Do not equate reset count with death count or accept the model's verified-route wording as independently certified.
+
+
+## Task46 death-input visibility review
+
+User requests checking the actual death decisions against model-visible evidence. Read-only review of five deaths, with no code changes or model runs. Sources: model-authored plans/NOTES, actual archived cell outputs, sealed observations and the actual actor delivery source. Complete provider request bodies were not archived; metrics are not their substitute. Specific pre-action descriptions directly establish model recognition where stated; no exact full-request reconstruction claim is made.
+
+| Death | Evidence before action | Finding |
+| --- | --- | --- |
+| L2/global24 | p24@23 explicitly mentions higher15shape; observation23 contains it in39column. Console107/110/113/115; NOTES@24 revises the claim. | Shape visible/recognized; falsely treated avoiding direct click as safety while clearing a round block caused continuous upward contact. |
+| L3/global77 | NOTES@76 predicts left→upward15collision; actual cell8 prints full64x64 board12676bytes without truncation; left77 says danger so only one step. | Lethal condition recognized; choice fails to apply its continuous-motion consequence. |
+| L6/global197 | sixupper195@194 receives observation194, showing open shaft at top boundary and no15in that column. | Treats visible emptiness as offscreen safety; lethal encounter is beyond current viewport. |
+| L6/global270 | exitroute269@268 receives observation268, containing39column15at y58..61 and gate12at y53, and plans right toward51safe descent. | Visible lethal obstacle, intermediate downward consequence omitted from route reasoning. |
+| L7/global324 | observation323 has57column y0..62 all empty10; outer324 says visible portion empty, avoids51lower spike. | Upper lethal encounter outside current viewport; same visible-safe→offscreen-safe inference persists after earlier deaths. |
+
+Current settled boards are losslessly encoded by actor_projection, not cropped by display; historical/animation reads and the current screen viewport must be distinguished. Two offscreen hazards do not demonstrate presentation deletion. Compact-display remains an isolated regression hypothesis, but these five deaths do not establish it as the common cause. L3 directly disproves an explanation based solely on never seeing/recognizing its trap. The capacity/format repair and model decision quality remain separate qualification boundaries. Private concise receipt: task46-bp35-danger-awareness/death-visibility-review.json.
+
+Timing qualification:197 and270 are fatal steps inside submitted batches. The model chooses these batches from observations194 and268 respectively; intermediate observations196/269 are internal feedback, not newly read inputs before those fatal steps. Single-step324 starts at observation323.
