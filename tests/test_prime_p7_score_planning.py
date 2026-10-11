@@ -217,7 +217,9 @@ class TestP7ScorePlanning(P7SolverFixture):
         self.assertTrue(remainder.startswith('工具：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。'))
         for fragment in ('完整通关', '整局满分100', '稳定目标', '执行停止边界'):
             self.assertNotIn(fragment, prompt)
-        self.assertIn('固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。', prompt)
+        self.assertIn('有限模式的固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。', prompt)
+        self.assertIn('监督研究中 action_cap、actions_remaining 和 wall_time_remaining_seconds 为 null，表示没有宿主总量停止线，由外围监测并决定停止；累计动作和评分基准仍然有效。', prompt)
+        self.assertIn('结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。', prompt)
 
 
 class TestP7ScoreFormula(unittest.TestCase):

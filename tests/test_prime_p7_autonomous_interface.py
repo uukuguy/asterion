@@ -8,6 +8,24 @@ from asterion.applications.prime.p7.research_runtime import P7ResearchRuntime
 
 
 class TestAutonomousResearchInterface(unittest.TestCase):
+    def test_public_prompts_do_not_include_unverified_death_risk_experiment(self):
+        for text in (prompt.build_autonomous_prompt(), prompt.build_notes_prompt(),
+                     prompt.P7_SOLVE_PROMPT):
+            with self.subTest(prompt=text[:32]):
+                self.assertNotIn('游戏可能存在导致死亡或 GAME_OVER 的危险', text)
+
+    def test_death_risk_experiment_is_appended_only_at_research_entry(self):
+        from asterion.applications.prime.p7 import operator
+        append = getattr(operator, '_append_research_experiment', None)
+        self.assertTrue(callable(append))
+        experiment = prompt.P7_DEATH_RISK_EXPERIMENT_PROMPT
+        for mode in ('research', 'autonomy', 'solve', 'witness', 'cognition', 'sweep', None):
+            with self.subTest(mode=mode):
+                environment = {} if mode is None else {'ASTERION_PRIME_P7_RUN_MODE': mode}
+                text = append('selected application guidance', environment)
+                self.assertEqual(text, 'selected application guidance' + (
+                    '\n\n' + experiment if mode == 'research' else ''))
+
     def test_trusted_current_state_exists_before_first_note(self):
         host = P7ResearchRuntime.__new__(P7ResearchRuntime)
         host._memory_instructions = 'trusted task'

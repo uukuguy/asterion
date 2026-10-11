@@ -4972,3 +4972,5 @@
 - 2026-10-11 c2df0c91 records L4 interruption; Task46 fresh BP35 starts historyoff with death-risk guidance.
 - 2026-10-11 Task46 cold BP35 first5PASS, resets2; known-risk fatal-action case retained; L6 running.
 - 2026-10-11 Audited Task39/46 non-adaptation differences; NOTES remains primary, WorldMap reporting clarified; L6 voluntary RESET distinguished.
+- 2026-10-11 3b75d56b distinguishes P7 behavior/configuration changes to prevent misattributing trial differences to migration.
+- 2026-10-11 User stopped Task46:6/9,331actions,6RESET; cleanup/replay verified, final solution certification pending.

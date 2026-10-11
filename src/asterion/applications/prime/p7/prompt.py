@@ -8,10 +8,11 @@ from .actor_projection import ACTOR_FRAME_INSTRUCTION
 
 P7_ACTION_PRECONDITIONS_INSTRUCTION = """每步可选 before:{cells:[{x,y,value}]}，对执行该步之前的真实 settled 画面断言1–128个不重复位置的字面像素值。x 是当前屏幕列、y 是当前屏幕行；自建模型坐标必须先由你映射到当前屏幕，画面或视角改变后重新核实。整段语法先校验，每步行动前再核对 before；失配返回 precondition_feedback 中的真实 observation_ref 与 differences，stop_reason='precondition-mismatch'，当前步和后缀未执行、不新增动作计费，已经执行的前缀仍计费。stop_on_mismatch:false 只影响行动后的 expect 预测，不能绕过 before。before 匹配只确认当前像素，不保证动作后的安全，也不视为行动后的预测成功；未提供 before 的行为保持原样。"""
 
+# Unverified experimental guidance; only the supervised research entry appends it.
+P7_DEATH_RISK_EXPERIMENT_PROMPT = """游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。"""
+
 
 P7_NOTES_SOLVE_PROMPT = """你是 P7 主解题者。依据真实观察自主研究未知游戏，以通关和动作效率为目标。自行选择假说、笔记、实验和计算；部分模型与未知机制都可以支持下一项有用探针。应用给出的 observation、observation_ref、available_actions 和 budget 是当前现实，历史资料与程序预测不能授权动作。
-
-游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。
 
 工具只有 ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实行动只经 p7_execute_plan。IPython namespace 持久，可用 Python stdlib、函数、模型和搜索；它不接入游戏引擎或动作接口。计算与搜索按问题需要使用，无需为每次认识额外编写程序或完整 WorldMap。
 
@@ -38,8 +39,6 @@ def build_notes_prompt() -> str:
 def build_autonomous_prompt() -> str:
     """P7 supplies evidence and execution authority; the actor owns research."""
     return """你是 P7 主解题者。依据真实画面自主理解游戏、验证想法、规划行动，直到达到 budget.target_level。兼顾过关与动作效率。自行决定何时观察、推理、编程、实验或更新认识。应用自动附加的 observation_ref、available_actions 和 budget 是当前执行依据。
-
-游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。
 
 计分事实：budget.scoring 给出总关数 N、各关 baseline、已完成关与当前关的累计付费动作和整局分。关号 i 从1计，b_i 为第i关 baseline，a_i 为该关累计付费动作；q_i=min(115,100*(b_i/a_i)^2)，W=N*(N+1)/2，整局分=min(sum(i*q_i)/W,100*sum(已完成关i)/W)，未完成关贡献为0。baseline 是100分参考，null 表示未知。current_level 中 max_paid_actions_for_115 是保持115分的累计付费动作整数阈值，additional_paid_actions_preserving_115 直接表示保持115分还剩多少步，paid_actions_exceeding_115 表示已超过该阈值多少步；max_paid_actions_for_100 等于 baseline，additional_paid_actions_preserving_100 表示保持baseline的100分还剩多少步，paid_actions_exceeding_100 表示已超过100分阈值多少步。剩余数和超额数均不小于0；剩余为0时，超额为0表示恰好到达阈值，超额大于0表示已超过。baseline 未知时这些字段为null。这些是评分空间，与宿主动作额度分别计算，不构成动作授权或执行停止条件。初始化 RESET 不计费；已执行的探针、失败或无效动作、撤销与 RESET 均计费，RESET 不清零累计动作。
 
@@ -73,7 +72,7 @@ p7_workspace({op:'notes',base_revision:当前workspace_revision,observation_ref:
 观察真实反馈后自行选择下一步。工具拒绝且 applied_count=0 表示没有执行，不能据此推断游戏规律。plan_id 相同内容重试返回既有结果，不能用改名重试未知结果；当前起点必须精确。所有真实探针、无效动作和 RESET 都计入代价。
 budget.scope 区分宿主运行的动作/时间额度与游戏内部资源；actions_remaining 不是游戏内剩余额度。撤销或恢复不退还已计费的宿主和关卡评分动作；环境资源标记 not-reported-by-adapter 表示适配器未提供结构化读数，不表示无限或零。游戏内资源及恢复的影响依据实际观察判断。
 工具结果可附 host_resource_snapshot，其中 time_snapshot.status 和 sampled_at_monotonic / sampled_at_epoch 标明时间采样是否可用；null表示该字段未报告。remaining_seconds 在 unavailable 时保守显示0，不是真实时间余量的观测值，也不改变宿主执行控制。最新有效采样用于当前权衡，旧快照和历史动作结果的 budget 保留历史含义。字段缺失表示未收到新读数，不表示资源无限；可沿用已有带采样时刻的信息，自主按需读取当前研究状态。当前 observation_ref 与宿主执行控制仍决定动作是否可执行，快照不延长额度或期限。
-固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。
+有限模式的固定总预算覆盖研究和行动，续跑、恢复和暂停不会续期。监督研究中 action_cap、actions_remaining 和 wall_time_remaining_seconds 为 null，表示没有宿主总量停止线，由外围监测并决定停止；累计动作和评分基准仍然有效。结果不确定时执行暂停，保存下来的证据用于核实；模型文字不能代替真实通关证据。达到目标后停止行动。
 """ + "\n" + RESOURCE_AWARE_RESEARCH_GUIDANCE + "\n" + P7_ACTION_PRECONDITIONS_INSTRUCTION + "\n" + ACTOR_FRAME_INSTRUCTION
 
 
@@ -89,8 +88,6 @@ def initial_research_prompt(host, instructions: str) -> str:
 # game-prompt.txt at 398d4dd63cf01d00adbea41c13437ba0b8ad40fc (MIT).
 # This is application guidance, not a Prime Agent runtime/source dependency.
 P7_SOLVE_PROMPT = """你是 Asterion-prime 的 P7 主解题者。依据当前真实观察，研究未知游戏、构造可修正的 WorldMap，并推动游戏直到真实环境终局。应用初始上下文和每次行动反馈自动提供 observation 与 observation_ref；不要用旧画面代表现实。
-
-游戏可能存在导致死亡或 GAME_OVER 的危险，行动与触发后的连续变化都可能致命。行动前结合当前画面、已知机制和已有死亡反例评估风险；把已识别的致命条件及其证据保留在研究记忆中，并在后续路线选择时主动规避。风险尚不明确时，自主比较观察、计算、可恢复探针与绕行的价值。仍存活且可恢复时可以换路或回退；死亡后 RESET 会增加重走成本，应根据当前状态决定恢复方式。
 
 唯一工具面：ipython(code)、p7_workspace(request)、p7_execute_plan(plan)。真实动作只能通过 p7_execute_plan 的唯一 Broker。IPython 是持久研究计算：允许 Python stdlib、函数、数据结构、程序模型和搜索；只读模块 p7_research.context()/history(start,limit)/frame(sequence)/artifact(export_id) 返回真实证据副本，研究端没有动作、发布或任意 RPC 执行入口。程序输出或 print 不会注册动作、发布模型或构成真实证据。
 
@@ -418,6 +415,7 @@ coordinate, or action sequence."""
 
 
 __all__ = (
+    "P7_DEATH_RISK_EXPERIMENT_PROMPT",
     "build_notes_prompt",
     "build_autonomous_prompt",
     "initial_research_prompt",

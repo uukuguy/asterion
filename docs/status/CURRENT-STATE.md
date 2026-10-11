@@ -122,3 +122,8 @@ Task37 unchanged94dabe66 repeat L121/Q100/161.361755s vsTask36 24/Q76.5625/247.1
 2. Check Git status/recent commits and any recorded process/unit before starting another run.
 3. Follow the canonical worklist, preserving active work and known non-PASS boundaries.
 4. Continue on the recorded current branch, inspect actual active guest units, and preserve exact source/campaign/official-submission boundaries. Latest verification, stopped-service status and community-review boundary are in `RESUME-NEXT-SESSION.md`.
+
+
+## P7 prompt experimental boundary
+
+Unverified behavioral guidance belongs to the experiment entry; only demonstrated useful general portions may enter the common P7 prompt (D-2026-10-11-04). Death guidance is isolated to supervised research; primary NOTES and optional WorldMap remain the same core mechanisms. Current source correction is tested at prompt/entry scope; prior Task46 uses its original injected source and is user-interrupted6/9, not proof of guide efficacy or historical migration losslessness.2MiB P7 output capacity is a ceiling, not emitted volume; Task46 actual45cell outputs total149003bytes/max12676/truncation0.

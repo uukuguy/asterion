@@ -1239,3 +1239,11 @@
 - Decision: inject immutable capacity policy through the standard Prime application entry, infer its configuration origin, bind it to runtime/recovery identity, and report the actual binding limit through validated numeric diagnostics. Capacity is not execution authority; command, session and ledger-backed parent grants remain hard boundaries. Supervised monitoring does not authorize unknown effects or remove recovery fencing.
 - Initial scope: manual-compaction admission262144tokens, full witness16MiB/material64KiB; P1 compaction reservation48000tokens/125000micros under unchanged64000tokens/500000micros total. Closed public alarms retain operation correlation, safe projection and independent delivery-failure handling. No new public protocol or provider configuration is introduced.
 - Evidence: implementation through9964fb7f, independent task and integrated review APPROVE, installed-wheel large/small native evidence with model/network0. See [formal audit](../reviews/2026-10-11-prime-p7-lossless-migration-audit.md#configurable-resource-policy-and-safe-runtime-alarms) for final packaged qualification and uncovered boundaries. Actual request/tokenizer/output/settlement certification and full context-memory/archive ceiling expansion remain separate.
+
+
+## D-2026-10-11-04 — Experimental guidance stays in the experiment entry until validated
+
+- User decision: experimental prompts are appended by the experimental entry. Only after effectiveness is demonstrated may their general portions enter the P7 common prompt; target levels, fresh-run conditions and experience policy remain entry-specific.
+- Immediate correction: unvalidated death/continuous-hazard guidance fromf5d9ef0f must leave common NOTES/autonomous/WorldMap prompts and be appended only by the supervised research experiment entry. No claim of improved danger avoidance follows from the current single trial.
+- Current Task46 already received the earlier prompt. Moving source text does not change its injected instructions or authorize restarting it. Its evidence remains bound toc2df0c91.
+- Stable existing research principles and experimental strategies are distinct; do not promote an experiment or copy its whole appendix into the common prompt merely because the text sounds generally useful.

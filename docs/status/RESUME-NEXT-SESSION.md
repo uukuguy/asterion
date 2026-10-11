@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-Updated: 2026-10-11. Active Task46 clean BP35 with death-risk guidance; not a final handoff.
+Updated: 2026-10-11. Task46 stopped by user; no game run active. Live-session checkpoint, not a final handoff.
 
 ## Objective
 
@@ -26,9 +26,9 @@ Offline source/evidence inspection confirms this trial loaded prior same-game/se
 
 User requires history OFF by default and explicitly authorizes a fresh BP35 full-game trial after fixing truncation. New research default never calls load_experience; explicit process EXPERIENCE_MODE=on opts in, explicit resume remains intentional continuation; operator files cannot enable experience. P7 raw output capacity explicitly2MiB, process OUTPUT_BYTES configurable>=256; generic64KiB default unchanged. P7 display(value,start,limit) projects only presentation pixels, keeps original raw data, bounds repr16KiB and returns next_start. Prompt documents paging and discarded stdout boundary. Root targeted81unittestPASS and ruffPASS; registered extension108PASS/6existing skips and bridge-related77PythonPASS. Independent review caught unchanged TS64KiB cap, repaired via validated injected bridge_output_bytes and trusted bootstrap capacity in both transports, JSON line allowance6x+8192, all3 bundled resources synchronized. Full promotion PASS25commands/provider_operations0/full_datasetno; first run4663tests had6new test-fixture ANSI parsing errors only, corrected fixture and rerunPASS. Log `.asterion-private/task45-clean-bp35/promotion.stdout.log`. Sourceb03b2307. User-authorized clean run starts next; no paid run during preparation. Clean trial will use modeoff/new run/no resume, watch exact startup and absence of experience artifacts, report each level's actual transition action counts and reported resource usage.
 
-## Active clean BP35 run
+## Stopped clean BP35 run
 
-Task46 run `p7-live-20261011150106-ad0b3e9e4c51491e3768fb14`, hostsession14379, sourcec2df0c91 including death-risk promptf5d9ef0f. Logs `.asterion-private/task46-bp35-danger-awareness/operator.*`; status/evidence exact run under `.asterion-private/prime-p7-live/`. Actual startup experience_mode=off/max_output_bytes2097152/seed0/target9/verified worldmap/new session; no resume. Initial check confirms no experience-manifest or experience-consumption artifacts. Follow real per-level transition total/final-successful actions, deaths/RESET and resources; user stop remains available. Preserve consolePID52024. No parallel game runs or additional repairs.
+Task46 run `p7-live-20261011150106-ad0b3e9e4c51491e3768fb14`, hostsession14379 (exited2 after user stop), sourcec2df0c91 including death-risk promptf5d9ef0f. Logs `.asterion-private/task46-bp35-danger-awareness/operator.*`; status/evidence exact run under `.asterion-private/prime-p7-live/`. Actual startup experience_mode=off/max_output_bytes2097152/seed0/target9/verified worldmap/new session; no resume. Initial check confirms no experience-manifest or experience-consumption artifacts. Follow real per-level transition total/final-successful actions, deaths/RESET and resources; user stop remains available. Preserve consolePID52024. No parallel game runs or additional repairs.
 
 ## During-run steering
 
@@ -80,3 +80,12 @@ Original native system failures and failed migrated cleanup retained. Rejected s
 ## Task46 comparison clarification
 
 Source audit baseline2930fbd8→actual runc2df0c91 is recorded in the formal migration audit Task46 section. Both actual paths use autonomous learner/NOTES primary cognition; startup worldmap is a reporting label and does not establish legacy learner. WorldMap structured research remains available, not removed by migration. Non-adaptation differences include target6→9, supervised aggregate controls, prompt appendix/death guidance, output64KiB→2MiB and native outer-session reuse/recovery. Both actual trials are experienceoff and use6.1-sol; actual Task46 effort not separately certified by startup. Actual autonomous prompt still contains fixed-total-budget wording; do not claim null-budget guidance is complete. No code fix or restart during read-only audit. Latest observed global233/L6 unfinished/RESET4; global217 is voluntary after NOT_FINISHED, whereas global198 follows GAME_OVER197. Do not label allRESET as deaths.
+
+
+## Task46 final stop and prompt correction
+
+User stopped the run because performance is unsatisfactory and prompt changes need isolation. Actual runtime closed, cleanup_complete=true, sealed_trace=true, replay_verified=true, no unresolved effect. Final6/9levels,331actions,6RESET (5afterGAME_OVER,1voluntary),3000.040524seconds,187model/186tool callbacks, reported input7637094/output68872tokens. Per-level totals18/49/47/24/44/133 (315throughL6); final successful18/42/36/24/44/44; unfinishedL7 has16actions. Final solution certification separately reports pending/ValueError; do not call certified full success. Final-summary private file retained. Main session14379 exited2; preserve console52024. No restart is authorized.
+
+User requires experimental hints at experiment entry and promotion of their generic portion only after efficacy is verified. Death guidance removed from public three prompts and appended solely by research entry; finite/null autonomous budget wording corrected. Task46 retains its original injectedc2df0c91 prompt; source correction does not change its evidence. Existing autonomy appendix and main research principles are not expanded. DecisionD-2026-10-11-04.
+
+Output measurement:45cells, total149003bytes, largest12676bytes, output_truncated0, none above64KiB.2MiB is a cap, not filled output; it did not enlarge actual retained cell output in this trial. Prior Task44 history-assisted trial had8worker truncations from full-frame history/route repr, a distinct information regime. Do not attribute this trial's slower time to raising capacity on these measurements.

@@ -92,6 +92,7 @@ from asterion.applications.prime.p7.optimizer import (
 )
 from asterion.applications.prime.p7.optimizer_arc import optimize_arc_route
 from asterion.applications.prime.p7.prompt import (
+    P7_DEATH_RISK_EXPERIMENT_PROMPT,
     P7_LEGACY_SOLVE_PROMPT,
     P7_EXPLORE_APPENDIX,
     build_solve_prompt,
@@ -312,6 +313,13 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
 
     value = environment.get(P7_OFFLINE_OPTIMIZATION_ENV, "").strip().lower()
     return value in {"integration", "enabled", "true", "1"}
+
+
+def _append_research_experiment(prompt: str, environment: Mapping[str, str]) -> str:
+    """Keep unverified guidance at the explicit supervised experiment entry."""
+    if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "research":
+        return prompt + "\n\n" + P7_DEATH_RISK_EXPERIMENT_PROMPT
+    return prompt
 
 
 def _autonomy_prompt() -> str:
@@ -4596,6 +4604,7 @@ async def run_live(
         )
     if autonomy_deadline is not None:
         prompt = _autonomy_prompt()
+    prompt = _append_research_experiment(prompt, invocation.environment)
     if execution_budget is None:
         execution_budget = _task_budget(invocation.environment, None,
             None if UNBOUNDED_FIRST_ROUND_ENV in invocation.environment or invocation.game.supervised_research else _DEADLINE_MS / 1000)
