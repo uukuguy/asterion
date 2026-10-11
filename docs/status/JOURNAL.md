@@ -4958,3 +4958,4 @@
 - 2026-10-11 User authorizes BP35 full-game supervised research; currentc81cef4f launch logs task44-bp35-live-89da8095, resource monitoring enabled.
 
 - 2026-10-11 Task44 BP359/9 PASS;346actions/0RESET, replay/cleanup verified; resources recorded, sourcec81cef4f.
+- 2026-10-11 eb70ff96 records BP35 full-game PASS and resources for reproducible recovery.
