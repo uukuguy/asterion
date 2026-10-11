@@ -4954,3 +4954,4 @@
 - 2026-10-11 9964fb7f adds validated operator resource alarms and canonical operation correlation; prevents duplicate publication and unsafe exception projection.
 - 2026-10-11 58856eba updates control fixture policy identity; all14control/recovery errors pass without relaxing production identity checks.
 - 2026-10-11 Resource policy final promotion25/provider0 and installed-wheel native capacity/refusal/continuity PASS; actual request certification remains open.
+- 2026-10-11 b321c71e records final resource-policy qualification and open request-certification boundary; enables evidence-based resume without chat memory.
