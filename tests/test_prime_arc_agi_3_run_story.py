@@ -159,6 +159,7 @@ def write_completed_fixture(
     reset_during_run: bool = False,
     recovered: bool = False,
     modern_summary: bool = False,
+    supervised_research: bool = False,
 ) -> Path:
     run_root = root / "fixture-run"
     trace_root = run_root / "trace"
@@ -224,6 +225,7 @@ def write_completed_fixture(
             "seed": 0,
             "terminal_reason": "level-completed",
             "win_levels": win_levels,
+            **({"supervised_research": True} if supervised_research else {}),
         },
     )
     recorder.seal()
@@ -352,6 +354,11 @@ def write_completed_fixture(
             "uncertain_items": 0,
             "unexecuted_items": 0,
         }
+    if supervised_research:
+        summary["broker"]["supervised_research"] = True
+        summary["experiment"].update(
+            supervised_research=True, action_cap=None, deadline_ms=None
+        )
     (run_root / "summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
@@ -405,6 +412,25 @@ class TestPrimeArcAgi3RunStory(unittest.TestCase):
         summary["prediction_accounting"]["mismatches"] = "zero"
         summary_path.write_text(json.dumps(summary, sort_keys=True), encoding="utf-8")
 
+        with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
+            read_run_evidence(run_root)
+
+    def test_reads_supervised_completion_with_sealed_mode(self) -> None:
+        evidence = read_run_evidence(write_completed_fixture(
+            self.root, modern_summary=True, supervised_research=True
+        ))
+        self.assertEqual(evidence.levels_completed, 1)
+        self.assertEqual(len(evidence.actions), 1)
+
+    def test_rejects_unsealed_supervised_metadata(self) -> None:
+        run_root = write_completed_fixture(self.root, modern_summary=True)
+        path = run_root / "summary.json"
+        summary = json.loads(path.read_text())
+        summary["experiment"].update(
+            supervised_research=True, action_cap=None, deadline_ms=None
+        )
+        summary["broker"]["supervised_research"] = True
+        path.write_text(json.dumps(summary))
         with self.assertRaisesRegex(RunStoryError, "evidence-invalid"):
             read_run_evidence(run_root)
 

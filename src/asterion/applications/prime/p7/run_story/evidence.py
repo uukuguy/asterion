@@ -392,6 +392,14 @@ def _completed_identity(
     if len(completed) != 1:
         _reject()
     payload = completed[0]
+    supervised = payload.get("supervised_research") is True
+    if "supervised_research" in payload and not supervised:
+        _reject()
+    if broker.get("supervised_research", False) is not supervised:
+        _reject()
+    if supervised:
+        payload = {key: value for key, value in payload.items() if key != "supervised_research"}
+        broker = {key: value for key, value in broker.items() if key != "supervised_research"}
     if (
         set(payload) != _COMPLETED_KEYS
         and set(payload) != _IDENTIFIED_COMPLETED_KEYS
@@ -515,6 +523,9 @@ def _modern_summary_metadata(summary: Mapping[str, object]) -> None:
     accounting = summary.get("prediction_accounting")
     if not isinstance(experiment, Mapping) or not isinstance(accounting, Mapping):
         _reject()
+    supervised = experiment.get("supervised_research") is True
+    if "supervised_research" in experiment and not supervised:
+        _reject()
     if set(experiment) != {
         "action_cap",
         "deadline_ms",
@@ -524,10 +535,12 @@ def _modern_summary_metadata(summary: Mapping[str, object]) -> None:
         "seed",
         "stall_seconds",
         "target_level",
-    }:
+    } | ({"supervised_research"} if supervised else set()):
+        _reject()
+    if supervised and (experiment["action_cap"] is not None or experiment["deadline_ms"] is not None):
         _reject()
     if (
-        _integer(experiment["action_cap"], minimum=1) < 1
+        (not supervised and _integer(experiment["action_cap"], minimum=1) < 1)
         or (
             experiment["deadline_ms"] is not None
             and _integer(experiment["deadline_ms"], minimum=1) < 1
@@ -594,6 +607,10 @@ def read_run_evidence(run_root: Path) -> RunEvidence:
     if run_id != run_root.name or summary.get("cleanup_complete") is not True:
         _reject()
     trace = _trace(trace_path, seal_path)
+    supervised = summary.get("experiment", {}).get("supervised_research") is True
+    completions = tuple(entry.payload for entry in trace if entry.kind == "arc.run.completed")
+    if len(completions) != 1 or (completions[0].get("supervised_research") is True) != supervised:
+        _reject()
     game_id, win_levels, frames, recording_actions = _recording(recording_path)
     diagnostics = summary.get("diagnostics")
     if not isinstance(diagnostics, Mapping):
