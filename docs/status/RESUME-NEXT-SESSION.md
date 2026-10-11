@@ -10,6 +10,7 @@
 - 独立386trace seal/255known事务通过；前五关214动作新SDK重放通过。完整失败后缀没有独立SDK重放。
 - host已退出、guestunit不存在/0PID/空cgroup、trial临时.env删除，原console保留。
 - [实测报告](../reviews/2026-10-11-p7-bp35-full-game-trial.md)；私有证据 `.asterion-private/p7-full-bp35-20261011-135551/`。
+- 实测报告提交 `134f0ef2`；docs314/232及1973项私有manifest校验通过。
 - 当前无运行工作包。下一候选：核对完整评估回调预设及失败原因保留；专用摘要接通仍独立未完成。本次不授权新一轮评估。
 
 ## 既有交接事实（本次运行不改写历史证据）
