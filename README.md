@@ -14,16 +14,16 @@ Asterion Prime P7 adapts that infrastructure to interactive ARC-AGI-3 games. The
 
 - **Reusable application foundation.** Existing P1 and P3–P7 model paths use the standard Prime owner for Pi/RPC, extensions, session/workspace lifetime and cleanup. P7 includes both the research actor and narrator. Independent applications consume the library directly.
 - **Research continuity.** Model-written NOTES carry useful understanding across turns; persistent IPython supports executable hypotheses and searches. Detailed evidence stays available by reference. P7 supplies actual game feedback and counterexamples, while Prime owns the generic context and execution mechanisms.
-- **Fresh autonomous solving demonstrated.** In a frozen BP35 trial, P7 started without previous NOTES, routes or programs and completed **L1–L6 in 211 actions, with zero deaths and zero paid RESETs**, without outside solving hints, runtime code changes or human takeover. The recorded trace was independently replayed and sealed. [Cold-trial evidence](docs/reviews/2026-10-09-p7-bp35-task29-evaluation.md).
+- **Fresh autonomous solving demonstrated.** In a frozen BP35 trial, P7 started without previous NOTES, routes or programs and completed **L1–L6 in 211 actions, with zero deaths and zero paid RESETs**, without outside solving hints, runtime code changes or human takeover. This completed the operator-defined six-level checkpoint. The recorded trace was independently replayed and sealed. [Cold-trial evidence](docs/reviews/2026-10-09-p7-bp35-task29-evaluation.md).
 
 | Demonstrated progress | Recorded scope |
 |---|---|
-| Autonomous completion of the operator-defined cold-start target | 2026-10-09, frozen `9557ad63`: BP35 L1–L6, 211 actions, 25 min 48.25 s, no prior research state or outside solving assistance |
-| Faster completion of the same operator-defined target | 2026-10-08, frozen `9b62d2c2`: 221 actions, 17 min 3.28 s, two paid RESETs; [process and replay audit](docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md) |
+| Completed cold-start autonomous checkpoint (L1–L6) | 2026-10-09, frozen `9557ad63`: BP35 L1–L6, 211 actions, 25 min 48.25 s, no prior research state or outside solving assistance |
+| Faster completion of the same checkpoint | 2026-10-08, frozen `9b62d2c2`: 221 actions, 17 min 3.28 s, two paid RESETs; [process and replay audit](docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md) |
 | Fresh solving after application adaptation | Task52, frozen `cb0ba4ec`: L1–L5 completed without historical experience or resume; nine-level attempt stopped by the user during L6 |
 | Standard-entry application adaptation | Task40 entry/resource migration and bounded packaged P7 deployment; Task43 specific lifecycle/context compatibility repairs |
 
-**The six-level endpoint was an operator-defined experiment scope, not a solving limit.** P7 autonomously completed the entire requested L1–L6 target; the trial then ended as configured, without attempting L7–L9. This establishes successful completion of the assigned fresh-state target and provides no evidence that P7 cannot solve the remaining levels. The later Task52 nine-level trial was explicitly stopped by the user during L6 for elapsed time, rather than run to a terminal whole-game result. The recorded 9/9 run used historical experience; it and the historical official campaign below retain their separate evaluation scopes.
+**The first six levels are a completed autonomous-research checkpoint, set by the operator—not a solving limit or a failed whole-game attempt.** P7 autonomously completed the entire requested L1–L6 target; the trial then ended as configured, preserving its trace and research for continuation to L7–L9. This establishes successful completion of the assigned fresh-state target and provides no evidence that P7 cannot solve the remaining levels. The later Task52 nine-level trial was explicitly stopped by the user during L6 for elapsed time, rather than run to a terminal whole-game result. The recorded 9/9 run used historical experience; it and the historical official campaign below retain their separate evaluation scopes.
 
 ## ARC-AGI-3: official result
 

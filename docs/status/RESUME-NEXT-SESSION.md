@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 12:28. Session remains active — preset trial scope clarified; no new live trial.
+> Updated: 2026-10-13 12:29. Session remains active — README checkpoint corrected; user authorized selected BP35 continuation, preparation only.
 
 ## 已验证事实
 
@@ -58,7 +58,7 @@ The main remaining cost is lengthy research/model revision and repeated input co
 
 ## 下一动作
 
-The user authorized stable-baseline consolidation into main and README/AGENTS alignment. Local merge is complete; no new live trial is authorized. Await the next research instruction. If asked to continue optimization, first inspect recorded L6 research and repeated context without new model/game calls, identify a concrete limited repair or discriminating experiment, and review new usage consumers. Do not automatically repeat the64-minute trial. If a new trial is authorized, freeze its source/wheel identity and verify actual cache fields are retained; report per-level actions,time and resource use.
+The user authorized stable-baseline consolidation into main and README/AGENTS alignment. Local merge and remote push are complete. User now authorizes continuation of the six-level BP35 checkpoint to the full game; resolve the selected certified source and keep recovered prefix actions separate from new autonomous solving. README checkpoint wording must be committed/pushed first. If asked to continue optimization, first inspect recorded L6 research and repeated context without new model/game calls, identify a concrete limited repair or discriminating experiment, and review new usage consumers. Do not automatically repeat the64-minute trial. If a new trial is authorized, freeze its source/wheel identity and verify actual cache fields are retained; report per-level actions,time and resource use.
 
 ## 恢复命令
 

@@ -5047,3 +5047,5 @@
 - 12:27 Highlighted fresh autonomous progress with exact versions and target scope to keep README claims reproducible [91decc36; amended receipt].
 - 12:28 Clarified six-level endpoint was operator-defined scope, not demonstrated solving limit; README preserves actual completion boundaries.
 - 12:28 Corrected preset-target wording to avoid inferring inability from unattempted levels [2f6c6bbe; amended receipt].
+- 12:29 Six-level README results are completed checkpoints; user authorizes selected continuation to full BP35 after documentation push.
+- 12:29 Preserved successful checkpoint framing and new continuation authority for README and recovery [b9b34ef7; amended receipt].
