@@ -5102,3 +5102,7 @@
 - 20:10 Task57activecheckpoint committed/pushed [6e32b3ea];unknown firstblocked0dispatch then4explicitprobes;localmodelreg3/BFS35329states9stepintermediatepath,new33nodeaths.
 
 - 2026-10-13 20:24 Task57 checkpoint [7cd78f4d] superseded by91newactions/1probe-death/1RESET; historical case persists across revisions, conditional fatal recognized but full terminal trajectory unresolved; primary context peak225KB thenfalls. Frozen runcontinues.
+
+- 2026-10-13 21:24 Checkpoint receipt [82f264c0]: preserved probe-death and persistent-case boundary during frozenTask57.
+- 2026-10-13 21:24 Task57game-won9/9:335restored+123new=458,1death/RESET,40remaining,2770.867s;sealed/replay/cleanuptrue,launcher0/unitinactive.
+- 2026-10-13 21:24 Audit21reviews/19probes,143evaluations median39ms;historicalfatalrecognized butterminalunresolved;probeconsentisnotsafety. Useracceptsfullscore;nofullL9repeattoretestofflinepredictionneeded.

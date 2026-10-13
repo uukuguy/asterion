@@ -74,5 +74,7 @@ plan = {
 - [x] Independent source review checks every primitive, probe binding, case provenance, unknown/fatal priority and unchanged generic Prime boundaries.
 - [x] Commit/push code and core state before starting the authorized run.
 - [x] Reuse the already admitted Task55 prefix-only export: 335 actions/eight levels, NOTES301, no future-L9 history/frames/cells. Freeze repaired source/wheel; target9, 163 new actions/total498, model1024/tool4096, operator3600/guest3780 seconds.
-- [ ] Monitor coverage reviews, explicit probes, model registration/backtests, fatal stops, actual mismatches and costs separately. Do not hint to the actor or replace the running wheel.
-- [ ] Record the actual terminal reason, restoration/new actions, sealed/replay/cleanup status and inactive unit; publish the result without claiming a partial pass is nine-level completion.
+- [x] Monitor coverage reviews, explicit probes, model registration/backtests, fatal stops, actual mismatches and costs separately. Do not hint to the actor or replace the running wheel.
+- [x] Record the actual terminal reason, restoration/new actions, sealed/replay/cleanup status and inactive unit; publish the result without claiming a partial pass is nine-level completion.
+
+Task57 closed `game-won`: 9/9, 335 restored +123 new actions, one death/RESET, 40 actions remaining, 2770.867 seconds. Sealed/replay/cleanup verified and launcher exit0/unit inactive/MainPID0. Real coverage reviews and counterexample retention verified; unknown-probe safety and risk-versus-terminal backtest presentation remain open. No additional paid trial launched.
