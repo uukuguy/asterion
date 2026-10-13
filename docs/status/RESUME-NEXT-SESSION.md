@@ -1,10 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 22:06 Asia/Shanghai. Task58 repair verified and pushed [ebb47e7f]. No active trial. Task57 completed9/9; no active paid trial.
+> Updated: 2026-10-13 22:32 Asia/Shanghai. Task59 targeted L9 packaged gate witness PASS; no active model/game process.
 
 ## 当前目标与授权
 
 用户在 Task57 满分通关后要求开始实施死亡预测后续修正。已实现风险／终局回测分层和应用授权的有限未知探针，已完成核对并提交推送（ebb47e7f）。没有新付费试验授权，也不需重跑完整第9关。
+
+## Task59 targeted witness PASS
+
+User accepted a short checkpoint hazardous-candidate verification, not a full-level solve. Private evidence `.asterion-private/task59-p7-level9-gate-witness/receipt.json`, `verify_l9_gate.py`, `original-reg6-callbacks.py`, `verification.log`.
+
+- Actual offline SDK restored exactly the original first376actions to L9/eightcompletedlevels through production `_apply_saved_prefix`; each before/after transition checked. These are restoration/setup, not new actor solving actions. Guard forbids all target/suffix dispatch beyond376.
+- Installed repaired wheel SHA4ba8d6b0c46df44154f2a4f322c7a8b2346a1a54530b49e49686693ca8b46167, fivechangedPythonfiles/threeextensionsbyte-aligned. Sourceebb47e7f. Standard operator/sharedIPython/applicationservices.execute_plan path, no assessment stub, no Pi/backend launch.
+- Reconstructed original predeath reg6 callbacks from actual actorcells16/59/87/105/109 with historicalG=-1. New registration1/currentkernel identity (not originalruntime6). Fresh model fullresult equals original rawartifact c239d148c6c5a309313ff6f9a734008f097e4e30b844c7f4993135c75914da5f, including hash; coverage automatic/contact_unmodeled/tick2 for ACTION6(57,33) preserved.
+- Ordinaryreview applied0/model-coverage-review, subsequent exactlybound explicitprobe applied0/model-coverage-review with denied/authorization_required,limit/used/remaining0,safety_verifiedfalse. TargetSDKdispatchattempts0/steps0,journal376,frameSHA13240ab… andobservationSHA37a4ee…/refunchanged.0modelbackendcalls,4actualkernelcells(twoautoevaluations),alloriginalevidencehashesunchanged.
+- Root verified receipt and independent Astra read-only audit APPROVED. Prime/SDK cleanuptrue; no residual witness/kernel/Pi processes. This verifies actual packaged candidate admission with original model and real game state; it is not a new full-game outcome or Pi/model inference deployment.
 
 ## Task58 implementation boundary
 
@@ -50,4 +60,4 @@
 
 Authorized implementation and verification completed and pushed [ebb47e7f]; no outstanding repair step or active paid trial. On a later application run, select its finite unknown exploration allowance deliberately; no model-controlled grant. This intentional default tightening can stop research until the model covers the candidate or the application accepts bounded unknown risk. It prevents declaration-only probe377 admission; it cannot prove an inaccurate model's claimed full coverage is true or guarantee zero deaths.
 
-Task57 remains valid full-score checkpoint continuation under its frozen prior policy. New source/wheel offline checks do not claim new live deployment or uninterrupted cold9/9. No full L9 repeat is required to verify the summary/gate changes. If a future real dispatch witness is requested, target the hazardous-candidate admission boundary within explicit finite authority rather than rerunning an entire solved level.
+Task57 remains valid full-score checkpoint continuation under its frozen prior policy. Task59 actual offlineSDK/sharedkernel gate checks do not claim a new full-game outcome, Pi/model deployment or uninterruptedcold9/9. No full L9 repeat is required to verify the summary/gate changes. The requested hazardous-candidate packaged witness has now passed; no further real-game action or full-level repeat is needed for this repair.

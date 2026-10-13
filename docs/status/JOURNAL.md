@@ -5115,3 +5115,8 @@
 - 22:06 Death repair RED→GREEN125Python/115TSPASS; saved35outputs preservefatal/unknown; wheelidentityPASS,0paidcalls,AstraAPPROVE.
 
 - 22:07 [ebb47e7f] Separate trusted probe authority and death-risk coverage; preserve unknown evidence and block declaration-only dispatch.
+
+- 2026-10-13 22:24 [94e40fcd] Closed verified repair recovery state; code and docs pushed.
+- 2026-10-13 22:24 User accepts short L9 hazardous-candidate packaged witness; restoration only, no model or full-level solving.
+
+- 2026-10-13 22:32 Task59PASS: realSDK376restored/originalmodelartifactidentical,packagedprobe0dispatch,frameunchanged,0modelcalls,cleanuptrue,AstraAPPROVE.
