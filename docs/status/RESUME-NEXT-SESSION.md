@@ -1,16 +1,16 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 12:22. Session remains active — stable main documentation committed; no new live trial.
+> Updated: 2026-10-13 12:23. Session remains active — baseline published to origin; no new live trial.
 
 ## 已验证事实
 
 - README.md, README.zh-CN.md and AGENTS.md now describe the standard Prime library owner, independent applications, NOTES and P7 model-relative rollout boundaries. Independent consolidation/documentation review found no blockers. Fresh post-merge Python76 PASS; runtime TypeScript31 PASS; Prime extension112 PASS/6 skipped; lint/docs PASS (327 markdown/283 local links). No full regression, promotion or new model/game trial performed for this consolidation. Baseline is marked by `asterion-prime-p7-baseline-2026-10-13`.
 
-- Main fast-forward includes all 237 commits from the research branch. Original branch tips are retained under annotated `baseline-archive/2026-10-13/` tags. Fully merged branches retired; patch-equivalent experiment branches renamed under `archive/2026-10-13/`. P1–P3 legacy branches/worktrees and P2/P3 uncommitted journal receipts are preserved; old code was already integrated before deliberate legacy removal, so no old implementation was cherry-picked. Remote main has not been pushed.
+- Main fast-forward includes all 237 commits from the research branch. Original branch tips are retained under annotated `baseline-archive/2026-10-13/` tags. Fully merged branches retired; patch-equivalent experiment branches renamed under `archive/2026-10-13/`. P1–P3 legacy branches/worktrees and P2/P3 uncommitted journal receipts are preserved; old code was already integrated before deliberate legacy removal, so no old implementation was cherry-picked. Remote main and all 11 baseline/archive tags were pushed and verified on 2026-10-13; baseline tag resolves to `4107aefb`.
 
 - Recovery checked closeout commit `0b79acb9` and recovery commit `fd30ab81` and final JOURNAL entries: Task52 process cleanup and evidence sealing were recorded; real cache/cost acceptance remains open. Working tree was clean before this recovery-only edit.
 
-- Branch `main`; stable Prime/P7 baseline fast-forwarded from `feat/prime-research-notes` on 2026-10-13. Latest implementation: `d1c96cf1` (cache/cost statistics); preceding `cb0ba4ec` (scope support and actor-only history), `07d00c1f` (retained fatal witnesses/input pressure). Stop receipt committed `33d0214d`. No push performed in this closeout.
+- Branch `main`; stable Prime/P7 baseline fast-forwarded from `feat/prime-research-notes` on 2026-10-13. Latest implementation: `d1c96cf1` (cache/cost statistics); preceding `cb0ba4ec` (scope support and actor-only history), `07d00c1f` (retained fatal witnesses/input pressure). Stop receipt committed `33d0214d`. Baseline consolidation is now pushed to origin.
 - Task52 fresh BP35 seed0/target9/historyOFF/noresume was explicitly stopped by the user because it was too slow. It ran frozen `cb0ba4ecd712d79ba46045f06e20cfe62d05c0be`, wheel `4ad6518a19f77e1dd0e1a37fb95e663b0aaeec0765ea86bfbcc4881985baabe9`, not the later cache fix.
 - Run `p7-live-20261011205910-0feb1490aea0c7f7684f3644`: 5/9,225 actual actions,3887.154227 seconds,one death,two RESET. Final model callbacks369, settled usage368,input13248210/output133425,peak input61077. Total input includes cache reads/writes; cache fractions and costs are unknown and cannot be backfilled.
 
