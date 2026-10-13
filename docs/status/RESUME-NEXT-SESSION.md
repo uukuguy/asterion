@@ -1,67 +1,95 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-10-13 22:40 Asia/Shanghai. README claims/conclusions rewritten and verified; no active trial.
+> Updated: 2026-10-13 23:30 Asia/Shanghai, end of session. All work authorized in this session is complete. No active research run; no additional paid trial authorized.
 
-## 当前目标与授权
+## TL;DR
 
-用户要求基于已通过的整局接续和死亡前门禁验证，重写中英文 README 的声明与结论。已完成：突出 Prime 重构／应用适配、自主 BP35 checkpoint 接续9/9／本地100分，将旧试验流水账移出正文，现代每步推演和未知探针授权取代旧监督入口限定说明。冷启动六关、选定前缀接续整局、新门禁单候选验证、历史官方成绩分别保留证据和范围。readme_conclusions 只编辑两份 README，Astra 独立事实复审通过，docs-check／diff-check通过。已提交推送（715db8b6），工作区收口；无新模型或游戏试验。
+- Prime/P7 milestone is consolidated on `main`. Annotated remote tag **`asterion-prime-p7-milestone-2026-10-13`** points to **`aca76ed77d0c3586380971381f18c82772c989d7`**. Previous baseline tag remains `4107aefb`. Later main commits contain state-only closeout, not new solver code.
+- BP35 selected-checkpoint continuation reached **9/9, local100.000000**: 335 restored +123 new L9 actions =458; one new death/RESET; final post-RESET attempt80 actions. Sealed trace, independent replay and cleanup passed. Cold L1–L6 was a completed operator-defined checkpoint, not a solving ceiling.
+- Death-prediction/probe repair is implemented and verified. The actual repaired wheel at the exact predeath L9 checkpoint reproduced the original model assessment and refused the unknown probe with **zero target dispatch**, unchanged frame and no model/Pi calls. README, decisions and collaboration memory now reflect these scopes.
 
-## Milestone snapshot
+## 已验证事实
 
-Annotated remote tag `asterion-prime-p7-milestone-2026-10-13` points to `aca76ed77d0c3586380971381f18c82772c989d7`, the completed repair/witness/README snapshot. Tag annotation records verified cold checkpoint, selected full-game continuation and exact repaired admission scope. Earlier `asterion-prime-p7-baseline-2026-10-13` remains unchanged. Later main state-only receipts do not change that milestone snapshot.
+### Implementation and integration
 
-## Task59 targeted witness PASS
+- Prime owns standard application backend/RPC/extensions/session/workspace cleanup; existing P1 and P3–P7 model paths, including P7 narrator, are adapted. Generic infrastructure stays separate from P7 research/data. P2 autonomous capability and CLI purpose remain separate.
+- Main consolidation and archived development branches are complete. Do not move the milestone/baseline tags or touch retained P1–P3 worktrees and unrelated journals/services. Previous “branch awaits main integration” statements are superseded.
+- `2673de30`: ordinary solve/sweep callbacks are configurable finite model1024/tool4096 by default, with separate diagnostic settlement headroom. Frozen profiles keep their own bounds.
+- `a35f5236`/`cffe2fe8`: native failed-assistant context omission supports verified zero-dispatch partial tool calls; uncertain/results/duplicate/aborted/length cases remain unavailable. Private v2 reasons distinguish context/producer/integration failures. A Pi/RPC stage label alone does not establish cause.
+- `12d12e51`: modern standard solve/selected resume/sweep bind the existing per-primitive shared-kernel evaluator; earlier Task54/55 did not exercise host automatic evaluation.
+- `7c2ad1e3`: unknown advance returns review before dispatch; gaps locate model component/microstep; exact-bound one-step probes and persistent local cases introduced. This is the **earlier policy frozen in Task57**.
+- `ebb47e7f`: every unassessed probe additionally needs trusted application `unknown_probe_action_limit` (default0), injected operator→runtime→Solver. Model prose/plans/NOTES do not grant authority. Valid current/prior registration/checker/gap evidence and exact review binding remain necessary; missing/failed/malformed/unavailable assessments cannot use the allowance. Fatal/applicability/stale/control/uncertain/budget vetoes remain stronger.
+- Allowance scope is a newly constructed host/attempt; resume defaults0. Spend before actual submission, including uncertain effects; cached plans do not spend again and RESET does not replenish. Positive allowance with disabled automatic evaluation rejects before resources.
+- Risk, findings, coverage, predicted outcome and raw trace references are preserved independently. Incomplete terminal reconstruction stays unknown/unresolved even after fatal recognition. Actual unassessed death is `death_not_assessed`, including feedback-persistence failures. Complete matched death and unmapped pixel claims keep their separate comparison boundaries.
 
-User accepted a short checkpoint hazardous-candidate verification, not a full-level solve. Private evidence `.asterion-private/task59-p7-level9-gate-witness/receipt.json`, `verify_l9_gate.py`, `original-reg6-callbacks.py`, `verification.log`.
+### Task57: full-game selected continuation
 
-- Actual offline SDK restored exactly the original first376actions to L9/eightcompletedlevels through production `_apply_saved_prefix`; each before/after transition checked. These are restoration/setup, not new actor solving actions. Guard forbids all target/suffix dispatch beyond376.
-- Installed repaired wheel SHA4ba8d6b0c46df44154f2a4f322c7a8b2346a1a54530b49e49686693ca8b46167, fivechangedPythonfiles/threeextensionsbyte-aligned. Sourceebb47e7f. Standard operator/sharedIPython/applicationservices.execute_plan path, no assessment stub, no Pi/backend launch.
-- Reconstructed original predeath reg6 callbacks from actual actorcells16/59/87/105/109 with historicalG=-1. New registration1/currentkernel identity (not originalruntime6). Fresh model fullresult equals original rawartifact c239d148c6c5a309313ff6f9a734008f097e4e30b844c7f4993135c75914da5f, including hash; coverage automatic/contact_unmodeled/tick2 for ACTION6(57,33) preserved.
-- Ordinaryreview applied0/model-coverage-review, subsequent exactlybound explicitprobe applied0/model-coverage-review with denied/authorization_required,limit/used/remaining0,safety_verifiedfalse. TargetSDKdispatchattempts0/steps0,journal376,frameSHA13240ab… andobservationSHA37a4ee…/refunchanged.0modelbackendcalls,4actualkernelcells(twoautoevaluations),alloriginalevidencehashesunchanged.
-- Root verified receipt and independent Astra read-only audit APPROVED. Prime/SDK cleanuptrue; no residual witness/kernel/Pi processes. This verifies actual packaged candidate admission with original model and real game state; it is not a new full-game outcome or Pi/model inference deployment.
+- Private root `.asterion-private/task57-bp35-level9-coverage-review/`; run **`p7-live-20261013115314-e524f29db557a595c3392ba1`**.
+- Frozen source `7c2ad1e3c43067e833469767e26c345842aa4d08`; wheel SHA256 `bd97a22535124f6195327a6e929a75e3e8d75a644d96b70a87f80bdf20752500`.
+- Input was the formal **335-action/eight-level prefix export produced by Task55**, source Task54 run `p7-live-20261013060100-342ba6272a17b7ae7fcffb2b`; only L8 NOTES301, history/frame≤335, no source cells or future L9 research. Source export tree SHA `a3cb8340175c6edb6217839797d881995e88f23e7778b87a9df7f2fb5a8d1557`.
+- HistoryOFF does not disable explicitly selected resume experience. Never substitute original Task54's complete final directory: it contains later L9 research. Reuse the formal isolated export if a future authorized comparison requires the same start.
+- Controls: 163 new L9 actions/totalcap498, model1024/tool4096, operator3600s/guest3780s. Completion: **game-won**, 458total, 9/9/local100; new death377/RESET378, final winning attempt379–458=80actions, 40remaining. Launcher elapsed2770.867s (46m10.87), exit0.
+- All144host-auto attempts recorded:143effective evaluations/1RESET, median39.004ms/p9565.132ms/total6.195s.21coverage reviews (18zero-dispatch,3blocked batch suffixes),19explicit probes,0missingmodel/0fatalveto.
+- First death was explicitly unassessed probe, not predicted safe: automatic/contact_unmodeled/tick2, ACTION6(57,33). Actor acknowledged possible death/offscreen movement and unknown recovery cost. Case survived RESET/revisions.31later raw historical checks recognized conditional fatal, but full terminal trajectory stayed incomplete; frozen outcome-only summaries obscured this distinction.
+- One real BFS was observed; source reconstruction and repeated case summaries added overhead. No sustained no-op loop or context projection rejection. SDK estimateUSD4.632586, not invoice; input6735270/output68819/cache5013760 (74.44%),174usageevents.
+- `final-receipt.json`, `rollout-process-audit.json`, `cleanup-receipt.json`, `final-passive-snapshot.json` preserve exact evidence. Sealed/replay/cleanuptrue; replay SHA `15464f786a26c2496c71870ec9f2ee1e7d5aecc943caf1038df21aadc7c067d9`. Guest unit `asterion-p7-6d8e8bb216a347c7a049577c6dc391ae.service` inactive/not-found/MainPID0/emptycgroup.
 
-## Task58 implementation boundary
+### Task58/59: repaired policy and exact packaged witness
 
-- `unknown_probe_action_limit=0` injects only through P7 `build_p7_operator_resources` → `P7ResearchRuntime` → `Solver`. True nonnegative finite integer, no more than game actioncap when present. Positive authority on disabled-auto/legacy paths rejects before resources. Model plans/prose/NOTES cannot grant or replenish. Newhost/attempt lifetime; resume defaults0, not durable run-global replenishment.
-- Existing singleprimitivegoal/risk/cost and exact prior/current review observation/action/model registration/kernel binding remain necessary. Registered/evaluated current/prior model with checker and explicit valid nonempty gaps only. Missing model/checker, malformed/unavailable evidence and failed computation cannot use allowance. Fatal/applicability/control/stale/uncertain/budget veto remain stronger. Consume before submission, including uncertain effects; cached plan no respending, RESET no probe charge. Covered candidates continue normally; finite application risk acceptance is not verified safety.
-- Backtests now retain predicted_outcome, predicted_risk, coverage, findings and exact raw artifact references. Partial/unassessed terminal reconstruction remains unknown/unresolved even if conditional fatal recognized. Complete death matches and complete nondeath contradicts; initial-dead without transition and unmapped pixel cases stay unresolved. Normal and feedback-persistence-failure paths label unassessed real death death_not_assessed, not safe-model contradiction.
-- Independent Astra code review APPROVED. Root final commands PASS125Python (90Solver/runtime/probe +35backtest/auto),115TypeScript/6existingexternal skips, resource byte-check, scopedruff/docs/diff. Private `.asterion-private/task58-death-prediction-repair/` contains tests/logs, `verify_saved_death_predictions.py`/`saved-death-classification-receipt.json`, wheel and `verify_wheel_policy.py`/`wheel-policy-receipt.json`.
-- Saved Task57 predeath377 production-classification replay returns death_not_assessed.35 original kernel result envelopes replayed via current `_ensure_backtest`,31conditionalfatal/4unassessed nowallunknown,originalrisk/coverage/findings/artifactSHApreserved;excluded1unavailablewithoutartifact.0model/engine/kernelexecute,sourceTask57filesunchanged. Scope saved-output classification, not re-execution of actor functions.
-- Packaged wheel SHA4ba8d6b0c46df44154f2a4f322c7a8b2346a1a54530b49e49686693ca8b46167. Wheel-import smoke validates final five source files/three extension resources byte-identical. Savedpredeathassessment+reconstructedreviewbinding defaultprobe377decision authorization_required; explicitapplication1 returns acceptedunknownrisk notsafety.0model/gamecalls,notactualdispatchdeployment. First smoke failed as late fixes changed source after earlier wheel build; rebuilt final wheel and exact check passed, no acceptance of stale resources.
-- Root owns docs/prompt/TS/resources; backtest_fix owned rollout runtime/backtests and private saved-output replay; probe_gate_fix owned Solver/operator/runtime/probe tests; probe_contract owned design/independent review. All source workers finished. No full unrelated promotion regression or real-game witness per user's narrow offline repair scope; packaged source/resource verification is separate from live behavior.
+- Task58 private root `.asterion-private/task58-death-prediction-repair/`: source/runtime/probe90Python + backtest/auto35Python =**125PASS**; TypeScript**115PASS/6existingexternal skips**; resource byte-check, scopedruff/docs/diff PASS; Astra independent source review APPROVED. No full unrelated promotion regression was claimed under the user's focused research scope.
+- Saved-output production classification replay:35original kernel envelopes (31conditionalfatal/4unassessed) remain unknown/unresolved with original risk/coverage/findings/artifact hashes; one unavailable/no-artifact record excluded.377feedback becomes death_not_assessed.0model/engine/kernelexecute; raw Task57 files unchanged. This is classification replay, not a new actor model trial.
+- Repaired wheel SHA **`4ba8d6b0c46df44154f2a4f322c7a8b2346a1a54530b49e49686693ca8b46167`**. Early stale-wheel byte check failed after late source fixes; final rebuild matches all five changed Python files/three extension resources. Do not revive the rejected stale build.
+- Task59 private root **`.asterion-private/task59-p7-level9-gate-witness/`**: `receipt.json`, `verify_l9_gate.py`, `original-reg6-callbacks.py`, `verification.log`. User authorized this **single short witness**, not a whole-level solve.
+- Actual offline SDK restored exact376recorded actions through production `_apply_saved_prefix`, checking every transition.376actions are restoration/setup; no new solving action. External guard forbids every SDK suffix dispatch.
+- Original predeath callbacks extracted from actual actor cells16/59/87/105/109, historical **G=-1**; new registration1/currentkernel, not original runtime registration6. Shared IPython recomputed the **full original result and identical artifact hash** `c239d148c6c5a309313ff6f9a734008f097e4e30b844c7f4993135c75914da5f`. No assessment stub or actor hint.
+- Standard application services `execute_plan`: ordinaryreview0/model-coverage-review; matching explicitprobe0/model-coverage-review, denied/**authorization_required**, limit/used/remaining0, safety_verifiedfalse. TargetSDKattempts0/steps0; journal376, observation/frame unchanged.4kernelcells including2auto evaluations,0Pi/modelbackend calls. Prime/SDK cleanuptrue, source evidence unchanged; Astra read-only audit APPROVED.
 
-## Task57 completed
+### Public statements and final state
 
-- Root `.asterion-private/task57-bp35-level9-coverage-review/`，actual run `p7-live-20261013115314-e524f29db557a595c3392ba1`，unit `asterion-p7-6d8e8bb216a347c7a049577c6dc391ae.service`。
-- Launcher PTY39451 completed exit0, elapsed2770.867s; unitinactive/MainPID0/emptyControlGroup/no cgroup process. Worker preserved cleanup-receipt.json.
-- Frozen source7c2ad1e3c43067e833469767e26c345842aa4d08; actual wheel SHA256bd97a22535124f6195327a6e929a75e3e8d75a644d96b70a87f80bdf20752500 preserved in trial root. Exact launch/preparation/prefix-copy/export receipts are there.
-- Standard solve GAMEbp35 target9/historyOFF; effective selected experience is only the isolated335-action/eight-level prefix with NOTES301/no futureL9/historymax335/frame335/cells0. Source is original Task54 ID exported by Task55, not Task55/56's final L9 research. SDK verificationPASS. First empty build venv lacked SDK and did not enter replay; existing SDK interpreter plus byte-identical current-wheel Python then verified normally.
-- New L9 allowance163,totalcap498;model1024/tool4096,operator3600s/guest3780s. Same starting materials and controls as Task55/56; repaired coverage policy/guidance differs.
-- Terminal game-won9/9,total458=335restored+123newL9,1newdeath377/1RESET378. Final postRESET winning attempt80actions, remaining40 of163 new allowance. Launcher elapsed2770.867s (46m10.87), sealed/replay/cleanuptrue. summary partial_game_score100.000000; replaySHA15464f786a26c2496c71870ec9f2ee1e7d5aecc943caf1038df21aadc7c067d9.
-- 144host_auto attempts/143evaluated/1RESET;103no_identified_fatal/41unassessed includingRESET.21review (18zero-dispatch,3batchsuffixblocked),19probes all exactbound;0model_missing/0fatalveto. Median39.004ms/p9565.132/max96.718,total6.195s. Ordinary unknown advance stops verified; single-step probe permits unassessed effects and can die.
-- First death was explicitly unassessed probe, not a safe prediction. Case1 persists acrossRESET and model revisions.36historicalbacktests summary35contradicted/1unavailable;31raw traces identifyconditional_fatal but full death terminal trajectory remains unreplicated withviewportgap. Outcome-only summary omits risk/coverage distinction and mislabels unassessed death as model_mismatch; do not interpret as model never recognizes fatal or as resolved case.
-- 68actorcells/33source-recoverycells/one actualBFS; lateview-boundary probescontinuedwithoutcoverageconvergence. No long no-op loop evidence.93host_auto resultsrepeat~150258bytesbacktestsummary (privateJSON estimate,notprovider token attribution).174usageevents input6735270/output68819/cache5013760 (74.44%),SDKestimateUSD4.632586,notinvoice.168primary/6inactivecontextrequests,no projectionrefusal,peak224636bytes.
-- Final receipt, final passive snapshot, rollout-process-audit.json and cleanup-receipt.json are preserved in Task57root. Original frozen evidence unchanged. Selected prefix continuation9/9 is verified; uninterruptedcold9/9 remains untested.
+- `715db8b6`/`aca76ed7`: bilingual README foregrounds refactored Prime/application integration and autonomous BP35 local full-score continuation; milestones/claim-evidence table replace old trial narration. Modern per-step evaluation replaces stale supervised-only language.
+- Milestone annotation records these exact scopes. Main after tag contains only state receipts/handoff. Branch and remote identities, docs links (329files/291links PASS), witness receipts and absence of owned local/guest processes were checked at closeout; independent handoff review APPROVED. Unrelated background services/worktrees were preserved.
 
-## 已验证的软件机制
+## 当前判断
 
-- 7c2ad1e3 committed/pushed: pure rollout reports bounded8-category coverage gaps with phase/actionindex/tick/reason/raw trace reference; actor-declared semantics are not hidden-engine facts.
-- Default advance with unassessed coverage stops current primitive and suffix as model-coverage-review. Explicit single-step probe requires a prior returned review at the exact observation/canonical action/model registration/kernel generation, nonempty goal and risk:/cost: assumptions. Recompute every probe; retained fatal/scope, current-ref/generation, cancellation, execution-unknown and budget boundaries remain stronger. RESET only bypasses coverage review, preserves cases.
-- Current-run/current-level death and actor-expectation cases are separate. New registration rechecks history, retaining matched/contradicted/unknown/not_comparable/unavailable/not_checked, counts all cases even if display clips32, and grants no execution authority. Initial-dead before transition cannot be a matched death prediction; pixel claims without a model mapping remain not_comparable. Changing model name/NOTES does not clear unresolved evidence.
-- REDactual21entrytests14failures→GREEN107relatedPython,115TSPASS/6existing skips,ruff/docs/diffPASS, independentAstrareviewAPPROVE. No full unrelated regression/promotion. Actual wheel was rebuilt for this trial; tests/source alone do not prove solving efficacy.
-- Root ownsdocs/prompt/TS/resources; worker callback_capacity_fix owns implementation and launch; childcoverage_gaps owned purehelper/backtests, finished. Plan `docs/superpowers/plans/2026-10-13-p7-coverage-decision.md`; D-2026-10-13-02 and INDEX synchronized.
+- This milestone is a stable research baseline. The model owns reasoning; the application supplies finite tools/authority and verifiable feedback. Scope-local verified gates should support research without imposing mandatory micro-reasoning procedures.
+- Explicit finite application risk acceptance is the honest mechanism for unknown exploration; actor gap labels or risk prose cannot prove reversibility/safety. Default-zero authority intentionally returns control until the model covers a candidate or the application accepts bounded risk.
+- The death-prediction repair needs no full L9 repeat: exact saved evidence and the real packaged candidate witness answered its admission question. A future trial should answer a distinct new research question rather than remeasure the same gate.
 
-## 历史事实与边界
+## 历史归档／不要重走
 
-- Stable baseline consolidation, README/AGENTS alignment, remote main/archive tags complete. Baseline tag remains4107aefb; preserve P1–P3 worktrees and other uncommitted journals.
-- Task29 six levels were an operator-defined successful checkpoint, not inability. Task53 restoredsix, independently completedL7, stopped old128callback.2673de30 fixed ordinarysolve/sweep1024/4096/configurable limits; a35f5236/cffe2fe8 fixed conservative native error omissions and precise private reasons. Do not blame PiRPC from filenames.
-- Task54 restored280/7levels, addedL8=55zero-deaths andL9=186three-deaths, closed8/9 at60min with53hostactions remaining. Task55 isolated335 prefix reranL9=163three-deaths/fourRESET,8/9 atactioncap. Both standard paths lacked hostauto; 12d12e51 corrected each-primitive wiring.
-- Task56 same335 prefix/163budget:163hostauto attempts=160models+3RESET,median25.207ms/p95nearest-rank34.707ms/max63.621ms,total4.242s.8/9/actioncap after1763.594s;deaths346/362/419 allunknown/unassessed→death_not_assessed,RESET347/363/420,missing0/veto0. Final SDKestimateUSD3.0788932,notinvoice. All trials sealed/replay/cleanuptrue and previousunitsinactive.
-- Task56 pure offline original-function recheck: v1firstdeathunknown; postdeathv2 predictsdead2ticks on identicalpredeathframe/action, proving mechanism can express hazard after learning. Y/T cases remainunknown atviewportboundary after7ticks with revisedmodels. No fatal finding masked byunknown; no proof hazards inherently undiscoverable. Exact observed-death fallback could block a repeat, but none occurredlive. Evidence `.asterion-private/task56-bp35-level9-autoforecast/rollout-process-audit.json`.
-- No cold full9/9 claim. Task44 history-assisted9/9 and originalarcskillr11l are separate evidence. Fixed program framework cannot invent accurate dynamics or certify unknown space.
+- Task29 coldsix211/zero-death was successful operator-defined scope. Task53 independently completedL7=69 then stopped oldcallback128; Task54 completedL8=55/zero-death then L9deadline; Task55 same335prefix L9=163/3death/4RESET atcap; Task56 recorded163host-auto attempts (160model evaluations/3RESET), ended8/9 with3unassessed-action deaths. These historical results remain intact; Task57 subsequently completed9/9.
+- Task54/55 missing host binding was an application defect, not proof the predictor cannot find traps. Task56 first death becomes predicted dead using the revised model offline; other viewport gaps remain unknown, not proof of inherent undiscoverability.
+- An explicitly declared unknown probe was still capable of dying under Task57. Do not report model consent as safety, outcome-only settled as complete coverage, or a changed name/NOTES as discharged counterexample.
+- Provider errors, native assistant records, zero-dispatch partial calls and Python/Node transport failures must be distinguished. Historical request52 cause remains limited by unavailable in-memory raw-native history; later compatibility tests do not manufacture that missing evidence.
+- Task52 user stop and Task44 history-assisted9/9 are separate scopes. Original arc-skill results and historical official100/25games/183levels are not current cold-P7 evidence. Different frozen code/start materials/budgets confound a pure randomness comparison.
+- Old detailed CURRENT-STATE/MEMORY narration is preserved in Git at `045d8ae3`; reports/decisions remain indexed. No new state/archive hierarchy was created. Earlier pending-main/active-run permissions are superseded.
 
-## 下一动作与未完成边界
+## 未完成边界
 
-Authorized implementation and verification completed and pushed [ebb47e7f]; no outstanding repair step or active paid trial. On a later application run, select its finite unknown exploration allowance deliberately; no model-controlled grant. This intentional default tightening can stop research until the model covers the candidate or the application accepts bounded unknown risk. It prevents declaration-only probe377 admission; it cannot prove an inaccurate model's claimed full coverage is true or guarantee zero deaths.
+- No **uninterrupted cold nine-level completion** is demonstrated. Task52 attempted that scope and was stopped by the user; do not say it was never attempted.
+- No whole-game model run under the **post-Task58 stricter default** has been performed. Task59 verifies exact packaged SDK/shared-kernel admission, not Pi/model inference deployment or new full-game success.
+- No general zero-death, model-accuracy, unseen/private-set or cross-domain capability claim. Remaining historical death trajectory coverage is still unresolved, although fatal recognition is visible.
+- Specialized code-aware compaction remains unwired; repeated source-recovery/case-summary costs and general research efficiency need concrete measurements. Inherited P1 manual-compaction actual-request/billing proof, SDK upstream peak memory, P2 autonomous retrieval and Prime CLI positioning remain separate open areas.
+- No new paid trial, full benchmark, official card, publishing action or unrelated branch cleanup is authorized by this handoff. Private receipts/data remain local/ignored; no new external backup was created.
 
-Task57 remains valid full-score checkpoint continuation under its frozen prior policy. Task59 actual offlineSDK/sharedkernel gate checks do not claim a new full-game outcome, Pi/model deployment or uninterruptedcold9/9. No full L9 repeat is required to verify the summary/gate changes. The requested hazardous-candidate packaged witness has now passed; no further real-game action or full-level repeat is needed for this repair.
+## 下一动作
+
+1. Run `project-state resume`; read INDEX, CURRENT-STATE, this handoff and recent JOURNAL; verify current Git/tag/process state.
+2. The closing session's work is complete. Await the user's next research target; do not automatically rerun L9 or reopen the same repair. If continuation is requested, choose an existing open area and a concrete finite measurement before invoking the managed workflow.
+3. Any future application trial must deliberately select finite unknown-risk authority; no actor-controlled grant or silent resume renewal. Use application/operator presets and avoid making the user configure backend/model/cost knobs.
+
+## Read-only recovery commands
+
+```bash
+git status --short
+git log -6 --oneline
+git rev-parse 'asterion-prime-p7-milestone-2026-10-13^{commit}'
+git rev-parse 'asterion-prime-p7-baseline-2026-10-13^{commit}'
+git ls-remote origin 'refs/tags/asterion-prime-p7-milestone-2026-10-13*'
+make docs-check
+```
+
+Reference test commands already passed, not instructions to rerun unchanged code:
+`uv run python -m unittest -q tests.test_prime_p7_solve_rollout tests.test_prime_p7_solver tests.test_prime_p7_probe_preparation tests.test_prime_p7_research_runtime` (90);
+`uv run python -m unittest -v tests.test_prime_p7_rollout_backtests tests.test_prime_p7_auto_rollout` (35);
+`npm --prefix packages/typescript/asterion-prime-extension test` (115pass/6existing skips).

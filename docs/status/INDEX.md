@@ -26,8 +26,8 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-08-prime-autonomous-research-interface-design.md` | 🟢 active | Authorized LLM-owned research interface and genuine execution boundaries. |
 | `../superpowers/plans/2026-10-08-prime-autonomous-research-interface.md` | 🟢 active | Task5 interrupted target failure archived; Task7 generic computation/context continuity and P7 adaptation verified in bounded r11l deployment; subsequent frozen medium BP35 L1–L6 passes221paid/2RESET. |
 | `JOURNAL.md` | 🟢 active | Append-only event log. `/project-state journal "..."` appends. |
-| `RESUME-NEXT-SESSION.md` | 🟢 active | Main baseline consolidation and branch archive; Task53 selected continuation7/9, callback/config and NOTES compatibility fixes; prior Task52 stop:5/9,225actions,64.8min; cache interface separate from frozen trial; evidence, limitations and next instruction boundary. |
-| `CURRENT-STATE.md` | 🟢 active | Structural snapshot, complete source-ancestry contracts, deployed/source repair distinction and unresolved SDK memory/reasoning boundaries. |
+| `RESUME-NEXT-SESSION.md` | 🟢 active | Final milestone handoff: Task57 selected continuation9/9/local100, Task58 trusted finite probe authority and risk/terminal summaries, Task59 actual SDK/shared-kernel zero-dispatch witness; immutable tags, evidence, cleanup and next authorization boundary. |
+| `CURRENT-STATE.md` | 🟢 active | Current structural snapshot: standard Prime ownership, P7 per-action admission and recovery, verified capability scopes and open domain/context/SDK boundaries. Historical trial narration remains in journal/reports/Git. |
 | `../superpowers/specs/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Complete dynamic animation storage, canonical hash identity, error stages and old-certificate compatibility design. |
 | `../superpowers/plans/2026-10-06-p7-dynamic-evidence-capacity.md` | 🟢 active | Core/integration implementation and focused verification; exact deployment and finite BP/G live trial boundaries. |
 | `../superpowers/specs/2026-10-06-p7-vercel-console-sync.md` | 🟢 active | User-authorized local-to-cloud readonly console synchronization boundary. |
@@ -59,7 +59,7 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
 
-- 当前九关冷实测：[2026-10-11 BP35完整目标实测](../reviews/2026-10-11-p7-bp35-full-game-trial.md)：5/9、255动作/4RESET；独立前五关214动作重放通过，128回调上限为强证据推断，九关目标未达成。
+- 历史九关冷实测：[2026-10-11 BP35完整目标实测](../reviews/2026-10-11-p7-bp35-full-game-trial.md)：5/9、255动作/4RESET；独立前五关214动作重放通过，128回调上限为强证据推断，九关目标未达成。
 
 ## Decision history (kept for traceability — verdicts may be outdated)
 
@@ -125,10 +125,17 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - Task50 中止与后续离线修正：沿用上述推演设计/计划；已识别致命风险跨模型保留、旧范围不可用明确暂停；128KiB可配置输入容量提醒不截断画面。见[决策 D-2026-10-12-03](DECISIONS.md#d-2026-10-12-03--retain-identified-fatal-risk-and-monitor-p7-input-pressure)及[当前恢复点](RESUME-NEXT-SESSION.md)。实际死亡前模型安装kernel复现并阻断候选，实战收益及token下降未验证。
 
-- Task51 fresh trial and scope/history follow-up: [current state](CURRENT-STATE.md#task51-stopped-trial-and-narrow-follow-up-2026-10-12), [resume evidence](RESUME-NEXT-SESSION.md). Four levels completed; L5 model error and scope builtin/local-cell support gap remain distinct.
+- Task51 fresh trial and scope/history follow-up: [current retained-risk boundary](CURRENT-STATE.md#standard-p7-per-action-rollout), [resume evidence](RESUME-NEXT-SESSION.md). Four levels completed; L5 model error and scope builtin/local-cell support gap remain distinct.
 
-- Prime cache/cost statistics: [decision D-2026-10-12-04](DECISIONS.md#d-2026-10-12-04--retain-cache-and-cost-observations-separately-from-throughput), [current state](CURRENT-STATE.md#prime-cache-and-cost-statistics-2026-10-12). Optional native fractions and SDK estimates, missing unknown; current frozen trial cannot be backfilled.
+- Prime cache/cost statistics: [decision D-2026-10-12-04](DECISIONS.md#d-2026-10-12-04--retain-cache-and-cost-observations-separately-from-throughput), [current measurement boundary](CURRENT-STATE.md#verified-capability-boundary). Optional native fractions and SDK estimates, missing unknown; discarded Task52 cache details cannot be backfilled.
 
-- Task52 final user stop: [handoff](RESUME-NEXT-SESSION.md) records per-level actions/resources, cleanup and private audit pointers. No active run; cache interface has no real backend acceptance.
+- Task52 historical user stop: [journal](JOURNAL.md) preserves its closure events; [final handoff](RESUME-NEXT-SESSION.md) qualifies it separately from later completion. No active run; Task52 discarded cache details cannot be backfilled. Later Task53–57 real runtime cache/cost observations retain their separate frozen scopes.
 
-- P7 post-Task57 death prediction repair: [plan](../superpowers/plans/2026-10-13-p7-death-prediction-repair.md), [decision D-2026-10-13-03](DECISIONS.md#d-2026-10-13-03--separate-unknown-probe-authority-and-terminal-backtest-coverage). Default-zero application probe allowance and risk/terminal summary separation; frozen Task579/9 unchanged, new live deployment separate.
+- P7 post-Task57 death prediction repair: [plan](../superpowers/plans/2026-10-13-p7-death-prediction-repair.md), [decision D-2026-10-13-03](DECISIONS.md#d-2026-10-13-03--separate-unknown-probe-authority-and-terminal-backtest-coverage). Default-zero application probe allowance and risk/terminal summary separation; frozen Task57 9/9 unchanged; Task59 real offline SDK/shared-kernel candidate witness PASS, no new Pi/model full-game run.
+
+## Current milestone anchors
+
+- [Coverage decision plan](../superpowers/plans/2026-10-13-p7-coverage-decision.md): default review and persistent cases, Task57 full-game continuation complete.
+- [Death prediction repair plan](../superpowers/plans/2026-10-13-p7-death-prediction-repair.md): application-owned finite unknown exploration and risk/terminal summaries, source/package/saved-output checks complete; Task59 exact candidate witness in final handoff.
+- [README](../../README.md) / [中文 README](../../README.zh-CN.md): current public statements distinguish cold checkpoint, local9/9 continuation, exact repaired gate witness and historical official result.
+- Immutable tags: milestone `asterion-prime-p7-milestone-2026-10-13` → `aca76ed7`; previous baseline → `4107aefb`. Main state-only closeout commits do not move either tag.
