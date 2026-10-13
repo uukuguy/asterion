@@ -1,8 +1,10 @@
-# Next-Session Handoff
+# Recovered Session Checkpoint
 
-> Updated: 2026-10-12. Final session closeout. No active game or monitor; do not restart without a new instruction.
+> Updated: 2026-10-13 12:14. Resume recovery: JOURNAL was newer than the saved handoff. The final journal updates were not included in that baton; prior final handoff synchronization was incomplete. No trial restarted.
 
 ## 已验证事实
+
+- Recovery checked closeout commit `0b79acb9` and recovery commit `18c5c5f1` (amended with its journal receipt) and final JOURNAL entries: Task52 process cleanup and evidence sealing were recorded; real cache/cost acceptance remains open. Working tree was clean before this recovery-only edit.
 
 - Branch `feat/prime-research-notes`. Latest implementation: `d1c96cf1` (cache/cost statistics); preceding `cb0ba4ec` (scope support and actor-only history), `07d00c1f` (retained fatal witnesses/input pressure). Stop receipt committed `33d0214d`. No push performed in this closeout.
 - Task52 fresh BP35 seed0/target9/historyOFF/noresume was explicitly stopped by the user because it was too slow. It ran frozen `cb0ba4ecd712d79ba46045f06e20cfe62d05c0be`, wheel `4ad6518a19f77e1dd0e1a37fb95e663b0aaeec0765ea86bfbcc4881985baabe9`, not the later cache fix.

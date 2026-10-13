@@ -5032,3 +5032,8 @@
 - 06:08 Handoff boundary verified: no Task52 processes, final evidence sealed, cache real acceptance remains open.
 
 - 06:08 Finalized handoff and recovery boundaries for reliable resume [5fba84bc; included in amended closeout].
+
+## 2026-10-13
+
+- 12:14 Resume recovered final journal synchronization; no trial restarted, cache acceptance remains open.
+- 12:14 Recovery checkpoint preserves final stop boundaries and prevents unintended restart [18c5c5f1; included in amended commit].
