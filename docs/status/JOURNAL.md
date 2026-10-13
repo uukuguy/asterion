@@ -5079,3 +5079,7 @@
 - 15:05 Committed/pushed eight-level result and authorized L9 rerun comparison boundaries [3cbfd0db].
 - 15:16 Task55 comparison uncovered selectedresume forces whole-source research despite historyOFF; preparing formal335-only SDK/Recorder export to exclude futureL9 evidence.
 - 15:34 Task55 formally isolated335prefix admitted/replayed; launchedp7-live-20261013073318-1b158c64fd7ca5d52aa26c3b,a608866b/wheel72b41624, restored8levels, newL9budget163/60min.
+- 15:45 Isolated L9 rerun checkpoint committed/pushed [1ae520d5]; current25newactions/zero deaths, primaryprojection and distinct route verified read-only.
+- 16:13 Task55 L9 differs:128newactions/one death400,twoRESET361/401,35actionsremain;provider3errors recovered, primaryprojection continuous, no transitionsearch.
+- 16:35 Task55 closed8/9 at163newL9actioncap:3deaths/4RESET, projectionprimary116requests/0refusals, sealed/replay/cleanuptrue, ownedunitinactive.
+- 16:35 Rerun route differed and avoidedTask54death afteridenticalstate; fullmotioncoverage/route-model gaps persisted, confoundedconditions prevent pure-random attribution.
