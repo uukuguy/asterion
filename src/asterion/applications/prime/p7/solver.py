@@ -890,6 +890,42 @@ class Solver:
             "next_prediction": following,
         }
 
+    def _reviewed_coverage_probe(self, plan, assessment, reference, action, generation):
+        """Bind one declared probe to a prior stopped decision, never to safety."""
+        if (plan['purpose'] != 'probe' or len(plan['steps']) != 1
+                or not plan['goal'].strip()):
+            return None
+        declarations = {}
+        for prefix in ('risk:', 'cost:'):
+            declaration = next((item for item in plan['assumptions']
+                                if item.startswith(prefix) and item[len(prefix):].strip()), None)
+            if declaration is None:
+                return None
+            declarations[prefix[:-1]] = declaration[len(prefix):].strip()
+        revision = assessment.get('model_revision')
+        registration = (None if revision is None else
+                        (revision.get('generation'), revision.get('registration_id')))
+        for previous_id, previous in self._plans.items():
+            if previous_id == plan['plan_id']:
+                continue
+            recorded = previous['result']
+            if recorded.get('stop_reason') != 'model-coverage-review':
+                continue
+            for prior in recorded.get('auto_rollouts', []):
+                prior_revision = prior.get('model_revision')
+                prior_registration = (None if prior_revision is None else
+                                      (prior_revision.get('generation'), prior_revision.get('registration_id')))
+                if (prior.get('risk') == 'unassessed'
+                        and prior.get('observation_ref') == reference
+                        and prior.get('action') == action
+                        and prior.get('kernel_generation') == str(generation)
+                        and prior_registration == registration):
+                    return {'status': 'explicit-probe', 'review_plan_id': previous_id,
+                            'goal': plan['goal'], **declarations,
+                            'claims': 'actor-declared-risk-and-cost',
+                            'safety_verified': False}
+        return None
+
     def execute_plan(self, plan: Mapping) -> dict:
         # A computation may need read/observer access to _lock. The separate
         # execution lock retains one plan owner while that lock is released.
@@ -1020,7 +1056,8 @@ class Solver:
                     finally:
                         self._lock.acquire()
                     assessment.update(step_index=index, observation_ref=copy_json(reference),
-                                      action=copy_json(native['action']), origin='host_auto')
+                                      action=copy_json(native['action']), origin='host_auto',
+                                      kernel_generation=str(generation))
                     result.setdefault('auto_rollouts', []).append(assessment)
                     current_observation, current_reference = self._observation()
                     self.control.poll(current_reference['sequence'], current_reference['observation_sha256'])
@@ -1035,6 +1072,13 @@ class Solver:
                         observation, reference = current_observation, current_reference
                     elif assessment['risk'] in {'predicted_death', 'conditional_fatal'}:
                         stop_reason = 'model-predicted-death' if assessment['risk'] == 'predicted_death' else 'model-conditional-fatal'
+                    elif assessment['risk'] == 'unassessed' and native['action']['name'] != 'RESET':
+                        decision = self._reviewed_coverage_probe(
+                            value, assessment, reference, native['action'], generation)
+                        if decision is None:
+                            stop_reason = 'model-coverage-review'
+                        else:
+                            assessment['probe_decision'] = decision
                     if stop_reason != 'matched':
                         unexecuted_start = index
                         break
@@ -1094,23 +1138,25 @@ class Solver:
                     result["feedback"].append(feedback)
                     if (count and assessment is not None
                             and native['action']['name'] != 'RESET'
-                            and observation['state'] == 'GAME_OVER'
+                            and (observation['state'] == 'GAME_OVER' or differences)
                             and callable(self.auto_observe)):
                         try:
                             model_feedback = self.auto_observe(
                                 copy_json(assessment), before_reference, copy_json(reference),
-                                copy_json(native['action']), observation['state'])
+                                copy_json(native['action']), observation['state'],
+                                **({'step_feedback': copy_json(feedback)} if differences else {}))
                             model_feedback = copy_json(model_feedback)
                         except Exception:
                             mismatch = assessment.get('status') == 'evaluated' and (
                                 assessment.get('outcome') in {'settled', 'goal', 'collision'})
                             model_feedback = {
                                 'origin': 'host_feedback',
-                                'type': 'model_mismatch' if mismatch else 'death_not_assessed',
+                                'type': ('model_mismatch' if mismatch else 'death_not_assessed')
+                                        if observation['state'] == 'GAME_OVER' else 'plan_expectation_mismatch',
                                 'death_case_sequence': reference['sequence'],
                                 'before_observation_ref': before_reference,
                                 'after_observation_ref': copy_json(reference),
-                                'action': copy_json(native['action']), 'actual_state': 'GAME_OVER',
+                                'action': copy_json(native['action']), 'actual_state': observation['state'],
                                 'predicted_risk': assessment.get('risk'),
                                 'predicted_outcome': assessment.get('outcome'),
                                 'model_revision': assessment.get('model_revision'),
@@ -1119,6 +1165,12 @@ class Solver:
                                 'level': before_reference.get('level'),
                                 'claims': 'observed-case-only', 'execution_authority': 'none',
                                 'evidence_status': 'feedback_record_unavailable'}
+                            if observation['state'] != 'GAME_OVER':
+                                model_feedback.pop('death_case_sequence')
+                                model_feedback.update(
+                                    expected=copy_json(feedback['expected']),
+                                    differences=copy_json(differences),
+                                    claim_source='actor_plan_expectation')
                         if model_feedback is not None:
                             result.setdefault('model_feedback', []).append(model_feedback)
                     self._emit(

@@ -90,13 +90,17 @@ Host services are operator-owned and explicitly injected. `executor.controlled` 
 
 通用 Prime 负责上下文归档、cursor／projection、资源与恢复边界；P7 提供 NOTES 研究内容、真实观察和领域工具。当前工作上下文以已接受 NOTES 为 epoch，旧明细按引用读取；普通 NOTES 与 Pi 原生手动／自动压缩分开。Task43 的原生上下文、ACK／checkpoint／resume、worker 连续性及 metadata 修复有具体验证，不能因此宣称专用代码摘要已接通或完整历史认知等价。
 
-P7 新研究默认不加载历史经验，过去运行材料须明确 process opt-in 或选定 resume。监督研究入口的 actor-model rollout 只执行模型自己写出的程序；逐动作宿主评估和已识别致命风险拦截不证明模型正确或未来安全。主动调用与 host_auto 独立记录。模型可见 cell 历史只包含 actor cells，私有 kernel 证据保持完整。通用 Prime 不接收 ARC 机制或隐藏引擎语义。
+P7 新研究默认不加载历史经验，过去运行材料须明确 process opt-in 或选定 resume。现代 solve／resume／sweep 与监督研究的 actor-model rollout 只执行模型自己写出的程序；逐动作宿主评估和已识别致命风险拦截不证明模型正确或未来安全。主动调用与 host_auto 独立记录。模型可见 cell 历史只包含 actor cells，私有 kernel 证据保持完整。通用 Prime 不接收 ARC 机制或隐藏引擎语义。
 
 历史官方 100.00 属于原代码身份和有经验累计研究口径；Task40 接入验证、Task43 局部迁移修复及 Task52 用户中止的 5/9 均按各自范围记录。后续 cache／cost 字段已实现，Task52 原实跑明细不可补回；缺失／部分覆盖仍为 unknown，`pi_sdk_estimate` 不等于账单。不能从 token 总量推断实际支付，不能将后续接口测试推广为原实跑验收。
 
 ### 应用调用容量
 
 有限调用容量由应用／operator 配置，经 selection、不可变 options、实际 Prime authorization 与执行计数器传递同一个值；预设缺省值不能被当成框架硬上界。普通 P7 solve／sweep 缺省 model1024／tool4096，可通过 operator 的 `ASTERION_PRIME_P7_MODEL_CALLBACKS` 与 `ASTERION_PRIME_P7_TOOL_CALLBACKS` 配置正整数容量，配置不进入模型环境。冻结 witness／official／autonomy 与显式监督模式保留独立授权规则；配置不能产生无上限授权。触限必须记录实际配置值、观测值及具体资源代码，不得因记录阶段为 `pi.prompt` 而归因为 RPC 管道故障。
+
+### P7 覆盖审查与明确探针
+
+覆盖未知默认先返回 `model-coverage-review`，保留缺口、微步与证据；不得报告完就自动推进。仍需探索时，使用匹配当前观察／动作／登记／内核代际的已返回审查，提交单步 `purpose: probe`、非空 goal 和 `risk:`／`cost:` assumptions。探针不是安全证明，不能绕过致命风险、适用性未知、执行未知、取消或预算。RESET 保留恢复边界，不清除反例。新登记模型的当前运行同关回测保留矛盾、未知及不可比较项；只改名字或 NOTES 不算修复。不要将任意模型 JSON 硬比为真实画面，也不要把局部回测推广为完整规则认证。见 D-2026-10-13-02 与当前 checkpoint。
 
 ### P7 改动与部署验证
 

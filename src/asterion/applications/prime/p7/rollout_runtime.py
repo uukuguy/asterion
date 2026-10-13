@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+from contextlib import nullcontext
 from concurrent.futures import TimeoutError as FutureTimeout
 import hashlib
 import json
@@ -233,6 +234,7 @@ def _rollout_compact(result):
     return {'status': result.get('status', 'evaluated'), 'risk': risk.get('status', 'unassessed'),
             'reason': result.get('reason', 'model-relative'), 'outcome': result.get('outcome'),
             'ticks': result.get('ticks', 0), 'coverage': risk.get('coverage'),
+            'evaluated_actions': result.get('evaluated_actions', 0),
             'findings': risk.get('findings', []), 'execution_authority': 'none',
             'claims': 'model-relative', 'initial_state_sha256':result.get('initial_state_sha256'),
             'scope_extractor_id':result.get('scope_extractor_id')}
@@ -296,10 +298,10 @@ def _evaluate_registered(frame, reference, action, boundary):
     global _registered_rollout_model
     model = _registered_rollout_model
     if model is None:
-        return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': 'model_missing', 'ticks': 0}, None
+        return _rollout_unavailable('model_missing','model_unavailable'), None
     if model['boundary'] != boundary:
         _registered_rollout_model = None
-        return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': 'model_boundary_invalidated', 'ticks': 0}, None
+        return _rollout_unavailable('model_boundary_invalidated','model_unavailable'), None
     try:
         try:
             fingerprint = _rollout_scope_fingerprint(model['from_frame'])
@@ -325,7 +327,13 @@ def _evaluate_registered(frame, reference, action, boundary):
             result['scope_extractor_id'] = extractor_id
         return _rollout_compact(result), result
     except Exception:
-        return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': 'model_callback_failed', 'ticks': 0}, None
+        return _rollout_unavailable('model_callback_failed','computation_failure'), None
+
+def _rollout_unavailable(reason, kind):
+    risk = _p7_rollout_risk_new(None)
+    _p7_rollout_gap(risk,kind,0,reason)
+    return {'status':'not_evaluated','risk':'unassessed','reason':reason,'ticks':0,
+            'coverage':risk['coverage'],'execution_authority':'none','claims':'model-relative'}
 
 def evaluate_action(frame, observation_ref, action, *, full=False):
     """Actively evaluate the registered model against an explicit real snapshot.
@@ -394,10 +402,27 @@ def last_auto_rollout():
     """Read the last raw host model result in this kernel; not a live game call."""
     return _p7_rollout_copy(_last_auto_rollout_result)
 
+def _host_backtest_action(frame, reference, action, boundary):
+    global _last_auto_rollout_result
+    saved = _last_auto_rollout_result
+    try:
+        return _host_evaluate_action(frame,reference,action,boundary)
+    finally:
+        _last_auto_rollout_result = saved
+
 def _invalidate_rollout_model():
     global _registered_rollout_model
     _registered_rollout_model = None
 '''
+
+
+def _unavailable_assessment(reason, kind='computation_failure', phase='input'):
+    return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': reason, 'ticks': 0,
+            'coverage': {'checker_supplied': False, 'evaluated_ticks': 0, 'unassessed_ticks': 0,
+                         'errors': [], 'partial': True, 'action_coverage': 'undeclared',
+                         'gaps': [{'kind': kind, 'phase': phase, 'action_index': None,
+                                   'tick': 0, 'reason': reason}], 'gaps_omitted': 0},
+            'execution_authority': 'none', 'claims': 'model-relative'}
 
 
 class RolloutRuntime:
@@ -426,6 +451,11 @@ class RolloutRuntime:
         self.retained_fatal_risks = []
         self._retained_fatal_keys = set()
         self._record_lock = threading.Lock()
+        self._cases = {}
+        self._case_version = 0
+        self._backtest_cache_key = None
+        self._backtest_results = {}
+        self._restore_cases()
 
     def _append(self, value):
         encoded = json.dumps(value, allow_nan=False, ensure_ascii=False, separators=(',', ':')) + '\n'
@@ -490,6 +520,7 @@ class RolloutRuntime:
                                            record['frame_sha256'], record['model_revision'],
                                            record.get('full_trace_ref'), 'actor')
             self._append(record)
+        await self._ensure_backtest(signal)
 
     def read_trace(self, reference, section, start, limit):
         """Selected raw JSON pages from host-retained current-run evidence."""
@@ -516,7 +547,176 @@ class RolloutRuntime:
 
     def model_case_status(self, revision):
         key = self._registration_key(revision)
-        return 'counterexample_observed' if key in self.counterexample_revisions else 'not_checked'
+        if key in self.counterexample_revisions:
+            return 'counterexample_observed'
+        summary = self.snapshot_backtest()
+        if summary['case_count'] and summary['model_revision'] == revision:
+            return summary['status']
+        return 'not_checked'
+
+    def _restore_cases(self):
+        path = self.root / 'calls.jsonl'
+        if not path.is_file():
+            return
+        try:
+            with path.open(encoding='utf-8') as stream:
+                for line in stream:
+                    try:
+                        record = json.loads(line)
+                        if (type(record) is dict and record.get('origin') == 'host_feedback'
+                                and record.get('type') in ('model_mismatch', 'model_risk_observed',
+                                                           'death_not_assessed', 'plan_expectation_mismatch')):
+                            self._remember_case(record)
+                    except (ValueError, TypeError, KeyError):
+                        self.telemetry_failures += 1
+        except OSError:
+            self.telemetry_failures += 1
+
+    def _remember_case(self, record):
+        from .score import digest
+        record = json.loads(json.dumps(record, allow_nan=False))
+        before, after, action = (record[key] for key in ('before_observation_ref', 'after_observation_ref', 'action'))
+        if (type(before) is not dict or type(after) is not dict or type(action) is not dict
+                or set(action) != {'name', 'data'} or type(action['data']) is not dict
+                or action['name'] not in [f'ACTION{i}' for i in range(1, 8)]):
+            raise ValueError('case identity unavailable')
+        case_id = digest({key: record.get(key) for key in (
+            'type', 'before_observation_ref', 'after_observation_ref', 'action',
+            'actual_state', 'expected', 'differences', 'model_revision')})
+        record['case_id'] = case_id
+        if case_id not in self._cases:
+            self._cases[case_id] = record
+            self._case_version += 1
+        if record['type'] == 'model_mismatch' and record.get('model_revision') is not None:
+            self.counterexample_revisions.add(self._registration_key(record['model_revision']))
+        if record.get('actual_state') == 'GAME_OVER' and record.get('frame_sha256') is not None and record.get('level') is not None:
+            key = (before.get('run_id'), record['frame_sha256'], record['level'], self._action_key(action))
+            self.observed_death_cases[key] = record
+        return record
+
+    def _case_context(self):
+        try:
+            return self.owner.solver.current_context()
+        except (AttributeError, ValueError):
+            return {'observation_ref': {}}
+
+    def _current_cases(self, context):
+        reference = context['observation_ref']
+        return [case for case in self._cases.values()
+                if reference.get('run_id') is not None and reference.get('level') is not None
+                and case['before_observation_ref'].get('run_id') == reference['run_id']
+                and case['before_observation_ref'].get('level') == reference['level']]
+
+    def _backtest_key(self, context):
+        reference = context['observation_ref']
+        return (self._action_key(self.revision(self.registration)), self._case_version,
+                reference.get('run_id'), reference.get('level'))
+
+    @staticmethod
+    def _case_summary(case):
+        return {key: case[key] for key in (
+            'case_id', 'type', 'before_observation_ref', 'after_observation_ref', 'action',
+            'actual_state', 'model_revision', 'expected', 'differences', 'full_trace_ref', 'claim_source', 'actual',
+        ) if key in case}
+
+    def snapshot_backtest(self):
+        context = self._case_context()
+        cases = self._current_cases(context)
+        current = self._backtest_cache_key == self._backtest_key(context)
+        results = [{**self._case_summary(case), **(self._backtest_results[case['case_id']] if current else {
+            'status': 'unavailable' if self.registration is None else 'unknown',
+            'reason': 'model_missing' if self.registration is None else 'case_revision_not_rechecked',
+        })} for case in cases]
+        statuses = {result['status'] for result in results}
+        status = next((value for value in ('contradicted', 'unavailable', 'unknown', 'not_comparable', 'matched')
+                       if value in statuses), 'not_checked')
+        return json.loads(json.dumps({
+            'status': status, 'case_count': len(results),
+            'unresolved_count': sum(result['status'] != 'matched' for result in results),
+            'cases': results[:32], 'omitted_cases': max(0, len(results) - 32),
+            'model_revision': self.revision(self.registration), 'case_version': self._case_version,
+            'execution_authority': 'none', 'claims': 'current-run-cases-only',
+        }, allow_nan=False))
+
+    def _case_observation(self, reference):
+        try:
+            lock = getattr(getattr(self.owner, '_broker', None), '_evidence_lock', nullcontext())
+            with lock:
+                observation, checked = self.owner._committed_observation(reference['sequence'])
+            if checked != reference:
+                raise ValueError('case observation unavailable')
+            frame = [list(row) for row in observation.frame[-1]]
+            return json.loads(json.dumps({'frame': frame, 'state': observation.state,
+                                         'levels_completed': observation.levels_completed}, allow_nan=False))
+        except (AttributeError, KeyError, ValueError, TypeError, IndexError):
+            return None
+
+    async def _ensure_backtest(self, signal):
+        from .research_runtime import _ResearchSignal
+        from .score import digest
+        context = self._case_context()
+        key = self._backtest_key(context)
+        if key == self._backtest_cache_key:
+            return
+        revision = self.revision(self.registration)
+        boundary = self.registration.get('boundary') if self.registration else None
+        reference = context['observation_ref']
+        current_boundary = {key: reference.get(key) for key in ('run_id', 'attempt_id', 'level')}
+        current_boundary['reset_sequence'] = context.get('notes_boundary', {}).get('reset_sequence', 0)
+        results = {}
+        for case in self._current_cases(context):
+            checked = {'status': 'unavailable', 'reason': 'model_missing'}
+            before = case.get('before_observation')
+            if boundary is None or boundary != current_boundary:
+                checked['reason'] = 'model_missing' if boundary is None else 'model_boundary_invalidated'
+            elif type(before) is not dict or digest(before.get('frame')) != case.get('frame_sha256'):
+                checked['reason'] = 'case_observation_unavailable'
+            else:
+                combined = _ResearchSignal(self.owner, signal)
+                if combined.cancelled or not self.owner.control.enter('cell'):
+                    checked['reason'] = 'research_stopped'
+                else:
+                    try:
+                        payload = json.dumps([before['frame'], case['before_observation_ref'], case['action'], boundary],
+                                             allow_nan=False, separators=(',', ':')).encode()
+                        packed_input = base64.b64encode(zlib.compress(payload)).decode()
+                        code = "import p7_research as _p7_r\nimport json as _p7_j\nimport zlib as _p7_z\nimport base64 as _p7_b\nprint(_p7_j.dumps(_p7_r._host_backtest_action(*_p7_j.loads(_p7_z.decompress(_p7_b.b64decode(" + repr(packed_input) + ")))),allow_nan=False))"
+                        value, cell_id = await self._cell(code, combined, 'p7-backtest-')
+                        assessment = value['assessment']
+                        checked = {'status': 'unknown', 'reason': assessment.get('reason', 'model-relative'),
+                                   'predicted_outcome': assessment.get('outcome'), 'cell_id': cell_id}
+                        if str(self.owner.kernel.generation) != revision['generation'] or combined.cancelled:
+                            checked.update(status='unavailable', reason='model_evaluation_failed')
+                        elif assessment.get('status') != 'evaluated':
+                            checked['status'] = 'unavailable'
+                        elif case['type'] == 'plan_expectation_mismatch':
+                            checked.update(status='not_comparable', reason='plan_claim_has_no_model_projection')
+                        elif assessment.get('evaluated_actions', 0) == 0 and assessment.get('outcome') in ('dead', 'goal'):
+                            checked.update(status='unknown', reason='initial_terminal_no_transition')
+                        elif assessment.get('outcome') == 'dead':
+                            checked.update(status='matched', reason='observed_death_matched')
+                        elif assessment.get('outcome') in ('settled', 'goal', 'collision'):
+                            checked.update(status='contradicted', reason='observed_death_contradicted')
+                        packed = value.get('result_zlib_base64')
+                        if packed is not None:
+                            raw = base64.b64decode(packed, validate=True)
+                            artifact_id = 'sha256:' + hashlib.sha256(raw).hexdigest()
+                            (self.root / (artifact_id[7:] + '.json.zlib')).write_bytes(raw)
+                            checked['result_artifact_id'] = artifact_id
+                    except Exception:
+                        checked = {'status': 'unavailable', 'reason': 'model_evaluation_failed'}
+                    finally:
+                        self.owner.control.leave('cell')
+                        self.owner.poll()
+            results[case['case_id']] = checked
+            try:
+                self._append({'origin': 'host_backtest', **self._case_summary(case), **checked,
+                              'rechecked_model_revision': revision, 'case_version': self._case_version,
+                              'execution_authority': 'none', 'claims': 'current-run-cases-only'})
+            except Exception:
+                self.telemetry_failures += 1
+        self._backtest_results = results
+        self._backtest_cache_key = key
 
     @staticmethod
     def _registration_key(revision):
@@ -585,9 +785,10 @@ class RolloutRuntime:
             result['reason'] = 'risk_applicability_unavailable'
             result['retained_fatal_risks'] = [{**w, 'match': 'unavailable'} for w in unavailable]
 
-    def record_feedback(self, assessment, before_ref, after_ref, action, actual_state):
-        """Record an observed death against its exact pre-action model result."""
-        if actual_state != 'GAME_OVER':
+    def record_feedback(self, assessment, before_ref, after_ref, action, actual_state, *, step_feedback=None):
+        """Keep observed deaths and actor plan claims as distinct current-run cases."""
+        differences = step_feedback.get('differences', []) if type(step_feedback) is dict else []
+        if actual_state != 'GAME_OVER' and not differences:
             return None
         assessment = assessment or {}
         risk = assessment.get('risk', 'unassessed')
@@ -595,7 +796,10 @@ class RolloutRuntime:
             risk = risk.get('status', 'unassessed')
         outcome = assessment.get('outcome')
         mismatch = assessment.get('status') == 'evaluated' and outcome in ('settled', 'goal', 'collision')
-        kind = 'model_mismatch' if mismatch else 'model_risk_observed' if outcome == 'dead' else 'death_not_assessed'
+        kind = (
+            'plan_expectation_mismatch' if actual_state != 'GAME_OVER' else
+            'model_mismatch' if mismatch else 'model_risk_observed' if outcome == 'dead' else 'death_not_assessed'
+        )
         revision = assessment.get('model_revision')
         record = {'origin': 'host_feedback', 'type': kind,
                   'before_observation_ref': before_ref, 'after_observation_ref': after_ref,
@@ -605,24 +809,47 @@ class RolloutRuntime:
                   'death_case_sequence': after_ref.get('sequence'),
                   'frame_sha256': assessment.get('frame_sha256'), 'level': before_ref.get('level'),
                   'claims': 'observed-case-only', 'execution_authority': 'none'}
-        if record['frame_sha256'] is not None and record['level'] is not None:
-            key = (record['frame_sha256'], record['level'], json.dumps(action, sort_keys=True, separators=(',', ':')))
-            self.observed_death_cases[key] = json.loads(json.dumps(record))
-        if mismatch and revision is not None:
-            self.counterexample_revisions.add(self._registration_key(revision))
-        try:
-            self._append(record)
-        except Exception:
-            self.telemetry_failures += 1
-            record['evidence_status'] = 'feedback_record_unavailable'
-        return record
+        if actual_state != 'GAME_OVER':
+            record.pop('death_case_sequence')
+        before, after = self._case_observation(before_ref), self._case_observation(after_ref)
+        if before is not None and record['frame_sha256'] is None:
+            from .score import digest
+            record['frame_sha256'] = digest(before['frame'])
+        record.update(before_observation=before, after_observation=after)
+        records = [record]
+        if differences:
+            claim = {**record, 'type': 'plan_expectation_mismatch',
+                     'expected': step_feedback.get('expected'), 'differences': differences,
+                     'actual': step_feedback.get('actual'), 'claim_source': 'actor_plan_expectation'}
+            claim.pop('death_case_sequence', None)
+            if actual_state == 'GAME_OVER':
+                records.append(claim)
+            else:
+                records = [claim]
+        persisted = []
+        for item in records:
+            case = self._remember_case(item)
+            try:
+                self._append(case)
+            except Exception:
+                self.telemetry_failures += 1
+                case['evidence_status'] = 'feedback_record_unavailable'
+            persisted.append(case)
+        returned = {key: value for key, value in persisted[0].items()
+                    if key not in ('before_observation', 'after_observation')}
+        if len(persisted) > 1:
+            returned['related_plan_claim_case_id'] = persisted[1]['case_id']
+        return returned
 
     async def _evaluate(self, observation, reference, action):
         from .research_runtime import _ResearchSignal
         owner = self.owner
         combined = _ResearchSignal(owner, self.signal)
+        await self._ensure_backtest(combined)
         if combined.cancelled or not owner.control.enter('cell'):
-            return {'status': 'not_evaluated', 'risk': 'unassessed', 'reason': 'research_stopped', 'ticks': 0}
+            result = _unavailable_assessment('research_stopped', 'model_unavailable')
+            result['backtest'] = self.snapshot_backtest()
+            return result
         try:
             boundary = {'run_id': reference['run_id'], 'attempt_id': reference['attempt_id'],
                         'level': reference['level'], 'reset_sequence': owner.solver._notes_boundary(reference)['reset_sequence']}
@@ -639,6 +866,7 @@ class RolloutRuntime:
             result['_retained_scope_assessments'] = value.get('retained_scope_assessments', {})
             result.update(model_revision=self.revision(self.registration), cell_id=cell_id)
             result['model_case_status'] = self.model_case_status(result['model_revision'])
+            result['backtest'] = self.snapshot_backtest()
             packed = value.get('result_zlib_base64')
             if packed is not None:
                 try:
@@ -673,6 +901,9 @@ class RolloutRuntime:
                     result['reason'] = 'model_evaluation_failed'
                     break
         from .score import digest
+        if result.get('coverage') is None:
+            result['coverage'] = _unavailable_assessment(result['reason'])['coverage']
+        result.setdefault('backtest', self.snapshot_backtest())
         result['frame_sha256'] = digest(observation['frame'][-1])
         # Retain only this fresh model result, before applying earlier witnesses;
         # reapplication must not fabricate a new witness in the new revision.
@@ -680,7 +911,7 @@ class RolloutRuntime:
             self._retain_fatal(result, reference, action, result['frame_sha256'],
                                result.get('model_revision'), result.get('result_artifact_id'), 'host_auto')
             self._apply_retained_fatal(result, reference, action)
-        key = (result['frame_sha256'], reference.get('level'), json.dumps(action, sort_keys=True, separators=(',', ':')))
+        key = (reference.get('run_id'), result['frame_sha256'], reference.get('level'), self._action_key(action))
         observed_death = self.observed_death_cases.get(key)
         if observed_death is not None and action['name'] != 'RESET':
             result['model_risk'] = result['risk']

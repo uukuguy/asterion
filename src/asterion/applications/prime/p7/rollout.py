@@ -52,7 +52,7 @@ def _p7_rollout_risk_new(checker, supported_actions=...):
         "coverage": {
             "checker_supplied": checker is not None, "evaluated_ticks": 0,
             "unassessed_ticks": 0, "errors": [], "partial": True,
-            "action_coverage": action_coverage,
+            "action_coverage": action_coverage, "gaps": [], "gaps_omitted": 0,
         },
     }
 
@@ -73,34 +73,83 @@ def _p7_rollout_risk_refresh(risk):
         risk["status"] = "no_identified_fatal"
 
 
-def _p7_rollout_risk_error(risk, tick, reason):
+def _p7_rollout_gap(risk, kind, tick, reason, phase="initial", action_index=None):
+    coverage = risk["coverage"]
+    if len(coverage["gaps"]) < 32:
+        coverage["gaps"].append({
+            "kind": kind, "phase": phase, "action_index": action_index,
+            "tick": tick, "reason": reason,
+        })
+    else:
+        coverage["gaps_omitted"] += 1
+
+
+def _p7_rollout_classification_gap(risk, tick, reason, phase="initial", action_index=None):
+    kind = (
+        "computation_failure" if "_exception:" in reason else
+        "contact_unmodeled" if reason.startswith("collision_") else
+        "state_unmodeled"
+    )
+    _p7_rollout_gap(risk, kind, tick, reason, phase, action_index)
+
+
+def _p7_rollout_risk_error(
+    risk, tick, reason, phase="initial", action_index=None, kind="computation_failure",
+):
     risk["coverage"]["unassessed_ticks"] += 1
     risk["coverage"]["errors"].append({"tick": tick, "reason": reason})
+    _p7_rollout_gap(risk, kind, tick, reason, phase, action_index)
 
 
-def _p7_rollout_risk_check(risk, checker, before, after, action, tick):
+def _p7_rollout_risk_check(
+    risk, checker, before, after, action, tick, phase="input", action_index=None,
+):
     if checker is None:
         risk["coverage"]["unassessed_ticks"] += 1
+        _p7_rollout_gap(risk, "risk_unmodeled", tick, "risk_check_missing", phase, action_index)
         return
     try:
-        payload = _p7_rollout_copy(checker(
+        payload = checker(
             _p7_rollout_copy(before), _p7_rollout_copy(after), _p7_rollout_copy(action),
-        ))
+        )
     except Exception as error:
-        _p7_rollout_risk_error(risk, tick, f"risk_check_exception:{type(error).__name__}")
+        _p7_rollout_risk_error(
+            risk, tick, f"risk_check_exception:{type(error).__name__}", phase, action_index,
+        )
         return
+    copy_error = None
+    try:
+        payload = _p7_rollout_copy(payload)
+    except Exception as error:
+        # Malformed siblings/envelope values must not erase a valid fatal
+        # finding. Only individually copied, validated findings are retained.
+        copy_error = f"risk_check_exception:{type(error).__name__}"
     envelope = payload if type(payload) is dict else None
     findings = envelope.get("findings") if envelope is not None else payload
     if type(findings) is not list:
-        _p7_rollout_risk_error(risk, tick, "risk_check_invalid")
+        _p7_rollout_risk_error(
+            risk, tick, copy_error or "risk_check_invalid", phase, action_index,
+            "computation_failure" if copy_error else "risk_unmodeled",
+        )
         return
-    invalid = envelope is not None and (
-        set(envelope) != {"findings", "coverage", "reason"}
+    invalid = copy_error is not None or (envelope is not None and (
+        set(envelope) not in (
+            {"findings", "coverage", "reason"},
+            {"findings", "coverage", "reason", "gap_kind"},
+        )
         or envelope.get("coverage") not in ("covered", "unknown")
         or type(envelope.get("reason")) is not str
         or not envelope["reason"].strip()
-    )
+        or ("gap_kind" in envelope and envelope["gap_kind"] not in (
+            "input_unmodeled", "state_unmodeled", "contact_unmodeled", "view_boundary",
+        ))
+    ))
     for finding in findings:
+        try:
+            finding = _p7_rollout_copy(finding)
+        except Exception:
+            invalid = True
+            continue
         if (
             type(finding) is not dict
             or set(finding) != {"id", "type", "condition", "evidence"}
@@ -115,9 +164,15 @@ def _p7_rollout_risk_check(risk, checker, before, after, action, tick):
         else:
             risk["findings"].append(finding)
     if invalid:
-        _p7_rollout_risk_error(risk, tick, "risk_check_invalid")
+        _p7_rollout_risk_error(
+            risk, tick, copy_error or "risk_check_invalid", phase, action_index,
+            "computation_failure" if copy_error else "risk_unmodeled",
+        )
     elif envelope is not None and envelope["coverage"] == "unknown":
-        _p7_rollout_risk_error(risk, tick, "risk_coverage_unknown")
+        _p7_rollout_risk_error(
+            risk, tick, "risk_coverage_unknown", phase, action_index,
+            envelope.get("gap_kind", "risk_unmodeled"),
+        )
         risk["coverage"]["errors"][-1]["model_reason"] = envelope["reason"]
     else:
         risk["coverage"]["evaluated_ticks"] += 1
@@ -190,7 +245,9 @@ def rollout(
     risk_check(before, after, action_or_none) declares explicit findings with
     id/type/condition/evidence; type is predicted_death or conditional_fatal.
     It runs before terminal/settled acceptance, with independent coverage.
-    A checker may also return {findings, coverage: covered|unknown, reason}.
+    A checker may also return {findings, coverage: covered|unknown, reason},
+    optionally declaring gap_kind as input_unmodeled, state_unmodeled,
+    contact_unmodeled or view_boundary. These categories remain model claims.
     Unknown coverage leaves dynamics unchanged and risk unassessed, unless a
     fatal finding exists. No state fields or game rules are inferred here.
     supported_actions omission preserves the legacy API without checking its
@@ -213,9 +270,11 @@ def rollout(
         result["risk"]["coverage"]["errors"].append({
             "tick": 0, "reason": "action_coverage_undeclared",
         })
+        _p7_rollout_gap(result["risk"], "input_unmodeled", 0, "action_coverage_undeclared")
     try:
         state = _p7_rollout_copy(initial_state)
     except Exception:
+        _p7_rollout_gap(result["risk"], "computation_failure", 0, "invalid_initial_state")
         return _p7_rollout_finish(result)
     result["state"] = state
     result["states"].append(_p7_rollout_copy(state))
@@ -232,6 +291,7 @@ def rollout(
                 raise ValueError("invalid action")
     except Exception:
         result["reason"] = "invalid_actions"
+        _p7_rollout_gap(result["risk"], "input_unmodeled", 0, "invalid_actions", "input")
         return _p7_rollout_finish(result)
     result["actions"] = copied_actions
 
@@ -240,10 +300,14 @@ def rollout(
         result.update(outcome=outcome, reason=reason)
         if outcome == "dead":
             _p7_rollout_risk_death(result["risk"], 0, None)
+        elif outcome == "unknown":
+            _p7_rollout_classification_gap(result["risk"], 0, reason)
         return _p7_rollout_finish(result)
     if not copied_actions:
         outcome, reason = _p7_rollout_classify(state, terminal, settled, collision)
         result.update(outcome=outcome or "unknown", reason=reason or "no_actions")
+        if result["outcome"] == "unknown":
+            _p7_rollout_classification_gap(result["risk"], 0, result["reason"])
         return _p7_rollout_finish(result)
 
     for action_index, action in enumerate(copied_actions):
@@ -257,6 +321,10 @@ def rollout(
                 "tick": result["ticks"], "reason": "unsupported_action",
                 "action_index": action_index, "action": action["name"],
             })
+            _p7_rollout_gap(
+                result["risk"], "input_unmodeled", result["ticks"],
+                "unsupported_action", "input", action_index,
+            )
             break
         # The input tick and subsequent None ticks have different dynamics.
         # An unchanged input state alone is not an autonomous-state cycle.
@@ -270,35 +338,50 @@ def rollout(
             result["ticks"] += 1
             before_state = state
             tick_action = action if tick == 1 else None
+            phase = "input" if tick == 1 else "automatic"
             try:
                 next_state = transition(
                     _p7_rollout_copy(state), _p7_rollout_copy(tick_action),
                 )
             except Exception as error:
                 segment["reason"] = f"transition_exception:{type(error).__name__}"
-                _p7_rollout_risk_error(result["risk"], result["ticks"], segment["reason"])
+                _p7_rollout_risk_error(
+                    result["risk"], result["ticks"], segment["reason"], phase, action_index,
+                )
                 break
             try:
                 state = _p7_rollout_copy(next_state)
             except Exception:
                 segment["reason"] = "invalid_transition_state"
-                _p7_rollout_risk_error(result["risk"], result["ticks"], segment["reason"])
+                _p7_rollout_risk_error(
+                    result["risk"], result["ticks"], segment["reason"], phase, action_index,
+                )
                 break
             result["states"].append(_p7_rollout_copy(state))
             _p7_rollout_risk_check(
                 result["risk"], risk_check, before_state, state, tick_action, result["ticks"],
+                phase, action_index,
             )
             outcome, reason = _p7_rollout_classify(state, terminal, settled, collision)
             if outcome == "dead":
                 _p7_rollout_risk_death(result["risk"], result["ticks"], action_index)
             if outcome is not None:
                 segment.update(outcome=outcome, reason=reason)
+                if outcome == "unknown":
+                    _p7_rollout_classification_gap(
+                        result["risk"], result["ticks"], reason, phase, action_index,
+                    )
                 break
             key = _p7_rollout_key(state)
             if key in seen:
                 segment["reason"] = "state_cycle"
                 break
             seen.add(key)
+        if segment["reason"] in ("state_cycle", "tick_limit"):
+            _p7_rollout_gap(
+                result["risk"], "continuation_limit", result["ticks"],
+                segment["reason"], phase, action_index,
+            )
         segment["state"] = _p7_rollout_copy(state)
         result["segments"].append(segment)
         result.update(
@@ -340,11 +423,21 @@ def replay_cases(
         )
         if missing_state:
             result["reason"] = "missing_initial_state"
+            for gap in result["risk"]["coverage"]["gaps"]:
+                if gap["reason"] == "terminal_unknown" and gap["phase"] == "initial":
+                    gap["reason"] = "missing_initial_state"
+                    break
+            else:
+                _p7_rollout_gap(result["risk"], "state_unmodeled", 0, "missing_initial_state")
         elif (
             result["actions"] and result["evaluated_actions"] == 0
             and result["outcome"] in ("dead", "goal")
         ):
             result.update(outcome="unknown", reason="initial_terminal_no_transition")
+            _p7_rollout_gap(
+                result["risk"], "input_unmodeled", 0,
+                "initial_terminal_no_transition", "input", 0,
+            )
         _p7_rollout_finish(result)
         predicted = result["outcome"]
         partial = (
@@ -427,6 +520,12 @@ def evaluate_candidates(
         coverage["errors"].extend([
             {**error, "candidate_index": index} for error in source_coverage["errors"]
         ])
+        for gap in source_coverage["gaps"]:
+            _p7_rollout_gap(
+                combined_risk, gap["kind"], gap["tick"], gap["reason"],
+                gap["phase"], gap["action_index"],
+            )
+        coverage["gaps_omitted"] += source_coverage["gaps_omitted"]
         coverage["partial"] |= source_coverage["partial"]
         if source_coverage["action_coverage"] == "unsupported":
             coverage["action_coverage"] = "unsupported"

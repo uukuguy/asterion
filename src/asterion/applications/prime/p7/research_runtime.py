@@ -475,6 +475,11 @@ class P7ResearchRuntime:
             if snapshot is None:
                 return result
             metadata['host_resource_snapshot'] = snapshot
+            rollouts = getattr(self, '_rollouts', None)
+            if rollouts is not None:
+                backtest = rollouts.snapshot_backtest()
+                if backtest is not None:
+                    metadata['model_backtest'] = backtest
             text = json.dumps(metadata, ensure_ascii=False, allow_nan=False, separators=(',', ':'))
             if len(text.encode('utf-8')) > self._limits.max_output_bytes:
                 return result

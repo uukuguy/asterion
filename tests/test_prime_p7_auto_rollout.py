@@ -254,7 +254,7 @@ class TestP7AutoRollout(unittest.IsolatedAsyncioTestCase):
             "def rest(state): return state['tick']>=3\n"
             f"def end(state): {end}\n"
             f"def risk(before,after,action): {risk}\n"
-            "print(r.register_rollout_model(from_frame=init,transition=move,settled=rest,terminal=end,risk_check=risk))\n"
+            "print(r.register_rollout_model(from_frame=init,transition=move,settled=rest,terminal=end,risk_check=risk,supported_actions=['ACTION1','ACTION2']))\n"
         ) + extra
         return await self.host.execute('model', source, _Signal())
 
@@ -283,7 +283,7 @@ class TestP7AutoRollout(unittest.IsolatedAsyncioTestCase):
         result = await self.plan()
         item = result['auto_rollouts'][0]
         self.assertEqual((item['status'], item['risk'], item['reason']), ('not_evaluated', 'unassessed', 'model_missing'))
-        self.assertEqual(result['applied_count'], 1, result)
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-coverage-review'), result)
         self.assertEqual(result['rollout_accounting']['auto_evaluated'], 0)
 
     async def test_conditional_fatal_stops_without_dispatch(self):
@@ -354,7 +354,8 @@ class TestP7AutoRollout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(original['stop_reason'], 'model-predicted-death')
         original_revision = original['auto_rollouts'][0]['model_revision']
         await self.retained_model(covered=False)
-        self.assertEqual((await self.plan('host-other', ('ACTION2',)))['applied_count'], 1)
+        other = await self.plan('host-other', ('ACTION2',))
+        self.assertEqual((other['applied_count'], other['stop_reason']), (0, 'model-coverage-review'))
         result = await self.plan('host-retained')
         self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-predicted-death'))
         assessment = result['auto_rollouts'][0]

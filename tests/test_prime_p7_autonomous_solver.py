@@ -60,14 +60,14 @@ class TestP7AutonomousSolver(P7SolverFixture):
         self.assertEqual(len(result['auto_rollouts']), 2)
         self.assertEqual(self.engine.calls, ['ACTION1'])
 
-    def test_auto_unassessed_allows_action_but_conditional_fatal_does_not(self):
-        for risk, applied in [('unassessed', 1), ('conditional_fatal', 0)]:
+    def test_auto_unassessed_requires_review_and_conditional_fatal_stops(self):
+        for risk, stop_reason in [('unassessed', 'model-coverage-review'), ('conditional_fatal', 'model-conditional-fatal')]:
             with self.subTest(risk=risk):
                 self.solver.auto_evaluate = lambda *args: {'status': 'not_evaluated', 'risk': risk,
                                                         'reason': 'model-relative', 'ticks': 0}
                 plan = self.minimal(risk)
                 result = self.solver.execute_plan(plan)
-                self.assertEqual(result['applied_count'], applied)
+                self.assertEqual((result['applied_count'], result['stop_reason']), (0, stop_reason))
                 self.assertEqual(result['auto_rollouts'][0]['risk'], risk)
                 self.assertEqual(self.solver.execute_plan(plan), result)
 

@@ -5095,3 +5095,5 @@
 - 19:04 Offlineoriginalmodelrecheck: firstdeathv1unknown→postdeathv2predictsdead2ticks;other2updatedmodelsremainunknownatviewportboundary,nofatalmasked.
 - 19:05 Task56audit163autoattempts/160models/3RESET,median25.207ms,p9534.707ms,total4.242s;0missing/0fatalveto,7unknown; sourceandruntimefailures separated.
 - 19:05 Committed/pushed Task56 rollout timings, unknown-death distinction and offline model recheck [5943fee6]; no active trial.
+- 19:29 User approvescoverage gap localization, unknownreview/explicitprobe and persistentmodelcasechecks, then authorized Task57 L9 rerun.
+- 19:48 Coveragereview/exactprobe/historycasechecks implemented:107PythonPASS,115TSPASS/6existingskips,ruff/docs/diffPASS,independentreviewAPPROVE;Task57readytolaunchaftercommit.
