@@ -5076,3 +5076,6 @@
 - 14:30 Task54 L9 twice extrapolated uncovered ascent and died340/386; later generated stopper before442 safely. LLM planned autonomously, no human hints.
 - 15:02 Task54 closed8/9 at60min deadline:280restored+241new,L8completed55zero deaths,L9 186/3deaths;53hostactions remain, sealed/replay/cleanuptrue.
 - 15:02 User authorizes Task55 selected eight-level checkpoint continuation to rerunL9 and examine reasoning variability; code/budget differences remain explicit.
+- 15:05 Committed/pushed eight-level result and authorized L9 rerun comparison boundaries [3cbfd0db].
+- 15:16 Task55 comparison uncovered selectedresume forces whole-source research despite historyOFF; preparing formal335-only SDK/Recorder export to exclude futureL9 evidence.
+- 15:34 Task55 formally isolated335prefix admitted/replayed; launchedp7-live-20261013073318-1b158c64fd7ca5d52aa26c3b,a608866b/wheel72b41624, restored8levels, newL9budget163/60min.
