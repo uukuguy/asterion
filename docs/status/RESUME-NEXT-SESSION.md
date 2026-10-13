@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 14:12 Asia/Shanghai. Session active; Task54 is running. Do not launch a duplicate trial.
+> Updated: 2026-10-13 14:12 Asia/Shanghai. Session active; Task54 closed. User authorized Task55 rerun of L9; preparation delegated, do not launch a duplicate.
 
 ## 已验证事实
 
@@ -9,12 +9,12 @@
 - Callback fix2673de30: ordinary solve/sweep1024model/4096tool, finite application overrides, ingress revalidation and exact diagnostic headroom. Frozen witness/official and supervised rules retained.88focusedPython tests and independentreviewPASS.
 - Context fixa35f5236: admit only failed-assistant/no-call safe native omissions; preserve raw archive and unknown execution protection. Unavailable projection no longer urges NOTES as repair. Private metricsv2 gives closed refusal reason, reads v1.115TS PASS/6existing skips, installedPi provider-free probe and independent reviewPASS; packaged resources synced. Full promotion not run under scoped-testing preference.
 
-## 当前运行：Task54
+## 已结算：Task54
 
 - Original full-game continuation authorization remains valid. Source `405d5014113d53d8e8e38569a8578263f7d0009e`, wheel SHA256 `c8982a065818e7681f754238f68c229e424c2763b61ce565df8fd9468224a2d7`.
 - Evidence root `.asterion-private/task54-bp35-seven-level-continuation/`; launch-plan and preparation-receipt identify selected source Task53 run. Byte-identical source-only copy2648files; offline SDK prefix replay280actions/7levels PASS; no unrelated history.
-- Active run `p7-live-20261013060100-342ba6272a17b7ae7fcffb2b`; unit `asterion-p7-0f4d5514b2564f6a9c6f8c7193763af9.service`; launcher PTY76415. Target9, operator3600s/guest3780s; model1024/tool4096. Standard solve generates its own console ID.
-- Snapshot14:30:28:445actions=280restored+55newL8+110newL9,8/9. L8 zero newdeathRESET; L9 deaths340/386 and RESET341/387. Model shifted from upper exploration to lower region. Two RESET belong to restored prefix, two are newL9.79usage,input8600891/output27911,SDK estimateUSD17.094175, not invoice. Unitactive. Read-only monitor: `.venv/bin/python .asterion-private/task54-bp35-seven-level-continuation/passive-monitor.py`.
+- Closed run `p7-live-20261013060100-342ba6272a17b7ae7fcffb2b`; unit `asterion-p7-0f4d5514b2564f6a9c6f8c7193763af9.service`; launcher PTY76415. Target9, operator3600s/guest3780s; model1024/tool4096. Standard solve generates its own console ID.
+- Final521actions=280restored+55newL8+186newL9,8/9. L8 zero newdeathRESET; L9 deaths340/386/515 and RESET341/387/516; final attempt5actions afterRESET. Deadlineexpiredtrue, CancelledError, actioncap574/53remaining.115usage,input12377931/output57084,SDK estimateUSD24.476689, not invoice. Sealed/replay/cleanuptrue, unitnotfound/inactive/MainPID0, launcher0/3634.207s. Final receipt in trial root. Read-only monitor: `.venv/bin/python .asterion-private/task54-bp35-seven-level-continuation/passive-monitor.py`.
 
 ## 当前判断与未完成边界
 
@@ -26,4 +26,4 @@
 
 ## 下一动作
 
-Continue passive Task54 monitoring and L8/L9 organization audit. Partialcall repair cffe2fe8 committed/pushed and independently approved. Reuse `/root/rollout_chronology` for read-only reasoning audit. Review changed code and relevant boundaries only; synchronize generated resources. On trial termination record concrete failure code, sealed/replay/cleanup and inactive unit, then commit/push evidence and repairs. Do not repeat permissions or launch unbounded trials.
+User authorized Task55 rerunL9 to examine reasoning variability. Worker `/root/callback_capacity_fix` preparing source-only Task54eight-level prefix335actions, SDK replay; standardsolve target9/historyOFF, current committedcode includescffe2fe8,1024/4096callbacks,3600/3780s. Standardresume grants163newactions,total498, versus prior239available enteringL9; this and repairedcode/context are comparison differences, not pure stochastic repeats. Await run/unit/PTY/source/wheel receipt and attach passive monitoring. Do not launch duplicate. Partialcall repair cffe2fe8 committed/pushed and independently approved. Reuse `/root/rollout_chronology` for read-only reasoning audit. Review changed code and relevant boundaries only; synchronize generated resources. On trial termination record concrete failure code, sealed/replay/cleanup and inactive unit, then commit/push evidence and repairs. Do not repeat permissions or launch unbounded trials.

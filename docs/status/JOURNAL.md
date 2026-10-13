@@ -5074,3 +5074,5 @@
 - 14:21 Native error partialcall zero-dispatch reproduced; narrow omission repair and nine private refusal reasons verified installedPi/77TS/4Python, independentreviewAPPROVE.
 - 14:21 Committed/pushed native pre-dispatch partialcall compatibility and precise refusal diagnostics [cffe2fe8]; frozen Task54 remains unchanged.
 - 14:30 Task54 L9 twice extrapolated uncovered ascent and died340/386; later generated stopper before442 safely. LLM planned autonomously, no human hints.
+- 15:02 Task54 closed8/9 at60min deadline:280restored+241new,L8completed55zero deaths,L9 186/3deaths;53hostactions remain, sealed/replay/cleanuptrue.
+- 15:02 User authorizes Task55 selected eight-level checkpoint continuation to rerunL9 and examine reasoning variability; code/budget differences remain explicit.
