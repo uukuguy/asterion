@@ -1,8 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 12:29. Session remains active — README checkpoint corrected; user authorized selected BP35 continuation, preparation only.
+> Updated: 2026-10-13 12:34. Session remains active — Task53 prefix restored, actor continuing from L7.
 
 ## 已验证事实
+
+- Task53 authorized selected continuation is running: run `p7-live-20261013043321-0eaa6aa58afb73753f4433fb`, unit `asterion-p7-989ae7dfa24d4e57b5b1dc9094ae3f7c.service`, source commit4a031303. Original Task29 six-level checkpoint `p7-live-20261009125226-984bb04c164deb226e93dcff` was copied byte-identically into a source-only operator root; current-code offline prefix replay211actions/212observations and worldmap/NOTES admission PASS. No unrelated history. Restoration211actions/6levels is complete; new actor is running L7–L9. Wheel SHA2561c19a755681758319bd375b784285a9bed2bc7f61a443f2a8ad76285f7c4fb2a is preserved privately. Restoration is separate from new actions. Initial manual-console-ID launch was rejected before execution; corrected solve generated the actual run ID. Private evidence `.asterion-private/task53-bp35-checkpoint-continuation/`, launcher PTY43218; finite operator3600s/guest3780s. Outcome pending; do not run a second instance. Prior no-restart restrictions are superseded only for this explicit selected continuation.
 
 - README progress now foregrounds standard Prime/P7 adaptation and fresh autonomous solving: Task29 frozen9557ad63 independently completed BP35 L1–L6 (211 actions/zero deaths), Task7 frozen9b62d2c2 completed the same six-level target in1023.28s, and post-adaptation Task52 completed L1–L5 before user stop. The six-level endpoint was operator-defined scope, not a solving limit; remaining levels were not attempted in those trials. Task52 was user-stopped, not an observed terminal inability. Original arc-skill r11l WIN is not P7 evidence. Documentation checks PASS; no new game/model calls.
 
