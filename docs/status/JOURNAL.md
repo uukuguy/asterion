@@ -5064,3 +5064,4 @@
 - 13:47 Application callback capacities implemented: P7finite1024/4096 defaults, configurable;88targetedtests/independentreview/lint PASS, no newpaidtrial.
 - 13:49 Application callback capacity committed separately to restore configurable execution instead of fixed128 [2673de30].
 - 13:49 Safe native error omissions and private projection reasons verified115TS/88Python/installedPi0provider, independentreviewAPPROVE.
+- 13:56 NOTES native omission compatibility and explicit refusal metrics committed separately [a35f5236]; combined source checks PASS, no live benefit yet.

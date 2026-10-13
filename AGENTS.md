@@ -94,6 +94,10 @@ P7 新研究默认不加载历史经验，过去运行材料须明确 process op
 
 历史官方 100.00 属于原代码身份和有经验累计研究口径；Task40 接入验证、Task43 局部迁移修复及 Task52 用户中止的 5/9 均按各自范围记录。后续 cache／cost 字段已实现，Task52 原实跑明细不可补回；缺失／部分覆盖仍为 unknown，`pi_sdk_estimate` 不等于账单。不能从 token 总量推断实际支付，不能将后续接口测试推广为原实跑验收。
 
+### 应用调用容量
+
+有限调用容量由应用／operator 配置，经 selection、不可变 options、实际 Prime authorization 与执行计数器传递同一个值；预设缺省值不能被当成框架硬上界。普通 P7 solve／sweep 缺省 model1024／tool4096，可通过 operator 的 `ASTERION_PRIME_P7_MODEL_CALLBACKS` 与 `ASTERION_PRIME_P7_TOOL_CALLBACKS` 配置正整数容量，配置不进入模型环境。冻结 witness／official／autonomy 与显式监督模式保留独立授权规则；配置不能产生无上限授权。触限必须记录实际配置值、观测值及具体资源代码，不得因记录阶段为 `pi.prompt` 而归因为 RPC 管道故障。
+
 ### P7 改动与部署验证
 
 研发阶段优先复审变更后的实现，按触及边界运行定向 TypeScript／Python 检查；改打包资源、入口、schema 或发布假设时运行 `make promotion-check`。工具注册改动须核对 wheel、扩展 artifact、Python bridge 与 allowlist 身份一致。源码或 provider-free 打包检查只能记为相应软件验证，不能宣称真实部署或解题效果完成。
