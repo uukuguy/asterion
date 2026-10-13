@@ -172,4 +172,8 @@ Mandatory compact-display guidance has been withdrawn from the common autonomous
 
 User requires costs to be distinguished from throughput. Optional runtime usage fields retain uncached input/cache reads/cache writes and reported USD SDK estimate; total input keeps existing semantics and budget authority is unchanged. Shared Python/schema/TS validation agrees, P7 traces and research status retain details and coverage, missing or partially known totals remain unknown. Source review and focused tests pass; no full regression or live deployment. StoppedTask52 used earlier frozen wheel, its cache details were discarded and cannot be reconstructed; total input includes cache reads/writes and is not uncached cost.
 
-Current operational boundary: no active P7 trial. Latest frozen trial and final resources are in RESUME; cache interface is implemented but not accepted against a real backend. Static instruction duplication and level-specific mechanics generalization remain open.
+Current operational state and latest run resources are recorded in RESUME. Cache interface is implemented; actual backend acceptance is tracked separately from stopped historical trials. Static instruction duplication and level-specific mechanics generalization remain open.
+
+## Native context-edit compatibility boundary
+
+The current NOTES primary projection rejects any native context_edit, including the shape used by legitimate native retry. Installed-Pi local reproduction passes; current P7 live path uses an in-memory native archive, and does not persist exact checkpoint receipt/rejection evidence. Repair and actual-run attribution remain separate work. See RESUME for active evidence.

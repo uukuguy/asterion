@@ -5053,3 +5053,8 @@
 - 12:32 Task53 authorized continuation launched current4a031303, restores6levels then solvesL7–L9; finite3600s actor/3780s guest.
 - 12:34 Correction: initial Task53 console selector rejected pre-execution; corrected solve minted p7-live-20261013043321-0eaa6aa58afb73753f4433fb.
 - 12:34 Task53 actual source4a031303/wheel1c19a755 restored211actions/6levels; actor runningL7, guestactive, no unrelated history.
+- 12:34 Committed active continuation checkpoint to preserve source identity and distinguish restoration from new solving [d63c03ff].
+- 12:59 Task53 audit separates early planning errors from laterBFS improvement; request52 context growth follows provider-error adjacency, exactcauseunknown.
+- 13:03 Task53 L7 completed autonomously69newactions/2RESET; restoredprefix211 separate, nowL8.
+- 13:03 Correction: message_end provider-error observations do not establish PiRPC transport failure; internal archive/projection responsibility remains under audit.
+- 13:10 RealPi context_edit witness PASS: Prime primary→unavailable,newNOTES cannotrestore; no model/game/network, request52 exactbranch stillmissing.
