@@ -5083,3 +5083,4 @@
 - 16:13 Task55 L9 differs:128newactions/one death400,twoRESET361/401,35actionsremain;provider3errors recovered, primaryprojection continuous, no transitionsearch.
 - 16:35 Task55 closed8/9 at163newL9actioncap:3deaths/4RESET, projectionprimary116requests/0refusals, sealed/replay/cleanuptrue, ownedunitinactive.
 - 16:35 Rerun route differed and avoidedTask54death afteridenticalstate; fullmotioncoverage/route-model gaps persisted, confoundedconditions prevent pure-random attribution.
+- 16:36 Recorded/pushed L9 rerun outcome and reasoning comparison for recovery [2a7a7192]; no active trial.
