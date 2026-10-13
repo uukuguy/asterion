@@ -4,7 +4,7 @@
 
 ## TL;DR
 
-- Prime/P7 milestone is consolidated on `main`. Annotated remote tag **`asterion-prime-p7-milestone-2026-10-13`** points to **`aca76ed77d0c3586380971381f18c82772c989d7`**. Previous baseline tag remains `4107aefb`. Later main commits contain state-only closeout, not new solver code.
+- Prime/P7 milestone is consolidated on `main`. Annotated remote tag **`asterion-prime-p7-milestone-2026-10-13`** points to **`aca76ed77d0c3586380971381f18c82772c989d7`**. Previous baseline tag remains `4107aefb`. Later main commits contain state-only closeout, not new solver code. Final handoff content is committed at `e5b78c8a`; subsequent receipt commits only record that closeout.
 - BP35 selected-checkpoint continuation reached **9/9, local100.000000**: 335 restored +123 new L9 actions =458; one new death/RESET; final post-RESET attempt80 actions. Sealed trace, independent replay and cleanup passed. Cold L1–L6 was a completed operator-defined checkpoint, not a solving ceiling.
 - Death-prediction/probe repair is implemented and verified. The actual repaired wheel at the exact predeath L9 checkpoint reproduced the original model assessment and refused the unknown probe with **zero target dispatch**, unchanged frame and no model/Pi calls. README, decisions and collaboration memory now reflect these scopes.
 
