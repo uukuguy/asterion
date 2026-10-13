@@ -8,6 +8,23 @@ Asterion Prime targets autonomous problem-solving for work that consumes substan
 
 Asterion Prime P7 adapts that infrastructure to interactive ARC-AGI-3 games. The model owns research reasoning: it maintains useful NOTES, writes and revises programs when needed, and tests hypotheses against real observations. The application supplies game facts, authorized actions and evidence. Historical experience is available only when explicitly selected; a new research run defaults to no prior-run experience.
 
+## Recent progress: refactored Prime and fresh autonomous P7 solving
+
+**Prime now provides a standard application entry and owns its backend resources; P7 has been adapted to it. P7 has demonstrated autonomous multi-level solving from a fresh research state.** The model develops its own understanding, writes and tests programs, revises failed hypotheses, and chooses real actions. Applications supply domain goals, tools and observations through the reusable Prime infrastructure.
+
+- **Reusable application foundation.** Existing P1 and P3–P7 model paths use the standard Prime owner for Pi/RPC, extensions, session/workspace lifetime and cleanup. P7 includes both the research actor and narrator. Independent applications consume the library directly.
+- **Research continuity.** Model-written NOTES carry useful understanding across turns; persistent IPython supports executable hypotheses and searches. Detailed evidence stays available by reference. P7 supplies actual game feedback and counterexamples, while Prime owns the generic context and execution mechanisms.
+- **Fresh autonomous solving demonstrated.** In a frozen BP35 trial, P7 started without previous NOTES, routes or programs and completed **L1–L6 in 211 actions, with zero deaths and zero paid RESETs**, without outside solving hints, runtime code changes or human takeover. The recorded trace was independently replayed and sealed. [Cold-trial evidence](docs/reviews/2026-10-09-p7-bp35-task29-evaluation.md).
+
+| Demonstrated progress | Recorded scope |
+|---|---|
+| Fresh autonomous six-level completion | 2026-10-09, frozen `9557ad63`: BP35 L1–L6, 211 actions, 25 min 48.25 s, no prior research state or outside solving assistance |
+| Faster autonomous six-level completion | 2026-10-08, frozen `9b62d2c2`: 221 actions, 17 min 3.28 s, two paid RESETs; [process and replay audit](docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md) |
+| Fresh solving after application adaptation | Task52, frozen `cb0ba4ec`: L1–L5 completed without historical experience or resume; nine-level attempt stopped by the user during L6 |
+| Standard-entry application adaptation | Task40 entry/resource migration and bounded packaged P7 deployment; Task43 specific lifecycle/context compatibility repairs |
+
+BP35 has nine levels; these cold trials completed their six-level target. The latest nine-level cold attempt, Task52, was stopped at 5/9; the recorded full 9/9 run used historical experience. These results show autonomous research and level completion from fresh state, while a full nine-level cold completion on the current baseline remains unverified. The historical official campaign below has its own evaluation scope.
+
 ## ARC-AGI-3: official result
 
 On 7 October 2026 (UTC+8), Asterion Prime P7 achieved an **official ARC-AGI-3 score of 100.00**, completing **25/25 public games and 183/183 levels in 6,781 actions**. The [Competition scorecard](https://arcprize.org/scorecards/60c10b53-9b8d-4af9-aae7-85f81543198a) is normally closed, and its final receipt has been checked against every submitted route. The research model was `gpt-6.1-sol`, seed `0`; the final execution snapshot is [`2f258ff3`](https://github.com/uukuguy/asterion/tree/2f258ff3e74478805f63e08daa437acf9ca53a21). Earlier saved routes retain their original code identities and certificates.

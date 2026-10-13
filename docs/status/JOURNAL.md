@@ -5043,3 +5043,5 @@
 - 12:22 Documentation aligns stable main ownership and evidence boundaries for future development [18095f2f; receipt included in amended commit].
 - 12:23 Pushed main4107aefb and11 baseline/archive tags; remote identities verified, preserving stable baseline and branch history.
 - 12:23 Recorded verified remote synchronization so resume reflects published baseline [17bf7dc8; receipt included in amended commit].
+- 12:27 README foregrounds Prime adaptation and evidence-backed fresh P7 solving, separating six-level success from nine-level completion.
+- 12:27 Highlighted fresh autonomous progress with exact versions and target scope to keep README claims reproducible [91decc36; amended receipt].
