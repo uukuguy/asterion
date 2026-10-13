@@ -6,7 +6,7 @@
 
 Asterion Prime 面向智能体自主解决人类需要花费大量时间与精力的问题。总体指导思想是自主开展长程、开放式、可证伪的计算研究，形成一条人类可理解、机器可复核、证据可追溯、结论可重放的推理链记录。Prime 提供通用基础设施，各领域提供研究层与数据层；当前先在 P7 上实验研究并定型，再推广到其它领域。这是架构方向，已验证能力以具体测试记录为准。参见 [Prime 架构定位](docs/architecture/agent-framework.md#asterion-prime-positioning)。
 
-Asterion Prime P7 通过编程、真实观察和可修正的假说研究 ARC-AGI-3 交互游戏，并把有用经验带入后续尝试。产生结果的系统代码在本仓库公开：包括 LLM、持久 IPython 工作区、版本化 WorldMap、预测核对与动作 Broker、经验存储，以及认证和提交流程。
+Asterion Prime P7 将通用基础设施适配到 ARC-AGI-3 交互游戏。模型负责研究推理：维护有用的 NOTES，按需编写和修订程序，用真实观察检验假说；应用提供游戏事实、授权动作与证据。历史经验仅在明确选择时提供，新研究运行默认不加载过去运行经验。
 
 ## ARC-AGI-3 官方评测结果
 
@@ -24,28 +24,45 @@ Asterion Prime P7 通过编程、真实观察和可修正的假说研究 ARC-AGI
 
 查看[公开结果说明](docs/results/arc-agi-3/README.md)及[机器可读证据](docs/results/arc-agi-3/p7-public-2026-10-07.json)。[只读控制台](https://asterion-p7-console.vercel.app)展示保存进度和回放；它通过同步更新，可能落后于本地研究。
 
-这是复用既有经验的公开题迭代研究结果，包含经验积累、重试、已验证前缀复用、操作者调度及研究中途的应用修复。P7 生成研究程序、WorldMap 和行动选择。6,781 个动作指选定路线，不包含所有探索，也不是研究总成本。官方保存路线提交不调用模型，在新的在线局中核对路线有效性，与全新 LLM 求解口径不同。本页不宣称私有题结果、ARC Prize Verified 身份或货币总成本。[限定范围的 API 价格折算](docs/results/arc-agi-3/README.md#scoped-api-price-estimate)在假设 97% 输入为缓存读取时，Standard 费用为 $147.46–$158.32；实际支付与完整研究成本仍未知。
+这是历史上复用既有经验的公开题迭代研究结果，包含经验积累、重试、已验证前缀复用、操作者调度及研究中途的应用修复。P7 生成研究程序、WorldMap 和行动选择。6,781 个动作指选定路线，不包含所有探索，也不是研究总成本。官方保存路线提交不调用模型，在新的在线局中核对路线有效性，与全新 LLM 求解口径不同。本页不宣称私有题结果、ARC Prize Verified 身份或货币总成本。[限定范围的 API 价格折算](docs/results/arc-agi-3/README.md#scoped-api-price-estimate)在假设 97% 输入为缓存读取时，Standard 费用为 $147.46–$158.32；实际支付与完整研究成本仍未知。
 
-## P7 的方法
+## Prime 标准库与 P7 应用
+
+标准库入口是 [`prepare_prime_application`](src/asterion/agents/prime/application.py)，接收 `PrimeApplicationSpec`、操作者解析的 `PrimeOperatorContext` 与显式授权。准备 owner 只校验输入，不启动 Pi；后续后端启动、RPC、扩展加载、持久工作区和清理由 Prime 管理。应用提供领域目标、声明的工具、数据及完成／续跑 hooks，不自行创建 Pi/RPC 对象注入 Prime。独立应用无需中央注册或 Provider 发现；既有 Provider／assembly 路线保留，统一 Prime CLI 不在已完成迁移范围内。
+
+| 层 | 所有权 |
+|---|---|
+| Prime 通用基础设施 | 计算与工作区生命周期、工具传输、上下文归档／投影、原生会话连续性、授权与资源边界 |
+| P7 研究层 | 研究指导、NOTES 与可选 WorldMap／程序、模型推演适配、观察和反例的解释 |
+| P7 数据层 | 真实画面和历史、游戏动作派发、证据引用、选定路线认证与重放 |
+| 操作者 | 后端配置与凭据、精确模型选择、外部资源、执行授权与停止策略 |
+
+操作者解析配置后注入，通用 Prime 不读取 `.env` 或认证 profile。P1、P3–P7 已有模型路径，包括 P7 narrator，已迁入标准资源 owner。P1–P6 目标模型为 `deepseek/deepseek-flash`，P7 为 `openai-codex/gpt-6.1-sol`；P2 当前仍是无模型的本地检索机制。这些是迁移范围，不证明每个应用都已具备自主研究能力。
+
+当前研究记忆以模型维护的 **NOTES** 为主，保留不可变修订与证据引用。已接受的笔记可建立工作上下文 epoch：当前笔记、必要应用状态、有效约束、近期完整工具组、重要错误及未知执行结果继续进入上下文；已覆盖的旧明细归档并可按引用读取。通用 TypeScript 机制负责 archive／cursor／projection，P7 提供研究内容与准确当前事实。该机制与原生压缩分开；保留持久内核接口的专用代码摘要尚未接入当前启动链。上下文容量提醒按 hook JSON bytes 计量，不是 Provider tokens，也不是已证明的 token／费用硬上限。
+
+## 当前 P7 研究方法
 
 ```mermaid
 flowchart LR
-    O[真实稳定观察] --> L[LLM 修订假说]
-    L --> W[版本化 WorldMap]
-    L --> P[持久 IPython 建模与搜索]
-    W --> A[带预测的短计划]
+    O[真实观察与当前事实] --> L[LLM 研究与修订]
+    L --> N[NOTES 与证据引用]
+    L --> P[持久 IPython 可选建模与搜索]
+    N --> A[绑定当前观察的计划]
     P --> A
-    A --> B[Broker 核对与执行]
+    A --> B[P7 准入与动作 Broker]
     B --> O
     B --> E[历史与反例]
     E --> L
 ```
 
-1. **观察并描述。** 应用提供真实稳定帧、观察引用、当前预算和工作区版本。LLM 在 WorldMap 中记录场景、候选规则、目标、未知、竞争假说以及有证据的动作含义，再根据未解问题选择下一次计算或能区分假说的实验；允许不完整模型。
-2. **编写可执行假说。** 持久 IPython namespace 保存 Python 状态投影、转移函数、目标候选和搜索程序，跨模型回合继续使用。只读 `p7_research` 提供真实观察和历史；模型不能导入真实游戏引擎、搜索隐藏状态来取答案。
-3. **用历史核对模型。** 报告可预测已发生序号的像素、画面摘要、状态或关卡数，由宿主与真实证据比较并返回反例。历史核对或真实动作与预测矛盾时，LLM 修订 WorldMap 或程序，再重新计算下一段计划。这种回溯预测核对只检验相应主张，不证明所有规则、目标或路线最优性。
-4. **带明确预测行动。** 短计划绑定当前观察与工作区版本。Broker 先校验，再逐步执行；首次失配、过关、RESET 或终局立即停止后缀。未执行动作不算作已执行；结果不确定时不能自动重派。
-5. **从失败中保留经验。** 后续尝试可读取同题研究、反例、制品和部分历史 cells。旧程序是需要选择与修订的资料，不能整体重播；旧证据不能授权本次动作。独立核对的已完成前缀可以在新本地局中恢复，再研究下一关。
+1. **观察并保留有用认识。** P7 直接向模型上下文追加真实稳定帧、观察引用、预算状态及工作区版本。模型自行选择假说、表示与下一项实验；NOTES 保留有用机制、假设、反例、未知和下一步。详细 WorldMap 仍可使用，不是强制推理形式。
+2. **按需计算。** 持久 IPython namespace 跨回合保存状态投影、转移函数与搜索程序。只读 `p7_research` 提供真实观察和证据，模型不能导入游戏引擎搜索隐藏状态。模型可见 cell 历史只包含 actor cells，保留原始 kernel 序号；私有 kernel 归档同时保留宿主计算。
+3. **将预测与证据比较。** 可选报告及动作预测可与真实记录核对。吻合仅支持相应比较，不证明模型完整、目标正确、路线最优或未来安全；矛盾作为反例保留。
+4. **执行当前计划。** 计划绑定精确观察和工作区版本，P7 先校验完整请求，再顺序派发动作。失配处理取决于所选 profile；RESET、换关、终局及未知执行结果继续保留硬停止。未执行后缀不算已执行，未知结果从不授权重派。
+5. **按来源和范围使用证据。** 新研究运行默认历史经验 **off**。明确启用历史的实验及选定 resume 路径，可在来源身份和当前状态核对下使用旧资料。旧程序用于检查与修订；旧证据不能授权本次动作。上方官方研究使用历史经验和已核对前缀复用，评估口径与当前全新运行不同。
+
+监督研究还提供 **actor 模型推演**：actor 显式登记当前 kernel 中自己编写的画面投影、动力学和风险 callbacks。助手施加一次输入，再展开模型中的自动运动直到停止或未知，不访问隐藏引擎机制。每次真实动作前，宿主按登记模型自动评估，发现 `predicted_death` 或 `conditional_fatal` 时阻止该步及后缀并返回证据；普通覆盖不完整明确报告，无模型为 `not_evaluated`。RESET、换关和内核恢复使旧登记失效。保留的致命风险见证有狭窄且经核对的适用范围，范围不可用时停止受影响候选。actor 主动检查与宿主自动检查独立记账。错误模型仍可能漏掉真实危险，模型未发现风险不是安全证书。这些实验指导只追加到监督研究入口。
 
 当前模型工具面恰为 **`ipython`、`p7_workspace`、`p7_execute_plan`**，通过应用实际注册，不靠提示词假装工具。研究计算和真实动作派发有独立接口。画面在更省空间时采用无损调色板与行字典表示，否则返回原始帧；研究接口可读取精确原始画面。此投影只改变呈现，不改游戏语义或记录证据。
 
@@ -53,15 +70,24 @@ flowchart LR
 
 可选的 `fresh-target` 隔离策略由**操作者明确选择**：排除指定的旧目标关材料，同时保留绑定的前面关卡前缀。它不是 P7 自动作出的决定。
 
-### 检查产生结果的代码
+### 检查实现
 
 | 表面 | 公开源码 |
 |---|---|
+| 标准资源 owner | [应用入口](src/asterion/agents/prime/application.py)、[后端 owner](src/asterion/agents/prime/backend.py) |
+| NOTES 与上下文连续性 | [记忆存储](src/asterion/applications/prime/p7/research.py)、[通用投影](packages/typescript/asterion-prime-extension/src/context-projection.ts)、[上下文见证](packages/typescript/asterion-prime-extension/src/context-witness.ts) |
 | LLM 指导与工具注册 | [Prompt](src/asterion/applications/prime/p7/prompt.py)、[工具注册表](src/asterion/applications/prime/p7/tool_registry.py)、[TypeScript 扩展](packages/typescript/asterion-prime-extension) |
 | 持久程序研究 | [IPython host](src/asterion/applications/prime/p7/ipython_host.py)、[研究运行时](src/asterion/applications/prime/p7/research_runtime.py)、[研究桥接](src/asterion/applications/prime/p7/research_bridge.py) |
 | WorldMap、核对与动作 | [研究工作区](src/asterion/applications/prime/p7/research.py)、[World model](src/asterion/applications/prime/p7/world_model.py)、[Broker](src/asterion/applications/prime/p7/broker.py) |
-| 经验与观察交付 | [经验加载](src/asterion/applications/prime/p7/experience.py)、[归纳](src/asterion/applications/prime/p7/experience_induction.py)、[Actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
+| Actor 模型推演 | [纯推演助手](src/asterion/applications/prime/p7/rollout.py)、[内核接线与保留风险](src/asterion/applications/prime/p7/rollout_runtime.py) |
+| 可选经验与观察交付 | [经验加载](src/asterion/applications/prime/p7/experience.py)、[归纳](src/asterion/applications/prime/p7/experience_induction.py)、[Actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
 | 保存认证与官方重放 | [认证](src/asterion/applications/prime/p7/solution_certificates.py)、[官方操作入口](src/asterion/applications/prime/p7/official_operator.py)、[在线重放](src/asterion/applications/prime/p7/official_replay.py) |
+
+## 当前验证边界
+
+10 月 7 日官方结果属于记录中的历史代码和研究过程，不能认证重构后的当前系统。Task40 在注明的源码、打包资源及有限 P7 部署范围内验证了标准入口迁移。Task43 修复并验证了具体生命周期、worker 清理、原生上下文／checkpoint／resume 及 P7 metadata 兼容路径；完整历史迁移等价和长程认知等价仍未验证。
+
+最近 Task52 的全新 BP35 尝试关闭历史经验、没有 resume，用户因速度慢中止于 **5/9 关**、**225 个实际动作**、**3,887.15 秒**，一次死亡、两次 RESET。该次验证了 actor-only 历史和保留范围对不同状态的核对，未证明全题求解，也未在实跑中验证同危险保留。报告的 13,248,210 输入 tokens 包含 cache reads／writes，其明细与费用未被保留。后续缓存／费用接口记录可选且考虑覆盖度的 token 分类及标注的 `pi_sdk_estimate`；缺失字段仍未知，SDK 估算不是账单。真实后端缓存／费用验收仍待完成。详见[当前 checkpoint](docs/status/CURRENT-STATE.md)和[会话交接](docs/status/RESUME-NEXT-SESSION.md)。
 
 ## 控制台与回放
 
@@ -111,6 +137,8 @@ make asterion-prime-p7-official-submit GAME=all
 
 权威发布物是根 [pyproject.toml](pyproject.toml) 定义、`src/asterion/` 实现的 Python wheel。Python 负责编排、组合、装配和执行；TypeScript 验证共享协议及 Node 集成；Rust 负责受控执行。
 
+Provider／assembly 集成遵循：
+
 ```text
 CLI / 宿主 → 已选择 Provider → 装配 → catalog / composer
            → 精确实现 → runner → runtime / 宿主服务
@@ -122,7 +150,7 @@ CLI / 宿主 → 已选择 Provider → 装配 → catalog / composer
 
 | 实现／应用 | 职责 |
 |---|---|
-| Asterion Prime（`asterion.prime`） | 基于 Pi 传输与程序状态的源码独立 Prime 风格智能体；P1–P7 是其应用 |
+| Asterion Prime（`asterion.prime`） | 管理私有 Pi／session 的通用 Prime 标准库；P1–P7 是独立应用，可选 Provider 集成 |
 | Asterion Native（`asterion.native`） | 同级控制面 Provider，目前不是 `AgentRuntime` 适配器 |
 | P1–P6 | 持久计算、程序化长上下文、递归工作、有界自治与持续执行 |
 | DCI | 研究、评估、基准、分析和导出的参考产品 |
@@ -136,6 +164,8 @@ CLI / 宿主 → 已选择 Provider → 装配 → catalog / composer
 
 公开证据排除凭据、Provider 载荷、私有提示词、原始研究输出和私有宿主路径；公开回放展示应用批准的投影。运行时流必须有单一运行身份、连续事件、配对调用／结果和唯一终态。
 
+研发复审首先检查变更实现及其实际边界，按表面选择定向检查；纯文档变更运行 `make docs-check`。可用的 provider-free 回归命令包括：
+
 ```bash
 make test
 make lint
@@ -143,7 +173,7 @@ make docs-check
 make check
 ```
 
-`make promotion-check` 验证打包资源与发布边界，不发布、不调用模型。上述检查只证明对应软件边界，不能替代 ARC 实测成绩。
+`make promotion-check` 验证打包资源与发布边界，不发布、不调用模型。上述检查只证明对应软件边界，不能替代 ARC 实测成绩。新模型／游戏实跑属于另行授权的实验；文档维护或本地检查通过不会启动实跑。
 
 - [文档入口](docs/README.md)、[DCI 操作指南](docs/OPERATOR-GUIDE.md)
 - [框架架构](docs/architecture/agent-framework.md)、[运行时与 Provider 边界](docs/architecture/runtime-provider-boundaries.md)

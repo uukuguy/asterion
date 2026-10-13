@@ -5037,3 +5037,7 @@
 
 - 12:14 Resume recovered final journal synchronization; no trial restarted, cache acceptance remains open.
 - 12:14 Recovery checkpoint preserves final stop boundaries and prevents unintended restart [18c5c5f1; included in amended commit].
+- 12:18 Main fast-forwarded 237 research commits; archived branch tips preserve legacy evidence without restoring superseded implementations.
+- 12:18 Baseline verification: Python76, runtimeTS31, extension112/6skipped, lint/docs PASS; no model or game calls.
+- 12:22 README/AGENTS align refactored Prime/P7 ownership and scoped evidence; independent source/documentation review found no blockers.
+- 12:22 Documentation aligns stable main ownership and evidence boundaries for future development [18095f2f; receipt included in amended commit].

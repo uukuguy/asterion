@@ -6,7 +6,7 @@
 
 Asterion Prime targets autonomous problem-solving for work that consumes substantial human time and effort. Its guiding purpose is long-horizon, open-ended, falsifiable computational research, producing a research chain that humans can understand, machines can check, evidence can trace, and conclusions can replay. Prime supplies reusable infrastructure; each domain supplies its research and data layers. We are first developing and testing this approach in P7 before extending it to other domains. This is the architectural direction; verified capabilities remain scoped to their recorded tests. See the [Prime architecture](docs/architecture/agent-framework.md#asterion-prime-positioning).
 
-Asterion Prime P7 studies interactive ARC-AGI-3 games by writing programs, testing hypotheses against real observations, and carrying useful experience into later attempts. Its producing system is public: the LLM, persistent IPython workspace, versioned WorldMap, checked action broker, experience store, and certification/submission code are in this repository.
+Asterion Prime P7 adapts that infrastructure to interactive ARC-AGI-3 games. The model owns research reasoning: it maintains useful NOTES, writes and revises programs when needed, and tests hypotheses against real observations. The application supplies game facts, authorized actions and evidence. Historical experience is available only when explicitly selected; a new research run defaults to no prior-run experience.
 
 ## ARC-AGI-3: official result
 
@@ -24,28 +24,45 @@ Official result: **100.00**, 25 games, 183 levels, 6,781 actions. [Full-page scr
 
 Read the [public result record](docs/results/arc-agi-3/README.md) and [machine-readable evidence](docs/results/arc-agi-3/p7-public-2026-10-07.json). Browse saved progress and replay in the [read-only console](https://asterion-p7-console.vercel.app); synchronized data may lag local research.
 
-This is a warm-start, iterative public-game research result, with retained experience, retries, verified prefix reuse, operator scheduling, and application repairs during the campaign. P7 generated research programs, WorldMaps, and action choices. The 6,781 actions describe selected routes, not all exploration or total research cost. Official saved-route submission checks those routes in new online games without model inference; it is distinct from a fresh LLM solve. No private-set result, ARC Prize Verified status, or monetary total is claimed. A [scoped API-price estimate](docs/results/arc-agi-3/README.md#scoped-api-price-estimate) gives $147.46–$158.32 at Standard rates under an assumed 97% cached-read share; actual payment and complete research cost remain unknown.
+This is a historical warm-start, iterative public-game research result, with retained experience, retries, verified prefix reuse, operator scheduling, and application repairs during the campaign. P7 generated research programs, WorldMaps, and action choices. The 6,781 actions describe selected routes, not all exploration or total research cost. Official saved-route submission checks those routes in new online games without model inference; it is distinct from a fresh LLM solve. No private-set result, ARC Prize Verified status, or monetary total is claimed. A [scoped API-price estimate](docs/results/arc-agi-3/README.md#scoped-api-price-estimate) gives $147.46–$158.32 at Standard rates under an assumed 97% cached-read share; actual payment and complete research cost remain unknown.
 
-## How P7 works
+## Prime as a library, P7 as an application
+
+The standard library entry is [`prepare_prime_application`](src/asterion/agents/prime/application.py), using `PrimeApplicationSpec`, an operator-resolved `PrimeOperatorContext`, and explicit authorization. Preparing the owner validates inputs without launching Pi. Prime subsequently owns backend launch, RPC, extension loading, persistent workspaces and cleanup. An application supplies its goals, declared tools, data, and completion/continuation hooks; it does not construct Pi/RPC objects to inject into Prime. Independent applications need no central registration or provider discovery. Existing provider/assembly routes remain available; a unified Prime CLI is outside the completed migration scope.
+
+| Layer | Ownership |
+|---|---|
+| Prime infrastructure | Computation and workspace lifetime, tool transport, context archives/projection, native-session continuity, authorization and resource boundaries |
+| P7 research | Research guidance, NOTES and optional WorldMap/programs, actor-model rollout integration, interpretation of observations and counterexamples |
+| P7 data | Actual frames and history, game action dispatch, evidence references, selected-route certificates and replay |
+| Operator | Backend configuration and credentials, exact model selection, external assets, execution authorization and stopping policy |
+
+The operator resolves configuration and injects it; generic Prime code does not read `.env` or authentication profiles. Existing P1 and P3–P7 model paths, including the P7 narrator, use the standard resource owner. P1–P6 target `deepseek/deepseek-flash`; P7 uses `openai-codex/gpt-6.1-sol`. P2 currently remains a model-free local retrieval mechanism. These are migration boundaries, not proof of autonomous capability in every application.
+
+Current research memory uses model-written **NOTES**, with immutable revisions and evidence references. Accepted notes can establish a working-context epoch: the current notes, necessary application state, effective constraints, recent complete tool groups, significant errors and uncertain effects remain in context, while covered older detail stays archived and readable by reference. The generic TypeScript context machinery handles archive/cursor/projection; P7 supplies the research content and exact current facts. This is separate from native compaction. Specialized code-aware summaries that preserve persistent-kernel interfaces are not yet connected to the current launch chain. Context-capacity reminders measure hook JSON bytes, not provider tokens or a proven token/cost ceiling.
+
+## How current P7 research works
 
 ```mermaid
 flowchart LR
-    O[Settled observation] --> L[LLM: revise hypotheses]
-    L --> W[Versioned WorldMap]
-    L --> P[Persistent IPython: model and search]
-    W --> A[Short plan with predictions]
+    O[Actual observation and current facts] --> L[LLM: research and revise]
+    L --> N[NOTES and evidence references]
+    L --> P[Persistent IPython: optional models and search]
+    N --> A[Observation-bound plan]
     P --> A
-    A --> B[Broker: check and execute]
+    A --> B[P7 admission and action broker]
     B --> O
     B --> E[History and counterexamples]
     E --> L
 ```
 
-1. **Observe and describe.** The application supplies the actual settled frame, observation reference, current budget, and workspace revision. The LLM maintains a WorldMap with its scene description, candidate rules, goals, unknowns, competing hypotheses, and evidence-backed action labels. It uses unresolved questions to choose the next useful computation or discriminating experiment. Partial models are allowed.
-2. **Build executable hypotheses.** A persistent IPython namespace holds Python state projections, transition functions, goal candidates, and searches across model turns. The read-only `p7_research` interface exposes recorded observations and history. The model compares alternatives without importing the game engine to search hidden state.
-3. **Check the model against history.** Reports can predict previously observed cells, frame hashes, states, or completed levels. Host-side comparison records matches and counterexamples. When a historical check or real action contradicts a prediction, the LLM revises its WorldMap or program and recomputes the next plan. This retrodiction checks a stated claim against observed evidence; it does not certify every rule, the goal, or route optimality.
-4. **Act with explicit predictions.** A short plan binds to the current observation and workspace version. The broker validates it, dispatches sequentially, and stops at the first mismatch, level boundary, RESET, or terminal condition. Unexecuted suffixes stay unexecuted; uncertain results do not authorize a retry.
-5. **Learn from failure.** Later attempts can read same-game research, counterexamples, artifacts, and selected historical cells. Old programs are inert material to revise, not a script to replay wholesale. Prior evidence cannot authorize current actions. Independently checked completed prefixes can be restored in a new local game before work on its next level.
+1. **Observe and retain useful understanding.** P7 appends the actual settled frame, observation reference, budget status and workspace revision to model context. The model chooses its hypotheses, representation and next experiment. NOTES hold useful mechanisms, assumptions, counterexamples, unresolved questions and next steps; detailed WorldMaps remain available rather than a mandatory reasoning form.
+2. **Compute when useful.** A persistent IPython namespace holds state projections, transition functions and searches across turns. The read-only `p7_research` interface exposes actual observations and evidence. The model cannot import the game engine to search hidden state. Model-facing cell history contains actor cells with their original kernel ordinals; the private kernel archive retains host computations too.
+3. **Compare predictions with evidence.** Optional reports and action predictions can be checked against recorded observations. A match supports the stated comparison; it does not establish model completeness, goal correctness, optimality or future safety. Contradictions remain available as counterexamples.
+4. **Execute a current plan.** Plans bind to the exact observation and workspace revision. P7 validates the whole request before dispatching actions sequentially. Mismatch handling follows the selected profile; RESET, level boundaries, terminal conditions and unresolved effects retain their hard stops. Unexecuted suffixes stay unexecuted, and uncertain effects never authorize a retry.
+5. **Keep evidence within its scope.** New research runs default to historical experience **off**. Explicit history-enabled experiments and selected resume paths can use prior material with source identities and current-state checks. Archived programs are material to inspect and revise; previous evidence cannot authorize current actions. The official campaign above used historical experience and verified prefix reuse and therefore has a different evaluation scope.
+
+Supervised research also supports **actor-model rollouts**: the actor explicitly registers its own frame projection and dynamics/risk callbacks in the current kernel. Helpers apply one input and then model automatic motion until a modeled stop or unknown result; they do not consult hidden engine mechanics. Before each real action, host evaluation of that registered model blocks identified `predicted_death` or `conditional_fatal` findings and returns evidence. Ordinary incomplete coverage is reported; no model means `not_evaluated`. RESET, level change and kernel restoration invalidate registration. Retained fatal witnesses have narrow, checked applicability; an unavailable scope stops the affected candidate. Proactive actor checks and automatic host checks are recorded separately. An inaccurate model can still miss a real hazard, and a modeled safe result is not a safety certificate. This experimental guidance stays at the supervised research entry.
 
 The current model-facing tool surface is exactly **`ipython`, `p7_workspace`, and `p7_execute_plan`**. These are registered application tools, not prompt-only names. Research and real action dispatch have separate interfaces. Board delivery uses a lossless palette/row dictionary when smaller, with raw-frame fallback and an exact raw research reader; this changes presentation, not game semantics or recorded evidence.
 
@@ -53,15 +70,24 @@ The current model-facing tool surface is exactly **`ipython`, `p7_workspace`, an
 
 The optional `fresh-target` quarantine policy is an **operator-selected intervention** that excludes explicitly identified prior target-level material while retaining a bound earlier-level prefix. It is not an automatic P7 decision.
 
-### Inspect the producing code
+### Inspect the implementation
 
 | Surface | Public source |
 |---|---|
+| Standard resource owner | [Application entry](src/asterion/agents/prime/application.py), [backend owner](src/asterion/agents/prime/backend.py) |
+| NOTES and context continuity | [Memory store](src/asterion/applications/prime/p7/research.py), [generic projection](packages/typescript/asterion-prime-extension/src/context-projection.ts), [context witness](packages/typescript/asterion-prime-extension/src/context-witness.ts) |
 | LLM guidance and registered tools | [Prompt](src/asterion/applications/prime/p7/prompt.py), [tool registry](src/asterion/applications/prime/p7/tool_registry.py), [TypeScript extension](packages/typescript/asterion-prime-extension) |
 | Persistent programmatic research | [IPython host](src/asterion/applications/prime/p7/ipython_host.py), [research runtime](src/asterion/applications/prime/p7/research_runtime.py), [research bridge](src/asterion/applications/prime/p7/research_bridge.py) |
 | WorldMap, checks, and actions | [Research workspace](src/asterion/applications/prime/p7/research.py), [world model](src/asterion/applications/prime/p7/world_model.py), [broker](src/asterion/applications/prime/p7/broker.py) |
-| Retained experience and delivery | [Experience loader](src/asterion/applications/prime/p7/experience.py), [induction](src/asterion/applications/prime/p7/experience_induction.py), [actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
+| Actor-model rollouts | [Pure helpers](src/asterion/applications/prime/p7/rollout.py), [kernel integration and retained risk](src/asterion/applications/prime/p7/rollout_runtime.py) |
+| Optional experience and observation delivery | [Experience loader](src/asterion/applications/prime/p7/experience.py), [induction](src/asterion/applications/prime/p7/experience_induction.py), [actor projection](src/asterion/applications/prime/p7/actor_projection.py) |
 | Save-time authority and official replay | [Certificates](src/asterion/applications/prime/p7/solution_certificates.py), [official operator](src/asterion/applications/prime/p7/official_operator.py), [online replay](src/asterion/applications/prime/p7/official_replay.py) |
+
+## Current verification boundary
+
+The October 7 official result belongs to its recorded historical code and research campaign. It does not certify the refactored current system. Task40 verified the standard-entry migration in its stated source, packaged-resource and bounded P7 deployment scope. Task43 repaired and verified specific lifecycle, worker cleanup, native context/checkpoint/resume and P7 metadata compatibility paths; whole historical migration equivalence and long-horizon cognition equivalence remain unverified.
+
+The latest Task52 fresh BP35 attempt ran with historical experience off and no resume, and was stopped by the user for slowness at **5/9 levels**, **225 actual actions**, **3,887.15 seconds**, one death and two RESETs. It verified actor-only history and a different-state retained-scope check; it did not establish full-game solving or same-danger retention in live play. Its 13,248,210 reported input tokens include cache reads/writes, whose breakdown and cost were not retained. The later cache/cost interface records optional coverage-aware token categories and a labeled `pi_sdk_estimate`; missing fields remain unknown, and the estimate is not an invoice. Actual backend cache/cost acceptance remains open. See the [current checkpoint](docs/status/CURRENT-STATE.md) and [session handoff](docs/status/RESUME-NEXT-SESSION.md).
 
 ## Console and replay
 
@@ -111,6 +137,8 @@ The latter creates a new Competition scorecard and executes real online actions.
 
 The authoritative distribution is the Python wheel defined by [pyproject.toml](pyproject.toml) and implemented in `src/asterion/`. Python owns orchestration, composition, assembly, and execution; TypeScript validates shared contracts and Node integration; Rust owns controlled execution.
 
+The provider/assembly integration follows:
+
 ```text
 CLI / host → selected provider → assembly → catalog / composer
            → exact implementations → runner → runtime / host services
@@ -122,7 +150,7 @@ The closed contracts are `asterion.agent-runtime/v1`, `asterion.capability/v1`, 
 
 | Implementation / application | Role |
 |---|---|
-| Asterion Prime (`asterion.prime`) | Source-independent Prime-style agent over Pi transport and programmatic state; P1–P7 are its applications |
+| Asterion Prime (`asterion.prime`) | Reusable Prime library with private Pi/session ownership; P1–P7 are independent applications, with optional provider integration |
 | Asterion Native (`asterion.native`) | Peer control-plane provider; currently not an `AgentRuntime` adapter |
 | P1–P6 | Persistent computation, programmatic long context, recursive work, bounded autonomy, and continual execution |
 | DCI | Reference research/evaluation/benchmark/analysis/export product |
@@ -136,6 +164,8 @@ The host owns credentials, policy, cancellation, data, and execution authority. 
 
 Public evidence excludes credentials, provider payloads, private prompts, raw research output, and private host paths. Public replay presents an application-approved projection. Runtime streams require one run identity, contiguous events, matched calls/results, and one terminal event.
 
+Development review starts with the changed implementation and its actual boundaries. Run focused checks appropriate to that surface; documentation-only changes use `make docs-check`. Available provider-free regression commands include:
+
 ```bash
 make test
 make lint
@@ -143,7 +173,7 @@ make docs-check
 make check
 ```
 
-`make promotion-check` verifies packaged resources and distribution boundaries without publishing or calling a model provider. These checks establish their named software boundaries, not ARC benchmark performance.
+`make promotion-check` verifies packaged resources and distribution boundaries without publishing or calling a model provider. These checks establish their named software boundaries, not ARC benchmark performance. A new model/game trial is a separately authorized experiment; documentation maintenance or a passing local check does not start one.
 
 - [Documentation hub](docs/README.md) and [DCI operator guide](docs/OPERATOR-GUIDE.md)
 - [Framework architecture](docs/architecture/agent-framework.md) and [runtime/provider boundaries](docs/architecture/runtime-provider-boundaries.md)

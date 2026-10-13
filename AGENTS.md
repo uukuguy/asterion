@@ -49,14 +49,16 @@ Python owns orchestration, composition, assembly, and execution; TypeScript vali
 
 ## Architecture and Dependency Direction
 
-Preserve this direction:
+For provider/assembly integration, preserve this direction:
 
 ```text
 CLI/host → selected provider → assembly → catalog/composer
          → exact implementations → runner → runtime/host services
 ```
 
-Framework modules (`runtime/`, `packages/`, `assembly/`, `runner/`, `services/`) must remain domain-neutral. Products may depend on them; they must not import DCI implementations, tests, or adjacent source trees. Runtime adapters only translate native commands/events into the public protocol.
+Independent Prime applications consume the standard library directly: application/operator → Prime resource owner → private backend/runtime services. Central registration, provider discovery and CLI dispatch are not prerequisites; an optional provider integration must still follow the direction above.
+
+Framework modules (`runtime/`, `packages/`, `assembly/`, `runner/`, `services/`) and generic Prime infrastructure must remain domain-neutral. Products may depend on them; they must not import DCI implementations, tests, or adjacent source trees. Runtime adapters only translate native commands/events into the public protocol.
 
 ## Protocol and Composition Invariants
 
@@ -76,7 +78,7 @@ Host services are operator-owned and explicitly injected. `executor.controlled` 
 
 ### Prime 应用入口与私有底层
 
-应用使用 Prime 标准入口，Pi、RPC、扩展加载及会话构造由 Prime 内部管理；应用提供领域目标、工具、数据与完成/续跑条件，不自行创建 Pi/RPC 对象注入 Prime。Task40 已按用户授权迁移 P1、P3–P7 的已有真实模型路径（包括 P7 narrator）；operator 解析配置并注入上下文，通用核心不读取 `.env` 或认证 profile。P1–P6 使用 `deepseek/deepseek-flash`，P7 使用 `openai-codex/gpt-6.1-sol`；P2 当前仍为无模型的本地检索机制，其自主能力补全另列。独立应用不以中央注册或 CLI 为前提；CLI 定位待定。统一接入与实际解题能力的验证分开，最终打包/实跑状态见 Task40 与当前 checkpoint。D-2026-10-10-03 取代此前暂缓迁移的范围限制；专用代码摘要接通仍单独验证。
+应用通过 `src/asterion/agents/prime/application.py` 的 `prepare_prime_application`、`PrimeApplicationSpec` 与 `PrimeOperatorContext` 使用标准库；prepare 不启动 Pi。Pi、RPC、扩展加载、会话与工作区生命周期及清理由 Prime 内部管理；应用提供领域目标、工具、数据与完成/续跑条件，不自行创建 Pi/RPC 对象注入 Prime。Task40 已按用户授权迁移 P1、P3–P7 的已有真实模型路径（包括 P7 narrator）；operator 解析配置并注入上下文，通用核心不读取 `.env` 或认证 profile。P1–P6 使用 `deepseek/deepseek-flash`，P7 使用 `openai-codex/gpt-6.1-sol`；P2 当前仍为无模型的本地检索机制，其自主能力补全另列。独立应用不以中央注册或 CLI 为前提；CLI 定位待定。统一接入与实际解题能力的验证分开，最终打包/实跑状态见 Task40 与当前 checkpoint。D-2026-10-10-03 取代此前暂缓迁移的范围限制；专用代码摘要接通仍单独验证。
 
 ### Prime 应用级工具（当前以 P7 验证）
 
@@ -84,9 +86,19 @@ Host services are operator-owned and explicitly injected. `executor.controlled` 
 
 必需的状态/观察结果由应用直接追加到模型上下文；只把有明确使用场景的查询或动作工具注册给模型，并在工具描述中写清调用时机、输入和返回结果。减少或新增工具时同步修改 Pi allowlist、TypeScript 注册、Python bridge、prompt 说明和测试。
 
-### P7 重构后的部署闭环
+### NOTES、P7 研究适配与验证范围
 
-完成一键重构脚本或 Prime 应用级工具改动后，按顺序执行 `npm --prefix packages/typescript/asterion-prime-extension test`、相关 Python 测试、`make promotion-check`；再用 `make asterion-prime-p7-level-witness GAME=<...> LEVEL=<...>` 走一次真实打包运行，确认生成的 wheel、Pi 扩展资源和工具 allowlist 是同一版本。记录运行证据并提交代码与状态文档；不得只改 TypeScript 源码或只改 prompt 就宣称部署完成。
+通用 Prime 负责上下文归档、cursor／projection、资源与恢复边界；P7 提供 NOTES 研究内容、真实观察和领域工具。当前工作上下文以已接受 NOTES 为 epoch，旧明细按引用读取；普通 NOTES 与 Pi 原生手动／自动压缩分开。Task43 的原生上下文、ACK／checkpoint／resume、worker 连续性及 metadata 修复有具体验证，不能因此宣称专用代码摘要已接通或完整历史认知等价。
+
+P7 新研究默认不加载历史经验，过去运行材料须明确 process opt-in 或选定 resume。监督研究入口的 actor-model rollout 只执行模型自己写出的程序；逐动作宿主评估和已识别致命风险拦截不证明模型正确或未来安全。主动调用与 host_auto 独立记录。模型可见 cell 历史只包含 actor cells，私有 kernel 证据保持完整。通用 Prime 不接收 ARC 机制或隐藏引擎语义。
+
+历史官方 100.00 属于原代码身份和有经验累计研究口径；Task40 接入验证、Task43 局部迁移修复及 Task52 用户中止的 5/9 均按各自范围记录。后续 cache／cost 字段已实现，Task52 原实跑明细不可补回；缺失／部分覆盖仍为 unknown，`pi_sdk_estimate` 不等于账单。不能从 token 总量推断实际支付，不能将后续接口测试推广为原实跑验收。
+
+### P7 改动与部署验证
+
+研发阶段优先复审变更后的实现，按触及边界运行定向 TypeScript／Python 检查；改打包资源、入口、schema 或发布假设时运行 `make promotion-check`。工具注册改动须核对 wheel、扩展 artifact、Python bridge 与 allowlist 身份一致。源码或 provider-free 打包检查只能记为相应软件验证，不能宣称真实部署或解题效果完成。
+
+新模型／游戏实跑不由代码改动、文档收口或已有配置自动授权；只有用户授权相应实验时才使用 `make asterion-prime-p7-level-witness GAME=<...> LEVEL=<...>` 等预设，冻结源码／wheel 身份并记录实际运行、清理及未完成边界。已停止试验不得自动续跑。纯文档变更以 `make docs-check` 与内容／索引一致性检查为准，不追加全量回归或真实试跑。
 
 The repository `.env` already contains operator-owned backend LLM configuration. Application or operator integration may resolve that configuration and inject an exact host service; framework modules must never read `.env`, credentials, or provider settings directly. A user-facing “small verification” is one preset action: it must not ask the user for provider, model, cost, or deadline knobs. The integration enforces finite controls internally and exposes only public-safe status. Missing Native host wiring is an application-integration task, not a request for the user to budget or configure a backend.
 
@@ -94,7 +106,8 @@ The repository `.env` already contains operator-owned backend LLM configuration.
 
 - **Runtime:** add `src/asterion/runtimes/<name>.py`, an exact factory binding, capability mapping, and tests. Do not fork capability manifests by runtime.
 - **Capability/package:** add manifests and implementations under `src/asterion/capabilities/`, composition/output tests, then exact assembly/provider bindings.
-- **Application:** add exact refs under `src/asterion/applications/<provider>/assemblies/`, allowed runtimes, and provider exposure. Keep executable paths out of JSON.
+- **Independent Prime application:** use the standard library owner; supply domain goals, tools, data and completion/continuation hooks. Keep backend resources private to Prime and resolve operator configuration outside generic code. No central registration or CLI is required.
+- **Provider/assembly application integration:** add exact refs under `src/asterion/applications/<provider>/assemblies/`, allowed runtimes, and provider exposure. Keep executable paths out of JSON.
 - **Protocol:** update canonical schema, Python validator/types, TypeScript types/validation, and `valid-*` plus `invalid-*` fixtures under `tests/fixtures/<protocol>/v1/`.
 - **Host service:** define a narrow protocol, declare the assembly capability, inject it only after host preflight, and test missing-service/redaction paths.
 
@@ -114,7 +127,7 @@ condition before requesting any operator action.
 
 ## Verification and Evidence
 
-Use `unittest` (`test_<surface>.py`, `Test...`, `test_<behavior>`) and `subTest` matrices. Cover success, failure, immutability, identity, determinism, cancellation, and redaction.
+Review the changed implementation first. Use focused `unittest` (`test_<surface>.py`, `Test...`, `test_<behavior>`) and `subTest` matrices for affected behavior and trust boundaries: relevant success/failure, immutability, identity, determinism, cancellation and redaction. Avoid excessive test expansion for research-stage changes. The commands below are available checks, not an unconditional sequence for every change; broaden only when scope or evidence requires it.
 
 ```bash
 uv run python -m unittest -v tests.test_package_execution
