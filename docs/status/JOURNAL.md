@@ -5065,3 +5065,7 @@
 - 13:49 Application callback capacity committed separately to restore configurable execution instead of fixed128 [2673de30].
 - 13:49 Safe native error omissions and private projection reasons verified115TS/88Python/installedPi0provider, independentreviewAPPROVE.
 - 13:56 NOTES native omission compatibility and explicit refusal metrics committed separately [a35f5236]; combined source checks PASS, no live benefit yet.
+
+- 14:12 Repair boundary documentation committed/pushed [405d5014]; callback and conservative context omission fixes are independently verified, full-game success remains open.
+- 14:12 Task54 active selected continuation source405d5014/wheelc8982a06 restores280actions/7levels; runp7-live-20261013060100-342ba6272a17b7ae7fcffb2b, model1024/tool4096, finite3600s. Snapshot316actions=280restored+36new,7/9; no newRESET.
+- 14:12 Task54 provider error producer traced to Codex stream service errors; auto_retry_end is lifecycle summary, not extra failure. Projection primary requests13–15, unsupported-context-edit from16; exact edit under investigation, no midrun code changes.
