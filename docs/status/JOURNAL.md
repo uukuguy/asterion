@@ -5129,3 +5129,6 @@
 - 2026-10-13 22:40 Rewrote bilingual README around verified capabilities; local9/9score, coldcheckpoint and packagedgate scopes reviewed,AstraAPPROVE,docsPASS.
 
 - 22:41 [715db8b6] Rewrote README capability conclusions to reflect verified full-game continuation and exact gate scope.
+
+- 2026-10-13 23:20 [aca76ed7] README rewrite closeout pushed; no remaining task or live trial.
+- 2026-10-13 23:20 Annotated milestone asterion-prime-p7-milestone-2026-10-13 tagged aca76ed7 and pushed; prior baseline preserved.

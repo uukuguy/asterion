@@ -6,6 +6,10 @@
 
 用户要求基于已通过的整局接续和死亡前门禁验证，重写中英文 README 的声明与结论。已完成：突出 Prime 重构／应用适配、自主 BP35 checkpoint 接续9/9／本地100分，将旧试验流水账移出正文，现代每步推演和未知探针授权取代旧监督入口限定说明。冷启动六关、选定前缀接续整局、新门禁单候选验证、历史官方成绩分别保留证据和范围。readme_conclusions 只编辑两份 README，Astra 独立事实复审通过，docs-check／diff-check通过。已提交推送（715db8b6），工作区收口；无新模型或游戏试验。
 
+## Milestone snapshot
+
+Annotated remote tag `asterion-prime-p7-milestone-2026-10-13` points to `aca76ed77d0c3586380971381f18c82772c989d7`, the completed repair/witness/README snapshot. Tag annotation records verified cold checkpoint, selected full-game continuation and exact repaired admission scope. Earlier `asterion-prime-p7-baseline-2026-10-13` remains unchanged. Later main state-only receipts do not change that milestone snapshot.
+
 ## Task59 targeted witness PASS
 
 User accepted a short checkpoint hazardous-candidate verification, not a full-level solve. Private evidence `.asterion-private/task59-p7-level9-gate-witness/receipt.json`, `verify_l9_gate.py`, `original-reg6-callbacks.py`, `verification.log`.
