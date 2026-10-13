@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 12:27. Session remains active — README progress evidence aligned; no new live trial.
+> Updated: 2026-10-13 12:28. Session remains active — preset trial scope clarified; no new live trial.
 
 ## 已验证事实
 
-- README progress now foregrounds standard Prime/P7 adaptation and fresh autonomous solving: Task29 frozen9557ad63 independently completed BP35 L1–L6 (211 actions/zero deaths), Task7 frozen9b62d2c2 completed the same six-level target in1023.28s, and post-adaptation Task52 completed L1–L5 before user stop. No recorded current full nine-level cold success was found; original arc-skill r11l WIN is not P7 evidence. Documentation checks PASS; no new game/model calls.
+- README progress now foregrounds standard Prime/P7 adaptation and fresh autonomous solving: Task29 frozen9557ad63 independently completed BP35 L1–L6 (211 actions/zero deaths), Task7 frozen9b62d2c2 completed the same six-level target in1023.28s, and post-adaptation Task52 completed L1–L5 before user stop. The six-level endpoint was operator-defined scope, not a solving limit; remaining levels were not attempted in those trials. Task52 was user-stopped, not an observed terminal inability. Original arc-skill r11l WIN is not P7 evidence. Documentation checks PASS; no new game/model calls.
 
 - README.md, README.zh-CN.md and AGENTS.md now describe the standard Prime library owner, independent applications, NOTES and P7 model-relative rollout boundaries. Independent consolidation/documentation review found no blockers. Fresh post-merge Python76 PASS; runtime TypeScript31 PASS; Prime extension112 PASS/6 skipped; lint/docs PASS (327 markdown/283 local links). No full regression, promotion or new model/game trial performed for this consolidation. Baseline is marked by `asterion-prime-p7-baseline-2026-10-13`.
 

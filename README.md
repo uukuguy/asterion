@@ -18,12 +18,12 @@ Asterion Prime P7 adapts that infrastructure to interactive ARC-AGI-3 games. The
 
 | Demonstrated progress | Recorded scope |
 |---|---|
-| Fresh autonomous six-level completion | 2026-10-09, frozen `9557ad63`: BP35 L1–L6, 211 actions, 25 min 48.25 s, no prior research state or outside solving assistance |
-| Faster autonomous six-level completion | 2026-10-08, frozen `9b62d2c2`: 221 actions, 17 min 3.28 s, two paid RESETs; [process and replay audit](docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md) |
+| Autonomous completion of the operator-defined cold-start target | 2026-10-09, frozen `9557ad63`: BP35 L1–L6, 211 actions, 25 min 48.25 s, no prior research state or outside solving assistance |
+| Faster completion of the same operator-defined target | 2026-10-08, frozen `9b62d2c2`: 221 actions, 17 min 3.28 s, two paid RESETs; [process and replay audit](docs/reviews/2026-10-08-p7-continuity-bp35-comparison.md) |
 | Fresh solving after application adaptation | Task52, frozen `cb0ba4ec`: L1–L5 completed without historical experience or resume; nine-level attempt stopped by the user during L6 |
 | Standard-entry application adaptation | Task40 entry/resource migration and bounded packaged P7 deployment; Task43 specific lifecycle/context compatibility repairs |
 
-BP35 has nine levels; these cold trials completed their six-level target. The latest nine-level cold attempt, Task52, was stopped at 5/9; the recorded full 9/9 run used historical experience. These results show autonomous research and level completion from fresh state, while a full nine-level cold completion on the current baseline remains unverified. The historical official campaign below has its own evaluation scope.
+**The six-level endpoint was an operator-defined experiment scope, not a solving limit.** P7 autonomously completed the entire requested L1–L6 target; the trial then ended as configured, without attempting L7–L9. This establishes successful completion of the assigned fresh-state target and provides no evidence that P7 cannot solve the remaining levels. The later Task52 nine-level trial was explicitly stopped by the user during L6 for elapsed time, rather than run to a terminal whole-game result. The recorded 9/9 run used historical experience; it and the historical official campaign below retain their separate evaluation scopes.
 
 ## ARC-AGI-3: official result
 
