@@ -5120,3 +5120,5 @@
 - 2026-10-13 22:24 User accepts short L9 hazardous-candidate packaged witness; restoration only, no model or full-level solving.
 
 - 2026-10-13 22:32 Task59PASS: realSDK376restored/originalmodelartifactidentical,packagedprobe0dispatch,frameunchanged,0modelcalls,cleanuptrue,AstraAPPROVE.
+
+- 22:33 [da446386] Recorded real L9 checkpoint gate proof; distinguish denied candidate from full-game evaluation.
