@@ -552,10 +552,13 @@ const appendNativeEntry = (fixture, value) => {
   fixture.entries.push(entry);return entry;
 };
 
-test("native failed no-call omission preserves NOTES receipts and raw evidence without resurrection",()=>{
+test("native failed partial-call omission preserves NOTES receipts and raw evidence without resurrection",()=>{
   const fixture=primaryFixture(),{archive,controller}=admitPrimary(fixture);
-  const failed={role:'assistant',stopReason:'error',content:[{type:'text',text:'FAILED_ATTEMPT_EVIDENCE'}]};
+  const failed={role:'assistant',stopReason:'error',content:[{type:'text',text:'FAILED_ATTEMPT_EVIDENCE'},
+    {type:'toolCall',id:'never-dispatched',name:'ipython',arguments:{code:'NEVER_EXECUTE'}}]};
   const target=appendNativeEntry(fixture,{type:'message',message:failed});
+  // The native omission is required; an unmatched partial call alone is not enough.
+  assert.match(JSON.stringify(controller.project([...fixture.messages,failed],archive).messages),/never-dispatched/);
   appendNativeEntry(fixture,{type:'context_edit',targetId:target.id,replacement:null});
   const original=structuredClone(fixture.entries);
   const view=controller.project(fixture.messages,archive);
@@ -576,15 +579,15 @@ test("native failed no-call omission preserves NOTES receipts and raw evidence w
 });
 
 test("native edits outside failed no-effect omission remain fail closed with safe reasons",()=>{
-  for(const mode of ['replacement','user','success','tool','calls','unknown','missing','duplicate','forward','unreadable',
+  for(const mode of ['replacement','user','success','length','aborted','tool','calls-result','calls-reused','calls-invalid','unknown','missing','duplicate','forward','unreadable',
     'stop-unknown','stop-environment-result-unknown','stop-processing-failed','status-cancelled','status-lost','status-rejected']) {
     const fixture=primaryFixture(),{archive,controller}=admitPrimary(fixture);
     let message={role:'assistant',stopReason:'error',content:[]};
     if(mode==='user') message=user('PRIVATE_EDIT_BODY');
-    if(mode==='success') message={...message,stopReason:'stop'};
+    if(['success','length','aborted'].includes(mode)) message={...message,stopReason:mode==='success'?'stop':mode};
     if(mode==='tool') message=result('unpaired');
-    if(mode==='calls') message={...message,content:assistant('unsafe').content};
-    if(mode==='unknown') message={...message,details:{context_interaction:{version:'asterion.prime-context-interaction/v1',effect:'unknown'}}};
+    if(mode.startsWith('calls-')) message={...message,content:assistant(mode==='calls-reused'?'call-0':mode==='calls-invalid'?'':'unsafe').content};
+    if(mode==='unknown') message={...message,content:assistant('unsafe').content,details:{context_interaction:{version:'asterion.prime-context-interaction/v1',effect:'unknown'}}};
     if(mode.startsWith('stop-')) message={...message,details:{stop_reason:mode.slice(5)}};
     if(mode.startsWith('status-')) message={...message,details:{status:mode.slice(7)}};
     if(mode==='unreadable') message={...message,content:[{type:'PRIVATE_BLOCK'}]};
@@ -592,9 +595,15 @@ test("native edits outside failed no-effect omission remain fail closed with saf
     const edit=appendNativeEntry(fixture,{type:'context_edit',targetId:mode==='missing'?'absent':target.id,replacement:mode==='replacement'?{content:'PRIVATE_EDIT_BODY'}:null});
     if(mode==='duplicate') appendNativeEntry(fixture,{type:'context_edit',targetId:target.id,replacement:null});
     if(mode==='forward') edit.targetId=appendNativeEntry(fixture,{type:'message',message}).id;
+    if(mode==='calls-result') appendNativeEntry(fixture,{type:'message',message:result('unsafe')});
+    if(mode==='calls-reused') appendNativeEntry(fixture,{type:'message',message:assistant('call-0')});
     const view=controller.project(fixture.messages,archive);
     assert.equal(view.outcome.status,'primary-unavailable',mode);
-    assert.equal(view.outcome.refusal_reason,'unsupported-context-edit',mode);
+    const reason=mode==='replacement'?'replacement':['missing','forward'].includes(mode)?'target-missing':
+      mode==='duplicate'?'target-duplicate':['user','tool'].includes(mode)?'target-role':
+      ['success','length','aborted'].includes(mode)?'target-stop':mode==='unreadable'?'unreadable-target':
+      mode==='calls-result'?'tool-evidence':mode.startsWith('calls-')?'call-identity':'unsettled-effect';
+    assert.equal(view.outcome.refusal_reason,'context-edit-'+reason,mode);
     assert.deepEqual(view.messages.filter(m=>m.customType!=='asterion_context_memory'),fixture.messages);
     assert.doesNotMatch(JSON.stringify(view.outcome),/PRIVATE/);
   }
@@ -608,10 +617,10 @@ test("unavailable projection records refusal and does not prescribe repeated NOT
   extension.registerP7MemoryContext({on:(_event,h)=>{hook=h;}},value=>records.push(value),{capacityBytes:1});
   const view=hook({type:'context',messages:fixture.messages},{sessionManager:fixture.manager}).messages;
   const notice=JSON.parse(view.find(m=>m.customType==='asterion_p7_context_capacity').content);
-  assert.equal(notice.refusal_reason,'unsupported-context-edit');
+  assert.equal(notice.refusal_reason,'context-edit-target-stop');
   assert.doesNotMatch(notice.instruction,/请尽快|成功且可验证的 NOTES 才能/);
   assert.equal(records[0].projection_status,'primary-unavailable');
-  assert.equal(records[0].refusal_reason,'unsupported-context-edit');
+  assert.equal(records[0].refusal_reason,'context-edit-target-stop');
 });
 
 test("P7 context capacity reminder preserves complete observations and does not accumulate",()=>{

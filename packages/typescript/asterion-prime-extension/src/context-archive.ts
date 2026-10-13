@@ -7,6 +7,9 @@ type RecordValue = Record<string,unknown>;
 const record = (value:unknown): RecordValue | undefined => typeof value==='object' && value!==null && !Array.isArray(value) ? value as RecordValue : undefined;
 export interface NativeContextArchive {sessionId:string; entries:RecordValue[];}
 export const CONTEXT_REFUSAL_REASONS = ['none','archive-unavailable','session-mismatch','unsupported-context-edit',
+  'context-edit-replacement','context-edit-target-missing','context-edit-target-duplicate','context-edit-target-role',
+  'context-edit-target-stop','context-edit-unsettled-effect','context-edit-tool-evidence','context-edit-call-identity',
+  'context-edit-unreadable-target',
   'incomplete-interaction','checkpoint-mismatch','unreadable-message','visible-lineage-mismatch','projection-error'] as const;
 export type ContextRefusalReason = typeof CONTEXT_REFUSAL_REASONS[number];
 /** Shared conservative boundary for native acknowledgements and omission admission. */
@@ -104,11 +107,11 @@ function marker(message:RecordValue) {
   const details=record(message.details), value=record(details?.context_interaction);
   return value?.version==='asterion.prime-context-interaction/v1' ? value : undefined;
 }
-function groups(archive:NativeContextArchive):Group[]|undefined {
+function groups(archive:NativeContextArchive,omitted:ReadonlySet<unknown>=new Set()):Group[]|undefined {
   const messages=archive.entries.map((entry,index)=>({entry,index,message:entry.type==='message'?record(entry.message):undefined})).filter(row=>row.message);
   const callCounts=new Map<string,number>(),resultCounts=new Map<string,number>();
-  for(const {message} of messages) {
-    if(message!.role==='assistant' && Array.isArray(message!.content)) for(const raw of message!.content) {
+  for(const {entry,message} of messages) {
+    if(!omitted.has(entry.id) && message!.role==='assistant' && Array.isArray(message!.content)) for(const raw of message!.content) {
       const block=record(raw);if(block?.type==='toolCall' && typeof block.id==='string') callCounts.set(block.id,(callCounts.get(block.id)??0)+1);
     }
     if(message!.role==='toolResult' && typeof message!.toolCallId==='string') resultCounts.set(message!.toolCallId,(resultCounts.get(message!.toolCallId)??0)+1);
@@ -118,6 +121,12 @@ function groups(archive:NativeContextArchive):Group[]|undefined {
   for(let position=0;position<messages.length;position++) {
     const row=messages[position]!, message=row.message!;
     if(message.role!=='assistant' || !Array.isArray(message.content)) continue;
+    // Native error stops precede dispatch. Keep the raw failed entry as a
+    // coverage boundary, but its omitted partial calls are not tool work.
+    if(omitted.has(row.entry.id)) {
+      result.push({start:row.index,end:row.index,entries:[row.entry],calls:[],complete:true,negative:false,unknown:false});
+      continue;
+    }
     const expected=new Map<string,string>();
     for(const raw of message.content) {
       const call=record(raw);if(call?.type!=='toolCall') continue;
@@ -154,39 +163,65 @@ export function parseContextCheckpoint(value:unknown):ContextCheckpointReceipt|u
 }
 export function createContextCheckpoint(archive:NativeContextArchive|undefined,toolCallId:string,revision:string):ContextCheckpointReceipt|undefined {
   if(!archive || !ID.test(toolCallId) || !REVISION.test(revision)) return undefined;
-  const all=groups(archive),source=all?.find(group=>group.calls.includes(toolCallId));if(!all || !source) return undefined;
+  const scan=failedAttemptOmissions(archive);if('reason' in scan) return undefined;
+  const all=groups(archive,scan.omitted),source=all?.find(group=>group.calls.includes(toolCallId));if(!all || !source) return undefined;
   const before=all.filter(group=>group.end<source.start);
   if(before.some(group=>!group.complete)) return undefined;
   return {version:CONTEXT_CHECKPOINT_VERSION,session_id:archive.sessionId,source_tool_call_id:toolCallId,
     coverage_through_entry_id:before.at(-1)?.entries.at(-1)?.id as string??null,notes_revision:revision};
 }
-/** Admit only native omission of a failed model attempt with no executable effects. */
-function failedAttemptOmissions(archive:NativeContextArchive):Set<unknown>|undefined {
+/** Admit only native omission of an error response that stopped before dispatch.
+ * Pi's agent loop returns on stopReason=error before tool execution, including
+ * partially streamed calls. Our application bridge runs only via tool.execute;
+ * message_update/message_end never dispatch. Missing results alone are NOT proof:
+ * require that native error boundary and reject contradictory execution evidence.
+ */
+function failedAttemptOmissions(archive:NativeContextArchive):{omitted:Set<unknown>}|{reason:ContextRefusalReason} {
   const previous=new Map<unknown,RecordValue>(), omitted=new Set<unknown>();
+  const callCounts=new Map<string,number>(), resultCalls=new Set<unknown>();
+  for(const entry of archive.entries) {
+    const message=entry.type==='message'?record(entry.message):undefined;
+    if(message?.role==='toolResult') resultCalls.add(message.toolCallId);
+    if(message?.role==='assistant' && Array.isArray(message.content)) for(const raw of message.content) {
+      const block=record(raw);
+      if(block?.type==='toolCall' && typeof block.id==='string') callCounts.set(block.id,(callCounts.get(block.id)??0)+1);
+    }
+  }
   for(const entry of archive.entries) {
     if(entry.type==='context_edit') {
       const target=previous.get(entry.targetId), message=record(target?.message), details=record(message?.details);
       const interaction=record(details?.context_interaction);
-      if(entry.replacement!==null || !target || target.type!=='message' || omitted.has(entry.targetId)
-        || message?.role!=='assistant' || message.stopReason!=='error' || !Array.isArray(message.content)
-        || message.content.some(raw=>record(raw)?.type==='toolCall')
-        || hasUnsettledContextEffect(details)
-        || interaction && (interaction.version!=='asterion.prime-context-interaction/v1' || interaction.effect!=='settled')) return undefined;
-      try {archiveMessage(message);} catch {return undefined;}
+      if(entry.replacement!==null) return {reason:'context-edit-replacement'};
+      if(!target) return {reason:'context-edit-target-missing'};
+      if(omitted.has(entry.targetId)) return {reason:'context-edit-target-duplicate'};
+      if(target.type!=='message' || message?.role!=='assistant') return {reason:'context-edit-target-role'};
+      if(message.stopReason!=='error') return {reason:'context-edit-target-stop'};
+      if(hasUnsettledContextEffect(details)
+        || interaction && (interaction.version!=='asterion.prime-context-interaction/v1' || interaction.effect!=='settled'))
+        return {reason:'context-edit-unsettled-effect'};
+      if(!Array.isArray(message.content)) return {reason:'context-edit-unreadable-target'};
+      for(const raw of message.content) {
+        const call=record(raw);if(call?.type!=='toolCall') continue;
+        if(typeof call.id!=='string' || !ID.test(call.id) || typeof call.name!=='string' || !call.name || callCounts.get(call.id)!==1)
+          return {reason:'context-edit-call-identity'};
+        if(resultCalls.has(call.id)) return {reason:'context-edit-tool-evidence'};
+      }
+      try {archiveMessage(message);} catch {return {reason:'context-edit-unreadable-target'};}
       omitted.add(entry.targetId);
     }
     previous.set(entry.id,entry);
   }
-  return omitted;
+  return {omitted};
 }
 export function primaryContextHistory(messages:readonly unknown[],archive:NativeContextArchive|undefined,receipt:ContextCheckpointReceipt,
   onRefusal?:(reason:ContextRefusalReason)=>void) {
   const refuse=(reason:ContextRefusalReason):undefined=>{onRefusal?.(reason);return undefined;};
   if(!archive) return refuse('archive-unavailable');
   if(archive.sessionId!==receipt.session_id) return refuse('session-mismatch');
-  const omitted=failedAttemptOmissions(archive);
-  if(!omitted) return refuse('unsupported-context-edit');
-  const all=groups(archive),source=all?.find(group=>group.calls.includes(receipt.source_tool_call_id));
+  const scan=failedAttemptOmissions(archive);
+  if('reason' in scan) return refuse(scan.reason);
+  const {omitted}=scan;
+  const all=groups(archive,omitted),source=all?.find(group=>group.calls.includes(receipt.source_tool_call_id));
   const actual=createContextCheckpoint(archive,receipt.source_tool_call_id,receipt.notes_revision);
   if(!all || !source?.complete || source.unknown) return refuse('incomplete-interaction');
   if(JSON.stringify(actual)!==JSON.stringify(receipt)) return refuse('checkpoint-mismatch');

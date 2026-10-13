@@ -24,6 +24,11 @@ class TestContextViewMetrics(unittest.TestCase):
         value['latest'].update(projection_status='primary-unavailable',
                                refusal_reason='unsupported-context-edit')
         self.assertEqual(ContextViewMetricsFile._validate(value), value)
+        for reason in ('context-edit-tool-evidence', 'context-edit-target-stop',
+                       'context-edit-call-identity', 'context-edit-unsettled-effect'):
+            value['latest']['refusal_reason'] = reason
+            with self.subTest(reason=reason):
+                self.assertEqual(ContextViewMetricsFile._validate(value), value)
         self.assertEqual(ContextViewMetricsFile._validate(payload()), payload())
         for key in ('projection_status', 'refusal_reason'):
             invalid = json.loads(json.dumps(value))

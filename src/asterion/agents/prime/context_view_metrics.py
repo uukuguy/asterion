@@ -19,6 +19,11 @@ _STATUSES = frozenset({'unobserved', 'inactive', 'retained', 'unsafe-boundary',
                       'primary', 'primary-unavailable', 'projection-unavailable'})
 _REASONS = frozenset({'none', 'archive-unavailable', 'session-mismatch',
                      'unsupported-context-edit', 'incomplete-interaction',
+                     'context-edit-replacement', 'context-edit-target-missing',
+                     'context-edit-target-duplicate', 'context-edit-target-role',
+                     'context-edit-target-stop', 'context-edit-unsettled-effect',
+                     'context-edit-tool-evidence', 'context-edit-call-identity',
+                     'context-edit-unreadable-target',
                      'checkpoint-mismatch', 'unreadable-message',
                      'visible-lineage-mismatch', 'projection-error'})
 

@@ -263,12 +263,61 @@ const afterNewNote=await primaryRunner.emitContext(primarySession.buildSessionCo
 assert.equal(primaryTelemetry.at(-1).projection_status,'primary');
 assert.doesNotMatch(JSON.stringify(afterNewNote),/FAILED_PROVIDER_ATTEMPT/);
 assert.match(JSON.stringify(afterNewNote),/PRIMARY_EXACT_USER_CONSTRAINT/);
+// Run the actual native loop and retry producer using a synthetic stream only.
+// Failed responses can retain partial calls; neither native execution nor bridge runs.
+const {runAgentLoop}=await import(pathToFileURL(resolve(packageRoot,"node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js")).href);
+let partialToolExecutions=0, syntheticStreamCalls=0;
+const partialAttempt={...assistant(call('failed-partial-call','p7_execute_plan',{incomplete:true})),
+  stopReason:'error',errorMessage:'WebSocket closed 1000'};
+const partialEvents=[];
+const partialTools=createAppLevelTools({callMethod:async()=>{
+  partialToolExecutions++;throw new Error('Failed response dispatched to bridge');
+}});
+await runAgentLoop([user('SYNTHETIC_RETRY_PROMPT')],{messages:[],tools:partialTools},
+  {model:{id:'probe',api:'openai-responses',provider:'openai'},convertToLlm:native.convertToLlm},
+  event=>{partialEvents.push(event);},undefined,()=>{
+    syntheticStreamCalls++;
+    const stream=new ai.EventStream(event=>event.type==='error',event=>event.error);
+    stream.push({type:'start',partial:partialAttempt});
+    stream.push({type:'toolcall_start',contentIndex:0,partial:partialAttempt});
+    stream.push({type:'error',reason:'error',error:partialAttempt});
+    return stream;
+  });
+assert.equal(syntheticStreamCalls,1);
+assert.equal(partialToolExecutions,0);
+assert.equal(partialEvents.filter(event=>event.type.startsWith('tool_execution')).length,0);
+assert.deepEqual(partialEvents.find(event=>event.type==='turn_end').toolResults,[]);
+const persistedPartial=partialEvents.find(event=>event.type==='message_end' && event.message.role==='assistant').message;
+const partialId=primarySession.appendMessage(persistedPartial);
+const recovery={sessionManager:primarySession,agent:{state:{messages:primarySession.buildSessionContext().messages}},
+  _entryIdsByMessage:new WeakMap(),_retryAttempt:0,
+  settingsManager:{getRetrySettings:()=>({enabled:true,maxRetries:1,baseDelayMs:0,maxDelayMs:0})},
+  _emit:event=>partialEvents.push(event),_refreshFinalizedContext:()=>{},
+  _findPersistedMessageEntryId:native.AgentSession.prototype._findPersistedMessageEntryId,
+  _omitRecoveryAttempt:native.AgentSession.prototype._omitRecoveryAttempt};
+assert.equal(await native.AgentSession.prototype._prepareRetry.call(recovery,persistedPartial),true);
+assert.equal(primarySession.getBranch().at(-1).type,'context_edit');
+assert.equal(primarySession.getBranch().at(-1).targetId,partialId);
+assert.equal(primarySession.getBranch().at(-1).replacement,null);
+const partialView=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.equal(primaryTelemetry.at(-1).projection_status,'primary');
+assert.doesNotMatch(JSON.stringify(partialView),/failed-partial-call/);
+assert.deepEqual(primarySession.getEntry(partialId).message,persistedPartial);
+const partialNoteCall=call('after-partial-note','p7_workspace',noteRequest);
+primarySession.appendMessage(assistant(partialNoteCall));
+const partialNote=await primaryWorkspace.execute(partialNoteCall.id,ai.validateToolArguments(primaryWorkspace,partialNoteCall));
+assert.equal(partialNote.details.context_checkpoint.coverage_through_entry_id,partialId);
+primarySession.appendMessage(toolResult(partialNoteCall.id,partialNoteCall.name,partialNote));
+const afterPartialNote=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.equal(primaryTelemetry.at(-1).projection_status,'primary');
+assert.doesNotMatch(JSON.stringify(afterPartialNote),/failed-partial-call/);
+assert.match(JSON.stringify(afterPartialNote),/PRIMARY_EXACT_USER_CONSTRAINT/);
 // The earlier diagnosis witness used successful prose, which must remain unsupported.
 const successfulId=primarySession.appendMessage({...assistant(),stopReason:'stop',content:[{type:'text',text:'SUCCESSFUL_PROSE'}]});
 primarySession.appendContextEdit(successfulId,null);
 await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
 assert.equal(primaryTelemetry.at(-1).projection_status,'primary-unavailable');
-assert.equal(primaryTelemetry.at(-1).refusal_reason,'unsupported-context-edit');
+assert.equal(primaryTelemetry.at(-1).refusal_reason,'context-edit-target-stop');
 assert.deepEqual(primaryErrors,[]);
 const manifest = JSON.parse(readFileSync(resolve(packageRoot,"package.json"),"utf8"));
 console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest.version,provider_calls:0,
@@ -279,4 +328,5 @@ console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest
   snapshot_after_state_group:true,snapshot_fixed_across_computation:true,
   actual_provider_event_numeric_observation:true,actual_provider_input_append_prefix:true,snapshot_native_user_conversion:true,selected_branch_isolated:true,
   normal_notes_v3_primary:true,native_archive_read:true,primary_actual_plan_append_prefix:true,primary_compaction_reload:true,final_extension_view_numeric_telemetry:true,
+  failed_partial_call_zero_dispatch:true,failed_partial_call_native_retry_primary:true,
   failed_no_call_omission_primary:true,new_notes_after_omission_primary:true,successful_prose_edit_rejected:true}));
