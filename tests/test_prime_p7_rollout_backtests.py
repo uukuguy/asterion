@@ -4,6 +4,7 @@ import contextlib
 import io
 import inspect
 import json
+import zlib
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from types import ModuleType, SimpleNamespace
@@ -53,12 +54,13 @@ class TestRolloutBacktests(unittest.IsolatedAsyncioTestCase):
             return json.loads(output.getvalue()), 'host:' + str(len(self.calls))
         self.runtime._cell = cell
 
-    def register(self, *, terminal=None, label='local'):
+    def register(self, *, terminal=None, label='local', risk_check=...):
         return self.namespace['register_rollout_model'](
             from_frame=lambda frame, ref: {'tick': 0, 'source_sequence': ref['sequence']},
             transition=lambda state, action: {**state, 'tick': state['tick'] + 1},
             settled=lambda state: True, terminal=terminal or (lambda state: None),
-            risk_check=lambda before, after, action: [], supported_actions=['ACTION1'], model_id=label,
+            risk_check=(lambda before, after, action: []) if risk_check is ... else risk_check,
+            supported_actions=['ACTION1'], model_id=label,
         )
 
     def death_feedback(self):
@@ -139,6 +141,72 @@ class TestRolloutBacktests(unittest.IsolatedAsyncioTestCase):
         summary = self.runtime.snapshot_backtest()
         self.assertEqual((summary['status'], summary['unresolved_count']), ('unknown', 1))
         self.assertEqual(summary['cases'][0]['reason'], 'initial_terminal_no_transition')
+
+    async def test_partial_death_backtest_retains_risk_and_coverage_without_terminal_claim(self):
+        self.register()
+        await self.runtime.collect_actor_calls(None, 'actor:first')
+        self.death_feedback()
+        fatal = {'id': 'view-fatal', 'type': 'conditional_fatal',
+                 'condition': 'contact may be fatal', 'evidence': 'declared model finding'}
+        for findings, expected_risk in (([], 'unassessed'), ([fatal], 'conditional_fatal')):
+            with self.subTest(risk=expected_risk):
+                self.register(risk_check=lambda before, after, action: {
+                    'findings': findings, 'coverage': 'unknown',
+                    'reason': 'outside modeled view', 'gap_kind': 'view_boundary',
+                })
+                await self.runtime.collect_actor_calls(None, 'actor:partial')
+                summary = self.runtime.snapshot_backtest()
+                case = summary['cases'][0]
+                self.assertEqual((summary['status'], summary['unresolved_count']), ('unknown', 1))
+                self.assertEqual((case['predicted_outcome'], case['predicted_risk']), ('settled', expected_risk))
+                self.assertEqual(case['reason'], 'risk_assessment_incomplete')
+                self.assertTrue(case['coverage']['partial'])
+                self.assertEqual(case['coverage']['gaps'][0]['kind'], 'view_boundary')
+                self.assertEqual(case['findings'], findings)
+                artifact = self.runtime.root / (case['result_artifact_id'][7:] + '.json.zlib')
+                raw = json.loads(zlib.decompress(artifact.read_bytes()))
+                self.assertEqual(raw['risk']['status'], case['predicted_risk'])
+                self.assertEqual(raw['risk']['coverage'], case['coverage'])
+                recorded = [json.loads(line) for line in (self.runtime.root / 'calls.jsonl').read_text().splitlines()]
+                recheck = [item for item in recorded if item.get('origin') == 'host_backtest'][-1]
+                self.assertEqual(recheck['predicted_risk'], expected_risk)
+                self.assertEqual(recheck['coverage'], case['coverage'])
+                self.assertEqual(self.runtime.retained_fatal_risks, [])
+
+    async def test_probe_death_with_unassessed_settled_outcome_is_not_a_safe_prediction_mismatch(self):
+        coverage = {'checker_supplied': True, 'evaluated_ticks': 0, 'unassessed_ticks': 1,
+                    'partial': True, 'errors': [], 'action_coverage': 'declared',
+                    'gaps': [{'kind': 'contact_unmodeled'}], 'gaps_omitted': 0}
+        for risk_fields in ({'risk': 'unassessed', 'coverage': coverage},
+                            {'risk': {'status': 'unassessed', 'coverage': coverage}}):
+            with self.subTest(risk=risk_fields['risk']):
+                record = self.runtime.record_feedback(
+                    {'status': 'evaluated', 'outcome': 'settled', **risk_fields,
+                     'result_artifact_id': 'sha256:original'},
+                    self.before, self.after, ACTION, 'GAME_OVER',
+                )
+                self.assertEqual(record['type'], 'death_not_assessed')
+                self.assertEqual(record['coverage'], coverage)
+                self.assertEqual(record['full_trace_ref'], 'sha256:original')
+        case = self.runtime.snapshot_backtest()['cases'][0]
+        self.assertEqual(case['predicted_risk'], 'unassessed')
+        self.assertEqual(case['coverage'], coverage)
+
+    async def test_partial_terminal_death_remains_unresolved_with_raw_death_prediction(self):
+        self.register()
+        await self.runtime.collect_actor_calls(None, 'actor:first')
+        self.death_feedback()
+        self.register(terminal=lambda state: 'dead' if state['tick'] else None,
+                      risk_check=lambda before, after, action: {
+                          'findings': [], 'coverage': 'unknown',
+                          'reason': 'contact unknown', 'gap_kind': 'contact_unmodeled',
+                      })
+        await self.runtime.collect_actor_calls(None, 'actor:partial-dead')
+        summary = self.runtime.snapshot_backtest()
+        case = summary['cases'][0]
+        self.assertEqual((summary['status'], summary['unresolved_count']), ('unknown', 1))
+        self.assertEqual((case['predicted_outcome'], case['predicted_risk']), ('dead', 'predicted_death'))
+        self.assertTrue(case['coverage']['partial'])
 
     async def test_death_witness_does_not_cross_run_when_same_root_is_recovered(self):
         self.register()

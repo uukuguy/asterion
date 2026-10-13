@@ -1,5 +1,6 @@
 """Standard solve uses the existing per-action rollout in its actual kernel."""
 import asyncio
+import copy
 import json
 from pathlib import Path
 import tempfile
@@ -35,7 +36,26 @@ class TestP7StandardSolveRollout(unittest.IsolatedAsyncioTestCase):
         self.assertIs(type(self.host), P7ResearchRuntime)
         self.tools = self.resources.application.services
 
-    async def model(self, *, terminal='return None', settled='return state["tick"]>=1', model_id='local-test', risk='return {"findings":[],"coverage":"covered","reason":"tested model"}', name='model'):
+    async def authorize_probes(self, limit, *, variant='verified'):
+        await self.resources.close()
+        self.root = self.root.parent / (self.root.name + '-authorized')
+        self.root.mkdir()
+        (self.root / 'trace').mkdir()
+        (self.root / 'extension.mjs').write_text('export default function extension() {}\n')
+        self.resources = build_p7_operator_resources(
+            environment={'ASTERION_PRIME_P7_RUN_MODE': self.run_mode,
+                         'ASTERION_PRIME_P7_HISTORY_VARIANT': variant,
+                         'ASTERION_PRIME_PI_AGENT_DIR': str(Path.home() / '.pi/agent'),
+                         'ASTERION_PRIME_PROVIDER': 'openai-codex',
+                         'ASTERION_PRIME_MODEL': 'gpt-6.1-sol'},
+            executable=Path('/usr/bin/pi'), extension_path=self.root / 'extension.mjs',
+            working_directory=self.root, engine=self.engine,
+            private_trace_root=self.root / 'trace', unknown_probe_action_limit=limit)
+        self.addAsyncCleanup(self.resources.close)
+        self.host = self.resources.host_services['prime.ipython']
+        self.tools = self.resources.application.services
+
+    async def model(self, *, terminal='return None', settled='return state["tick"]>=1', model_id='local-test', risk='return {"findings":[],"coverage":"covered","reason":"tested model"}', name='model', checker=True):
         code = ('import p7_research as r\n'
                 'def init(board,ref): return {"tick":0,"sequence":ref["sequence"]}\n'
                 'def move(state,action): state["tick"]+=1; return state\n'
@@ -43,7 +63,7 @@ class TestP7StandardSolveRollout(unittest.IsolatedAsyncioTestCase):
                 f'def end(state): {terminal}\n'
                 f'def risk(before,after,action): {risk}\n'
                 'r.register_rollout_model(from_frame=init,transition=move,settled=rest,'
-                f'terminal=end,risk_check=risk,supported_actions=["ACTION1"],model_id={model_id!r})\n')
+                f'terminal=end,risk_check={"risk" if checker else "None"},supported_actions=["ACTION1"],model_id={model_id!r})\n')
         result = await self.host.execute(name, code, _Signal())
         self.assertEqual(result.status, 'ok', result)
         return result
@@ -53,6 +73,7 @@ class TestP7StandardSolveRollout(unittest.IsolatedAsyncioTestCase):
                    'steps': [{'action': {'name': 'ACTION1', 'data': {}}} for _ in range(count)],
                    'stop_on_view_change': False}
         request.update(options)
+        self.last_plan_request = request
         result = await asyncio.wait_for(self.tools.call(name, 'execute_plan', request, _Signal()), 15)
         return json.loads(result['output'])
 
@@ -133,7 +154,7 @@ class TestP7StandardSolveRollout(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(result['unexecuted_steps']), 2)
 
     async def test_explicit_probe_requires_prior_review_and_can_only_dispatch_one_matching_step(self):
-        await self.unknown_model()
+        await self.unknown_model(settled='return state["tick"]>=2')
         first = await self.plan(name='unreviewed-probe', **self.probe_options())
         self.assertEqual((first['applied_count'], first['stop_reason']), (0, 'model-coverage-review'))
         for name,options,count in (
@@ -146,15 +167,19 @@ class TestP7StandardSolveRollout(unittest.IsolatedAsyncioTestCase):
         # Reading model evidence changes the actor cell, not its registration.
         await self.host.execute('read-after-review', 'print(r.current())', _Signal())
         result = await self.plan(name='reviewed-probe', **self.probe_options())
-        self.assertEqual(result['applied_count'], 1)
-        self.assertEqual(self.engine.calls, ['ACTION1'])
+        self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-coverage-review'))
+        self.assertEqual(self.engine.calls, [])
         self.assertEqual(result['auto_rollouts'][0]['risk'], 'unassessed')
-        self.assertEqual(result['auto_rollouts'][0]['probe_decision']['status'], 'explicit-probe')
-        # The old reviewed snapshot cannot cover a new state.
-        changed = await self.plan(name='changed-state-probe', **self.probe_options())
-        self.assertEqual((changed['applied_count'],changed['stop_reason']),(0,'model-coverage-review'))
+        decision = result['auto_rollouts'][0]['probe_decision']
+        self.assertEqual((decision['status'], decision['reason']), ('denied', 'authorization_required'))
+        self.assertEqual((decision['limit'], decision['used'], decision['remaining']), (0, 0, 0))
+        self.assertIs(decision['safety_verified'], False)
+        forged = await self.plan(name='actor-forged-allowance', unknown_probe_action_limit=1, **self.probe_options())
+        self.assertEqual(forged['status'], 'rejected')
+        self.assertEqual(self.engine.calls, [])
 
     async def test_probe_cannot_reuse_review_after_registration_or_bypass_new_fatal(self):
+        await self.authorize_probes(1)
         await self.unknown_model()
         first=await self.plan(name='review')
         self.assertEqual(first['stop_reason'],'model-coverage-review')
@@ -165,6 +190,98 @@ class TestP7StandardSolveRollout(unittest.IsolatedAsyncioTestCase):
         fatal=await self.plan(name='fatal-probe',**self.probe_options())
         self.assertEqual((fatal['applied_count'],fatal['stop_reason']),(0,'model-conditional-fatal'))
         self.assertEqual(self.engine.calls,[])
+
+    async def test_trusted_allowance_consumes_only_dispatch_and_never_replenishes(self):
+        await self.authorize_probes(1)
+        await self.unknown_model()
+        await self.plan(name='first-review')
+        request = {'name': 'allowed-probe', **self.probe_options()}
+        result = await self.plan(**request)
+        self.assertEqual((result['applied_count'], self.engine.calls), (1, ['ACTION1']))
+        decision = result['auto_rollouts'][0]['probe_decision']
+        self.assertEqual((decision['limit'], decision['used'], decision['remaining']), (1, 1, 0))
+        self.assertEqual(decision['status'], 'operator-authorized-unknown-probe')
+        self.assertEqual(decision['authority'], 'application-operator')
+        self.assertEqual(decision['accepted_risk'], 'unknown-may-be-fatal')
+        self.assertIs(decision['safety_verified'], False)
+        self.assertEqual(result['budget']['unknown_probe_policy']['used'], 1)
+        # Exact cached request cannot spend or dispatch twice.
+        cached = self.host.solver.execute_plan(self.last_plan_request)
+        self.assertEqual((cached['applied_count'], cached['stop_reason']), (result['applied_count'], result['stop_reason']))
+        self.assertEqual(cached['budget']['unknown_probe_policy'], result['budget']['unknown_probe_policy'])
+        self.assertEqual(self.engine.calls, ['ACTION1'])
+        await self.plan(name='second-review')
+        exhausted = await self.plan(name='exhausted-probe', **self.probe_options())
+        self.assertEqual((exhausted['applied_count'], exhausted['stop_reason']), (0, 'model-coverage-review'))
+        self.assertEqual(exhausted['auto_rollouts'][0]['probe_decision']['reason'], 'allowance_exhausted')
+        self.assertEqual(self.engine.calls, ['ACTION1'])
+
+    async def test_allowance_does_not_override_missing_failed_or_invalid_assessment(self):
+        await self.authorize_probes(3)
+        for index, (risk, checker) in enumerate(((None, True), ('return []', False), ('raise RuntimeError("checker failed")', True), ('return {"findings":[],"coverage":"invalid","reason":"malformed"}', True))):
+            with self.subTest(risk=risk, checker=checker):
+                if risk is not None:
+                    await self.model(name=f'invalid-model-{index}', risk=risk, checker=checker)
+                await self.plan(name=f'unavailable-review-{index}')
+                result = await self.plan(name=f'unavailable-probe-{index}', **self.probe_options())
+                self.assertEqual((result['applied_count'], result['stop_reason']), (0, 'model-coverage-review'))
+                self.assertEqual(result['budget']['unknown_probe_policy']['used'], 0)
+        self.assertEqual(self.engine.calls, [])
+
+    async def test_uncertain_dispatch_spends_allowance_and_cached_plan_cannot_respend(self):
+        await self.authorize_probes(1)
+        await self.unknown_model()
+        await self.plan(name='uncertain-review')
+        self.engine.raises_on = 1
+        result = await self.plan(name='uncertain-probe', **self.probe_options())
+        self.assertEqual(result['stop_reason'], 'environment-result-unknown')
+        self.assertEqual(result['budget']['unknown_probe_policy']['used'], 1)
+        cached = self.host.solver.execute_plan(self.last_plan_request)
+        self.assertEqual(cached['stop_reason'], result['stop_reason'])
+        self.assertEqual(cached['budget']['unknown_probe_policy'], result['budget']['unknown_probe_policy'])
+        self.assertEqual(self.engine.calls, ['ACTION1'])
+
+    async def test_unassessed_probe_death_keeps_classification_if_feedback_recording_fails(self):
+        await self.authorize_probes(1)
+        await self.unknown_model()
+        await self.plan(name='death-review')
+        def unavailable(*args, **kwargs):
+            raise RuntimeError('feedback unavailable')
+        self.host.solver.auto_observe = unavailable
+        self.engine.game_over_after = 1
+        result = await self.plan(name='death-probe', **self.probe_options())
+        feedback = result['model_feedback'][0]
+        self.assertEqual((feedback['type'], feedback['evidence_status']),
+                         ('death_not_assessed', 'feedback_record_unavailable'))
+        self.assertEqual(feedback['coverage'], result['auto_rollouts'][0]['coverage'])
+        self.assertEqual(feedback['findings'], result['auto_rollouts'][0]['findings'])
+
+    async def test_reset_does_not_spend_or_replenish_probe_allowance(self):
+        await self.authorize_probes(1)
+        await self.model()
+        self.engine.game_over_after = 1
+        await self.plan(name='covered-but-actual-death')
+        reset = await self.plan(name='recover', steps=[{'action': {'name': 'RESET', 'data': {}}}])
+        self.assertEqual((reset['applied_count'], reset['stop_reason']), (1, 'reset-applied'))
+        policy = reset['budget']['unknown_probe_policy']
+        self.assertEqual((policy['limit'], policy['used'], policy['remaining']), (1, 0, 1))
+        await self.plan(name='missing-after-reset-review')
+        missing = await self.plan(name='missing-after-reset-probe', **self.probe_options())
+        self.assertEqual((missing['applied_count'], missing['stop_reason']), (0, 'model-coverage-review'))
+        self.assertEqual(self.engine.calls, ['ACTION1', 'RESET'])
+
+    async def test_allowance_is_application_owned_and_validated_before_resources_start(self):
+        from asterion.applications.prime.p7.operator import P7OperatorError
+        for limit in (True, -1, 1.5, '1', self.host._broker.game.action_cap + 1):
+            with self.subTest(limit=limit), self.assertRaises(P7OperatorError):
+                await self.authorize_probes(limit)
+        with self.assertRaises(AttributeError):
+            self.host.solver.unknown_probe_action_limit = 100
+
+    async def test_probe_authority_cannot_be_injected_into_disabled_rollout(self):
+        from asterion.applications.prime.p7.operator import P7OperatorError
+        with self.assertRaises(P7OperatorError):
+            await self.authorize_probes(1, variant='legacy')
 
     async def test_model_reregistration_rechecks_death_case_instead_of_clearing_evidence(self):
         await self.model()
@@ -214,3 +331,30 @@ class TestP7StandardRolloutGuidance(unittest.TestCase):
                         self.assertEqual(text, 'selected application guidance\n\n' + P7_AUTO_ROLLOUT_INSTRUCTION)
                     else:
                         self.assertEqual(text, 'selected application guidance')
+
+
+class TestP7UnknownProbePolicy(unittest.TestCase):
+    def test_malformed_assessment_cannot_be_treated_as_valid_exploration(self):
+        from asterion.applications.prime.p7.rollout import rollout
+        from asterion.applications.prime.p7.solver import Solver
+        result = rollout({'tick': 0}, [{'name': 'ACTION1', 'data': {}}],
+                         transition=lambda state, action: {'tick': 1},
+                         settled=lambda state: True, terminal=lambda state: None,
+                         supported_actions=['ACTION1'],
+                         risk_check=lambda before, after, action: {
+                             'findings': [], 'coverage': 'unknown', 'reason': 'contact unknown'})
+        assessment = {'status': 'evaluated', 'risk': result['risk']['status'],
+                      'coverage': result['risk']['coverage'],
+                      'model_revision': {'generation': '1', 'registration_id': 1}}
+        self.assertTrue(Solver._probe_eligible_assessment(assessment))
+        for field, value in (('action_coverage', []), ('gaps_omitted', False),
+                             ('checker_supplied', 1), ('errors', None), ('gaps', [])):
+            with self.subTest(field=field):
+                malformed = copy.deepcopy(assessment)
+                malformed['coverage'][field] = value
+                self.assertFalse(Solver._probe_eligible_assessment(malformed))
+        for field in ('kind', 'phase', 'reason'):
+            with self.subTest(gap_field=field):
+                malformed = copy.deepcopy(assessment)
+                malformed['coverage']['gaps'][0][field] = []
+                self.assertFalse(Solver._probe_eligible_assessment(malformed))

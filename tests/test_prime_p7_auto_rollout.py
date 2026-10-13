@@ -176,7 +176,7 @@ class TestRolloutFeedback(unittest.TestCase):
             for outcome in ('settled', 'goal', 'collision', 'unknown'):
                 with self.subTest(outcome=outcome):
                     result = runtime.record_feedback({'status':'evaluated','risk':'unassessed','outcome':outcome}, before, after, action, 'GAME_OVER')
-                    self.assertEqual(result['type'], 'death_not_assessed' if outcome == 'unknown' else 'model_mismatch')
+                    self.assertEqual(result['type'], 'death_not_assessed')
 
     def test_current_run_death_case_matches_only_same_pixels_level_and_action(self):
         from asterion.applications.prime.p7.score import digest

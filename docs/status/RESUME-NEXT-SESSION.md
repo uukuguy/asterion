@@ -1,10 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 21:24 Asia/Shanghai. Task57 completed9/9. No active trial; no additional paid trial authorized.
+> Updated: 2026-10-13 22:06 Asia/Shanghai. Task58 repair verified; commit/push closeout in progress. Task57 completed9/9; no active paid trial.
 
 ## 当前目标与授权
 
-用户已批准机制层修正并明确要求实测重跑第9关：覆盖缺口分类、未知先返回、明确单步探针、模型反例历史回测。本轮单次试验已完成满分通关；根全程只读跟踪，没有向actor提供解题提示。模型回调、动作与时间额度已有应用配置，不重复询问授权或配置。
+用户在 Task57 满分通关后要求开始实施死亡预测后续修正。已实现风险／终局回测分层和应用授权的有限未知探针，正在完成最终核对和提交推送。没有新付费试验授权，也不需重跑完整第9关。
+
+## Task58 implementation boundary
+
+- `unknown_probe_action_limit=0` injects only through P7 `build_p7_operator_resources` → `P7ResearchRuntime` → `Solver`. True nonnegative finite integer, no more than game actioncap when present. Positive authority on disabled-auto/legacy paths rejects before resources. Model plans/prose/NOTES cannot grant or replenish. Newhost/attempt lifetime; resume defaults0, not durable run-global replenishment.
+- Existing singleprimitivegoal/risk/cost and exact prior/current review observation/action/model registration/kernel binding remain necessary. Registered/evaluated current/prior model with checker and explicit valid nonempty gaps only. Missing model/checker, malformed/unavailable evidence and failed computation cannot use allowance. Fatal/applicability/control/stale/uncertain/budget veto remain stronger. Consume before submission, including uncertain effects; cached plan no respending, RESET no probe charge. Covered candidates continue normally; finite application risk acceptance is not verified safety.
+- Backtests now retain predicted_outcome, predicted_risk, coverage, findings and exact raw artifact references. Partial/unassessed terminal reconstruction remains unknown/unresolved even if conditional fatal recognized. Complete death matches and complete nondeath contradicts; initial-dead without transition and unmapped pixel cases stay unresolved. Normal and feedback-persistence-failure paths label unassessed real death death_not_assessed, not safe-model contradiction.
+- Independent Astra code review APPROVED. Root final commands PASS125Python (90Solver/runtime/probe +35backtest/auto),115TypeScript/6existingexternal skips, resource byte-check, scopedruff/docs/diff. Private `.asterion-private/task58-death-prediction-repair/` contains tests/logs, `verify_saved_death_predictions.py`/`saved-death-classification-receipt.json`, wheel and `verify_wheel_policy.py`/`wheel-policy-receipt.json`.
+- Saved Task57 predeath377 production-classification replay returns death_not_assessed.35 original kernel result envelopes replayed via current `_ensure_backtest`,31conditionalfatal/4unassessed nowallunknown,originalrisk/coverage/findings/artifactSHApreserved;excluded1unavailablewithoutartifact.0model/engine/kernelexecute,sourceTask57filesunchanged. Scope saved-output classification, not re-execution of actor functions.
+- Packaged wheel SHA4ba8d6b0c46df44154f2a4f322c7a8b2346a1a54530b49e49686693ca8b46167. Wheel-import smoke validates final five source files/three extension resources byte-identical. Savedpredeathassessment+reconstructedreviewbinding defaultprobe377decision authorization_required; explicitapplication1 returns acceptedunknownrisk notsafety.0model/gamecalls,notactualdispatchdeployment. First smoke failed as late fixes changed source after earlier wheel build; rebuilt final wheel and exact check passed, no acceptance of stale resources.
+- Root owns docs/prompt/TS/resources; backtest_fix owned rollout runtime/backtests and private saved-output replay; probe_gate_fix owned Solver/operator/runtime/probe tests; probe_contract owned design/independent review. All source workers finished. No full unrelated promotion regression or real-game witness per user's narrow offline repair scope; packaged source/resource verification is separate from live behavior.
 
 ## Task57 completed
 
@@ -38,6 +48,6 @@
 
 ## 下一动作与未完成边界
 
-Task57 authorized trial complete; no active process, no automatic second paid trial. User confirmed full-score success and asks whether death-prediction repair needs another run: root explained no full L9 repeat needed. Reuse saved predeath frames/actions for pure offline regression first; if actual dispatch admission changes, a focused hazardous-candidate test can verify the gate rather than replaying the entire level.
+Finish final targeted verification, commit/push code and state; no new paid trial. On a later application run, select its finite unknown exploration allowance deliberately; no model-controlled grant. This intentional default tightening can stop research until the model covers the candidate or the application accepts bounded unknown risk. It prevents declaration-only probe377 admission; it cannot prove an inaccurate model's claimed full coverage is true or guarantee zero deaths.
 
-Open repair: separate backtest predicted_risk/coverage from terminal outcome; incomplete settled trace must not imply safe or complete contradiction. Keep fatal recognition and full trajectory replication distinct, retain unresolved cases. Probe goal/risk/cost text is actor consent, not evidence of safety. Probe377 explicitly acknowledged possible death or ascent offscreen and unknown replay cost; its automatic/contact_unmodeled/tick2 gap had no evidence-supported reversible envelope. This is identifiable without hidden engine knowledge; gap labels alone cannot classify all probes. A stronger policy must distinguish application-authorized destructive exploration from probes with an evidence-supported safety envelope; structural gap labels alone cannot prove lethality or reversibility. Do not invent hidden mechanics, silently outlaw all exploration, or claim this policy is already implemented. Current user question does not authorize another paid trial.
+Task57 remains valid full-score checkpoint continuation under its frozen prior policy. New source/wheel offline checks do not claim new live deployment or uninterrupted cold9/9. No full L9 repeat is required to verify the summary/gate changes. If a future real dispatch witness is requested, target the hazardous-candidate admission boundary within explicit finite authority rather than rerunning an entire solved level.

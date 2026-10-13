@@ -613,10 +613,22 @@ class RolloutRuntime:
                 reference.get('run_id'), reference.get('level'))
 
     @staticmethod
+    def _risk_assessment_incomplete(assessment):
+        risk = assessment.get('risk', 'unassessed')
+        coverage = assessment.get('coverage')
+        if type(risk) is dict:
+            coverage = risk.get('coverage', coverage)
+            risk = risk.get('status', 'unassessed')
+        return risk == 'unassessed' or (type(coverage) is dict and bool(
+            coverage.get('partial') or coverage.get('unassessed_ticks') or coverage.get('errors')
+        ))
+
+    @staticmethod
     def _case_summary(case):
         return {key: case[key] for key in (
             'case_id', 'type', 'before_observation_ref', 'after_observation_ref', 'action',
             'actual_state', 'model_revision', 'expected', 'differences', 'full_trace_ref', 'claim_source', 'actual',
+            'predicted_risk', 'predicted_outcome', 'coverage', 'findings',
         ) if key in case}
 
     def snapshot_backtest(self):
@@ -684,7 +696,10 @@ class RolloutRuntime:
                         value, cell_id = await self._cell(code, combined, 'p7-backtest-')
                         assessment = value['assessment']
                         checked = {'status': 'unknown', 'reason': assessment.get('reason', 'model-relative'),
-                                   'predicted_outcome': assessment.get('outcome'), 'cell_id': cell_id}
+                                   'predicted_outcome': assessment.get('outcome'), 'cell_id': cell_id,
+                                   'predicted_risk': assessment.get('risk', 'unassessed'),
+                                   'coverage': assessment.get('coverage'),
+                                   'findings': assessment.get('findings', [])}
                         if str(self.owner.kernel.generation) != revision['generation'] or combined.cancelled:
                             checked.update(status='unavailable', reason='model_evaluation_failed')
                         elif assessment.get('status') != 'evaluated':
@@ -693,6 +708,8 @@ class RolloutRuntime:
                             checked.update(status='not_comparable', reason='plan_claim_has_no_model_projection')
                         elif assessment.get('evaluated_actions', 0) == 0 and assessment.get('outcome') in ('dead', 'goal'):
                             checked.update(status='unknown', reason='initial_terminal_no_transition')
+                        elif self._risk_assessment_incomplete(assessment):
+                            checked.update(status='unknown', reason='risk_assessment_incomplete')
                         elif assessment.get('outcome') == 'dead':
                             checked.update(status='matched', reason='observed_death_matched')
                         elif assessment.get('outcome') in ('settled', 'goal', 'collision'):
@@ -792,10 +809,13 @@ class RolloutRuntime:
             return None
         assessment = assessment or {}
         risk = assessment.get('risk', 'unassessed')
+        coverage, findings = assessment.get('coverage'), assessment.get('findings', [])
         if type(risk) is dict:
+            coverage, findings = risk.get('coverage', coverage), risk.get('findings', findings)
             risk = risk.get('status', 'unassessed')
         outcome = assessment.get('outcome')
-        mismatch = assessment.get('status') == 'evaluated' and outcome in ('settled', 'goal', 'collision')
+        mismatch = (assessment.get('status') == 'evaluated' and outcome in ('settled', 'goal', 'collision')
+                    and not self._risk_assessment_incomplete(assessment))
         kind = (
             'plan_expectation_mismatch' if actual_state != 'GAME_OVER' else
             'model_mismatch' if mismatch else 'model_risk_observed' if outcome == 'dead' else 'death_not_assessed'
@@ -805,6 +825,7 @@ class RolloutRuntime:
                   'before_observation_ref': before_ref, 'after_observation_ref': after_ref,
                   'action': action, 'actual_state': actual_state, 'predicted_risk': risk,
                   'predicted_outcome': assessment.get('outcome'), 'model_revision': revision,
+                  'coverage': coverage, 'findings': findings,
                   'full_trace_ref': assessment.get('result_artifact_id'),
                   'death_case_sequence': after_ref.get('sequence'),
                   'frame_sha256': assessment.get('frame_sha256'), 'level': before_ref.get('level'),

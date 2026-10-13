@@ -3609,14 +3609,26 @@ def build_p7_operator_resources(
     execution_budget=None,
     settlement_budget=None,
     action_journal=None,
+    unknown_probe_action_limit=0,
 ) -> P7OperatorResources:
-    """Preflight the exact native P7 host-service closure from injected edges."""
+    """Preflight the exact native P7 host-service closure from injected edges.
+
+    Unknown probe allowance belongs to this host attempt. New/resumed hosts
+    default to zero; only explicit application injection grants fresh capacity.
+    """
 
     if type(cognition_mode) is not bool:
         raise P7OperatorError("P7 host services are unavailable")
+    from .solver import validate_unknown_probe_action_limit
+    try:
+        validate_unknown_probe_action_limit(unknown_probe_action_limit, game.action_cap)
+    except ValueError as error:
+        raise P7OperatorError("P7 host services are unavailable") from error
     output_bytes = _resolve_output_bytes(environment)
     variant = _resolve_history_variant(environment, game)
     research_mode = variant == "verified" and not cognition_mode
+    if unknown_probe_action_limit and not research_mode:
+        raise P7OperatorError("P7 host services are unavailable")
     context_capacity_bytes = _resolve_context_capacity_bytes(environment) if research_mode else None
 
     trace = None
@@ -3625,6 +3637,11 @@ def build_p7_operator_resources(
     try:
         research_python = _research_python(environment)
         selection = resolve_p7_runtime(environment, game)
+        auto_rollout = research_mode and (selection.supervised_research
+                                         or (type(game) is not ArcGameContract
+                                             and _standard_rollout_enabled(environment)))
+        if unknown_probe_action_limit and not auto_rollout:
+            raise ValueError('unknown probe allowance requires automatic rollout')
         witness_deadline = _witness_deadline(environment)
         autonomy_deadline = _autonomy_deadline(environment)
         task_deadline = autonomy_deadline if autonomy_deadline is not None else witness_deadline
@@ -3759,8 +3776,8 @@ def build_p7_operator_resources(
                 experience=experience,
                 limits=None if output_bytes is None else KernelLimits(max_output_bytes=output_bytes),
                 learner_profile="autonomous",
-                auto_rollout=(selection.supervised_research
-                              or (not official and _standard_rollout_enabled(environment))),
+                auto_rollout=auto_rollout,
+                unknown_probe_action_limit=unknown_probe_action_limit,
             )
             if selection.supervised_research:
                 from .research_monitor import ResearchMonitor

@@ -16,6 +16,14 @@ from .processing_diagnostics import DiagnosticLog
 from .view_change import view_change
 
 
+def validate_unknown_probe_action_limit(value, action_cap):
+    """Validate trusted application policy, never an actor declaration."""
+    if (type(value) is not int or value < 0
+            or (action_cap is not None and value > action_cap)):
+        raise ValueError('unknown probe action limit invalid')
+    return value
+
+
 class Solver:
     def __init__(
         self,
@@ -30,6 +38,7 @@ class Solver:
         experience=None,
         diagnostics=None,
         learner_profile='legacy',
+        unknown_probe_action_limit=0,
     ):
         if learner_profile not in {'legacy', 'notes', 'autonomous'}:
             raise ValueError('research learner profile invalid')
@@ -37,6 +46,9 @@ class Solver:
         self.broker, self.kernel, self.control = broker, kernel, control
         self.run_id, self.attempt_id = identifier(run_id), identifier(attempt_id)
         game = broker.game
+        self._unknown_probe_action_limit = validate_unknown_probe_action_limit(
+            unknown_probe_action_limit, game.action_cap)
+        self._unknown_probe_actions_used = 0
         self._workspace = ResearchWorkspace(
             root=workspace_root,
             kernel=kernel,
@@ -64,6 +76,16 @@ class Solver:
         self._finished_cells = set()
         self.diagnostics = diagnostics if diagnostics is not None else DiagnosticLog(workspace_root.parent / "processing-diagnostics.json")
         self._processing_blocked = False
+
+    @property
+    def unknown_probe_action_limit(self):
+        return self._unknown_probe_action_limit
+
+    def _unknown_probe_policy(self):
+        return {'origin': 'application-policy', 'limit': self.unknown_probe_action_limit,
+                'used': self._unknown_probe_actions_used,
+                'remaining': self.unknown_probe_action_limit - self._unknown_probe_actions_used,
+                'safety_verified': False}
 
     def _observation(self) -> tuple[dict, dict]:
         full = self.broker.observation_state().to_projection()
@@ -306,6 +328,8 @@ class Solver:
             "terminal_reason": status.terminal_reason,
             "target_level": self.broker.game.target_level,
             "action_cap": self.broker.game.action_cap,
+            **({'unknown_probe_policy': self._unknown_probe_policy()}
+               if callable(self.auto_evaluate) or self.unknown_probe_action_limit else {}),
             "scoring": score_planning_facts(self.broker.game, self.broker.journal,
                 primitive_actions=status.primitive_actions, levels_completed=status.levels_completed),
             "scope": {
@@ -890,9 +914,52 @@ class Solver:
             "next_prediction": following,
         }
 
+    @staticmethod
+    def _probe_eligible_assessment(assessment):
+        """Only a completed model computation can identify an exploration gap."""
+        allowed_reasons = {
+            'unsupported_action', 'action_coverage_undeclared', 'risk_coverage_unknown',
+            'terminal_unknown', 'settled_unknown', 'collision_unknown', 'tick_limit', 'state_cycle',
+        }
+        revision, coverage = assessment.get('model_revision'), assessment.get('coverage')
+        if (assessment.get('status') != 'evaluated' or assessment.get('risk') != 'unassessed'
+                or assessment.get('hard_stop') is not None
+                or assessment.get('evidence_status') is not None
+                or type(revision) is not dict
+                or type(revision.get('generation')) is not str or not revision['generation']
+                or type(revision.get('registration_id')) is not int or revision['registration_id'] <= 0
+                or type(coverage) is not dict or coverage.get('checker_supplied') is not True
+                or coverage.get('partial') is not True
+                or type(coverage.get('gaps_omitted')) is not int or coverage['gaps_omitted'] != 0
+                or type(coverage.get('gaps')) is not list or not coverage['gaps']
+                or type(coverage.get('errors')) is not list):
+            return False
+        for key in ('evaluated_ticks', 'unassessed_ticks'):
+            if type(coverage.get(key)) is not int or coverage[key] < 0:
+                return False
+        if coverage.get('action_coverage') not in ('declared', 'undeclared', 'unsupported'):
+            return False
+        for gap in coverage['gaps']:
+            if (type(gap) is not dict
+                    or gap.get('kind') not in ('input_unmodeled', 'state_unmodeled', 'contact_unmodeled', 'view_boundary', 'risk_unmodeled', 'continuation_limit')
+                    or gap.get('phase') not in ('initial', 'input', 'automatic')
+                    or type(gap.get('tick')) is not int or gap['tick'] < 0
+                    or (gap.get('action_index') is not None
+                        and (type(gap['action_index']) is not int or gap['action_index'] < 0))
+                    or 'action_index' not in gap
+                    or type(gap.get('reason')) is not str or gap['reason'] not in allowed_reasons):
+                return False
+        for error in coverage['errors']:
+            if (type(error) is not dict or type(error.get('reason')) is not str
+                    or error['reason'] not in allowed_reasons
+                    or type(error.get('tick')) is not int or error['tick'] < 0):
+                return False
+        return True
+
     def _reviewed_coverage_probe(self, plan, assessment, reference, action, generation):
         """Bind one declared probe to a prior stopped decision, never to safety."""
-        if (plan['purpose'] != 'probe' or len(plan['steps']) != 1
+        if (not self._probe_eligible_assessment(assessment)
+                or plan['purpose'] != 'probe' or len(plan['steps']) != 1
                 or not plan['goal'].strip()):
             return None
         declarations = {}
@@ -912,15 +979,23 @@ class Solver:
             if recorded.get('stop_reason') != 'model-coverage-review':
                 continue
             for prior in recorded.get('auto_rollouts', []):
+                if not self._probe_eligible_assessment(prior):
+                    continue
                 prior_revision = prior.get('model_revision')
                 prior_registration = (None if prior_revision is None else
                                       (prior_revision.get('generation'), prior_revision.get('registration_id')))
-                if (prior.get('risk') == 'unassessed'
-                        and prior.get('observation_ref') == reference
+                if (prior.get('observation_ref') == reference
                         and prior.get('action') == action
                         and prior.get('kernel_generation') == str(generation)
                         and prior_registration == registration):
-                    return {'status': 'explicit-probe', 'review_plan_id': previous_id,
+                    policy = self._unknown_probe_policy()
+                    if policy['remaining'] <= 0:
+                        return {**policy, 'status': 'denied',
+                                'reason': 'authorization_required' if policy['limit'] == 0 else 'allowance_exhausted',
+                                'review_plan_id': previous_id}
+                    return {**policy, 'status': 'operator-authorized-unknown-probe',
+                            'authority': 'application-operator', 'accepted_risk': 'unknown-may-be-fatal',
+                            'review_plan_id': previous_id,
                             'goal': plan['goal'], **declarations,
                             'claims': 'actor-declared-risk-and-cost',
                             'safety_verified': False}
@@ -1075,10 +1150,10 @@ class Solver:
                     elif assessment['risk'] == 'unassessed' and native['action']['name'] != 'RESET':
                         decision = self._reviewed_coverage_probe(
                             value, assessment, reference, native['action'], generation)
-                        if decision is None:
-                            stop_reason = 'model-coverage-review'
-                        else:
+                        if decision is not None:
                             assessment['probe_decision'] = decision
+                        if decision is None or decision['status'] == 'denied':
+                            stop_reason = 'model-coverage-review'
                     if stop_reason != 'matched':
                         unexecuted_start = index
                         break
@@ -1098,6 +1173,10 @@ class Solver:
                     )
                     preparation = (self._probe_preparation(value, translated, index, reference, observation)
                                    if self.learner_profile != 'autonomous' else None)
+                    if assessment is not None and assessment.get('probe_decision', {}).get('status') == 'operator-authorized-unknown-probe':
+                        # Spend at submission. A missing reply never refunds authority.
+                        self._unknown_probe_actions_used += 1
+                        assessment['probe_decision'].update(self._unknown_probe_policy())
                     if preparation:
                         dispatched = self.broker.act_checked([native], probe_preparation=preparation)
                     else:
@@ -1147,8 +1226,11 @@ class Solver:
                                 **({'step_feedback': copy_json(feedback)} if differences else {}))
                             model_feedback = copy_json(model_feedback)
                         except Exception:
-                            mismatch = assessment.get('status') == 'evaluated' and (
-                                assessment.get('outcome') in {'settled', 'goal', 'collision'})
+                            from .rollout_runtime import RolloutRuntime
+                            mismatch = (
+                                assessment.get('status') == 'evaluated'
+                                and not RolloutRuntime._risk_assessment_incomplete(assessment)
+                                and assessment.get('outcome') in {'settled', 'goal', 'collision'})
                             model_feedback = {
                                 'origin': 'host_feedback',
                                 'type': ('model_mismatch' if mismatch else 'death_not_assessed')
@@ -1159,6 +1241,8 @@ class Solver:
                                 'action': copy_json(native['action']), 'actual_state': observation['state'],
                                 'predicted_risk': assessment.get('risk'),
                                 'predicted_outcome': assessment.get('outcome'),
+                                'coverage': copy_json(assessment.get('coverage')),
+                                'findings': copy_json(assessment.get('findings', [])),
                                 'model_revision': assessment.get('model_revision'),
                                 'full_trace_ref': assessment.get('result_artifact_id'),
                                 'frame_sha256': assessment.get('frame_sha256'),

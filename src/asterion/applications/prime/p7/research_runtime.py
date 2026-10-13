@@ -117,7 +117,12 @@ class P7ResearchRuntime:
                  deadline_seconds: float | None, event_sink, workspace_owner=None, python=None,
                  deadline_monotonic: float | None = None,
                  limits: KernelLimits | None = None, experience=None,
-                 learner_profile='legacy', task_deadline=None, auto_rollout=False):
+                 learner_profile='legacy', task_deadline=None, auto_rollout=False,
+                 unknown_probe_action_limit=0):
+        from .solver import validate_unknown_probe_action_limit
+        validate_unknown_probe_action_limit(unknown_probe_action_limit, broker.game.action_cap)
+        if unknown_probe_action_limit and not auto_rollout:
+            raise ValueError('unknown probe allowance requires automatic rollout')
         self._workspace_owner = workspace_owner or WorkspaceOwner()
         self._owns_workspace_owner = workspace_owner is None
         self._python = python
@@ -172,6 +177,7 @@ class P7ResearchRuntime:
                 attempt_id=run_id, event_sink=event_sink, experience=experience,
                 diagnostics=getattr(trace_client, 'processing_diagnostics', None),
                 learner_profile=learner_profile,
+                unknown_probe_action_limit=unknown_probe_action_limit,
             )
             self._rollouts = RolloutRuntime(self, run_root) if auto_rollout else None
             if self._rollouts is not None:
