@@ -5113,3 +5113,5 @@
 - 21:30 User authorizes death-prediction implementation; finite application probe authority and risk/terminal summaries, no new paid trial.
 
 - 22:06 Death repair RED→GREEN125Python/115TSPASS; saved35outputs preservefatal/unknown; wheelidentityPASS,0paidcalls,AstraAPPROVE.
+
+- 22:07 [ebb47e7f] Separate trusted probe authority and death-risk coverage; preserve unknown evidence and block declaration-only dispatch.

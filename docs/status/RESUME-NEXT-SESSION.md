@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 22:06 Asia/Shanghai. Task58 repair verified; commit/push closeout in progress. Task57 completed9/9; no active paid trial.
+> Updated: 2026-10-13 22:06 Asia/Shanghai. Task58 repair verified and pushed [ebb47e7f]. No active trial. Task57 completed9/9; no active paid trial.
 
 ## 当前目标与授权
 
-用户在 Task57 满分通关后要求开始实施死亡预测后续修正。已实现风险／终局回测分层和应用授权的有限未知探针，正在完成最终核对和提交推送。没有新付费试验授权，也不需重跑完整第9关。
+用户在 Task57 满分通关后要求开始实施死亡预测后续修正。已实现风险／终局回测分层和应用授权的有限未知探针，已完成核对并提交推送（ebb47e7f）。没有新付费试验授权，也不需重跑完整第9关。
 
 ## Task58 implementation boundary
 
@@ -48,6 +48,6 @@
 
 ## 下一动作与未完成边界
 
-Finish final targeted verification, commit/push code and state; no new paid trial. On a later application run, select its finite unknown exploration allowance deliberately; no model-controlled grant. This intentional default tightening can stop research until the model covers the candidate or the application accepts bounded unknown risk. It prevents declaration-only probe377 admission; it cannot prove an inaccurate model's claimed full coverage is true or guarantee zero deaths.
+Authorized implementation and verification completed and pushed [ebb47e7f]; no outstanding repair step or active paid trial. On a later application run, select its finite unknown exploration allowance deliberately; no model-controlled grant. This intentional default tightening can stop research until the model covers the candidate or the application accepts bounded unknown risk. It prevents declaration-only probe377 admission; it cannot prove an inaccurate model's claimed full coverage is true or guarantee zero deaths.
 
 Task57 remains valid full-score checkpoint continuation under its frozen prior policy. New source/wheel offline checks do not claim new live deployment or uninterrupted cold9/9. No full L9 repeat is required to verify the summary/gate changes. If a future real dispatch witness is requested, target the hazardous-candidate admission boundary within explicit finite authority rather than rerunning an entire solved level.
