@@ -5094,3 +5094,4 @@
 - 19:04 Task56 closed8/9:163newL9actions/3deathRESET,actioncap,1763.594s;everyactionpre-evaluated,unknownratherthansafeforall3deaths, sealed/replay/cleanuptrue.
 - 19:04 Offlineoriginalmodelrecheck: firstdeathv1unknown→postdeathv2predictsdead2ticks;other2updatedmodelsremainunknownatviewportboundary,nofatalmasked.
 - 19:05 Task56audit163autoattempts/160models/3RESET,median25.207ms,p9534.707ms,total4.242s;0missing/0fatalveto,7unknown; sourceandruntimefailures separated.
+- 19:05 Committed/pushed Task56 rollout timings, unknown-death distinction and offline model recheck [5943fee6]; no active trial.
