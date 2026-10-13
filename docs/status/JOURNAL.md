@@ -5106,3 +5106,5 @@
 - 2026-10-13 21:24 Checkpoint receipt [82f264c0]: preserved probe-death and persistent-case boundary during frozenTask57.
 - 2026-10-13 21:24 Task57game-won9/9:335restored+123new=458,1death/RESET,40remaining,2770.867s;sealed/replay/cleanuptrue,launcher0/unitinactive.
 - 2026-10-13 21:24 Audit21reviews/19probes,143evaluations median39ms;historicalfatalrecognized butterminalunresolved;probeconsentisnotsafety. Useracceptsfullscore;nofullL9repeattoretestofflinepredictionneeded.
+
+- 21:26 [cc17fef7] Recorded full-game continuation success and unresolved probe safety to preserve accurate recovery boundaries.
