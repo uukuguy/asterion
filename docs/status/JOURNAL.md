@@ -5122,3 +5122,8 @@
 - 2026-10-13 22:32 Task59PASS: realSDK376restored/originalmodelartifactidentical,packagedprobe0dispatch,frameunchanged,0modelcalls,cleanuptrue,AstraAPPROVE.
 
 - 22:33 [da446386] Recorded real L9 checkpoint gate proof; distinguish denied candidate from full-game evaluation.
+
+- 2026-10-13 22:35 [cb621adf] Recorded Task59 witness receipt; packaged hazardous candidate denied without new actions.
+- 2026-10-13 22:35 User requests README statement/conclusion rewrite around verified full-game continuation and repaired gate evidence.
+
+- 2026-10-13 22:40 Rewrote bilingual README around verified capabilities; local9/9score, coldcheckpoint and packagedgate scopes reviewed,AstraAPPROVE,docsPASS.

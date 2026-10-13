@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 22:32 Asia/Shanghai. Task59 targeted L9 packaged gate witness PASS; no active model/game process.
+> Updated: 2026-10-13 22:40 Asia/Shanghai. README claims/conclusions rewritten and verified; no active trial.
 
 ## 当前目标与授权
 
-用户在 Task57 满分通关后要求开始实施死亡预测后续修正。已实现风险／终局回测分层和应用授权的有限未知探针，已完成核对并提交推送（ebb47e7f）。没有新付费试验授权，也不需重跑完整第9关。
+用户要求基于已通过的整局接续和死亡前门禁验证，重写中英文 README 的声明与结论。已完成：突出 Prime 重构／应用适配、自主 BP35 checkpoint 接续9/9／本地100分，将旧试验流水账移出正文，现代每步推演和未知探针授权取代旧监督入口限定说明。冷启动六关、选定前缀接续整局、新门禁单候选验证、历史官方成绩分别保留证据和范围。readme_conclusions 只编辑两份 README，Astra 独立事实复审通过，docs-check／diff-check通过。根负责最终提交推送；无新模型或游戏试验。
 
 ## Task59 targeted witness PASS
 
