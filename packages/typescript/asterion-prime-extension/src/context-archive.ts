@@ -6,6 +6,17 @@ export const CONTEXT_CHECKPOINT_VERSION = 'asterion.prime-context-checkpoint/v1'
 type RecordValue = Record<string,unknown>;
 const record = (value:unknown): RecordValue | undefined => typeof value==='object' && value!==null && !Array.isArray(value) ? value as RecordValue : undefined;
 export interface NativeContextArchive {sessionId:string; entries:RecordValue[];}
+export const CONTEXT_REFUSAL_REASONS = ['none','archive-unavailable','session-mismatch','unsupported-context-edit',
+  'incomplete-interaction','checkpoint-mismatch','unreadable-message','visible-lineage-mismatch','projection-error'] as const;
+export type ContextRefusalReason = typeof CONTEXT_REFUSAL_REASONS[number];
+/** Shared conservative boundary for native acknowledgements and omission admission. */
+export function hasUnsettledContextEffect(value:unknown):boolean {
+  const details=record(value);
+  return details!==undefined && (details.environment_result_unknown===true || details.processing_blocked===true
+    || Object.hasOwn(details,'uncertain_step')
+    || ['unknown','environment-result-unknown','processing-failed'].includes(String(details.stop_reason))
+    || ['unknown','uncertain','rejected','cancelled','lost','processing-blocked'].includes(String(details.status)));
+}
 export interface ContextCheckpointReceipt {
   version:typeof CONTEXT_CHECKPOINT_VERSION; session_id:string; source_tool_call_id:string;
   coverage_through_entry_id:string|null; notes_revision:string;
@@ -149,24 +160,49 @@ export function createContextCheckpoint(archive:NativeContextArchive|undefined,t
   return {version:CONTEXT_CHECKPOINT_VERSION,session_id:archive.sessionId,source_tool_call_id:toolCallId,
     coverage_through_entry_id:before.at(-1)?.entries.at(-1)?.id as string??null,notes_revision:revision};
 }
-export function primaryContextHistory(messages:readonly unknown[],archive:NativeContextArchive|undefined,receipt:ContextCheckpointReceipt) {
-  if(!archive || archive.sessionId!==receipt.session_id || archive.entries.some(entry=>entry.type==='context_edit')) return undefined;
+/** Admit only native omission of a failed model attempt with no executable effects. */
+function failedAttemptOmissions(archive:NativeContextArchive):Set<unknown>|undefined {
+  const previous=new Map<unknown,RecordValue>(), omitted=new Set<unknown>();
+  for(const entry of archive.entries) {
+    if(entry.type==='context_edit') {
+      const target=previous.get(entry.targetId), message=record(target?.message), details=record(message?.details);
+      const interaction=record(details?.context_interaction);
+      if(entry.replacement!==null || !target || target.type!=='message' || omitted.has(entry.targetId)
+        || message?.role!=='assistant' || message.stopReason!=='error' || !Array.isArray(message.content)
+        || message.content.some(raw=>record(raw)?.type==='toolCall')
+        || hasUnsettledContextEffect(details)
+        || interaction && (interaction.version!=='asterion.prime-context-interaction/v1' || interaction.effect!=='settled')) return undefined;
+      try {archiveMessage(message);} catch {return undefined;}
+      omitted.add(entry.targetId);
+    }
+    previous.set(entry.id,entry);
+  }
+  return omitted;
+}
+export function primaryContextHistory(messages:readonly unknown[],archive:NativeContextArchive|undefined,receipt:ContextCheckpointReceipt,
+  onRefusal?:(reason:ContextRefusalReason)=>void) {
+  const refuse=(reason:ContextRefusalReason):undefined=>{onRefusal?.(reason);return undefined;};
+  if(!archive) return refuse('archive-unavailable');
+  if(archive.sessionId!==receipt.session_id) return refuse('session-mismatch');
+  const omitted=failedAttemptOmissions(archive);
+  if(!omitted) return refuse('unsupported-context-edit');
   const all=groups(archive),source=all?.find(group=>group.calls.includes(receipt.source_tool_call_id));
   const actual=createContextCheckpoint(archive,receipt.source_tool_call_id,receipt.notes_revision);
-  if(!all || !source?.complete || source.unknown || JSON.stringify(actual)!==JSON.stringify(receipt)) return undefined;
+  if(!all || !source?.complete || source.unknown) return refuse('incomplete-interaction');
+  if(JSON.stringify(actual)!==JSON.stringify(receipt)) return refuse('checkpoint-mismatch');
   const sourceResult=source.entries.map(entry=>record(entry.message)).find(message=>message?.toolCallId===receipt.source_tool_call_id);
   const details=record(sourceResult?.details), envelope=record(details?.context_memory);
   if(sourceResult?.isError!==false || envelope?.version!=='asterion.prime-context-memory/v3' || envelope.commit!==true
-    || envelope.revision!==receipt.notes_revision || JSON.stringify(parseContextCheckpoint(details?.context_checkpoint))!==JSON.stringify(receipt)) return undefined;
+    || envelope.revision!==receipt.notes_revision || JSON.stringify(parseContextCheckpoint(details?.context_checkpoint))!==JSON.stringify(receipt)) return refuse('checkpoint-mismatch');
   try {
     // Every message retired or reconstructed has a readable, role-safe original.
     const rows=archivedRows(archive);
-    const signatures=new Set(rows.map(({message})=>JSON.stringify(message)));
+    const signatures=new Set(rows.filter(({entry})=>!omitted.has(entry.id)).map(({message})=>JSON.stringify(message)));
     for(const raw of messages) {
       const message=record(raw);if(message?.role==='custom' && message.customType==='asterion_context_memory') continue;
       if(['compactionSummary','branchSummary'].includes(String(message?.role))) {
-        if(!archive.entries.some(entry=>['compaction','branch_summary'].includes(String(entry.type)) && entry.summary===message?.summary)) return undefined;
-      } else if(!signatures.has(JSON.stringify(archiveMessage(raw)))) return undefined;
+        if(!archive.entries.some(entry=>['compaction','branch_summary'].includes(String(entry.type)) && entry.summary===message?.summary)) return refuse('visible-lineage-mismatch');
+      } else if(!signatures.has(JSON.stringify(archiveMessage(raw)))) return refuse('visible-lineage-mismatch');
     }
     const prior=all.filter(group=>group.end<source.start),protectedGroups=new Set(prior.filter(group=>group.calls.length>0).slice(-2));
     const negative=[...prior].reverse().find(group=>group.negative);if(negative) protectedGroups.add(negative);
@@ -179,10 +215,10 @@ export function primaryContextHistory(messages:readonly unknown[],archive:Native
     // Pi's context hook hides/restores system state itself. Direct projections
     // preserve visible system records verbatim, without reviving hidden old loadouts.
     const visibleSystems=new Set(messages.filter(raw=>record(raw)?.role==='system').map(raw=>JSON.stringify(archiveMessage(raw))));
-    const retained=rows.filter(({entry,message})=>!retiredIds.has(entry.id) && (message.role!=='system' || visibleSystems.has(JSON.stringify(message))));
+    const retained=rows.filter(({entry,message})=>!omitted.has(entry.id) && !retiredIds.has(entry.id) && (message.role!=='system' || visibleSystems.has(JSON.stringify(message))));
     let insertion=0;retained.forEach(({entry},index)=>{if(archive.entries.indexOf(entry)<=source.end) insertion=index+1;});
     const catalog=JSON.stringify({context_archive:{session_id:archive.sessionId,through_ref:receipt.coverage_through_entry_id===null?null:{session_id:archive.sessionId,entry_id:receipt.coverage_through_entry_id},
       retired_complete_groups:retired.length,list_op:'context_archive_list',read_op:'context_archive_read'}});
     return {messages:retained.map(({entry})=>entry.message),insertion,catalog,retired:retired.length,protectedGroups:protectedGroups.size};
-  } catch {return undefined;}
+  } catch {return refuse('unreadable-message');}
 }

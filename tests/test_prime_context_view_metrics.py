@@ -18,6 +18,19 @@ def payload():
 
 
 class TestContextViewMetrics(unittest.TestCase):
+    def test_v2_bounded_projection_diagnostics_and_v1_compatibility(self):
+        value = payload()
+        value['version'] = 'asterion.prime-context-view-metrics/v2'
+        value['latest'].update(projection_status='primary-unavailable',
+                               refusal_reason='unsupported-context-edit')
+        self.assertEqual(ContextViewMetricsFile._validate(value), value)
+        self.assertEqual(ContextViewMetricsFile._validate(payload()), payload())
+        for key in ('projection_status', 'refusal_reason'):
+            invalid = json.loads(json.dumps(value))
+            invalid['latest'][key] = 'PRIVATE_SENTINEL'
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                ContextViewMetricsFile._validate(invalid)
+
     def test_inherited_file_roundtrip_and_lifecycle(self):
         with tempfile.TemporaryDirectory() as root:
             path = Path(root) / 'metrics.json'

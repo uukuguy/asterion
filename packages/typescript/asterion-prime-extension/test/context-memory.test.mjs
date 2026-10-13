@@ -322,7 +322,7 @@ test("registered context telemetry sees final owned projections and cannot block
   const projected=hook({type:"context",messages:source},{sessionManager:{getBranch:() => entries}}).messages;
   assert.equal(projected.at(-1).content,"CURRENT_VIEW");
   assert.equal(records.length,1);
-  const expected=new extension.ContextViewTelemetry().observe(projected);
+  const expected=new extension.ContextViewTelemetry().observe(projected,{projection_status:'retained',refusal_reason:'none'});
   assert.deepEqual(records[0],expected);
   extension.registerP7MemoryContext({on:(_event,handler) => {hook=handler;}},() => {throw Error("COLLECTOR_SECRET");});
   assert.deepEqual(hook({type:"context",messages:source},{sessionManager:{getBranch:() => entries}}).messages,projected);
@@ -346,7 +346,9 @@ test("metrics descriptor is overwritten with bounded numeric samples without lea
     const text=readFileSync(path,"utf8");
     const payload=JSON.parse(text);
     assert.deepEqual(Object.keys(payload).sort(),["latest","measurement","samples","samples_truncated","version"]);
-    assert.equal(payload.version,"asterion.prime-context-view-metrics/v1");
+    assert.equal(payload.version,"asterion.prime-context-view-metrics/v2");
+    assert.equal(payload.latest.projection_status,'unobserved');
+    assert.equal(payload.latest.refusal_reason,'none');
     assert.equal(payload.measurement,"extension-hook-json-utf8");
     assert.equal(payload.latest.requests,1026);
     assert.equal(payload.samples.length,1024);
@@ -544,6 +546,73 @@ const admitPrimary = fixture => {
   assert.equal(controller.accept("note",primaryEnvelope(),true,receipt),true);
   return {archive,receipt,controller};
 };
+
+const appendNativeEntry = (fixture, value) => {
+  const entry={...value,id:'entry-'+fixture.entries.length,parentId:fixture.entries.at(-1)?.id??null};
+  fixture.entries.push(entry);return entry;
+};
+
+test("native failed no-call omission preserves NOTES receipts and raw evidence without resurrection",()=>{
+  const fixture=primaryFixture(),{archive,controller}=admitPrimary(fixture);
+  const failed={role:'assistant',stopReason:'error',content:[{type:'text',text:'FAILED_ATTEMPT_EVIDENCE'}]};
+  const target=appendNativeEntry(fixture,{type:'message',message:failed});
+  appendNativeEntry(fixture,{type:'context_edit',targetId:target.id,replacement:null});
+  const original=structuredClone(fixture.entries);
+  const view=controller.project(fixture.messages,archive);
+  assert.equal(view.outcome.status,'primary');
+  assert.doesNotMatch(JSON.stringify(view.messages),/FAILED_ATTEMPT_EVIDENCE/);
+  assert.match(JSON.stringify(view.messages),/EXACT_USER_CONSTRAINT/);
+  const raw=extension.contextArchiveOperation(archive,{op:'context_archive_read',ref:{session_id:archive.sessionId,entry_id:target.id}});
+  assert.match(raw.text,/FAILED_ATTEMPT_EVIDENCE/);
+  assert.deepEqual(fixture.entries,original);
+  const noteCall={...assistant('new-note'),content:[{type:'toolCall',id:'new-note',name:'p7_workspace',arguments:{}}]};
+  appendNativeEntry(fixture,{type:'message',message:noteCall});
+  const receipt=extension.createContextCheckpoint(archive,'new-note',nextRevision);
+  const details={status:'noted',notes_revision:nextRevision,context_memory:{...primaryEnvelope(),revision:nextRevision},context_memory_anchor:'new-note',context_checkpoint:receipt};
+  const noteResult={...result('new-note'),toolName:'p7_workspace',details};
+  appendNativeEntry(fixture,{type:'message',message:noteResult});
+  controller.accept('new-note',details.context_memory,true,receipt);
+  assert.equal(controller.project([...fixture.messages,noteCall,noteResult],archive).outcome.status,'primary');
+});
+
+test("native edits outside failed no-effect omission remain fail closed with safe reasons",()=>{
+  for(const mode of ['replacement','user','success','tool','calls','unknown','missing','duplicate','forward','unreadable',
+    'stop-unknown','stop-environment-result-unknown','stop-processing-failed','status-cancelled','status-lost','status-rejected']) {
+    const fixture=primaryFixture(),{archive,controller}=admitPrimary(fixture);
+    let message={role:'assistant',stopReason:'error',content:[]};
+    if(mode==='user') message=user('PRIVATE_EDIT_BODY');
+    if(mode==='success') message={...message,stopReason:'stop'};
+    if(mode==='tool') message=result('unpaired');
+    if(mode==='calls') message={...message,content:assistant('unsafe').content};
+    if(mode==='unknown') message={...message,details:{context_interaction:{version:'asterion.prime-context-interaction/v1',effect:'unknown'}}};
+    if(mode.startsWith('stop-')) message={...message,details:{stop_reason:mode.slice(5)}};
+    if(mode.startsWith('status-')) message={...message,details:{status:mode.slice(7)}};
+    if(mode==='unreadable') message={...message,content:[{type:'PRIVATE_BLOCK'}]};
+    const target=appendNativeEntry(fixture,{type:'message',message});
+    const edit=appendNativeEntry(fixture,{type:'context_edit',targetId:mode==='missing'?'absent':target.id,replacement:mode==='replacement'?{content:'PRIVATE_EDIT_BODY'}:null});
+    if(mode==='duplicate') appendNativeEntry(fixture,{type:'context_edit',targetId:target.id,replacement:null});
+    if(mode==='forward') edit.targetId=appendNativeEntry(fixture,{type:'message',message}).id;
+    const view=controller.project(fixture.messages,archive);
+    assert.equal(view.outcome.status,'primary-unavailable',mode);
+    assert.equal(view.outcome.refusal_reason,'unsupported-context-edit',mode);
+    assert.deepEqual(view.messages.filter(m=>m.customType!=='asterion_context_memory'),fixture.messages);
+    assert.doesNotMatch(JSON.stringify(view.outcome),/PRIVATE/);
+  }
+});
+
+test("unavailable projection records refusal and does not prescribe repeated NOTES as repair",()=>{
+  const fixture=primaryFixture();admitPrimary(fixture);
+  const target=appendNativeEntry(fixture,{type:'message',message:{role:'assistant',content:[],stopReason:'stop'}});
+  appendNativeEntry(fixture,{type:'context_edit',targetId:target.id,replacement:null});
+  let hook;const records=[];
+  extension.registerP7MemoryContext({on:(_event,h)=>{hook=h;}},value=>records.push(value),{capacityBytes:1});
+  const view=hook({type:'context',messages:fixture.messages},{sessionManager:fixture.manager}).messages;
+  const notice=JSON.parse(view.find(m=>m.customType==='asterion_p7_context_capacity').content);
+  assert.equal(notice.refusal_reason,'unsupported-context-edit');
+  assert.doesNotMatch(notice.instruction,/请尽快|成功且可验证的 NOTES 才能/);
+  assert.equal(records[0].projection_status,'primary-unavailable');
+  assert.equal(records[0].refusal_reason,'unsupported-context-edit');
+});
 
 test("P7 context capacity reminder preserves complete observations and does not accumulate",()=>{
   let hook;const records=[];

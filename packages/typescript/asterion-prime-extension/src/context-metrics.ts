@@ -1,11 +1,20 @@
 /** Bounded numeric observation of the final extension view, never provider wire/tokens. */
 import {closeSync, fstatSync, ftruncateSync, writeSync} from "node:fs";
 import {contextMessageBytes, memoryRecord} from "./context-memory.js";
+import {CONTEXT_REFUSAL_REASONS,type ContextRefusalReason} from './context-archive.js';
+
+const PROJECTION_STATUSES=['unobserved','inactive','retained','unsafe-boundary','primary','primary-unavailable','projection-unavailable'] as const;
+export interface ContextProjectionDiagnostic {
+  readonly projection_status: typeof PROJECTION_STATUSES[number];
+  readonly refusal_reason: ContextRefusalReason;
+}
 
 const METRICS_ENVIRONMENT = "ASTERION_PRIME_IPYTHON_CONTEXT_METRICS_FD";
 const SAMPLE_CAP = 1024;
 const EXCLUDED_CUSTOM_TYPES = new Set(["session_slash_command","session_slash_command_result","compaction_outcome"]);
 export interface ContextViewNumbers {
+  readonly projection_status?: ContextProjectionDiagnostic['projection_status'];
+  readonly refusal_reason?: ContextRefusalReason;
   readonly requests: number;
   readonly assistant_bytes: number;
   readonly current_snapshot_bytes: number;
@@ -32,7 +41,7 @@ export class ContextViewTelemetry {
   #cumulative = 0;
   #unmeasurable = 0;
 
-  observe(messages: readonly unknown[]): ContextViewNumbers {
+  observe(messages: readonly unknown[],diagnostic?:ContextProjectionDiagnostic): ContextViewNumbers {
     this.#requests = boundedAdd(this.#requests,1);
     let assistant = 0, snapshot = 0, tools = 0, other = 0;
     try {
@@ -55,7 +64,8 @@ export class ContextViewTelemetry {
     this.#cumulative = boundedAdd(this.#cumulative,total);
     return Object.freeze({requests:this.#requests,assistant_bytes:assistant,current_snapshot_bytes:snapshot,
       tool_result_bytes:tools,other_bytes:other,total_bytes:total,peak_total_bytes:this.#peak,
-      cumulative_total_bytes:this.#cumulative,unmeasurable_requests:this.#unmeasurable});
+      cumulative_total_bytes:this.#cumulative,unmeasurable_requests:this.#unmeasurable,
+      ...(diagnostic ? {projection_status:diagnostic.projection_status,refusal_reason:diagnostic.refusal_reason} : {})});
   }
 }
 
@@ -80,13 +90,16 @@ export function contextViewMetricsFromEnvironment(): ContextViewMetricsSink | un
     if (closed) return;
     try {
       // Copy exactly the closed numeric shape: callbacks cannot smuggle extra metadata.
-      const latest = Object.freeze({requests:numbers.requests,assistant_bytes:numbers.assistant_bytes,
+      const numeric = {requests:numbers.requests,assistant_bytes:numbers.assistant_bytes,
         current_snapshot_bytes:numbers.current_snapshot_bytes,tool_result_bytes:numbers.tool_result_bytes,
         other_bytes:numbers.other_bytes,total_bytes:numbers.total_bytes,peak_total_bytes:numbers.peak_total_bytes,
-        cumulative_total_bytes:numbers.cumulative_total_bytes,unmeasurable_requests:numbers.unmeasurable_requests});
-      if (Object.values(latest).some(value => !Number.isSafeInteger(value) || value < 0)) {close(); return;}
+        cumulative_total_bytes:numbers.cumulative_total_bytes,unmeasurable_requests:numbers.unmeasurable_requests};
+      const status=numbers.projection_status??'unobserved', reason=numbers.refusal_reason??'none';
+      if (Object.values(numeric).some(value => !Number.isSafeInteger(value) || value < 0)
+        || !PROJECTION_STATUSES.includes(status) || !CONTEXT_REFUSAL_REASONS.includes(reason)) {close(); return;}
+      const latest=Object.freeze({...numeric,projection_status:status,refusal_reason:reason});
       if (samples.length < SAMPLE_CAP) samples.push(latest);
-      const bytes = Buffer.from(JSON.stringify({version:"asterion.prime-context-view-metrics/v1",
+      const bytes = Buffer.from(JSON.stringify({version:"asterion.prime-context-view-metrics/v2",
         measurement:"extension-hook-json-utf8",latest,samples,samples_truncated:latest.requests>SAMPLE_CAP ? 1 : 0}),"utf8");
       let offset = 0;
       while (offset < bytes.length) {

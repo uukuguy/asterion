@@ -1,5 +1,5 @@
 /** Snapshot-only model view; Pi owns conversation history and compaction. */
-import {archiveSystemMessage,parseContextCheckpoint,primaryContextHistory,type ContextCheckpointReceipt,type NativeContextArchive} from './context-archive.js';
+import {archiveSystemMessage,parseContextCheckpoint,primaryContextHistory,type ContextCheckpointReceipt,type NativeContextArchive,type ContextRefusalReason} from './context-archive.js';
 export const CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v2";
 export const PRIMARY_CONTEXT_MEMORY_VERSION = "asterion.prime-context-memory/v3";
 const LEGACY_VERSION = "asterion.prime-context-memory/v1";
@@ -32,6 +32,7 @@ interface MemoryMessage {
 }
 export interface MemoryProjectionOutcome {
   readonly status: "inactive" | "retained" | "unsafe-boundary" | "primary" | "primary-unavailable";
+  readonly refusal_reason?: ContextRefusalReason;
   readonly retired_complete_groups?: number;
   readonly protected_complete_groups?: number;
   readonly removed_messages: number;
@@ -227,11 +228,12 @@ export class MemoryContextController {
   project<T>(messages: readonly T[],archive?:NativeContextArchive): MemoryProjection<T> {
     if(this.#epoch) {
       const {checkpoint,receipt}=this.#epoch;
+      let refusalReason:ContextRefusalReason='checkpoint-mismatch';
       const selected=receipt && receipt.source_tool_call_id===checkpoint.anchorToolCallId && receipt.notes_revision===checkpoint.revision
-        ? primaryContextHistory(messages,archive,receipt) : undefined;
+        ? primaryContextHistory(messages,archive,receipt,reason=>{refusalReason=reason;}) : undefined;
       if(!selected) {
         const fallback=projectMemoryContext(messages,checkpoint);
-        return {...fallback,outcome:{...fallback.outcome,status:'primary-unavailable'}};
+        return {...fallback,outcome:{...fallback.outcome,status:'primary-unavailable',refusal_reason:refusalReason}};
       }
       const memory:MemoryMessage={role:'custom',customType:CUSTOM_TYPE,content:checkpoint.content+'\n\n'+selected.catalog,display:false,timestamp:0};
       const projected=[...selected.messages] as Array<T|MemoryMessage>;

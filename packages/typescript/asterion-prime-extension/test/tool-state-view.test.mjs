@@ -134,7 +134,7 @@ test("context composition telemetry measures stale-state replacement and appende
   assert.equal(projected.at(-1).content,"LATEST_SNAPSHOT_SENTINEL");
   const raw=new extension.ContextViewTelemetry().observe(source);
   assert.ok(records[0].tool_result_bytes<raw.tool_result_bytes);
-  assert.deepEqual(records[0],new extension.ContextViewTelemetry().observe(projected));
+  assert.deepEqual(records[0],new extension.ContextViewTelemetry().observe(projected,{projection_status:'retained',refusal_reason:'none'}));
   assert.deepEqual(source,original);
   assert.doesNotMatch(JSON.stringify(records),/SENTINEL|board|feedback|compute/);
 });

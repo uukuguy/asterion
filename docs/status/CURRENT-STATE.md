@@ -176,4 +176,4 @@ Current operational state and latest run resources are recorded in RESUME. Cache
 
 ## Native context-edit compatibility boundary
 
-The current NOTES primary projection rejects any native context_edit, including the shape used by legitimate native retry. Installed-Pi local reproduction passes; current P7 live path uses an in-memory native archive, and does not persist exact checkpoint receipt/rejection evidence. Repair and actual-run attribution remain separate work. See RESUME for active evidence.
+NOTES primary projection supports only verified native omissions of failed assistant messages without tool calls or unknown effects; other edits remain unavailable. Original archives, receipts, user constraints and tool pairs remain protected. Private v2 context metrics persist closed projection/refusal reasons while reading v1. In-memory raw native archives still limit historical request52 reconstruction; software repair and actual-run attribution remain distinct. See RESUME for named checks.

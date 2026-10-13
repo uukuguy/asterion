@@ -167,6 +167,8 @@
 
 ### feedback — a classification is not a cause; recover the value
 
+- User clarification 2026-10-13: Prime refactoring and application adaptation must make internal failures diagnosable. Do not label every reported error as a Pi RPC failure; trace the producer, transport, settlement and context handling separately, identify our integration responsibility, and state missing evidence.
+
 - When a failure surfaces as a classification with no detail, instrument the
   check that produced it and read the actual values before changing anything.
   `raise ... from None` suppresses the display but leaves the original in

@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 VERSION = 'asterion.prime-context-view-metrics/v1'
+DIAGNOSTIC_VERSION = 'asterion.prime-context-view-metrics/v2'
 MEASUREMENT = 'extension-hook-json-utf8'
 _MAX_BYTES = 1024 * 1024
 _MAX_SAMPLES = 1024
@@ -14,12 +15,24 @@ _FIELDS = frozenset({'requests', 'assistant_bytes', 'current_snapshot_bytes',
                      'tool_result_bytes', 'other_bytes', 'total_bytes',
                      'peak_total_bytes', 'cumulative_total_bytes',
                      'unmeasurable_requests'})
+_STATUSES = frozenset({'unobserved', 'inactive', 'retained', 'unsafe-boundary',
+                      'primary', 'primary-unavailable', 'projection-unavailable'})
+_REASONS = frozenset({'none', 'archive-unavailable', 'session-mismatch',
+                     'unsupported-context-edit', 'incomplete-interaction',
+                     'checkpoint-mismatch', 'unreadable-message',
+                     'visible-lineage-mismatch', 'projection-error'})
 
 
-def _sample(value: object) -> dict:
-    if type(value) is not dict or set(value) != _FIELDS:
+def _sample(value: object, *, diagnostics: bool = False) -> dict:
+    fields = _FIELDS | {'projection_status', 'refusal_reason'} if diagnostics else _FIELDS
+    if type(value) is not dict or set(value) != fields:
         raise ValueError
-    if any(type(v) is not int or not 0 <= v <= _MAX_INTEGER for v in value.values()):
+    if any(type(value[k]) is not int or not 0 <= value[k] <= _MAX_INTEGER for k in _FIELDS):
+        raise ValueError
+    if diagnostics and (type(value['projection_status']) is not str
+                        or value['projection_status'] not in _STATUSES
+                        or type(value['refusal_reason']) is not str
+                        or value['refusal_reason'] not in _REASONS):
         raise ValueError
     total = sum(value[k] for k in ('assistant_bytes', 'current_snapshot_bytes',
                                    'tool_result_bytes', 'other_bytes'))
@@ -34,16 +47,17 @@ def _sample(value: object) -> dict:
 def _validate(value: object) -> dict:
     if (type(value) is not dict or set(value) != {
             'version', 'measurement', 'latest', 'samples', 'samples_truncated'}
-            or value['version'] != VERSION or value['measurement'] != MEASUREMENT
+            or value['version'] not in (VERSION, DIAGNOSTIC_VERSION) or value['measurement'] != MEASUREMENT
             or type(value['samples_truncated']) is not int
             or value['samples_truncated'] not in (0, 1)
             or type(value['samples']) is not list
             or len(value['samples']) > _MAX_SAMPLES):
         raise ValueError
-    latest = _sample(value['latest'])
+    diagnostics = value['version'] == DIAGNOSTIC_VERSION
+    latest = _sample(value['latest'], diagnostics=diagnostics)
     previous = None
     for raw in value['samples']:
-        current = _sample(raw)
+        current = _sample(raw, diagnostics=diagnostics)
         if previous is not None and (current['requests'] <= previous['requests']
                 or current['peak_total_bytes'] < previous['peak_total_bytes']
                 or current['cumulative_total_bytes'] < previous['cumulative_total_bytes']

@@ -1,7 +1,7 @@
 import { normalizeFunctionParameters } from "./tool-schema.js";
 import { MemoryContextController, contextMessageBytes, memoryRecord, parseMemoryEnvelope } from "./context-memory.js";
-import { nativeContextArchive, createContextCheckpoint, contextArchiveOperation } from "./context-archive.js";
-import { ContextViewTelemetry, type ContextViewNumbers } from "./context-metrics.js";
+import { nativeContextArchive, createContextCheckpoint, contextArchiveOperation, hasUnsettledContextEffect, type ContextRefusalReason } from "./context-archive.js";
+import { ContextViewTelemetry, type ContextViewNumbers, type ContextProjectionDiagnostic } from "./context-metrics.js";
 import { admitToolStateView, projectToolStateViewContext } from "./tool-state-view.js";
 import { type IpythonBridge, type MethodTool, type AppToolResult, unavailable } from "./tool-bridge.js";
 import type { ExtensionApi, PrimeToolModule, PrimeToolModuleDependencies } from "./ipython-extension.js";
@@ -508,10 +508,7 @@ export function recoverP7MemoryContext(controller: MemoryContextController, entr
       || details.notes_revision !== envelope.revision || details.context_memory_anchor !== message.toolCallId)) continue;
     // Unknown application effects remain model-visible, but cannot promise a
     // stable state boundary merely because the native transport settled.
-    const stableSource = details.environment_result_unknown !== true && details.processing_blocked !== true
-      && !Object.hasOwn(details,"uncertain_step")
-      && !["unknown","environment-result-unknown","processing-failed"].includes(String(details.stop_reason))
-      && !["unknown","uncertain","rejected","cancelled","lost","processing-blocked"].includes(String(details.status));
+    const stableSource = !hasUnsettledContextEffect(details);
     controller.accept(message.toolCallId,envelope,stableSource,details.context_checkpoint);
   }
 }
@@ -541,7 +538,7 @@ function p7CapacityOptionsFromEnvironment(): P7ContextCapacityOptions {
 }
 
 /** Request a new explicit NOTES summary; never retire or truncate additional evidence. */
-function p7CapacityView(messages:readonly unknown[],options:P7ContextCapacityOptions,projectionStatus:string):readonly unknown[] {
+function p7CapacityView(messages:readonly unknown[],options:P7ContextCapacityOptions,projectionStatus:string,refusalReason:ContextRefusalReason):readonly unknown[] {
   if(options.enabled===false) return messages;
   const capacity=options.capacityBytes??P7_DEFAULT_CONTEXT_CAPACITY;
   const invalid=options.configurationUnavailable===true || !Number.isSafeInteger(capacity) || capacity<1 || capacity>8*1024*1024;
@@ -550,12 +547,13 @@ function p7CapacityView(messages:readonly unknown[],options:P7ContextCapacityOpt
   const projectionUnavailable=["primary-unavailable","projection-unavailable","unsafe-boundary"].includes(projectionStatus);
   const selectedCapacity=invalid?P7_DEFAULT_CONTEXT_CAPACITY:capacity;
   if(!invalid && !projectionUnavailable && bytes!==null && bytes<=selectedCapacity) return messages;
-  const instruction=(projectionUnavailable?"上下文摘要投影未能建立；全部原始历史仍保留。 ":"")
+  const instruction=(projectionUnavailable?"上下文摘要投影未能建立；当前原生上下文视图保持完整，原始归档仍保留。重复更新 NOTES 不能保证修复此状态；可按研究需要正常记录笔记，并依据当前观察继续任务。 ":"")
     +(invalid?"上下文容量配置不可用，当前采用默认提醒阈值。 ":"")
-    +"请尽快用 p7_workspace op notes 更新 NOTES，保留危险及条件、死亡反例、模型/程序/轨迹引用、未覆盖分支和下一步判断。成功且可验证的 NOTES 才能退休已总结历史；未总结推理、未知/错误证据和当前完整棋盘仍保留，原始记录可按需读取。计量为 hook JSON UTF-8 bytes，不是 token 硬上限。";
+    +(projectionUnavailable?"":"请尽快用 p7_workspace op notes 更新 NOTES，保留危险及条件、死亡反例、模型/程序/轨迹引用、未覆盖分支和下一步判断。成功且可验证的 NOTES 才能退休已总结历史；未总结推理、未知/错误证据和当前完整棋盘仍保留，原始记录可按需读取。")
+    +"计量为 hook JSON UTF-8 bytes，不是 token 硬上限。";
   const notice={role:"custom",customType:P7_CAPACITY_NOTICE,display:false,timestamp:0,content:JSON.stringify({
     version:"asterion.prime-p7-context-capacity/v1",status:bytes===null?"measurement-unavailable":bytes>selectedCapacity?"over_capacity":"attention",
-    measured_bytes:bytes,capacity_bytes:selectedCapacity,projection_status:projectionStatus,
+    measured_bytes:bytes,capacity_bytes:selectedCapacity,projection_status:projectionStatus,refusal_reason:refusalReason,
     configuration_status:invalid?"configuration-unavailable":"configured",instruction})};
   return [...messages,notice];
 }
@@ -584,8 +582,8 @@ export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: Conte
   if (!api || typeof api.on !== "function") return false;
   let lastOutcome: string | undefined;
   const metrics = telemetry ? new ContextViewTelemetry() : undefined;
-  const observe = (messages: readonly unknown[]): void => {
-    try {if (metrics && telemetry) telemetry(metrics.observe(messages));} catch {}
+  const observe = (messages: readonly unknown[],diagnostic:ContextProjectionDiagnostic): void => {
+    try {if (metrics && telemetry) telemetry(metrics.observe(messages,diagnostic));} catch {}
   };
   (pi as MemoryExtensionApi).on("context", (rawEvent,rawContext) => {
     const event = memoryRecord(rawEvent);
@@ -595,8 +593,9 @@ export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: Conte
       const message=memoryRecord(raw);
       return !(message?.role==="custom" && message.customType===P7_CAPACITY_NOTICE);
     });
-    const finish=(view:readonly unknown[],status:string):{messages:readonly unknown[]}=>{
-      const finalView=p7CapacityView(view,capacityOptions,status);observe(finalView);return {messages:finalView};
+    const finish=(view:readonly unknown[],status:ContextProjectionDiagnostic['projection_status'],reason:ContextRefusalReason='none'):{messages:readonly unknown[]}=>{
+      const finalView=p7CapacityView(view,capacityOptions,status,reason);
+      observe(finalView,{projection_status:status,refusal_reason:reason});return {messages:finalView};
     };
     try {
       // Rebuild from the selected branch on each request: navigation/reload must
@@ -606,7 +605,7 @@ export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: Conte
       const manager = memoryRecord(context?.sessionManager);
       let entries: unknown = messages.map(message => ({type:"message",message}));
       if (manager && typeof manager.getBranch === "function") entries = manager.getBranch();
-      if (!Array.isArray(entries)) return finish(messages,"projection-unavailable");
+      if (!Array.isArray(entries)) return finish(messages,"projection-unavailable","archive-unavailable");
       recoverP7MemoryContext(controller,entries);
       const branchMessages = entries.flatMap(raw => {
         const entry = memoryRecord(raw);
@@ -620,12 +619,12 @@ export function registerP7MemoryContext(pi: unknown, telemetry?: (numbers: Conte
         emitMemoryDiagnostic("[prime-context-memory] " + safeOutcome);
         lastOutcome = safeOutcome;
       }
-      return finish(projected.messages,projected.outcome.status);
+      return finish(projected.messages,projected.outcome.status,projected.outcome.refusal_reason??'none');
     } catch {
       // Pi catches extension exceptions, so an exception is not a request fence.
       // A projection failure explicitly preserves every original message.
       emitMemoryDiagnostic('[prime-context-memory] {"status":"projection-unavailable"}');
-      return finish(messages,"projection-unavailable");
+      return finish(messages,"projection-unavailable","projection-error");
     }
   });
   return true;

@@ -25,7 +25,9 @@ const providerTelemetry = [];
 let hasNotes = false;
 const runtime = native.createExtensionRuntime();
 const factory = await loadExtensionFromFactory(pi => {
-  assert.equal(registerP7MemoryContext(pi,numbers => telemetry.push(numbers)),true);
+  // This legacy-v2 probe compares native history verbatim; capacity reminders
+  // have dedicated hook tests and remain enabled in the primary probe below.
+  assert.equal(registerP7MemoryContext(pi,numbers => telemetry.push(numbers),{enabled:false}),true);
   assert.equal(registerProviderPrefixMetrics(pi,numbers => providerTelemetry.push(numbers)),true);
   for (const tool of createAppLevelTools({callMethod:async (id,method,params) => {
     calls.push({id,method,params});
@@ -176,8 +178,9 @@ assert.doesNotMatch(JSON.stringify(otherView),/CURRENT_CHAPTER_5_BOARD/);
 assert.deepEqual(session.getBranch(),rawBefore);
 // Normal NOTES v3 through the installed native tool wrapper and selected-session archive.
 const primaryRuntime=native.createExtensionRuntime();
+const primaryTelemetry=[];
 const primaryFactory=await loadExtensionFromFactory(pi=>{
-  registerP7MemoryContext(pi);
+  registerP7MemoryContext(pi,value=>primaryTelemetry.push(value));
   for(const tool of createAppLevelTools({callMethod:async(id,method,params)=>{
     const commit=method==="workspace" && params.op==="notes";
     return {status:commit?"noted":"recorded",...(commit?{notes_revision:revision}:{}),
@@ -243,6 +246,30 @@ const reloadedPrimarySession=native.SessionManager.inMemory(process.cwd(),undefi
 const reloadedPrimaryRunner=new native.ExtensionRunner([primaryFactory],primaryRuntime,process.cwd(),reloadedPrimarySession,{});
 assert.deepEqual(await reloadedPrimaryRunner.emitContext(reloadedPrimarySession.buildSessionContext().messages),rebuiltPrimary);
 assert.deepEqual(primaryErrors,[]);
+// Native retry omission shape: no model/provider calls, raw evidence stays intact.
+const failedAttempt={...assistant(),stopReason:'error',content:[{type:'text',text:'FAILED_PROVIDER_ATTEMPT'}]};
+const failedId=primarySession.appendMessage(failedAttempt);
+primarySession.appendContextEdit(failedId,null);
+const afterOmission=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.equal(primaryTelemetry.at(-1).projection_status,'primary');
+assert.doesNotMatch(JSON.stringify(afterOmission),/FAILED_PROVIDER_ATTEMPT/);
+assert.deepEqual(primarySession.getEntry(failedId).message,failedAttempt);
+const newNoteCall=call('after-omission-note','p7_workspace',noteRequest);
+primarySession.appendMessage(assistant(newNoteCall));
+const newNote=await primaryWorkspace.execute(newNoteCall.id,ai.validateToolArguments(primaryWorkspace,newNoteCall));
+assert.equal(newNote.details.context_checkpoint.source_tool_call_id,newNoteCall.id);
+primarySession.appendMessage(toolResult(newNoteCall.id,newNoteCall.name,newNote));
+const afterNewNote=await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.equal(primaryTelemetry.at(-1).projection_status,'primary');
+assert.doesNotMatch(JSON.stringify(afterNewNote),/FAILED_PROVIDER_ATTEMPT/);
+assert.match(JSON.stringify(afterNewNote),/PRIMARY_EXACT_USER_CONSTRAINT/);
+// The earlier diagnosis witness used successful prose, which must remain unsupported.
+const successfulId=primarySession.appendMessage({...assistant(),stopReason:'stop',content:[{type:'text',text:'SUCCESSFUL_PROSE'}]});
+primarySession.appendContextEdit(successfulId,null);
+await primaryRunner.emitContext(primarySession.buildSessionContext().messages);
+assert.equal(primaryTelemetry.at(-1).projection_status,'primary-unavailable');
+assert.equal(primaryTelemetry.at(-1).refusal_reason,'unsupported-context-edit');
+assert.deepEqual(primaryErrors,[]);
 const manifest = JSON.parse(readFileSync(resolve(packageRoot,"package.json"),"utf8"));
 console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest.version,provider_calls:0,
   raw_messages:source.length,model_messages:modelView.length,state_before_notes:true,minimal_plan_validated:true,
@@ -251,4 +278,5 @@ console.log(JSON.stringify({status:"pass",package:manifest.name,version:manifest
   complete_sibling_group:true,system_and_tools_preserved:true,raw_branch_unchanged:true,restart_after_compaction:true,
   snapshot_after_state_group:true,snapshot_fixed_across_computation:true,
   actual_provider_event_numeric_observation:true,actual_provider_input_append_prefix:true,snapshot_native_user_conversion:true,selected_branch_isolated:true,
-  normal_notes_v3_primary:true,native_archive_read:true,primary_actual_plan_append_prefix:true,primary_compaction_reload:true,final_extension_view_numeric_telemetry:true}));
+  normal_notes_v3_primary:true,native_archive_read:true,primary_actual_plan_append_prefix:true,primary_compaction_reload:true,final_extension_view_numeric_telemetry:true,
+  failed_no_call_omission_primary:true,new_notes_after_omission_primary:true,successful_prose_edit_rejected:true}));

@@ -5062,3 +5062,5 @@
 - 13:15 Task53 L8 localmechanisms supported; repeatedNOTES7 atsameframe align unrecoverableprojection reminder,89ms compute rulesoutcompute bottleneck.
 - 13:47 Task53 ended7/9:211restored+92new,3deathRESET,129>128callbackstop; sealed/replay/cleanup true, guestinactive.
 - 13:47 Application callback capacities implemented: P7finite1024/4096 defaults, configurable;88targetedtests/independentreview/lint PASS, no newpaidtrial.
+- 13:49 Application callback capacity committed separately to restore configurable execution instead of fixed128 [2673de30].
+- 13:49 Safe native error omissions and private projection reasons verified115TS/88Python/installedPi0provider, independentreviewAPPROVE.
