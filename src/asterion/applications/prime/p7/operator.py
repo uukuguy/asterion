@@ -105,7 +105,7 @@ from asterion.agents.prime.application import (
     PrimeApplication, PrimeApplicationSpec, PrimeOperatorContext, PrimeToolModuleArtifact,
     prepare_prime_application,
 )
-from asterion.agents.prime.execution import AsterionPrimeLimits
+from asterion.agents.prime.execution import AsterionPrimeLimits, ASTERION_PRIME_RESEARCH_LIMITS
 from asterion.applications.prime.p7.tool_dispatch import P7ToolDispatch
 from asterion.applications.prime.p7.tool_registry import P7_TOOL_REGISTRY, P7_LEGACY_TOOL_REGISTRY
 from asterion.agents.prime.tool_registry import TOOL_REGISTRY_ENV
@@ -134,12 +134,15 @@ P7_OFFLINE_OPTIMIZATION_ENV = "ASTERION_PRIME_P7_OFFLINE_OPTIMIZATION"
 P7_RESUME_RUN_ID_ENV = "ASTERION_PRIME_P7_RESUME_RUN_ID"
 P7_EXPERIENCE_MODE_ENV = "ASTERION_PRIME_P7_EXPERIENCE_MODE"
 P7_OUTPUT_BYTES_ENV = "ASTERION_PRIME_P7_OUTPUT_BYTES"
+P7_MODEL_CALLBACKS_ENV = "ASTERION_PRIME_P7_MODEL_CALLBACKS"
+P7_TOOL_CALLBACKS_ENV = "ASTERION_PRIME_P7_TOOL_CALLBACKS"
 P7_CONTEXT_CAPACITY_BYTES_ENV = "ASTERION_PRIME_P7_CONTEXT_CAPACITY_BYTES"
 P7_COGNITION_MODE_ENV = "ASTERION_PRIME_P7_COGNITION_MODE"
 P7_FRESH_TARGET_POLICY_ENV = "ASTERION_PRIME_P7_FRESH_TARGET_POLICY"
 P7_RESEARCH_PYTHON_ENV = "ASTERION_PRIME_P7_RESEARCH_PYTHON"
 PI_CODING_AGENT_DIR = "PI_CODING_AGENT_DIR"
 _MAX_CALLBACKS = 128
+_MAX_TOOL_CALLBACKS = 500
 _DEADLINE_MS = 3_600_000
 _ROUTE_OPTIMIZER_CANDIDATE_BUDGET = 64
 _ROUTE_OPTIMIZER_MAX_REMOVED = 3
@@ -3147,6 +3150,7 @@ class P7RuntimeSelection:
     unbounded_first_round: bool = False
     autonomy: bool = False
     supervised_research: bool = False
+    max_tool_callbacks: int | None = ASTERION_PRIME_RESEARCH_LIMITS.tool_callbacks
 
     def __post_init__(self) -> None:
         if (
@@ -3159,10 +3163,19 @@ class P7RuntimeSelection:
             or type(self.unbounded_first_round) is not bool
             or type(self.autonomy) is not bool
             or (self.autonomy and (self.unbounded_first_round or self.max_actions != 1000))
-            or (self.max_callbacks, self.deadline_ms) != (
-                (None, None) if self.unbounded_first_round or self.supervised_research else (1024, 5_400_000) if self.autonomy else (_MAX_CALLBACKS, _DEADLINE_MS)
-            )
         ):
+            raise P7OperatorError("P7 runtime selection is invalid")
+        try:
+            limits = AsterionPrimeLimits(self.max_callbacks, self.max_tool_callbacks, self.deadline_ms)
+        except ValueError:
+            raise P7OperatorError("P7 runtime selection is invalid") from None
+        if self.unbounded_first_round or self.supervised_research:
+            valid_limits = limits == AsterionPrimeLimits(None, None, None)
+        elif self.autonomy:
+            valid_limits = limits == ASTERION_PRIME_RESEARCH_LIMITS
+        else:
+            valid_limits = self.deadline_ms == _DEADLINE_MS
+        if not valid_limits:
             raise P7OperatorError("P7 runtime selection is invalid")
 
     @classmethod
@@ -3179,7 +3192,11 @@ class P7RuntimeSelection:
         object.__setattr__(value, "provider", provider)
         object.__setattr__(value, "model", model)
         object.__setattr__(value, "max_actions", game.action_cap)
-        object.__setattr__(value, "max_callbacks", _MAX_CALLBACKS)
+        official = type(game) is ArcGameContract
+        object.__setattr__(value, "max_callbacks",
+                           _MAX_CALLBACKS if official else ASTERION_PRIME_RESEARCH_LIMITS.model_callbacks)
+        object.__setattr__(value, "max_tool_callbacks",
+                           _MAX_TOOL_CALLBACKS if official else ASTERION_PRIME_RESEARCH_LIMITS.tool_callbacks)
         object.__setattr__(value, "deadline_ms", _DEADLINE_MS)
         object.__setattr__(value, "unbounded_first_round", False)
         object.__setattr__(value, "autonomy", False)
@@ -3246,7 +3263,7 @@ def resolve_pi_provider(
 def resolve_p7_runtime(
     environment: Mapping[str, str], game: P7GameSelection | ArcGameContract = DEFAULT_GAME
 ) -> P7RuntimeSelection:
-    """Resolve the operator-selected model/runtime preset without tuning knobs."""
+    """Resolve operator-owned finite capacities and the exact runtime preset."""
 
     try:
         selected = resolve_model_selection(environment)
@@ -3276,12 +3293,26 @@ def resolve_p7_runtime(
         or game.action_cap_override is None
     ):
         raise P7OperatorError("P7 first-round runtime mode is invalid")
+    closed = (autonomy or supervised or unbounded or type(game) is ArcGameContract
+              or environment.get("ASTERION_PRIME_P7_RUN_MODE") == "witness")
+    if closed and {P7_MODEL_CALLBACKS_ENV, P7_TOOL_CALLBACKS_ENV}.intersection(environment):
+        raise P7OperatorError("P7 callback capacity is invalid for this preset")
+    if unbounded or supervised:
+        model_callbacks = tool_callbacks = None
+    elif type(game) is ArcGameContract or environment.get("ASTERION_PRIME_P7_RUN_MODE") == "witness":
+        model_callbacks, tool_callbacks = _MAX_CALLBACKS, _MAX_TOOL_CALLBACKS
+    else:
+        model_callbacks = _resolve_callback_capacity(environment, P7_MODEL_CALLBACKS_ENV,
+                                                    ASTERION_PRIME_RESEARCH_LIMITS.model_callbacks)
+        tool_callbacks = _resolve_callback_capacity(environment, P7_TOOL_CALLBACKS_ENV,
+                                                   ASTERION_PRIME_RESEARCH_LIMITS.tool_callbacks)
     return P7RuntimeSelection(
         runtime_id=_RUNTIME_ID,
         provider=provider,
         model=selected.model,
         max_actions=game.action_cap,
-        max_callbacks=None if unbounded or supervised else 1024 if autonomy else _MAX_CALLBACKS,
+        max_callbacks=model_callbacks,
+        max_tool_callbacks=tool_callbacks,
         deadline_ms=None if unbounded or supervised else 5_400_000 if autonomy else _DEADLINE_MS,
         autonomy=autonomy,
         supervised_research=supervised,
@@ -3298,13 +3329,16 @@ def p7_runtime_options(
         type(selection) is not P7RuntimeSelection
         or selection != replace(
             P7RuntimeSelection.fixed(game, selection.provider, selection.model),
-            max_callbacks=None if selection.unbounded_first_round or selection.supervised_research else 1024 if selection.autonomy else _MAX_CALLBACKS,
+            max_callbacks=selection.max_callbacks,
+            max_tool_callbacks=selection.max_tool_callbacks,
             deadline_ms=None if selection.unbounded_first_round or selection.supervised_research else 5_400_000 if selection.autonomy else _DEADLINE_MS,
             autonomy=selection.autonomy,
             supervised_research=selection.supervised_research,
             unbounded_first_round=selection.unbounded_first_round,
         )
         or selection.supervised_research != bool(getattr(game, "supervised_research", False))
+        or (type(game) is ArcGameContract
+            and (selection.max_callbacks, selection.max_tool_callbacks) != (_MAX_CALLBACKS, _MAX_TOOL_CALLBACKS))
         or (selection.unbounded_first_round and (
             type(game) is not P7GameSelection or game.action_cap_override is None
         ))
@@ -3315,6 +3349,7 @@ def p7_runtime_options(
             "deadline_ms": "none" if selection.deadline_ms is None else str(selection.deadline_ms),
             "max_actions": "none" if selection.max_actions is None else str(selection.max_actions),
             "max_callbacks": "none" if selection.max_callbacks is None else str(selection.max_callbacks),
+            "max_tool_callbacks": "none" if selection.max_tool_callbacks is None else str(selection.max_tool_callbacks),
             "model": selection.model,
             "provider": selection.provider,
         }
@@ -3366,6 +3401,22 @@ def _resolve_output_bytes(environment: Mapping[str, str]) -> int | None:
     except ValueError:
         pass
     raise P7OperatorError("P7 output capacity is invalid")
+
+
+def _resolve_callback_capacity(environment: Mapping[str, str], name: str, default: int) -> int:
+    """Consume a finite application capacity without granting caller-controlled stopping."""
+    if name not in environment:
+        return default
+    value = environment[name]
+    if type(value) is str and re.fullmatch(r"[0-9]+", value):
+        try:
+            selected = int(value)
+            # Runtime diagnostics report the first rejected callback as cap + 1.
+            if 1 <= selected <= 2**53 - 2:
+                return selected
+        except ValueError:
+            pass
+    raise P7OperatorError("P7 callback capacity is invalid")
 
 
 def _resolve_context_capacity_bytes(environment: Mapping[str, str]) -> int:
@@ -3609,6 +3660,7 @@ def build_p7_operator_resources(
                 P7_RESUME_RUN_ID_ENV,
                 P7_EXPERIENCE_MODE_ENV,
                 P7_OUTPUT_BYTES_ENV,
+                P7_MODEL_CALLBACKS_ENV, P7_TOOL_CALLBACKS_ENV,
                 P7_COGNITION_MODE_ENV, P7_FRESH_TARGET_POLICY_ENV,
                 _WITNESS_STARTED_ENV, _WITNESS_EPOCH_ENV, P7_RESEARCH_PYTHON_ENV,
             }
@@ -3626,8 +3678,7 @@ def build_p7_operator_resources(
             provider_environment["ASTERION_PRIME_DEBUG_TRANSCRIPT_PATH"] = str(
                 private_trace_root.parent / "debug-transcript.jsonl"
             )
-        limits = AsterionPrimeLimits(selection.max_callbacks,
-            None if selection.unbounded_first_round or selection.supervised_research else 4096 if selection.autonomy else 500, deadline_ms)
+        limits = AsterionPrimeLimits(selection.max_callbacks, selection.max_tool_callbacks, deadline_ms)
         alarm_sink = ResourceAlarmSink(private_trace_root.parent / 'resource-alarms.jsonl',
                                        emit=_public_resource_alarm)
         official = type(game) is ArcGameContract

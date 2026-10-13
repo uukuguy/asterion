@@ -13,7 +13,7 @@ from pathlib import Path
 from types import MappingProxyType, SimpleNamespace
 from typing import AsyncIterator, cast
 
-from asterion.agents.prime.session import ASTERION_PRIME_LIMITS
+from asterion.agents.prime.session import AsterionPrimeLimits
 from asterion.agents.prime.trace import PrimeTraceRecorder
 from asterion.agents.prime.tool_registry import PrimeApplicationToolRegistry
 from asterion.services.diagnostics import FailureDiagnostic
@@ -464,7 +464,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
                 provider="openai-codex",
                 model="gpt-6.1-sol",
                 max_actions=500,
-                max_callbacks=128,
+                max_callbacks=1024,
                 deadline_ms=3_600_000,
             ),
         )
@@ -475,7 +475,8 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             {
                 "deadline_ms": "3600000",
                 "max_actions": "500",
-                "max_callbacks": "128",
+                "max_callbacks": "1024",
+                "max_tool_callbacks": "4096",
                 "model": "gpt-6.1-sol",
                 "provider": "openai-codex",
             },
@@ -1019,7 +1020,7 @@ class TestPrimeP7NativeProvider(unittest.TestCase):
             PrimeOperatorContext(Path('/usr/bin/pi'), None, root, 'openai-codex',
                 'gpt-6.1-sol' if declare_model else 'invalid-model', 'medium', {},
                 TaskDeadline(deadline_monotonic=time.monotonic()+3600, deadline_epoch=time.time()+3600)),
-            authorization=ASTERION_PRIME_LIMITS)
+            authorization=AsterionPrimeLimits(1024, 4096, 3600000))
         trace_root = root / 'trace'
         trace_root.mkdir()
         return owner, P7PrivateTraceReceipt(broker, PrimeTraceRecorder(trace_root))

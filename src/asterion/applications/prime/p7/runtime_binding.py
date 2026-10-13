@@ -10,6 +10,7 @@ from typing import cast
 
 from asterion.agents.prime.execution import (
     ASTERION_PRIME_LIMITS,
+    ASTERION_PRIME_RESEARCH_LIMITS,
     AsterionPrimeLimits,
     PrimeRoundDiagnostic,
     PrimePromptRecovery,
@@ -391,7 +392,14 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
     application_id = 'prime.arc-agi-3-gameplay' if gameplay else 'prime.arc-agi-3-solving'
     if type(owner) is not PrimeApplication or type(broker) is not ArcBroker:
         raise RuntimeFactoryError(_ERROR)
-    limits = owner.authorized_limits
+    try:
+        authorization = owner.authorized_limits
+        if type(authorization) is not AsterionPrimeLimits:
+            raise ValueError
+        limits = AsterionPrimeLimits(authorization.model_callbacks,
+                                    authorization.tool_callbacks, authorization.deadline_ms)
+    except (AttributeError, TypeError, ValueError):
+        raise RuntimeFactoryError(_ERROR) from None
     supervised = type(broker.game) is P7GameSelection and broker.game.supervised_research
     first_round = (type(broker.game) is P7GameSelection and not supervised
                    and broker.game.action_cap_override is not None
@@ -404,8 +412,17 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
         'provider': DEFAULT_PROVIDER, 'model': DEFAULT_MODEL,
         'deadline_ms': 'none' if unbounded else str(limits.deadline_ms),
         'max_callbacks': 'none' if unbounded else str(limits.model_callbacks),
+        'max_tool_callbacks': 'none' if unbounded else str(limits.tool_callbacks),
         'max_actions': 'none' if broker.game.action_cap is None else str(broker.game.action_cap),
     }
+    if unbounded:
+        valid_limits = limits == AsterionPrimeLimits(None, None, None)
+    elif autonomy:
+        valid_limits = limits == ASTERION_PRIME_RESEARCH_LIMITS
+    elif limits.deadline_ms == 900_000:
+        valid_limits = limits == AsterionPrimeLimits(128, 500, 900_000)
+    else:
+        valid_limits = limits.deadline_ms == ASTERION_PRIME_LIMITS.deadline_ms
     checks = {
         'identity': owner.identity == (application_id, '1.0.0', DEFAULT_PROVIDER, DEFAULT_MODEL),
         'host_services': set(host_services) == (_GAMEPLAY_HOST_CAPABILITIES if gameplay else _HOST_CAPABILITIES),
@@ -418,8 +435,7 @@ def build_p7_direct_runtime(host_services, options, *, services=None, gameplay=F
         'trace_broker': type(trace_adapter) is expected_trace and trace_adapter.matches_runtime_broker(broker),
         'trace_ready': trace is not None and trace._seal is None and trace._trace_fd is not None
             and (gameplay or type(trace_adapter) is P7PrivateTraceReceipt and trace_adapter.runtime_ready()),
-        'limits': limits in (ASTERION_PRIME_LIMITS, AsterionPrimeLimits(128, 500, 900_000),
-                             AsterionPrimeLimits(1024, 4096, 5_400_000), AsterionPrimeLimits(None, None, None)),
+        'limits': type(limits) is AsterionPrimeLimits and valid_limits,
         'deadline': unbounded or owner.task_deadline is not None,
     }
     if gameplay:

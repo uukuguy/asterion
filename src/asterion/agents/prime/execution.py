@@ -47,6 +47,8 @@ _DEADLINE_MS = 60 * 60 * 1000
 _RESEARCH_MODEL_CALLBACKS = 1024
 _RESEARCH_TOOL_CALLBACKS = 4096
 _RESEARCH_DEADLINE_MS = 90 * 60 * 1000
+# An exhaustion observation can be cap + 1; keep that diagnostic JSON-safe.
+_MAX_SAFE_CALLBACKS = 2**53 - 2
 _SOURCE_NAME = "ASTERION_PI_EXTENSION_SOURCE_NAME"
 _SOURCE_SHA256 = "ASTERION_PI_EXTENSION_SOURCE_SHA256"
 _TRANSPORT_PROTOCOL_ERROR = "Asterion-prime transport protocol failed"
@@ -180,7 +182,7 @@ def _snapshot_native_events(events: object) -> tuple[PiRpcEvent, ...]:
 
 @dataclass(frozen=True, slots=True)
 class AsterionPrimeLimits:
-    """Execution bounds; all-None explicitly delegates stopping to the caller."""
+    """Finite application capacities; all-None delegates stopping to the caller."""
 
     model_callbacks: int | None
     tool_callbacks: int | None
@@ -193,8 +195,8 @@ class AsterionPrimeLimits:
         if any(isinstance(value, bool) or type(value) is not int for value in values):
             raise ValueError("Asterion-prime limits are invalid")
         if (
-            not 1 <= self.model_callbacks <= _RESEARCH_MODEL_CALLBACKS
-            or not 1 <= self.tool_callbacks <= _RESEARCH_TOOL_CALLBACKS
+            not 1 <= self.model_callbacks <= _MAX_SAFE_CALLBACKS
+            or not 1 <= self.tool_callbacks <= _MAX_SAFE_CALLBACKS
             or not 1 <= self.deadline_ms <= _RESEARCH_DEADLINE_MS
         ):
             raise ValueError("Asterion-prime limits are invalid")

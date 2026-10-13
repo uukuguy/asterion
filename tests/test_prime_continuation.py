@@ -195,7 +195,7 @@ class TestPrimeResearchLimits(unittest.TestCase):
         self.assertEqual(ASTERION_PRIME_RESEARCH_LIMITS, AsterionPrimeLimits(1024, 4096, 5400000))
         self.assertEqual(ASTERION_PRIME_LIMITS, AsterionPrimeLimits(128, 500, 3600000))
         self.assertEqual(AsterionPrimeLimits(None, None, None).deadline_ms, None)
-        for bounds in ((1025, 4096, 5400000), (1024, 4097, 5400000),
+        for bounds in ((2**53, 4096, 5400000), (1024, 2**53, 5400000),
                        (1024, 4096, 5400001), (None, 500, 3600000),
                        (128, None, None), (True, 500, 3600000), (0, 500, 3600000)):
             with self.subTest(bounds=bounds), self.assertRaises(ValueError):

@@ -535,6 +535,7 @@ class TestOfficialOperator(unittest.TestCase):
             self.assertNotIn("arc-secret", repr(resources))
             self.assertEqual(dict(resources.runtime_options), {
                 "deadline_ms": "3600000", "max_actions": "1000", "max_callbacks": "128",
+                "max_tool_callbacks": "500",
                 "model": "gpt-6.1-sol", "provider": "openai-codex",
             })
             runtime = build_p7_direct_runtime(resources.host_services, resources.runtime_options, gameplay=True)
