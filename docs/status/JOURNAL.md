@@ -5069,3 +5069,8 @@
 - 14:12 Repair boundary documentation committed/pushed [405d5014]; callback and conservative context omission fixes are independently verified, full-game success remains open.
 - 14:12 Task54 active selected continuation source405d5014/wheelc8982a06 restores280actions/7levels; runp7-live-20261013060100-342ba6272a17b7ae7fcffb2b, model1024/tool4096, finite3600s. Snapshot316actions=280restored+36new,7/9; no newRESET.
 - 14:12 Task54 provider error producer traced to Codex stream service errors; auto_retry_end is lifecycle summary, not extra failure. Projection primary requests13–15, unsupported-context-edit from16; exact edit under investigation, no midrun code changes.
+- 14:14 Recorded active repaired continuation and unresolved edit boundary to prevent duplicate trial on recovery [7fa928c7].
+- 14:14 Task54 L8 completed55newactions/zero newdeathRESET;335total=280restored+55new, now8/9.
+- 14:21 Native error partialcall zero-dispatch reproduced; narrow omission repair and nine private refusal reasons verified installedPi/77TS/4Python, independentreviewAPPROVE.
+- 14:21 Committed/pushed native pre-dispatch partialcall compatibility and precise refusal diagnostics [cffe2fe8]; frozen Task54 remains unchanged.
+- 14:30 Task54 L9 twice extrapolated uncovered ascent and died340/386; later generated stopper before442 safely. LLM planned autonomously, no human hints.
