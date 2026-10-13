@@ -530,6 +530,7 @@ class TestOfficialOperator(unittest.TestCase):
             self.assertEqual(broker.frame_at(0), [[1]])
             launch = resources.host_services["prime.launch"]
             self.assertIs(type(launch), PrimeApplication)
+            self.assertFalse(resources.host_services['prime.ipython']._auto_rollout_enabled)
             self.assertNotIn("ARC_API_KEY", launch._operator.environment)
             self.assertNotIn("arc-secret", repr(launch))
             self.assertNotIn("arc-secret", repr(resources))

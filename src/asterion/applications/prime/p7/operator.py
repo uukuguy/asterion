@@ -92,6 +92,7 @@ from asterion.applications.prime.p7.optimizer import (
 )
 from asterion.applications.prime.p7.optimizer_arc import optimize_arc_route
 from asterion.applications.prime.p7.prompt import (
+    P7_AUTO_ROLLOUT_INSTRUCTION,
     P7_DEATH_RISK_EXPERIMENT_PROMPT,
     P7_ROLLOUT_EXPERIMENT_PROMPT,
     P7_LEGACY_SOLVE_PROMPT,
@@ -320,14 +321,22 @@ def _offline_optimization_enabled(environment: Mapping[str, str]) -> bool:
     return value in {"integration", "enabled", "true", "1"}
 
 
+def _standard_rollout_enabled(environment: Mapping[str, str]) -> bool:
+    """Modern solve and sweep share the existing automatic per-action gate."""
+    return (environment.get("ASTERION_PRIME_P7_RUN_MODE", "solve") in {"solve", "sweep"}
+            and environment.get(P7_HISTORY_VARIANT_ENV, "verified") == "verified")
+
+
 def _append_research_experiment(prompt: str, environment: Mapping[str, str]) -> str:
-    """Keep unverified guidance at the explicit supervised experiment entry."""
+    """Append the guidance matching the selected P7 rollout entry."""
     if environment.get("ASTERION_PRIME_P7_RUN_MODE") == "research":
         return (prompt + "\n\n" + P7_DEATH_RISK_EXPERIMENT_PROMPT + "\n\n" + P7_ROLLOUT_EXPERIMENT_PROMPT
                 + "\n\n当出现 asterion_p7_context_capacity 容量提醒时，尽快更新简明 NOTES，"
                   "保留已识别危险及条件、死亡反例、模型/程序/轨迹引用、未覆盖分支和下一步判断。"
                   "提醒不删除未总结推理或当前完整观察，只有已接受且可验证的 NOTES 才能退休已总结历史；"
                   "原始证据仍可按需读取。容量按 hook JSON UTF-8 bytes 计量，不是 token 硬上限。")
+    if _standard_rollout_enabled(environment):
+        return prompt + "\n\n" + P7_AUTO_ROLLOUT_INSTRUCTION
     return prompt
 
 
@@ -3750,7 +3759,8 @@ def build_p7_operator_resources(
                 experience=experience,
                 limits=None if output_bytes is None else KernelLimits(max_output_bytes=output_bytes),
                 learner_profile="autonomous",
-                auto_rollout=selection.supervised_research,
+                auto_rollout=(selection.supervised_research
+                              or (not official and _standard_rollout_enabled(environment))),
             )
             if selection.supervised_research:
                 from .research_monitor import ResearchMonitor

@@ -114,6 +114,7 @@ class TestP7Autonomy(unittest.TestCase):
                 self.assertNotEqual(prefix_fd, metrics_fd)
                 self.assertEqual(resources.provider_prefix_metrics(), {'status': 'not-recorded'})
                 self.assertEqual(host.solver.learner_profile, 'autonomous')
+                self.assertFalse(host._auto_rollout_enabled)
                 self.assertNotIn('ASTERION_PRIME_P7_RESEARCH_PYTHON', native.rpc.config.environment)
                 self.assertEqual(launch.task_deadline.deadline_monotonic, 5500.0)
                 self.assertEqual(host.control._deadline, 5500.0)

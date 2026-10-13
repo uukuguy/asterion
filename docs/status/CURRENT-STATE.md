@@ -177,3 +177,7 @@ Current operational state and latest run resources are recorded in RESUME. Cache
 ## Native context-edit compatibility boundary
 
 NOTES primary projection supports only verified native omissions of failed assistant messages that stop before tool dispatch, including partial calls with unique identities and no execution evidence. Matching results, unknown effects, length/aborted and arbitrary edits remain unavailable. Original archives, receipts, user constraints and tool pairs remain protected. Private v2 context metrics persist closed projection/refusal reasons while reading v1. In-memory raw native archives still limit historical request52 reconstruction; software repair and actual-run attribution remain distinct. See RESUME for named checks.
+
+## Standard P7 per-action rollout
+
+Modern verified solve/selected resume and sweep bind the existing RolloutRuntime to the shared research kernel. Solver evaluates each primitive against its current actual observation, rechecks the observation/kernel/cancellation boundary before dispatch, and records model feedback after execution. Predicted death and conditional fatal risk stop the current step and suffix; missing models or unknown coverage remain explicitly unassessed under the existing exploration policy. Host automatic attempts and actor-initiated calls are separate. Frozen witness/official/autonomy and legacy routes retain their stated behavior. See D-2026-10-13-01; named verification and efficacy boundaries are in RESUME.

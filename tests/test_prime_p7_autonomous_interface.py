@@ -26,6 +26,9 @@ class TestAutonomousResearchInterface(unittest.TestCase):
                 if mode == 'research':
                     self.assertTrue(text.startswith('selected application guidance\n\n' + experiment))
                     self.assertIn('asterion_p7_context_capacity', text)
+                elif mode in ('solve', 'sweep', None):
+                    self.assertEqual(text, 'selected application guidance\n\n' + prompt.P7_AUTO_ROLLOUT_INSTRUCTION)
+                    self.assertNotIn(experiment, text)
                 else:
                     self.assertEqual(text, 'selected application guidance')
 

@@ -5084,3 +5084,6 @@
 - 16:35 Task55 closed8/9 at163newL9actioncap:3deaths/4RESET, projectionprimary116requests/0refusals, sealed/replay/cleanuptrue, ownedunitinactive.
 - 16:35 Rerun route differed and avoidedTask54death afteridenticalstate; fullmotioncoverage/route-model gaps persisted, confoundedconditions prevent pure-random attribution.
 - 16:36 Recorded/pushed L9 rerun outcome and reasoning comparison for recovery [2a7a7192]; no active trial.
+- 16:44 Correction: Task54/55 standardsolve lackedhostauto rollout binding; user requires everyprimitive pre-evaluation, extending existingresearch-only gate to modernsolve/sweep.
+- 16:51 Modernsolve/sweep everyprimitive gate wired; actualsharedkernel TDD135PythonPASS,115TSPASS/6existing skips, independentreview pending, no paidtrial.
+- 16:52 IndependentreviewAPPROVE standardperstep rollout; refinedprompt23testsPASS, no newpaidrun or broadpromotion.

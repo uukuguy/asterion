@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-13 16:35 Asia/Shanghai. Session active; Task54 closed. Task55 rerun of L9 is closed; no active trial. User-requested rerun and comparison completed.
+> Updated: 2026-10-13 16:52 Asia/Shanghai. Session active; Task54 closed. Task55 rerun of L9 is closed; no active trial. User-requested rerun and comparison completed.
 
 ## 已验证事实
 
@@ -32,4 +32,4 @@ Task55 primaryprojection all establishedepochs through116requests, no refusal; f
 
 Route variability observed: early route avoidedTask54firstdeath; laterTask55steps475–478 matchTask54steps336–339exactaction/framehash, then479left avoidedTask54directfatal340. This proves different actionselection at matching publicstate but not pure stochastic causality: sourcecodefixed, context/NOTES and newallowance163vs239 differ. Neither trial built executable dynamics/route search; partial motion coverage errors persisted despite primaryprojection recovery. No full9/9 claim.
 
-All requested fixes independently reviewed and pushed; README reflects8/9 boundary. Do not launch another trial automatically. If further optimization is requested, inspect existing L9 animation/plan evidence and design a narrow discriminating study of complete-motion modeling/exit route before another bounded live run. Keep operator score thresholds advisory and separate from hostcaps. Existing source actualresume loads latestwhole-source research; formalprefix-only export was needed to exclude L9future, originalsource unchanged.
+Task54/55 standardsolve did not bind hostauto evaluator; user reaffirmed everyprimitive pre-rollout, including batches. Modernsolve/sweep now use existing sharedkernel evaluator; no Solver algorithm change. New actualoperator/kernel RED11failures→GREEN,135relatedPythonPASS,115TSPASS/6existing skips, resources synced. Minimal registration/fullmotion/unknown/feedback guidance appended onlyenabledentries. D-2026-10-13-01 extends originalresearch-onlyscope. No newpaidrun; localwiring verification is not livegame efficacy. IndependentreviewAPPROVE; additional23prompt/actualentrytestsPASS after contract clarification. README reflects8/9 boundary. Do not launch another trial automatically. If further optimization is requested, inspect existing L9 animation/plan evidence and design a narrow discriminating study of complete-motion modeling/exit route before another bounded live run. Keep operator score thresholds advisory and separate from hostcaps. Existing source actualresume loads latestwhole-source research; formalprefix-only export was needed to exclude L9future, originalsource unchanged.

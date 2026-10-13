@@ -119,6 +119,7 @@ class TestWitnessDeadline(unittest.TestCase):
                     self.assertNotIn(STARTED, launch._operator.environment)
                     self.assertEqual(resources.runtime_options['deadline_ms'], '900000' if witness else '3600000')
                     ipython = resources.host_services['prime.ipython']
+                    self.assertEqual(ipython._auto_rollout_enabled, not witness)
                     remaining = ipython.control.budget_snapshot()['wall_time_remaining_seconds']
                     expected = 875.0 if witness else 3600.0
                     self.assertLessEqual(remaining, expected)
