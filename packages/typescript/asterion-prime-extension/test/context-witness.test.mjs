@@ -467,6 +467,124 @@ test('frame refusal after approval sends numeric settlement metadata and closes'
   } finally {sockets.close();}
 });
 
+const codeSummary = [
+  "asterion.prime-code-summary/v1",
+  "keep_recent_tokens: 256",
+  "native_automatic_keep_recent_tokens: 20000",
+  "below_native_threshold: true",
+  "interfaces:",
+  "- class AffineAccumulator",
+  "- callable accumulator",
+  "",
+].join("\n");
+
+function codeSummaryChild(sockets, options) {
+  const source = `
+    import {registerContextWitness} from ${JSON.stringify(artifact)};
+    const options=JSON.parse(process.argv[1]);
+    const deps=Object.freeze({
+      buildSessionContext:entries=>({messages:entries.at(-1)?.type==='compaction'
+        ? [{role:'compactionSummary',summary:entries.at(-1).summary??'',retainedMessageCount:0}]:[]}),
+      getCurrentSystemMessage:()=>undefined,convertToLlm:messages=>messages,
+      serializeConversation:()=>'x'.repeat(64)});
+    const hooks=new Map();
+    const witness=registerContextWitness({on:(name,hook)=>hooks.set(name,hook)},deps,
+      {descriptor:3,launchNonce:${JSON.stringify(launch)},policy:${JSON.stringify(policy)},
+       configSource:'framework-default',timeoutMs:1500});
+    const event={type:'session_before_compact',
+      customInstructions:options.instructions,
+      preparation:{settings:{enabled:false,reserveTokens:16384,keepRecentTokens:256},
+        firstKeptEntryId:'entry-2',messagesToSummarize:[{role:'user',content:[{type:'text',text:'hello'}]}],
+        turnPrefixMessages:[],isSplitTurn:false,tokensBefore:12},
+      branchEntries:[{id:'entry-1',parentId:null,type:'message'},
+        {id:'entry-2',parentId:'entry-1',type:'message'}]};
+    const result=await hooks.get('session_before_compact')(event,{getSystemPrompt:()=>'system'});
+    let persistedError=null;
+    if(result?.compaction && options.persist!==false){
+      const summary=options.persistedSummary??result.compaction.summary;
+      const entry={type:'compaction',id:'entry-3',parentId:'entry-2',timestamp:'2000-01-01T00:00:00.000Z',
+        firstKeptEntryId:result.compaction.firstKeptEntryId,summary,
+        tokensBefore:result.compaction.tokensBefore,fromHook:options.fromHook!==false};
+      try{await hooks.get('session_compact')({type:'session_compact',
+        fromExtension:options.fromExtension!==false,compactionEntry:entry},
+        {getSystemPrompt:()=>'system',sessionManager:{getBranch:()=>[...event.branchEntries,entry]}});}
+      catch(error){persistedError=error.message}
+    }
+    process.stdout.write(JSON.stringify({cancel:result?.cancel??false,
+      summary:result?.compaction?.summary??null,
+      firstKeptEntryId:result?.compaction?.firstKeptEntryId??null,
+      tokensBefore:result?.compaction?.tokensBefore??null,
+      closed:witness.closed,persistedError}));
+    process.exit(0);`;
+  const child=spawn(process.execPath,['--input-type=module','-e',source,JSON.stringify(options)],
+    {stdio:['ignore','pipe','pipe',sockets.client]});
+  let stdout='',stderr='';
+  child.stdout.on('data',chunk=>{stdout+=chunk});
+  child.stderr.on('data',chunk=>{stderr+=chunk});
+  return new Promise((done,reject)=>{
+    child.once('error',reject);
+    child.once('exit',code=>{try{assert.equal(code,0,stderr);assert.equal(stderr,'');done(JSON.parse(stdout))}
+      catch(error){reject(error)}});
+  });
+}
+
+test('code-aware compact persists the supplied summary below the native threshold',async()=>{
+  const sockets=await pair();
+  try {
+    const running=codeSummaryChild(sockets,{instructions:codeSummary});
+    sockets.peer.write(frame(arm));
+    const proposal=await readFrame(sockets.peer);
+    assert.equal(proposal.phase,'proposal');
+    assert.equal(proposal.preparation.custom_instructions,codeSummary);
+    sockets.peer.write(frame({...base,phase:'decision',status:'approve'}));
+    const persisted=await readFrame(sockets.peer);
+    assert.equal(persisted.phase,'persisted');
+    assert.equal(persisted.summary,codeSummary);
+    assert.equal(persisted.compaction_entry.summary,codeSummary);
+    assert.equal(persisted.compaction_entry.fromHook,true);
+    assert.equal(persisted.summary_sha256,createHash('sha256').update(codeSummary).digest('hex'));
+    assert.equal(persisted.summary.includes('## Goal'),false);
+    assert.equal(persisted.summary.includes('below_native_threshold: true'),true);
+    sockets.peer.write(frame({...base,phase:'ack'}));
+    const outcome=await running;
+    assert.equal(outcome.cancel,false);
+    assert.equal(outcome.summary,codeSummary);
+    assert.equal(outcome.firstKeptEntryId,'entry-2');
+    assert.equal(outcome.tokensBefore,12);
+    assert.equal(outcome.persistedError,null);
+    assert.equal(outcome.closed,false);
+  } finally {sockets.close();}
+});
+
+test('a native Goal template is not the code-aware compaction',async()=>{
+  const sockets=await pair();
+  try {
+    const poisoned=codeSummary.replace('interfaces:','## Goal\ninterfaces:');
+    const running=codeSummaryChild(sockets,{instructions:poisoned});
+    sockets.peer.write(frame(arm));
+    const outcome=await running;
+    assert.equal(outcome.cancel,true);
+    assert.equal(outcome.summary,null);
+    assert.equal(outcome.closed,true);
+  } finally {sockets.close();}
+});
+
+test('persisting a native template on a code-aware compact is refused',async()=>{
+  const sockets=await pair();
+  try {
+    const native='## Goal\n## Constraints & Preferences\n';
+    const running=codeSummaryChild(sockets,{instructions:codeSummary,persistedSummary:native});
+    sockets.peer.write(frame(arm));
+    const proposal=await readFrame(sockets.peer);
+    assert.equal(proposal.preparation.custom_instructions,codeSummary);
+    sockets.peer.write(frame({...base,phase:'decision',status:'approve'}));
+    const outcome=await running;
+    assert.equal(outcome.summary,codeSummary);
+    assert.equal(outcome.persistedError,'Asterion context witness is unavailable');
+    assert.equal(outcome.closed,true);
+  } finally {sockets.close();}
+});
+
 test('legacy frame alias without explicit policy becomes the only effective frame cap',async()=>{
   const sockets=await pair();
   try {

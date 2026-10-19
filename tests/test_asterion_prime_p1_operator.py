@@ -215,18 +215,33 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             ],
         )
         self.assertEqual((rpc.calls, rpc.compacts, rpc.closes), (3, 1, 1))
-        # The application's own instruction reached the RPC, and it is the
-        # kernel note rather than a restatement of it anywhere in the operator.
-        from asterion.agents.prime.summarization import SUMMARY_KERNEL_NOTE
+        import hashlib
 
-        self.assertEqual(rpc.compact_instructions, SUMMARY_KERNEL_NOTE)
+        from asterion.agents.prime.code_summary import (
+            NATIVE_AUTOMATIC_KEEP_RECENT_TOKENS,
+            is_native_generic_summary,
+        )
+
+        sent = rpc.compact_instructions
+        self.assertTrue(sent.startswith("asterion.prime-code-summary/v1\n"))
+        self.assertIn("\nbelow_native_threshold: true\n", sent)
+        self.assertIn(f"\nnative_automatic_keep_recent_tokens: {NATIVE_AUTOMATIC_KEEP_RECENT_TOKENS}\n", sent)
+        self.assertLess(256, NATIVE_AUTOMATIC_KEEP_RECENT_TOKENS)
+        self.assertIn("- class AffineAccumulator\n", sent)
+        self.assertIn("- callable accumulator\n", sent)
+        self.assertFalse(is_native_generic_summary(sent))
+        self.assertNotIn("## Goal", sent)
+        self.assertNotIn("## Constraints", sent)
+        self.assertEqual(result.code_summary_text, sent)
         self.assertEqual(result.code_summary_kind, "asterion.prime-code-summary/v1")
         self.assertTrue(result.code_summary_below_native_threshold)
         self.assertEqual(
+            result.code_summary_sha256,
+            hashlib.sha256(sent.encode()).hexdigest(),
+        )
+        self.assertEqual(
             result.code_summary_bindings[:2], ("AffineAccumulator", "accumulator")
         )
-        self.assertNotIn("## Goal", result.code_summary_text)
-        self.assertEqual(len(result.code_summary_sha256), 64)
         self.assertFalse(resources.private_root.exists())
         assert resources.worker.cleanup_receipt is not None
         self.assertEqual(resources.worker.cleanup_receipt.reap_count, 1)

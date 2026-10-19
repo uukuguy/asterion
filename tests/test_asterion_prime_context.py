@@ -46,7 +46,7 @@ def digest(value):
     return hashlib.sha256(encode(value)).hexdigest()
 
 
-def material(custom_instructions=None, summary_text="checkpoint"):
+def material(custom_instructions=None, summary_text="checkpoint", from_hook=False):
     pre = projection([user(SECRET * 24), user("retained")])
     retained = projection([user("retained")])
     preparation = {
@@ -102,7 +102,7 @@ def material(custom_instructions=None, summary_text="checkpoint"):
         "firstKeptEntryId": "e1",
         "summary": summary,
         "tokensBefore": 123456,
-        "fromHook": False,
+        "fromHook": from_hook,
         "details": {"readFiles": [], "modifiedFiles": []},
     }
     persisted = {
@@ -315,6 +315,63 @@ class TestAsterionPrimeContext(ContextMixin, unittest.TestCase):
             persisted["post_context_projection"]["messages"][0]["custom_instructions"]
         )
         self.assertEqual(evidence.before_context_tokens, proposal["pre_units"])
+
+    def test_dedicated_code_summary_is_the_persisted_entry(self):
+        from asterion.agents.prime.code_summary import (
+            KernelBinding,
+            build_code_aware_summary,
+        )
+        from asterion.agents.prime.summarization import SUMMARY_INITIAL_TEMPLATE
+
+        context = self.module()
+        summary = build_code_aware_summary(
+            (
+                KernelBinding("AffineAccumulator", "class"),
+                KernelBinding("accumulator", "callable"),
+            ),
+            keep_recent_tokens=256,
+        )
+        proposal, persisted = material(
+            custom_instructions=summary.text,
+            summary_text=summary.text,
+            from_hook=True,
+        )
+        evidence = context.validate_compaction_witness(
+            proposal,
+            persisted,
+            expected_launch_nonce=LAUNCH,
+            expected_command_nonce=COMMAND,
+        )
+        self.assertEqual(evidence.summary_sha256, summary.sha256)
+        self.assertEqual(persisted["compaction_entry"]["summary"], summary.text)
+        self.assertNotIn("## Goal", summary.text)
+        refused = (
+            material(
+                custom_instructions=summary.text,
+                summary_text=summary.text,
+                from_hook=False,
+            ),
+            material(
+                custom_instructions=summary.text,
+                summary_text=SUMMARY_INITIAL_TEMPLATE,
+                from_hook=True,
+            ),
+            material(
+                custom_instructions=summary.text,
+                summary_text="checkpoint",
+                from_hook=True,
+            ),
+            material(summary_text=summary.text, from_hook=True),
+        )
+        for proposal, persisted in refused:
+            with self.subTest(summary=persisted["summary"][:24]):
+                with self.assertRaises(context.PrimeContextError):
+                    context.validate_compaction_witness(
+                        proposal,
+                        persisted,
+                        expected_launch_nonce=LAUNCH,
+                        expected_command_nonce=COMMAND,
+                    )
 
     def test_a_summary_larger_than_what_it_replaces_is_accepted(self):
         # A byte bound on the rebuilt context refused legitimate compactions:

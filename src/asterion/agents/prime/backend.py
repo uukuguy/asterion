@@ -21,6 +21,10 @@ from asterion.agents.prime.compaction_budget import (
     ModelPrice,
     PrimeCompactionPolicy,
 )
+from asterion.agents.prime.code_summary import (
+    is_dedicated_code_summary,
+    is_native_generic_summary,
+)
 from asterion.agents.prime.context import (
     PrimeContextWitnessSession,
     count_rebuilt_context,
@@ -252,6 +256,11 @@ class PrimeAttachment:
             budget, authority_revision=authority_revision, admitted_context=admitted_context,
         )
 
+    def bind_compaction_instruction(self, reference: str, text: str) -> None:
+        """Point one opaque handle at the summary this compaction will persist."""
+
+        self._owner().bind_compaction_instruction(reference, text)
+
     async def cancel_context(self, command_id: str) -> None:
         await self._owner().cancel_context(command_id)
 
@@ -405,6 +414,23 @@ class PrimeSessionBackend:
 
     def __repr__(self) -> str:
         return "<PrimeSessionBackend redacted>"
+
+    def bind_compaction_instruction(self, reference: str, text: str) -> None:
+        """Replace one opaque handle with the summary this compaction persists.
+
+        The command journal keeps the handle. The text is the summary the
+        witness supplies to Pi, and a native Goal/Constraints template is refused.
+        """
+
+        if (
+            self._phase != "open"
+            or self._outstanding is not None
+            or type(reference) is not str
+            or OPAQUE_ID.fullmatch(reference) is None
+            or not is_dedicated_code_summary(text)
+        ):
+            raise PrimeBackendError("Prime backend configuration is invalid")
+        self._compaction_instructions[reference] = text
 
     @property
     def kernel(self) -> PrimeExecutionKernel:
@@ -1075,8 +1101,11 @@ class PrimeSessionBackend:
                     "context-reservation",
                     {"command_sha256": digest, "budget": budget},
                 )
-                # This is private session accounting. Only the host settles its ledger.
-                self._kernel.model_callbacks += 2
+                # Pi's two summarizer branches are this reservation. A dedicated
+                # code summary is what the hook persists, so those branches do
+                # not run and must not spend the application callback cap.
+                if not is_dedicated_code_summary(custom_instructions):
+                    self._kernel.model_callbacks += 2
                 self._charge(
                     int(budget["aggregate_tokens"]),
                     int(budget["cost_micros"]),
@@ -1160,6 +1189,12 @@ class PrimeSessionBackend:
                 hashlib.sha256(summary.encode()).hexdigest(),
                 body.get("firstKeptEntryId"),
                 body.get("tokensBefore"),
+            ):
+                raise ValueError
+            # The dedicated path persists the summary Prime supplied. A native
+            # Goal/Constraints result is a different compaction and is refused.
+            if is_dedicated_code_summary(custom_instructions) and (
+                summary != custom_instructions or is_native_generic_summary(summary)
             ):
                 raise ValueError
             self._kernel.observe_context_events(native_result)

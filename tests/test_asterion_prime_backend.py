@@ -71,6 +71,7 @@ class FakeReusablePi:
         self.compact_limit = None
         self.compact_abort_unknown = False
         self.compact_proposal_overrides = {}
+        self.compact_summary_override = None
 
     def validate_lifecycle(self, *, opened):
         if self.dead or self.closes or bool(self.opens) != opened or self.pending_abort:
@@ -115,7 +116,16 @@ class FakeReusablePi:
         self.compact_instructions = custom_instructions
         self.compacts += 1
         arm = await receive(self.peer)
-        proposal, persisted = material()
+        from asterion.agents.prime.code_summary import is_dedicated_code_summary
+
+        if is_dedicated_code_summary(custom_instructions):
+            proposal, persisted = material(
+                custom_instructions=custom_instructions,
+                summary_text=self.compact_summary_override or custom_instructions,
+                from_hook=True,
+            )
+        else:
+            proposal, persisted = material()
         for frame in (proposal, persisted):
             frame["command_nonce"] = arm["command_nonce"]
             frame["authority_sha256"] = arm["authority_sha256"]
@@ -746,13 +756,68 @@ class TestPrimeBackend(unittest.IsolatedAsyncioTestCase):
 
     async def test_compact_resolves_the_instruction_reference_for_the_rpc(self):
         await self.backend.execute_prompt(self.request())
+        callbacks = self.backend._kernel.model_callbacks
         receipt = await self.backend.execute_context(
             self.compact_command(instructions_ref="note-1")
         )
         self.assertEqual(receipt.status, "succeeded")
+        self.assertEqual(self.backend._kernel.model_callbacks, callbacks + 2)
         self.assertEqual(self.rpc.compact_instructions, "KERNEL-NOTE-TEXT")
         # The reference is what the canonical command carries; the text is not.
         self.assertNotIn("KERNEL-NOTE-TEXT", json.dumps(receipt.to_mapping()))
+
+    async def test_code_aware_instruction_is_the_persisted_summary(self):
+        from asterion.agents.prime.code_summary import (
+            KernelBinding,
+            build_code_aware_summary,
+            is_native_generic_summary,
+        )
+
+        summary = build_code_aware_summary(
+            (
+                KernelBinding("AffineAccumulator", "class"),
+                KernelBinding("accumulator", "callable"),
+            ),
+            keep_recent_tokens=256,
+        )
+        await self.backend.execute_prompt(self.request())
+        self.backend.bind_compaction_instruction("note-1", summary.text)
+        callbacks = self.backend._kernel.model_callbacks
+        receipt = await self.backend.execute_context(
+            self.compact_command(instructions_ref="note-1")
+        )
+        self.assertEqual(receipt.status, "succeeded")
+        self.assertEqual(self.backend._kernel.model_callbacks, callbacks)
+        self.assertEqual(self.rpc.compact_instructions, summary.text)
+        self.assertEqual(receipt.payload["result"]["summary_sha256"], summary.sha256)
+        self.assertEqual(self.backend._summary, summary.text.encode())
+        self.assertFalse(is_native_generic_summary(summary.text))
+        self.assertNotIn("## Goal", summary.text)
+        self.assertNotIn(summary.text, json.dumps(receipt.to_mapping()))
+
+    async def test_native_template_on_a_code_aware_compact_is_refused(self):
+        from asterion.agents.prime.code_summary import (
+            KernelBinding,
+            build_code_aware_summary,
+        )
+        from asterion.agents.prime.summarization import SUMMARY_INITIAL_TEMPLATE
+
+        summary = build_code_aware_summary(
+            (KernelBinding("AffineAccumulator", "class"),),
+            keep_recent_tokens=256,
+        )
+        await self.backend.execute_prompt(self.request())
+        self.backend.bind_compaction_instruction("note-1", summary.text)
+        callbacks = self.backend._kernel.model_callbacks
+        self.rpc.compact_summary_override = SUMMARY_INITIAL_TEMPLATE
+        receipt = await self.backend.execute_context(
+            self.compact_command(command_id="compact-native", instructions_ref="note-1")
+        )
+        self.assertEqual(receipt.status, "uncertain")
+        self.assertEqual(receipt.reason_code, "recovery-required")
+        self.assertEqual(self.backend._kernel.model_callbacks, callbacks)
+        self.assertIsNone(self.backend._summary)
+        self.assertNotIn("## Goal", self.rpc.compact_instructions)
 
     async def test_unresolvable_instruction_reference_is_refused(self):
         await self.backend.execute_prompt(self.request())

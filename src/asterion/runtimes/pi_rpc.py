@@ -1534,12 +1534,12 @@ class PiRpcSession:
         on_event: Callable[[PiRpcEvent], None],
         custom_instructions: str | None = None,
     ) -> PiRpcCompactResult:
-        """Request native compaction on the currently open child.
+        """Request compaction on the currently open child.
 
-        ``custom_instructions`` is the host's own additional focus for the
-        summary it generates; Pi appends it to its own prompt and stays the
-        summarizer, so the compaction terminal is unaffected. It is optional
-        and absent from the request when there is none.
+        When ``custom_instructions`` is a dedicated code summary, the context
+        witness persists that text and Pi does not run its native summarizer.
+        Any other value is additional focus for the summary Pi generates. It is
+        optional and absent from the request when there is none.
         """
 
         if custom_instructions is not None and (

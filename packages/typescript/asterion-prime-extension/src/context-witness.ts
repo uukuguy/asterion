@@ -17,6 +17,22 @@ const POLICY_ENV = "ASTERION_PRIME_IPYTHON_COMPACTION_POLICY";
 const NONCE = /^[0-9a-f]{64}$/;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/;
 const SETTINGS = Object.freeze({ enabled: false, reserveTokens: 16384, keepRecentTokens: 256 });
+const CODE_SUMMARY_VERSION = "asterion.prime-code-summary/v1";
+const NATIVE_SUMMARY_MARKERS = [
+  "## Goal", "## Constraints & Preferences", "## Progress", "## Key Decisions",
+  "## Next Steps", "## Critical Context",
+];
+
+function isNativeGenericSummary(text: string): boolean {
+  return NATIVE_SUMMARY_MARKERS.some(marker => text.includes(marker));
+}
+
+function isDedicatedCodeSummary(text: unknown): text is string {
+  return typeof text === "string"
+    && text.startsWith(`${CODE_SUMMARY_VERSION}\n`)
+    && text.includes("\nbelow_native_threshold: true\n")
+    && !isNativeGenericSummary(text);
+}
 const BASE_KEYS = ["authority_sha256", "command_nonce", "launch_nonce", "phase", "protocol"];
 const ARM_KEYS = [...BASE_KEYS, "summarization", "compaction_policy"];
 // Pi host mechanics this pinned source may not import for itself: the source is
@@ -446,7 +462,11 @@ export class ContextWitness {
     } catch { return false; }
   }
 
-  async before(rawEvent: unknown, rawContext: unknown): Promise<undefined | { cancel: true }> {
+  async before(rawEvent: unknown, rawContext: unknown): Promise<
+    undefined | { cancel: true } | {
+      compaction: { summary: string; firstKeptEntryId: string; tokensBefore: number };
+    }
+  > {
     try {
       if (this.closed || this.#active || this.#proposal) fail();
       this.#active = true;
@@ -471,6 +491,10 @@ export class ContextWitness {
       if (typeof context.getSystemPrompt !== "function") fail();
       const systemPrompt = string(context.getSystemPrompt());
       const instructions = optionalString(event.customInstructions);
+      // A version-prefixed native template is not a code summary. Refuse it
+      // before Pi's summarizer can persist Goal/Constraints sections.
+      if (typeof instructions === "string" && instructions.startsWith(`${CODE_SUMMARY_VERSION}\n`)
+          && !isDedicatedCodeSummary(instructions)) fail();
       const tokensBefore = integer(preparation.tokensBefore);
       if (tokensBefore === 0) fail();
       const proposed = preparedMaterial(preparation, branch, systemPrompt, instructions, this.#deps);
@@ -495,6 +519,17 @@ export class ContextWitness {
         return { cancel: true };
       }
       if (decision.status !== "approve" || signal?.aborted || this.closed) fail();
+      // Supplying the summary here makes Pi persist it and skip the native
+      // summarizer. The persisted entry then carries fromHook.
+      if (isDedicatedCodeSummary(instructions)) {
+        return {
+          compaction: {
+            summary: instructions,
+            firstKeptEntryId: identifier(preparation.firstKeptEntryId),
+            tokensBefore,
+          },
+        };
+      }
       return undefined;
     } catch (error) {
       const refused = await this.#refuseLimit(error, false);
@@ -511,14 +546,23 @@ export class ContextWitness {
       if (this.closed || this.#active || !this.#proposal || !this.#branch || !this.#identity) fail();
       this.#active = true;
       const event = object(rawEvent), context = object(rawContext);
-      if (event.type !== "session_compact" || event.fromExtension !== false) fail();
+      if (event.type !== "session_compact") fail();
       // Pi persists this entry as JSON; optional undefined fields have no bytes.
       const entry = object(JSON.parse(JSON.stringify(event.compactionEntry)));
       const proposal = this.#proposal;
+      const proposedInstructions = optionalString(object(proposal.preparation).custom_instructions);
+      const dedicated = isDedicatedCodeSummary(proposedInstructions);
+      if (dedicated) {
+        if (event.fromExtension !== true) fail();
+      } else if (event.fromExtension !== false) fail();
       if (entry.type !== "compaction" || entry.firstKeptEntryId !== proposal.first_kept_entry_id ||
-          entry.parentId !== proposal.covered_leaf_id || entry.fromHook !== false) fail();
+          entry.parentId !== proposal.covered_leaf_id) fail();
+      if (dedicated) {
+        if (entry.fromHook !== true) fail();
+      } else if (entry.fromHook !== false) fail();
       const summary = string(entry.summary);
       if (!summary.trim()) fail();
+      if (dedicated && (summary !== proposedInstructions || isNativeGenericSummary(summary))) fail();
       const manager = object(context.sessionManager);
       if (typeof manager.getBranch !== "function" || typeof context.getSystemPrompt !== "function") fail();
       const branch = array(manager.getBranch());

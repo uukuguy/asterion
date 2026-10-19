@@ -29,7 +29,12 @@ from asterion.agents.prime.compaction_budget import (
 from asterion.applications.prime.resource_alarms import ResourceAlarmSink, public_resource_alarms
 from asterion.agents.prime.execution import AsterionPrimeLimits
 from asterion.agents.prime.store import private_root_identity
-from asterion.agents.prime.code_summary import CODE_SUMMARY_VERSION, CodeSummaryError
+from asterion.agents.prime.code_summary import (
+    CODE_SUMMARY_VERSION,
+    CodeSummaryError,
+    is_dedicated_code_summary,
+    is_native_generic_summary,
+)
 from asterion.agents.prime.summarization import compaction_custom_instructions
 from asterion.applications.prime.p1.code_summary import summarize_worker
 from .compaction_policy import (
@@ -523,6 +528,27 @@ class P1OperatorResources:
 
     async def compact(self) -> SessionContextReceipt:
         assert self.host is not None and self.host.session_context_manager is not None
+        try:
+            summary = summarize_worker(
+                self.worker.snapshot(),
+                keep_recent_tokens=int(
+                    _AGENT_SETTINGS["compaction"]["keepRecentTokens"]
+                ),
+            )
+        except CodeSummaryError:
+            raise P1OperatorError() from None
+        if (
+            summary.kind != CODE_SUMMARY_VERSION
+            or not summary.below_native_threshold
+            or not is_dedicated_code_summary(summary.text)
+            or is_native_generic_summary(summary.text)
+        ):
+            raise P1OperatorError()
+        # The handle stays opaque in the command journal. The text it resolves
+        # to is the summary Pi persists, not a side list written afterwards.
+        self.backend.bind_compaction_instruction(
+            _COMPACTION_INSTRUCTION_REF, summary.text
+        )
         command = SessionContextCommand(
             "compact-1",
             self.identity.session_id,
@@ -557,21 +583,14 @@ class P1OperatorResources:
         )
         if receipt.status != "succeeded":
             raise P1RuntimeHostError("recovery-required")
-        self.observe("compact.persist")
-        try:
-            self._code_summary = summarize_worker(
-                self.worker.snapshot(),
-                keep_recent_tokens=int(
-                    _AGENT_SETTINGS["compaction"]["keepRecentTokens"]
-                ),
-            )
-        except CodeSummaryError:
-            raise P1OperatorError() from None
+        fields = receipt.payload["result"]
         if (
-            self._code_summary.kind != CODE_SUMMARY_VERSION
-            or not self._code_summary.below_native_threshold
+            not isinstance(fields, Mapping)
+            or fields.get("summary_sha256") != summary.sha256
         ):
             raise P1OperatorError()
+        self._code_summary = summary
+        self.observe("compact.persist")
         return receipt
 
     async def resume(self, compact: SessionContextReceipt) -> None:

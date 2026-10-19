@@ -60,6 +60,20 @@ def is_native_generic_summary(text: str) -> bool:
     return any(marker in text for marker in _NATIVE_MARKERS)
 
 
+def is_dedicated_code_summary(text: object) -> bool:
+    """The summary Prime itself persists, below Pi's automatic cut.
+
+    A native Goal/Constraints template is never this record, including one that
+    pastes the version line above those sections.
+    """
+
+    if type(text) is not str or not text.startswith(CODE_SUMMARY_VERSION + "\n"):
+        return False
+    if "\nbelow_native_threshold: true\n" not in text:
+        return False
+    return not is_native_generic_summary(text)
+
+
 def build_code_aware_summary(
     bindings: tuple[KernelBinding, ...], *, keep_recent_tokens: int
 ) -> CodeAwareSummary:
@@ -101,5 +115,6 @@ __all__ = (
     "CodeSummaryError",
     "KernelBinding",
     "build_code_aware_summary",
+    "is_dedicated_code_summary",
     "is_native_generic_summary",
 )

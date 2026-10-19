@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
+import hashlib
+
 from asterion.agents.prime.code_summary import (
     CodeAwareSummary,
     CodeSummaryError,
     KernelBinding,
     build_code_aware_summary,
+    is_dedicated_code_summary,
+    is_native_generic_summary,
 )
+from asterion.applications.prime.p1.task import P1_TASK_STATEMENT
 from asterion.applications.prime.p1.worker import P1InstrumentationSnapshot
 
 
@@ -41,10 +46,25 @@ def kernel_bindings(snapshot: P1InstrumentationSnapshot) -> tuple[KernelBinding,
 def summarize_worker(
     snapshot: P1InstrumentationSnapshot, *, keep_recent_tokens: int
 ) -> CodeAwareSummary:
-    """The summary ``P1OperatorResources.compact`` stores for the public receipt."""
+    """The summary ``P1OperatorResources.compact`` sends and Pi persists.
 
-    return build_code_aware_summary(
+    The interface list names ``task_statement``. Its seeded body is part of
+    that record so the cut conversation is not the only copy of the continuation.
+    """
+
+    summary = build_code_aware_summary(
         kernel_bindings(snapshot), keep_recent_tokens=keep_recent_tokens
+    )
+    body = "\n".join(f"  {line}" for line in P1_TASK_STATEMENT.splitlines())
+    text = f"{summary.text}task_statement:\n{body}\n"
+    if not is_dedicated_code_summary(text) or is_native_generic_summary(text):
+        raise CodeSummaryError()
+    return CodeAwareSummary(
+        summary.kind,
+        summary.bindings,
+        text,
+        hashlib.sha256(text.encode("utf-8")).hexdigest(),
+        summary.below_native_threshold,
     )
 
 

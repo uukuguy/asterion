@@ -23,6 +23,11 @@ from typing import Literal, NoReturn, cast
 
 from .compaction_budget import ModelPrice, PrimeCompactionPolicy, quote_compaction_reservation
 from asterion.services.diagnostics import LimitDiagnostic, ResourceLimitExceeded
+from .code_summary import (
+    CODE_SUMMARY_VERSION,
+    is_dedicated_code_summary,
+    is_native_generic_summary,
+)
 from .summarization import (
     MATERIAL_KEYS,
     MATERIAL_VERSION,
@@ -547,7 +552,6 @@ def validate_compaction_witness(
             entry["type"] != "compaction"
             or entry["parentId"] != p["covered_leaf_id"]
             or entry["firstKeptEntryId"] != p["first_kept_entry_id"]
-            or entry.get("fromHook") is not False
             or entry["tokensBefore"] != p["private_diagnostics"]["tokensBefore"]
         ):
             _fail()
@@ -557,6 +561,25 @@ def validate_compaction_witness(
             _fail()
         summary = _string(s["summary"])
         if not summary.strip() or summary != entry["summary"]:
+            _fail()
+        # A dedicated code summary is the entry Pi stores when the witness
+        # supplies it. That path sets fromHook. Every other summary, including
+        # a native Goal/Constraints template, must stay on Pi's own summarizer.
+        custom = p["preparation"].get("custom_instructions")
+        dedicated = is_dedicated_code_summary(custom)
+        from_hook = entry.get("fromHook")
+        if dedicated:
+            if (
+                from_hook is not True
+                or summary != custom
+                or is_native_generic_summary(summary)
+            ):
+                _fail()
+        elif from_hook is not False or (
+            type(custom) is str
+            and custom.startswith(CODE_SUMMARY_VERSION)
+            and is_native_generic_summary(summary)
+        ):
             _fail()
         if hashlib.sha256(summary.encode()).hexdigest() != _hex(s["summary_sha256"]):
             _fail()

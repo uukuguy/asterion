@@ -1,9 +1,8 @@
-"""Code-aware compaction is a kernel interface list, not the native template."""
+"""Code-aware compaction is the summary Prime sends and Pi persists."""
 
 from __future__ import annotations
 
-import asyncio
-import time
+import hashlib
 import unittest
 
 from asterion.agents.prime.code_summary import (
@@ -15,11 +14,9 @@ from asterion.agents.prime.code_summary import (
     is_native_generic_summary,
 )
 from asterion.agents.prime.summarization import SUMMARY_INITIAL_TEMPLATE
-from asterion.applications.prime.p1.code_summary import summarize_worker
-from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
 from asterion.applications.prime.p1.operator import _AGENT_SETTINGS
-from asterion.applications.prime.p1.worker import P1CellRequest
-from tests.test_asterion_prime_p1_worker import setup_cell
+from asterion.capabilities.prime_ipython_coding_native.host import P1RuntimeHostError
+from tests.test_asterion_prime_p1_operator import TestP1Operator
 
 
 class TestCodeAwareCompaction(unittest.TestCase):
@@ -43,36 +40,62 @@ class TestCodeAwareCompaction(unittest.TestCase):
         with self.assertRaises(CodeSummaryError):
             build_code_aware_summary((), keep_recent_tokens=256)
 
-    def test_shipped_compaction_summarizes_the_live_kernel(self) -> None:
+class TestShippedCodeCompact(unittest.IsolatedAsyncioTestCase):
+    async def _resources(self):
+        case = TestP1Operator()
+        case.addCleanup = self.addCleanup
+        case.addAsyncCleanup = self.addAsyncCleanup
+        resources, rpc, trace = await case.fixture()
+        await resources.open()
+        await resources._prompt("prepare", "prepare local state")
+        await resources.host.pump()
+        self.addAsyncCleanup(resources.close_in_owner_order)
+        return resources, rpc, trace
+
+    async def test_shipped_compact_persists_the_code_summary(self) -> None:
         keep_recent = int(_AGENT_SETTINGS["compaction"]["keepRecentTokens"])
         self.assertLess(keep_recent, NATIVE_AUTOMATIC_KEEP_RECENT_TOKENS)
+        resources, rpc, _trace = await self._resources()
+        callbacks = resources.backend._owner()._kernel.model_callbacks
+        compact = await resources.compact()
+        sent = rpc.compact_instructions
+        self.assertEqual(compact.status, "succeeded")
+        self.assertEqual(resources.backend._owner()._kernel.model_callbacks, callbacks)
+        self.assertTrue(sent.startswith(CODE_SUMMARY_VERSION + "\n"))
+        self.assertIn("\nbelow_native_threshold: true\n", sent)
+        self.assertIn(f"keep_recent_tokens: {keep_recent}\n", sent)
+        self.assertIn(
+            f"native_automatic_keep_recent_tokens: {NATIVE_AUTOMATIC_KEEP_RECENT_TOKENS}\n",
+            sent,
+        )
+        self.assertIn("- class AffineAccumulator\n", sent)
+        self.assertIn("- callable accumulator\n", sent)
+        self.assertIn("- value input_tuple\n", sent)
+        self.assertIn("\ntask_statement:\n", sent)
+        self.assertIn("set final_result to that", sent)
+        self.assertFalse(is_native_generic_summary(sent))
+        self.assertNotIn("## Goal", sent)
+        self.assertNotIn("## Constraints", sent)
+        digest = hashlib.sha256(sent.encode()).hexdigest()
+        self.assertEqual(compact.payload["result"]["summary_sha256"], digest)
+        self.assertEqual(resources._code_summary.text, sent)
+        self.assertEqual(resources._code_summary.sha256, digest)
+        self.assertEqual(resources._code_summary.kind, CODE_SUMMARY_VERSION)
+        self.assertTrue(resources._code_summary.below_native_threshold)
 
-        async def run() -> None:
-            worker = P1WorkerProcess(deadline=time.monotonic() + 30)
-            try:
-                await worker.start()
-                receipt = await worker.execute_cell(
-                    P1CellRequest("code-summary-setup", "code-summary-turn", setup_cell())
-                )
-                self.assertEqual(receipt.status, "ok")
-                summary = summarize_worker(
-                    worker.snapshot(), keep_recent_tokens=keep_recent
-                )
-            finally:
-                await worker.close()
-            self.assertEqual(summary.kind, CODE_SUMMARY_VERSION)
-            self.assertEqual(
-                summary.bindings[:2], ("AffineAccumulator", "accumulator")
-            )
-            self.assertIn("input_tuple", summary.bindings)
-            self.assertTrue(summary.below_native_threshold)
-            self.assertFalse(is_native_generic_summary(summary.text))
-            self.assertNotIn("## Goal", summary.text)
-            self.assertEqual(len(summary.sha256), 64)
-            self.assertIn("class AffineAccumulator", summary.text)
-            self.assertIn("callable accumulator", summary.text)
-
-        asyncio.run(run())
+    async def test_shipped_compact_rejects_a_native_template(self) -> None:
+        resources, rpc, trace = await self._resources()
+        callbacks = resources.backend._owner()._kernel.model_callbacks
+        rpc.compact_summary_override = SUMMARY_INITIAL_TEMPLATE
+        with self.assertRaises(P1RuntimeHostError):
+            await resources.compact()
+        self.assertEqual(resources.backend._owner()._kernel.model_callbacks, callbacks)
+        sent = rpc.compact_instructions
+        self.assertTrue(sent.startswith(CODE_SUMMARY_VERSION + "\n"))
+        self.assertFalse(is_native_generic_summary(sent))
+        self.assertNotIn("## Goal", sent)
+        self.assertIsNone(resources._code_summary)
+        self.assertNotIn("compact.persist", trace)
 
 
 if __name__ == "__main__":
