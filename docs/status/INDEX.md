@@ -135,7 +135,7 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 ## Current milestone anchors
 
-- [Prime application completion](../superpowers/plans/2026-10-20-prime-application-completion.md): `P-NOTES-1` and `P-P2-1` accepted. `P-LIVE-1` is blocked on the missing `ubuntu` orb machine and guest `uv`. Composition and compaction remain unstarted.
+- [Prime application completion](../superpowers/plans/2026-10-20-prime-application-completion.md): `P-NOTES-1` and `P-P2-1` accepted. `P-LIVE-1` has one P1 preset result, `recovery-required` at model callbacks 9/8. P4–P6, composition, and compaction remain unstarted.
 
 - [Coverage decision plan](../superpowers/plans/2026-10-13-p7-coverage-decision.md): default review and persistent cases, Task57 full-game continuation complete.
 - [Death prediction repair plan](../superpowers/plans/2026-10-13-p7-death-prediction-repair.md): application-owned finite unknown exploration and risk/terminal summaries, source/package/saved-output checks complete; Task59 exact candidate witness in final handoff.

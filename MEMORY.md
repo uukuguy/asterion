@@ -76,7 +76,7 @@ Start with `project-state resume`: INDEX → CURRENT-STATE → final RESUME → 
 
 ## Current Judgment
 
-The authorized milestone scope is closed. Subsequent research should select a concrete target and finite experiment under current policy. The handoff lists open areas; it does not authorize another paid trial or promise general safety, cross-domain capability or uninterrupted cold full-game completion.
+The Prime/P7 milestone remains closed. The user then authorized `P-NOTES-1`, `P-P2-1`, and the existing finite presets in `P-LIVE-1`. One current-main P1 preset stopped `recovery-required` at model callbacks 9/8. That is not a completed P1 result. P4–P6 have not run. A full benchmark, official card, L9 rerun, and probe-authority move stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
 
 ## Historical Corrections
 

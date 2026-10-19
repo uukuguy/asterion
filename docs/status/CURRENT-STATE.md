@@ -5,7 +5,7 @@
 - Project: Asterion composable multi-runtime framework; native Prime autonomous research infrastructure and P7 domain application.
 - Branch: `main`. Prime/P7 development branches are consolidated; archive tags preserve ancestry. Retained P1–P3 worktrees and their unrelated changes remain operator-owned.
 - Theme: Long-horizon, open-ended, falsifiable computational research with understandable, checkable, traceable and replayable evidence. P7 is the current domain reference.
-- Project route: managed. Active work package: none. `P-NOTES-1` and `P-P2-1` are accepted. Next package is `P-LIVE-1`. Its preset machine `ubuntu` is absent, and the only guest `ubuntu-fusion-control` has no `/root/.local/bin/uv`. No preset was launched.
+- Project route: managed. Active work package: `P-LIVE-1`. `P-NOTES-1` and `P-P2-1` are accepted. One current-main P1 preset ran on guest `ubuntu-fusion-control` and stopped `recovery-required` at model callbacks 9/8 (`prime-model-callback-limit`). P4, P3, P5, and P6 presets have not run.
 - Canonical worklist: `docs/superpowers/plans/2026-10-20-prime-application-completion.md`. The 2026-10-08 research-interface plan and the P7 milestone handoff remain historical. They do not authorize a new experiment.
 - Milestone: annotated `asterion-prime-p7-milestone-2026-10-13` → `aca76ed7`; baseline `asterion-prime-p7-baseline-2026-10-13` → `4107aefb`. State-only commits after the milestone do not change its code snapshot.
 
@@ -50,7 +50,7 @@
 - Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Specialized code-aware compaction is not connected to the current launch chain; causal efficiency gains remain unproven.
 - Inherited P1 manual-compaction actual-request token/reservation/billing certification is unresolved, distinct from P7's verified resource controls. No actual overspend has been established.
 - SDK upstream animation materialization memory, generic sandbox strength and complete historical migration/long-horizon cognition equivalence remain separate boundaries.
-- Current-main live re-verification of P1 and P3–P6 is blocked before launch: `make` uses `PRIME_ORB_MACHINE=ubuntu`, `orb list` has only stopped `ubuntu-fusion-control`, and that guest lacks `/root/.local/bin/uv`. A live P2 model preset, P1/P4 kernel handoff, dedicated code-aware compaction, and moving the effectful probe hook into Prime remain open. Prime CLI positioning remains open.
+- Current-main P1 re-verification ran once: run `p1-cbf17566ec1bdd98a2d6c0ab`, status `recovery-required`, receipt absent, model-callback limit 8 observed 9 during execution after compact and resume. That single stop is not a completed P1 result and not a stability rate. P3–P6 live presets, a live P2 model preset, P1/P4 kernel handoff, dedicated code-aware compaction, and moving the effectful probe hook into Prime remain open. Prime CLI positioning remains open. The named orb machine `ubuntu` is still absent; this run used `ubuntu-fusion-control`.
 
 ## Key Files
 
