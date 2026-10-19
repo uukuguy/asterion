@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-20-01 | 🟢 active | Prime owns the accepted-note epoch and passive research record; P7 remains the first consumer |
 | D-2026-10-11-03 | 🟢 active | Application-configurable capacities and explicit safe alarms preserve authority and unknown-effect fences |
 | D-2026-10-09-01 | 🟢 active | Position Prime as autonomous, long-horizon, open-ended, falsifiable computational research with a verifiable research chain |
 | D-2026-10-07-04 | 🟢 active | Bounded reusable research implemented; cold target6 failed5/213, actual ARC process audit informs layered candidates |
@@ -1329,3 +1330,14 @@ Task57 completed the selected checkpoint continuation at9/9/fullscore, with one 
 
 
 Final qualification (2026-10-13): Task58 repair `ebb47e7f` passed125relatedPython/115TypeScript checks (6existingexternal skips), independentAstrareview and exact packaged-resource checks. Task59 installed the repaired wheel, restored actual offlineSDK to predeath376 and ran original actor callbacks in sharedIPython; complete rawartifact and hash matched the original. Default-zero review/probe dispatched0, SDK/frame unchanged, no Pi/model calls and cleanup verified. This completes the requested exact admission witness; it does not retrospectively change Task57's earlier policy or demonstrate a full game under the stricter default. Milestone tag points to `aca76ed7`; later state receipts preserve both tag identities. No additional paid trial is authorized by a historical decision or this closeout.
+
+
+## D-2026-10-20-01 — Prime owns the accepted-note epoch and passive research record
+
+- Authority: on 2026-10-20 the user confirmed the first package after the P7 milestone: record the generic/domain boundary and extract the Prime NOTES/research-record interface, with P7 as the first consumer. No model run is included.
+- Decision: Prime owns immutable research documents, the accepted-note epoch, and the passive research-record index. An application commits the epoch and attaches opaque evidence references. Saving a document does not accept it. Readable history is the committed revision and its ancestors. An orphan document remains on disk and is not history. A sealed snapshot may reread an exact revision through `ResearchMemoryStore`; that read is archive access, not a second epoch.
+- Interface: `ResearchNotes` in `asterion.agents.prime.research_notes` is the epoch. `ResearchMemoryStore` remains the content-addressed document store. `ResearchRecordStore` remains the passive relationship index: temporal `observed_after` links only, causal support stays `unknown`, and statement bodies stay out of the public summary. P7 `ResearchWorkspace` commits `notes_revision` and validates game observation boundaries before that commit. P7 `P7ResearchChain` is the first record-index consumer.
+- Stays in the application: world models, action labels, scores, game observations, consoles, official identities, per-action death prediction, and effectful probe admission. Model text, plans, and NOTES do not grant execution authority. D-2026-10-13-03 remains the admission rule; this decision does not move that hook into Prime.
+- Out of this package: P2 model-owned retrieval, current-main live re-verification of P1 and P3–P6, P1 kernel state across a P4 process handoff, and dedicated code-aware compaction. Those packages are listed in the worklist and are not authorized by this interface.
+- Evidence: provider-free `tests/test_prime_research_notes.py` plus the existing P7 notes and research-record tests. No paid trial.
+- Reference: [worklist](../superpowers/plans/2026-10-20-prime-application-completion.md).

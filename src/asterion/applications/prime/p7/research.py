@@ -10,6 +10,7 @@ import re
 
 from .score import canonical_bytes, digest
 from asterion.agents.prime.memory import ResearchMemoryStore
+from asterion.agents.prime.research_notes import ResearchNotes
 
 _HASH = re.compile(r"sha256:[0-9a-f]{64}\Z")
 _OPERATIONS = {"analyze", "model", "validate", "search", "probe", "execute"}
@@ -313,12 +314,15 @@ class ResearchWorkspace:
     def _notes(self, revision: str) -> dict:
         return notes_attachment(self.memory.read(revision), self.scope)
 
+    def _notes_epoch(self, accepted_revision):
+        return ResearchNotes(self.memory, accepted_revision=accepted_revision)
+
     def save_notes(self, *, base_revision, observation_ref, boundary, text):
         if base_revision != self.revision:
             raise ValueError('stale-workspace-revision')
         previous = self.read()
-        record = self.memory.save(text, parent_revision=previous.get('notes_revision'),
-                                  evidence_refs=[{'observation_ref': observation_ref, 'boundary': boundary}])
+        record = self._notes_epoch(previous.get('notes_revision')).save(
+            text, evidence_refs=[{'observation_ref': observation_ref, 'boundary': boundary}])
         self._notes(record['revision'])
         snapshot = {key: value for key, value in previous.items() if key not in {'workspace_revision', 'notes'}}
         snapshot.update(parent_revision=self.revision, notes_revision=record['revision'])
@@ -326,23 +330,13 @@ class ResearchWorkspace:
         return self.read()
 
     def notes_history(self, *, start=0, limit=16) -> dict:
-        return self.memory.history(self.read().get('notes_revision'), start=start, limit=limit)
+        return self._notes_epoch(self.read().get('notes_revision')).history(start=start, limit=limit)
 
     def notes_read(self, revision=None) -> dict | None:
-        current = self.read().get('notes_revision')
-        if revision is None:
-            return self._notes(current) if current is not None else None
-        # An arbitrary blob, including an orphan, is never accepted history.
-        seen = set()
-        while current is not None:
-            if current in seen or len(seen) >= 16384:
-                raise ValueError('research notes ancestry invalid')
-            seen.add(current)
-            record = self.memory.read(current)
-            if current == revision:
-                return self._notes(current)
-            current = record['parent_revision']
-        raise ValueError('research notes unavailable')
+        record = self._notes_epoch(self.read().get('notes_revision')).read(revision)
+        if record is None:
+            return None
+        return notes_attachment(record, self.scope)
 
     def candidate(self, export_id: str, kind: str | None = None) -> dict:
         if type(export_id) is not str or _HASH.fullmatch(export_id) is None:

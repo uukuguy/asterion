@@ -5,8 +5,8 @@
 - Project: Asterion composable multi-runtime framework; native Prime autonomous research infrastructure and P7 domain application.
 - Branch: `main`. Prime/P7 development branches are consolidated; archive tags preserve ancestry. Retained P1–P3 worktrees and their unrelated changes remain operator-owned.
 - Theme: Long-horizon, open-ended, falsifiable computational research with understandable, checkable, traceable and replayable evidence. P7 is the current domain reference.
-- Project route: managed. Active work package: none selected.
-- Canonical worklist reference: `docs/superpowers/plans/2026-10-08-prime-autonomous-research-interface.md`; current milestone scope and next authorized action are in `RESUME-NEXT-SESSION.md`. Historical worklists do not authorize new experiments.
+- Project route: managed. Active work package: none. `P-NOTES-1` is accepted. Next unstarted package is `P-P2-1`.
+- Canonical worklist: `docs/superpowers/plans/2026-10-20-prime-application-completion.md`. The 2026-10-08 research-interface plan and the P7 milestone handoff remain historical. They do not authorize a new experiment.
 - Milestone: annotated `asterion-prime-p7-milestone-2026-10-13` → `aca76ed7`; baseline `asterion-prime-p7-baseline-2026-10-13` → `4107aefb`. State-only commits after the milestone do not change its code snapshot.
 
 ## Current Architecture
@@ -16,7 +16,7 @@
 - Existing P1 and P3–P7 model paths use the standard resource owner, including the P7 narrator. Independent applications need no central registration. P1–P6 target `deepseek/deepseek-flash`; P7 uses `openai-codex/gpt-6.1-sol`. P2 remains local model-free retrieval. CLI purpose and P2 autonomous capability are separate open areas.
 - Operator-owned configuration is resolved outside generic Prime and explicitly injected. Manifests carry compatibility, never prompts, commands, credentials, mutable state or execution authority.
 - P7 exposes registered `ipython`, `p7_workspace`, `p7_execute_plan`. The model owns hypotheses, representations, programs, search, NOTES and strategy. P7 supplies real observations and a single action broker; model code cannot import hidden game mechanics.
-- NOTES revisions and raw evidence remain immutable/readable. Accepted notes establish working-context epochs, retaining current facts, user constraints, recent complete tool groups, errors and unknown effects. Generic TypeScript owns projection; P7 supplies domain context. Hook bytes, provider tokens, cache counts and estimated costs remain distinct measurements.
+- `ResearchNotes` is the Prime accepted-note epoch over `ResearchMemoryStore`. A save does not accept a document. Readable history is the application-committed revision and its ancestors. `ResearchRecordStore` is the passive evidence index. P7 commits `notes_revision` and validates game observation boundaries. World models, action labels, consoles, and probe admission stay in P7. Generic TypeScript still owns context projection. Hook bytes, provider tokens, cache counts, and estimated costs remain distinct measurements.
 
 ## Standard P7 per-action rollout
 
@@ -50,7 +50,7 @@
 - Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Specialized code-aware compaction is not connected to the current launch chain; causal efficiency gains remain unproven.
 - Inherited P1 manual-compaction actual-request token/reservation/billing certification is unresolved, distinct from P7's verified resource controls. No actual overspend has been established.
 - SDK upstream animation materialization memory, generic sandbox strength and complete historical migration/long-horizon cognition equivalence remain separate boundaries.
-- P2 autonomous retrieval and Prime CLI positioning remain open. No new paid experiment or package is authorized merely by this handoff.
+- P2 autonomous retrieval, current-main live re-verification of P1 and P3–P6, P1/P4 kernel handoff, dedicated code-aware compaction, and moving the effectful probe hook into Prime remain open. D-2026-10-20-01 does not authorize those packages or a paid run. Prime CLI positioning remains open.
 
 ## Key Files
 
@@ -60,6 +60,8 @@
 - `docs/superpowers/specs/2026-10-10-prime-standard-application-entry-design.md` — standard application ownership.
 - `docs/superpowers/plans/2026-10-13-p7-coverage-decision.md`, `2026-10-13-p7-death-prediction-repair.md` — completed coverage and authority repairs.
 - `src/asterion/agents/prime/application.py`, `backend.py`, `ipython.py`, `execution.py`, `session.py` — generic owner/computation/session boundaries.
+- `src/asterion/agents/prime/research_notes.py`, `memory.py`, `research_record.py` — accepted-note epoch, immutable documents, and passive research index.
+- `docs/superpowers/plans/2026-10-20-prime-application-completion.md` — P1–P6 completion and generic-lift worklist.
 - `src/asterion/applications/prime/p7/operator.py`, `research_runtime.py`, `solver.py`, `rollout_runtime.py`, `rollout.py`, `prompt.py` — application wiring, per-action admission and model evidence.
 - `src/asterion/applications/prime/p7/research.py`, `research_chain.py`, `solutions.py`, `solution_certificates.py` — memory, research references and source-bound routes.
 - `packages/typescript/asterion-prime-extension/`, `src/asterion/applications/prime/resources/` — typed tools and synchronized wheel resources.

@@ -115,6 +115,14 @@ alone does not verify a model's interpretation. Replay targets recorded inputs,
 programs, execution conditions and result checks, rather than identical future
 LLM generations. Required evidence and replay scope depend on the domain.
 
+Prime owns that record's storage rules. `ResearchNotes` exposes the accepted
+note epoch: a saved document stays uncommitted until the application persists
+its revision, and only that revision and its ancestors are history.
+`ResearchRecordStore` indexes opaque evidence with temporal links and unknown
+causal support. P7 is the first consumer. It validates game observations and
+keeps world models, action meaning, and effectful admission in the application.
+An exact reread of a sealed snapshot is archive access, not a second epoch.
+
 Research organization remains model-owned. The harness supplies reliable facts
 and hard execution boundaries; it does not require a complete world model,
 fixed reasoning sequence, mandatory note form or per-step prediction before
