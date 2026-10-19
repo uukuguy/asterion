@@ -150,7 +150,7 @@ class TestP6Live(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((root / "candidate.json").exists())
             admission.assert_not_called()
 
-    async def test_model_candidate_is_admitted_evaluated_and_promoted(self):
+    async def test_model_candidate_is_admitted_evaluated_and_rolled_back(self):
         session = _Session('{"multiplier":3,"offset":1}')
         with tempfile.TemporaryDirectory() as temporary:
             result = await self._invoke(
@@ -158,8 +158,8 @@ class TestP6Live(unittest.IsolatedAsyncioTestCase):
                 root_run_id="p6-live-one",
             )
             self.assertEqual(result.status, "completed")
-            self.assertEqual(result.terminal_outcome, "preserved")
-            self.assertEqual(result.rollback_invocation_count, 0)
+            self.assertEqual(result.terminal_outcome, "rolled-back")
+            self.assertEqual(result.rollback_invocation_count, 1)
             self.assertNotEqual(
                 result.candidate_revision_digest, result.baseline_snapshot_digest
             )
@@ -201,6 +201,7 @@ class TestP6Live(unittest.IsolatedAsyncioTestCase):
                 session, Path(temporary),
                 root_run_id="p6-live-regressed",
             )
+            self.assertEqual(result.status, "completed")
             self.assertEqual(result.terminal_outcome, "rolled-back")
             self.assertEqual(result.rollback_invocation_count, 1)
             self.assertTrue(session.closed)
@@ -219,7 +220,8 @@ class TestP6Live(unittest.IsolatedAsyncioTestCase):
                 _Session('{"multiplier":3,"offset":1}'), Path(temporary),
                 root_run_id="p6-direct",
             )
-        self.assertEqual(result.terminal_outcome, "preserved")
+        self.assertEqual(result.terminal_outcome, "rolled-back")
+        self.assertEqual(result.rollback_invocation_count, 1)
 
     async def test_candidate_revision_projects_owner_usage_once(self):
         from asterion.applications.prime.p6 import live

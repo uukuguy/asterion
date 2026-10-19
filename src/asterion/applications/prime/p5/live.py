@@ -115,9 +115,12 @@ class _CandidateWork:
         return candidate
 
     async def propose(self, signal: CancellationSignal | None) -> P5ProposeStep:
+        # Stated examples solve to offset 1. The checker below is the hidden
+        # specification, offset 2, so the model fails once and repairs from
+        # the verifier's expected value.
         candidate = await self._ask(
             "Fixed task: choose one integer offset for f(x) = 3*x + offset "
-            "so f(-2)=-4, f(0)=2, and f(3)=11. "
+            "so f(-2)=-5, f(0)=1, and f(3)=10. "
             'Return only JSON with one integer key "offset". Use no tools.',
             signal,
         )

@@ -28,6 +28,16 @@ def _target(value: int) -> int:
     return 3 * value + 1
 
 
+def _holdout_target(value: int) -> int:
+    """Holdout labels are the baseline rule, not the visible training rule.
+
+    A candidate that fits the training examples therefore regresses, and the
+    live path rolls it back.
+    """
+
+    return _BASELINE_MULTIPLIER * value + _BASELINE_OFFSET
+
+
 @dataclass(frozen=True, slots=True, repr=False)
 class P6Candidate:
     multiplier: int
@@ -91,7 +101,7 @@ def evaluate_holdout(candidate: P6Candidate) -> P6HoldoutEvidence:
     rows = []
     baseline_error = candidate_error = 0
     for value in _HOLDOUT_INPUTS:
-        expected = _target(value)
+        expected = _holdout_target(value)
         baseline = _BASELINE_MULTIPLIER * value + _BASELINE_OFFSET
         actual = candidate.predict(value)
         baseline_error += abs(baseline - expected)

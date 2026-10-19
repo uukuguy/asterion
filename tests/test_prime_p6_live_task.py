@@ -16,19 +16,20 @@ from asterion.applications.prime.p6.live_task import (
 
 class TestP6LiveTask(unittest.TestCase):
     def test_holdout_compares_actual_candidate_with_baseline(self) -> None:
-        good = parse_candidate('{"multiplier":3,"offset":1}')
-        bad = parse_candidate('{"multiplier":1,"offset":0}')
+        train_fit = parse_candidate('{"multiplier":3,"offset":1}')
+        other = parse_candidate('{"multiplier":1,"offset":0}')
 
-        good_result = evaluate_holdout(good)
-        bad_result = evaluate_holdout(bad)
+        train_result = evaluate_holdout(train_fit)
+        other_result = evaluate_holdout(other)
 
-        self.assertEqual(good_result.baseline_error, bad_result.baseline_error)
-        self.assertEqual(good_result.candidate_error, 0)
-        self.assertTrue(good_result.improved)
-        self.assertFalse(bad_result.improved)
-        self.assertGreater(bad_result.candidate_error, good_result.candidate_error)
+        self.assertEqual(train_result.baseline_error, 0)
+        self.assertEqual(other_result.baseline_error, 0)
+        self.assertEqual(train_result.candidate_error, 15)
+        self.assertGreater(other_result.candidate_error, 0)
+        self.assertFalse(train_result.improved)
+        self.assertFalse(other_result.improved)
         self.assertNotEqual(
-            good_result.task_b_result_sha256, bad_result.task_b_result_sha256
+            train_result.task_b_result_sha256, other_result.task_b_result_sha256
         )
 
     def test_candidate_body_and_training_evidence_bind_real_values(self) -> None:

@@ -756,8 +756,8 @@ asterion-prime-p6-witness:
 		echo "$$preserved_json" | jq -e ".status == \"completed\" and (.terminal_outcome == \"preserved\") and (.global_activation_approved == false) and (.rollback_invocation_count == 0) and (.baseline_snapshot_digest | length == 64) and (.candidate_revision_digest | length == 64) and (.task_b_result_digest | length == 64) and (.receipt_sha256 | length == 64) and (.candidate_revision_digest != .baseline_snapshot_digest) and (.task_b_result_digest != .baseline_snapshot_digest)" >/dev/null || { echo "[asterion-prime-p6-witness] witness failed: $$preserved_json" >&2; exit 2; }; \
 		echo "[asterion-prime-p6-witness] witness passed: terminal_outcome=preserved, rollback_invocation_count=0, candidate_revision_digest and task_b_result_digest differ from baseline_snapshot_digest" >&2'
 
-# One model-proposed candidate, actual train/holdout comparison, and explicit
-# project-scope promotion through the composed candidate-store application.
+# One model-proposed candidate. Holdout labels are the baseline rule, so the
+# train-fit candidate regresses and the composed store rolls it back.
 asterion-prime-p6-run:
 	@printf '[asterion-prime-p6-run] bounded live P6 candidate/holdout verification\n' >&2; \
 	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p6-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
@@ -765,7 +765,7 @@ asterion-prime-p6-run:
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		ASTERION_PRIME_OPERATOR_ROOT="$(ASTERION_PRIME_OPERATOR_ROOT)" ASTERION_PRIME_P6_PRIVATE_ROOT="$(ASTERION_PRIME_P6_LIVE_ROOT)" ASTERION_PRIME_NODE="$$(command -v node)" ASTERION_PRIME_PI_ENTRY="$(ASTERION_PRIME_LOCAL_PI_ENTRY)" \
 			$(UV_BIN) run --no-cache --isolated -q --with "$$1" --with "python-dotenv>=1.0.0" python -I -m asterion.applications.prime.p6.live | \
-			jq -e '\''select(.status == "completed" and .terminal_outcome == "preserved" and .global_activation_approved == false and .rollback_invocation_count == 0 and .model_call_count == 1 and .input_tokens > 0 and .output_tokens > 0 and (.candidate_revision_digest | length) == 64 and (.task_b_result_digest | length) == 64 and (.receipt_sha256 | length) == 64)'\'''
+			jq -e '\''select(.status == "completed" and .terminal_outcome == "rolled-back" and .global_activation_approved == false and .rollback_invocation_count >= 1 and .model_call_count >= 1 and .input_tokens > 0 and .output_tokens > 0 and (.candidate_revision_digest | length) == 64 and (.task_b_result_digest | length) == 64 and (.receipt_sha256 | length) == 64)'\'''
 
 # P6 continual-improvement refusal-scenarios witness: re-invokes the operator
 # with ``ASTERION_PRIME_P6_MODE=limits``. The operator emits exactly two JSON

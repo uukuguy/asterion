@@ -125,13 +125,20 @@ class _P6RuntimeSession:
                     request.run_id, 2, "run.completed", {"status": "cancelled"}
                 )
                 return
+            clean_preserved = (
+                receipt.terminal_outcome == "preserved"
+                and receipt.rollback_invocation_count == 0
+            )
+            clean_rollback = (
+                receipt.terminal_outcome == "rolled-back"
+                and receipt.rollback_invocation_count == 1
+            )
             if (
                 type(receipt) is not P6NativeReceipt
                 or receipt.root_run_id != request.run_id
                 or seal_p6_native_receipt(receipt) != receipt
                 or receipt.failure_digest is not None
-                or receipt.terminal_outcome != "preserved"
-                or receipt.rollback_invocation_count != 0
+                or not (clean_preserved or clean_rollback)
             ):
                 raise ProtocolError("P6 candidate did not complete successfully")
             yield RunEvent(
