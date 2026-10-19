@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-20-02 | 🟢 active | P2 model inquiry stays in the application; Prime does not scan the corpus |
 | D-2026-10-20-01 | 🟢 active | Prime owns the accepted-note epoch and passive research record; P7 remains the first consumer |
 | D-2026-10-11-03 | 🟢 active | Application-configurable capacities and explicit safe alarms preserve authority and unknown-effect fences |
 | D-2026-10-09-01 | 🟢 active | Position Prime as autonomous, long-horizon, open-ended, falsifiable computational research with a verifiable research chain |
@@ -1340,4 +1341,12 @@ Final qualification (2026-10-13): Task58 repair `ebb47e7f` passed125relatedPytho
 - Stays in the application: world models, action labels, scores, game observations, consoles, official identities, per-action death prediction, and effectful probe admission. Model text, plans, and NOTES do not grant execution authority. D-2026-10-13-03 remains the admission rule; this decision does not move that hook into Prime.
 - Out of this package: P2 model-owned retrieval, current-main live re-verification of P1 and P3–P6, P1 kernel state across a P4 process handoff, and dedicated code-aware compaction. Those packages are listed in the worklist and are not authorized by this interface.
 - Evidence: provider-free `tests/test_prime_research_notes.py` plus the existing P7 notes and research-record tests. No paid trial.
+- Reference: [worklist](../superpowers/plans/2026-10-20-prime-application-completion.md).
+
+## D-2026-10-20-02 — P2 model inquiry stays in the application
+
+- Authority: the user continued the application-completion worklist into `P-P2-1`. No paid model run is included.
+- Decision: the operator still owns the corpus file. An injected model writes the query and the answer. P2 `context_service` executes that query. The answer is accepted only when its cited fragment digest equals the slice P2 actually returned. `ResearchNotes` commits the answer text after that check. A mismatch leaves the epoch unchanged. The default zero-token P2 run stays in place.
+- Prime does not gain a corpus scanner, a bounds choice, or the fragment payload. The public inquiry result carries digests and the notes revision, not the corpus body.
+- Evidence: `tests/test_prime_p2_inquiry.py`. Existing P2 oracle and receipt tests remain the witness path.
 - Reference: [worklist](../superpowers/plans/2026-10-20-prime-application-completion.md).
