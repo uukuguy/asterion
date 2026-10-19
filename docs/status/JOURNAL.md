@@ -5146,3 +5146,4 @@
 - 01:34 P2 model inquiry commits a note only after the cited fragment digest matches the returned slice. Default zero-token run unchanged. No live model [b9b680b4].
 - 01:39 P-LIVE-1 not started: preset machine ubuntu is absent; guest ubuntu-fusion-control has the repo and Pi entry and no /root/.local/bin/uv. No model call. Guest stopped again.
 - 02:32 P-LIVE-1 P1 preset ran on guest ubuntu-fusion-control after root uv 0.13.1, managed CPython 3.12.15, and forwarding ASTERION_PRIME_PI_AGENT_DIR [1a56b541]. Run p1-cbf17566ec1bdd98a2d6c0ab reached compact and resume, then stopped: status recovery-required, model callbacks limit 8 observed 9, prime-model-callback-limit, phase execution, receipt_sha256 null. Operator exit 1. Not a completed verification. P4–P6 not started.
+- 02:44 Final handoff. P-LIVE-1 stays open at the P1 callback stop. No Asterion process remains. Guest ubuntu-fusion-control stopped. Local main is ahead of origin and is not pushed.
