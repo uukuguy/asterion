@@ -29,7 +29,9 @@ from asterion.agents.prime.compaction_budget import (
 from asterion.applications.prime.resource_alarms import ResourceAlarmSink, public_resource_alarms
 from asterion.agents.prime.execution import AsterionPrimeLimits
 from asterion.agents.prime.store import private_root_identity
+from asterion.agents.prime.code_summary import CODE_SUMMARY_VERSION, CodeSummaryError
 from asterion.agents.prime.summarization import compaction_custom_instructions
+from asterion.applications.prime.p1.code_summary import summarize_worker
 from .compaction_policy import (
     P1_COMPACTION_RESERVED_TOKENS, P1_COMPACTION_COST_MICROS, P1_COMPACTION_POLICY,
 )
@@ -122,6 +124,11 @@ class P1PublicResult:
     status: str
     receipt_sha256: str | None = None
     resource_alarms: tuple[dict[str, object], ...] = ()
+    code_summary_kind: str | None = None
+    code_summary_sha256: str | None = None
+    code_summary_bindings: tuple[str, ...] = ()
+    code_summary_text: str | None = None
+    code_summary_below_native_threshold: bool = False
 
 
 _PUBLIC_PROGRESS_STAGES = frozenset(
@@ -225,6 +232,7 @@ class P1OperatorResources:
         self._oracle_result: P1OracleReceipt | None = None
         self._release: P1StageTwoRelease | None = None
         self._consumed = False
+        self._code_summary = None
         self.host: ControlHost | None = None
         self._journal: FileCanonicalJournal | None = None
         self.authority = AuthorityEnvelope(
@@ -550,6 +558,20 @@ class P1OperatorResources:
         if receipt.status != "succeeded":
             raise P1RuntimeHostError("recovery-required")
         self.observe("compact.persist")
+        try:
+            self._code_summary = summarize_worker(
+                self.worker.snapshot(),
+                keep_recent_tokens=int(
+                    _AGENT_SETTINGS["compaction"]["keepRecentTokens"]
+                ),
+            )
+        except CodeSummaryError:
+            raise P1OperatorError() from None
+        if (
+            self._code_summary.kind != CODE_SUMMARY_VERSION
+            or not self._code_summary.below_native_threshold
+        ):
+            raise P1OperatorError()
         return receipt
 
     async def resume(self, compact: SessionContextReceipt) -> None:
@@ -804,8 +826,30 @@ async def run_fixed_small_verification(
         return P1PublicResult(resources.run_id, "protocol-failure", resource_alarms=alarms)
     resources.observe("runner.terminal")
     assert finalization is not None
+    summary = resources._code_summary
+    if finalization.classification == "completed" and (
+        summary is None
+        or summary.kind != CODE_SUMMARY_VERSION
+        or not summary.below_native_threshold
+        or not summary.bindings
+        or not summary.sha256
+        or not summary.text
+    ):
+        return P1PublicResult(resources.run_id, "protocol-failure", resource_alarms=alarms)
+    if summary is None:
+        return P1PublicResult(
+            resources.run_id, finalization.classification, finalization.receipt_sha256, alarms
+        )
     return P1PublicResult(
-        resources.run_id, finalization.classification, finalization.receipt_sha256, alarms
+        resources.run_id,
+        finalization.classification,
+        finalization.receipt_sha256,
+        alarms,
+        summary.kind,
+        summary.sha256,
+        summary.bindings,
+        summary.text,
+        summary.below_native_threshold,
     )
 
 

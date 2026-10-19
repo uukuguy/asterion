@@ -220,6 +220,13 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
         from asterion.agents.prime.summarization import SUMMARY_KERNEL_NOTE
 
         self.assertEqual(rpc.compact_instructions, SUMMARY_KERNEL_NOTE)
+        self.assertEqual(result.code_summary_kind, "asterion.prime-code-summary/v1")
+        self.assertTrue(result.code_summary_below_native_threshold)
+        self.assertEqual(
+            result.code_summary_bindings[:2], ("AffineAccumulator", "accumulator")
+        )
+        self.assertNotIn("## Goal", result.code_summary_text)
+        self.assertEqual(len(result.code_summary_sha256), 64)
         self.assertFalse(resources.private_root.exists())
         assert resources.worker.cleanup_receipt is not None
         self.assertEqual(resources.worker.cleanup_receipt.reap_count, 1)
