@@ -5144,3 +5144,4 @@
 
 - 01:26 Prime accepted-note epoch landed; P7 consumes it and game checks stay in the application. No model run [f73ac2c7].
 - 01:34 P2 model inquiry commits a note only after the cited fragment digest matches the returned slice. Default zero-token run unchanged. No live model [b9b680b4].
+- 01:39 P-LIVE-1 not started: preset machine ubuntu is absent; guest ubuntu-fusion-control has the repo and Pi entry and no /root/.local/bin/uv. No model call. Guest stopped again.

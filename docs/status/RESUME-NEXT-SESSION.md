@@ -1,27 +1,21 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-20 01:34. **Session remains active — not a final handoff.**
+> Updated: 2026-10-20 01:39. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- `P-P2-1` is accepted at `b9b680b4`. An injected model writes the P2 query and answer. P2 scans the operator corpus. The note commits only when the cited fragment digest matches the returned slice. D-2026-10-20-02 records that boundary.
-- The default zero-token P2 run is unchanged. No live model call.
-- Next package is `P-LIVE-1`. It needs a separate authorization before any current-main preset run.
-
-## Where things stand
-
-- `P-NOTES-1` is `f73ac2c7`. `P-P2-1` is `b9b680b4`. This checkpoint is the state receipt after those commits. It is local and not pushed.
-- Milestone `aca76ed7` and baseline `4107aefb` are unchanged. The P7 selected continuation remains 9/9, local 100. The repaired L9 gate remains a zero-dispatch witness.
-- P1 and P3–P6 still have only historical bounded runs.
+- `P-LIVE-1` did not start. The Make preset asks for orb machine `ubuntu`. That machine is not in `orb list`. The only guest, `ubuntu-fusion-control`, can see the checkout and the Pi entry at `/mnt/mac/opt/homebrew/.../rpc-entry.js`, and it has no `/root/.local/bin/uv`.
+- No model call was made. The guest was stopped again after the probe.
+- `P-NOTES-1` and `P-P2-1` stay accepted. Milestone tags are unchanged.
 
 ## Next action
 
-1. Wait for an explicit authorization before `P-LIVE-1`. That package reruns the existing finite presets for P1, P4, P3, P5, and P6 on current `main`. P5 needs one real repair. P6 needs one real rollback.
-2. Leave `P-COMPOSE-1` and `P-COMPACT-1` unstarted.
+1. Restore the preset host: a machine the Make target can address, with `/root/.local/bin/uv`, then run one existing finite preset. Start with `make asterion-prime-p1-run`.
+2. After P1, P4, and P3 return, run the P5 and P6 live presets. Record whether a real repair and a real rollback occurred. A first-try success is not those two outcomes.
+3. Do not retarget the preset onto a different machine or install uv inside the guest as part of an unattended run.
 
 ## Ruled out
 
-- Prime does not scan the P2 corpus or choose query bounds.
-- A mismatched fragment digest does not move the note epoch.
-- Do not rerun L9 or reopen the death-prediction repair from this checkpoint.
+- Do not treat the stopped-guest probe as a failed model result.
+- Do not rerun L9 or reopen the death-prediction repair.
 - Do not treat `P-P2-1` as a live DeepSeek retrieval proof.
