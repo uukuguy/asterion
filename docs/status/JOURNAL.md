@@ -5155,3 +5155,4 @@
 - 10:46 Public stderr now names the first failing stage-two clause. A pass still prints only oracle.pass. Cap and probe unchanged [aca0fa5b].
 - 13:04 Final handoff. Completion worklist is done. No paid run is authorized from the baton. Guest ubuntu-fusion-control is running. No preset process remains. Local main is not pushed.
 - 13:24 INDEX milestone anchor records the five completion packages as done. The later P1 miss stays outside the witness.
+- 15:08 P2 finite deepseek-flash inquiry verified. Two model calls, input 583, output 576, notes sha256:e3831a589eb252d687fadee6d60976a0f500f711775ced6b29e43cd8eeebb11f. Default zero-token preset unchanged.

@@ -24,6 +24,7 @@ P7_CONSOLE_PORT ?= 57515
 .PHONY: test-typescript test-rust check-rust
 .PHONY: asterion-prime-p1-run
 .PHONY: asterion-prime-p2-run
+.PHONY: asterion-prime-p2-live
 .PHONY: asterion-prime-p2-run-verbose
 .PHONY: asterion-prime-p4-run
 .PHONY: asterion-prime-p4-witness
@@ -320,6 +321,15 @@ asterion-prime-p2-run:
 		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
 		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
 		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P2_CORPUS="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p2.operator'\'' asterion-prime-p2-run "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P2_CORPUS)"'
+
+# Finite deepseek-flash inquiry. The zero-token preset above stays unchanged.
+asterion-prime-p2-live:
+	@printf '[asterion-prime-p2-live] bounded live P2 deepseek-flash inquiry\n' >&2; \
+	exec /bin/sh -ec 'build_dir="$$(mktemp -d "$(CURDIR)/.asterion-prime-p2-wheel.XXXXXX")"; trap '\''rm -rf "$$build_dir"'\'' EXIT HUP INT TERM; \
+		$(UV_BIN) build --wheel --out-dir "$$build_dir" >/dev/null; \
+		set -- "$$build_dir"/asterion-*.whl; [ "$$#" -eq 1 ] && [ -f "$$1" ]; \
+		orb -m "$(PRIME_ORB_MACHINE)" -u root -w /tmp /bin/sh -ec '\''unset PYTHONPATH; export ASTERION_PRIME_OPERATOR_ROOT="$$2"; export ASTERION_PRIME_PI_ENTRY="$$3"; export ASTERION_PRIME_P2_CORPUS="$$4"; export ASTERION_PRIME_NODE="$$(npm exec --offline --yes --package=node@22 -- node -p "process.execPath")"; exec /root/.local/bin/uv run --no-cache --isolated --with "$$1" --with "python-dotenv>=1.0.0" --with "ipython==9.17.1" python -I -m asterion.applications.prime.p2.live'\'' asterion-prime-p2-live "$$1" "$(ASTERION_PRIME_OPERATOR_ROOT)" "$(ASTERION_PRIME_PI_ENTRY)" "$(ASTERION_PRIME_P2_CORPUS)" | \
+		jq -e '\''select(.status == "verified" and .provider == "deepseek" and .model == "deepseek-flash" and .model_call_count >= 2 and .input_tokens > 0 and (.fragment_sha256 | length) == 64 and (.notes_revision | startswith("sha256:")))'\'''
 
 # The default P7 target selects the prepared next game and its sibling asset
 # root. The operator rejects missing or unusable assets before a model run.
