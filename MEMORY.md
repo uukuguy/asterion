@@ -76,7 +76,7 @@ Start with `project-state resume`: INDEX → CURRENT-STATE → final RESUME → 
 
 ## Current Judgment
 
-The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done. The active program is the peer-foundation worklist. `P-PI-1` is done: `PiRpcSession` keeps `PiChildProcess`, and both the session and the one-shot facade reap through it. `P-NATIVE-1` and `P-CITE-1` are pending and are not built. Prime stays a product-independent harness. DCI stays the retrieval package. A full benchmark, official card, L9 rerun, probe-authority move, a new P application, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
+The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done. The active program is the peer-foundation worklist. `P-PI-1` is done: `PiRpcSession` keeps `PiChildProcess`, and both the session and the one-shot facade reap through it. `P-NATIVE-1` is done: provider `native` assembles `controlled-code@1.0.0` and `dci@1.0.0` on `pi.reference`. `P-CITE-1` is pending and is not built. Prime stays a product-independent harness. DCI stays the retrieval package. A full benchmark, official card, L9 rerun, probe-authority move, a new P application, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
 
 ## Historical Corrections
 

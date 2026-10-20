@@ -1,30 +1,29 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-20 19:16. **Session remains active — not a final handoff.**
+> Updated: 2026-10-20 20:18. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The peer-foundation worklist is the active program. `P-PI-1` is done. Decision D-2026-10-20-04.
-- `PiRpcSession` keeps `PiChildProcess`. `stop` and `force_close` reap only through that child. The one-shot facade uses the same spawn and reap. Commit `2f5046d3`. Event mapping, redaction, and evidence stay on the facade.
-- `P-NATIVE-1` and `P-CITE-1` are pending and are not started.
+- The peer-foundation worklist is the active program. `P-PI-1` and `P-NATIVE-1` are done. Decision D-2026-10-20-04.
+- Provider `native` resolves `native.packages@1.0.0` against `pi.reference` with packages `controlled-code@1.0.0` and `dci@1.0.0`. Commit `ef384cd8`.
+- `P-CITE-1` is pending and is not started.
 
 ## Verified facts
 
-- `tests.test_asterion_pi_runtime.PiRuntimeClientTests` passed: 23 tests. A one-shot run and a locked `force_close` both invoke `PiChildProcess.reap`.
-- One stdout line longer than 4MiB raises `ProtocolError` `Pi runtime output limit exceeded`. Queued stdout bytes stay within the 64KiB line cap.
-- The regression set passed: `tests.test_asterion_pi_runtime`, `PiRpcReusableTests.test_force_close_kills_the_process_group_without_the_command_lock`, `TestP1Operator.test_forced_pi_close_bypasses_an_active_command_lock`, and `TestPrimeOwnedBackend.test_injected_output_capacity_reaches_launch_and_python_bridge`. 26 tests. Forced close still finishes within 0.5s while the command lock is held.
-- `PiExtensionProcessTests.test_public_events_redact_adversarial_extension_channels` and `test_redaction_preserves_protocol_controls_matching_environment` passed. Their stdout shows `<redacted>`.
-- A fresh interpreter called the shipped one-shot `run` twice on a local stub. Both runs exited 0, printed `fresh-owner-token-77eeaf02`, and recorded one `run.completed` event. The stub child was gone after each run.
-- `ruff check` passed on `pi.py`, `pi_rpc.py`, `test_asterion_pi_runtime.py`, `test_pi_rpc_reusable.py`, and `test_pi_runtime_extensions.py`.
-- No model run was started.
+- `tests.test_native_package_host` passed: 2 tests. `resolve_installed_provider` resolves `native.packages@1.0.0` on `pi.reference` with package refs `controlled-code@1.0.0` and `dci@1.0.0`. Resolved implementations are the same objects as the bound package factories, and the two packages' implementation modules are disjoint.
+- The same test scans the base runtime, assembly, runner, services, and generic application modules. None import `asterion.capabilities.dci` or `asterion.capabilities.controlled_code`.
+- `tests.test_builtin_controlled_code_application` passed. The application entry points are `controlled-code`, `dci-agent-lite`, `native`, and `prime-applications`.
+- `tests.test_application_discovery.ApplicationDiscoveryTests.test_builtin_application_index_covers_framework_applications` passed. `native.packages@1.0.0` selects provider `native`.
+- `ruff check` passed on the Native provider, its test, the provider inventory test, and the core allowlist.
+- No model run was started. `make promotion-check` was not run.
 
 ## Open boundary
 
-- `P-NATIVE-1` is not started. There is no Native provider that assembles `dci` and `controlled-code`.
 - `P-CITE-1` is not started. `prime-*-native` packages still execute Prime.
-- A paid run, benchmark, official card, L9 rerun, and a push of `main` stay outside this program.
+- `tests.test_core_only_install` still reports `asterion.agents.prime.code_summary` missing from `CORE_MODULES`. That gap predates this package.
+- A paid run, benchmark, official card, L9 rerun, `make promotion-check`, and a push of `main` stay outside this program.
 
 ## Next action
 
-1. `P-NATIVE-1` is the next pending package and is not started: one Native provider assembles the `dci` package and the `controlled-code` package against `pi.reference`. The base does not import either package.
+1. `P-CITE-1` is the next pending package and is not started. `prime-*-native` packages cite a Prime receipt: media type, digest, and run identity. They do not contain a second Prime implementation. `prepare_prime_application` remains the Prime execution door.
 2. Do not start a paid run from this checkpoint.

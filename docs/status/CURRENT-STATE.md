@@ -5,14 +5,14 @@
 - Project: Asterion composable multi-runtime framework; native Prime autonomous research infrastructure and P7 domain application.
 - Branch: `main`. Prime/P7 development branches are consolidated; archive tags preserve ancestry. Retained P1–P3 worktrees and their unrelated changes remain operator-owned.
 - Theme: Long-horizon, open-ended, falsifiable computational research with understandable, checkable, traceable and replayable evidence. P7 is the current domain reference. The structural program puts Prime and Native on one base Pi process.
-- Project route: managed. `P-PI-1` is done. The next pending package is `P-NATIVE-1`; it is not started. Completion-worklist packages `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1` are done. That closure does not authorize a new experiment.
+- Project route: managed. `P-PI-1` and `P-NATIVE-1` are done. The next pending package is `P-CITE-1`; it is not started. Completion-worklist packages `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1` are done. That closure does not authorize a new experiment.
 - Canonical worklist: `docs/superpowers/plans/2026-10-20-asterion-peer-foundation.md`. The 2026-10-20 completion worklist, the 2026-10-08 research-interface plan, and the P7 milestone handoff remain historical. They do not authorize a new experiment.
 - Milestone: annotated `asterion-prime-p7-milestone-2026-10-13` → `aca76ed7`; baseline `asterion-prime-p7-baseline-2026-10-13` → `4107aefb`. State-only commits after the milestone do not change its code snapshot.
 
 ## Current Architecture
 
 - Python owns orchestration, composition and execution; TypeScript validates shared contracts and registers Prime/application tools; Rust provides policy-controlled direct execution. Canonical schemas, exact identities, deterministic composition and closed authorization boundaries remain authoritative in `AGENTS.md`.
-- The base owns protocols, composition, the runner, host services, and the Pi process in `PiRpcSession`. Prime and Native are peers. Prime supplies the IPython harness, exact tool allowlist, accepted notes, compaction content, and `prepare_prime_application`. Applications do not construct Pi/RPC objects. The one-shot `pi.reference` facade and the long-lived session share `PiChildProcess` for child start, signal, and reap. A Native multi-package host is not built; that work is pending package `P-NATIVE-1`. DCI remains the retrieval package. Citation-only `prime-*-native` packages are not built; that work is pending package `P-CITE-1`.
+- The base owns protocols, composition, the runner, host services, and the Pi process in `PiRpcSession`. Prime and Native are peers. Prime supplies the IPython harness, exact tool allowlist, accepted notes, compaction content, and `prepare_prime_application`. Applications do not construct Pi/RPC objects. The one-shot `pi.reference` facade and the long-lived session share `PiChildProcess` for child start, signal, and reap. Provider `native` assembles `controlled-code@1.0.0` and `dci@1.0.0` as application `native.packages@1.0.0` on `pi.reference`. DCI remains the retrieval package. Citation-only `prime-*-native` packages are not built; that work is pending package `P-CITE-1`.
 - Existing P1 and P3–P7 model paths use the standard resource owner, including the P7 narrator. Independent applications need no central registration. P1–P6 target `deepseek/deepseek-flash`; P7 uses `openai-codex/gpt-6.1-sol`. P2's default run remains local model-free retrieval. `p2/program.py` interprets one model-written `retrieve` or `transform` statement, and `p2/inquiry.py` commits a note only after the fragment digest matches. `p2/live.py` is the separate finite flash inquiry. CLI purpose remains open. The writing map is `docs/guides/prime-application-writing.md`.
 - Operator-owned configuration is resolved outside generic Prime and explicitly injected. Manifests carry compatibility, never prompts, commands, credentials, mutable state or execution authority.
 - P7 exposes registered `ipython`, `p7_workspace`, `p7_execute_plan`. The model owns hypotheses, representations, programs, search, NOTES and strategy. P7 supplies real observations and a single action broker; model code cannot import hidden game mechanics.
@@ -51,7 +51,7 @@
 - Inherited P1 manual-compaction actual-request token/reservation/billing certification is unresolved, distinct from P7's verified resource controls. No actual overspend has been established.
 - SDK upstream animation materialization memory, generic sandbox strength and complete historical migration/long-horizon cognition equivalence remain separate boundaries.
 - P1 continuation evidence is one `oracle.pass`, one tool-callback stop at 5 of 4, and one `oracle.reject.final_result`. Prompts and `AsterionPrimeLimits(8, 4, 600000)` stayed unchanged. That is not a stability rate. The P7 low-threshold compaction test, moving effectful probe admission into Prime, and Prime CLI positioning remain open. The program-shaped P2 inquiry has one verified receipt and is one run, not a stability rate. The named orb machine `ubuntu` is absent; Orb presets use `ubuntu-fusion-control`. `make promotion-check` is not a pass on a Node 24 symlink host.
-- Native has no single provider that assembles both the `dci` and `controlled-code` packages. `prime-*-native` packages still execute Prime rather than cite a receipt.
+- `prime-*-native` packages still execute Prime rather than cite a receipt. That work is pending package `P-CITE-1`.
 
 ## Key Files
 
@@ -64,7 +64,8 @@
 - `src/asterion/agents/prime/research_notes.py`, `memory.py`, `research_record.py` — accepted-note epoch, immutable documents, and passive research index.
 - `src/asterion/applications/prime/p2/program.py`, `inquiry.py`, `live.py` — one interpreted retrieval statement, digest-gated notes, and the finite flash entry. The zero-token preset stays separate.
 - `docs/guides/prime-application-writing.md` — writing map for the seven existing Prime applications.
-- `docs/superpowers/plans/2026-10-20-asterion-peer-foundation.md` — active peer-foundation worklist. `P-PI-1` is done. `P-NATIVE-1` and `P-CITE-1` are pending.
+- `docs/superpowers/plans/2026-10-20-asterion-peer-foundation.md` — active peer-foundation worklist. `P-PI-1` and `P-NATIVE-1` are done. `P-CITE-1` is pending.
+- `src/asterion/applications/native/provider.py` — Native application `native.packages@1.0.0` on `pi.reference`, packages `controlled-code@1.0.0` and `dci@1.0.0`.
 - `src/asterion/runtimes/pi_rpc.py` — the base Pi process and session, including `PiChildProcess` and forced close.
 - `src/asterion/runtimes/pi.py` — one-shot public events, redaction, and evidence. Child start and reap go through `PiChildProcess`.
 - `docs/superpowers/plans/2026-10-20-prime-application-completion.md` — closed P1–P6 completion and generic-lift worklist.
@@ -79,4 +80,4 @@
 
 1. Read INDEX, this snapshot, the final handoff, recent JOURNAL and AGENTS/MEMORY.
 2. Confirm Git, remote/tag identity and recorded cleanup before new work. Preserve unrelated worktrees/services.
-3. `P-PI-1` is done. The next pending package is `P-NATIVE-1` on the peer-foundation worklist. It is not started. A paid run, benchmark, official card, or L9 rerun needs a separate authorization.
+3. `P-PI-1` and `P-NATIVE-1` are done. The next pending package is `P-CITE-1` on the peer-foundation worklist. It is not started. A paid run, benchmark, official card, or L9 rerun needs a separate authorization.

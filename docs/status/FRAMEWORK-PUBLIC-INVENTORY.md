@@ -14,6 +14,7 @@ application is requested.
 |---|---|---|---|---|
 | `controlled-code` | `asterion.applications.controlled_code:create_provider` | `code.quality@1.0.0` | `controlled-code@1.0.0` | `pi.reference` |
 | `dci-agent-lite` | `asterion.applications.dci_agent_lite:create_provider` | `dci.research-capability@1.0.0`; `dci.complete-application@1.0.0`; `dci.local-benchmark-application@1.0.0` | `dci@1.0.0` | `claude-code.reference`, `pi.reference` |
+| `native` | `asterion.applications.native:create_provider` | `native.packages@1.0.0` | `controlled-code@1.0.0`; `dci@1.0.0` | `pi.reference` |
 | `prime-agent` | `asterion.applications.prime_agent.provider:create_provider` | `prime.arc-agi-3@1.0.0`; `prime.bounded-autonomy@1.0.0`; `prime.capability-program@1.0.0`; `prime.continual-improvement@1.0.0`; `prime.ipython-coding@1.0.0`; `prime.long-session-continuity@1.0.0`; `prime.programmatic-long-context@1.0.0`; `prime.recursive-workflow@1.0.0` | `prime-agent@1.0.0` | `prime.agent` |
 
 The application index group `asterion.application_index` repeats these
@@ -62,9 +63,10 @@ application route or an AgentRuntime ID.
 | Native | `asterion.native@0.1.0` | `asterion.control.providers.native.factory.native_control_plane_binding()` | `src/asterion/control/providers/native/resources/control-plane.json` |
 
 Current fact: Prime is an `AgentRuntime`/application route through
-`prime.agent` and the `prime-agent` application provider. Native is currently
-only the `asterion.native` control provider. The expected Native AgentRuntime
-and corresponding application route have not been implemented.
+`prime.agent` and the `prime-agent` application provider. The application
+provider `native` assembles `controlled-code@1.0.0` and `dci@1.0.0` against
+the existing runtime `pi.reference`. That route is not a Native AgentRuntime.
+The control provider remains `asterion.native`.
 
 ## Evidence boundary
 
