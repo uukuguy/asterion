@@ -88,7 +88,8 @@ or change the existing provider, assembly, runtime or host-service contracts.
 The backend dependency is `P7 -> Asterion Prime -> PiRpcSession`. Prime owns
 harness launch preparation, extension binding, tool registration, and session
 use. `PiRpcSession` owns the Pi process, including forced close. The one-shot
-`pi.reference` facade is still a separate subprocess until `P-PI-1` finishes.
+`pi.reference` facade starts and reaps its child through `PiChildProcess` on
+that session.
 The application operator resolves configuration and injects exact model and
 resource context; the generic owner does not read `.env` or profile contents.
 P1–P6 target `deepseek/deepseek-flash`; all P7 model paths use

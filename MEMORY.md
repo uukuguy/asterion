@@ -76,7 +76,7 @@ Start with `project-state resume`: INDEX → CURRENT-STATE → final RESUME → 
 
 ## Current Judgment
 
-The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done. The active program is the peer-foundation worklist, package `P-PI-1`: one base Pi process, Prime as a product-independent harness, Native as the multi-package host, DCI as the retrieval package. A full benchmark, official card, L9 rerun, probe-authority move, a new P application, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
+The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done. The active program is the peer-foundation worklist. `P-PI-1` is done: the one-shot `pi.reference` facade and the long-lived session share one base Pi child. `P-NATIVE-1` and `P-CITE-1` are pending and are not built. Prime stays a product-independent harness. DCI stays the retrieval package. A full benchmark, official card, L9 rerun, probe-authority move, a new P application, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
 
 ## Historical Corrections
 

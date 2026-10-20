@@ -137,7 +137,7 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 ## Current milestone anchors
 
-- [Asterion peer foundation](../superpowers/plans/2026-10-20-asterion-peer-foundation.md): active worklist. `P-PI-1` is open. Decision D-2026-10-20-04. Prime stays a product-independent harness. The base `PiRpcSession` owns the Pi process. Native will host multiple capability packages. DCI stays the retrieval package. No paid run is authorized.
+- [Asterion peer foundation](../superpowers/plans/2026-10-20-asterion-peer-foundation.md): active worklist. `P-PI-1` is done. `P-NATIVE-1` and `P-CITE-1` are pending and are not built. Decision D-2026-10-20-04. Prime stays a product-independent harness. The base `PiRpcSession` owns the Pi process. DCI stays the retrieval package. No paid run is authorized.
 
 - [Prime application completion](../superpowers/plans/2026-10-20-prime-application-completion.md): `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1` are done. The P1 compaction witness is `p1-86417a49d97c4a88c6d2466a`. A later continuation, `p1-5f194466f4f4077ec270a9e4`, printed `oracle.pass`. One pass is not a stability rate. A new paid run needs a separate authorization.
 
