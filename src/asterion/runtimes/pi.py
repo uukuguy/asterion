@@ -9,7 +9,6 @@ import hashlib
 import json
 import os
 import secrets
-import signal as process_signal
 import stat
 import sys
 import time
@@ -19,7 +18,6 @@ from contextlib import contextmanager, nullcontext
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from asterion.adapters.pi import PiProtocolAdapter
 from asterion.runtime.host import (
@@ -40,6 +38,7 @@ from asterion.pathlight.runtime_observation import (
 )
 from asterion.runtimes.pi_observation import PiObservationBuilder
 from asterion.runtimes.pi_extensions import PiExtensionLease
+from asterion.runtimes.pi_rpc import PiChildProcess
 
 
 _MAX_STDOUT_LINE_BYTES = 64 * 1024
@@ -351,6 +350,7 @@ async def _collect_runtime_snapshot(
     observation_builder = PiObservationBuilder(time.monotonic_ns)
     attempt_observation_checkpoint = observation_builder.checkpoint()
     adapter.start()
+    child: PiChildProcess | None = None
     try:
         with bind_process_working_directory(
             cwd=cwd,
@@ -366,30 +366,26 @@ async def _collect_runtime_snapshot(
                 pass_fds = tuple(sorted({*launch.pass_fds, *inherited_fds}))
                 for fd in inherited_fds:
                     os.fstat(fd)
-                descriptor_options: dict[str, Any] = (
-                    {"pass_fds": pass_fds}
-                    if pass_fds
-                    else {}
-                )
-                process = await asyncio.create_subprocess_exec(
-                    *launch.command,
+                child = PiChildProcess.spawn(
+                    launch.command,
                     cwd=working.cwd,
                     env=environment,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                    start_new_session=os.name != "nt",
-                    **descriptor_options,
+                    pass_fds=pass_fds,
+                )
+                child.start_raw_pipes(
+                    line_limit=_MAX_STDOUT_LINE_BYTES,
+                    stderr_limit=_MAX_STDERR_BYTES,
                 )
     except (OSError, TypeError, ValueError):
+        if child is not None:
+            child.reap(
+                graceful=False,
+                exit_seconds=_PROCESS_EXIT_SECONDS,
+                drain_seconds=_PIPE_DRAIN_SECONDS,
+            )
         raise ProtocolError("Pi runtime process failed to start") from None
+    assert child is not None
 
-    assert process.stdin is not None
-    assert process.stdout is not None
-    assert process.stderr is not None
-    stderr_task = asyncio.create_task(
-        _drain_capped(process.stderr, _MAX_STDERR_BYTES)
-    )
     graceful = False
     final_text = ""
     try:
@@ -398,10 +394,10 @@ async def _collect_runtime_snapshot(
             "type": "prompt",
             "message": request.input_text,
         }
-        process.stdin.write(
-            (json.dumps(payload, separators=(",", ":")) + "\n").encode()
+        child.write_stdin(
+            (json.dumps(payload, separators=(",", ":")) + "\n").encode(),
+            timeout=0.5,
         )
-        await asyncio.wait_for(process.stdin.drain(), timeout=0.5)
         acknowledged = False
         assistant_error = False
         answer_parts: list[str] = []
@@ -422,16 +418,18 @@ async def _collect_runtime_snapshot(
             ):
                 raise ProtocolError("Pi runtime request deadline expired")
             if signal is not None and signal.cancelled:
-                await _send_abort(process)
+                await _send_abort(child)
                 raise ProtocolError("Pi runtime request was cancelled")
-            try:
-                raw = await asyncio.wait_for(
-                    process.stdout.readline(), timeout=0.05
-                )
-            except TimeoutError:
+            raw = child.read_available()
+            if raw is None:
+                await asyncio.sleep(0.05)
                 continue
-            except (ValueError, asyncio.LimitOverrunError):
-                raise ProtocolError("Pi runtime output limit exceeded") from None
+            if isinstance(raw, BaseException):
+                if isinstance(raw, (ValueError, asyncio.LimitOverrunError)):
+                    raise ProtocolError(
+                        "Pi runtime output limit exceeded"
+                    ) from None
+                raise raw
             if not raw:
                 raise ProtocolError("Pi runtime process ended before completion")
             event_count += 1
@@ -475,7 +473,7 @@ async def _collect_runtime_snapshot(
             if event_type == "turn_start":
                 turns += 1
                 if turns > max_turns:
-                    await _send_abort(process)
+                    await _send_abort(child)
                     raise ProtocolError("Pi runtime turn limit exceeded")
                 adapter.consume(event)
                 continue
@@ -545,7 +543,7 @@ async def _collect_runtime_snapshot(
         raise ProtocolError("Pi runtime execution failed") from None
     finally:
         returncode = await _finalize_process_uninterruptibly(
-            process, stderr_task, graceful=graceful
+            child, graceful=graceful
         )
 
     if returncode != 0:
@@ -684,37 +682,28 @@ def _assistant_message_text(message: Mapping[str, object]) -> str:
     return "".join(parts)
 
 
-async def _send_abort(process: asyncio.subprocess.Process) -> None:
-    if process.stdin is None or process.stdin.is_closing():
-        return
+async def _send_abort(child: PiChildProcess) -> None:
     try:
-        process.stdin.write(b'{"id":"asterion-abort","type":"abort"}\n')
-        await asyncio.wait_for(process.stdin.drain(), timeout=0.1)
-    except (BrokenPipeError, ConnectionResetError, TimeoutError):
+        child.write_stdin(
+            b'{"id":"asterion-abort","type":"abort"}\n',
+            timeout=0.1,
+        )
+    except (BrokenPipeError, ConnectionResetError, TimeoutError, ValueError):
         pass
 
 
-async def _drain_capped(
-    stream: asyncio.StreamReader, limit: int
-) -> bytes:
-    retained = bytearray()
-    while True:
-        chunk = await stream.read(8192)
-        if not chunk:
-            return bytes(retained)
-        remaining = limit - len(retained)
-        if remaining > 0:
-            retained.extend(chunk[:remaining])
-
-
 async def _finalize_process_uninterruptibly(
-    process: asyncio.subprocess.Process,
-    stderr_task: asyncio.Task[bytes],
+    child: PiChildProcess,
     *,
     graceful: bool,
 ) -> int | None:
     finalizer = asyncio.create_task(
-        _finalize_owned_process(process, stderr_task, graceful=graceful)
+        asyncio.to_thread(
+            child.reap,
+            graceful=graceful,
+            exit_seconds=_PROCESS_EXIT_SECONDS,
+            drain_seconds=_PIPE_DRAIN_SECONDS,
+        )
     )
     interrupted = False
     while not finalizer.done():
@@ -729,67 +718,6 @@ async def _finalize_process_uninterruptibly(
     if interrupted:
         raise asyncio.CancelledError
     return result
-
-
-async def _finalize_owned_process(
-    process: asyncio.subprocess.Process,
-    stderr_task: asyncio.Task[bytes],
-    *,
-    graceful: bool,
-) -> int | None:
-    if process.stdin is not None and not process.stdin.is_closing():
-        process.stdin.close()
-    if not graceful:
-        _signal_process_group(process, process_signal.SIGTERM)
-    try:
-        await asyncio.wait_for(process.wait(), timeout=_PROCESS_EXIT_SECONDS)
-    except TimeoutError:
-        _signal_process_group(process, process_signal.SIGTERM)
-        try:
-            await asyncio.wait_for(process.wait(), timeout=_PROCESS_EXIT_SECONDS)
-        except TimeoutError:
-            _signal_process_group(process, process_signal.SIGKILL)
-            try:
-                await asyncio.wait_for(
-                    process.wait(), timeout=_PROCESS_EXIT_SECONDS
-                )
-            except TimeoutError:
-                pass
-
-    if os.name != "nt":
-        _signal_process_group(process, process_signal.SIGTERM)
-    try:
-        await asyncio.wait_for(
-            asyncio.shield(stderr_task), timeout=_PIPE_DRAIN_SECONDS
-        )
-    except TimeoutError:
-        _signal_process_group(process, process_signal.SIGKILL)
-        try:
-            await asyncio.wait_for(
-                asyncio.shield(stderr_task), timeout=_PIPE_DRAIN_SECONDS
-            )
-        except TimeoutError:
-            stderr_task.cancel()
-            try:
-                await stderr_task
-            except asyncio.CancelledError:
-                pass
-    return process.returncode
-
-
-def _signal_process_group(
-    process: asyncio.subprocess.Process, signal_number: int
-) -> None:
-    try:
-        if os.name != "nt":
-            os.killpg(process.pid, signal_number)
-        elif process.returncode is None:
-            if signal_number == process_signal.SIGKILL:
-                process.kill()
-            else:
-                process.terminate()
-    except (OSError, ProcessLookupError):
-        pass
 
 
 def prepare_pi_evidence_root(path: Path) -> Path:

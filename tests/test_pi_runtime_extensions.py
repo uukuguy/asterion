@@ -860,7 +860,7 @@ class PiExtensionProcessTests(unittest.IsolatedAsyncioTestCase):
 
             with (
                 patch(
-                    "asterion.runtimes.pi.asyncio.create_subprocess_exec"
+                    "asterion.runtimes.pi.PiChildProcess.spawn"
                 ) as process,
                 self.assertRaises(ProtocolError),
             ):

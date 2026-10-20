@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import gc
 import hashlib
+import inspect
 import json
 import os
 import sys
@@ -18,6 +19,8 @@ from asterion.capabilities.dci.implementation.services import create_local_corpu
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError, validate_event_stream
 from asterion.runtime.working_directory import ProcessWorkingDirectory
+import asterion.runtimes.pi as pi_facade
+import asterion.runtimes.pi_rpc as pi_owner
 from asterion.runtimes.pi import PiRuntimeClient
 from asterion.services.registry import HostServiceFactoryContext
 
@@ -674,7 +677,7 @@ print(json.dumps({"type": "agent_end"}), flush=True)
             try:
                 with (
                     patch(
-                        "asterion.runtimes.pi.asyncio.create_subprocess_exec",
+                        "asterion.runtimes.pi.PiChildProcess.spawn",
                         side_effect=OSError("SECRET-START"),
                     ),
                     self.assertRaises(ProtocolError) as caught,
@@ -1335,6 +1338,109 @@ print(json.dumps({"type": "agent_end"}), flush=True)
                     ),
                     timeout=1,
                 )
+
+    async def test_one_shot_run_starts_and_reaps_through_the_shared_session_owner(
+        self,
+    ) -> None:
+        """One-shot start and reap go through the shared Pi child owner.
+
+        The facade keeps the locked public observables: assistant text, one
+        terminal event, redaction, staged evidence, session leader, a cleared
+        Python startup environment, cancellation, deadline, and output cap.
+        """
+
+        facade = Path(pi_facade.__file__).read_text(encoding="utf-8")
+        owner = Path(pi_owner.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("asyncio.create_subprocess_exec", facade)
+        self.assertNotIn("os.killpg", facade)
+        self.assertNotIn("subprocess.Popen", facade)
+        self.assertIn("PiChildProcess.spawn", facade)
+        self.assertIn("child.reap", facade)
+        self.assertIn("def spawn_pi_child", owner)
+        self.assertIn("def signal_pi_child", owner)
+        self.assertIn("def reap(", owner)
+        self.assertIn(
+            "PiChildProcess.spawn",
+            inspect.getsource(pi_owner.PiRpcSession.start),
+        )
+        self.assertIn(
+            "signal_pi_child",
+            inspect.getsource(pi_owner.PiRpcSession._signal_process),
+        )
+        token = "shared-owner-token"
+        script = r'''
+import json, os, signal, subprocess, sys, time
+request = json.loads(sys.stdin.readline())
+pid_path, text = sys.argv[1], sys.argv[2]
+subprocess.Popen([
+    sys.executable, "-c",
+    "import os,signal,sys,time; "
+    "open(sys.argv[1],'w').write(str(os.getpid())); "
+    "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+    "time.sleep(30)",
+    pid_path,
+])
+for _ in range(200):
+    if os.path.isfile(pid_path) and os.path.getsize(pid_path) > 0:
+        break
+    time.sleep(0.01)
+print(json.dumps({"type": "response", "id": request["id"], "success": True}), flush=True)
+print(json.dumps({"type": "agent_start"}), flush=True)
+print(json.dumps({"type": "turn_start"}), flush=True)
+print(json.dumps({
+    "type": "message_update",
+    "assistantMessageEvent": {"type": "text_delta", "delta": text},
+}), flush=True)
+print(json.dumps({
+    "type": "message_end",
+    "message": {
+        "role": "assistant", "stopReason": "stop",
+        "usage": {"input": 1, "output": 1},
+        "content": [{"type": "text", "text": text}],
+    },
+}), flush=True)
+print(json.dumps({"type": "agent_end"}), flush=True)
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            pid_path = root / "grandchild.pid"
+            client = PiRuntimeClient(
+                command=(sys.executable, "-u", "-c", script, str(pid_path), token),
+                cwd=root,
+                capabilities=("filesystem.read",),
+                evidence_root=root / "evidence",
+            )
+            events = [
+                event
+                async for event in client.run(
+                    RunRequest(
+                        run_id="shared-owner",
+                        input_text="question",
+                        requested_capabilities=("filesystem.read",),
+                    )
+                )
+            ]
+            completed = client.completed_run_dir("shared-owner")
+            self.assertIsNotNone(completed)
+            assert completed is not None
+            self.assertEqual((completed / "final.txt").read_text(), token)
+            grandchild = int(pid_path.read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(grandchild, 0)
+
+        deltas = [
+            event.payload["text"]
+            for event in events
+            if event.type == "text.delta"
+        ]
+        terminals = [
+            event.type
+            for event in events
+            if event.type in {"run.completed", "run.failed"}
+        ]
+        self.assertEqual(deltas, [token])
+        self.assertEqual(terminals, ["run.completed"])
+        validate_event_stream([event.to_mapping() for event in events])
 
 
 async def _collect(

@@ -1101,21 +1101,21 @@ class DefaultRuntimeFactoryProcessAuthorityTests(unittest.IsolatedAsyncioTestCas
                     )
                 )
                 )
-                original_start = pi_runtime.asyncio.create_subprocess_exec
+                original_start = pi_runtime.PiChildProcess.spawn
                 swapped = False
 
-                async def swap_then_start(*args, **kwargs):
+                def swap_then_start(*args, **kwargs):
                     nonlocal swapped
                     if not swapped:
                         swapped = True
                         corpus.rename(root / "original-corpus")
                         corpus.mkdir()
                         (corpus / "marker.txt").write_text("REPLACEMENT")
-                    return await original_start(*args, **kwargs)
+                    return original_start(*args, **kwargs)
 
                 with patch.object(
-                    pi_runtime.asyncio,
-                    "create_subprocess_exec",
+                    pi_runtime.PiChildProcess,
+                    "spawn",
                     side_effect=swap_then_start,
                 ):
                     events = [

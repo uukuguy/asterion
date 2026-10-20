@@ -13,7 +13,7 @@ import signal as process_signal
 import subprocess
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from enum import Enum
 from io import UnsupportedOperation
@@ -580,6 +580,233 @@ def validate_pi_compact_result(result: PiRpcCompactResult) -> None:
         raise ValueError("Pi RPC compact terminal is invalid") from None
 
 
+def spawn_pi_child(
+    command: Sequence[str],
+    *,
+    cwd: str | Path | None,
+    env: Mapping[str, str],
+    pass_fds: tuple[int, ...] = (),
+    popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+) -> subprocess.Popen[bytes]:
+    """Start one Pi child in its own session."""
+
+    return popen(
+        list(command),
+        cwd=cwd,
+        env=dict(env),
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        pass_fds=pass_fds,
+        start_new_session=os.name != "nt",
+    )
+
+
+def signal_pi_child(
+    process: subprocess.Popen[bytes], signal_number: int
+) -> None:
+    """Signal the child process group. Callers do not send the signal themselves."""
+
+    try:
+        if os.name != "nt":
+            os.killpg(process.pid, signal_number)
+        elif signal_number == process_signal.SIGTERM:
+            process.terminate()
+        else:
+            process.kill()
+    except (AttributeError, OSError):
+        pass
+
+
+class PiChildProcess:
+    """One Pi child shared by the one-shot facade and the long-lived session.
+
+    Raw pipe threads deliver bytes only. The one-shot facade keeps its own
+    JSON limits, redaction, and public events.
+    """
+
+    def __init__(self, process: subprocess.Popen[bytes]) -> None:
+        self.process = process
+        self._stdout_queue: queue.Queue[bytes | BaseException] = queue.Queue()
+        self._stdout_thread: threading.Thread | None = None
+        self._stderr_thread: threading.Thread | None = None
+        self._stdout_started = False
+        self._stderr_started = False
+        self._stdin_writer: threading.Thread | None = None
+
+    @classmethod
+    def spawn(
+        cls,
+        command: Sequence[str],
+        *,
+        cwd: str | Path | None,
+        env: Mapping[str, str],
+        pass_fds: tuple[int, ...] = (),
+        popen: Callable[..., subprocess.Popen[bytes]] = subprocess.Popen,
+    ) -> PiChildProcess:
+        return cls(
+            spawn_pi_child(
+                command,
+                cwd=cwd,
+                env=env,
+                pass_fds=pass_fds,
+                popen=popen,
+            )
+        )
+
+    def start_raw_pipes(self, *, line_limit: int, stderr_limit: int) -> None:
+        if self._stdout_started or self._stderr_started:
+            raise RuntimeError("Pi child pipes are already open")
+        self._stdout_thread = threading.Thread(
+            target=self._read_stdout, args=(line_limit,), daemon=True
+        )
+        self._stderr_thread = threading.Thread(
+            target=self._read_stderr, args=(stderr_limit,), daemon=True
+        )
+        self._stdout_thread.start()
+        self._stdout_started = True
+        self._stderr_thread.start()
+        self._stderr_started = True
+
+    def read_available(self) -> bytes | BaseException | None:
+        try:
+            return self._stdout_queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def write_stdin(self, payload: bytes, *, timeout: float) -> None:
+        stdin = self.process.stdin
+        if stdin is None or stdin.closed:
+            raise BrokenPipeError
+        errors: list[BaseException] = []
+
+        def write() -> None:
+            try:
+                stdin.write(payload)
+                stdin.flush()
+            except BaseException as exc:
+                errors.append(exc)
+
+        worker = threading.Thread(target=write, daemon=True)
+        self._stdin_writer = worker
+        worker.start()
+        worker.join(timeout)
+        if worker.is_alive():
+            raise TimeoutError
+        self._stdin_writer = None
+        if errors:
+            raise errors[0]
+
+    def reap(
+        self, *, graceful: bool, exit_seconds: float, drain_seconds: float
+    ) -> int | None:
+        """Close stdin, signal the group, and join the raw pipe threads."""
+
+        self._close_stdin()
+        if not graceful:
+            signal_pi_child(self.process, process_signal.SIGTERM)
+        if not self._wait(exit_seconds):
+            signal_pi_child(self.process, process_signal.SIGTERM)
+            if not self._wait(exit_seconds):
+                signal_pi_child(self.process, process_signal.SIGKILL)
+                self._wait(exit_seconds)
+        if os.name != "nt":
+            signal_pi_child(self.process, process_signal.SIGTERM)
+        if self._join_readers(drain_seconds):
+            signal_pi_child(self.process, process_signal.SIGKILL)
+            self._unblock_readers()
+            self._join_readers(drain_seconds)
+        self._close_streams()
+        return self.process.returncode
+
+    def _read_stdout(self, line_limit: int) -> None:
+        stream = self.process.stdout
+        if stream is None:
+            return
+        try:
+            while True:
+                raw = stream.readline(line_limit + 1)
+                self._stdout_queue.put(raw)
+                if not raw:
+                    return
+        except (OSError, ValueError) as exc:
+            self._stdout_queue.put(exc)
+
+    def _read_stderr(self, stderr_limit: int) -> None:
+        stream = self.process.stderr
+        if stream is None:
+            return
+        retained = 0
+        try:
+            while chunk := stream.read(8192):
+                retained += len(chunk)
+                if retained > stderr_limit:
+                    retained = stderr_limit
+        except (OSError, ValueError):
+            return
+
+    def _wait(self, timeout: float) -> bool:
+        try:
+            self.process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False
+        return True
+
+    def _reader_threads(self) -> tuple[threading.Thread, ...]:
+        threads: list[threading.Thread] = []
+        if self._stdout_started and self._stdout_thread is not None:
+            threads.append(self._stdout_thread)
+        if self._stderr_started and self._stderr_thread is not None:
+            threads.append(self._stderr_thread)
+        return tuple(threads)
+
+    def _join_readers(self, timeout: float) -> bool:
+        deadline = time.monotonic() + timeout
+        for thread in self._reader_threads():
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                thread.join(remaining)
+        return any(thread.is_alive() for thread in self._reader_threads())
+
+    def _unblock_readers(self) -> None:
+        for stream in (self.process.stdout, self.process.stderr):
+            if stream is None:
+                continue
+            try:
+                os.close(stream.fileno())
+            except (OSError, ValueError):
+                pass
+
+    def _close_stdin(self) -> None:
+        stream = self.process.stdin
+        if stream is None:
+            return
+        try:
+            os.close(stream.fileno())
+        except (OSError, ValueError):
+            pass
+        writer = self._stdin_writer
+        if writer is not None:
+            writer.join(timeout=0.1)
+        try:
+            stream.close()
+        except (OSError, ValueError):
+            pass
+
+    def _close_streams(self) -> None:
+        for stream in (
+            self.process.stdin,
+            self.process.stdout,
+            self.process.stderr,
+        ):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except (OSError, ValueError):
+                pass
+
+
 class PiRpcSession:
     """Own one explicitly configured Pi JSONL-RPC child process."""
 
@@ -713,16 +940,13 @@ class PiRpcSession:
             raise RuntimeError("RPC session already started")
         self._last_stderr = b""
         try:
-            process = self._popen(
+            process = PiChildProcess.spawn(
                 list(self.config.command),
                 cwd=self.config.cwd,
                 env=dict(self.config.environment),
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
                 pass_fds=self.config.inherited_fds,
-                start_new_session=os.name != "nt",
-            )
+                popen=self._popen,
+            ).process
             state = _ProcessState(process, queue.Queue(), bytearray())
             self._state = state
             state.stdout_thread = self._thread_factory(
@@ -1272,15 +1496,7 @@ class PiRpcSession:
 
     @staticmethod
     def _signal_process(process: subprocess.Popen[bytes], signal_number: int) -> None:
-        try:
-            if os.name != "nt":
-                os.killpg(process.pid, signal_number)
-            elif signal_number == process_signal.SIGTERM:
-                process.terminate()
-            else:
-                process.kill()
-        except (AttributeError, OSError):
-            pass
+        signal_pi_child(process, signal_number)
 
     @staticmethod
     def _close_pipe_descriptors(process: subprocess.Popen[bytes]) -> None:
