@@ -5164,3 +5164,4 @@
 - 16:02 P1 p1-2b2bc38316f672779559bc8e stopped recovery-required after stage2.release. Tool callbacks observed 5, limit 4, prime-tool-callback-limit. No oracle line. Receipt null. Cap unchanged.
 - 16:04 P1 p1-ab9e8b4bb66dc3f2254352f9 reached stage2.complete and printed oracle.reject.final_result. Receipt null. Prompts unchanged.
 - 16:08 P1 p1-5f194466f4f4077ec270a9e4 completed. oracle.pass. Receipt 4f7e05f467a8506755b39ebf51147b68d46771f2e9679d4d4c25549c22beeb0c. Summary e7fb9c3c83f6e95401b59874a6556cf02f63a850d369ea81b7c8f155c8201841. Same cap and prompts. One pass is not a stability rate.
+- 16:15 Final handoff. Showcase follow-up is closed. No preset process remains. Guest ubuntu-fusion-control is running. Local main is not pushed.
