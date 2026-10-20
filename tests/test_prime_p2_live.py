@@ -56,6 +56,8 @@ class TestP2LiveInquiry(unittest.TestCase):
         self.assertEqual(result.input_tokens, 24)
         self.assertTrue(seen[0].startswith(P2_TASK_STATEMENT))
         self.assertIn("retrieve(start, end)", seen[0])
+        self.assertIn("Use no tools", seen[0])
+        self.assertIn("retrieve(0, 1)", seen[0])
         self.assertNotIn(SENTINEL, seen[0])
         self.assertIn(SENTINEL, seen[1])
         public = {

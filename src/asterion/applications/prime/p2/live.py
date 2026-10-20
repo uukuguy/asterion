@@ -151,8 +151,9 @@ class _PromptInquiry:
             f"The corpus has {self._records} records, indexed from 0. "
             "Write one Python statement and no other text. "
             "Call retrieve(start, end) or transform(start, end, \"key\", ...). "
-            "Bounds are a half-open interval and must select at least one record. "
-            "Use no imports, attributes, or other names."
+            "Bounds are a half-open interval and must select exactly one record. "
+            "A legal reply is retrieve(0, 1). "
+            "Use no tools, no imports, no attributes, and no other names."
         )
         reply_text = prompt
         for _attempt in range(2):
@@ -162,7 +163,7 @@ class _PromptInquiry:
                 reply_text = (
                     prompt
                     + "\nThe previous reply was not one legal statement. "
-                    + "Return only that statement."
+                    + "Return only that statement. Use no tools."
                 )
         raise P2InquiryError()
 
