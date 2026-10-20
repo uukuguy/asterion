@@ -27,6 +27,7 @@ asterion-dci = "asterion.applications.dci_agent_lite.cli:main"
 [project.entry-points."asterion.applications"]
 controlled-code = "asterion.applications.controlled_code:create_provider"
 dci-agent-lite = "asterion.applications.dci_agent_lite:create_provider"
+native = "asterion.applications.native:create_provider"
 prime-applications = "asterion.applications.prime:create_provider"
 
 [project.entry-points."asterion.application_index"]
@@ -34,6 +35,7 @@ prime-applications = "asterion.applications.prime:create_provider"
 "dci.complete-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.local-benchmark-application__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
 "dci.research-capability__1.0.0" = "asterion.applications.dci_agent_lite:create_provider"
+"native.packages__1.0.0" = "asterion.applications.native:create_provider"
 "prime.arc-agi-3-solving__1.0.0" = "asterion.applications.prime:create_provider"
 "prime.bounded-autonomy__1.0.0" = "asterion.applications.prime:create_provider"
 "prime.continual-improvement__1.0.0" = "asterion.applications.prime:create_provider"

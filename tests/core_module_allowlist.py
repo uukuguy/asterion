@@ -191,6 +191,7 @@ NON_CORE_MODULE_PREFIXES = (
     "asterion.applications.dci_agent_lite",
     "asterion.applications.first_party_cli",
     "asterion.applications.first_party_packages",
+    "asterion.applications.native",
     "asterion.applications.prime",
     "asterion.capabilities.builtin",
     "asterion.capabilities.controlled_code",
