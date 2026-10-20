@@ -5157,3 +5157,7 @@
 - 13:24 INDEX milestone anchor records the five completion packages as done. The later P1 miss stays outside the witness.
 - 15:08 P2 finite deepseek-flash inquiry verified. Two model calls, input 583, output 576, notes sha256:e3831a589eb252d687fadee6d60976a0f500f711775ced6b29e43cd8eeebb11f. Default zero-token preset unchanged.
 - 15:40 The user authorized the showcase completion: P2 live query becomes one interpreted statement, one P1 continuation run is read afterward, and a writing map points at the existing applications. No new P application.
+- 15:48 P2 statement interpreter and writing map landed. The program-shaped live run was still outstanding [efb326b1].
+- 15:52 Two P2 program-shaped attempts failed closed with no public receipt. The model emitted a bash tool call, then an empty turn at the 512-token output cap.
+- 15:55 The query forbids tools and shows one legal statement. The host still accepts only that statement [2770be70].
+- 15:59 P2 program-shaped inquiry verified. retrieve bounds [0, 1], calls 3, input 1128, output 897, cost 1417 micros, fragment 6a4c24f668b7140d3d8ac553e61623754f188e1a66944d6b1d6924ee540fb8b4, notes sha256:f156051535646c2157b4426cc8a965fed6a588123ac28ff94362c17ad2ac77a5.

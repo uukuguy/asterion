@@ -1,13 +1,14 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-20. **Session remains active — not a final handoff.**
+> Updated: 2026-10-20 15:59. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - P1 and P3–P6 already have one finite `deepseek/deepseek-flash` preset receipt each. Those receipts stand.
-- The earlier P2 flash inquiry used a JSON bounds query: status `verified`, model calls 2, input 583, output 576, cost 867 micros. Notes revision `sha256:e3831a589eb252d687fadee6d60976a0f500f711775ced6b29e43cd8eeebb11f`. Fragment `6a4c24f668b7140d3d8ac553e61623754f188e1a66944d6b1d6924ee540fb8b4`.
-- D-2026-10-20-03 changes the live query to one host-interpreted `retrieve` or `transform` statement. The corpus stays out of the query prompt. The zero-token `make asterion-prime-p2-run` path is unchanged. The program-shaped live receipt is not recorded yet.
+- P2's program-shaped inquiry is verified: `retrieve` bounds `[0, 1]`, model calls 3, input 1128, output 897, cost 1417 micros. Fragment `6a4c24f668b7140d3d8ac553e61623754f188e1a66944d6b1d6924ee540fb8b4`. Notes `sha256:f156051535646c2157b4426cc8a965fed6a588123ac28ff94362c17ad2ac77a5`.
+- The corpus stayed out of the query prompt. The zero-token `make asterion-prime-p2-run` path is unchanged. One inquiry is not a stability rate.
 - The writing map is `docs/guides/prime-application-writing.md`. No new P application.
+- The authorized P1 continuation preset is the remaining run. Leave both prompts unchanged until its `oracle.pass` or `oracle.reject.*` line is known.
 
 ## Verified facts
 
@@ -16,13 +17,14 @@
 - P4 `p4-live-a5408e515e04808bc100791b`, generation 1→2.
 - P5 `p5-live-5856895e1469cbe6e739780f`, receipt `314a419ee3f7158492f209d5f044bbdfe788d2ba6b8736f6d46db7da8e83c69b`.
 - P6 `p6-live-4ab28bf1f52682c8`, `rolled-back`, receipt `07004c52690c10ef0e71fe5387d26a4e61a73f0e459f38709f53e526ec94d4a5`.
-- Focused P2 tests passed: `tests.test_prime_p2_program`, `tests.test_prime_p2_live`, and `tests.test_prime_p2_inquiry`. `ruff check` passed on the interpreter and live adapter. `tools/check_docs.py` passed.
+- P2 program-shaped live receipt: `retrieve` `[0, 1]`, calls 3, fragment `6a4c24f668b7140d3d8ac553e61623754f188e1a66944d6b1d6924ee540fb8b4`, notes `sha256:f156051535646c2157b4426cc8a965fed6a588123ac28ff94362c17ad2ac77a5`.
+- Focused P2 tests passed: `tests.test_prime_p2_program`, `tests.test_prime_p2_live`, and `tests.test_prime_p2_inquiry`. `ruff check` passed on the interpreter and live adapter. `tools/check_docs.py` passed before the live receipt.
 - Guest `ubuntu-fusion-control` was running for the P2 inquiry. Local `main` stays unpushed.
 
 ## Current judgment
 
-- P1–P6 each have one completed flash preset. P2's recorded live receipt still used the JSON bounds query. The statement interpreter is source-verified and is waiting for its own live receipt.
-- The later P1 run `p1-03801814231299013ad98348` still stopped before `oracle.pass`. Read the `oracle.reject.*` line from commit `aca0fa5b` before changing the continuation prompt.
+- P2's program-shaped receipt is the live evidence for D-2026-10-20-03. The earlier JSON-bounds receipt remains a separate inquiry.
+- The later P1 run `p1-03801814231299013ad98348` stopped before `oracle.pass`. The authorized rerun is in progress. Read its `oracle.pass` or `oracle.reject.*` line before changing the continuation prompt.
 
 ## Open boundary
 
@@ -32,8 +34,8 @@
 
 ## Next action
 
-1. Run one program-shaped P2 live inquiry. Record only the public JSON.
-2. After that guest command finishes, run the existing P1 preset once. Read the single `oracle.pass` or `oracle.reject.*` line before changing any prompt. Keep `AsterionPrimeLimits(8, 4, 600000)` and the computed `(40, 58)` probe.
+1. Wait for the P1 preset already started on `ubuntu-fusion-control`. Do not start a second orb command on that guest.
+2. Read the single `oracle.pass` or `oracle.reject.*` line before changing any prompt. Keep `AsterionPrimeLimits(8, 4, 600000)` and the computed `(40, 58)` probe.
 3. Do not push `main`. Do not start a P7 benchmark, an official card, an L9 rerun, or a second P application.
 
 ## Ready commands

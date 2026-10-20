@@ -50,7 +50,7 @@
 - Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Dedicated code-aware compaction is on the Prime compact hook and has one completed low-threshold P1 witness. Continuation stability is unmeasured, and the P7 low-threshold compaction test has not run. Causal efficiency gains remain unproven.
 - Inherited P1 manual-compaction actual-request token/reservation/billing certification is unresolved, distinct from P7's verified resource controls. No actual overspend has been established.
 - SDK upstream animation materialization memory, generic sandbox strength and complete historical migration/long-horizon cognition equivalence remain separate boundaries.
-- P1 continuation stability after dedicated compaction is unmeasured. The P7 low-threshold compaction test, moving effectful probe admission into Prime, and Prime CLI positioning remain open. One P2 flash inquiry is a single run, not a stability rate. The named orb machine `ubuntu` is absent; Orb presets use `ubuntu-fusion-control`. `make promotion-check` is not a pass on a Node 24 symlink host.
+- P1 continuation stability after dedicated compaction is unmeasured until the authorized preset prints `oracle.pass` or one `oracle.reject.*` line. The P7 low-threshold compaction test, moving effectful probe admission into Prime, and Prime CLI positioning remain open. The program-shaped P2 inquiry has one verified receipt and is one run, not a stability rate. The named orb machine `ubuntu` is absent; Orb presets use `ubuntu-fusion-control`. `make promotion-check` is not a pass on a Node 24 symlink host.
 
 ## Key Files
 
