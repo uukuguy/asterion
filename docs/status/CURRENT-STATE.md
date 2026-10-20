@@ -47,10 +47,10 @@
 ## Open Problems
 
 - General autonomous modeling quality, full-game reliability under default-zero probe authority and transfer beyond P7 are unmeasured. Finite application risk acceptance permits exploration but cannot certify an inaccurate model's claimed coverage.
-- Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Dedicated code-aware compaction is on the Prime compact hook and has one completed low-threshold P1 witness. Continuation stability is unmeasured, and the P7 low-threshold compaction test has not run. Causal efficiency gains remain unproven.
+- Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Dedicated code-aware compaction is on the Prime compact hook and has the low-threshold P1 witness plus one later `oracle.pass`. Continuation stability is not a measured rate, and the P7 low-threshold compaction test has not run. Causal efficiency gains remain unproven.
 - Inherited P1 manual-compaction actual-request token/reservation/billing certification is unresolved, distinct from P7's verified resource controls. No actual overspend has been established.
 - SDK upstream animation materialization memory, generic sandbox strength and complete historical migration/long-horizon cognition equivalence remain separate boundaries.
-- P1 continuation stability after dedicated compaction is unmeasured until the authorized preset prints `oracle.pass` or one `oracle.reject.*` line. The P7 low-threshold compaction test, moving effectful probe admission into Prime, and Prime CLI positioning remain open. The program-shaped P2 inquiry has one verified receipt and is one run, not a stability rate. The named orb machine `ubuntu` is absent; Orb presets use `ubuntu-fusion-control`. `make promotion-check` is not a pass on a Node 24 symlink host.
+- P1 continuation after dedicated compaction has one additional `oracle.pass` on the unchanged prompt and cap. The same session also recorded a tool-callback stop and one `oracle.reject.final_result`. That is not a stability rate. The P7 low-threshold compaction test, moving effectful probe admission into Prime, and Prime CLI positioning remain open. The program-shaped P2 inquiry has one verified receipt and is one run, not a stability rate. The named orb machine `ubuntu` is absent; Orb presets use `ubuntu-fusion-control`. `make promotion-check` is not a pass on a Node 24 symlink host.
 
 ## Key Files
 

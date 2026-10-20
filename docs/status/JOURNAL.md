@@ -5161,3 +5161,6 @@
 - 15:52 Two P2 program-shaped attempts failed closed with no public receipt. The model emitted a bash tool call, then an empty turn at the 512-token output cap.
 - 15:55 The query forbids tools and shows one legal statement. The host still accepts only that statement [2770be70].
 - 15:59 P2 program-shaped inquiry verified. retrieve bounds [0, 1], calls 3, input 1128, output 897, cost 1417 micros, fragment 6a4c24f668b7140d3d8ac553e61623754f188e1a66944d6b1d6924ee540fb8b4, notes sha256:f156051535646c2157b4426cc8a965fed6a588123ac28ff94362c17ad2ac77a5.
+- 16:02 P1 p1-2b2bc38316f672779559bc8e stopped recovery-required after stage2.release. Tool callbacks observed 5, limit 4, prime-tool-callback-limit. No oracle line. Receipt null. Cap unchanged.
+- 16:04 P1 p1-ab9e8b4bb66dc3f2254352f9 reached stage2.complete and printed oracle.reject.final_result. Receipt null. Prompts unchanged.
+- 16:08 P1 p1-5f194466f4f4077ec270a9e4 completed. oracle.pass. Receipt 4f7e05f467a8506755b39ebf51147b68d46771f2e9679d4d4c25549c22beeb0c. Summary e7fb9c3c83f6e95401b59874a6556cf02f63a850d369ea81b7c8f155c8201841. Same cap and prompts. One pass is not a stability rate.
