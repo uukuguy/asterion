@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-20-03 | 🟢 active | P2 live query is one host-interpreted retrieve or transform statement |
 | D-2026-10-20-02 | 🟢 active | P2 model inquiry stays in the application; Prime does not scan the corpus |
 | D-2026-10-20-01 | 🟢 active | Prime owns the accepted-note epoch and passive research record; P7 remains the first consumer |
 | D-2026-10-11-03 | 🟢 active | Application-configurable capacities and explicit safe alarms preserve authority and unknown-effect fences |
@@ -1344,6 +1345,14 @@ Final qualification (2026-10-13): Task58 repair `ebb47e7f` passed125relatedPytho
 - Out of this package: P2 model-owned retrieval, current-main live re-verification of P1 and P3–P6, P1 kernel state across a P4 process handoff, and dedicated code-aware compaction. Those packages are listed in the worklist and are not authorized by this interface.
 - Evidence: provider-free `tests/test_prime_research_notes.py` plus the existing P7 notes and research-record tests. No paid trial.
 - Reference: [worklist](../superpowers/plans/2026-10-20-prime-application-completion.md).
+
+## D-2026-10-20-03 — P2 live query is one interpreted statement
+
+- Authority: on 2026-10-20 the user accepted three showcase completions: the P2 live path becomes a model-written retrieval program, one P1 continuation run is read after that, and a short writing map points at the existing applications. No new P application is added.
+- Decision: the injected model writes exactly one Python statement, `retrieve(start, end)` or `transform(start, end, "key", ...)`. An optional assignment may use only the name `result`. `p2/program.py` reads that statement with `ast` and does not execute arbitrary Python. `P2ContextService` performs the one call. The corpus body stays out of the query prompt. One rejected statement gets one replacement ask. The answer remains one JSON object, and `ResearchNotes` commits it only when the cited fragment digest matches the returned slice. The default zero-token run stays `make asterion-prime-p2-run`. `make asterion-prime-p2-live` is the finite preset for this statement path.
+- Ownership is unchanged: Prime does not scan the corpus. D-2026-10-20-02 remains that boundary. The writing map is `docs/guides/prime-application-writing.md`.
+- Evidence: `tests/test_prime_p2_program.py` and `tests/test_prime_p2_live.py`. A program-shaped live receipt is a separate record and is not claimed here.
+- Reference: [writing map](../guides/prime-application-writing.md).
 
 ## D-2026-10-20-02 — P2 model inquiry stays in the application
 

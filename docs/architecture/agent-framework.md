@@ -92,8 +92,8 @@ resource context; the generic owner does not read `.env` or profile contents.
 P1–P6 target `deepseek/deepseek-flash`; all P7 model paths use
 `openai-codex/gpt-6.1-sol`. P2's default run remains local retrieval with
 zero model tokens. A separate application inquiry lets an injected model
-write the query and answer; the corpus scanner stays in P2, and a live
-model preset is not part of that path.
+write one retrieval statement and the answer; the corpus scanner stays in
+P2, and `make asterion-prime-p2-live` is the finite preset for that path.
 P7 supplies domain tools, goal/continuation content and mappings
 from framework events to game evidence. Naming a Pi transport with a neutral
 alias does not transfer that ownership. The current migration and its

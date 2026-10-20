@@ -29,6 +29,7 @@ from asterion.applications.prime.p2.inquiry import (
     P2InquiryError,
     run_model_inquiry,
 )
+from asterion.applications.prime.p2.program import P2ProgramError, interpret
 from asterion.runtime.host import CancellationSignal
 
 
@@ -108,31 +109,34 @@ class _PromptInquiry:
         self.calls = 0
         self.usage: list[tuple[int, int, int]] = []
 
+    def _complete(self, text: str) -> str:
+        future = asyncio.run_coroutine_threadsafe(
+            self._prompt(text, signal=self._signal), self._loop
+        )
+        reply = future.result()
+        if type(reply) is not LiveModelReply:
+            raise P2LiveError()
+        usage = reply.usage
+        incoming, outgoing, cost = usage.input_tokens, usage.output_tokens, usage.cost_micros
+        if (
+            type(incoming) is not int
+            or type(outgoing) is not int
+            or type(cost) is not int
+            or incoming < 0
+            or outgoing < 0
+            or cost < 0
+            or incoming + outgoing == 0
+        ):
+            raise P2LiveError()
+        self.calls += 1
+        self.usage.append((incoming, outgoing, cost))
+        return reply.text
+
     def _ask(self, text: str) -> dict:
         reply_text = text
         for _attempt in range(2):
-            future = asyncio.run_coroutine_threadsafe(
-                self._prompt(reply_text, signal=self._signal), self._loop
-            )
-            reply = future.result()
-            if type(reply) is not LiveModelReply:
-                raise P2LiveError()
-            usage = reply.usage
-            incoming, outgoing, cost = usage.input_tokens, usage.output_tokens, usage.cost_micros
-            if (
-                type(incoming) is not int
-                or type(outgoing) is not int
-                or type(cost) is not int
-                or incoming < 0
-                or outgoing < 0
-                or cost < 0
-                or incoming + outgoing == 0
-            ):
-                raise P2LiveError()
-            self.calls += 1
-            self.usage.append((incoming, outgoing, cost))
             try:
-                return _object(reply.text)
+                return _object(self._complete(reply_text))
             except P2LiveError:
                 reply_text = (
                     text
@@ -142,14 +146,25 @@ class _PromptInquiry:
         raise P2InquiryError()
 
     def write_query(self, task: str) -> dict:
-        return self._ask(
+        prompt = (
             f"{task}\n\n"
             f"The corpus has {self._records} records, indexed from 0. "
-            "Bounds are a half-open interval [start, end]. "
-            "Return only one JSON object. "
-            'Use operation "retrieve" and bounds that select exactly one record. '
-            "The object has exactly the keys operation and bounds. Use no tools."
+            "Write one Python statement and no other text. "
+            "Call retrieve(start, end) or transform(start, end, \"key\", ...). "
+            "Bounds are a half-open interval and must select at least one record. "
+            "Use no imports, attributes, or other names."
         )
+        reply_text = prompt
+        for _attempt in range(2):
+            try:
+                return interpret(self._complete(reply_text), self._records)
+            except P2ProgramError:
+                reply_text = (
+                    prompt
+                    + "\nThe previous reply was not one legal statement. "
+                    + "Return only that statement."
+                )
+        raise P2InquiryError()
 
     def write_answer(self, task: str, fragment: dict) -> dict:
         shown = {

@@ -38,7 +38,7 @@ class TestP2LiveInquiry(unittest.TestCase):
         async def prompt(text, *, signal):
             seen.append(text)
             if len(seen) == 1:
-                return LiveModelReply('{"operation":"retrieve","bounds":[0,1]}', _usage())
+                return LiveModelReply("retrieve(0, 1)", _usage())
             return LiveModelReply(_answer(text), _usage(13, 9))
 
         result = asyncio.run(run_live_inquiry(
@@ -55,6 +55,7 @@ class TestP2LiveInquiry(unittest.TestCase):
         self.assertEqual(result.model_call_count, 2)
         self.assertEqual(result.input_tokens, 24)
         self.assertTrue(seen[0].startswith(P2_TASK_STATEMENT))
+        self.assertIn("retrieve(start, end)", seen[0])
         self.assertNotIn(SENTINEL, seen[0])
         self.assertIn(SENTINEL, seen[1])
         public = {
@@ -71,9 +72,9 @@ class TestP2LiveInquiry(unittest.TestCase):
         async def prompt(text, *, signal):
             seen.append(text)
             if len(seen) == 1:
-                return LiveModelReply("not json", _usage())
+                return LiveModelReply("import os", _usage())
             if len(seen) == 2:
-                return LiveModelReply('{"operation":"retrieve","bounds":[0,1]}', _usage())
+                return LiveModelReply("retrieve(0, 1)", _usage())
             return LiveModelReply(_answer(text), _usage())
 
         result = asyncio.run(run_live_inquiry(
@@ -89,7 +90,7 @@ class TestP2LiveInquiry(unittest.TestCase):
     def test_zero_token_reply_is_rejected(self):
         async def prompt(text, *, signal):
             return LiveModelReply(
-                '{"operation":"retrieve","bounds":[0,1]}',
+                "retrieve(0, 1)",
                 LiveModelUsage(0, 0, 0),
             )
 
