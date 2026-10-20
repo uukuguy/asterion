@@ -76,7 +76,7 @@ Start with `project-state resume`: INDEX → CURRENT-STATE → final RESUME → 
 
 ## Current Judgment
 
-The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done: `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1`. The later showcase follow-up is also closed: P2 has one program-shaped flash receipt, P1 has one later `oracle.pass` on the unchanged prompt and cap, and the writing map points at the seven existing applications. One pass is not a stability rate. A full benchmark, official card, L9 rerun, probe-authority move, a new P application, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
+The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done. The active program is the peer-foundation worklist, package `P-PI-1`: one base Pi process, Prime as a product-independent harness, Native as the multi-package host, DCI as the retrieval package. A full benchmark, official card, L9 rerun, probe-authority move, a new P application, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
 
 ## Historical Corrections
 

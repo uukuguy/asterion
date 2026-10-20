@@ -16,8 +16,8 @@ paper reproduction is optional evidence, not a framework prerequisite.
 
 P1–P7 are independent applications of Asterion Prime. The standard-entry
 migration targets direct library use: an application supplies its domain goals,
-tools, data and completion conditions, while Prime owns private Pi/session
-resources. Central application registration, provider discovery and CLI
+tools, data and completion conditions. Prime owns the harness session.
+The base `PiRpcSession` owns the Pi process. Central application registration, provider discovery and CLI
 dispatch are not prerequisites of that interface. Task40 migrates the existing
 P1 and P3–P7 live paths, including the P7 narrator, to the standard owner;
 P2 retains its model-free local retrieval mechanism. Source migration and
@@ -85,8 +85,10 @@ adapts those layers without importing its semantics into generic framework
 modules. These application responsibilities do not introduce another runner
 or change the existing provider, assembly, runtime or host-service contracts.
 
-The backend dependency is `P7 -> Asterion Prime -> Pi`. Prime owns
-backend launch, extension loading, RPC sessions and native event handling.
+The backend dependency is `P7 -> Asterion Prime -> PiRpcSession`. Prime owns
+harness launch preparation, extension binding, tool registration, and session
+use. `PiRpcSession` owns the Pi process, including forced close. The one-shot
+`pi.reference` facade is still a separate subprocess until `P-PI-1` finishes.
 The application operator resolves configuration and injects exact model and
 resource context; the generic owner does not read `.env` or profile contents.
 P1–P6 target `deepseek/deepseek-flash`; all P7 model paths use
@@ -150,11 +152,12 @@ CLI / host -> exact agent system -> selected control provider
            -> exact application assembly -> runner -> runtime / host services
 ```
 
-`asterion-prime` (`asterion.prime`) and `asterion-native`
-(`asterion.native`) are peer agent implementations behind that boundary.
-`asterion-prime` owns reusable Prime-style agent semantics using only Asterion
-contracts; it does not import, load, launch, inspect, or require Prime Agent
-source or SDK code. P1 through P7 are applications of `asterion-prime`, not
+Prime and Native are peer products on the Asterion base. Prime is the
+IPython harness. Native is the multi-package host. `asterion.native` names
+the Native control provider, not the capability catalog. DCI is one Native
+package. `asterion-prime` owns reusable Prime harness semantics using only
+Asterion contracts; it does not import, load, launch, inspect, or require
+Prime Agent source or SDK code. P1 through P7 are applications of Prime, not
 the agent implementation itself. Prime Gateway evidence is historical and
 non-native compatibility evidence; it cannot support a claim that Asterion
 implements Prime-style capabilities. Python retains portable state, authority,

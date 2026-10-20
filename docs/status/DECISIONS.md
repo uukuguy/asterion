@@ -4,6 +4,7 @@
 
 | ID | Status | Decision |
 |---|---|---|
+| D-2026-10-20-04 | 🟢 active | Prime is a product-independent harness on one base Pi process owner |
 | D-2026-10-20-03 | 🟢 active | P2 live query is one host-interpreted retrieve or transform statement |
 | D-2026-10-20-02 | 🟢 active | P2 model inquiry stays in the application; Prime does not scan the corpus |
 | D-2026-10-20-01 | 🟢 active | Prime owns the accepted-note epoch and passive research record; P7 remains the first consumer |
@@ -47,7 +48,7 @@
 | D-2026-10-06-02 | 🟢 active | Every continuation retains per-level cognition through explicit provenance, including live replay |
 | D-2026-10-06-03 | 🟢 active | Prepare saved replay projections during export and load only the selected level |
 
-| D-2026-10-10-02 | 🟢 active | Prime owns private Pi/RPC. Task40 migrated the existing live paths. P1 witnessed dedicated compaction on 2026-10-20. The P7 low-threshold test is still open. |
+| D-2026-10-10-02 | 🟡 amended | Prime owns the harness session. D-2026-10-20-04 moves the Pi process lifecycle to the base session. |
 
 ## D-2026-10-01-01 — Certificate-gated same-game simulator
 
@@ -1335,6 +1336,14 @@ Task57 completed the selected checkpoint continuation at9/9/fullscore, with one 
 
 Final qualification (2026-10-13): Task58 repair `ebb47e7f` passed125relatedPython/115TypeScript checks (6existingexternal skips), independentAstrareview and exact packaged-resource checks. Task59 installed the repaired wheel, restored actual offlineSDK to predeath376 and ran original actor callbacks in sharedIPython; complete rawartifact and hash matched the original. Default-zero review/probe dispatched0, SDK/frame unchanged, no Pi/model calls and cleanup verified. This completes the requested exact admission witness; it does not retrospectively change Task57's earlier policy or demonstrate a full game under the stricter default. Milestone tag points to `aca76ed7`; later state receipts preserve both tag identities. No additional paid trial is authorized by a historical decision or this closeout.
 
+
+## D-2026-10-20-04 — Prime stays product-independent on one base Pi process
+
+- Authority: on 2026-10-20 the user confirmed the peer-foundation shape and asked to implement it in order. This worklist does not authorize a paid model run, a benchmark, an official card, or an L9 rerun.
+- Decision: Asterion's base owns protocols, composition, the runner, host services, and the one Pi process implementation, `PiRpcSession`. Prime and Native are peers on that base. Prime remains a direct-library harness: IPython, the exact tool allowlist, accepted notes, compaction content, and `prepare_prime_application`. Native hosts multiple capability packages. DCI remains the retrieval package. Shared framework behavior is a Native package. The one-shot facade `pi.reference` and the long-lived session are two callers of that one Pi implementation.
+- Amends: the process-ownership sentences in D-2026-10-10-02 and D-2026-10-10-03. Prime still owns harness launch preparation, extension binding, tool registration, and session use. Prime does not signal or reap the Pi process itself. Applications still do not construct Pi or RPC objects. Central registration and a Prime CLI remain non-prerequisites.
+- Stays open in this decision: `pi.reference` still has its own subprocess loop until package `P-PI-1` moves it onto `PiRpcSession`. A Native provider that assembles both `dci` and `controlled-code` is package `P-NATIVE-1`. `prime-*-native` packages still execute Prime until package `P-CITE-1` reduces them to receipt citations.
+- Reference: [peer-foundation worklist](../superpowers/plans/2026-10-20-asterion-peer-foundation.md).
 
 ## D-2026-10-20-01 — Prime owns the accepted-note epoch and passive research record
 

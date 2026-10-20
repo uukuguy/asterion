@@ -83,6 +83,11 @@ class FakeReusablePi:
             raise ValueError("PRIVATE-ABORT")
         self.pending_abort = None
 
+    async def force_close(self) -> None:
+        stop = getattr(self, "stop", None)
+        if callable(stop):
+            stop()
+
     async def open(self, *, signal):
         self.opens += 1
 

@@ -1229,6 +1229,47 @@ class PiRpcSession:
         if failure is not None:
             raise RuntimeError("Pi RPC process cleanup timed out") from failure
 
+    async def force_close(self) -> None:
+        """Reap the child without taking the command lock.
+
+        A caller that already holds the lock, or that must abandon a wedged
+        command, uses this path. The process group is killed before ``stop``.
+        """
+
+        process = self.process
+        if process is not None and process.poll() is None:
+            self._signal_process(process, process_signal.SIGKILL)
+        loop = asyncio.get_running_loop()
+        stopped = loop.create_future()
+
+        def finish(failed: bool) -> None:
+            if stopped.done():
+                return
+            if failed:
+                stopped.set_exception(
+                    RuntimeError("Pi RPC process cleanup is incomplete")
+                )
+            else:
+                stopped.set_result(None)
+
+        def stop() -> None:
+            failed = False
+            try:
+                self.stop()
+            except BaseException:
+                failed = True
+            try:
+                loop.call_soon_threadsafe(finish, failed)
+            except RuntimeError:
+                pass
+
+        threading.Thread(target=stop, daemon=True).start()
+        await stopped
+        if self.process is not None or (
+            process is not None and process.poll() is None
+        ):
+            raise RuntimeError("Pi RPC process cleanup is incomplete")
+
     @staticmethod
     def _signal_process(process: subprocess.Popen[bytes], signal_number: int) -> None:
         try:

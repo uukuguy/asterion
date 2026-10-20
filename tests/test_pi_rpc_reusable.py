@@ -768,6 +768,34 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(stop.call_count, 1)
         self.assertIsNone(rpc.process)
 
+    async def test_force_close_kills_the_process_group_without_the_command_lock(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            rpc = PiRpcSession(
+                PiRpcConfig(
+                    command=(sys.executable, "-I", "-c", "import time; time.sleep(30)"),
+                    cwd=Path(temporary),
+                    environment={},
+                    deadline_seconds=1,
+                )
+            )
+            rpc.start()
+            process = rpc.process
+            try:
+                async with rpc._command_lock:
+                    await asyncio.wait_for(rpc.force_close(), 0.5)
+                assert process is not None
+                self.assertIsNotNone(process.poll())
+                self.assertIsNone(rpc.process)
+            finally:
+                rpc.stop()
+        launch = (
+            Path(__file__).parents[1] / "src/asterion/agents/prime/_launch.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("killpg", launch)
+        self.assertNotIn("SIGKILL", launch)
+
     async def test_aborted_compact_needs_exact_typed_settlement_before_reuse(self):
         rpc = self.make_session(compact_events=True)
         await rpc.open(signal=NeverCancelled())

@@ -1,4 +1,4 @@
-"""Prime-owned process construction from preflighted operator data."""
+"""Prime harness launch. The base Pi session owns the process."""
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -162,40 +162,5 @@ def persistent_base_command(executable, entry, effort, tool_names):
 
 
 async def force_close_rpc(rpc) -> None:
-    """Use the retained process owner, never an active RPC command lock."""
-    import asyncio
-    import os
-    import signal
-    import threading
-
-    process = getattr(rpc, 'process', None)
-    if process is not None and process.poll() is None:
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    loop = asyncio.get_running_loop()
-    stopped = loop.create_future()
-
-    def finish(failed: bool) -> None:
-        if not stopped.done():
-            if failed:
-                stopped.set_exception(RuntimeError('Prime process cleanup is incomplete'))
-            else:
-                stopped.set_result(None)
-
-    def stop() -> None:
-        failed = False
-        try:
-            rpc.stop()
-        except BaseException:
-            failed = True
-        try:
-            loop.call_soon_threadsafe(finish, failed)
-        except RuntimeError:
-            pass  # The bounded launcher has already closed its loop.
-
-    threading.Thread(target=stop, daemon=True).start()
-    await stopped
-    if getattr(rpc, 'process', None) is not None or (process is not None and process.poll() is None):
-        raise RuntimeError('Prime process cleanup is incomplete')
+    """Ask the base session to reap its process without the command lock."""
+    await rpc.force_close()
