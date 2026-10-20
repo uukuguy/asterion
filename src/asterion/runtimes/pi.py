@@ -38,7 +38,7 @@ from asterion.pathlight.runtime_observation import (
 )
 from asterion.runtimes.pi_observation import PiObservationBuilder
 from asterion.runtimes.pi_extensions import PiExtensionLease
-from asterion.runtimes.pi_rpc import PiChildProcess
+from asterion.runtimes.pi_rpc import PiChildProcess, PiStdoutLimitExceeded
 
 
 _MAX_STDOUT_LINE_BYTES = 64 * 1024
@@ -375,6 +375,7 @@ async def _collect_runtime_snapshot(
                 child.start_raw_pipes(
                     line_limit=_MAX_STDOUT_LINE_BYTES,
                     stderr_limit=_MAX_STDERR_BYTES,
+                    total_limit=_MAX_STDOUT_BYTES,
                 )
     except (OSError, TypeError, ValueError):
         if child is not None:
@@ -425,7 +426,10 @@ async def _collect_runtime_snapshot(
                 await asyncio.sleep(0.05)
                 continue
             if isinstance(raw, BaseException):
-                if isinstance(raw, (ValueError, asyncio.LimitOverrunError)):
+                if isinstance(
+                    raw,
+                    (ValueError, asyncio.LimitOverrunError, PiStdoutLimitExceeded),
+                ):
                     raise ProtocolError(
                         "Pi runtime output limit exceeded"
                     ) from None
@@ -791,6 +795,8 @@ def _pin_evidence_root(
             yield current, identity
         finally:
             os.close(current)
+    except ProtocolError:
+        raise
     except (OSError, ValueError):
         raise ProtocolError("Pi runtime evidence is unavailable") from None
 

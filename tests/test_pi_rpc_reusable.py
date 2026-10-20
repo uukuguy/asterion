@@ -17,6 +17,7 @@ from asterion.services.diagnostics import MemoryDiagnosticSink
 
 from asterion.runtimes.pi_rpc import (
     CancellationSignal,
+    PiChildProcess,
     PiRpcConfig,
     PiRpcResult,
     PiRpcSession,
@@ -782,12 +783,26 @@ class PiRpcReusableTests(unittest.IsolatedAsyncioTestCase):
             )
             rpc.start()
             process = rpc.process
+            self.assertIsNotNone(rpc._child)
+            self.assertIs(rpc._child.process, process)
+            reaped: list[tuple[PiChildProcess, bool]] = []
+            real_reap = PiChildProcess.reap
+
+            def spy_reap(self, *args, **kwargs):
+                reaped.append((self, rpc._command_lock.locked()))
+                return real_reap(self, *args, **kwargs)
+
             try:
-                async with rpc._command_lock:
-                    await asyncio.wait_for(rpc.force_close(), 0.5)
+                with patch.object(PiChildProcess, "reap", spy_reap):
+                    async with rpc._command_lock:
+                        await asyncio.wait_for(rpc.force_close(), 0.5)
                 assert process is not None
                 self.assertIsNotNone(process.poll())
                 self.assertIsNone(rpc.process)
+                self.assertIsNone(rpc._child)
+                self.assertTrue(reaped)
+                self.assertTrue(all(held for _child, held in reaped))
+                self.assertIs(reaped[0][0].process, process)
             finally:
                 rpc.stop()
         launch = (

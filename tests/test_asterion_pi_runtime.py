@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import json
 import os
+import queue
 import sys
 import tempfile
 import time
@@ -1367,6 +1368,7 @@ print(json.dumps({"type": "agent_end"}), flush=True)
             "signal_pi_child",
             inspect.getsource(pi_owner.PiRpcSession._signal_process),
         )
+        self.assertIn(".reap(", inspect.getsource(pi_owner.PiRpcSession.stop))
         token = "shared-owner-token"
         script = r'''
 import json, os, signal, subprocess, sys, time
@@ -1410,16 +1412,26 @@ print(json.dumps({"type": "agent_end"}), flush=True)
                 capabilities=("filesystem.read",),
                 evidence_root=root / "evidence",
             )
-            events = [
-                event
-                async for event in client.run(
-                    RunRequest(
-                        run_id="shared-owner",
-                        input_text="question",
-                        requested_capabilities=("filesystem.read",),
+            reaped: list[pi_owner.PiChildProcess] = []
+            real_reap = pi_owner.PiChildProcess.reap
+
+            def spy_reap(self, *args, **kwargs):
+                reaped.append(self)
+                return real_reap(self, *args, **kwargs)
+
+            with patch.object(pi_owner.PiChildProcess, "reap", spy_reap):
+                events = [
+                    event
+                    async for event in client.run(
+                        RunRequest(
+                            run_id="shared-owner",
+                            input_text="question",
+                            requested_capabilities=("filesystem.read",),
+                        )
                     )
-                )
-            ]
+                ]
+            self.assertEqual(len(reaped), 1)
+            self.assertIsNotNone(reaped[0].process.poll())
             completed = client.completed_run_dir("shared-owner")
             self.assertIsNotNone(completed)
             assert completed is not None
@@ -1441,6 +1453,58 @@ print(json.dumps({"type": "agent_end"}), flush=True)
         self.assertEqual(deltas, [token])
         self.assertEqual(terminals, ["run.completed"])
         validate_event_stream([event.to_mapping() for event in events])
+
+    async def test_stdout_reader_stops_at_the_line_cap_without_retaining_the_line(
+        self,
+    ) -> None:
+        script = r'''
+import sys
+sys.stdin.readline()
+sys.stdout.write("x" * (4 * 1024 * 1024 + 1))
+sys.stdout.write("\n")
+sys.stdout.flush()
+'''
+        seen: list[pi_owner.PiChildProcess] = []
+        real_start = pi_owner.PiChildProcess.start_raw_pipes
+
+        def spy_start(self, *args, **kwargs):
+            seen.append(self)
+            return real_start(self, *args, **kwargs)
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            client = self._client(root, script)
+            with (
+                patch.object(pi_owner.PiChildProcess, "start_raw_pipes", spy_start),
+                self.assertRaises(ProtocolError) as raised,
+            ):
+                await asyncio.wait_for(
+                    _collect(
+                        client,
+                        RunRequest(
+                            run_id="huge-line",
+                            input_text="question",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        MutableSignal(),
+                    ),
+                    timeout=5,
+                )
+        self.assertEqual(
+            str(raised.exception), "Pi runtime output limit exceeded"
+        )
+        self.assertEqual(len(seen), 1)
+        child = seen[0]
+        self.assertLessEqual(child.queued_stdout_bytes, 64 * 1024)
+        retained = 0
+        while True:
+            try:
+                item = child._stdout_queue.get_nowait()
+            except queue.Empty:
+                break
+            if isinstance(item, (bytes, bytearray)):
+                retained += len(item)
+        self.assertLessEqual(retained, 64 * 1024)
 
 
 async def _collect(

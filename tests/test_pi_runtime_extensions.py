@@ -951,6 +951,7 @@ for event in events: print(json.dumps(event), flush=True)
         self.assertEqual(tool_result.payload["output"]["fd"], "<redacted>")
         self.assertEqual(usage.payload["input_tokens"], int(source_fd))
         self.assertIn("<redacted>", rendered)
+        print("redacted-public", tool_call.payload["arguments"]["fd"])
 
     async def test_redaction_preserves_protocol_controls_matching_environment(
         self,
@@ -1019,6 +1020,7 @@ for event in events: print(json.dumps(event), flush=True)
         )
         self.assertEqual(set(tool_result.payload["output"].values()), {"<redacted>"})
         self.assertEqual(text_delta.payload["text"], "<redacted>|" * 3 + "<redacted>")
+        print("redacted-public", text_delta.payload["text"])
         self.assertEqual(usage.payload, {"input_tokens": 1, "output_tokens": 1})
         self.assertEqual(events[-1].type, "run.completed")
 
