@@ -37,6 +37,12 @@ class TestP1OracleContract(unittest.TestCase):
             with self.subTest(value=value):
                 with self.assertRaisesRegex(P1OracleError, "^P1 oracle rejected$"):
                     P1StageOneReceipt(cast(str, value), "a" * 64, "b" * 64, 2)
+        bare = P1OracleError()
+        self.assertIsNone(bare.step)
+        self.assertEqual(str(bare), "P1 oracle rejected")
+        with self.assertRaisesRegex(ValueError, "^P1 oracle step is invalid$") as caught:
+            P1OracleError("SENTINEL_PRIVATE_STEP")
+        self.assertNotIn("SENTINEL_PRIVATE", str(caught.exception))
 
 
 class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
@@ -191,8 +197,9 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
             )
         self.checkpoint()
         await self.cell(stage_two_cell(), 3)
-        with self.assertRaises(P1OracleError):
+        with self.assertRaises(P1OracleError) as caught:
             self.oracle.verify_stage_two(self.worker.snapshot(), replace(first))
+        self.assertEqual(caught.exception.step, "prefix")
 
     async def test_verification_requires_distinct_turn(self) -> None:
         from asterion.applications.prime.p1.oracle import P1OracleError
@@ -207,8 +214,9 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
 
         first = await self.first_stage()
         await self.cell(stage_two_cell(), 3)
-        with self.assertRaises(P1OracleError):
+        with self.assertRaises(P1OracleError) as caught:
             self.oracle.verify_stage_two(self.worker.snapshot(), first)
+        self.assertEqual(caught.exception.step, "checkpoint")
 
     async def test_checkpoint_cannot_change_initial_kernel_generation(self) -> None:
         from asterion.applications.prime.p1.oracle import P1OracleError
@@ -216,8 +224,9 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
         first = await self.first_stage()
         self.checkpoint(kernel_generation=2)
         await self.cell(stage_two_cell(), 3)
-        with self.assertRaises(P1OracleError):
+        with self.assertRaises(P1OracleError) as caught:
             self.oracle.verify_stage_two(self.worker.snapshot(), first)
+        self.assertEqual(caught.exception.step, "checkpoint")
 
     async def test_setup_requires_actual_accumulator_call(self) -> None:
         from asterion.applications.prime.p1.oracle import P1OracleError
@@ -235,8 +244,10 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
         first = await self.first_stage()
         self.checkpoint()
         await self.cell('print("verified"); final_result = 98', 3)
-        with self.assertRaises(P1OracleError):
+        with self.assertRaises(P1OracleError) as caught:
             self.oracle.verify_stage_two(self.worker.snapshot(), first)
+        self.assertEqual(caught.exception.step, "final_read")
+        self.assertEqual(str(caught.exception), "P1 oracle rejected")
 
     async def test_stage_two_replaced_object_is_rejected(self) -> None:
         from asterion.applications.prime.p1.oracle import P1OracleError
@@ -249,8 +260,21 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
             + stage_two_cell(),
             3,
         )
-        with self.assertRaises(P1OracleError):
+        with self.assertRaises(P1OracleError) as caught:
             self.oracle.verify_stage_two(self.worker.snapshot(), first)
+        self.assertEqual(caught.exception.step, "objects")
+
+    async def test_repeated_stage_two_with_a_different_effect_names_receipt(self) -> None:
+        from asterion.applications.prime.p1.oracle import P1OracleError
+
+        await self.final_stage()
+        self.oracle._final = replace(
+            self.oracle._final, stage_two_effect_sha256="c" * 64
+        )
+        with self.assertRaises(P1OracleError) as caught:
+            self.oracle.verify_stage_two(self.worker.snapshot(), self.oracle._first)
+        self.assertEqual(caught.exception.step, "receipt")
+        self.assertEqual(str(caught.exception), "P1 oracle rejected")
 
     async def test_actual_complete_file_bytes_are_required_in_both_reading_stages(
         self,
@@ -309,8 +333,9 @@ class TestP1Oracle(unittest.IsolatedAsyncioTestCase):
                             "final_result = accumulator(input_tuple[3]) + 40"
                         )
                         await worker.execute_cell(P1CellRequest("final", "final", code))
-                        with self.assertRaises(P1OracleError):
+                        with self.assertRaises(P1OracleError) as caught:
                             oracle.verify_stage_two(worker.snapshot(), first)
+                        self.assertEqual(caught.exception.step, "final_read")
                     finally:
                         await worker.close()
 

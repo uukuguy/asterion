@@ -754,14 +754,131 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             callable(getattr(operator, "_public_progress", None)),
             "public-safe P1 progress reporter is missing",
         )
+        from asterion.applications.prime.p1.oracle import P1_ORACLE_REJECT_STEPS
+
         output = io.StringIO()
+        lines = ['{"stage":"runner.start"}\n']
         with patch.object(operator.sys, "stderr", output):
             operator._public_progress("runner.start")
+            for step in sorted(P1_ORACLE_REJECT_STEPS):
+                stage = f"oracle.reject.{step}"
+                operator._public_progress(stage)
+                lines.append(f'{{"stage":"{stage}"}}\n')
+            operator._public_progress("oracle.reject.effect")
+            lines.append('{"stage":"oracle.reject.effect"}\n')
             with self.assertRaises(operator.P1OperatorError):
                 operator._public_progress("SENTINEL_PRIVATE_STAGE")
+            with self.assertRaises(operator.P1OperatorError):
+                operator._public_progress("failure.P1OracleError.final")
 
-        self.assertEqual(output.getvalue(), '{"stage":"runner.start"}\n')
+        self.assertEqual(output.getvalue(), "".join(lines))
         self.assertNotIn("SENTINEL_PRIVATE", output.getvalue())
+        self.assertNotIn("failure.", output.getvalue())
+
+    async def test_verify_names_the_rejecting_stage_two_clause(self):
+        from asterion.applications.prime.p1 import operator
+        from asterion.applications.prime.p1.operator import P1OperatorResources
+        from asterion.applications.prime.p1.oracle import P1Oracle, P1OracleError
+        from asterion.applications.prime.p1.worker import P1WorkerCheckpoint
+        from asterion.capabilities.prime_ipython_coding_native.host import (
+            P1StageMilestone,
+        )
+
+        read_file = (
+            "import json\n"
+            'with open("stage-one.json", "rb") as stream:\n'
+            "    preserved_bytes = stream.read()\n"
+            "preserved = json.loads(preserved_bytes)\n"
+        )
+        clauses = {
+            "final_result": (
+                read_file
+                + "final_result = accumulator(input_tuple[3]) + preserved['setup_value']\n"
+                + "final_result = 0\n"
+                + "marker = 'SENTINEL_CELL_SOURCE'\n"
+            ),
+            "final_read": "marker = 'SENTINEL_CELL_SOURCE'\nfinal_result = 98\n",
+            "final_verified": (
+                read_file
+                + "final_result = accumulator(input_tuple[3]) + preserved['setup_value']\n"
+                + "stage_one_verified = {'object_id': 1, 'probe': 1, 'file_sha256': 'ab'}\n"
+                + "marker = 'SENTINEL_CELL_SOURCE'\n"
+            ),
+            "final_call": (
+                read_file
+                + "final_result = preserved['setup_value'] + 58\n"
+                + "marker = 'SENTINEL_CELL_SOURCE'\n"
+            ),
+        }
+
+        class _Pump:
+            async def pump(self) -> None:
+                return None
+
+        async def open_continuation(code: str):
+            worker = P1WorkerProcess(deadline=time.monotonic() + 20)
+            await worker.start()
+            self.addAsyncCleanup(worker.close)
+            oracle = P1Oracle(worker)
+            await worker.execute_cell(P1CellRequest("setup", "setup", setup_cell()))
+            await worker.execute_cell(
+                P1CellRequest("verify", "verify", verification_cell())
+            )
+            first = oracle.verify_stage_one(worker.snapshot())
+            worker.mark_compact_checkpoint(
+                P1WorkerCheckpoint(
+                    worker.identity.sha256(),
+                    2,
+                    "a" * 64,
+                    "b" * 64,
+                    1,
+                    1,
+                    2,
+                    1024,
+                    256,
+                )
+            )
+            await worker.execute_cell(P1CellRequest("final", "final", code))
+            owned = P1OperatorResources.__new__(P1OperatorResources)
+            owned._stage_one = first
+            owned.host = _Pump()
+            owned.oracle = oracle
+            owned.worker = worker
+            owned.observe = operator._public_progress
+            return owned, worker
+
+        for step, code in clauses.items():
+            with self.subTest(step=step):
+                owned, _worker = await open_continuation(code)
+                output = io.StringIO()
+                with patch.object(operator.sys, "stderr", output):
+                    with self.assertRaises(P1OracleError) as caught:
+                        await owned.verify(
+                            P1StageMilestone("stage-two", "0" * 64, 0, 0)
+                        )
+                public = output.getvalue()
+                self.assertEqual(caught.exception.step, step)
+                self.assertEqual(str(caught.exception), "P1 oracle rejected")
+                self.assertEqual(public, f'{{"stage":"oracle.reject.{step}"}}\n')
+                self.assertNotIn("SENTINEL_CELL_SOURCE", public)
+                self.assertNotIn("stage-one.json", public)
+                self.assertNotIn("oracle.pass", public)
+
+        owned, worker = await open_continuation(
+            stage_two_cell() + "marker = 'SENTINEL_CELL_SOURCE'\n"
+        )
+        cell_sha = worker.snapshot().cells[-1].sha256()
+        output = io.StringIO()
+        with patch.object(operator.sys, "stderr", output):
+            with self.assertRaises(operator.P1OperatorError):
+                await owned.verify(P1StageMilestone("stage-two", "0" * 64, 0, 0))
+        self.assertEqual(output.getvalue(), '{"stage":"oracle.reject.effect"}\n')
+        output = io.StringIO()
+        with patch.object(operator.sys, "stderr", output):
+            await owned.verify(P1StageMilestone("stage-two", cell_sha, 0, 0))
+        public = output.getvalue()
+        self.assertEqual(public, '{"stage":"oracle.pass"}\n')
+        self.assertNotIn("SENTINEL_CELL_SOURCE", public)
 
     def test_stubborn_host_owners_are_bounded_and_real_worker_is_reaped(self):
         root = Path(__file__).resolve().parents[1]

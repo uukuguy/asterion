@@ -55,8 +55,10 @@ from asterion.applications.prime.p1.coordination import (
 from asterion.applications.prime.p1.ipython_host import P1WorkerProcess
 from asterion.applications.prime.p1.oracle import (
     P1Oracle,
+    P1OracleError,
     P1OracleReceipt,
     P1StageOneReceipt,
+    P1_ORACLE_REJECT_STEPS,
 )
 from asterion.applications.prime.p1.receipt import (
     build_native_receipt,
@@ -149,6 +151,7 @@ _PUBLIC_PROGRESS_STAGES = frozenset(
         "host2.recover",
         "journal.reopen",
         "oracle.pass",
+        "oracle.reject.effect",
         "resume.admit",
         "resume.persist",
         "runner.start",
@@ -164,7 +167,11 @@ _PUBLIC_PROGRESS_STAGES = frozenset(
         "stage2.release",
         "worker.close",
     }
-)
+) | frozenset(f"oracle.reject.{step}" for step in P1_ORACLE_REJECT_STEPS)
+
+_ORACLE_REJECT_STAGES = {
+    step: f"oracle.reject.{step}" for step in P1_ORACLE_REJECT_STEPS
+}
 
 
 def _public_progress(stage: str) -> None:
@@ -646,8 +653,17 @@ class P1OperatorResources:
         assert self._stage_one is not None
         assert self.host is not None
         await self.host.pump()
-        result = self.oracle.verify_stage_two(self.worker.snapshot(), self._stage_one)
+        try:
+            result = self.oracle.verify_stage_two(
+                self.worker.snapshot(), self._stage_one
+            )
+        except P1OracleError as error:
+            stage = _ORACLE_REJECT_STAGES.get(error.step or "")
+            if stage is not None:
+                self.observe(stage)
+            raise
         if result.stage_two_effect_sha256 != milestone.effect_sha256:
+            self.observe("oracle.reject.effect")
             raise P1OperatorError()
         self._oracle_result = result
         self.observe("oracle.pass")

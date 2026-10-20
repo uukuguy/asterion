@@ -20,9 +20,29 @@ if TYPE_CHECKING:
     from .receipt import P1CleanupReceipt
 
 
+# Closed continuation clauses. The public stage log names one of these and
+# nothing about the cell that failed it.
+P1_ORACLE_REJECT_STEPS = frozenset(
+    {
+        "checkpoint",
+        "final_call",
+        "final_read",
+        "final_result",
+        "final_verified",
+        "objects",
+        "prefix",
+        "receipt",
+        "snapshot",
+    }
+)
+
+
 class P1OracleError(ValueError):
-    def __init__(self) -> None:
+    def __init__(self, step: str | None = None) -> None:
+        if step is not None and step not in P1_ORACLE_REJECT_STEPS:
+            raise ValueError("P1 oracle step is invalid")
         super().__init__("P1 oracle rejected")
+        self.step = step
 
 
 def _digest(value: object) -> str:
@@ -233,13 +253,16 @@ class P1Oracle:
         snapshot: P1InstrumentationSnapshot,
         stage_one: P1StageOneReceipt,
     ) -> P1OracleReceipt:
-        self._validate_snapshot(snapshot, 3)
+        try:
+            self._validate_snapshot(snapshot, 3)
+        except P1OracleError:
+            raise P1OracleError("snapshot") from None
         if (
             self._first is None
             or stage_one is not self._first
             or snapshot.cells[:2] != self._prefix
         ):
-            raise P1OracleError()
+            raise P1OracleError("prefix")
         checkpoint = snapshot.checkpoint
         if (
             checkpoint is None
@@ -254,8 +277,11 @@ class P1Oracle:
             # markdown-heavy summary legitimately costs more bytes than the
             # conversation it replaces — a live run measured 8260 -> 8596 and was
             # refused here, which is why the stage-two milestone never verified.
-            raise P1OracleError()
-        self._validate_objects(snapshot.cells)
+            raise P1OracleError("checkpoint")
+        try:
+            self._validate_objects(snapshot.cells)
+        except P1OracleError:
+            raise P1OracleError("objects") from None
         final = snapshot.cells[-1]
         multiplier, offset, first_input, second_input = P1_INPUT_TUPLE
         second_value = multiplier * second_input + offset
@@ -263,13 +289,18 @@ class P1Oracle:
         if (
             type(final.final_result) is not int
             or final.final_result != expected_result
-            or final.file_reads != 1
-            or final.file_read_sha256 != (final.file_sha256,)
-            or final.stage_one_verified != self._prefix[-1].stage_one_verified
-            or (final.accumulator_id, second_input, second_value)
-            not in final.call_observations
         ):
-            raise P1OracleError()
+            raise P1OracleError("final_result")
+        if final.file_reads != 1 or final.file_read_sha256 != (final.file_sha256,):
+            raise P1OracleError("final_read")
+        if final.stage_one_verified != self._prefix[-1].stage_one_verified:
+            raise P1OracleError("final_verified")
+        if (
+            final.accumulator_id,
+            second_input,
+            second_value,
+        ) not in final.call_observations:
+            raise P1OracleError("final_call")
         if self._final is None:
             self._final = P1OracleReceipt(
                 self._identity.sha256(),
@@ -285,7 +316,7 @@ class P1Oracle:
                 checkpoint.after_context_tokens,
             )
         elif self._final.stage_two_effect_sha256 != final.sha256():
-            raise P1OracleError()
+            raise P1OracleError("receipt")
         return self._final
 
     def validates_result(self, result: P1OracleReceipt) -> bool:
