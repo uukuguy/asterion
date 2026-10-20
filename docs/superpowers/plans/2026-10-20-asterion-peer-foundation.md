@@ -8,13 +8,13 @@
 
 | ID | Status | Outcome | Depends on | Acceptance |
 |---|---|---|---|---|
-| P-PI-1 | done | One Pi process owner. Prime requests and closes sessions through `PiRpcSession`. The one-shot `pi.reference` facade uses that same owner. | Closed completion worklist | Provider-free tests. Prime launch code does not signal a process group. `PiRpcSession.force_close` reaps the child without the command lock. `pi.reference` process creation goes through `PiRpcSession`. No model run. |
+| P-PI-1 | done | One Pi process owner. Prime requests and closes sessions through `PiRpcSession`. The one-shot `pi.reference` facade uses the same `PiChildProcess`. | Closed completion worklist | Provider-free tests. Prime launch code does not signal a process group. `PiRpcSession` keeps `PiChildProcess`; `stop` and `force_close` reap through it, and `force_close` does not take the command lock. The one-shot facade uses that same spawn and reap. No model run. |
 | P-NATIVE-1 | pending | One Native provider assembles the `dci` package and the `controlled-code` package. | P-PI-1 | A provider-free assembly resolves both packages against `pi.reference`. Each package keeps its own behavior. The base does not import either package. |
 | P-CITE-1 | pending | `prime-*-native` packages cite a Prime receipt. | P-PI-1 | `prepare_prime_application` remains the Prime execution door. A citation package records media type, digest, and run identity. It does not contain a second Prime implementation. Provider-free tests. No model run. |
 
 ## Current slice
 
-`P-PI-1` is done. The one-shot facade in `src/asterion/runtimes/pi.py` starts, signals, and reaps its child through `PiChildProcess` on the base session. Event mapping, redaction, and evidence stay on the facade. `P-NATIVE-1` and `P-CITE-1` are pending and are not started.
+`P-PI-1` is done. `PiRpcSession` keeps `PiChildProcess`. `stop` and `force_close` reap only through that child. The one-shot facade in `src/asterion/runtimes/pi.py` uses the same spawn and reap. It does not create a subprocess and does not signal a process group. Event mapping, redaction, and evidence stay on the facade. `P-NATIVE-1` and `P-CITE-1` are pending and are not started.
 
 ## Boundary
 

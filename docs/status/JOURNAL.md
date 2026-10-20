@@ -5167,3 +5167,4 @@
 - 16:15 Final handoff. Showcase follow-up is closed. No preset process remains. Guest ubuntu-fusion-control is running. Local main is not pushed.
 - 17:37 Peer foundation P-PI-1 started. Forced Pi close lives on PiRpcSession. Prime launch does not signal the process [da76b733].
 - 18:26 Peer foundation P-PI-1 done. One-shot pi.reference starts and reaps through PiChildProcess. P-NATIVE-1 and P-CITE-1 stay pending [ee1e687d].
+- 19:16 Peer foundation P-PI-1 reap fix. The session keeps PiChildProcess. stop and force_close reap through it. The raw stdout reader stops at the line cap. P-NATIVE-1 and P-CITE-1 stay pending [2f5046d3].
