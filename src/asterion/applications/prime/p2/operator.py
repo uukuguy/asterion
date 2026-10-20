@@ -42,9 +42,9 @@ from asterion.capabilities.prime_programmatic_long_context_native.host import (
     P2RetrievalReceipt as _HostRetrievalReceipt,
     P2RuntimeHostError,
 )
+from asterion.applications.prime.runtime_receipt import consume_prime_receipt
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
-from asterion.runtime.host import CancellationSignal
-from asterion.runner.composed import run_composed_application
+from asterion.runtime.host import CancellationSignal, RunRequest
 
 
 _P2_CORPUS_ENV = "ASTERION_PRIME_P2_CORPUS"
@@ -283,21 +283,20 @@ async def _invoke_composed(resources: P2OperatorResources) -> P2PublicResult:
             host_services,
         )
     )
-    run_result = await run_composed_application(
-        assembly.plan,
-        implementations=tuple(
-            (item.capability_ref, item.implementation)
-            for item in package.implementations
-        ),
-        runtime=runtime,
-        run_id=resources.run_id,
-        input_text="fixed-small-verification",
-        host_services=host_services,
-    )
-    if not run_result.artifacts:
+    try:
+        receipt_sha = await consume_prime_receipt(
+            runtime,
+            RunRequest(
+                resources.run_id,
+                "fixed-small-verification",
+                ("prime.tool.ipython",),
+                600_000,
+            ),
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
         return P2PublicResult(resources.run_id, "protocol-failure")
-    artifact = run_result.artifacts[0]
-    receipt_sha = artifact["value"]["receipt_sha256"]
     return P2PublicResult(
         run_id=resources.run_id,
         status="completed",

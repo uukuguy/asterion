@@ -17,6 +17,9 @@ from unittest.mock import patch
 
 from asterion.applications.prime.p4 import live, live_entry, operator
 from asterion.applications.prime.p4.runtime_binding import _P4RuntimeSession
+from asterion.capabilities.prime_long_session_continuity_native.provider import (
+    P4_INPUT_PRESET,
+)
 from asterion.runtime.host import RunRequest
 from asterion.agents.prime import application
 from asterion.agents.prime.application import PrimeApplicationSpec, PrimeOperatorContext, prepare_prime_application
@@ -193,11 +196,19 @@ class TestP4Live(unittest.IsolatedAsyncioTestCase):
             return await live.run_live_round(mode=mode, private_root=self.root, prime=prime, **kwargs)
 
     async def test_new_session_consumes_prior_artifact_through_composed_path(self):
-        with patch.object(operator, "run_composed_application", wraps=operator.run_composed_application) as composed:
+        runs = []
+        original_run = _P4RuntimeSession.run
+
+        async def spy(self, request, *, signal=None):
+            runs.append(request.input_text)
+            async for event in original_run(self, request, signal=signal):
+                yield event
+
+        with patch.object(_P4RuntimeSession, "run", spy):
             commit = await self.run_round("commit")
             blobs = {path.name: path.read_bytes() for path in self.root.glob("transcript-*.blob")}
             recover = await self.run_round("recover")
-        self.assertEqual(composed.await_count, 2)
+        self.assertEqual(runs, [P4_INPUT_PRESET, P4_INPUT_PRESET])
         self.assertEqual((commit.status, recover.status), ("committed", "recovered"))
         self.assertEqual(recover.new_generation, 2)
         self.assertEqual(recover.prior_checkpoint_sha256, commit.checkpoint_sha256)

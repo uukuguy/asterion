@@ -26,8 +26,6 @@ import subprocess
 import sys
 from types import MappingProxyType
 
-from asterion.assembly.protocol import resolve_assembly
-from asterion.capabilities.catalog import discover_capabilities
 from asterion.agents.prime.state import (
     PrimeBackendIdentity,
     PrimeCheckpoint,
@@ -51,12 +49,12 @@ from asterion.applications.prime.p4.runtime_binding import (
     build_p4_runtime,
 )
 from asterion.applications.prime.services import ContinuityStoreHostService
+from asterion.applications.prime.runtime_receipt import consume_prime_receipt
 from asterion.capabilities.prime_long_session_continuity_native.provider import (
     P4_INPUT_PRESET,
-    create_prime_long_session_continuity_native_package,
 )
-from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryContext
+from asterion.runtime.host import RunRequest
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -483,7 +481,6 @@ async def _invoke_composed_round(
     preflight: _Preflight, *, host: _OperatorP4RuntimeHost | None = None,
     signal=None,
 ) -> P4PublicResult:
-    package = create_prime_long_session_continuity_native_package()
     assembly_path = Path(__file__).resolve().parent.parent / "assemblies/prime-long-session-continuity.json"
     if host is None:
         host = _OperatorP4RuntimeHost(preflight)
@@ -506,25 +503,18 @@ async def _invoke_composed_round(
                 services,
             )
         )
-        plan = resolve_assembly(
-            json.loads(assembly_path.read_text()),
-            catalog=discover_capabilities(package.catalog_roots),
-            runtime_manifest=runtime.manifest.to_mapping(),
-        )
-        result = await run_composed_application(
-            plan,
-            implementations=tuple((b.capability_ref, b.implementation) for b in package.implementations),
-            runtime=runtime,
-            run_id="p4-" + preflight.mode + "-" + secrets.token_hex(8),
-            input_text=P4_INPUT_PRESET,
-            host_services=services,
-            signal=signal,
+        digest = await consume_prime_receipt(
+            runtime,
+            RunRequest(
+                "p4-" + preflight.mode + "-" + secrets.token_hex(8),
+                P4_INPUT_PRESET,
+                ("prime.tool.ipython",),
+                120_000,
+            ),
+            signal,
         )
         public = host.public_result()
-        if (
-            len(result.artifacts) != 1
-            or result.artifacts[0]["value"]["receipt_sha256"] != public.receipt_sha256
-        ):
+        if digest != public.receipt_sha256:
             raise P4OperatorError()
         return public
     finally:

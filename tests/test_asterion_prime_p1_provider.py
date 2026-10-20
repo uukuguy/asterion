@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
 import json
 from pathlib import Path
 import tomllib
@@ -22,8 +21,10 @@ from asterion.capabilities.execution import (
     CapabilityExecutionError,
     CapabilityInvocation,
 )
-from asterion.capabilities.prime_ipython_coding_native.provider import CAPABILITY_REF
-from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
+from asterion.capabilities.prime_ipython_coding_native.provider import (
+    CAPABILITY_REF,
+    P1_RECEIPT_MEDIA_TYPE,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,58 +48,17 @@ P1_HOST_CAPABILITIES = (
 
 class _Runtime:
     def __init__(self) -> None:
-        self.requests: list[RunRequest] = []
+        self.calls = 0
 
-    @property
-    def manifest(self) -> RuntimeManifest:
-        return RuntimeManifest("asterion.prime", ("prime.tool.ipython",))
-
-    async def run(
-        self, request: RunRequest, *, signal: object = None
-    ) -> AsyncIterator[RunEvent]:
-        del signal
-        self.requests.append(request)
-        yield RunEvent(
-            request.run_id,
-            1,
-            "run.started",
-            {"capabilities": ["prime.tool.ipython"]},
-        )
-        yield RunEvent(
-            request.run_id,
-            2,
-            "artifact.created",
-            {
-                "artifact": {
-                    "artifact_id": "prime.p1-native.receipt",
-                    "kind": "p1-native",
-                    "media_type": "application/vnd.asterion.prime.p1-native-receipt+json",
-                    "sha256": "a" * 64,
-                }
-            },
-        )
-        yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+    async def run(self, request, signal=None):
+        del request, signal
+        self.calls += 1
+        raise AssertionError("citation package executed Prime")
+        yield
 
 
-class _CancelledAfterUsageRuntime(_Runtime):
-    async def run(
-        self, request: RunRequest, *, signal: object = None
-    ) -> AsyncIterator[RunEvent]:
-        del signal
-        self.requests.append(request)
-        yield RunEvent(
-            request.run_id,
-            1,
-            "run.started",
-            {"capabilities": ["prime.tool.ipython"]},
-        )
-        yield RunEvent(
-            request.run_id,
-            2,
-            "usage.reported",
-            {"input_tokens": 11, "output_tokens": 7},
-        )
-        yield RunEvent(request.run_id, 3, "run.completed", {"status": "cancelled"})
+class _Cancelled:
+    cancelled = True
 
 
 class TestAsterionPrimeP1Provider(unittest.TestCase):
@@ -127,11 +87,21 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
             ),
         )
 
-    def test_capability_accepts_only_literal_preset_and_projects_digest(self) -> None:
+    def test_capability_records_a_citation_and_rejects_the_old_preset(self) -> None:
         package = create_prime_ipython_coding_native_package()
         implementation = package.implementations[0].implementation
         manifest = json.loads(CAPABILITY.read_text(encoding="utf-8"))
         runtime = _Runtime()
+        digest = "ab" * 32
+        citation = json.dumps(
+            {
+                "media_type": P1_RECEIPT_MEDIA_TYPE,
+                "run_id": "p1-capability-test",
+                "sha256": digest,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
         result = asyncio.run(
             implementation.execute(
@@ -139,19 +109,22 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                     capability_ref=CAPABILITY_REF,
                     manifest=manifest,
                     run_id="p1-capability-test",
-                    input_text="fixed-small-verification",
+                    input_text=citation,
                     upstream_artifacts=(),
                     runtime=runtime,
                     host_services={},
                 )
             )
         )
-        self.assertEqual(len(result.artifacts), 1)
-        value = result.artifacts[0]["value"]
-        self.assertIsInstance(value, Mapping)
-        assert isinstance(value, Mapping)
-        self.assertEqual(value["receipt_sha256"], "a" * 64)
-        self.assertEqual(runtime.requests[0].deadline_ms, 600_000)
+        self.assertEqual(runtime.calls, 0)
+        self.assertEqual(
+            result.artifacts[0]["value"],
+            {
+                "media_type": P1_RECEIPT_MEDIA_TYPE,
+                "run_id": "p1-capability-test",
+                "sha256": digest,
+            },
+        )
 
         with self.assertRaises(CapabilityExecutionError):
             asyncio.run(
@@ -160,20 +133,29 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                         capability_ref=CAPABILITY_REF,
                         manifest=manifest,
                         run_id="p1-capability-invalid",
-                        input_text="not-the-preset",
+                        input_text="fixed-small-verification",
                         upstream_artifacts=(),
                         runtime=runtime,
                         host_services={},
                     )
                 )
             )
-        self.assertEqual(len(runtime.requests), 1)
+        self.assertEqual(runtime.calls, 0)
 
-    def test_capability_preserves_cancellation_after_committed_usage(self) -> None:
+    def test_cancelled_citation_does_not_execute_prime(self) -> None:
         package = create_prime_ipython_coding_native_package()
         implementation = package.implementations[0].implementation
         manifest = json.loads(CAPABILITY.read_text(encoding="utf-8"))
-        runtime = _CancelledAfterUsageRuntime()
+        runtime = _Runtime()
+        citation = json.dumps(
+            {
+                "media_type": P1_RECEIPT_MEDIA_TYPE,
+                "run_id": "p1-capability-cancelled",
+                "sha256": "cd" * 32,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
 
         with self.assertRaises(asyncio.CancelledError):
             asyncio.run(
@@ -182,13 +164,15 @@ class TestAsterionPrimeP1Provider(unittest.TestCase):
                         capability_ref=CAPABILITY_REF,
                         manifest=manifest,
                         run_id="p1-capability-cancelled",
-                        input_text="fixed-small-verification",
+                        input_text=citation,
                         upstream_artifacts=(),
                         runtime=runtime,
                         host_services={},
+                        signal=_Cancelled(),
                     )
                 )
             )
+        self.assertEqual(runtime.calls, 0)
 
     def test_provider_publishes_all_seven_applications(self) -> None:
         # prime.ipython-coding returns to the public list together with its

@@ -40,11 +40,8 @@ def create_prime_recursive_workflow_native_package() -> InstalledCapabilityPacka
                 CAPABILITY_REF,
                 PrimeNativeReceiptImplementation(
                     CAPABILITY_REF,
-                    P3_INPUT_PRESET,
                     P3_ARTIFACT_ID,
                     P3_RECEIPT_MEDIA_TYPE,
-                    "p3-native",
-                    60_000,
                 ),
             ),
         ),

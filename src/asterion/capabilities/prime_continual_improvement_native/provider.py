@@ -39,11 +39,8 @@ def create_prime_continual_improvement_native_package() -> InstalledCapabilityPa
                 CAPABILITY_REF,
                 PrimeNativeReceiptImplementation(
                     CAPABILITY_REF,
-                    P6_INPUT_PRESET,
                     P6_ARTIFACT_ID,
                     P6_RECEIPT_MEDIA_TYPE,
-                    "p6-native",
-                    120_000,
                 ),
             ),
         ),

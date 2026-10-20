@@ -39,11 +39,8 @@ def create_prime_bounded_autonomy_native_package() -> InstalledCapabilityPackage
                 CAPABILITY_REF,
                 PrimeNativeReceiptImplementation(
                     CAPABILITY_REF,
-                    P5_INPUT_PRESET,
                     P5_ARTIFACT_ID,
                     P5_RECEIPT_MEDIA_TYPE,
-                    "p5-native",
-                    120_000,
                 ),
             ),
         ),

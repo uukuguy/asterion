@@ -1,10 +1,10 @@
-"""Validate a selected Prime runtime round before exposing its receipt."""
+"""Record a Prime receipt citation without executing Prime."""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
 
 from asterion.capabilities.catalog import CapabilityRef
@@ -13,92 +13,63 @@ from asterion.capabilities.execution import (
     CapabilityExecutionResult,
     CapabilityInvocation,
 )
-from asterion.runtime.host import RunRequest, parse_event_stream
 
 
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
+_CITATION_KEYS = frozenset({"media_type", "run_id", "sha256"})
 
 
 @dataclass(frozen=True, slots=True)
 class PrimeNativeReceiptImplementation:
     capability_ref: CapabilityRef
-    input_preset: str
     artifact_id: str
     media_type: str
-    kind: str
-    deadline_ms: int
 
     async def execute(
         self, invocation: CapabilityInvocation
     ) -> CapabilityExecutionResult:
-        if (
-            invocation.capability_ref != self.capability_ref
-            or invocation.runtime.manifest.runtime_id != "asterion.prime"
-            or invocation.input_text != self.input_preset
-        ):
-            raise CapabilityExecutionError("Prime native runtime is unavailable")
-        events = tuple(
-            [
-                event
-                async for event in invocation.runtime.run(
-                    RunRequest(
-                        run_id=invocation.run_id,
-                        input_text=invocation.input_text,
-                        requested_capabilities=(),
-                        deadline_ms=self.deadline_ms,
-                    ),
-                    signal=invocation.signal,
-                )
-            ]
-        )
-        try:
-            stream = parse_event_stream(event.to_mapping() for event in events)
-        except Exception:
-            raise CapabilityExecutionError("Prime native runtime result is invalid") from None
-        if any(event.run_id != invocation.run_id for event in stream):
-            raise CapabilityExecutionError("Prime native runtime result is invalid")
-        if (
-            len(stream) == 2
-            and tuple(event.type for event in stream) == ("run.started", "run.completed")
-            and stream[0].payload == {"capabilities": []}
-            and stream[1].payload == {"status": "cancelled"}
-        ):
+        if invocation.signal is not None and invocation.signal.cancelled:
             raise asyncio.CancelledError()
-        if (
-            len(stream) != 3
-            or tuple(event.type for event in stream)
-            != ("run.started", "artifact.created", "run.completed")
-            or stream[0].payload != {"capabilities": []}
-            or stream[2].payload != {"status": "completed"}
-        ):
-            raise CapabilityExecutionError("Prime native runtime did not complete")
-        artifact = stream[1].payload.get("artifact")
-        if (
-            not isinstance(artifact, Mapping)
-            or artifact
-            != {
-                "artifact_id": self.artifact_id,
-                "kind": self.kind,
-                "media_type": self.media_type,
-                "sha256": artifact.get("sha256"),
-            }
-            or _DIGEST.fullmatch(str(artifact.get("sha256"))) is None
-        ):
-            raise CapabilityExecutionError("Prime native runtime result is invalid")
+        if invocation.capability_ref != self.capability_ref:
+            raise CapabilityExecutionError("Prime receipt citation is invalid")
+        citation = _citation(invocation.input_text, invocation.run_id, self.media_type)
         return CapabilityExecutionResult(
             events=(),
             artifacts=(
                 {
                     "artifact_id": self.artifact_id,
                     "media_type": self.media_type,
-                    "value": {
-                        "scope": self.kind,
-                        "promotion": "unpromoted",
-                        "receipt_sha256": artifact["sha256"],
-                    },
+                    "value": citation,
                 },
             ),
         )
+
+
+def _citation(text: str, run_id: str, media_type: str) -> dict[str, str]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        raise CapabilityExecutionError("Prime receipt citation is invalid") from None
+    if (
+        type(payload) is not dict
+        or set(payload) != _CITATION_KEYS
+        or any(type(payload[key]) is not str for key in _CITATION_KEYS)
+    ):
+        raise CapabilityExecutionError("Prime receipt citation is invalid")
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    if (
+        canonical != text
+        or payload["media_type"] != media_type
+        or payload["run_id"] != run_id
+        or payload["run_id"] == ""
+        or _DIGEST.fullmatch(payload["sha256"]) is None
+    ):
+        raise CapabilityExecutionError("Prime receipt citation is invalid")
+    return {
+        "media_type": payload["media_type"],
+        "run_id": payload["run_id"],
+        "sha256": payload["sha256"],
+    }
 
 
 __all__ = ("PrimeNativeReceiptImplementation",)

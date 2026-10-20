@@ -20,7 +20,7 @@ from asterion.capabilities.prime_bounded_autonomy_native.provider import (
     create_prime_bounded_autonomy_native_package,
 )
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryRegistry
-from asterion.runner.composed import run_composed_application
+from asterion.runtime.host import RunRequest
 
 
 class Signal:
@@ -85,38 +85,40 @@ class PrimeP5ComposedExecutionTests(unittest.IsolatedAsyncioTestCase):
                 host_services=services,
             )
         )
-        return await run_composed_application(
-            plan,
-            implementations=tuple(
-                (b.capability_ref, b.implementation) for b in package.implementations
-            ),
-            runtime=runtime,
-            run_id="p5-composed-test",
-            input_text="fixed-bounded-autonomy",
-            host_services=services,
-            signal=signal,
-        )
+        return [
+            event
+            async for event in runtime.run(
+                RunRequest(
+                    "p5-composed-test",
+                    "fixed-bounded-autonomy",
+                    (),
+                    120_000,
+                ),
+                signal=signal,
+            )
+        ]
 
     async def test_success_invokes_host_and_returns_one_receipt(self):
         host = RecordingP5Host()
-        result = await self.run_p5(host)
+        events = await self.run_p5(host)
         self.assertEqual(len(host.calls), 1)
-        self.assertEqual(len(result.artifacts), 1)
+        self.assertEqual(events[-1].payload, {"status": "completed"})
         self.assertEqual(
-            result.artifacts[0]["value"]["receipt_sha256"], host.receipt.receipt_sha256
+            events[1].payload["artifact"]["sha256"], host.receipt.receipt_sha256
         )
 
     async def test_stopped_host_cannot_return_successful_receipt(self):
-        with self.assertRaises(Exception):
-            await self.run_p5(RecordingP5Host("no-progress"))
+        events = await self.run_p5(RecordingP5Host("no-progress"))
+        self.assertEqual(events[-1].type, "run.failed")
+        self.assertNotIn("artifact.created", [event.type for event in events])
 
     async def test_pre_cancelled_has_no_host_call(self):
         host = RecordingP5Host()
         signal = Signal()
         signal.cancelled = True
-        with self.assertRaisesRegex(Exception, "cancelled"):
-            await self.run_p5(host, signal)
+        events = await self.run_p5(host, signal)
         self.assertEqual(host.calls, [])
+        self.assertEqual(events[-1].payload, {"status": "cancelled"})
 
 
 class RecordingP6Host:
@@ -280,19 +282,20 @@ class PrimeP6ComposedExecutionTests(unittest.IsolatedAsyncioTestCase):
                 host_services=services,
             )
         )
-        result = await run_composed_application(
-            plan,
-            implementations=tuple(
-                (b.capability_ref, b.implementation) for b in package.implementations
-            ),
-            runtime=runtime,
-            run_id="p6-composed-test",
-            input_text="fixed-continual-improvement",
-            host_services=services,
-        )
+        events = [
+            event
+            async for event in runtime.run(
+                RunRequest(
+                    "p6-composed-test",
+                    "fixed-continual-improvement",
+                    (),
+                    120_000,
+                )
+            )
+        ]
         self.assertEqual(len(host.calls), 1)
         self.assertEqual(
-            result.artifacts[0]["value"]["receipt_sha256"], host.receipt.receipt_sha256
+            events[1].payload["artifact"]["sha256"], host.receipt.receipt_sha256
         )
 
     async def test_real_candidate_workflow_oracle_and_rollback_control_result(self):
@@ -370,17 +373,22 @@ class PrimeP6ComposedExecutionTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual(loop.rollback_invocation_count, 0)
                     self.assertIsNone(host.receipt)
 
-    async def test_operator_uses_public_composed_runner(self):
+    async def test_operator_runs_the_prime_runtime(self):
         from unittest.mock import patch
         from asterion.applications.prime.p6.operator import drive_preserved_for_test
-        from asterion.runner.composed import run_composed_application
+        from asterion.applications.prime.p6.runtime_binding import _P6RuntimeSession
 
-        with patch(
-            "asterion.runner.composed.run_composed_application",
-            wraps=run_composed_application,
-        ) as composed:
+        calls = []
+        original = _P6RuntimeSession.run
+
+        async def spy(self, request, *, signal=None):
+            calls.append((request.input_text, request.deadline_ms))
+            async for event in original(self, request, signal=signal):
+                yield event
+
+        with patch.object(_P6RuntimeSession, "run", spy):
             result = await drive_preserved_for_test(root_run_id="p6-composed-operator")
-        self.assertEqual(composed.call_count, 1)
+        self.assertEqual(calls, [("fixed-continual-improvement", 120_000)])
         self.assertEqual(result.terminal_outcome, "preserved")
 
     async def test_cancelled_admitted_candidate_is_reversed_or_requires_recovery(self):

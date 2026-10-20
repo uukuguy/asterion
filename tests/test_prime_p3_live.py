@@ -12,6 +12,7 @@ import unittest
 from unittest.mock import patch
 
 from asterion.applications.prime.p3 import live, operator
+from asterion.applications.prime.p3.runtime_binding import _P3RuntimeSession
 from asterion.agents.prime import application
 from asterion.agents.prime.application import PrimeApplicationSpec, PrimeOperatorContext, prepare_prime_application
 from asterion.agents.prime.deadline import TaskDeadline
@@ -129,12 +130,20 @@ class TestP3Live(unittest.IsolatedAsyncioTestCase):
             self.events.append("admit")
             return await original(**kwargs)
 
+        runs = []
+        original_run = _P3RuntimeSession.run
+
+        async def spy(self, request, *, signal=None):
+            runs.append(request.input_text)
+            async for event in original_run(self, request, signal=signal):
+                yield event
+
         with patch.object(runner, "admit_child", side_effect=admit), patch.object(
             runner, "record_child_cost", wraps=runner.record_child_cost
-        ) as cost, patch.object(operator, "run_composed_application", wraps=operator.run_composed_application) as composed:
+        ) as cost, patch.object(_P3RuntimeSession, "run", spy):
             result = await self.run_live(child_runner=runner)
         self.assertEqual(self.events[0], "admit")
-        self.assertEqual(composed.await_count, 1)
+        self.assertEqual(runs, ["fixed-recursive-workflow"])
         self.assertEqual(result.status, "completed")
         self.assertEqual(result.model_call_count, 2)
         self.assertEqual(result.cost_micros, 108)

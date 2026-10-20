@@ -637,10 +637,10 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
                     patch.object(operator, "_CLEANUP_SECONDS", 0.1),
                     patch.object(
                         operator,
-                        "run_composed_application",
+                        "consume_prime_receipt",
                         hang
                         if owner == "runner"
-                        else operator.run_composed_application,
+                        else operator.consume_prime_receipt,
                     ),
                 ):
                     task = asyncio.create_task(
@@ -668,7 +668,7 @@ class TestP1Operator(unittest.IsolatedAsyncioTestCase):
             raise RuntimeError("SENTINEL_PRIVATE_RUNNER")
 
         with patch(
-            "asterion.applications.prime.p1.operator.run_composed_application", fail
+            "asterion.applications.prime.p1.operator.consume_prime_receipt", fail
         ):
             result = await asyncio.wait_for(run_fixed_small_verification(resources), 2)
         self.assertEqual(result.status, "protocol-failure")

@@ -263,13 +263,9 @@ async def _run_owned_candidate(
         P6_RUNTIME_OPTIONS,
         build_p6_runtime,
     )
-    from asterion.capabilities.prime_continual_improvement_native.provider import (
-        create_prime_continual_improvement_native_package,
-    )
-    from asterion.assembly.protocol import resolve_assembly
-    from asterion.capabilities.catalog import discover_capabilities
+    from asterion.applications.prime.runtime_receipt import consume_prime_receipt
     from asterion.runtime.factory import RuntimeFactoryContext
-    from asterion.runner.composed import run_composed_application
+    from asterion.runtime.host import RunRequest
 
     if (
         type(root_run_id) is not str or not root_run_id
@@ -370,7 +366,6 @@ async def _run_owned_candidate(
     host = _ComposedCandidateHost(
         resources, loop, coordinator, workflow=workflow, task_deadline=prime.task_deadline,
     )
-    package = create_prime_continual_improvement_native_package()
     assembly_path = (Path(__file__).resolve().parent.parent
                      / "assemblies/prime-continual-improvement.json")
     services = {
@@ -391,30 +386,15 @@ async def _run_owned_candidate(
             host_services=services,
         )
     )
-    plan = resolve_assembly(
-        json.loads(assembly_path.read_text()),
-        catalog=discover_capabilities(package.catalog_roots),
-        runtime_manifest=runtime.manifest.to_mapping(),
-    )
+    if signal.cancelled:
+        raise P6OperatorError()
     try:
-        result = await run_composed_application(
-            plan,
-            implementations=tuple(
-                (binding.capability_ref, binding.implementation)
-                for binding in package.implementations
-            ),
-            runtime=runtime,
-            run_id=root_run_id,
-            input_text="fixed-continual-improvement",
-            host_services=services,
-            signal=signal,
+        digest = await consume_prime_receipt(
+            runtime,
+            RunRequest(root_run_id, "fixed-continual-improvement", (), 120_000),
+            signal,
         )
-        if (
-            host.receipt is None
-            or len(result.artifacts) != 1
-            or result.artifacts[0]["value"]["receipt_sha256"]
-            != host.receipt.receipt_sha256
-        ):
+        if host.receipt is None or digest != host.receipt.receipt_sha256:
             raise P6OperatorError()
         status = "completed"
     except Exception:

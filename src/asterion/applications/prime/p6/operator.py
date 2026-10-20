@@ -845,17 +845,13 @@ class _ComposedCandidateHost:
 
 
 async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult:
-    from asterion.assembly.protocol import resolve_assembly
-    from asterion.capabilities.catalog import discover_capabilities
     from asterion.applications.prime.p6.runtime_binding import (
         build_p6_runtime,
         P6_RUNTIME_OPTIONS,
     )
-    from asterion.capabilities.prime_continual_improvement_native.provider import (
-        create_prime_continual_improvement_native_package,
-    )
+    from asterion.applications.prime.runtime_receipt import consume_prime_receipt
     from asterion.runtime.factory import RuntimeFactoryContext
-    from asterion.runner.composed import run_composed_application
+    from asterion.runtime.host import RunRequest
 
     loop, coordinator = await _open_candidate_store_for_run(
         scope=resources.scope,
@@ -863,7 +859,6 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
         private_store=MemoryHarnessPrivateRevisionStore(),
     )
     host = _ComposedCandidateHost(resources, loop, coordinator)
-    package = create_prime_continual_improvement_native_package()
     assembly_path = (Path(__file__).resolve().parent.parent
                      / "assemblies/prime-continual-improvement.json")
     services = {
@@ -884,27 +879,17 @@ async def _drive_preserved_path(resources: _OperatorResources) -> P6PublicResult
             host_services=services,
         )
     )
-    plan = resolve_assembly(
-        json.loads(assembly_path.read_text()),
-        catalog=discover_capabilities(package.catalog_roots),
-        runtime_manifest=runtime.manifest.to_mapping(),
-    )
-    result = await run_composed_application(
-        plan,
-        implementations=tuple(
-            (b.capability_ref, b.implementation) for b in package.implementations
+    digest = await consume_prime_receipt(
+        runtime,
+        RunRequest(
+            resources.root_run_id,
+            "fixed-continual-improvement",
+            (),
+            120_000,
         ),
-        runtime=runtime,
-        run_id=resources.root_run_id,
-        input_text="fixed-continual-improvement",
-        host_services=services,
-        signal=_NeverCancelled(),
+        _NeverCancelled(),
     )
-    if (
-        host.receipt is None
-        or len(result.artifacts) != 1
-        or result.artifacts[0]["value"]["receipt_sha256"] != host.receipt.receipt_sha256
-    ):
+    if host.receipt is None or digest != host.receipt.receipt_sha256:
         raise P6OperatorError()
     return P6PublicResult(status="completed", **asdict(host.receipt))
 

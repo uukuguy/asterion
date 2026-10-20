@@ -10,7 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.applications.prime.p3 import operator
-from asterion.runner.application import ApplicationRunError
+from asterion.applications.prime.p3.operator import P3OperatorError
 from asterion.applications.prime.p3.runtime_binding import (
     P3_RUNTIME_OPTIONS,
     _P3RuntimeSession,
@@ -89,9 +89,9 @@ class PrimeP3ComposedRuntimeTests(unittest.IsolatedAsyncioTestCase):
                 operator._Preflight(root, Path(sys.executable), root / "private", "success", None)
             )
             with patch.object(operator, "_drive_success", side_effect=RuntimeError("SENTINEL")):
-                with self.assertRaises(ApplicationRunError) as raised:
+                with self.assertRaises(P3OperatorError) as raised:
                     await operator._invoke_composed_success(resources)
-            self.assertEqual(str(raised.exception), "application capability execution failed")
+            self.assertEqual(str(raised.exception), "P3 operator is unavailable")
             self.assertNotIn("SENTINEL", str(raised.exception))
 
     async def test_cancellation_after_host_work_does_not_sign_completion(self) -> None:

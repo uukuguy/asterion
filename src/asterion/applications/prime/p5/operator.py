@@ -491,20 +491,15 @@ class _ComposedLoopHost:
 
 
 async def _run_composed_loop(loop, resources, signal=None, prime=None):
-    from asterion.assembly.protocol import resolve_assembly
-    from asterion.capabilities.catalog import discover_capabilities
     from asterion.applications.prime.p5.runtime_binding import (
         build_p5_runtime,
         P5_RUNTIME_OPTIONS,
     )
-    from asterion.capabilities.prime_bounded_autonomy_native.provider import (
-        create_prime_bounded_autonomy_native_package,
-    )
+    from asterion.applications.prime.runtime_receipt import consume_prime_receipt
     from asterion.runtime.factory import RuntimeFactoryContext
-    from asterion.runner.composed import run_composed_application
+    from asterion.runtime.host import RunRequest
 
     host = _ComposedLoopHost(loop, resources, prime)
-    package = create_prime_bounded_autonomy_native_package()
     assembly_path = Path(__file__).resolve().parent.parent / "assemblies/prime-bounded-autonomy.json"
     services = {
         "prime.ipython": loop,
@@ -524,27 +519,17 @@ async def _run_composed_loop(loop, resources, signal=None, prime=None):
             host_services=services,
         )
     )
-    plan = resolve_assembly(
-        json.loads(assembly_path.read_text()),
-        catalog=discover_capabilities(package.catalog_roots),
-        runtime_manifest=runtime.manifest.to_mapping(),
-    )
-    result = await run_composed_application(
-        plan,
-        implementations=tuple(
-            (b.capability_ref, b.implementation) for b in package.implementations
+    digest = await consume_prime_receipt(
+        runtime,
+        RunRequest(
+            resources.root_run_id,
+            "fixed-bounded-autonomy",
+            (),
+            120_000,
         ),
-        runtime=runtime,
-        run_id=resources.root_run_id,
-        input_text="fixed-bounded-autonomy",
-        host_services=services,
-        signal=signal if signal is not None else _NeverCancelled(),
+        signal if signal is not None else _NeverCancelled(),
     )
-    if (
-        host.receipt is None
-        or len(result.artifacts) != 1
-        or result.artifacts[0]["value"]["receipt_sha256"] != host.receipt.receipt_sha256
-    ):
+    if host.receipt is None or digest != host.receipt.receipt_sha256:
         raise P5OperatorError()
     return host.receipt
 

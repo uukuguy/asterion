@@ -163,12 +163,23 @@ class P4OperatorEndToEnd(unittest.TestCase):
             finally:
                 store.close()
 
-    def test_operator_round_uses_composed_provider_route(self) -> None:
+    def test_operator_round_runs_the_prime_runtime(self) -> None:
         import asyncio
         from unittest.mock import patch
 
         from asterion.applications.prime.p4 import operator
-        from asterion.runner.composed import run_composed_application
+        from asterion.applications.prime.p4.runtime_binding import _P4RuntimeSession
+        from asterion.capabilities.prime_long_session_continuity_native.provider import (
+            P4_INPUT_PRESET,
+        )
+
+        runs = []
+        original_run = _P4RuntimeSession.run
+
+        async def spy(self, request, *, signal=None):
+            runs.append(request.input_text)
+            async for event in original_run(self, request, signal=signal):
+                yield event
 
         with __import__("tempfile").TemporaryDirectory() as tmp:
             environment = {
@@ -178,16 +189,11 @@ class P4OperatorEndToEnd(unittest.TestCase):
             }
             with (
                 patch.dict(os.environ, environment),
-                patch.object(
-                    operator,
-                    "run_composed_application",
-                    wraps=run_composed_application,
-                    create=True,
-                ) as composed,
+                patch.object(_P4RuntimeSession, "run", spy),
             ):
                 result = asyncio.run(operator._run_async())
             self.assertEqual(result.status, "committed")
-            self.assertEqual(composed.call_count, 1)
+            self.assertEqual(runs, [P4_INPUT_PRESET])
 
 
 def _fixture_path() -> Path:

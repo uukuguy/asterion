@@ -105,10 +105,9 @@ from asterion.control.session_context import (
 )
 from asterion.control.system import resolve_agent_system
 from asterion.applications.prime.p7 import live
-from asterion.runner.application import ApplicationRunResult
-from asterion.runner.composed import run_composed_application
+from asterion.applications.prime.runtime_receipt import consume_prime_receipt
 from asterion.runtime.factory import RuntimeFactoryRegistry
-from asterion.runtime.host import CancellationSignal
+from asterion.runtime.host import CancellationSignal, RunRequest
 from asterion.agents.prime.application import (
     PrimeApplication, PrimeApplicationSpec, PrimeOperatorContext, PrimeBackendSpec,
     PrimeToolModuleArtifact, prepare_prime_application,
@@ -771,19 +770,20 @@ async def run_fixed_small_verification(
         raise P1OperatorError()
     resources._consumed = True
     coordination = resources.coordination
-    runner: asyncio.Task[ApplicationRunResult] | None = None
+    runner: asyncio.Task[str] | None = None
     protocol_failure = False
     try:
         await coordination.effect(resources.open(), run_id=resources.run_id)
         resources.observe("runner.start")
         runner = asyncio.create_task(
-            run_composed_application(
-                resources.plan,
-                implementations=resources.implementations,
-                runtime=resources.runtime,
-                run_id=resources.run_id,
-                input_text="fixed-small-verification",
-                host_services=resources.host_services,
+            consume_prime_receipt(
+                resources.runtime,
+                RunRequest(
+                    resources.run_id,
+                    "fixed-small-verification",
+                    ("prime.tool.ipython",),
+                    600_000,
+                ),
             )
         )
         runner.add_done_callback(consume_task_result)

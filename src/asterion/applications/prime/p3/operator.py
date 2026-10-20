@@ -35,8 +35,6 @@ import shutil
 import subprocess
 import sys
 
-from asterion.assembly.protocol import resolve_assembly
-from asterion.capabilities.catalog import discover_capabilities
 from asterion.agents.prime.state import PrimeBackendIdentity
 from asterion.agents.prime.store import private_root_identity
 from asterion.applications.prime.p3.oracle import P3Oracle
@@ -51,9 +49,9 @@ from asterion.applications.prime.p3.runtime_binding import (
     P3_RUNTIME_OPTIONS,
     build_p3_runtime,
 )
+from asterion.applications.prime.runtime_receipt import consume_prime_receipt
 from asterion.capabilities.prime_recursive_workflow_native.provider import (
     P3_INPUT_PRESET,
-    create_prime_recursive_workflow_native_package,
 )
 from asterion.applications.prime.services import (
     ChildAdmissionRefused,
@@ -64,9 +62,8 @@ from asterion.services.progress import NOOP_HOST_PROGRESS_REPORTER
 from asterion.services.diagnostics import DiagnosticSink, capture_failure
 from asterion.services.presentation import NOOP_HOST_PRESENTATION_SINK
 from asterion.services.registry import HostServiceFactoryContext
-from asterion.runner.composed import run_composed_application
 from asterion.runtime.factory import RuntimeFactoryContext
-from asterion.runtime.host import CancellationSignal
+from asterion.runtime.host import CancellationSignal, RunRequest
 
 
 _OPERATOR_ROOT_ENV = "ASTERION_PRIME_OPERATOR_ROOT"
@@ -720,7 +717,6 @@ async def _invoke_composed_success(
     resources: _OperatorResources, signal: CancellationSignal | None = None,
     *, session_backend: _OperatorP3RuntimeHost | None = None,
 ) -> P3PublicResult:
-    package = create_prime_recursive_workflow_native_package()
     assembly_path = Path(__file__).resolve().parent.parent / "assemblies/prime-recursive-workflow.json"
     if session_backend is None:
         session_backend = _OperatorP3RuntimeHost(resources)
@@ -742,26 +738,23 @@ async def _invoke_composed_success(
             host_services,
         )
     )
-    plan = resolve_assembly(
-        json.loads(assembly_path.read_text()),
-        catalog=discover_capabilities(package.catalog_roots),
-        runtime_manifest=runtime.manifest.to_mapping(),
-    )
-    result = await run_composed_application(
-        plan,
-        implementations=tuple((b.capability_ref, b.implementation) for b in package.implementations),
-        runtime=runtime,
-        run_id=resources.root_run_id,
-        input_text=P3_INPUT_PRESET,
-        host_services=host_services,
-        signal=signal,
-    )
+    try:
+        digest = await consume_prime_receipt(
+            runtime,
+            RunRequest(
+                resources.root_run_id,
+                P3_INPUT_PRESET,
+                (),
+                60_000,
+            ),
+            signal,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        raise P3OperatorError() from None
     public = session_backend.result
-    if (
-        public is None
-        or len(result.artifacts) != 1
-        or result.artifacts[0]["value"]["receipt_sha256"] != public.receipt_sha256
-    ):
+    if public is None or digest != public.receipt_sha256:
         raise P3OperatorError()
     return public
 
