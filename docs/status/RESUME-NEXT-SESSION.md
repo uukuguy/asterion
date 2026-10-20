@@ -1,29 +1,27 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-20 20:18. **Session remains active — not a final handoff.**
+> Updated: 2026-10-20 20:47. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The peer-foundation worklist is the active program. `P-PI-1` and `P-NATIVE-1` are done. Decision D-2026-10-20-04.
-- Provider `native` resolves `native.packages@1.0.0` against `pi.reference` with packages `controlled-code@1.0.0` and `dci@1.0.0`. Commit `ef384cd8`.
-- `P-CITE-1` is pending and is not started.
+- The peer-foundation worklist is complete. `P-PI-1`, `P-NATIVE-1`, and `P-CITE-1` are done. Decision D-2026-10-20-04.
+- The six `prime-*-native` packages cite a receipt. `prepare_prime_application` stays the Prime door. Operators P1 through P6 read the digest from the Prime runtime. Code commit `e131e5a0`.
+- No pending package is defined. No paid run is authorized.
 
 ## Verified facts
 
-- `tests.test_native_package_host` passed: 2 tests. `resolve_installed_provider` resolves `native.packages@1.0.0` on `pi.reference` with package refs `controlled-code@1.0.0` and `dci@1.0.0`. Resolved implementations are the same objects as the bound package factories, and the two packages' implementation modules are disjoint.
-- The same test scans the base runtime, assembly, runner, services, and generic application modules. None import `asterion.capabilities.dci` or `asterion.capabilities.controlled_code`.
-- `tests.test_builtin_controlled_code_application` passed. The application entry points are `controlled-code`, `dci-agent-lite`, `native`, and `prime-applications`.
-- `tests.test_application_discovery.ApplicationDiscoveryTests.test_builtin_application_index_covers_framework_applications` passed. `native.packages@1.0.0` selects provider `native`.
-- `ruff check` passed on the Native provider, its test, the provider inventory test, and the core allowlist.
+- `tests.test_prime_native_citation` passed. The six packages record media type, digest, and run identity. Their sources do not call Prime or `prepare_prime_application`.
+- The focused operator, live, runtime, and composed suite ran 195 tests. One failure remains: `test_real_candidate_workflow_oracle_and_rollback_control_result` with outcome `regressed` sees `run.completed` where the test expects `run.failed`. That assertion was not changed by this package. The other P5 and P6 composed tests passed.
+- `ruff check` passed on the citation module, the six providers, `runtime_receipt.py`, the P1–P6 operators, `p6/live.py`, and the edited tests.
 - No model run was started. `make promotion-check` was not run.
 
 ## Open boundary
 
-- `P-CITE-1` is not started. `prime-*-native` packages still execute Prime.
+- The peer-foundation worklist has no pending package. Do not start one from this checkpoint.
 - `tests.test_core_only_install` still reports `asterion.agents.prime.code_summary` missing from `CORE_MODULES`. That gap predates this package.
+- The P6 composed `regressed` subtest still expects `run.failed` and observes `run.completed`. It predates this package.
 - A paid run, benchmark, official card, L9 rerun, `make promotion-check`, and a push of `main` stay outside this program.
 
 ## Next action
 
-1. `P-CITE-1` is the next pending package and is not started. `prime-*-native` packages cite a Prime receipt: media type, digest, and run identity. They do not contain a second Prime implementation. `prepare_prime_application` remains the Prime execution door.
-2. Do not start a paid run from this checkpoint.
+1. No peer-foundation package remains. A new package needs a separate decision. Do not start a paid run from this checkpoint.

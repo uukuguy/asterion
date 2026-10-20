@@ -158,7 +158,9 @@ IPython harness. Native is the multi-package host. `asterion.native` names
 the Native control provider, not the capability catalog. DCI is one Native
 package. The application provider `native` assembles `controlled-code@1.0.0`
 and `dci@1.0.0` on the existing runtime `pi.reference`. It does not add a
-runtime. `asterion-prime` owns reusable Prime harness semantics using only
+runtime. The six `prime-*-native` packages record a receipt's media type,
+digest, and run identity. `prepare_prime_application` remains the Prime
+execution door. `asterion-prime` owns reusable Prime harness semantics using only
 Asterion contracts; it does not import, load, launch, inspect, or require
 Prime Agent source or SDK code. P1 through P7 are applications of Prime, not
 the agent implementation itself. Prime Gateway evidence is historical and

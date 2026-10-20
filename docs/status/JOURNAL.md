@@ -5169,3 +5169,4 @@
 - 18:26 Peer foundation P-PI-1 done. One-shot pi.reference starts and reaps through PiChildProcess. P-NATIVE-1 and P-CITE-1 stay pending [ee1e687d].
 - 19:16 Peer foundation P-PI-1 reap fix. The session keeps PiChildProcess. stop and force_close reap through it. The raw stdout reader stops at the line cap. P-NATIVE-1 and P-CITE-1 stay pending [2f5046d3].
 - 20:18 Peer foundation P-NATIVE-1 done. Provider native assembles controlled-code and dci on pi.reference. Each package keeps its own implementations. P-CITE-1 stays pending [ef384cd8].
+- 20:47 Peer foundation P-CITE-1 done. The six prime-*-native packages cite a receipt. prepare_prime_application stays the Prime door. Operators P1 through P6 read that receipt from the Prime runtime. [e131e5a0].
