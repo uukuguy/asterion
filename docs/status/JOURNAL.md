@@ -5147,3 +5147,10 @@
 - 01:39 P-LIVE-1 not started: preset machine ubuntu is absent; guest ubuntu-fusion-control has the repo and Pi entry and no /root/.local/bin/uv. No model call. Guest stopped again.
 - 02:32 P-LIVE-1 P1 preset ran on guest ubuntu-fusion-control after root uv 0.13.1, managed CPython 3.12.15, and forwarding ASTERION_PRIME_PI_AGENT_DIR [1a56b541]. Run p1-cbf17566ec1bdd98a2d6c0ab reached compact and resume, then stopped: status recovery-required, model callbacks limit 8 observed 9, prime-model-callback-limit, phase execution, receipt_sha256 null. Operator exit 1. Not a completed verification. P4–P6 not started.
 - 02:44 Final handoff. P-LIVE-1 stays open at the P1 callback stop. No Asterion process remains. Guest ubuntu-fusion-control stopped. Local main is ahead of origin and is not pushed.
+- 03:56 P5 and P6 live presets closed: one real repair and one real rollback [5589e9c7].
+- 03:56 P-COMPOSE-1 resumed the P1 kernel across a P4 handoff. Receipt 94492ade19a0feb87a29da3d2b8424c3c6b16f6a801d76a3779cde04d440f943, identity_match strict. Probe (40, 58) unchanged [ea91a888].
+- 03:56 A post-compact name list is not the compaction witness. Side-channel receipt f492701eadcca74cb720efc2cf92f5ed46b7e7028435120f5dc286654c762a35 [3141322e].
+- 05:12 The compact hook persists the code-aware summary. P1 p1-86417a49d97c4a88c6d2466a completed inside the same cap. Receipt 37a32db7ce65767ea67b25bd6795a7e5192d998826f6c52feaf770e9a70af5ae. Summary e7fb9c3c83f6e95401b59874a6556cf02f63a850d369ea81b7c8f155c8201841, keep 256 below 20000 [4e4f175e].
+- 10:45 Operator rerun p1-03801814231299013ad98348 stopped recovery-required after stage2.complete. Same summary hash, no oracle.pass, receipt null. Not a replacement witness.
+- 10:46 Public stderr now names the first failing stage-two clause. A pass still prints only oracle.pass. Cap and probe unchanged [aca0fa5b].
+- 13:04 Final handoff. Completion worklist is done. No paid run is authorized from the baton. Guest ubuntu-fusion-control is running. No preset process remains. Local main is not pushed.

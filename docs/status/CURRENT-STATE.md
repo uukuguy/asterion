@@ -5,7 +5,7 @@
 - Project: Asterion composable multi-runtime framework; native Prime autonomous research infrastructure and P7 domain application.
 - Branch: `main`. Prime/P7 development branches are consolidated; archive tags preserve ancestry. Retained P1–P3 worktrees and their unrelated changes remain operator-owned.
 - Theme: Long-horizon, open-ended, falsifiable computational research with understandable, checkable, traceable and replayable evidence. P7 is the current domain reference.
-- Project route: managed. Active work package: `P-LIVE-1`. `P-NOTES-1` and `P-P2-1` are accepted. One current-main P1 preset ran on guest `ubuntu-fusion-control` and stopped `recovery-required` at model callbacks 9/8 (`prime-model-callback-limit`). P4, P3, P5, and P6 presets have not run.
+- Project route: managed. Active work package: none. Completion-worklist packages `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1` are done on the evidence in the canonical worklist. That closure does not authorize a new experiment.
 - Canonical worklist: `docs/superpowers/plans/2026-10-20-prime-application-completion.md`. The 2026-10-08 research-interface plan and the P7 milestone handoff remain historical. They do not authorize a new experiment.
 - Milestone: annotated `asterion-prime-p7-milestone-2026-10-13` → `aca76ed7`; baseline `asterion-prime-p7-baseline-2026-10-13` → `4107aefb`. State-only commits after the milestone do not change its code snapshot.
 
@@ -47,10 +47,10 @@
 ## Open Problems
 
 - General autonomous modeling quality, full-game reliability under default-zero probe authority and transfer beyond P7 are unmeasured. Finite application risk acceptance permits exploration but cannot certify an inaccurate model's claimed coverage.
-- Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Specialized code-aware compaction is not connected to the current launch chain; causal efficiency gains remain unproven.
+- Repeated source reconstruction and repeated case summaries add reasoning/context overhead. Dedicated code-aware compaction is on the Prime compact hook and has one completed low-threshold P1 witness. Continuation stability is unmeasured, and the P7 low-threshold compaction test has not run. Causal efficiency gains remain unproven.
 - Inherited P1 manual-compaction actual-request token/reservation/billing certification is unresolved, distinct from P7's verified resource controls. No actual overspend has been established.
 - SDK upstream animation materialization memory, generic sandbox strength and complete historical migration/long-horizon cognition equivalence remain separate boundaries.
-- Current-main P1 re-verification ran once: run `p1-cbf17566ec1bdd98a2d6c0ab`, status `recovery-required`, receipt absent, model-callback limit 8 observed 9 during execution after compact and resume. That single stop is not a completed P1 result and not a stability rate. P3–P6 live presets, a live P2 model preset, P1/P4 kernel handoff, dedicated code-aware compaction, and moving the effectful probe hook into Prime remain open. Prime CLI positioning remains open. The named orb machine `ubuntu` is still absent; this run used `ubuntu-fusion-control`.
+- P1 continuation stability after dedicated compaction is unmeasured. A live P2 model preset, the P7 low-threshold compaction test, moving effectful probe admission into Prime, and Prime CLI positioning remain open. The named orb machine `ubuntu` is absent; Orb presets use `ubuntu-fusion-control`. `make promotion-check` is not a pass on a Node 24 symlink host.
 
 ## Key Files
 
@@ -62,7 +62,8 @@
 - `src/asterion/agents/prime/application.py`, `backend.py`, `ipython.py`, `execution.py`, `session.py` — generic owner/computation/session boundaries.
 - `src/asterion/agents/prime/research_notes.py`, `memory.py`, `research_record.py` — accepted-note epoch, immutable documents, and passive research index.
 - `src/asterion/applications/prime/p2/inquiry.py` — model-written query and answer; corpus scan and fragment check stay in P2.
-- `docs/superpowers/plans/2026-10-20-prime-application-completion.md` — P1–P6 completion and generic-lift worklist.
+- `docs/superpowers/plans/2026-10-20-prime-application-completion.md` — closed P1–P6 completion and generic-lift worklist.
+- `src/asterion/agents/prime/code_summary.py`, `src/asterion/applications/prime/p1/operator.py`, `src/asterion/applications/prime/p1/oracle.py` — dedicated compaction witness and closed public stage-two clause labels.
 - `src/asterion/applications/prime/p7/operator.py`, `research_runtime.py`, `solver.py`, `rollout_runtime.py`, `rollout.py`, `prompt.py` — application wiring, per-action admission and model evidence.
 - `src/asterion/applications/prime/p7/research.py`, `research_chain.py`, `solutions.py`, `solution_certificates.py` — memory, research references and source-bound routes.
 - `packages/typescript/asterion-prime-extension/`, `src/asterion/applications/prime/resources/` — typed tools and synchronized wheel resources.

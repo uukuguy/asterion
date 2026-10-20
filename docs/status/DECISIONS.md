@@ -46,7 +46,7 @@
 | D-2026-10-06-02 | 🟢 active | Every continuation retains per-level cognition through explicit provenance, including live replay |
 | D-2026-10-06-03 | 🟢 active | Prepare saved replay projections during export and load only the selected level |
 
-| D-2026-10-10-02 | 🟢 active (implementation deferred) | Prime standard application entry owns private Pi/RPC; unify P1–P7 later and verify dedicated compaction in low-threshold P7 |
+| D-2026-10-10-02 | 🟢 active | Prime owns private Pi/RPC. Task40 migrated the existing live paths. P1 witnessed dedicated compaction on 2026-10-20. The P7 low-threshold test is still open. |
 
 ## D-2026-10-01-01 — Certificate-gated same-game simulator
 
@@ -1199,6 +1199,7 @@
 - Follow-up: audit and unify P1–P7 application entries and backend ownership, clarify real-agent versus mechanism-witness boundaries, and restore default specialized compaction without changing native triggering/preparation/persistence. Current P7 injection is a known legacy gap; do not copy it into new applications.
 - Future live test: user explicitly requests a lower compaction threshold in the P7 environment after specialized summary wiring exists. Force a real selected-model summary within finite controls; verify actual prompt routing, provider usage, persistent kernel generation, variable/function reuse, NOTES/counterexamples and continued solving. Provider-free fixtures or a native generic summary do not establish dedicated live compaction. Default high threshold remains separate from this test preset.
 - Scope at this decision: the user deferred consolidation until the P7 NOTES experiment finished. Task39 is complete. The later D-2026-10-10-03 reopens standard-entry design with a narrower migration scope; implementation and dedicated compaction remain unverified.
+- Later evidence (2026-10-20): Task40 closed the standard-entry migration. P1 dedicated compaction is witnessed by run `p1-86417a49d97c4a88c6d2466a`, receipt `37a32db7ce65767ea67b25bd6795a7e5192d998826f6c52feaf770e9a70af5ae`, commits `4e4f175e` and `aca0fa5b`. That witness is not the P7 low-threshold test, and one pass is not a stability rate.
 - Reference: [architecture](../architecture/agent-framework.md#asterion-prime-positioning), [active design and deferred scope](../superpowers/specs/2026-10-10-prime-notes-primary-context-design.md).
 
 ## D-2026-10-10-03 — Stable Prime application entry; migrate existing live paths first
@@ -1213,6 +1214,7 @@
 - Separate behavior change: dedicated automatic code-aware compaction belongs to Prime, but its wiring and lower-threshold live validation remain distinct from ownership migration. Existing NOTES projection and unknown-effect protection remain required. Historical Task39 budgets do not authorize another BP35 run.
 - Historical inventory at design time: P1/P7 used existing Prime execution code but constructed backend resources in the application; P3–P6 used direct application-owned Pi text sessions; P2 had no model call. Those live receipts remain historical evidence. Task40 separates generic extension mechanisms from selected application tools through the existing registration mechanism.
 - Status: user authorized completing the migration. Tasks 1–7 are committed and individually reviewed: standard owner/text sessions, tool modules and P1/P3–P7 consumers including narrator. Task8 removed obsolete startup wrappers; final domain review passed. Final contract review found a non-durable cancellation cleanup gap; 37b6ab71 fixes it and Astra re-review approves. Installed fixture/core inventory corrections preserve assertions. Final provider-free gates pass, including full promotion25commands/provider0. Finite r11l L1 deployment witness passed: exact Sol, 1 level/4 actions, sealed trace/replay/cleanup; observed guest processes reaped. Task40 closed within migration scope. Dedicated summary and cross-domain capability remain unverified.
+- Later evidence (2026-10-20): the P1 dedicated-summary witness is recorded on D-2026-10-10-02. Cross-domain capability and the P7 low-threshold test remain unverified.
 - Reference: [standard application entry design](../superpowers/specs/2026-10-10-prime-standard-application-entry-design.md); canonical worklist Task40.
 
 

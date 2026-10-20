@@ -76,7 +76,7 @@ Start with `project-state resume`: INDEX → CURRENT-STATE → final RESUME → 
 
 ## Current Judgment
 
-The Prime/P7 milestone remains closed. The user then authorized `P-NOTES-1`, `P-P2-1`, and the existing finite presets in `P-LIVE-1`. One current-main P1 preset stopped `recovery-required` at model callbacks 9/8. That is not a completed P1 result. P4–P6 have not run. A full benchmark, official card, L9 rerun, and probe-authority move stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
+The Prime/P7 milestone remains closed. The 2026-10-20 completion worklist is done: `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1`. One P1 dedicated-compaction witness exists. A later same-preset run stopped before `oracle.pass`; the clause label is in place and has not been read on a live run. A full benchmark, official card, L9 rerun, probe-authority move, and a push of `main` stay unauthorized. Details are in `docs/status/RESUME-NEXT-SESSION.md`.
 
 ## Historical Corrections
 
