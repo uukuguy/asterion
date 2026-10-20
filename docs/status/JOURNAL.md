@@ -5154,3 +5154,4 @@
 - 10:45 Operator rerun p1-03801814231299013ad98348 stopped recovery-required after stage2.complete. Same summary hash, no oracle.pass, receipt null. Not a replacement witness.
 - 10:46 Public stderr now names the first failing stage-two clause. A pass still prints only oracle.pass. Cap and probe unchanged [aca0fa5b].
 - 13:04 Final handoff. Completion worklist is done. No paid run is authorized from the baton. Guest ubuntu-fusion-control is running. No preset process remains. Local main is not pushed.
+- 13:24 INDEX milestone anchor records the five completion packages as done. The later P1 miss stays outside the witness.

@@ -136,7 +136,7 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 ## Current milestone anchors
 
-- [Prime application completion](../superpowers/plans/2026-10-20-prime-application-completion.md): `P-NOTES-1` and `P-P2-1` accepted. `P-LIVE-1` has one P1 preset result, `recovery-required` at model callbacks 9/8. P4–P6, composition, and compaction remain unstarted.
+- [Prime application completion](../superpowers/plans/2026-10-20-prime-application-completion.md): `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1` are done. The P1 compaction witness is `p1-86417a49d97c4a88c6d2466a`. A later same-preset run stopped before `oracle.pass`. A new paid run needs a separate authorization.
 
 - [Coverage decision plan](../superpowers/plans/2026-10-13-p7-coverage-decision.md): default review and persistent cases, Task57 full-game continuation complete.
 - [Death prediction repair plan](../superpowers/plans/2026-10-13-p7-death-prediction-repair.md): application-owned finite unknown exploration and risk/terminal summaries, source/package/saved-output checks complete; Task59 exact candidate witness in final handoff.
