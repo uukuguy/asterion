@@ -4,9 +4,31 @@
 
 Native keeps `native.packages@1.0.0` as the multi-package host. That application assembles `controlled-code@1.0.0` and `dci@1.0.0` together. One run of it executes every executable capability in the assembly, so it is not a DCI retrieval example.
 
-The Native provider gains a second application, `native.dci-research@1.0.0`. It assembles only the DCI retrieval graph. A repository example runs that application with an injected runtime. A Make preset runs it once with the real `pi.reference` runtime.
+The Native provider gains a second application, `native.dci-research@1.0.0`. It assembles only the DCI retrieval graph.
 
-This follows decision D-2026-10-20-04. Prime remains the product-independent harness. DCI remains the retrieval package. The Native provider does not import DCI implementation modules. The base does not gain a second runner.
+Native also gains a direct library entry, `prepare_native_application`. It is the Native peer of `prepare_prime_application`. An application supplies its id and version. The operator supplies the runtime factory and host-service options. Preparation validates that material and does not start Pi. One later `run` executes the selected assembly through the existing composed runner.
+
+The repository example and the live preset both call this entry. They do not resolve an assembly themselves.
+
+This follows decision D-2026-10-20-04. Prime remains the product-independent harness, and `prepare_prime_application` remains the Prime door. DCI remains the retrieval package. The Native entry does not import DCI implementation modules. The base does not gain a second runner.
+
+## Standard entry
+
+Add the package `asterion.agents.native` and `src/asterion/agents/native/application.py`.
+
+`NativeApplicationSpec` carries `application_id` and `application_version`.
+
+`NativeOperatorContext` carries three values:
+
+- A runtime factory registry.
+- The string options for the selected runtime.
+- Host-service options, keyed by host capability id.
+
+`prepare_native_application(spec, operator)` returns a `NativeApplication`. It calls `create_provider()` in `asterion.applications.native.provider` directly. It does not scan providers. It resolves that provider with `resolve_installed_provider`, the operator's runtime registry, and the builtin packages named by the provider's registered applications. It then selects the application whose id and version match the spec. An unknown id or version fails during preparation. A missing assembly runtime fails during preparation. It checks that the operator's host-service keys are exactly the selected assembly's host capabilities. It does not spawn a process, read `.env`, or import `asterion.capabilities.dci` or `asterion.capabilities.controlled_code`. Resolving the sibling `native.packages` closure does not execute it.
+
+`NativeApplication.run` takes the input text, a run id, and an optional cancellation signal. It executes the selected assembly once. It opens each declared host service through the registered `asterion.host_services` entry point, then creates the runtime from the operator's registry. The factory context uses provider id `native`, the selected application identity, and an empty host-service map. Opened host services are passed only to the composed runner. After `run` returns or fails, a second `run` fails. The entry does not keep a Pi process after the composed run finishes.
+
+The entry accepts every application the Native provider registers. This spec's example, test, and preset use `native.dci-research@1.0.0`. The composed run of that application executes `dci.research` only. `policy.local-corpus` stays declarative.
 
 ## Application
 
@@ -26,29 +48,29 @@ Add `src/asterion/applications/native/assemblies/native-dci-research.json`.
 
 ## Development example
 
-Add `examples/applications/native_dci.py` with `run_native_dci_application`.
+Add `examples/applications/native_dci.py`.
 
-The function takes an injected runtime, an absolute corpus root, a run id, the question text, and an optional cancellation signal. It loads the Native provider and selects the application whose id is `native.dci-research` and whose version is `1.0.0`. It does not use list position. It resolves that application's package implementations. It opens `corpus.local-root` through the registered `asterion.host_services` entry point. The only option is `root`, and the value is the absolute corpus path supplied by the caller. It does not import a DCI service module. It passes the question as the composed application's input text. It passes the corpus service only to that composed run.
+The file builds a `NativeApplicationSpec` for `native.dci-research` at version `1.0.0`. It builds a `NativeOperatorContext` with the caller's runtime factory registry, the caller's runtime options, and one host-service option: `corpus.local-root` with `root` set to the absolute corpus path. It calls `prepare_native_application`, then `run`, and passes the question as the input text. It does not select a provider application by list position, resolve an assembly, or open a host service itself.
 
-The composed run executes `dci.research` only. `policy.local-corpus` stays declarative.
+The caller owns the registry. The example does not spawn Pi and does not read `.env`.
 
-The caller owns the runtime. The example does not spawn Pi and does not read `.env`.
-
-`examples/README.md` states that this file runs the Native DCI retrieval application. `examples/applications/dci_research.py` and `examples/applications/controlled_code.py` stay as they are.
+`examples/README.md` states that this file runs the Native DCI retrieval application through `prepare_native_application`. `examples/applications/dci_research.py` and `examples/applications/controlled_code.py` stay as they are.
 
 ## Provider-free test
 
 Add `tests/test_native_dci_example.py`.
 
-The test uses a fixture runtime. The fixture runtime id is `pi.reference`. Its manifest includes `filesystem.read`. A successful run yields `run.started`, one `artifact.created` event whose artifact kind is `answer` and whose uri is non-empty, then `run.completed`. The test checks all of the following:
+The test calls `prepare_native_application` and `run`. Its operator registry binds `pi.reference` to a factory that returns a fixture runtime. The fixture manifest includes `filesystem.read`. A successful run yields `run.started`, one `artifact.created` event whose artifact kind is `answer` and whose uri is non-empty, then `run.completed`. The test checks all of the following:
 
+- Preparation does not call the runtime factory.
 - The application id is `native.dci-research` and the version is `1.0.0`.
 - The resolved packages contain `dci@1.0.0` and do not contain `controlled-code`.
 - The corpus service receives the absolute root given by the test.
 - The fixture runtime receives the question as its request input text, and the requested capability is `filesystem.read`.
 - The composed result contains event `research.completed` and artifact media type `application/vnd.dci.research+json`.
-- A relative corpus path and a missing directory fail while opening the corpus service, before the fixture runtime receives a request.
-- An already cancelled signal fails before the fixture runtime receives a request.
+- A relative corpus path and a missing directory fail while opening the corpus service, before the fixture factory is called.
+- An already cancelled signal fails before the host service opens and before the fixture factory is called.
+- A second `run` on the same owner fails.
 - The test does not read `.env` and does not start a process.
 
 The existing `tests.test_native_package_host` remains the proof for `native.packages`.
@@ -57,7 +79,7 @@ The existing `tests.test_native_package_host` remains the proof for `native.pack
 
 Add `examples/native_dci_example.sh` and the Make target `native-dci-example`.
 
-The preset calls `run_native_dci_application` with a runtime created by the `pi.reference` factory from `default_runtime_factory_registry()`. It does not construct `PiChildProcess` itself. The factory context carries no host service. The preset passes `cwd` and does not pass `cwd_host_capability`. The corpus service stays inside the example.
+The preset calls `prepare_native_application` with `default_runtime_factory_registry()` and the runtime options below, then calls `run` once. It does not construct `PiChildProcess` itself. The factory context carries no host service. The options pass `cwd` and do not pass `cwd_host_capability`. The corpus service stays inside the Native entry. Readiness stays in the preset. The entry does not load `.env`.
 
 The run id is `native-dci-` plus a unique suffix. The preset prints that same id.
 
@@ -105,6 +127,8 @@ The implementation run executes `make native-dci-example` once after the readine
 ## Out of scope
 
 - A second Pi runner or a change to `PiChildProcess`.
+- A change to `prepare_prime_application`, IPython, accepted notes, or Prime session ownership.
+- A Native CLI, provider discovery, or a central application registry.
 - Repair of `examples/asterion_dci_basic_example.sh`.
-- Changes to `native.packages`, Prime, P7, or the six `prime-*-native` citation packages.
+- Changes to the `native.packages` assembly, P7, or the six `prime-*-native` citation packages.
 - A benchmark, an official card, or an L9 rerun.

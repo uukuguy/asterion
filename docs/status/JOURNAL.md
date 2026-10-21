@@ -3843,3 +3843,4 @@
 - 21:42 Harvest moved 10 superseded status files. July and August journal archived.
 - 22:14 DCI preflight FAIL. Package root misses .env. DCI_PI_DIR is absent. Repo pi CLI exists. Run without --runtime exits 2.
 - 22:51 Native DCI research example spec written. Application native.dci-research@1.0.0. Provider-free example and one live retrieval preset. Implementation has not started.
+- 22:58 Native standard entry added to the same spec. prepare_native_application is the Native peer of prepare_prime_application. Implementation has not started.
