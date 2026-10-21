@@ -154,6 +154,77 @@ class NativePackageHostTests(unittest.TestCase):
                     offenders.append(f"{path.relative_to(SOURCE)} imports {name}")
         self.assertEqual(offenders, [])
 
+    def test_single_package_applications_register_beside_native_packages(self) -> None:
+        from asterion.applications.native import create_provider
+
+        provider = create_provider()
+        self.assertEqual(
+            tuple(
+                (item.application_id, item.version) for item in provider.applications
+            ),
+            (
+                ("native.packages", "1.0.0"),
+                ("native.dci-research", "1.0.0"),
+                ("native.controlled-code", "1.0.0"),
+            ),
+        )
+        names = {
+            entry.name
+            for entry in metadata.entry_points(group="asterion.application_index")
+        }
+        self.assertIn("native.packages__1.0.0", names)
+        self.assertNotIn("native.dci-research__1.0.0", names)
+        self.assertNotIn("native.controlled-code__1.0.0", names)
+
+        resolved = resolve_installed_provider(
+            provider,
+            runtime_factories=default_runtime_factory_registry(),
+            installed_packages=_bound_packages(),
+        )
+        self.assertEqual(resolved.applications[0].application_id, "native.packages")
+        by_id = {
+            application.application_id: application
+            for application in resolved.applications
+        }
+        dci = by_id["native.dci-research"]
+        code = by_id["native.controlled-code"]
+        self.assertEqual(
+            dci.capability_packages,
+            (CapabilityPackageRef("dci", "1.0.0"),),
+        )
+        self.assertEqual(
+            dci.assemblies[0].plan.host_capabilities,
+            ("corpus.local-root",),
+        )
+        self.assertEqual(
+            tuple(ref.capability_id for ref in dci.assemblies[0].plan.capability_refs),
+            ("dci.research", "policy.local-corpus"),
+        )
+        self.assertEqual(dci.assemblies[0].runtime_id, "pi.reference")
+        self.assertEqual(
+            code.capability_packages,
+            (CapabilityPackageRef("controlled-code", "1.0.0"),),
+        )
+        self.assertEqual(
+            code.assemblies[0].plan.host_capabilities,
+            ("executor.controlled",),
+        )
+        self.assertEqual(
+            tuple(ref.capability_id for ref in code.assemblies[0].plan.capability_refs),
+            (
+                "evaluation.code-quality",
+                "observability.execution-audit",
+                "policy.controlled-code-check",
+                "workflow.code-quality",
+            ),
+        )
+        self.assertEqual(code.assemblies[0].runtime_id, "pi.reference")
+        provider_source = (SOURCE / "applications/native/provider.py").read_text(
+            encoding="utf-8"
+        )
+        for name in FORBIDDEN_IMPORTS:
+            self.assertNotIn(name, provider_source)
+
 
 if __name__ == "__main__":
     unittest.main()

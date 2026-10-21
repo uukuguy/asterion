@@ -14,7 +14,7 @@ from asterion.capability_packages import CapabilityPackageRef
 
 
 def create_provider() -> InstalledApplicationProvider:
-    """Return the Native application that names both installed packages."""
+    """Return the Native applications. native.packages stays first."""
 
     root = Path(str(resources.files("asterion"))).resolve()
     return InstalledApplicationProvider(
@@ -31,6 +31,27 @@ def create_provider() -> InstalledApplicationProvider:
                 capability_packages=(
                     CapabilityPackageRef("controlled-code", "1.0.0"),
                     CapabilityPackageRef("dci", "1.0.0"),
+                ),
+                runtime_ids=("pi.reference",),
+            ),
+            InstalledApplication(
+                application_id="native.dci-research",
+                version="1.0.0",
+                assembly_paths=(
+                    root / "applications/native/assemblies/native-dci-research.json",
+                ),
+                capability_packages=(CapabilityPackageRef("dci", "1.0.0"),),
+                runtime_ids=("pi.reference",),
+            ),
+            InstalledApplication(
+                application_id="native.controlled-code",
+                version="1.0.0",
+                assembly_paths=(
+                    root
+                    / "applications/native/assemblies/native-controlled-code.json",
+                ),
+                capability_packages=(
+                    CapabilityPackageRef("controlled-code", "1.0.0"),
                 ),
                 runtime_ids=("pi.reference",),
             ),

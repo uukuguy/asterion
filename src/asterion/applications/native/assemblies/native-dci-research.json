@@ -1,0 +1,17 @@
+{
+  "protocol": "asterion.application-assembly/v1",
+  "application_id": "native.dci-research",
+  "version": "1.0.0",
+  "runtime_id": "pi.reference",
+  "capability_packages": [
+    {"package_id": "dci", "version": "1.0.0"}
+  ],
+  "capabilities": [
+    {"capability_id": "dci.research", "version": "1.0.0"},
+    {"capability_id": "policy.local-corpus", "version": "1.0.0"}
+  ],
+  "host_capabilities": ["corpus.local-root"],
+  "host_policies": [],
+  "host_events": [],
+  "host_artifacts": []
+}

@@ -153,6 +153,10 @@ expected = {
         'asterion.application-assembly/v1',
     'applications/native/assemblies/native-packages.json':
         'asterion.application-assembly/v1',
+    'applications/native/assemblies/native-controlled-code.json':
+        'asterion.application-assembly/v1',
+    'applications/native/assemblies/native-dci-research.json':
+        'asterion.application-assembly/v1',
     'capabilities/controlled_code/capability-package.json':
         'asterion.capability-package/v1',
     'capabilities/controlled_code/manifests/code-quality-evaluation.json':
