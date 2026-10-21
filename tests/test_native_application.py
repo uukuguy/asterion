@@ -406,5 +406,58 @@ class NativeApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.factory.calls, [])
 
 
+class NativeDciExampleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_example_calls_the_standard_entry(self) -> None:
+        import importlib.util
+        import inspect
+
+        path = Path(__file__).resolve().parents[1] / "examples/applications/native_dci.py"
+        spec = importlib.util.spec_from_file_location("native_dci_example", path)
+        self.assertIsNotNone(spec)
+        self.assertIsNotNone(spec.loader)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        helper_source = inspect.getsource(module.run_native_dci_research)
+        for banned in (
+            "load_dotenv",
+            ".env",
+            "PiChildProcess",
+            "resolve_assembly",
+            "HostServiceFactoryRegistry",
+            "applications[0]",
+        ):
+            self.assertNotIn(banned, helper_source)
+        self.assertIn("prepare_native_application", helper_source)
+        self.assertEqual(
+            module.QUESTION,
+            "Answer the following question using only wiki_dump.jsonl in the current directory. Do not use web search. Use rg instead of grep for fast searching. Question: In which street did the Great Fire of London originate?",
+        )
+
+        runtime = _Runtime()
+        factory = _Factory(runtime)
+        corpus = _corpus()
+        self.addCleanup(lambda: __import__("shutil").rmtree(corpus, ignore_errors=True))
+        result = await module.run_native_dci_research(
+            runtime_factories=_registry(factory),
+            runtime_options={},
+            corpus_root=corpus,
+            question=QUESTION,
+            run_id="native-dci-example-test",
+        )
+        self.assertEqual(len(factory.calls), 1)
+        self.assertEqual(list(factory.calls[0].host_services), [])
+        self.assertEqual(runtime.requests[0].input_text, QUESTION)
+        self.assertIn(
+            "research.completed",
+            [event["type"] for event in result.events],
+        )
+        readme = (Path(__file__).resolve().parents[1] / "examples/README.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("prepare_native_application", readme)
+        self.assertIn("native_dci.py", readme)
+        self.assertIn("every Native application", readme)
+
+
 if __name__ == "__main__":
     unittest.main()
