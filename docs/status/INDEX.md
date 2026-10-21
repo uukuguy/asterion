@@ -135,6 +135,8 @@ Research memory implementation evidence: [generic/P7 NOTES](../reviews/2026-10-0
 
 - [Native DCI research example](../superpowers/specs/2026-10-21-native-dci-research-example-design.md) ([plan](../superpowers/plans/2026-10-21-native-dci-research-example.md)): written spec and implementation plan for one `prepare_native_application` entry, single-package applications `native.dci-research@1.0.0` and `native.controlled-code@1.0.0`, a provider-free example, and one live retrieval preset. Implementation is in. The live preset stopped at readiness and did not call the model. The public reason is in the journal.
 
+- [Native DCI complete example](../superpowers/specs/2026-10-22-native-dci-complete-example-design.md): written spec for `native.dci-complete@1.0.0` on the same entry. One labeled question, corpus option, and an operator-managed Judge. Implementation has not started. No model call is authorized.
+
 - [Prime application completion](../superpowers/plans/2026-10-20-prime-application-completion.md): `P-NOTES-1`, `P-P2-1`, `P-LIVE-1`, `P-COMPOSE-1`, and `P-COMPACT-1` are done. The P1 compaction witness is `p1-86417a49d97c4a88c6d2466a`. Later continuations `p1-5f194466f4f4077ec270a9e4` and `p1-f8f0aa6dfe5cb466d2c64e79` printed `oracle.pass`. `p1-cf6c9ddd449a9710bd968e21` printed `oracle.reject.snapshot`. `make asterion-prime-p1-run` exits 0 only when status is `completed`. Passes are not a stability rate. A new paid run needs a separate authorization.
 
 - [Coverage decision plan](../superpowers/plans/2026-10-13-p7-coverage-decision.md): default review and persistent cases, Task57 full-game continuation complete.
