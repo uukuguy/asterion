@@ -5170,3 +5170,10 @@
 - 19:16 Peer foundation P-PI-1 reap fix. The session keeps PiChildProcess. stop and force_close reap through it. The raw stdout reader stops at the line cap. P-NATIVE-1 and P-CITE-1 stay pending [2f5046d3].
 - 20:18 Peer foundation P-NATIVE-1 done. Provider native assembles controlled-code and dci on pi.reference. Each package keeps its own implementations. P-CITE-1 stays pending [ef384cd8].
 - 20:47 Peer foundation P-CITE-1 done. The six prime-*-native packages cite a receipt. prepare_prime_application stays the Prime door. Operators P1 through P6 read that receipt from the Prime runtime. [e131e5a0].
+
+## 2026-10-21
+
+- 21:11 P1 preset p1-e822af327220e58ba4c6c43d stopped at stage1.oracle.start. Status recovery-required. Receipt null.
+- 21:11 P1 preset p1-f8f0aa6dfe5cb466d2c64e79 completed. oracle.pass. Receipt 0c02c5ed03f898758a56fd10c8a0bd7ee31c8ccd8efd7d9d971d5632668fc137. Summary e7fb9c3c83f6e95401b59874a6556cf02f63a850d369ea81b7c8f155c8201841.
+- 21:11 P1 preset p1-cf6c9ddd449a9710bd968e21 reached stage2.complete and printed oracle.reject.snapshot. Status recovery-required. Receipt null. Same summary.
+- 21:11 Final handoff. Peer-foundation worklist stays done. The P1 preset exits 0 only when status is completed. No preset process remains. Guest ubuntu-fusion-control is running. Local main is not pushed.
