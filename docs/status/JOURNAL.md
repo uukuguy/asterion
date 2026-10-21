@@ -3841,3 +3841,4 @@
 - 21:11 P1 preset p1-cf6c9ddd449a9710bd968e21 reached stage2.complete and printed oracle.reject.snapshot. Status recovery-required. Receipt null. Same summary.
 - 21:11 Final handoff. Peer-foundation worklist stays done. The P1 preset exits 0 only when status is completed. No preset process remains. Guest ubuntu-fusion-control is running. Local main is not pushed.
 - 21:42 Harvest moved 10 superseded status files. July and August journal archived.
+- 22:14 DCI preflight FAIL. Package root misses .env. DCI_PI_DIR is absent. Repo pi CLI exists. Run without --runtime exits 2.
