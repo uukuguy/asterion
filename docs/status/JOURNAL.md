@@ -3846,3 +3846,4 @@
 - 22:58 Native standard entry added to the same spec. prepare_native_application is the Native peer of prepare_prime_application. Implementation has not started.
 - 23:06 The Native entry is one standard for every package. native.dci-research and native.controlled-code share prepare and run. Implementation has not started.
 - 23:46 Native application entry plan written. Implementation has not started.
+- 00:41 Native application entry is in. The live preset exited 2. Reason: pi checkout is unavailable. The model was not called.

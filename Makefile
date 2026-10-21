@@ -20,7 +20,7 @@ P7_CONSOLE_PORT ?= 57515
 .PHONY: asterion-run
 .PHONY: dci-list dci-describe dci-preflight dci-basic dci-complete
 .PHONY: dci-run dci-benchmark
-.PHONY: dci-basic-example dci-runtime-context-example
+.PHONY: dci-basic-example dci-runtime-context-example native-dci-example
 .PHONY: test-typescript test-rust check-rust
 .PHONY: asterion-prime-p1-run
 .PHONY: asterion-prime-p2-run
@@ -847,3 +847,6 @@ dci-basic-example:
 
 dci-runtime-context-example:
 	bash examples/asterion_dci_runtime_context_example.sh
+
+native-dci-example:
+	bash examples/native_dci_example.sh

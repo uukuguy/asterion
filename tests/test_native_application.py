@@ -459,5 +459,228 @@ class NativeDciExampleTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("every Native application", readme)
 
 
+class NativeDciLivePresetTests(unittest.IsolatedAsyncioTestCase):
+    def _load(self):
+        import importlib.util
+
+        path = Path(__file__).resolve().parents[1] / "examples/applications/native_dci.py"
+        spec = importlib.util.spec_from_file_location("native_dci_live", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_shell_and_makefile_are_thin(self) -> None:
+        root = Path(__file__).resolve().parents[1]
+        shell = (root / "examples/native_dci_example.sh").read_text(encoding="utf-8")
+        makefile = (root / "Makefile").read_text(encoding="utf-8")
+        self.assertIn("examples/applications/native_dci.py --live", shell)
+        self.assertNotIn("source ", shell)
+        self.assertNotIn("set -a", shell)
+        self.assertIn("\nnative-dci-example:\n", makefile)
+        self.assertIn("bash examples/native_dci_example.sh", makefile)
+        entry = (SOURCE / "agents/native/application.py").read_text(encoding="utf-8")
+        self.assertNotIn("load_dotenv", entry)
+        example = (root / "examples/applications/native_dci.py").read_text(encoding="utf-8")
+        self.assertIn("override=False", example)
+        self.assertNotIn("PiChildProcess", example)
+
+    def test_missing_provider_does_not_call_prepare(self) -> None:
+        module = self._load()
+        root = Path(tempfile.mkdtemp()).resolve()
+        calls: list[object] = []
+
+        def prepare(*args, **kwargs):
+            calls.append((args, kwargs))
+            raise AssertionError("prepare")
+
+        import asyncio
+        import contextlib
+        import io
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = asyncio.run(
+                module.run_live(
+                    root=root,
+                    env={"DCI_MODEL": "deepseek-flash"},
+                    prepare=prepare,
+                    which=lambda name: None,
+                )
+            )
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertEqual(stderr.getvalue().strip(), "missing DCI_PROVIDER")
+
+    def test_runtime_failure_is_body_free_and_hides_the_exception(self) -> None:
+        import asyncio
+        import contextlib
+        import io
+
+        from asterion.runner.application import ApplicationRunError
+
+        module = self._load()
+        config = module.LiveConfiguration(
+            provider="deepseek",
+            model="deepseek-flash",
+            node="/usr/bin/node",
+            cli="/tmp/cli.js",
+            corpus="/tmp/wiki_corpus",
+            agent_dir="/tmp/agent",
+            evidence_root="/tmp/outputs/native-dci-example",
+            environment={"PI_CODING_AGENT_DIR": "/tmp/agent"},
+        )
+        options = module.live_runtime_options(config)
+        self.assertEqual(options["tools"], "read,grep")
+        self.assertEqual(options["max_turns"], "6")
+        self.assertEqual(options["cwd"], config.corpus)
+        self.assertNotIn("cwd_host_capability", options)
+        self.assertNotIn("bash", options["tools"])
+        self.assertNotIn("thinking_level", options)
+
+        def prepare(*args, **kwargs):
+            del args, kwargs
+            raise ApplicationRunError("SECRET-PROVIDER-PAYLOAD")
+
+        stdout = io.StringIO()
+        stderr = io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = asyncio.run(
+                module.execute_live(config, prepare=prepare, run_id="native-dci-test")
+            )
+        self.assertEqual(code, 1)
+        payload = __import__("json").loads(stdout.getvalue())
+        self.assertEqual(
+            set(payload),
+            {"application_id", "run_id", "status"},
+        )
+        self.assertEqual(payload["application_id"], "native.dci-research")
+        self.assertEqual(payload["run_id"], "native-dci-test")
+        self.assertEqual(payload["status"], "failed")
+        self.assertEqual(stderr.getvalue().strip(), "native-dci-example: run failed")
+        self.assertNotIn("SECRET-PROVIDER-PAYLOAD", stdout.getvalue())
+        self.assertNotIn("SECRET-PROVIDER-PAYLOAD", stderr.getvalue())
+
+    def test_ready_configuration_matches_the_factory_path_rule(self) -> None:
+        import os
+        import stat
+
+        from asterion.runtime.defaults import RuntimeFactoryError, _pi_exact_path
+
+        module = self._load()
+        root = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(lambda: __import__("shutil").rmtree(root, ignore_errors=True))
+        node = root / "bin" / "node"
+        node.parent.mkdir()
+        node.write_text("#!/bin/sh\n", encoding="utf-8")
+        node.chmod(node.stat().st_mode | stat.S_IEXEC)
+        checkout = root / "pi"
+        cli = checkout / "packages/coding-agent/dist/cli.js"
+        cli.parent.mkdir(parents=True)
+        cli.write_text("cli", encoding="utf-8")
+        agent = root / "agent"
+        agent.mkdir()
+        corpus = root / "corpus" / "wiki_corpus"
+        corpus.mkdir(parents=True)
+        (corpus / "wiki_dump.jsonl").write_text("{}\n", encoding="utf-8")
+        self.assertEqual(_pi_exact_path(str(node), require_directory=False), node)
+        self.assertEqual(_pi_exact_path(str(corpus), require_directory=True), corpus)
+        config = module.resolve_live_configuration(
+            root,
+            {
+                "DCI_PROVIDER": "deepseek",
+                "DCI_MODEL": "deepseek-flash",
+                "DCI_PI_AGENT_DIR": str(agent),
+            },
+            which=lambda name: str(node) if name == "node" else None,
+        )
+        self.assertEqual(config.corpus, str(corpus))
+        self.assertEqual(config.node, str(node))
+        self.assertEqual(config.evidence_root, str(root / "outputs" / "native-dci-example"))
+        self.assertEqual(config.environment["PI_CODING_AGENT_DIR"], str(agent))
+        self.assertTrue((root / "outputs").is_dir())
+        fallback = module.resolve_live_configuration(
+            root,
+            {
+                "DCI_PROVIDER": "deepseek",
+                "DCI_MODEL": "deepseek-flash",
+                "DCI_PI_DIR": str(root / "missing-pi"),
+                "DCI_PI_AGENT_DIR": str(agent),
+            },
+            which=lambda name: str(node) if name == "node" else None,
+        )
+        self.assertEqual(fallback.cli, str(cli))
+        linked_root = root / "linked-root"
+        linked_root.mkdir()
+        os.symlink(corpus, linked_root / "wiki_corpus", target_is_directory=True)
+        with self.assertRaises(module.ReadinessFailure) as raised:
+            module.resolve_live_configuration(
+                root,
+                {
+                    "DCI_PROVIDER": "deepseek",
+                    "DCI_MODEL": "deepseek-flash",
+                    "DCI_PI_AGENT_DIR": str(agent),
+                    "ASTERION_DCI_CORPUS_ROOT": str(linked_root),
+                },
+                which=lambda name: str(node) if name == "node" else None,
+            )
+        self.assertEqual(raised.exception.reason, "corpus is unavailable")
+        with self.assertRaises(RuntimeFactoryError):
+            _pi_exact_path(str(linked_root / "wiki_corpus"), require_directory=True)
+        with self.assertRaises(module.ReadinessFailure) as raised:
+            module.resolve_live_configuration(
+                root,
+                {
+                    "DCI_PROVIDER": "deepseek",
+                    "DCI_MODEL": "deepseek-flash",
+                    "DCI_PI_AGENT_DIR": str(agent),
+                },
+                which=lambda name: None,
+            )
+        self.assertEqual(raised.exception.reason, "node executable is unavailable")
+        with self.assertRaises(module.ReadinessFailure) as raised:
+            module.resolve_live_configuration(
+                root,
+                {"DCI_PROVIDER": "deepseek"},
+                which=lambda name: (_ for _ in ()).throw(AssertionError("which")),
+            )
+        self.assertEqual(raised.exception.reason, "missing DCI_MODEL")
+        with self.assertRaises(module.ReadinessFailure) as raised:
+            module.resolve_live_configuration(
+                root,
+                {
+                    "DCI_PROVIDER": "deepseek",
+                    "DCI_MODEL": "deepseek-flash",
+                    "DCI_PI_AGENT_DIR": str(root / "missing-agent"),
+                },
+                which=lambda name: str(node) if name == "node" else None,
+            )
+        self.assertEqual(raised.exception.reason, "agent directory is unavailable")
+        outputs = root / "outputs"
+        __import__("shutil").rmtree(outputs)
+        os.symlink(agent, outputs, target_is_directory=True)
+        with self.assertRaises(module.ReadinessFailure) as raised:
+            module.resolve_live_configuration(
+                root,
+                {
+                    "DCI_PROVIDER": "deepseek",
+                    "DCI_MODEL": "deepseek-flash",
+                    "DCI_PI_AGENT_DIR": str(agent),
+                },
+                which=lambda name: str(node) if name == "node" else None,
+            )
+        self.assertEqual(raised.exception.reason, "evidence parent is unavailable")
+        empty = Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(lambda: __import__("shutil").rmtree(empty, ignore_errors=True))
+        with self.assertRaises(module.ReadinessFailure) as raised:
+            module.resolve_live_configuration(
+                empty,
+                {"DCI_PROVIDER": "deepseek", "DCI_MODEL": "deepseek-flash"},
+                which=lambda name: str(node),
+            )
+        self.assertEqual(raised.exception.reason, "pi checkout is unavailable")
+
+
 if __name__ == "__main__":
     unittest.main()
