@@ -188,7 +188,7 @@
 - Rationale: The seven-scenario program already contains substantial workload,
   worker, receipt and compatibility implementation; integrate and verify that
   work before redirecting effort to broad framework refactoring.
-- Consequence: `PRIME-TYPICAL-APPLICATIONS.md` is the canonical active worklist,
+- Consequence: `docs/status/_archive/asterion-prime-p7-milestone-2026-10-13/PRIME-TYPICAL-APPLICATIONS.md` is the canonical active worklist,
   beginning with P1's real execution spine and full semantic proof. The earlier
   assessment's framework-first implementation ordering is superseded; its
   technical findings remain valid backlog candidates or blocking fixes.
@@ -202,7 +202,7 @@
 ## D-2026-09-06-01 — Resume the framework-first integration sequence after Prime closure
 
 - Status: 🔴 superseded by D-2026-09-12-01
-- Decision: Use `FRAMEWORK-INTEGRATION-WORKLIST.md` as the canonical mainline.
+- Decision: Use `docs/status/_archive/asterion-prime-p7-milestone-2026-10-13/FRAMEWORK-INTEGRATION-WORKLIST.md` as the canonical mainline.
   Repair existing v1 cross-layer inconsistencies before adding protocol
   versions, product parity features, registries, or execution engines.
 - Rationale: Prime P1–P7 now provide bounded development evidence for one

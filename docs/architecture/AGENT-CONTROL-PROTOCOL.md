@@ -190,6 +190,6 @@ kernel must later implement the same public client contract and pass the common
 scenarios; provider-specific tests may add constraints but cannot waive them.
 
 Use the current evidence ledger for exact command results and claim level:
-[Prime Parity Ledger](../status/PRIME-PARITY-LEDGER.md). Phase 0 can prove only
+[Prime Parity Ledger](../status/_archive/asterion-prime-p7-milestone-2026-10-13/PRIME-PARITY-LEDGER.md). Phase 0 can prove only
 `control-plane-foundation`; it cannot prove `Verified-loop`,
 `Verified-system-parity`, `Verified-native-parity` or full Prime equivalence.

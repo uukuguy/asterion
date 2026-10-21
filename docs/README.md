@@ -24,7 +24,7 @@ read architecture documents when extending the framework.
 - [Agent Control Protocol](architecture/AGENT-CONTROL-PROTOCOL.md) — optional
   long-running systems, provider interchangeability, authority, journal,
   recovery and safe evidence boundaries.
-- [Prime parity ledger](status/PRIME-PARITY-LEDGER.md) — pinned baseline,
+- [Prime parity ledger](status/_archive/asterion-prime-p7-milestone-2026-10-13/PRIME-PARITY-LEDGER.md) — pinned baseline,
   evidence levels, stable domains and explicit Prime/native gaps.
 - [Framework and capability integration](architecture/asterion-framework-capability-integration.md)
   — runtime, adapter, package, capability, assembly, application, provider,

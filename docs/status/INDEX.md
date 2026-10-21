@@ -35,10 +35,6 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/plans/2026-10-06-p7-vercel-console-sync.md` | 🟢 active | Private Blob publisher, Vercel cloud reads and actual deployment acceptance. |
 | `DCI-BENCHMARK-INSTANCES.md` | 🟢 active | DCI benchmark implementation and verification backlog. |
 | `PATHLIGHT-DCI-DIAGNOSIS.md` | 🟢 active | Provider-free six-run DCI Pathlight diagnosis; safe numeric observations and unapproved follow-up proposals. |
-| `PRIME-PARITY-LEDGER.md` | 🟡 decision-history | Pinned Prime-Gateway parity baseline and evidence; historical after native detachment (2026-09-14); `asterion.native` rows remain Missing. |
-| `PRIME-TYPICAL-APPLICATIONS.md` | 🟡 decision-history | Historical Prime-backed P1-P7 behavior and traces; not native Asterion Prime closure. |
-| `FRAMEWORK-INTEGRATION-WORKLIST.md` | 🟡 decision-history | Completed framework integration worklist; superseded as active route by the 2026-09-12 native reset. |
-| `FRAMEWORK-PUBLIC-INVENTORY.md` | 🟢 active | Metadata-only inventory of application providers, capability refs, AgentRuntime IDs, separate control providers, and evidence boundaries. |
 | `ASTERION-PRIME-P7-EVIDENCE.md` | 🟡 decision-history | Historical native implementation, partial-card and console acceptance evidence; final official result is in the result record and current handoff. |
 | `../guides/pathlight-operator-guide.md` | 🟢 active | 中文 Pathlight 操作者手册：观察、追踪、评估、优化、Dashboard 与 Opik。 |
 | `../guides/prime-application-writing.md` | 🟢 active | 七个 Prime 示范应用的编写入口：文本回合、持久内核、声明工具与笔记。 |
@@ -58,7 +54,6 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 | `../superpowers/specs/2026-10-05-p7-worldmap-solver-redesign.md` | 🟢 active | Whole solver/console redesign, evidence reuse and source-bound save-time replay preparation and ready-only25-game/183-level initial views; evaluation/deployment boundaries remain in the active checkpoint. |
 | `../superpowers/specs/2026-10-05-prime-p7-console-modes-design.md` | 🟢 active | Approved P7-first design; packaged realtime decisions/actions/cognition and stop/cleanup verified; full gate non-PASS; independent manual play/direct levels, remembered choice, reliable controls and durable per-level HUMAN save/resume/history verified; current-level clear/restart verified; cooperative pause is implemented by the WorldMap solver/control redesign. |
 | `PRIME-P1-P7-ACCEPTANCE.md` | 🟢 active | P1–P7 验收指南；Task40 标准 owner 与精确模型策略、独立入口、P2 无模型和 P4 历史指纹边界；打包实跑状态以 checkpoint 为准。 |
-| `climb/` | 🟢 active | Prime autonomous verification loop state; read `research-tree.md` on resume. |
 | `INDEX.md` (this file) | 🟢 active | Discovery hub. |
 
 - 历史九关冷实测：[2026-10-11 BP35完整目标实测](../reviews/2026-10-11-p7-bp35-full-game-trial.md)：5/9、255动作/4RESET；独立前五关214动作重放通过，128回调上限为强证据推断，九关目标未达成。
@@ -67,14 +62,13 @@ When adding a new file to `docs/status/`, **also add its row here** — otherwis
 
 | File | Status | What it recorded | Outcome / supersession |
 |---|---|---|---|
-| `GIT-RECOVERY-CLOSURE-20260830.md` | 🟡 decision-history | Git recovery and worktree cleanup audit | Historical closure; current branch state is in `CURRENT-STATE.md`. |
 | `../reviews/2026-09-22-architecture-and-execution-review.md` | 🟡 decision-history | Baseline design/code review, nine findings, provider-free reproductions, and prioritized repair plan | Implementation evidence is tracked in the active `RESUME-NEXT-SESSION.md`; the baseline reproductions do not prove current application capability. |
 
 ## Archived
 
 | Bucket | Files | Notes |
 |---|---|---|
-| (empty initially) | | |
+| `_archive/asterion-prime-p7-milestone-2026-10-13/` | 10 files | Five superseded ledgers and the climb directory. July and August journal text is in `_archive/journal/asterion-prime-p7-milestone-2026-10-13.md`. |
 
 > When adding new archive buckets, append a row here pointing to `_archive/<label>/`. Do not list individual files.
 
