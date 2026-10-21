@@ -476,8 +476,12 @@ class NativeDciLivePresetTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("examples/applications/native_dci.py --live", shell)
         self.assertNotIn("source ", shell)
         self.assertNotIn("set -a", shell)
+        self.assertIn('--with "python-dotenv>=1.0.0"', shell)
         self.assertIn("\nnative-dci-example:\n", makefile)
-        self.assertIn("bash examples/native_dci_example.sh", makefile)
+        self.assertIn(
+            '$(UV_BIN) run --with "python-dotenv>=1.0.0" python examples/applications/native_dci.py --live',
+            makefile,
+        )
         entry = (SOURCE / "agents/native/application.py").read_text(encoding="utf-8")
         self.assertNotIn("load_dotenv", entry)
         example = (root / "examples/applications/native_dci.py").read_text(encoding="utf-8")

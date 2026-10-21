@@ -140,7 +140,7 @@ help:
 	@echo "provider-free framework: asterion-list asterion-describe asterion-verify-preflight asterion-verify-acceptance"
 	@echo "bounded provider-backed presets: asterion-verify-basic asterion-verify-complete"
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
-	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example"
+	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example native-dci-example"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
@@ -849,4 +849,4 @@ dci-runtime-context-example:
 	bash examples/asterion_dci_runtime_context_example.sh
 
 native-dci-example:
-	bash examples/native_dci_example.sh
+	$(UV_BIN) run --with "python-dotenv>=1.0.0" python examples/applications/native_dci.py --live
