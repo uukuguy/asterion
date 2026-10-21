@@ -4,7 +4,7 @@
 
 `prepare_native_application` stays the one Native door. This spec adds one application on that door: `native.dci-complete@1.0.0`. It runs the existing DCI complete chain for one labeled question: retrieval, Judge, the one-case tally, analysis, and export.
 
-The corpus is the host option `corpus.local-root`. The Judge is an operator-managed host service supplied by the example. The product factory `_open_answer_judge_service` stays locked to provider `dci-agent-lite` and application `dci.complete-application@1.0.0`. The example does not call that factory.
+The corpus is the host option `corpus.local-root`. The Judge is an operator-managed host service supplied by the example. The example does not call `_open_answer_judge_service`. That factory stays unchanged.
 
 `src/asterion/agents/native/application.py` and `src/asterion/agents/native/__init__.py` stay as they are. The existing entry already accepts one option map and one managed-service map whose keys together equal the assembly host capabilities and do not overlap. `native.packages@1.0.0` stays first in the provider tuple. `native.dci-research@1.0.0`, `native.controlled-code@1.0.0`, and `examples/applications/native_dci.py` stay as they are.
 
