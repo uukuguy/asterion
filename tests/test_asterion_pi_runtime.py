@@ -1495,7 +1495,7 @@ sys.stdout.flush()
         )
         self.assertEqual(len(seen), 1)
         child = seen[0]
-        self.assertLessEqual(child.queued_stdout_bytes, 64 * 1024)
+        self.assertLessEqual(child.queued_stdout_bytes, 1024 * 1024)
         retained = 0
         while True:
             try:
@@ -1504,7 +1504,34 @@ sys.stdout.flush()
                 break
             if isinstance(item, (bytes, bytearray)):
                 retained += len(item)
-        self.assertLessEqual(retained, 64 * 1024)
+        self.assertLessEqual(retained, 1024 * 1024)
+
+    async def test_tool_sized_stdout_line_is_not_the_line_cap(self) -> None:
+        script = r'''
+import sys
+sys.stdin.readline()
+sys.stdout.write("x" * (100 * 1024) + "\n")
+sys.stdout.flush()
+'''
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            client = self._client(root, script)
+            with self.assertRaises(ProtocolError) as raised:
+                await asyncio.wait_for(
+                    _collect(
+                        client,
+                        RunRequest(
+                            run_id="tool-sized-line",
+                            input_text="question",
+                            requested_capabilities=("filesystem.read",),
+                        ),
+                        MutableSignal(),
+                    ),
+                    timeout=5,
+                )
+        self.assertEqual(
+            str(raised.exception), "Pi runtime emitted invalid JSONL"
+        )
 
 
 async def _collect(

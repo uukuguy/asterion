@@ -41,7 +41,8 @@ from asterion.runtimes.pi_extensions import PiExtensionLease
 from asterion.runtimes.pi_rpc import PiChildProcess, PiStdoutLimitExceeded
 
 
-_MAX_STDOUT_LINE_BYTES = 64 * 1024
+# One Pi tool event repeats the tool's own truncated body in details.
+_MAX_STDOUT_LINE_BYTES = 1024 * 1024
 _MAX_STDOUT_BYTES = 4 * 1024 * 1024
 _MAX_STDERR_BYTES = 64 * 1024
 _MAX_EVENT_COUNT = 2048
