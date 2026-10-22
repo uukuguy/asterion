@@ -536,6 +536,10 @@ class NativeDciLivePresetTests(unittest.IsolatedAsyncioTestCase):
             environment={"PI_CODING_AGENT_DIR": "/tmp/agent"},
         )
         options = module.live_runtime_options(config)
+        self.assertEqual(
+            __import__("json").loads(options["command"]),
+            [config.node, config.cli, "--mode", "rpc"],
+        )
         self.assertEqual(options["tools"], "read,grep")
         self.assertEqual(options["max_turns"], "6")
         self.assertEqual(options["cwd"], config.corpus)

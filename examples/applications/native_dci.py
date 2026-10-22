@@ -224,7 +224,7 @@ def resolve_live_configuration(root: Path, env: Mapping[str, str], *, which=shut
 def live_runtime_options(config: LiveConfiguration) -> dict[str, str]:
     return {
         "command": json.dumps(
-            [config.node, config.cli],
+            [config.node, config.cli, "--mode", "rpc"],
             ensure_ascii=False,
             separators=(",", ":"),
         ),
