@@ -1,469 +1,122 @@
-# Task 4 report: Asterion-prime session and AgentRuntime
+# Task 4 report: one-question live preset
 
-## Scope delivered
+## What I implemented
 
-- Added the source-independent `AsterionPrimeSession` over the injected common
-  `PiRpcSession`, exact `prime.ipython` binding, and its already-open pinned
-  single-run lease. Host/operator integration retains ownership of resolution
-  and preflight; the session does not discover paths, read provider settings,
-  compose, authorize, retry, or persist.
-- Enforced the fixed P7 slice limits: 128 model callbacks, 500 tool callbacks,
-  and a 3,600,000 ms deadline. A session accepts one active request, consumes
-  its lease once, and rejects reused run IDs.
-- Added immutable, redacted `PrimeToolCall` / `PrimeToolResult` values and a
-  deterministic ledger that accepts each call/result ID once and refuses a
-  successful seal for unmatched or uncertain effects.
-- Added the exact `asterion.prime` runtime manifest with sorted capabilities
-  `prime.arc-agi-3-solving` and `prime.tool.ipython`.
-- Normalized only closed Pi native event shapes into contiguous
-  `asterion.agent-runtime/v1` events. Model prose, provider payloads, IPython
-  arguments/results, stderr, extension paths, and launch values are not placed
-  in public events or errors. Terminal completion/cancellation contains only
-  status; transport failures use one fixed public-safe code/message.
-- The session owns lease closure after completion, failure, cancellation,
-  protocol rejection, explicit close, and unstarted-object finalization.
+Added the provider-free live preset around the existing `run_native_dci_research` helper and `QUESTION`.
 
-## Clarified constructor seam
+- `examples/applications/native_dci.py` now defines `ReadinessFailure`, `LiveConfiguration`, `resolve_live_configuration`, `live_runtime_options`, `execute_live`, `run_live`, and `main`. Live imports sit at the top of the file. There is no second top-level import block. `load_dotenv` is called only from `main`, with `override=False`. The helper and `QUESTION` are unchanged. The live command does not construct `PiChildProcess`.
+- `examples/native_dci_example.sh` is mode `0755` and only execs `uv run python examples/applications/native_dci.py --live`.
+- `Makefile` adds `native-dci-example` to the existing `dci-basic-example` `.PHONY` line and a tab recipe, `bash examples/native_dci_example.sh`. It is not attached to `verify.native-verified-loop.small`.
+- `tests/test_native_application.py` gained `NativeDciLivePresetTests`.
+- `docs/status/INDEX.md` and `docs/status/JOURNAL.md` record the readiness stop.
 
-The task owner confirmed during implementation that construction receives all
-three of the following values: an injected common `PiRpcSession`, an exact
-`PiExtensionBinding`, and the already-open `PiExtensionLease`. Construction
-fails closed unless the binding is exactly `prime.ipython`, its capability is
-exactly `prime.tool.ipython`, the lease belongs to that binding, and the
-transport command, environment, inherited descriptors, and deadline reflect
-the lease launch material exactly. The session does not call `preflight()`.
+Live options are `tools=read,grep`, `max_turns=6`, and `cwd` set to the corpus. They do not pass `cwd_host_capability`, `bash`, `rg`, or a thinking level. Stdout on a run is one body-free JSON object. A readiness failure prints only the public reason and exits 2.
 
-## Files
+## What I tested
 
-- `src/asterion/agents/prime/__init__.py`
-- `src/asterion/agents/prime/session.py`
-- `src/asterion/agents/prime/tools.py`
-- `src/asterion/runtimes/asterion_prime.py`
-- `src/asterion/runtimes/pi_extensions.py` (approved lease identity expansion)
-- `tests/test_asterion_prime_session.py`
-- `tests/test_asterion_prime_runtime.py`
-- `tests/test_pi_runtime_extensions.py` (focused identity regression)
-- `.superpowers/sdd/task-4-report.md` (this required report)
+RED, before the implementation:
 
-## TDD evidence
+`uv run python -m unittest -v tests.test_native_application.NativeDciLivePresetTests`
 
-Initial missing-product RED:
+Result: `FAILED (errors=4)`.
 
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime
+- `test_shell_and_makefile_are_thin`: `FileNotFoundError` for `examples/native_dci_example.sh`.
+- `test_missing_provider_does_not_call_prepare`: `AttributeError: module 'native_dci_live' has no attribute 'run_live'`.
+- `test_runtime_failure_is_body_free_and_hides_the_exception`: `AttributeError` for `LiveConfiguration`.
+- `test_ready_configuration_matches_the_factory_path_rule`: `AttributeError` for `resolve_live_configuration`.
 
-ERROR: ModuleNotFoundError: No module named 'asterion.agents.prime.session'
-ERROR: ModuleNotFoundError: No module named 'asterion.runtimes.asterion_prime'
-Ran 2 tests; FAILED (errors=2), exit 1.
-```
+That failure was expected. The shell, Make target, and live helpers did not exist yet.
 
-Initial focused GREEN:
+GREEN, after the implementation:
 
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime
-Ran 16 tests in 0.071s; OK.
-```
+`uv run python -m unittest -v tests.test_native_application tests.test_native_package_host`
 
-Self-review RED/GREEN:
+Result: `Ran 16 tests in 0.496s` / `OK`.
 
-- An unstarted abandoned session test first failed with
-  `TypeError: cannot create weak reference to 'AsterionPrimeSession' object`;
-  the weakref finalizer implementation then passed.
-- Malicious tool mappings initially raised raw `RuntimeError` values containing
-  `PRIVATE-MAPPING-*`, and an explicitly closed session could still invoke its
-  transport. After normalization and the closed-lease admission check, both
-  focused tests passed with no retained exception context.
+`uv run python -c "import runpy; runpy.run_path('tools/check_promotion.py', run_name='promotion_path_check')"`
 
-Independent-review RED/GREEN:
+Result: exit 0. That `run_name` does not enter `main()`, so this invocation does not execute the promotion audit. The brief asked for this command and exit 0.
 
-- The extra-environment regression initially accepted
-  `PRIVATE_PROVIDER_SECRET`; the lookalike-session regression initially allowed
-  an arbitrary callable object to expose the `asterion.prime` identity. Both
-  failed as expected before their fixes.
-- Construction now requires exact transport/lease environment equality, and
-  the runtime adapter requires an exact validated `AsterionPrimeSession`.
-  Focused rerun: 2 tests, OK.
-- The review's type-narrowing finding was fixed; scoped pyright reports
-  `0 errors, 0 warnings, 0 informations`.
+The provider-free tests do not call a model.
 
-Final protocol and detachment GREEN:
+## Live command
 
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
-  tests.test_runtime_protocol tests.test_asterion_prime_architecture
-Ran 30 tests in 0.067s; OK.
-```
+Command, run once: `make native-dci-example`
 
-Final static verification:
+Exit code: 2
 
-```text
-uv run ruff check <six owned implementation/test files>
-All checks passed!
+Public reason: `pi checkout is unavailable`
 
-uv run python -m py_compile <six owned implementation/test files>
-exit 0
+Stdout was only Make's recipe echo. Stderr was the public reason plus Make's error wrapper. No JSON status line. The model was not called. The command was not run again.
 
-uv run pyright <Task 4 source/test files>
-0 errors, 0 warnings, 0 informations
+Before the run, local symlinks were created and not committed:
 
-git diff --check -- <Task 4 owned files and report>
-exit 0
-```
+- worktree `.env` → primary checkout `.env`
+- worktree `pi` → primary checkout `pi`
+
+`/pi/` in `.gitignore` does not match a symlink, so `/pi` was added to the local common `.git/info/exclude`. After that, `git status --short` does not list `.env` or `pi`.
+
+## Files changed
+
+Commit `b8069cc3` `feat: add the native dci live preset` on `native-dci-research-example`:
+
+- `examples/applications/native_dci.py`
+- `examples/native_dci_example.sh` (100755)
+- `Makefile`
+- `tests/test_native_application.py`
+- `docs/status/INDEX.md`
+- `docs/status/JOURNAL.md`
+
+Not committed: `outputs/`, `.env`, `pi`, and the local exclude file. Nothing was pushed.
 
 ## Self-review
 
-- Confirmed one contiguous stream and one terminal for every returned stream;
-  malformed native events raise a generic `ProtocolError` before buffered
-  public events are yielded.
-- Confirmed tool code/results and model deltas are validated/accounted for but
-  not projected onto the public stream; only call identity/name, error status,
-  and numeric usage cross the adapter boundary.
-- Confirmed duplicate/unmatched results, duplicate terminals, unknown native
-  event types, callback overflow, request deadline overrides, active overlap,
-  reused IDs, closed leases, and launch-material mismatches fail closed.
-- Confirmed no Prime Agent source, SDK, loader, launcher, or source lock is
-  referenced; the Task 1 static detachment gate passes.
-- Independent review found no remaining critical/high issue after its three
-  findings were resolved.
+- The preset matches the brief: public readiness reasons, body-free failure JSON, hidden exception text, exact factory path rejection for symlinks, and a thin shell.
+- `run_native_dci_research` still calls `prepare_native_application` and does not read `.env` or spawn Pi.
+- Names and file layout match the brief. No second example script and no Native CLI, registry row, or `pyproject.toml` change.
+- Tests cover the thin shell, missing provider, redacted runtime failure, and the path rule, including the symlink corpus and evidence-parent cases.
 
-## Concerns and boundary
+## Issues and concerns
 
-- This is only the framework/session protocol slice. It does not register a
-  provider, assembly, application, P7 extension, or live-solving route.
-- Exact child environment equality intentionally prevents provider credentials
-  or arbitrary `.env` values from being smuggled into this runtime slice.
-  Subsequent application integration must use the approved host-injection
-  boundary; widening child environment inheritance requires an explicit
-  contract change and privacy review.
-- A protocol-invalid Pi callback raises `ProtocolError` rather than returning a
-  partial failure stream. This preserves the brief's explicit fail-closed
-  unmatched-result behavior and ensures no partially translated private event
-  is observable.
+- `from __future__ import annotations` was removed from `examples/applications/native_dci.py`. On Python 3.14, a frozen dataclass with postponed annotations crashes when the tests load the file through `spec_from_file_location` without inserting the module into `sys.modules` (`sys.modules.get(cls.__module__)` is `None`). Removing the future import keeps the brief's dataclass and the brief's loaders working. Runtime behavior of the helper is unchanged.
+- `python-dotenv` is only an optional extra. This worktree's `.venv` did not have it, so it was installed locally with `uv pip install` and was not committed. A clean `uv run` without that package raises `ModuleNotFoundError` at import, before readiness. The focused test command and the shell both use plain `uv run`.
+- The required `pi` symlink cannot satisfy `_real_directory`, which rejects symlinks. The one live run stopped at `pi checkout is unavailable`. That is a completed readiness exit, not a second attempt. No corpus file was created.
 
-## Reviewer follow-up: exact lease, command, and terminal boundaries
+## Fix: native dci make entry
 
-The post-commit reviewer identified five additional boundary gaps. The focused
-fix retains the original Task 4 architecture while tightening admission and
-publication:
+The live command entry is the Makefile target `native-dci-example`. It now passes `--with "python-dotenv>=1.0.0"`, the same way Prime targets do, so the command does not depend on an optional extra already being installed. It does not use `--isolated`, a wheel build, ipython, or a guest machine. `examples/applications/native_dci.py` was not changed; the top-level `dotenv` import stays.
 
-- Native tool starts remain private until a certain matching result arrives;
-  the session then publishes the `tool.call` and `tool.result` together.
-  Failure or cancellation discards an unmatched staged call, so every returned
-  stream remains valid.
-- A transport-originated `ProtocolError` is normalized to the one fixed
-  `Asterion-prime transport protocol failed` error with no retained exception
-  context. Callback-local validation uses an explicit internal rejection path
-  and exposes only static public-safe messages; ledger unit errors retain their
-  specific contract diagnostics.
-- `PiExtensionBinding` now derives an opaque domain-separated canonical SHA-256
-  fingerprint over its immutable binding fields. Preflight copies it into an
-  immutable `PiExtensionLease`; session admission compares the two directly.
-  Matching basenames/environments cannot substitute a lease from another
-  absolute binding path.
-- The host injects an immutable `approved_command`; session construction
-  requires full tuple equality with `PiRpcConfig.command`, in addition to the
-  pinned loader suffix checks. Extra executable or flag prefixes fail closed.
-- External `close()` refuses an active request without closing or detaching its
-  lease. The run's `finally` path remains the sole active-run cleanup owner.
+- `Makefile`: the `native-dci-example` recipe is a tab line, `$(UV_BIN) run --with "python-dotenv>=1.0.0" python examples/applications/native_dci.py --live`. It does not call the shell. The help line is `DCI bounded examples: dci-basic-example dci-runtime-context-example native-dci-example`. The target is not attached to `verify.native-verified-loop.small`.
+- `examples/native_dci_example.sh`: kept the shebang, `set -euo pipefail`, and the existing `cd` to the repo root. It does not `source` anything and does not `set -a`. The exec line is `exec uv run --with "python-dotenv>=1.0.0" python examples/applications/native_dci.py --live`.
+- `tests/test_native_application.py`: `test_shell_and_makefile_are_thin` still checks the live script path, the absence of `source ` and `set -a`, the `\nnative-dci-example:\n` target, `load_dotenv` absent from the Native entry, `override=False`, and `PiChildProcess` absent from the example. It now asserts `--with "python-dotenv>=1.0.0"` in the shell and the `$(UV_BIN) run --with ...` recipe in the Makefile, instead of `bash examples/native_dci_example.sh`.
 
-Follow-up RED evidence:
+Commit `929e83a3` `fix: define the native dci make entry` on `native-dci-research-example`. Only those three files. Nothing was pushed. `make native-dci-example` was not run.
 
-```text
-Lease identity / approved command:
-- AttributeError: PiExtensionBinding had no binding_fingerprint.
-- TypeError: AsterionPrimeSession rejected the new approved_command keyword.
+Test command:
 
-Publication / transport / close:
-- failure after tool_execution_start produced a protocol-invalid unmatched call.
-- transport ProtocolError exposed PRIVATE-TRANSPORT-PAYLOAD.
-- close() during a gated active run did not raise.
+`uv run --with "python-dotenv>=1.0.0" python -m unittest -v tests.test_native_application tests.test_native_package_host`
 
-Independent re-review:
-- direct assignment to lease._binding_fingerprint succeeded, allowing identity
-  mutation; the new regression failed because AttributeError was not raised.
-- Follow-up review found that deleting `_initialized` reopened normal slot
-  assignment; its regression likewise failed before deletion was guarded.
+Result: exit 0. `Ran 16 tests in 0.440s` / `OK`.
+
 ```
+test_cancelled_controlled_code_run_fails_before_open ... ok
+test_cancelled_dci_run_fails_before_open_and_blocks_a_second_run ... ok
+test_controlled_code_uses_the_managed_executor ... ok
+test_dci_research_runs_one_retrieval_without_preparing_the_runtime ... ok
+test_entry_source_does_not_import_package_implementations ... ok
+test_host_service_keys_must_match_the_selected_assembly ... ok
+test_relative_and_missing_corpus_fail_before_the_runtime_factory ... ok
+test_second_dci_run_fails ... ok
+test_example_calls_the_standard_entry ... ok
+test_missing_provider_does_not_call_prepare ... ok
+test_ready_configuration_matches_the_factory_path_rule ... ok
+test_runtime_failure_is_body_free_and_hides_the_exception ... ok
+test_shell_and_makefile_are_thin ... ok
+test_base_does_not_import_either_package ... ok
+test_provider_free_assembly_resolves_both_packages_on_pi_reference ... ok
+test_single_package_applications_register_beside_native_packages ... ok
 
-Each RED was observed before its corresponding implementation. The immutable
-lease fix guards both assignment and deletion after construction while
-`close()` changes only `_closed` through the class-owned internal path.
+Ran 16 tests in 0.440s
 
-Follow-up GREEN evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
-  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
-  tests.test_pi_runtime_extensions
-Ran 61 tests in 0.316s; OK.
+OK
 ```
-
-Independent re-review found no critical/high issue; its sole medium immutable
-backing-slot finding was covered by a failing regression and then fixed.
-The final follow-up re-review returned CLEAN after both normal assignment and
-sentinel-deletion bypasses were closed.
-
-Follow-up static verification:
-
-```text
-uv run ruff check <expanded Task 3/4 scoped files>
-All checks passed!
-
-uv run python -m py_compile <expanded Task 3/4 scoped files>
-exit 0
-
-uv run pyright <Task 4 files plus pi_extensions.py>
-0 errors, 0 warnings, 0 informations
-
-git diff --check -- <expanded Task 3/4 scoped files and report>
-exit 0
-```
-
-## Reviewer follow-up: hostile callback exception redaction
-
-One remaining review found that a hostile native `Mapping.get()` implementation
-could raise a secret-bearing `ProtocolError`. The callback wrapper previously
-copied `str(error)`, incorrectly treating exception type as proof that its
-message was code-owned.
-
-RED evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session.TestAsterionPrimeSession.\
-test_hostile_callback_protocol_errors_are_fixed_and_context_free
-
-Both `outer` and `nested` subtests failed because the observed message was
-`PRIVATE-MAPPING-PROTOCOL-ERROR` instead of the fixed native-event error.
-```
-
-The fix gives static local callback diagnostics a private
-`_NativeEventRejected` channel. Every other exception crossing an untrusted
-native mapping operation, including `ProtocolError`, becomes the fixed
-`Asterion-prime native event is invalid` error. The public exception retains
-neither the hostile message nor an exception context or cause.
-
-Focused GREEN evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  <hostile outer/nested regression> <unmatched-result regression> \
-  <model-cap regression> <tool-cap regression>
-Ran 4 tests in 0.013s; OK.
-
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session
-Ran 22 tests in 0.098s; OK.
-
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
-  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
-  tests.test_pi_runtime_extensions
-Ran 62 tests in 0.360s; OK.
-
-uv run ruff check <expanded Task 3/4 scoped files>
-All checks passed!
-
-uv run python -m py_compile <expanded Task 3/4 scoped files>
-exit 0
-
-uv run pyright <Task 4 files plus pi_extensions.py>
-0 errors, 0 warnings, 0 informations
-
-git diff --check -- <hostile-callback scoped files and report>
-exit 0
-```
-
-Independent focused re-review returned CLEAN/APPROVE after direct outer and
-nested hostile callback probes and found no attacker-controlled
-`ProtocolError(str(...))` path in the scoped files.
-
-## Reviewer follow-up: structural hostile-event snapshot
-
-A broader review demonstrated that exception-class filtering was not a
-sufficient provenance boundary. An untrusted mapping could raise a
-`BaseException` outside `Exception`, or forge the module-private diagnostic
-exception with attacker text.
-
-RED evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session.TestAsterionPrimeSession.\
-test_hostile_callback_base_exceptions_and_forgery_are_fixed
-
-All eight outer/nested subtests failed:
-- CancelledError, KeyboardInterrupt, and SystemExit escaped as their native
-  BaseException types.
-- forged `_NativeEventRejected` instances exposed
-  `PRIVATE-FORGED-DIAGNOSTIC`.
-```
-
-The callback now snapshots the complete native event recursively into a new
-`PiRpcEvent` whose mappings/sequences contain only immutable builtin
-JSON-compatible values. This snapshot is the only untrusted-access phase and
-runs inside a `BaseException` guard that always selects the fixed native-event
-error. Only the trusted snapshot reaches native classification. Code-owned
-diagnostics use a closed `_NativeDiagnostic` enum and immutable enum-to-static
-message mapping; `_NativeEventRejected` refuses arbitrary strings.
-
-Focused GREEN evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  <hostile BaseException/forgery regression> \
-  <hostile ProtocolError regression> <trusted malformed tool-result regression>
-Ran 3 tests in 0.041s; OK.
-
-uv run pyright src/asterion/agents/prime/session.py \
-  tests/test_asterion_prime_session.py
-0 errors, 0 warnings, 0 informations
-
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
-  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
-  tests.test_pi_runtime_extensions
-Ran 63 tests in 0.349s; OK.
-```
-
-Independent focused re-review returned CLEAN/APPROVE. It additionally probed
-real task cancellation and confirmed that transport/task `CancelledError`
-still propagates unchanged, while payload-originated cancellation exceptions
-are normalized only inside the untrusted snapshot boundary.
-
-## Reviewer follow-up: returned-event snapshot authority
-
-The final post-callback review found that callback events were trusted
-snapshots, but `PiRpcResult.events` was still compared as an unsnapshotted
-transport-owned tuple. A mutated payload equality implementation could execute
-again after the callback trust boundary.
-
-RED evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  <hostile returned-event equality regression> \
-  <trusted returned-event mismatch regression>
-
-The trusted mismatch regression passed. All three hostile equality subtests
-failed: secret-bearing ProtocolError text leaked, and CancelledError/SystemExit
-escaped unchanged.
-```
-
-The session now snapshots the exact returned event tuple under a
-`BaseException` guard using the same recursive event snapshotter. The consumed
-callback snapshots and returned snapshots are the only values compared; no
-transport-owned event or mapping is accessed again. Snapshot failure raises
-the fixed transport protocol error after leaving the exception handler, so its
-public exception has neither hostile context nor cause. Trusted builtin
-mismatches still receive the static `native result is malformed` diagnostic.
-
-Focused GREEN evidence:
-
-```text
-uv run python -W error::ResourceWarning -m unittest -v \
-  <hostile returned-event equality regression> \
-  <trusted returned-event mismatch regression> \
-  <hostile callback BaseException regression> \
-  <trusted malformed tool-result regression>
-Ran 4 tests in 0.018s; OK.
-
-uv run python -W error::ResourceWarning -m unittest -v \
-  tests.test_asterion_prime_session tests.test_asterion_prime_runtime \
-  tests.test_runtime_protocol tests.test_asterion_prime_architecture \
-  tests.test_pi_runtime_extensions
-Ran 65 tests in 0.347s; OK.
-```
-
-Independent focused re-review returned CLEAN/APPROVE. Direct probes confirmed
-fixed/context-free errors for hostile returned events, retained trusted
-mismatch diagnostics, no post-snapshot attacker access, and unchanged real
-task-cancellation propagation.
-
-## Task 4 pure mechanism model review closeout — 2026-09-30
-
-Commit `5f6e8455` added the bounded declarative mechanism model. The follow-up fix keeps mapping and array values distinct during immutable storage, allows an empty rule set to return `unknown`, caps rules/guards/effects/spec bytes, validates prediction deltas, and prevents directly constructed certificates from becoming planner-eligible without broker issuance.
-
-Verification: `uv run python -m unittest -v tests.test_prime_p7_native_broker.TestP7MechanismModel` — 4 tests passed; Ruff and `git diff --check` passed.
-
-## Task 4 broker lifecycle slice — 2026-09-30
-
-The broker now accepts an identity-checked `WorldModelStore`, records bounded transition evidence, exposes immutable world/transition/playbook projections, and returns bounded retrodiction/conflict fields from `act_checked`. The P7 operator injects the same-game store and emits scalar model diagnostics without private frames or fact values.
-
-Verification: 50 native broker tests plus WorldModel/TransitionModel/Playbook suites (77 total) passed; Ruff and `git diff --check` passed.
-
-## Task 4 operator Playbook lifecycle slice — 2026-09-30
-
-Added a bounded Playbook projection, same-game load before prompt construction, safe baseline fallback for malformed private state, and save/branch behavior limited to sealed or failed runs. Diagnostics expose only loaded/saved booleans.
-
-Verification: 64 focused broker/playbook/mechanism tests passed; Ruff and `py_compile` passed.
-
-## Task 4 review remediation — 2026-09-30
-
-The first lifecycle slice overstated `retrodiction=verified`: an observed transcript is now reported as `observed` until a broker-issued mechanism certificate is promoted. Worker `act_checked` now preserves bounded `retrodiction` and `conflict` fields. Playbook saves now derive checked routes from sealed broker evidence, require a successful run for success-route persistence, and write a branch for failed/unverified runs. Mechanism hypotheses are accepted only with one canonical distinguishing probe; matching evidence promotes a validated certificate, while contradiction consumes the probe and records a conflict.
-
-P7 application tools are registered through `P7ToolRegistry` and mirrored through the typed Python bridge, generated worker module, TypeScript extension source, and built extension resource. Python focused suites: 149 tests passed; mechanism model Pyright: 0 errors; TypeScript typecheck/build and focused extension tests passed (one context-witness test remains environment-limited by its missing peer harness).
-
-## Task 5 prompt and application-tool closeout — 2026-09-30
-
-The active solve prompt now treats action names as opaque per-game slots and
-requires action semantics to come from `available_actions`, confirmed same-game
-facts, and settled feedback. It explicitly directs the model to read the
-world model, Playbook, and retrodiction status before proposing a batch, while
-keeping hypothesis confirmation behind one distinguishing probe. The new
-world-model, Playbook, retrodiction, and hypothesis tools remain registered
-through the P7 application registry and all worker/bridge/extension surfaces.
-
-Verification: the focused live/bridge/broker prompt suite passed; no active
-prompt contains the old fixed ACTION1–ACTION7 semantic claim.
-
-## Task 6 replay expectation closeout — 2026-09-30
-
-Fresh offline ARC replays now emit one bounded `ActionExpectation` per
-candidate action, including action data, before/after state digests, settled
-frame digest, changed-cell samples, level, and state. A shorter route is
-eligible for the live optimization hint only when all expectations are
-present. Route adoption receives the expectations and stops recording at the
-first action or expectation mismatch, preserving normal model control as the
-fallback. Partial attempts carry the same private expectation metadata.
-
-Verification: optimizer, ARC witness, live-command, and full P7 model/replay
-focused suites passed (199 tests in the combined run); optimizer, broker, and
-mechanism modules pass Pyright with zero errors; Ruff and `git diff --check`
-pass.
-
-## Task 7 replay/public evidence closeout — 2026-09-30
-
-The replay, official replay, diagnostics, installed-wheel, provider, bridge,
-optimizer, and same-game model suites now pass together (221 tests). The
-installed fixtures declare an explicit temporary provider profile and select
-the ipython tool by name, so the full P7 application registry is exercised
-without relying on registration order or the operator's host profile. The
-prompt regression asserts opaque per-game action slots and rejects the old
-fixed ACTION1 direction claim.
-
-Verification: `uv run python -m unittest -q` over the combined P7 suite — 221
-tests passed; `make lint` and `make docs-check` passed earlier in this
-closeout. A repository-wide `make check` run was interrupted by the session
-model switch after the Python suite had progressed through most packages; it
-must be rerun before claiming the repository gate.
-
-## Online replay-witness adoption closeout — 2026-09-30
-
-Commit `56948081` closes the offline-to-live gap. `ArcBroker.act_checked` now
-accepts the private replay expectations and checks the prior state, settled
-frame, state, level, and changed cells before allowing each candidate action.
-The first mismatch stops the batch and records a replan conflict. The P7
-Playbook projection exposes at most twenty checked actions with falsifiable
-frame expectations, and the prompt tells the model to submit that plan through
-`p7_act_checked` unchanged.
-
-Verification: the combined P7 suite passed 223 tests after this change; the
-90 prompt/live tests and model-module Pyright passed. The full repository gate
-completed 3509 tests with one existing promotion-environment failure: the
-offline npm-ci test observed one network request. It is recorded as a
-repository-gate failure, not a P7 regression.

@@ -46,3 +46,26 @@
 - Final source acceptance: Sol domain/Astra contracts approved; TS93PASS/6external,Python155PASS,promotion full25commands/provider0,lint/docs PASS. Task8 finite real r11l L1 witness next; not complete until deployment evidence.
 
 - Task8/Task40 complete: fresh-wheel r11l L1 PASS, exact Sol,1level/4actions, replay/seal/cleanup PASS;610source/wheel/resources audited independently PASS. No owned live processes; dedicated-summary behavior remains separate.
+
+## Native DCI research example (2026-10-21)
+
+This section is a new plan. The P7 and Prime lines above are not Tasks 1–4 of this plan.
+
+- Plan: `docs/superpowers/plans/2026-10-21-native-dci-research-example.md`
+- Branch: `native-dci-research-example`
+- Worktree: `.worktrees/native-dci-research-example`
+- Baseline: `014897b9`. `uv run python -m unittest -v tests.test_native_package_host` — 2 tests, OK.
+- Task 1: complete (commits `014897b9`..`2b77c81f`, review clean). ⚠️ resolved: GREEN and path-assert evidence accepted from the implementer report; `make promotion-check` failed only on missing Node 22 after the path assert; later-task constraints are outside this diff.
+- Task 2: complete (commits `2b77c81f`..`4d9bdf93`, review clean). ⚠️ resolved: worktree `git status --short` was empty at package time; this commit was not pushed (no upstream). Provider order stays the Task 1 registration; this commit does not touch `applications/native/`.
+- Minor for final review (plan-mandated, not fixed): `application.py` host-key expression relies on operator precedence; `asterion.applications.provider` is imported twice; `_corpus()` temp dirs are removed only in the successful DCI test.
+- Task 3: complete (commits `4d9bdf93`..`bd4d8db4`, review clean). No open ⚠️.
+- Task 4: complete (commits `bd4d8db4`..`929e83a3`, includes `b8069cc3` and `929e83a3`, re-review clean). Live run once, exit 2, reason `pi checkout is unavailable`. Model was not called. `outputs/` absent. ⚠️ resolved: journal has one live line and the fix commit did not rerun the preset.
+- Minor for final review, Task 4 re-review: `test_shell_and_makefile_are_thin` does not assert the absence of a second recipe.
+- Final review: Ready to merge, no Critical or Important. Focused tests re-run: 16 OK.
+- Merged fast-forward into local main at `929e83a3`. Worktree removed. Branch deleted. Not pushed. `git pull` was skipped because this repo rebases on pull and main had unpushed commits.
+- ⚠️ resolved: one live run, no model evidence, not pushed.
+- User decision: the live entry is the Makefile target, like Prime. The recipe supplies `--with "python-dotenv>=1.0.0"`. Do not edit `pyproject.toml`. Do not rerun the live preset.
+- Minor for final review (plan-mandated, not fixed): `main` calls `repository_root()` outside the readiness handler; `execute_live` success-path wiring into `run_native_dci_research` is not directly asserted.
+- Task 2 minors still open for final review: host-key precedence, duplicate provider import, `_corpus()` cleanup.
+- Task 4: pending. One live `make native-dci-example` only after provider-free tests and readiness are green.
+

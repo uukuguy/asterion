@@ -1,64 +1,99 @@
-# Task 2 report
+# Task 2 Report: Add the standard Native entry
 
-Implemented bounded P7 console supervision and the loopback HTTP application. No model or real guest attempt was launched by this task. No commits were made; root owns integration.
+## What you implemented
 
-## Delivered
+Added the one package-uniform library entry, `prepare_native_application`, and the provider-free prepare/run tests. There is no example script and no live model run.
 
-- `console_session.py`: one activity slot; service-allocated exact run ID and exact guest unit; fixed level-witness argv; 900 second host watchdog; inherited unbounded/attempt/Make control flags removed. Operator/ARC roots and guest are trusted constructor values, passed explicitly. stdout/stderr are discarded and never used as browser data.
-- Startup and stop command IDs deduplicate exact requests. Stop responds immediately with `stopping`; process termination, reap and guest cleanup happen outside the state lock. Natural exit also reaps the process group and independently checks the owned guest unit. Failed cleanup blocks restart.
-- `operator.main`: optional console ID comes only from process environment, matches `p7-live-[0-9]{14}-[0-9a-f]{24}`, and refuses an existing or symlinked evidence directory. Non-console calls continue generating their ID.
-- Make containment branch now admits a console-owned witness. Guest launcher requires witness mode, the complete strict ID/unit/900-second contract, and absence of the unbounded marker; sweep behavior remains. The environment allowlist forwards the console ID.
-- Guest `systemctl stop` timeout is 30 seconds, exceeding the existing 20-second unit stop/KILL window. Console host cleanup timeout is 40 seconds and retains the helper's inactive/not-found and unpopulated-cgroup checks. The unrelated sweep supervisor still has its old host timeout; this task did not change that workflow.
-- `console_server.py`: only 127.0.0.1; exact Host; exact Origin and page-injected random token for POST; bounded JSON and exact keys; fixed routes; no arbitrary file serving or CORS. HTML uses the renderer's actual script/style hashes plus frame-ancestors restriction.
-- `game.public_game_catalog`: returns only validated game ID, alias and win-level metadata without importing game code.
+`prepare_native_application(spec, operator)` loads the existing `native` provider, resolves it with the operator's runtime factories and the built-in `dci` and `controlled-code` packages, and selects `application_id@version`. It returns a `NativeApplication` only when that application has exactly one assembly and the operator's host-service option keys and managed keys are disjoint and together equal the assembly's host capabilities. Missing applications, wrong versions, an empty runtime registry, and mismatched host-service keys raise `NativeApplicationError` with no chained cause. Preparation does not call the runtime factory.
 
-## Frozen browser interface
+`NativeApplication.run(input_text, *, run_id, signal=None)` is single-use. A cancelled signal fails before `HostServiceFactoryRegistry.open` and before the runtime factory, and still consumes the application. A successful or failed first run blocks a second run. The run opens host services for `plan.host_capabilities`, constructs the runtime with empty `host_services` and the operator's runtime options, and returns `run_composed_application`. It does not store the runtime, call `close`, branch on `application_id`, or branch on a host capability id.
 
-- `GET /api/state`: `{session_id,state,game_id,run_id,cleanup_confirmed,snapshot,revision}`. IDs/game/snapshot are null while idle. States: `idle`, `starting`, `running`, `stopping`, `completed`, `incomplete`, `cancelled`, `timed-out`, `failed`, `cleanup-unconfirmed`.
-- `GET /api/games`: `{games:[{game_id,alias,win_levels}]}`.
-- `GET /api/runs`: `{runs:[{run_id,game_id,status}]}` from at most 256 explicitly validated run directories.
-- `GET /api/replay/<run_id>`: safe console snapshot only, with catalog/game/run identity checks.
-- `POST /api/start`: `{game_id,command_id}`; `POST /api/stop`: `{session_id,command_id}`. Both return the state shape with HTTP 202. Use `Content-Type: application/json` and `X-P7-Console-Token` header; browser same-origin Origin is required. Errors use fixed `{error:code}` responses.
-- `render_console(snapshot,live_config={token,games})` receives the token only in the real-time page. No token in URLs or state APIs. Polling state does not start/stop a task.
-- `serve_console(operator_root,arc_root,guest_machine='ubuntu',open_browser=False,on_ready=None)` is the CLI entry; it invokes on_ready with the bound loopback URL and cleans the session on SIGTERM/SIGINT/shutdown.
+`NativeApplication.capability_packages` exposes the selected application's package refs. `native.packages` remains the first provider application and its assembly file was not edited.
 
-## Verification
+## What you tested and the test results
 
-- PASS: `uv run python -m unittest -q tests.test_prime_p7_console_session tests.test_prime_p7_console_server tests.test_prime_p7_guest tests.test_prime_p7_native_game tests.test_prime_p7_console_cli` — 43 tests, one existing opt-in real Orb probe skipped. Includes actual HTTP using fake processes, exact host/origin/token, immutable views, concurrent start/idempotency, stop during startup, slow cleanup without response blocking, deadline cancellation, natural exit, final success proof, mismatched run/game, environment contamination and reused run IDs.
-- PASS: targeted `ruff check` over session/server/game/operator/guest helper and Task 2 test files; `git diff --check`.
-- PASS: `make -n asterion-prime-p7-level-witness GAME=sp80 LEVEL=1 ...` read-only check confirms console containment branch and `python -I -m ...p7.operator` from wheel path.
-- Related regression run: 138 tests across live-command, native-game, Task 2 and CLI had one failure: `TestPrimeP7LiveCommand.test_initial_context_logs_cognition_refresh` expected `startup-cognition-marker`, but log reported `duplicate-snapshot`. Reported to root/Task 1 owner; not classified as baseline and not fixed outside this task's ownership. Task 2 focused suite passed.
+Command:
 
-## Boundaries
-
-Success is derived from the final safe snapshot's successful status plus sealed/replay-verified evidence, never process exit zero. An exit-zero run without successful evidence is incomplete. Forced stop need not produce final operator summary, but requires independent containment cleanup to permit a new run.
-
-Real Mac/Orb containment, real wheel/model witness and visual acceptance are not proven by these fake-process tests; root owns that deployment verification. No pause/resume or manual game execution was added.
-
-## Review correction: surviving host descendants
-
-The important finding in `task-2-review.md` was reproduced before changing the implementation. The real-process regression starts a fresh process group with a Python parent and a child that ignores SIGTERM. Both parent-terminated and parent-natural-exit cases failed with the original helper: the guest-cleanup boundary observed a surviving host group.
-
-`_stop_process` now sends SIGKILL to any remaining group members regardless of whether waiting for the parent timed out, reaps the parent, and waits up to five seconds for `killpg(pgid, 0)` to report group absence. A surviving group or inspection failure raises instead of granting cleanup confirmation. Session shutdown allows 60 seconds for the host teardown plus the existing 40-second guest cleanup. The independent guest cleanup still follows the host phase; any unconfirmed host teardown blocks restart even if guest cleanup succeeds.
-
-Real regression uses actual subprocesses and OS group signals, with a readiness file from the TERM-ignoring child. It checks group absence at guest-cleanup entry for both parent exit modes, parent reaping and the final public cleanup flag. Its finally block forcibly cleans the owned group even on test failure. No model or Orb service is involved.
-
-Fresh command outputs after correction:
-
-```text
-$ uv run python -m unittest -q tests.test_prime_p7_console_session.TestPrimeP7ConsoleSession.test_real_process_group_cleans_term_ignoring_child_after_parent_exit
-Ran 1 test in 0.187s
-OK
-
-$ uv run python -m unittest -q tests.test_prime_p7_console_session tests.test_prime_p7_console_server tests.test_prime_p7_guest tests.test_prime_p7_console_cli
-Ran 31 tests in 3.487s
-OK (skipped=1)
-
-$ uv run ruff check src/asterion/applications/prime/p7/console_session.py tests/test_prime_p7_console_session.py
-All checks passed!
-
-$ git diff --check
-(no output; exit 0)
+```bash
+uv run python -m unittest -v tests.test_native_application tests.test_native_package_host
 ```
 
-The skipped test remains the opt-in actual Orb probe. Only `console_session.py`, its session tests and this report changed for the review correction; no commit was made.
+Result: `Ran 11 tests in 0.412s` / `OK`.
+
+Covered behavior:
+
+- Entry sources do not contain `asterion.capabilities.dci`, `asterion.capabilities.controlled_code`, `PiChildProcess`, `load_dotenv`, `.env`, or the contiguous string `run_application`. `application.py` calls `run_composed_application`.
+- `native.dci-research` prepares without calling the runtime factory, exposes only `dci@1.0.0`, then runs one retrieval. The factory context is `native` / `native.dci-research@1.0.0` with empty host services and no `cwd_host_capability`. The corpus root is opened once. The runtime sees the question and `filesystem.read`. The result includes `research.completed` and `application/vnd.dci.research+json`.
+- Relative and missing corpus roots raise `HostServiceRegistryError` before the runtime factory, then a second run raises `NativeApplicationError`.
+- A cancelled DCI or controlled-code run fails before open and blocks a second run.
+- A second DCI run fails after one successful run, with one factory call.
+- `native.controlled-code` uses the managed `executor.controlled` service, does not call the runtime `run` method, and emits the code-quality workflow and audit events plus both code-quality media types.
+- `native.packages` accepts both host services and exposes `controlled-code@1.0.0` then `dci@1.0.0` without opening the executor or calling the factory. Partial keys, overlapping keys, an unknown id, version `9.9.9`, and an empty runtime registry fail closed.
+- Existing `tests.test_native_package_host` still passes.
+
+## TDD evidence
+
+RED, before the entry existed:
+
+```bash
+uv run python -m unittest -v tests.test_native_application
+```
+
+```text
+ERROR: test_dci_research_runs_one_retrieval_without_preparing_the_runtime
+...
+ModuleNotFoundError: No module named 'asterion.agents.native'
+...
+Ran 8 tests in 0.006s
+FAILED (errors=8)
+```
+
+Every test failed in `setUp` on `from asterion.agents.native.application import ...`. That failure was expected: the test was added before `src/asterion/agents/native/` existed.
+
+GREEN, after `src/asterion/agents/native/__init__.py` and `application.py`:
+
+```bash
+uv run python -m unittest -v tests.test_native_application tests.test_native_package_host
+```
+
+```text
+test_cancelled_controlled_code_run_fails_before_open ... ok
+test_cancelled_dci_run_fails_before_open_and_blocks_a_second_run ... ok
+test_controlled_code_uses_the_managed_executor ... ok
+test_dci_research_runs_one_retrieval_without_preparing_the_runtime ... ok
+test_entry_source_does_not_import_package_implementations ... ok
+test_host_service_keys_must_match_the_selected_assembly ... ok
+test_relative_and_missing_corpus_fail_before_the_runtime_factory ... ok
+test_second_dci_run_fails ... ok
+test_base_does_not_import_either_package ... ok
+test_provider_free_assembly_resolves_both_packages_on_pi_reference ... ok
+test_single_package_applications_register_beside_native_packages ... ok
+
+Ran 11 tests in 0.412s
+
+OK
+```
+
+## Files changed
+
+Commit `4d9bdf93` on `native-dci-research-example`: `feat: add the native application entry`
+
+- `tests/test_native_application.py` (created)
+- `src/asterion/agents/native/__init__.py` (created)
+- `src/asterion/agents/native/application.py` (created)
+
+Not changed: `src/asterion/agents/__init__.py`, `src/asterion/applications/native/`, `pyproject.toml`, status docs, and the rest of the tree. `git status --short` is empty. The commit was not pushed.
+
+## Self-review findings
+
+- The implementation is the brief's entry, including the second import of `resolve_installed_provider` from `asterion.applications.provider`. That split is redundant but required by the brief and does not change behavior.
+- `prepare_native_application` resolves every application on the provider, then selects one. It does not branch on application id. The `filesystem.read`-only test factory is enough for all three assemblies, which the passing prepare and run tests confirm.
+- Host-service matching uses set intersection and union against `plan.host_capabilities`. The overlap, missing-key, and exact-key cases in the test pass.
+- The runtime is created only inside `run`, with `host_services={}`, and is not stored. Cancellation and the consumed flag are checked before `open`.
+- Source checks pass for the new entry and the existing provider: no package-implementation imports, no `PiChildProcess`, no `load_dotenv`, no `.env`, and no contiguous `run_application`.
+- No second Pi runner, no change to `prepare_prime_application`, no CLI, no `asterion.application_index` row, and no `executor.controlled` entry point.
+- Tests assert the public contract rather than a private helper. No extra files or product behavior were added.
+
+## Issues or concerns
+
+None. The brief's verification command passed. The whole repository suite was not run, by instruction.
