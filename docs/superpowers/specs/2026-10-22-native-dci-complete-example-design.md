@@ -4,9 +4,9 @@
 
 `prepare_native_application` stays the one Native door. This spec adds one application on that door: `native.dci-complete@1.0.0`. It runs the existing DCI complete chain for one labeled question: retrieval, Judge, the one-case tally, analysis, and export.
 
-The corpus is the host option `corpus.local-root`. The Judge is an operator-managed host service supplied by the example. The example does not call `_open_answer_judge_service`. That factory stays unchanged.
+The corpus is the host option `corpus.local-root`. The Judge is an operator-managed host service supplied by the example. The example does not call `_open_answer_judge_service`. The provider conversion spec owns that factory's identity and the removal of provider `dci-agent-lite`.
 
-`src/asterion/agents/native/application.py` and `src/asterion/agents/native/__init__.py` stay as they are. The existing entry already accepts one option map and one managed-service map whose keys together equal the assembly host capabilities and do not overlap. `native.packages@1.0.0` stays first in the provider tuple. `native.dci-research@1.0.0`, `native.controlled-code@1.0.0`, and `examples/applications/native_dci.py` stay as they are.
+`src/asterion/agents/native/application.py` and `src/asterion/agents/native/__init__.py` stay as they are. The existing entry already accepts one option map and one managed-service map whose keys together equal the assembly host capabilities and do not overlap. `native.packages@1.0.0` stays first in the provider tuple. `native.controlled-code@1.0.0` and `examples/applications/native_dci.py` stay as they are. The provider conversion spec adds the Claude assembly to `native.dci-research@1.0.0`.
 
 This follows decision D-2026-10-20-04. It does not add a decision record. Prime stays on `prepare_prime_application`. The one question does not close D-2026-07-31-02 and does not authorize a dataset run.
 
@@ -157,9 +157,9 @@ A missing offline Node executable stays outside this spec. `docs/status/INDEX.md
 ## Out of scope
 
 - Editing `src/asterion/agents/native/application.py` or the Native package exports.
-- Opening `_open_answer_judge_service` to provider `native`.
-- A second product door for `dci.complete-application`.
-- A change to `native.dci-research`, its live preset, or `examples/applications/native_dci.py`.
+- Calling `_open_answer_judge_service` from the development example. The provider conversion spec retargets that factory to `native` and `native.dci-complete@1.0.0`.
+- Keeping `dci.complete-application` as a second product door. The provider conversion spec removes that id.
+- A change to the `native.dci-research` Pi graph, its live preset, or `examples/applications/native_dci.py`. The provider conversion spec adds the Claude research assembly.
 - Creating `wiki_dump.jsonl` or any corpus file.
 - Running `make native-dci-example` or `make native-dci-complete-example`.
 - A batch, the 50-case closure in D-2026-07-31-02, `dci.local-benchmark-application`, or a full dataset run.
