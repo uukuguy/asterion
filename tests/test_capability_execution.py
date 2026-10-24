@@ -75,7 +75,7 @@ class FixtureRuntime:
 class ScaffoldRuntime(FixtureRuntime):
     manifest = RuntimeManifest(
         runtime_id="pi.reference",
-        capabilities=("filesystem.read", "pi.tool.grep"),
+        capabilities=("filesystem.read", "pi.tool.grep", "shell"),
     )
 
 
@@ -551,7 +551,7 @@ class CapabilityExecutionValueTests(unittest.TestCase):
             events=({"type": "research.completed", "payload": {"ok": True}},),
             artifacts=({
                 "artifact_id": "research-result",
-                "media_type": "application/vnd.dci.research+json",
+                "media_type": "application/vnd.dci.research.answer+json",
                 "value": {"answer_artifact_uri": "final.txt"},
             },),
         )
@@ -586,7 +586,7 @@ class CapabilityResultValidationTests(unittest.TestCase):
                 events=({"type": "research.completed", "payload": {}},),
                 artifacts=({
                     "artifact_id": "research-result",
-                    "media_type": "application/vnd.dci.research+json",
+                    "media_type": "application/vnd.dci.research.answer+json",
                     "value": {},
                 },),
             ),
@@ -613,8 +613,8 @@ class CapabilityResultValidationTests(unittest.TestCase):
             CapabilityExecutionResult(
                 events=(),
                 artifacts=(
-                    {"artifact_id": "same", "media_type": "application/vnd.dci.research+json", "value": {}},
-                    {"artifact_id": "same", "media_type": "application/vnd.dci.research+json", "value": {}},
+                    {"artifact_id": "same", "media_type": "application/vnd.dci.research.answer+json", "value": {}},
+                    {"artifact_id": "same", "media_type": "application/vnd.dci.research.answer+json", "value": {}},
                 ),
             ),
             CapabilityExecutionResult(
@@ -625,7 +625,7 @@ class CapabilityResultValidationTests(unittest.TestCase):
                 events=(),
                 artifacts=({
                     "artifact_id": "",
-                    "media_type": "application/vnd.dci.research+json",
+                    "media_type": "application/vnd.dci.research.answer+json",
                     "value": {},
                 },),
             ),
@@ -633,7 +633,7 @@ class CapabilityResultValidationTests(unittest.TestCase):
                 events=(),
                 artifacts=({
                     "artifact_id": "result",
-                    "media_type": "application/vnd.dci.research+json",
+                    "media_type": "application/vnd.dci.research.answer+json",
                     "value": sentinel,
                 },),
             ),

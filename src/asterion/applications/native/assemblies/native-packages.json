@@ -4,23 +4,69 @@
   "version": "1.0.0",
   "runtime_id": "pi.reference",
   "capability_packages": [
-    {"package_id": "controlled-code", "version": "1.0.0"},
-    {"package_id": "dci", "version": "1.0.0"}
+    {
+      "package_id": "controlled-code",
+      "version": "1.0.0"
+    },
+    {
+      "package_id": "dci",
+      "version": "1.0.0"
+    }
   ],
   "capabilities": [
-    {"capability_id": "dci.analysis", "version": "1.0.0"},
-    {"capability_id": "dci.benchmark", "version": "1.0.0"},
-    {"capability_id": "dci.evaluation", "version": "1.0.0"},
-    {"capability_id": "dci.export", "version": "1.0.0"},
-    {"capability_id": "dci.research", "version": "1.0.0"},
-    {"capability_id": "evaluation.code-quality", "version": "1.0.0"},
-    {"capability_id": "observability.execution-audit", "version": "1.0.0"},
-    {"capability_id": "policy.controlled-code-check", "version": "1.0.0"},
-    {"capability_id": "policy.local-corpus", "version": "1.0.0"},
-    {"capability_id": "protocol.observability", "version": "1.0.0"},
-    {"capability_id": "workflow.code-quality", "version": "1.0.0"}
+    {
+      "capability_id": "dci.analysis",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "dci.benchmark",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "dci.evaluation",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "dci.export",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "dci.research",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "evaluation.code-quality",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "observability.execution-audit",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "policy.context-management",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "policy.controlled-code-check",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "policy.local-corpus",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "protocol.observability",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "workflow.code-quality",
+      "version": "1.0.0"
+    }
   ],
-  "host_capabilities": ["corpus.local-root", "executor.controlled"],
+  "host_capabilities": [
+    "corpus.local-root",
+    "executor.controlled"
+  ],
   "host_policies": [],
   "host_events": [],
   "host_artifacts": []

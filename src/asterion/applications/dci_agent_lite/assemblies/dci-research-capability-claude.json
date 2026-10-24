@@ -4,13 +4,28 @@
   "version": "1.0.0",
   "runtime_id": "claude-code.reference",
   "capability_packages": [
-    {"package_id": "dci", "version": "1.0.0"}
+    {
+      "package_id": "dci",
+      "version": "1.0.0"
+    }
   ],
   "capabilities": [
-    {"capability_id": "dci.research", "version": "1.0.0"},
-    {"capability_id": "policy.local-corpus", "version": "1.0.0"}
+    {
+      "capability_id": "dci.research",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "policy.context-management",
+      "version": "1.0.0"
+    },
+    {
+      "capability_id": "policy.local-corpus",
+      "version": "1.0.0"
+    }
   ],
-  "host_capabilities": ["corpus.local-root"],
+  "host_capabilities": [
+    "corpus.local-root"
+  ],
   "host_policies": [],
   "host_events": [],
   "host_artifacts": []

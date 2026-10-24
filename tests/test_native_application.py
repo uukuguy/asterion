@@ -37,7 +37,7 @@ class _Runtime:
     def __init__(self) -> None:
         self.manifest = RuntimeManifest(
             runtime_id="pi.reference",
-            capabilities=("filesystem.read",),
+            capabilities=("filesystem.read", "shell"),
         )
         self.requests: list[object] = []
 
@@ -64,7 +64,33 @@ class _Runtime:
                 }
             },
         )
-        yield RunEvent(run_id, 3, "run.completed", {"status": "completed"})
+        yield RunEvent(
+            run_id,
+            3,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "locations",
+                    "kind": "locations",
+                    "media_type": "text/plain",
+                    "uri": "doc.txt",
+                }
+            },
+        )
+        yield RunEvent(
+            run_id,
+            4,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "trajectory",
+                    "kind": "trajectory",
+                    "media_type": "text/plain",
+                    "uri": "bash",
+                }
+            },
+        )
+        yield RunEvent(run_id, 5, "run.completed", {"status": "completed"})
 
 
 class _Factory:
@@ -116,7 +142,7 @@ def _registry(factory: _Factory) -> RuntimeFactoryRegistry:
         (
             RuntimeFactoryBinding(
                 runtime_id="pi.reference",
-                capabilities=("filesystem.read",),
+                capabilities=("filesystem.read", "shell"),
                 factory=factory,
             ),
         )
@@ -219,14 +245,14 @@ class NativeApplicationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.runtime.requests[0].input_text, QUESTION)
         self.assertEqual(
             self.runtime.requests[0].requested_capabilities,
-            ("filesystem.read",),
+            ("filesystem.read", "shell"),
         )
         self.assertIn(
             "research.completed",
             [event["type"] for event in result.events],
         )
         self.assertIn(
-            "application/vnd.dci.research+json",
+            "application/vnd.dci.research.answer+json",
             [artifact["media_type"] for artifact in result.artifacts],
         )
 

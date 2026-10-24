@@ -42,7 +42,7 @@ class AsterionDciBridgeTests(unittest.TestCase):
             projection = project_dci_run(fixture_result(Path(temporary_directory) / "run"))
 
         self.assertEqual(projection.events[0]["type"], "research.completed")
-        self.assertEqual(projection.artifacts[0]["media_type"], "application/vnd.dci.research+json")
+        self.assertEqual(projection.artifacts[0]["media_type"], "application/vnd.dci.research.answer+json")
         self.assertEqual(
             dict(projection.artifacts[0]["value"]),
             {

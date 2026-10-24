@@ -32,7 +32,7 @@ _CAPABILITY_BINDINGS = (
     ("dci.benchmark", "benchmark.completed", "application/vnd.dci.benchmark+json"),
     ("dci.evaluation", "evaluation.completed", "application/vnd.dci.verdict+json"),
     ("dci.export", "export.completed", "application/vnd.dci.export+json"),
-    ("dci.research", "research.completed", "application/vnd.dci.research+json"),
+    ("dci.research", "research.completed", "application/vnd.dci.research.answer+json"),
     ("protocol.observability", "audit.capability-observed", None),
 )
 _BENCHMARK_BINDING_IDS = (

@@ -36,10 +36,10 @@ research capability can declare:
   "kind": "capability",
   "provides_capabilities": ["research.local-corpus"],
   "requires_capabilities": ["filesystem.read", "shell"],
-  "requires_policies": ["policy.local-corpus"],
+  "requires_policies": ["policy.context-management", "policy.local-corpus"],
   "emits_events": ["artifact.created", "tool.result"],
   "consumes_events": ["run.started"],
-  "produces_artifacts": ["application/vnd.dci.research+json"],
+  "produces_artifacts": ["application/vnd.dci.research.answer+json", "application/vnd.dci.research.locations+json", "application/vnd.dci.research.trajectory+json"],
   "consumes_artifacts": ["text/plain"]
 }
 ```

@@ -27,8 +27,20 @@ from asterion.runtimes.pi_extensions import (
 )
 
 
-PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep")
-CLAUDE_CAPABILITIES = ("claude.tool.glob", "claude.tool.grep", "filesystem.read")
+PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep", "shell")
+_PI_TOOL_SETS = {
+    "read,bash": ("read", "bash"),
+    "read,grep": ("read", "grep"),
+}
+_PI_CONTEXT_PROFILES = frozenset(
+    {None, "level0", "level1", "level2", "level3", "level4"}
+)
+CLAUDE_CAPABILITIES = (
+    "claude.tool.glob",
+    "claude.tool.grep",
+    "filesystem.read",
+    "shell",
+)
 _CLAUDE_PROVIDER_CONFIG = {
     "minimax": ("https://api.minimax.io/anthropic", "MINIMAX_API_KEY"),
     "minimax-cn": ("https://api.minimaxi.com/anthropic", "MINIMAX_CN_API_KEY"),
@@ -130,15 +142,15 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     )
     environment = _pi_environment(context.options["environment"])
     tools = context.options["tools"]
-    if type(tools) is not str or tools != "read,grep":
+    if type(tools) is not str or tools not in _PI_TOOL_SETS:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    normalized_tools = ("read", "grep")
+    normalized_tools = _PI_TOOL_SETS[tools]
     provider = _pi_identity_option(context.options.get("provider"))
     model = _pi_identity_option(context.options.get("model"))
     if (provider is None) != (model is None):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     context_profile = context.options.get("context_profile")
-    if context_profile not in {None, "level3"}:
+    if context_profile not in _PI_CONTEXT_PROFILES:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
     raw_max_turns = context.options["max_turns"]
     if type(raw_max_turns) is not str:

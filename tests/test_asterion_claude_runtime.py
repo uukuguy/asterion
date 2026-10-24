@@ -381,7 +381,7 @@ class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.manifest.runtime_id, "claude-code.reference")
         self.assertEqual(
             runtime.manifest.capabilities,
-            ("claude.tool.glob", "claude.tool.grep", "filesystem.read"),
+            ("claude.tool.glob", "claude.tool.grep", "filesystem.read", "shell"),
         )
         command = process.call_args.args[0]
         self.assertIn("Read,Grep,Glob", command)

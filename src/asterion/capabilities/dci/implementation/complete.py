@@ -196,7 +196,7 @@ class DciCompleteResearchImplementation:
         )
         return _result(
             stage="research",
-            media_type="application/vnd.dci.research+json",
+            media_type="application/vnd.dci.research.answer+json",
             value={"stage_data": stage_data},
         )
 
@@ -224,7 +224,7 @@ def _write_private_json(path: Path, payload: Mapping[str, object]) -> None:
 
 class DciCompleteEvaluationImplementation:
     async def execute(self, invocation: CapabilityInvocation) -> CapabilityExecutionResult:
-        research = _artifact(invocation, "application/vnd.dci.research+json")
+        research = _artifact(invocation, "application/vnd.dci.research.answer+json")
         private = _research_private_value(research)
         judge = _require_answer_judge(invocation)
         try:

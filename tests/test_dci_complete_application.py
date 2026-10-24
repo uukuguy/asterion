@@ -72,8 +72,14 @@ STAGES = (
     "dci.export",
 )
 ORDER = (
+    "policy.context-management",
     "policy.local-corpus",
     *STAGES,
+)
+CORE_ARTIFACTS = (
+    "application/vnd.dci.research.answer+json",
+    "application/vnd.dci.research.locations+json",
+    "application/vnd.dci.research.trajectory+json",
 )
 EVENTS = (
     "research.completed",
@@ -83,7 +89,7 @@ EVENTS = (
     "export.completed",
 )
 ARTIFACTS = (
-    "application/vnd.dci.research+json",
+    "application/vnd.dci.research.answer+json",
     "application/vnd.dci.verdict+json",
     "application/vnd.dci.benchmark+json",
     "application/vnd.dci.analysis+json",
@@ -249,7 +255,7 @@ def plan(runtime_id: str):
         catalog=discover_capabilities((MANIFESTS,)),
         runtime_manifest=RuntimeManifest(
             runtime_id=runtime_id,
-            capabilities=("filesystem.read",),
+            capabilities=("filesystem.read", "shell"),
         ).to_mapping(),
     )
 
@@ -265,7 +271,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             if name.endswith(".py")
         }
         self.assertEqual(declared, reachable)
-        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 77)
+        self.assertEqual(len(DCI_COMPLETE_IMPLEMENTATION_RESOURCES), 78)
 
     def test_transitive_identity_contains_explicit_packaged_resource_closure(
         self,
@@ -576,8 +582,19 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
             with self.subTest(package_id=package_id):
                 manifest = manifests[package_id]
                 self.assertEqual(manifest["emits_events"], (EVENTS[index],))
-                self.assertEqual(manifest["produces_artifacts"], (ARTIFACTS[index],))
-                if index:
+                if package_id == "dci.research":
+                    self.assertEqual(manifest["produces_artifacts"], CORE_ARTIFACTS)
+                    self.assertEqual(manifest["requires_capabilities"], ("filesystem.read", "shell"))
+                    self.assertEqual(
+                        manifest["requires_policies"],
+                        ("policy.context-management", "policy.local-corpus"),
+                    )
+                else:
+                    self.assertEqual(manifest["produces_artifacts"], (ARTIFACTS[index],))
+                if package_id == "dci.evaluation":
+                    self.assertEqual(manifest["consumes_events"], ("research.completed",))
+                    self.assertEqual(manifest["consumes_artifacts"], CORE_ARTIFACTS)
+                elif index:
                     self.assertEqual(
                         manifest["consumes_events"], (EVENTS[index - 1],)
                     )
@@ -591,11 +608,13 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
         self.assertEqual(manifest["consumes_events"], [])
         self.assertEqual(manifest["consumes_artifacts"], [])
 
-    def test_complete_graph_does_not_require_shell_web_or_subagents(self) -> None:
+    def test_complete_graph_requires_shell_and_rejects_web_or_subagents(self) -> None:
         for runtime_id in ("pi.reference", "claude-code.reference"):
             with self.subTest(runtime_id=runtime_id):
                 resolved = plan(runtime_id)
-                self.assertEqual(resolved.runtime_capabilities, ("filesystem.read",))
+                self.assertEqual(
+                    resolved.runtime_capabilities, ("filesystem.read", "shell")
+                )
                 required: set[str] = set()
                 for manifest in resolved.capability_manifests:
                     required_capabilities = manifest["requires_capabilities"]
@@ -604,7 +623,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
                     ):
                         self.fail("resolved capabilities are not canonical")
                     required.update(cast(tuple[str, ...], required_capabilities))
-                self.assertNotIn("shell", required)
+                self.assertIn("shell", required)
                 self.assertFalse(
                     required
                     & {"network", "web.fetch", "web.search", "agent.subagent"}
@@ -795,12 +814,12 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
                 (
                     RuntimeFactoryBinding(
                         runtime_id="pi.reference",
-                        capabilities=("filesystem.read",),
+                        capabilities=("filesystem.read", "shell"),
                         factory=lambda context: runtime,
                     ),
                     RuntimeFactoryBinding(
                         runtime_id="claude-code.reference",
-                        capabilities=("filesystem.read",),
+                        capabilities=("filesystem.read", "shell"),
                         factory=lambda context: (_ for _ in ()).throw(
                             AssertionError("unselected runtime")
                         ),
@@ -907,7 +926,7 @@ class _UnusedPiRuntime:
 class _CompletedRuntime:
     def __init__(self, runtime_id: str, output_dir: Path) -> None:
         capabilities = (
-            ("claude.tool.glob", "claude.tool.grep", "filesystem.read")
+            ("claude.tool.glob", "claude.tool.grep", "filesystem.read", "shell")
             if runtime_id == "claude-code.reference"
             else ("filesystem.read", "shell")
         )
@@ -1057,7 +1076,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                 upstream_artifacts=(
                     {
                         "artifact_id": "research",
-                        "media_type": "application/vnd.dci.research+json",
+                        "media_type": "application/vnd.dci.research.answer+json",
                         "value": {
                             "schema": "asterion.dci.complete-application/v1",
                             "implementation_sha256": complete_application_identity(),
@@ -1107,7 +1126,7 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
                     upstream_artifacts=(
                         {
                             "artifact_id": "research",
-                            "media_type": "application/vnd.dci.research+json",
+                            "media_type": "application/vnd.dci.research.answer+json",
                             "value": {
                                 "schema": "asterion.dci.complete-application/v1",
                                 "implementation_sha256": complete_application_identity(),
@@ -1246,7 +1265,8 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(
-            runtime.requests[0].requested_capabilities, ("filesystem.read",)
+            runtime.requests[0].requested_capabilities,
+            ("filesystem.read", "shell"),
         )
         self.assertEqual(judge.calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)
@@ -1286,7 +1306,8 @@ class DciCompleteApplicationExecutionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.calls, 1)
         self.assertEqual(runtime.requests[0].input_text, "PRIVATE QUESTION")
         self.assertEqual(
-            runtime.requests[0].requested_capabilities, ("filesystem.read",)
+            runtime.requests[0].requested_capabilities,
+            ("filesystem.read", "shell"),
         )
         self.assertEqual(judge.calls[0]["predicted_answer"], "PRIVATE ANSWER")
         self.assertEqual(tuple(event["type"] for event in result.events), EVENTS)

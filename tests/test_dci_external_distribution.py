@@ -171,7 +171,7 @@ class DciExternalDistributionTests(unittest.TestCase):
             self.assertEqual(
                 json.loads(probe.stdout),
                 {
-                    "capabilities": 7,
+                    "capabilities": 8,
                     "conformance": True,
                     "payload_sha256": materialized.payload_sha256,
                     "provider_imported_during_discovery": False,
@@ -340,7 +340,7 @@ result = asyncio.run(research.implementation.execute(
     )
 ))
 assert result.events[0]["type"] == "research.completed"
-assert result.artifacts[0]["media_type"] == "application/vnd.dci.research+json"
+assert result.artifacts[0]["media_type"] == "application/vnd.dci.research.answer+json"
 
 print(json.dumps({
     "capabilities": len(payload.manifest.capabilities),

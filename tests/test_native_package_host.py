@@ -198,7 +198,7 @@ class NativePackageHostTests(unittest.TestCase):
         )
         self.assertEqual(
             tuple(ref.capability_id for ref in dci.assemblies[0].plan.capability_refs),
-            ("dci.research", "policy.local-corpus"),
+            ("dci.research", "policy.context-management", "policy.local-corpus"),
         )
         self.assertEqual(dci.assemblies[0].runtime_id, "pi.reference")
         self.assertEqual(

@@ -1072,6 +1072,7 @@ test("validates every checked-in reference capability manifest", async () => {
   assert.deepEqual(names, [
     "code-quality-evaluation.json",
     "code-quality-workflow.json",
+    "context-management-policy.json",
     "controlled-code-policy.json",
     "dci-analysis.json",
     "dci-benchmark.json",

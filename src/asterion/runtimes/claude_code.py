@@ -96,7 +96,12 @@ class ClaudeCodeRuntimeClient:
     def manifest(self) -> RuntimeManifest:
         return RuntimeManifest(
             runtime_id="claude-code.reference",
-            capabilities=("claude.tool.glob", "claude.tool.grep", "filesystem.read"),
+            capabilities=(
+                "claude.tool.glob",
+                "claude.tool.grep",
+                "filesystem.read",
+                "shell",
+            ),
         )
 
     def completed_run_dir(self, run_id: str) -> Path | None:

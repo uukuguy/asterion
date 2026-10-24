@@ -37,6 +37,7 @@ catalog = discover_capabilities(
     ]
 )
 refs = (
+    CapabilityRef("policy.context-management", "1.0.0"),
     CapabilityRef("policy.local-corpus", "1.0.0"),
     CapabilityRef("dci.research", "1.0.0"),
     CapabilityRef("dci.evaluation", "1.0.0"),

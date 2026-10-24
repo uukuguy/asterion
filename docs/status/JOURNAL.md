@@ -3854,3 +3854,4 @@
 - 13:04 Later evidence run native-dci-f4c9df9acea44c419e76c21a666f9532 ends run.completed. One read result is an error. Two grep results are not errors.
 - 13:04 Complete example and provider conversion remain specs [0fca6e23, ee0e0ef3]. Product provider dci-agent-lite is still live. No plan.
 - 13:04 Final handoff. No example process remains. origin/main was 18808a14. This handoff commit stays local.
+- 15:10 DCI research contract requires filesystem.read, shell, policy.context-management, and policy.local-corpus, and declares answer, location, and trajectory artifacts. pi.reference accepts read,bash or read,grep and context profiles level0-level4. The profile is stored and the context extension is not loaded. No model call. dci-agent-lite remains.

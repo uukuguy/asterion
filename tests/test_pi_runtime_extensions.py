@@ -282,7 +282,7 @@ class PiExtensionFactoryTests(unittest.TestCase):
         self.assertNotIn(str(extension), runtime._command)
         self.assertEqual(
             runtime.manifest.capabilities,
-            (*PI_CAPABILITIES, "prime.tool.ipython"),
+            tuple(sorted((*PI_CAPABILITIES, "prime.tool.ipython"))),
         )
         self.assertNotIn(descriptor, runtime._inherited_fds)
         self.assertEqual(len(runtime._inherited_fds), 2)

@@ -65,7 +65,7 @@ def project_dci_run(result: DciRunResult) -> CapabilityExecutionResult:
         artifacts=(
             {
                 "artifact_id": "dci-research-result",
-                "media_type": "application/vnd.dci.research+json",
+                "media_type": "application/vnd.dci.research.answer+json",
                 "value": value,
             },
         ),

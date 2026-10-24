@@ -130,8 +130,10 @@ behavior, normalized artifacts, and answer quality.
 
 The application host owns runtime construction and configuration. The DCI
 implementation sends one portable `RunRequest` through the supplied client and
-projects a normalized answer artifact into its declared
-`application/vnd.dci.research+json` output.
+projects normalized answer, location, and trajectory artifacts into its declared
+`application/vnd.dci.research.answer+json`,
+`application/vnd.dci.research.locations+json`, and
+`application/vnd.dci.research.trajectory+json` outputs.
 
 Public errors identify structural failure classes only. They never include
 application input, corpus content, prompts, credentials, provider payloads,

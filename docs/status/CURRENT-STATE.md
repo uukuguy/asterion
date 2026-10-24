@@ -67,7 +67,8 @@
 - `docs/superpowers/plans/2026-10-20-asterion-peer-foundation.md` — peer-foundation worklist. `P-PI-1`, `P-NATIVE-1`, and `P-CITE-1` are done. No package is pending.
 - `src/asterion/applications/native/provider.py` — provider `native`. `native.packages@1.0.0` stays first. Also `native.dci-research@1.0.0` and `native.controlled-code@1.0.0`.
 - `src/asterion/agents/native/application.py` — `prepare_native_application`, the Native door.
-- `examples/applications/native_dci.py` — shipped retrieval preset. `make native-dci-example` is the live entry.
+- `examples/applications/native_dci.py` — shipped retrieval preset. `make native-dci-example` is the live entry. It still launches `read,grep` and does not set a context level.
+- `src/asterion/capabilities/dci/payload/capabilities/dci-research.json` — core retrieval requires `filesystem.read`, `shell`, `policy.context-management`, and `policy.local-corpus`. It declares answer, location, and trajectory artifacts. `pi.reference` accepts `read,bash` or `read,grep` and context profiles `level0`–`level4`. The client stores the profile and does not load the DCI context extension. The advertised Pi and Claude capability sets still include `shell`.
 - `docs/superpowers/specs/2026-10-22-native-dci-complete-example-design.md` — specified `native.dci-complete@1.0.0`. Not built.
 - `docs/superpowers/specs/2026-10-22-native-dci-provider-conversion-design.md` — specified move onto `native.dci-*`. Not built.
 - `src/asterion/capabilities/prime_native_receipt.py` — the six `prime-*-native` packages record media type, digest, and run identity.
@@ -85,4 +86,4 @@
 
 1. Read INDEX, this snapshot, the final handoff, recent JOURNAL and AGENTS/MEMORY.
 2. Confirm Git, remote/tag identity and recorded cleanup before new work. Preserve unrelated worktrees/services.
-3. `P-PI-1`, `P-NATIVE-1`, and `P-CITE-1` are done. The peer-foundation worklist has no pending package. The Native complete example and the provider conversion are specified and are not a new managed package. A paid run, benchmark, official card, or L9 rerun needs a separate authorization.
+3. `P-PI-1`, `P-NATIVE-1`, and `P-CITE-1` are done. The peer-foundation worklist has no pending package. The user authorized one DCI package contract on Native: core retrieval declares tools, context policy, and three artifacts. Comparison capabilities consume those artifacts. A grid-regulation application, a paper replica, a dataset run, and a model call are not authorized. `dci-agent-lite` is still the in-repo product provider.

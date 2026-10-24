@@ -9,6 +9,7 @@
   "capabilities": [
     {"capability_id": "dci.evaluation", "version": "1.0.0"},
     {"capability_id": "dci.research", "version": "1.0.0"},
+    {"capability_id": "policy.context-management", "version": "1.0.0"},
     {"capability_id": "policy.local-corpus", "version": "1.0.0"},
     {"capability_id": "protocol.observability", "version": "1.0.0"}
   ],

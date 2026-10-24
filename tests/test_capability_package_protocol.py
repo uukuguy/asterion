@@ -323,6 +323,7 @@ class CapabilityPackageProtocolTests(unittest.TestCase):
                 CapabilityRef("dci.evaluation", "1.0.0"),
                 CapabilityRef("dci.export", "1.0.0"),
                 CapabilityRef("dci.research", "1.0.0"),
+                CapabilityRef("policy.context-management", "1.0.0"),
                 CapabilityRef("policy.local-corpus", "1.0.0"),
                 CapabilityRef("protocol.observability", "1.0.0"),
             ),

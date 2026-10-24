@@ -42,6 +42,7 @@ DCI_COMPLETE_IMPLEMENTATION_RESOURCES: tuple[str, ...] = tuple(sorted((
     "capabilities/dci/payload/capabilities/dci-benchmark.json",
     "capabilities/dci/payload/capabilities/dci-evaluation.json",
     "capabilities/dci/payload/capabilities/dci-export.json",
+    "capabilities/dci/payload/capabilities/context-management-policy.json",
     "capabilities/dci/payload/capabilities/dci-research.json",
     "capabilities/dci/payload/capabilities/local-corpus-policy.json",
     "capabilities/dci/resources/batch-profiles.json",

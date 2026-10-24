@@ -178,7 +178,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
 
         self.assertEqual(
             binding.capabilities,
-            ("claude.tool.glob", "claude.tool.grep", "filesystem.read"),
+            ("claude.tool.glob", "claude.tool.grep", "filesystem.read", "shell"),
         )
         self.assertEqual(runtime.manifest.runtime_id, "claude-code.reference")
         self.assertEqual(runtime.manifest.capabilities, binding.capabilities)
@@ -488,7 +488,9 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                     )
                 )
 
-        self.assertEqual(binding.capabilities, ("filesystem.read", "pi.tool.grep"))
+        self.assertEqual(
+            binding.capabilities, ("filesystem.read", "pi.tool.grep", "shell")
+        )
         self.assertEqual(runtime.manifest.runtime_id, "pi.reference")
         self.assertEqual(runtime.manifest.capabilities, binding.capabilities)
         self.assertEqual(runtime._cwd, corpus.resolve())
@@ -499,6 +501,81 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
         self.assertEqual(runtime._tools, ("read", "grep"))
         self.assertEqual(runtime._context_profile, "level3")
         self.assertEqual(runtime._evidence_root, (root / "evidence").resolve())
+
+    def test_pi_reference_factory_accepts_core_bash_and_context_levels(self) -> None:
+        from asterion.runtime.defaults import default_runtime_factory_registry
+        from asterion.runtime.factory import RuntimeFactoryError
+
+        cases = (
+            ("read,bash", "level0", ("read", "bash")),
+            ("read,bash", "level4", ("read", "bash")),
+            ("read,grep", "level1", ("read", "grep")),
+            ("read,grep", "level2", ("read", "grep")),
+        )
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir).resolve()
+            corpus = root / "corpus"
+            corpus.mkdir()
+            executable = Path(sys.executable).resolve()
+            binding = default_runtime_factory_registry().select("pi.reference")
+            for tools, profile, expected in cases:
+                with self.subTest(tools=tools, profile=profile):
+                    runtime = binding.factory(
+                        RuntimeFactoryContext(
+                            provider_id="native",
+                            application_id="native.dci-research",
+                            application_version="1.0.0",
+                            runtime_id="pi.reference",
+                            assembly_path=root / "assembly.json",
+                            options={
+                                "command": json.dumps(
+                                    [str(executable), "-u", "-c", "pass"],
+                                    separators=(",", ":"),
+                                ),
+                                "cwd": str(corpus),
+                                "environment": "{}",
+                                "evidence_root": str(root / "evidence"),
+                                "tools": tools,
+                                "max_turns": "6",
+                                "context_profile": profile,
+                            },
+                        )
+                    )
+                    self.assertEqual(runtime._tools, expected)
+                    self.assertEqual(runtime._context_profile, profile)
+                    self.assertIn(("--tools", tools), tuple(zip(runtime._command, runtime._command[1:])))
+                    self.assertEqual(
+                        runtime.manifest.capabilities,
+                        ("filesystem.read", "pi.tool.grep", "shell"),
+                    )
+            for tools, profile in (
+                ("read,bash,grep", "level3"),
+                ("read,bash", "level5"),
+                ("bash", "level0"),
+            ):
+                with self.subTest(rejected_tools=tools, rejected_profile=profile):
+                    with self.assertRaises(RuntimeFactoryError):
+                        binding.factory(
+                            RuntimeFactoryContext(
+                                provider_id="native",
+                                application_id="native.dci-research",
+                                application_version="1.0.0",
+                                runtime_id="pi.reference",
+                                assembly_path=root / "assembly.json",
+                                options={
+                                    "command": json.dumps(
+                                        [str(executable), "-u", "-c", "pass"],
+                                        separators=(",", ":"),
+                                    ),
+                                    "cwd": str(corpus),
+                                    "environment": "{}",
+                                    "evidence_root": str(root / "evidence"),
+                                    "tools": tools,
+                                    "max_turns": "6",
+                                    "context_profile": profile,
+                                },
+                            )
+                        )
 
     def test_pi_reference_factory_can_bind_cwd_to_one_exact_host_service(
         self,

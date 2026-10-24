@@ -58,7 +58,33 @@ class FixtureRuntime:
                 }
             },
         )
-        yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+        yield RunEvent(
+            request.run_id,
+            3,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "locations",
+                    "kind": "locations",
+                    "media_type": "text/plain",
+                    "uri": "doc.txt",
+                }
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            4,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "trajectory",
+                    "kind": "trajectory",
+                    "media_type": "text/plain",
+                    "uri": "bash",
+                }
+            },
+        )
+        yield RunEvent(request.run_id, 5, "run.completed", {"status": "completed"})
 
 
 class FailingRuntime(FixtureRuntime):
@@ -127,17 +153,23 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(runtime.requests[0].input_text, "SECRET-APPLICATION-INPUT")
         self.assertEqual(
             runtime.requests[0].requested_capabilities,
-            ("filesystem.read",),
+            ("filesystem.read", "shell"),
         )
         self.assertIs(runtime.signals[0], signal)
         self.assertEqual(result.events[0]["type"], "research.completed")
         self.assertEqual(
-            result.artifacts[0]["media_type"],
-            "application/vnd.dci.research+json",
+            [artifact["media_type"] for artifact in result.artifacts],
+            [
+                "application/vnd.dci.research.answer+json",
+                "application/vnd.dci.research.locations+json",
+                "application/vnd.dci.research.trajectory+json",
+            ],
         )
         self.assertEqual(
             result.artifacts[0]["value"]["answer_artifact_uri"], "final.txt"
         )
+        self.assertEqual(result.artifacts[1]["value"]["paths"], ("doc.txt",))
+        self.assertEqual(result.artifacts[2]["value"]["calls"], ("bash",))
 
     async def test_missing_corpus_service_fails_before_runtime_invocation(
         self,
