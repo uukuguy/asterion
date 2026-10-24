@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from importlib import resources
@@ -18,13 +19,15 @@ from asterion.capabilities.execution import (
 )
 from asterion.documents import (
     DocumentToolError,
-    parse_document_tools,
-    read_span,
-    search_documents,
+    document_spans,
     write_docx,
     write_pdf,
 )
 from asterion.runtime.host import RunEvent, RunRequest
+
+
+# A longer dotted id is not a shorter clause: 2.10 is not 2.1, and 2.1.1 is not 2.1.
+_CLAUSE_ID = re.compile(r"^([0-9]{1,2}(?:\.[0-9]{1,2}){1,4})(?!\d|\.[0-9])")
 
 
 class RegulationCitationError(ValueError):
@@ -52,14 +55,14 @@ async def cite_regulation(
     *,
     document_tools: str,
 ) -> RegulationCitation:
-    """Search enabled document tools and record verified anchors."""
+    """Assemble a dotted clause and record its verified anchors."""
 
-    if not parse_document_tools(document_tools):
+    if not _query_ready(query):
         raise RegulationCitationError("regulation citation is unavailable")
     try:
-        found = search_documents(corpus, query.clause_id, tools=document_tools)
-        accepted = tuple(
-            anchor for anchor in found if _span_supports(corpus, anchor, query)
+        accepted = _accepted_anchors(
+            document_spans(corpus, tools=document_tools),
+            query,
         )
     except DocumentToolError:
         raise RegulationCitationError("regulation citation is unavailable") from None
@@ -124,11 +127,105 @@ def write_demo_corpus(root: Path) -> None:
     )
 
 
-def _span_supports(
-    corpus: Path, anchor: Mapping[str, object], query: RegulationQuery
-) -> bool:
-    text = read_span(corpus, anchor)
-    return query.clause_id in text and query.version in text and query.finding in text
+def _query_ready(query: RegulationQuery) -> bool:
+    return (
+        type(query.clause_id) is str
+        and type(query.version) is str
+        and type(query.finding) is str
+        and bool(query.clause_id)
+        and bool(query.version.strip())
+        and bool(query.finding.strip())
+        and _CLAUSE_ID.fullmatch(query.clause_id) is not None
+    )
+
+
+def _accepted_anchors(
+    spans: tuple[tuple[Mapping[str, object], str], ...],
+    query: RegulationQuery,
+) -> tuple[Mapping[str, object], ...]:
+    grouped: dict[str, list[tuple[Mapping[str, object], str]]] = {}
+    order: list[str] = []
+    for anchor, text in spans:
+        document = str(anchor["document"])
+        if document not in grouped:
+            order.append(document)
+            grouped[document] = []
+        grouped[document].append((anchor, text))
+    selected: list[Mapping[str, object]] = []
+    for document in order:
+        selected.extend(_file_anchors(grouped[document], query))
+    return tuple(selected)
+
+
+def _file_anchors(
+    spans: list[tuple[Mapping[str, object], str]],
+    query: RegulationQuery,
+) -> tuple[Mapping[str, object], ...]:
+    version = next(
+        (anchor for anchor, text in spans if query.version in text),
+        None,
+    )
+    if version is None:
+        return ()
+    wanted: set[tuple[object, ...]] = set()
+    index = 0
+    while index < len(spans):
+        heading = _heading_id(spans[index][1])
+        if heading != query.clause_id:
+            index += 1
+            continue
+        cursor = index + 1
+        while cursor < len(spans):
+            child = _heading_id(spans[cursor][1])
+            if child is not None and not child.startswith(heading + "."):
+                break
+            cursor += 1
+        body = spans[index:cursor]
+        overlapped = _finding_anchors(body, query.finding)
+        if overlapped:
+            wanted.add(_anchor_key(version))
+            wanted.add(_anchor_key(body[0][0]))
+            wanted.update(_anchor_key(item) for item in overlapped)
+        index = cursor
+    return tuple(anchor for anchor, _text in spans if _anchor_key(anchor) in wanted)
+
+
+def _finding_anchors(
+    body: list[tuple[Mapping[str, object], str]],
+    finding: str,
+) -> tuple[Mapping[str, object], ...]:
+    joined = "".join(text for _anchor, text in body)
+    start = joined.find(finding)
+    if start < 0:
+        return ()
+    end = start + len(finding)
+    offset = 0
+    chosen: list[Mapping[str, object]] = []
+    for anchor, text in body:
+        span_end = offset + len(text)
+        if offset < end and span_end > start:
+            chosen.append(anchor)
+        offset = span_end
+    return tuple(chosen)
+
+
+def _heading_id(text: str) -> str | None:
+    match = _CLAUSE_ID.match(text.strip())
+    if match is None:
+        return None
+    return match.group(1)
+
+
+def _anchor_key(anchor: Mapping[str, object]) -> tuple[object, ...]:
+    position = anchor["position"]
+    items = position.items() if isinstance(position, Mapping) else ()
+    return (
+        anchor["document"],
+        anchor["source_sha256"],
+        anchor["kind"],
+        tuple(sorted(items)),
+        anchor["span_sha256"],
+    )
 
 
 def _invocation(

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from asterion.documents import (
     DocumentToolError,
+    document_spans,
     parse_document_tools,
     read_span,
     search_documents,
@@ -164,6 +165,18 @@ endcmap
             )
             self.assertEqual(array_letters[0]["position"]["y"], 600)
             self.assertEqual(search_documents(root, "\u7532\u4e59", tools="pdf"), ())
+
+    def test_document_spans_keeps_text_for_the_caller(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_docx(root / "rules.docx", (("4.1.2 限值。SPAN-PRIVATE", None),))
+            spans = document_spans(root, tools="docx")
+            anchor, text = spans[0]
+            self.assertEqual(text, "4.1.2 限值。SPAN-PRIVATE")
+            self.assertNotIn("SPAN-PRIVATE", repr(anchor))
+            self.assertEqual(search_documents(root, "4.1.2", tools="docx"), (anchor,))
+            with self.assertRaises(DocumentToolError):
+                document_spans(root, tools=None)
 
 
 def _identity_pdf(content: bytes, cmap: bytes) -> bytes:

@@ -1,25 +1,25 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-24 21:12. **Session remains active — not a final handoff.**
+> Updated: 2026-10-24 22:14. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Installed provider `dci-agent-lite` is gone (`34027537`). `asterion-dci` describes and verifies the product. `native.dci-complete` is not built.
-- The PDF reader decodes Identity-H ToUnicode maps and cites one baseline as one span. A DOCX paragraph with inactive numbering stays readable.
-- The untracked regulation PDFs and DOCX files now yield CJK spans. OLE `.doc`, the dsl file, and scanned pages stay unread. No model call ran.
+- Grid citation assembles a dotted clause from ordered PDF and DOCX spans. It records the file's version span, the heading, and the spans that hold the finding.
+- A private probe cited one such clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
+- `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
 ## Verified facts
 
-- `tests.test_document_tools` and `tests.test_grid_regulation` passed: 6 tests. Ruff check passed on the edited Python.
-- A synthetic Identity-H file cites `条款甲` as one span, keeps a distant glyph apart, and reads both a scalar and an array `bfrange`.
-- A DOCX `numId` of 0, and a `numPr` with only `ilvl`, keep the paragraph text and omit numbering fields.
-- Local probe, text not recorded: three DOCX files and three PDFs produce CJK spans. Body lines of about 30 characters are present. Median lines are shorter because of labels and cells.
+- `tests.test_document_tools` and `tests.test_grid_regulation` passed: 10 tests. Ruff check passed on the edited Python.
+- The fictional demo still cites one `grounding.docx` anchor for `4.1.2` and one `patrol.pdf` anchor for `5.2`.
+- A split synthetic clause cites the cover, the heading, and the two spans that join the finding. A child span is cited only when the finding is in that child. A repeated clause id does not keep the earlier section.
+- Local probe, text not recorded: each of the six regulation PDF and DOCX files returned 3 or 5 anchors for one dotted clause. The finding span was among them. `.doc` and the dsl file were not read.
 - `make promotion-check` was not run. `make native-dci-example` was not run.
 
 ## Current judgment
 
-- Baseline spans can cite a phrase that sits on one line. A sentence that wraps, or a clause id and a finding on different lines, is more than one span.
-- The 36-point gap splits the sampled column gaps. It is a reader constant, not a layout proof.
+- Citation checks that the version string occurs in the file and that the finding occurs inside the assembled clause. It does not decide legal applicability.
+- The 36-point gap remains a reader constant, not a layout proof.
 
 ## Historical archive
 
@@ -28,11 +28,12 @@
 - Do not retarget the Judge factory until `native.dci-complete` exists.
 - Do not move `level0`–`level4`, the ablation matrix, judges, or dataset targets onto the public runtime.
 - D-2026-07-31-02 remains active. A full dataset run still needs its own authorization.
+- The same-span citation rule is retired. A clause id, its version, and its finding may sit on different spans.
 
 ## Open boundary
 
 - Scanned pages, CID fonts without a ToUnicode map, OLE `.doc`, and `docs/guodiao_2023_2.0_1.0-utf8.dsl` are not citation anchors.
-- The grid demo is still the fictional corpus. It is not registered on provider `native`.
+- The grid application is not registered on provider `native`. The example still uses the fictional corpus.
 - The shipped retrieval preset still launches `read,grep` and does not advertise `shell`.
 - `make promotion-check` has not been run since `context-policy-extension.mjs` was added.
 - Worktrees `asterion-p1-workload`, `asterion-p2-worker`, and `asterion-p3-real-rlm` remain. They are unrelated.
@@ -42,7 +43,7 @@
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
 2. Do not run `make native-dci-example` or any dataset or model call.
-3. A citation over a real regulation file needs an explicit file and clause. Do not commit those files.
+3. Do not commit the regulation originals. A further citation still needs the caller to name the clause, version, and finding.
 
 ## Ready-to-paste command
 

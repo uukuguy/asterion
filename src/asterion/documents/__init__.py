@@ -4,6 +4,7 @@ from asterion.documents.docx import write_docx
 from asterion.documents.pdf import write_pdf
 from asterion.documents.tools import (
     DocumentToolError,
+    document_spans,
     parse_document_tools,
     read_span,
     search_documents,
@@ -12,6 +13,7 @@ from asterion.documents.tools import (
 
 __all__ = (
     "DocumentToolError",
+    "document_spans",
     "parse_document_tools",
     "read_span",
     "search_documents",

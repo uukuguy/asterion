@@ -64,6 +64,27 @@ def search_documents(
     return tuple(hits)
 
 
+def document_spans(
+    root: Path,
+    *,
+    tools: str | None,
+    path: str | None = None,
+) -> tuple[tuple[Mapping[str, object], str], ...]:
+    """Return every nonempty span.
+
+    Span text is for the caller and must not be published as an artifact.
+    """
+
+    enabled = parse_document_tools(tools)
+    if not enabled:
+        raise DocumentToolError("document tool is unavailable")
+    found: list[tuple[Mapping[str, object], str]] = []
+    for relative, file_path in _files(root, enabled, path):
+        source_sha256 = _sha256(_read_bytes(file_path))
+        found.extend(_spans(file_path, relative, source_sha256))
+    return tuple(found)
+
+
 def read_span(root: Path, anchor: Mapping[str, object]) -> str:
     """Re-read one verified anchor. The caller keeps the span private."""
 
