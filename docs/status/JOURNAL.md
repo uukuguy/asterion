@@ -3863,3 +3863,7 @@
 - 22:14 Grid citation assembles a dotted clause across ordered spans. It records the file version, the heading, and the spans that hold the finding. A private probe cited one such clause in each of three DOCX files and three PDFs. Text was not recorded. Search still stops above 32 hits. No model call.
 - 22:51 The grid regulation desk is one HTML file served on 127.0.0.1. It lists the corpus and shows cited spans. Headless Chrome completed one fictional query. No model call.
 - 23:08 `make grid-regulation` serves that desk on 127.0.0.1:8765 and opens a browser. The corpus defaults to docs. No model call.
+
+## 2026-10-25
+
+- 00:54 The desk explains the clause, the version string, and the excerpt before search. Headless Chrome reviewed the empty page, one citation, and a miss. No model call.

@@ -7,18 +7,24 @@
   <style>
     :root {
       color-scheme: light;
-      --paper: #efeae2;
-      --sheet: #fbf8f3;
-      --ink: #1b2330;
-      --muted: #45515d;
-      --line: #d4cdc2;
-      --seal: #8e2f2a;
-      --navy: #1a3648;
-      --navy-ink: #f7f4ee;
-      --mark: #f0d48a;
-      --mark-ink: #1a1408;
-      --focus: #1a3648;
-      --shadow: 0 18px 40px rgba(27, 35, 48, 0.06);
+      --bg: #f3f6fa;
+      --chrome: #ffffff;
+      --sheet: #fffbf5;
+      --ink: #0f172a;
+      --muted: #475569;
+      --line: #e2e8f0;
+      --sheet-line: #e6ddd0;
+      --primary: #1e3a8a;
+      --primary-press: #172e6e;
+      --on-primary: #ffffff;
+      --gold: #92400e;
+      --gold-bg: #fef3c7;
+      --mark: #f6d98a;
+      --mark-ink: #1c1917;
+      --danger: #b91c1c;
+      --danger-bg: #fef2f2;
+      --focus: #1e3a8a;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 32px rgba(15, 23, 42, 0.05);
       --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
       --serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "PMingLiU", serif;
       --mono: "SF Mono", "Sarasa Mono SC", ui-monospace, monospace;
@@ -27,24 +33,30 @@
     @media (prefers-color-scheme: dark) {
       :root {
         color-scheme: dark;
-        --paper: #12161c;
-        --sheet: #1b212a;
-        --ink: #f0eadf;
-        --muted: #c9d2da;
-        --line: #343c46;
-        --seal: #efc2bc;
-        --navy: #d7e6ee;
-        --navy-ink: #122028;
-        --mark: #e6c56a;
-        --mark-ink: #1a1408;
-        --focus: #d7e6ee;
+        --bg: #0b1220;
+        --chrome: #111827;
+        --sheet: #17140f;
+        --ink: #f8fafc;
+        --muted: #cbd5e1;
+        --line: #334155;
+        --sheet-line: #3f382e;
+        --primary: #dbeafe;
+        --primary-press: #eff6ff;
+        --on-primary: #0f172a;
+        --gold: #fde68a;
+        --gold-bg: #3a2a10;
+        --mark: #f6d98a;
+        --mark-ink: #1c1917;
+        --danger: #fecaca;
+        --danger-bg: #3f1d1d;
+        --focus: #dbeafe;
         --shadow: none;
       }
     }
 
     * { box-sizing: border-box; }
 
-    html { background: var(--paper); }
+    html { background: var(--bg); }
 
     body {
       margin: 0;
@@ -52,11 +64,12 @@
       min-height: 100dvh;
       color: var(--ink);
       background:
-        linear-gradient(var(--seal), var(--seal)) top / 100% 3px no-repeat,
-        var(--paper);
+        linear-gradient(var(--primary), var(--primary)) top / 100% 3px no-repeat,
+        var(--bg);
       font-family: var(--sans);
       font-size: 16px;
       line-height: 1.5;
+      padding-top: env(safe-area-inset-top);
     }
 
     .skip {
@@ -64,10 +77,10 @@
       left: 16px;
       top: 12px;
       transform: translateY(-140%);
-      background: var(--navy);
-      color: var(--navy-ink);
+      background: var(--primary);
+      color: var(--on-primary);
       padding: 8px 12px;
-      z-index: 2;
+      z-index: 20;
     }
 
     .skip:focus { transform: none; }
@@ -75,77 +88,169 @@
     .frame {
       width: min(1120px, calc(100% - 32px));
       margin: 0 auto;
-      padding: 32px 0 48px;
+      padding: 28px 0 40px;
     }
 
-    .masthead {
-      display: flex;
-      justify-content: space-between;
-      gap: 24px;
-      align-items: end;
-      padding-bottom: 16px;
-      border-bottom: 1px solid var(--ink);
-      box-shadow: 0 3px 0 var(--seal);
-    }
+    .mast { padding-bottom: 8px; }
 
-    .brand { display: flex; gap: 16px; align-items: center; }
+    .brand { display: flex; gap: 14px; align-items: center; }
 
-    .seal {
-      width: 48px;
-      height: 48px;
-      color: var(--seal);
+    .mark-icon {
+      width: 36px;
+      height: 36px;
+      color: var(--primary);
       flex: none;
     }
 
-    .kicker, .quiet, .label, .meta, .path, .note {
+    .eyebrow, .lead, .hint, .path, .note, .specimen-note, .count {
       margin: 0;
       color: var(--muted);
     }
 
-    .kicker {
+    .eyebrow {
       font-size: 13px;
-      letter-spacing: 0.12em;
+      font-weight: 600;
     }
 
     h1 {
-      margin: 0;
+      margin: 2px 0 0;
       font-family: var(--serif);
-      font-size: 32px;
+      font-size: 36px;
       font-weight: 600;
       line-height: 1.2;
-      letter-spacing: 0.04em;
     }
 
-    .quiet { font-size: 14px; text-align: right; }
+    .lead {
+      max-width: 40em;
+      margin-top: 12px;
+      font-size: 16px;
+    }
 
-    .layout {
+    .guide { margin-top: 28px; }
+
+    .guide-head h2, .panel h2, .sheet h2 {
+      margin: 0;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .guide-head p {
+      max-width: 42em;
+      margin: 8px 0 0;
+    }
+
+    .steps {
       display: grid;
-      gap: 24px;
-      margin-top: 32px;
+      gap: 12px;
+      margin: 16px 0 0;
+      padding: 0;
+      list-style: none;
     }
 
-    @media (min-width: 960px) {
-      .frame { width: min(1120px, calc(100% - 64px)); padding-top: 40px; }
-      .layout { grid-template-columns: 340px minmax(0, 1fr); gap: 40px; align-items: start; }
-      .desk { position: sticky; top: 24px; }
-    }
-
-    .desk, .sheet {
-      background: var(--sheet);
+    .steps li {
+      display: grid;
+      grid-template-columns: 32px minmax(0, 1fr);
+      gap: 12px;
+      align-items: start;
+      padding: 16px;
+      background: var(--chrome);
       border: 1px solid var(--line);
+      border-radius: 12px;
       box-shadow: var(--shadow);
     }
 
-    .desk { padding: 20px; }
+    .num {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 999px;
+      background: var(--gold-bg);
+      color: var(--gold);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+    }
 
-    form { display: grid; gap: 16px; }
+    .steps h3 {
+      margin: 4px 0 0;
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
 
-    .field { display: grid; gap: 8px; }
+    .steps p, .guide-head p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
 
-    label, legend {
+    .specimen {
+      margin-top: 12px;
+      padding: 16px;
+      background: var(--chrome);
+      border: 1px dashed var(--line);
+      border-radius: 12px;
+    }
+
+    .specimen-label {
+      margin: 0;
       font-size: 13px;
       font-weight: 600;
-      letter-spacing: 0.04em;
+    }
+
+    .specimen dl {
+      display: grid;
+      gap: 12px;
+      margin: 12px 0 0;
+    }
+
+    .specimen dl div { min-width: 0; }
+
+    .specimen dt {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .specimen dd {
+      margin: 2px 0 0;
+      font-weight: 600;
+      overflow-wrap: anywhere;
+    }
+
+    .specimen-note { margin-top: 12px; font-size: 13px; }
+
+    .layout {
+      display: grid;
+      gap: 16px;
+      margin-top: 16px;
+    }
+
+    .panel, .sheet {
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel {
+      padding: 20px;
+      background: var(--chrome);
+      border: 1px solid var(--line);
+    }
+
+    form { display: grid; gap: 16px; margin-top: 16px; }
+
+    .field { display: grid; gap: 6px; }
+
+    label, legend {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .req {
+      margin-left: 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 500;
     }
 
     input[type="text"] {
@@ -153,8 +258,8 @@
       min-height: 48px;
       padding: 12px 14px;
       border: 1px solid var(--line);
-      border-radius: 4px;
-      background: var(--paper);
+      border-radius: 8px;
+      background: var(--bg);
       color: var(--ink);
       font: inherit;
     }
@@ -166,16 +271,11 @@
       outline-offset: 2px;
     }
 
+    input[type="text"]:focus-visible { border-color: var(--primary); }
+
     input::placeholder { color: var(--muted); opacity: 1; }
 
-    .sheet:focus { outline: none; }
-
-    .sheet:focus-visible {
-      outline: 2px solid var(--focus);
-      outline-offset: 2px;
-    }
-
-    .hint { margin: 0; color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .hint { font-size: 13px; line-height: 1.5; }
 
     fieldset {
       margin: 0;
@@ -185,82 +285,151 @@
       gap: 8px;
     }
 
-    .checks { display: flex; gap: 8px; }
+    .checks { display: flex; flex-wrap: wrap; gap: 8px; }
 
     .check {
       display: flex;
+      flex: 1 1 140px;
       align-items: center;
       gap: 8px;
       min-height: 48px;
       padding: 0 14px;
       border: 1px solid var(--line);
-      border-radius: 4px;
+      border-radius: 8px;
+      background: var(--bg);
       cursor: pointer;
-      background: var(--paper);
+      touch-action: manipulation;
     }
 
-    .check input { width: 18px; height: 18px; margin: 0; accent-color: var(--navy); }
+    .check input { width: 18px; height: 18px; margin: 0; accent-color: var(--primary); }
 
     button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      width: 100%;
       min-height: 48px;
       border: 0;
-      border-radius: 4px;
-      background: var(--navy);
-      color: var(--navy-ink);
+      border-radius: 8px;
+      background: var(--primary);
+      color: var(--on-primary);
       font: inherit;
       font-weight: 600;
-      letter-spacing: 0.08em;
       cursor: pointer;
-      transition: background-color 180ms ease, opacity 180ms ease;
+      touch-action: manipulation;
+      transition: background-color 180ms ease;
     }
 
-    button:hover { filter: brightness(1.08); }
+    button svg { width: 18px; height: 18px; flex: none; }
 
-    button:active { filter: brightness(0.94); }
+    button:hover:not(:disabled) { background: var(--primary-press); }
+
+    button:active:not(:disabled) { filter: brightness(0.96); }
 
     button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-    .files { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--line); }
+    .status { margin: 0; font-weight: 600; }
 
-    .files h2, .sheet h2 {
-      margin: 0 0 8px;
-      font-size: 13px;
-      font-weight: 600;
-      letter-spacing: 0.08em;
+    .status.is-alert { color: var(--danger); }
+
+    .status:empty { display: none; }
+
+    .files {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
     }
 
-    .path { font-family: var(--mono); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+    .files-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+    }
 
-    .file-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+    .files h3 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .count { font-variant-numeric: tabular-nums; font-size: 13px; }
+
+    .path {
+      margin-top: 8px;
+      font-family: var(--mono);
+      font-size: 13px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .file-list {
+      list-style: none;
+      margin: 12px 0 0;
+      padding: 0;
+      display: grid;
+      gap: 8px;
+    }
 
     .file-list li {
-      display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
-      gap: 4px 12px;
-      align-items: baseline;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      gap: 8px 12px;
+      align-items: start;
       min-width: 0;
-      font-size: 14px;
     }
 
-    .file-list strong { font-weight: 600; overflow-wrap: anywhere; min-width: 0; }
+    .pill {
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+      line-height: 1.4;
+    }
 
-    .meta { font-variant-numeric: tabular-nums; font-size: 13px; white-space: nowrap; }
+    .file-list strong {
+      font-weight: 600;
+      overflow-wrap: anywhere;
+      min-width: 0;
+    }
+
+    .meta {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      font-size: 13px;
+      white-space: nowrap;
+    }
 
     .sheet {
-      min-height: 420px;
-      padding: 28px 28px 32px;
-      border-top: 4px solid var(--ink);
+      min-height: 280px;
+      padding: 24px;
+      background: var(--sheet);
+      border: 1px solid var(--sheet-line);
+      border-top: 4px solid var(--primary);
     }
 
-    .sheet h2 { color: var(--muted); }
+    .sheet:focus { outline: none; }
+
+    .sheet:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
 
     .lede {
       max-width: 38em;
-      margin: 24px 0 0;
+      margin: 16px 0 0;
       font-family: var(--serif);
       font-size: 20px;
-      line-height: 1.75;
+      line-height: 1.7;
+    }
+
+    .sample-mark {
+      margin: 16px 0 0;
+      color: var(--muted);
+      font-size: 14px;
     }
 
     .clause-title {
@@ -271,19 +440,25 @@
       line-height: 1.3;
     }
 
-    .status {
+    .recover {
+      max-width: 40em;
       margin: 16px 0 0;
-      color: var(--ink);
-      font-weight: 600;
+      padding: 4px 8px 4px 28px;
+      background: var(--danger-bg);
+      color: var(--danger);
+      border-radius: 12px;
     }
 
-    .status.is-alert { color: var(--seal); }
-
-    .status:empty { display: none; }
+    .recover li { margin: 10px 0; }
 
     .group { margin-top: 28px; }
 
-    .group header { display: flex; justify-content: space-between; gap: 16px; align-items: baseline; }
+    .group header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: baseline;
+    }
 
     .group h3 {
       margin: 0;
@@ -295,14 +470,14 @@
     article {
       margin-top: 16px;
       padding-top: 16px;
-      border-top: 1px solid var(--line);
+      border-top: 1px solid var(--sheet-line);
     }
 
     .where {
       display: flex;
       flex-wrap: wrap;
       gap: 8px 16px;
-      margin-bottom: 8px;
+      margin: 0 0 8px;
       color: var(--muted);
       font-family: var(--mono);
       font-size: 13px;
@@ -314,7 +489,7 @@
       max-width: 40em;
       font-family: var(--serif);
       font-size: 18px;
-      line-height: 1.85;
+      line-height: 1.8;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
@@ -325,23 +500,29 @@
       padding: 0 0.12em;
     }
 
-    .note { margin-top: 20px; font-size: 13px; }
+    .note { margin-top: 16px; font-size: 14px; }
 
     footer {
       width: min(1120px, calc(100% - 32px));
-      margin: 8px auto 0;
+      margin: 16px auto 0;
+      padding-bottom: calc(16px + env(safe-area-inset-bottom));
       color: var(--muted);
       font-size: 13px;
     }
 
+    @media (min-width: 800px) {
+      .steps, .specimen dl { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    }
+
     @media (min-width: 960px) {
-      footer { width: min(1120px, calc(100% - 64px)); }
+      .frame, footer { width: min(1120px, calc(100% - 64px)); }
+      .frame { padding-top: 40px; }
+      .layout { grid-template-columns: 380px minmax(0, 1fr); gap: 20px; align-items: start; }
     }
 
     @media (max-width: 719px) {
-      .masthead { display: block; }
-      .quiet { margin-top: 12px; text-align: left; }
-      .sheet, .desk { padding: 16px; }
+      h1 { font-size: 32px; }
+      .panel, .sheet, .specimen { padding: 16px; }
       .lede, blockquote { font-size: 17px; }
     }
 
@@ -351,57 +532,108 @@
   </style>
 </head>
 <body>
-  <a class="skip" href="#result">跳到引用结果</a>
+  <a class="skip" href="#result">跳到原文位置</a>
   <div class="frame">
-    <header class="masthead">
+    <header class="mast">
       <div class="brand">
-        <svg class="seal" viewBox="0 0 48 48" aria-hidden="true">
-          <rect x="3.5" y="3.5" width="41" height="41" fill="none" stroke="currentColor" stroke-width="1.5"></rect>
-          <rect x="7.5" y="7.5" width="33" height="33" fill="none" stroke="currentColor" stroke-width="0.75"></rect>
-          <text x="24" y="31" text-anchor="middle" font-size="18" font-family="Songti SC, serif">条</text>
+        <svg class="mark-icon" viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M7 3.5h7.1L19 8.3V20.5H7z" fill="none" stroke="currentColor" stroke-width="1.5"></path>
+          <path d="M14 3.8V8.5h4.5" fill="none" stroke="currentColor" stroke-width="1.5"></path>
+          <path d="M9.5 12.5h7M9.5 16h5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
         </svg>
         <div>
-          <p class="kicker">调度运行文件</p>
+          <p class="eyebrow">本地规程</p>
           <h1>规程检索</h1>
         </div>
       </div>
-      <p class="quiet">按条款号核对原文位置</p>
+      <p class="lead">在这个目录的 PDF 和 DOCX 里，按条款号找出原句的位置。</p>
     </header>
+    <section class="guide" aria-labelledby="guide-title">
+      <div class="guide-head">
+        <h2 id="guide-title">怎么填</h2>
+        <p>三项都要出现在同一份文件里。缺一项，或分属两份文件，就找不到。</p>
+      </div>
+      <ol class="steps">
+        <li>
+          <span class="num">1</span>
+          <div>
+            <h3>条款号</h3>
+            <p>照抄正文里的编号，例如 2.1 或 4.1.2。不要写成“第 2.1 条”。2.1.1 不会被当成 2.1。</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">2</span>
+          <div>
+            <h3>版本字样</h3>
+            <p>写这份文件里看得到的年份或标准号，例如 2024。它必须和条款号在同一份文件中。</p>
+          </div>
+        </li>
+        <li>
+          <span class="num">3</span>
+          <div>
+            <h3>原句</h3>
+            <p>从该条款里连续抄几个字，不必抄完整句。这里只核对它是否出现在这个条款中。</p>
+          </div>
+        </li>
+      </ol>
+      <div class="specimen">
+        <p class="specimen-label">填法示例</p>
+        <dl>
+          <div><dt>条款号</dt><dd>4.1.2</dd></div>
+          <div><dt>版本字样</dt><dd>2024</dd></div>
+          <div><dt>原句</dt><dd>连续的几个字</dd></div>
+        </dl>
+        <p class="specimen-note">这只说明格式。请改成你正在看的那一页，页面不会替你检索。</p>
+      </div>
+    </section>
     <main class="layout">
-      <div class="desk">
+      <section class="panel" aria-labelledby="form-title">
+        <h2 id="form-title">查找</h2>
         <form id="query">
           <div class="field">
-            <label for="clause">条款号</label>
-            <input id="clause" name="clause_id" type="text" required autocomplete="off" spellcheck="false" placeholder="4.1.2">
+            <label for="clause">条款号<span class="req">必填</span></label>
+            <input id="clause" name="clause_id" type="text" required autocomplete="off" spellcheck="false" placeholder="例如 4.1.2" aria-describedby="clause-hint">
+            <p class="hint" id="clause-hint">只写编号本身。</p>
           </div>
           <div class="field">
-            <label for="version">版本</label>
-            <input id="version" name="version" type="text" required autocomplete="off" placeholder="文件中出现的版本字样">
+            <label for="version">版本字样<span class="req">必填</span></label>
+            <input id="version" name="version" type="text" required autocomplete="off" placeholder="例如 2024" aria-describedby="version-hint">
+            <p class="hint" id="version-hint">年份或标准号，须在同一份文件里。</p>
           </div>
           <div class="field">
-            <label for="finding">语句</label>
-            <input id="finding" name="finding" type="text" required autocomplete="off" aria-describedby="finding-hint">
-            <p class="hint" id="finding-hint">这句话可以分在相邻段落。检索只核对该条款里是否出现它。</p>
+            <label for="finding">原句<span class="req">必填</span></label>
+            <input id="finding" name="finding" type="text" required autocomplete="off" placeholder="从该条款连续抄几个字" aria-describedby="finding-hint">
+            <p class="hint" id="finding-hint">连续的几个字即可。</p>
           </div>
           <fieldset>
-            <legend>文件</legend>
+            <legend>查找范围</legend>
             <div class="checks">
               <label class="check"><input id="tool-docx" type="checkbox" checked> DOCX</label>
               <label class="check"><input id="tool-pdf" type="checkbox" checked> PDF</label>
             </div>
           </fieldset>
-          <button id="search" type="submit">检索</button>
+          <button id="search" type="submit">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="11" cy="11" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
+              <path d="M16 16.5 20 20.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+            </svg>
+            <span id="search-label">查找原文位置</span>
+          </button>
           <p class="status" id="form-status" role="status"></p>
         </form>
         <section class="files" aria-labelledby="files-title">
-          <h2 id="files-title">目录</h2>
+          <div class="files-head">
+            <h3 id="files-title">本次目录</h3>
+            <p class="count" id="count"></p>
+          </div>
           <p class="path" id="root">正在读取目录</p>
           <ul class="file-list" id="files"></ul>
         </section>
-      </div>
+      </section>
       <section class="sheet" id="result" tabindex="-1" aria-live="polite">
-        <h2>引用</h2>
-        <p class="lede" id="lede">结果会按文件中的顺序，列出版本所在处、条款标题，以及语句落在的段落或文本行。</p>
+        <h2>原文位置</h2>
+        <p class="lede" id="lede">填好三项后，点「查找原文位置」。结果按文件排列，并标出你抄的那几个字。</p>
+        <p class="sample-mark">标出的样子：<mark>这几个字</mark></p>
       </section>
     </main>
   </div>
@@ -411,8 +643,10 @@
     const result = document.querySelector("#result");
     const formStatus = document.querySelector("#form-status");
     const rootNode = document.querySelector("#root");
+    const countNode = document.querySelector("#count");
     const fileList = document.querySelector("#files");
     const button = document.querySelector("#search");
+    const buttonLabel = document.querySelector("#search-label");
 
     const kinds = {
       "docx-paragraph": "段落",
@@ -466,24 +700,48 @@
       return block;
     }
 
+    function heading(text) {
+      const title = document.createElement("h2");
+      title.textContent = text;
+      return title;
+    }
+
     function clearResult(message) {
       result.replaceChildren();
-      const title = document.createElement("h2");
-      title.textContent = "引用";
       const copy = document.createElement("p");
       copy.className = "lede";
       copy.textContent = message;
-      result.append(title, copy);
+      result.append(heading("原文位置"), copy);
+    }
+
+    function showMiss() {
+      result.replaceChildren();
+      const copy = document.createElement("p");
+      copy.className = "lede";
+      copy.textContent = "没有找到这句原文。";
+      const list = document.createElement("ol");
+      list.className = "recover";
+      [
+        "条款号要和正文编号一致，例如 4.1.2。不要写成“第 4.1.2 条”。",
+        "版本字样必须出现在同一份文件里，例如年份 2024。",
+        "原句要落在这个条款里面。别的条款里的句子不会被列出。",
+      ].forEach((text) => {
+        const item = document.createElement("li");
+        item.textContent = text;
+        list.append(item);
+      });
+      const again = document.createElement("p");
+      again.className = "note";
+      again.textContent = "改完后，再点「查找原文位置」。";
+      result.append(heading("原文位置"), copy, list, again);
     }
 
     function render(payload, finding) {
       result.replaceChildren();
-      const title = document.createElement("h2");
-      title.textContent = "引用";
       const clause = document.createElement("p");
       clause.className = "clause-title";
       clause.textContent = payload.clause_id + " · " + payload.anchors.length + " 处";
-      result.append(title, clause);
+      result.append(heading("原文位置"), clause);
       const complete = payload.anchors.some((anchor) => anchor.text.includes(finding));
       if (!complete) {
         const note = document.createElement("p");
@@ -500,12 +758,12 @@
         const group = document.createElement("section");
         group.className = "group";
         const header = document.createElement("header");
-        const heading = document.createElement("h3");
-        heading.textContent = name;
+        const nameHeading = document.createElement("h3");
+        nameHeading.textContent = name;
         const count = document.createElement("p");
         count.className = "meta";
         count.textContent = anchors.length + " 处";
-        header.append(heading, count);
+        header.append(nameHeading, count);
         group.append(header);
         anchors.forEach((anchor) => {
           const article = document.createElement("article");
@@ -529,15 +787,19 @@
         if (!response.ok) throw new Error("unavailable");
         const payload = await response.json();
         rootNode.textContent = payload.root;
+        countNode.textContent = payload.files.length + " 份";
         fileList.replaceChildren();
         payload.files.forEach((file) => {
           const item = document.createElement("li");
+          const pill = document.createElement("span");
+          pill.className = "pill";
+          pill.textContent = file.kind.toUpperCase();
           const name = document.createElement("strong");
           name.textContent = file.document;
           const meta = document.createElement("span");
           meta.className = "meta";
-          meta.textContent = file.kind.toUpperCase() + " · " + sizeLabel(file.bytes);
-          item.append(name, meta);
+          meta.textContent = sizeLabel(file.bytes);
+          item.append(pill, name, meta);
           fileList.append(item);
         });
         if (payload.files.length === 0) {
@@ -547,8 +809,15 @@
         }
       } catch {
         rootNode.textContent = "请通过本地服务打开此页。";
+        countNode.textContent = "";
         fileList.replaceChildren();
       }
+    }
+
+    function setBusy(busy) {
+      button.disabled = busy;
+      button.setAttribute("aria-busy", busy ? "true" : "false");
+      buttonLabel.textContent = busy ? "正在查找…" : "查找原文位置";
     }
 
     form.addEventListener("submit", async (event) => {
@@ -560,10 +829,10 @@
       if (!selected) {
         formStatus.classList.add("is-alert");
         formStatus.textContent = "请至少选择一种文件。";
+        document.querySelector("#tool-docx").focus();
         return;
       }
-      button.disabled = true;
-      button.textContent = "检索中";
+      setBusy(true);
       try {
         const response = await fetch("/api/cite", {
           method: "POST",
@@ -577,20 +846,19 @@
         });
         const payload = await response.json();
         if (!response.ok) {
-          clearResult("没有可引用的位置。请核对条款号、版本是否写在同一文件里，以及语句是否落在该条款内。");
+          showMiss();
           formStatus.classList.add("is-alert");
-          formStatus.textContent = "未找到引用。";
+          formStatus.textContent = "没有找到。请按原文位置里的三项改完再查。";
           return;
         }
         render(payload, finding);
-        formStatus.textContent = "已列出 " + payload.anchors.length + " 处。";
+        formStatus.textContent = "已列出 " + payload.anchors.length + " 处原文。";
       } catch {
-        clearResult("本地服务没有返回结果。");
+        clearResult("本地服务没有返回结果。请确认页面是从本地服务打开的，然后重新查找。");
         formStatus.classList.add("is-alert");
         formStatus.textContent = "检索没有完成。";
       } finally {
-        button.disabled = false;
-        button.textContent = "检索";
+        setBusy(false);
       }
     });
 

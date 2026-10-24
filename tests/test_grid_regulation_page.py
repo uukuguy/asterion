@@ -23,9 +23,13 @@ class GridRegulationPageTests(unittest.TestCase):
     def test_page_is_one_local_file_and_cites_the_demo_clause(self) -> None:
         html = page_bytes().decode()
         self.assertIn("规程检索", html)
+        self.assertIn("怎么填", html)
+        self.assertIn("同一份文件", html)
+        self.assertIn("查找原文位置", html)
         self.assertNotIn("SECRET", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
+        self.assertNotIn("@import", html)
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             write_demo_corpus(root)

@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-24 23:08. **Session remains active — not a final handoff.**
+> Updated: 2026-10-25 00:54. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
+- The grid regulation desk is one HTML file, `page.html`. It explains the three fields before search. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
