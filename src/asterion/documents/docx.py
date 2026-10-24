@@ -122,13 +122,18 @@ def _paragraph_position(
         return position
     level = numbering.find(f"{_W}ilvl")
     number_id = numbering.find(f"{_W}numId")
+    # numId 0 and a half-present numPr mean the paragraph is not numbered.
     if level is None or number_id is None:
-        raise DocumentFormatError("document tool is unavailable")
+        return position
     try:
-        position["numbering_level"] = int(level.attrib[f"{_W}val"])
-        position["numbering_id"] = int(number_id.attrib[f"{_W}val"])
+        level_number = int(level.attrib[f"{_W}val"])
+        id_number = int(number_id.attrib[f"{_W}val"])
     except (KeyError, ValueError):
-        raise DocumentFormatError("document tool is unavailable") from None
+        return position
+    if level_number < 0 or id_number < 1:
+        return position
+    position["numbering_level"] = level_number
+    position["numbering_id"] = id_number
     return position
 
 

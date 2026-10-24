@@ -1,4 +1,9 @@
-"""Read and write PDF text anchors with a page and a text position."""
+"""Read and write PDF text anchors with a page and a text position.
+
+Identity-H fonts decode through a ToUnicode bfchar or bfrange map. Glyphs
+that share a baseline form one span. A gap wider than 36 points starts
+another span, so two columns on the same baseline stay apart.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +16,11 @@ _OBJECT = re.compile(rb"(\d+) 0 obj")
 _LENGTH = re.compile(rb"/Length\s+(\d+)")
 _CONTENTS = re.compile(rb"/Contents\s+(\d+)\s+0\s+R")
 _OPERATOR = re.compile(r"^(?:BT|ET|Tf|Tj|TJ|Tm|Td|TD|T\*)$")
+_TOUNICODE = re.compile(rb"/ToUnicode\s+(\d+)\s+0\s+R")
+_CMAP_TOKEN = re.compile(r"<([0-9A-Fa-f]+)>|\[|\]")
+# User-space points. Body text in the regulation PDFs stays under 24.
+_BASELINE_GAP = 36
+_MAX_CMAP_RANGE = 4096
 
 
 class DocumentFormatError(ValueError):
@@ -72,8 +82,8 @@ def pdf_spans(path: Path) -> tuple[tuple[str, Mapping[str, int], str], ...]:
     except (OSError, ValueError, zlib.error):
         raise DocumentFormatError("document tool is unavailable") from None
     spans: list[tuple[str, Mapping[str, int], str]] = []
-    for page_number, content in enumerate(pages, start=1):
-        for item, (x_point, y_point, text) in enumerate(_text_items(content)):
+    for page_number, (content, fonts) in enumerate(pages, start=1):
+        for item, (x_point, y_point, text) in enumerate(_text_items(content, fonts)):
             if not text:
                 continue
             spans.append(
@@ -128,7 +138,9 @@ def _objects(data: bytes) -> dict[int, tuple[bytes, bytes | None]]:
     return found
 
 
-def _pages(objects: dict[int, tuple[bytes, bytes | None]]) -> tuple[str, ...]:
+def _pages(
+    objects: dict[int, tuple[bytes, bytes | None]],
+) -> tuple[tuple[str, Mapping[str, Mapping[bytes, str] | None]], ...]:
     pages_header = next(
         (header for header, _payload in objects.values() if b"/Type /Pages" in header),
         None,
@@ -139,7 +151,8 @@ def _pages(objects: dict[int, tuple[bytes, bytes | None]]) -> tuple[str, ...]:
     kids = [int(item) for item in re.findall(rb"(\d+)\s+0\s+R", kids_text)]
     if not kids:
         raise DocumentFormatError("document tool is unavailable")
-    contents: list[str] = []
+    cache: dict[int, dict[bytes, str]] = {}
+    contents: list[tuple[str, Mapping[str, Mapping[bytes, str] | None]]] = []
     for kid in kids:
         header, _payload = objects[kid]
         contents_match = _CONTENTS.search(header)
@@ -148,16 +161,147 @@ def _pages(objects: dict[int, tuple[bytes, bytes | None]]) -> tuple[str, ...]:
         payload = objects[int(contents_match.group(1))][1]
         if payload is None:
             raise DocumentFormatError("document tool is unavailable")
-        contents.append(payload.decode("latin-1"))
+        contents.append(
+            (payload.decode("latin-1"), _font_encodings(header, objects, cache))
+        )
     return tuple(contents)
 
 
-def _text_items(content: str) -> tuple[tuple[int, int, str], ...]:
+def _font_encodings(
+    header: bytes,
+    objects: dict[int, tuple[bytes, bytes | None]],
+    cache: dict[int, dict[bytes, str]],
+) -> dict[str, Mapping[bytes, str] | None]:
+    chunk = header
+    if b"/Font" not in chunk:
+        resource = re.search(rb"/Resources\s+(\d+)\s+0\s+R", header)
+        if resource is None:
+            return {}
+        chunk = objects[int(resource.group(1))][0]
+    font_at = chunk.find(b"/Font")
+    if font_at < 0 or b"<<" not in chunk[font_at:]:
+        return {}
+    body = chunk[font_at:].split(b"<<", 1)[1].split(b">>", 1)[0]
+    encodings: dict[str, Mapping[bytes, str] | None] = {}
+    for name, object_id in re.findall(rb"/([A-Za-z0-9]+)\s+(\d+)\s+0\s+R", body):
+        font_header = objects[int(object_id)][0]
+        link = _TOUNICODE.search(font_header)
+        if link is None:
+            encodings[name.decode()] = None
+            continue
+        cmap_id = int(link.group(1))
+        if cmap_id not in cache:
+            cmap_payload = objects[cmap_id][1]
+            cache[cmap_id] = {} if cmap_payload is None else _tounicode(cmap_payload)
+        encodings[name.decode()] = cache[cmap_id]
+    return encodings
+
+
+def _tounicode(payload: bytes) -> dict[bytes, str]:
+    text = payload.decode("latin-1")
+    mapping: dict[bytes, str] = {}
+    for body in re.findall(r"beginbfchar(.*?)endbfchar", text, re.S):
+        pairs = re.findall(r"<([0-9A-Fa-f]+)>", body)
+        if len(pairs) % 2:
+            continue
+        for index in range(0, len(pairs), 2):
+            _put_cmap(mapping, pairs[index], pairs[index + 1])
+    for body in re.findall(r"beginbfrange(.*?)endbfrange", text, re.S):
+        _bfrange(mapping, body)
+    widths = {len(key) for key in mapping}
+    if len(widths) != 1:
+        return {}
+    return mapping
+
+
+def _cmap_tokens(body: str) -> list[str]:
+    return [
+        match.group(1) if match.group(1) is not None else match.group(0)
+        for match in _CMAP_TOKEN.finditer(body)
+    ]
+
+
+def _bfrange(mapping: dict[bytes, str], body: str) -> None:
+    tokens = _cmap_tokens(body)
+    index = 0
+    while index + 2 < len(tokens):
+        start, end, third = tokens[index], tokens[index + 1], tokens[index + 2]
+        if start in {"[", "]"} or end in {"[", "]"}:
+            index += 1
+            continue
+        if third == "[":
+            dests: list[str] = []
+            index += 3
+            while index < len(tokens) and tokens[index] != "]":
+                if tokens[index] != "[":
+                    dests.append(tokens[index])
+                index += 1
+            index += 1
+            _fill_array(mapping, start, end, dests)
+            continue
+        _fill_scalar(mapping, start, end, third)
+        index += 3
+
+
+def _fill_array(
+    mapping: dict[bytes, str], start: str, end: str, dests: Sequence[str]
+) -> None:
+    if len(start) % 2 or not start:
+        return
+    start_code = int(start, 16)
+    end_code = int(end, 16)
+    width = len(start) // 2
+    count = end_code - start_code + 1
+    if count <= 0 or count > _MAX_CMAP_RANGE or count != len(dests):
+        return
+    for offset, dest in enumerate(dests):
+        _put_cmap(mapping, (start_code + offset).to_bytes(width, "big").hex(), dest)
+
+
+def _fill_scalar(mapping: dict[bytes, str], start: str, end: str, dest: str) -> None:
+    if len(start) % 2 or not start or len(dest) % 2:
+        return
+    start_code = int(start, 16)
+    end_code = int(end, 16)
+    width = len(start) // 2
+    count = end_code - start_code + 1
+    if count <= 0 or count > _MAX_CMAP_RANGE:
+        return
+    try:
+        base = int(dest, 16)
+        dest_width = len(dest) // 2
+    except ValueError:
+        return
+    for offset in range(count):
+        code = (start_code + offset).to_bytes(width, "big")
+        try:
+            encoded = (base + offset).to_bytes(dest_width, "big")
+        except OverflowError:
+            return
+        _put_cmap(mapping, code.hex(), encoded.hex())
+
+
+def _put_cmap(mapping: dict[bytes, str], src_hex: str, dst_hex: str) -> None:
+    try:
+        source = bytes.fromhex(src_hex)
+        text = bytes.fromhex(dst_hex).decode("utf-16-be")
+    except (ValueError, UnicodeDecodeError):
+        return
+    if source and text:
+        mapping[source] = text
+
+
+def _text_items(
+    content: str, fonts: Mapping[str, Mapping[bytes, str] | None]
+) -> tuple[tuple[int, int, str], ...]:
     tokens = _tokenize(content)
     operands: list[object] = []
-    x_point = 0
-    y_point = 0
-    items: list[tuple[int, int, str]] = []
+    scale_a, scale_b, scale_c, scale_d = 1.0, 0.0, 0.0, 1.0
+    x_point = 0.0
+    y_point = 0.0
+    leading = 0.0
+    encoding: Mapping[bytes, str] | None = None
+    glyphs: list[tuple[int, int, str, int]] = []
     for token in tokens:
         if token == "[":
             operands.append([])
@@ -174,24 +318,96 @@ def _text_items(content: str) -> tuple[tuple[int, int, str], ...]:
         if not _OPERATOR.fullmatch(token):
             operands.append(token)
             continue
-        if token == "Tm" and len(operands) >= 6:
-            x_point = _whole(operands[-2])
-            y_point = _whole(operands[-1])
+        if token == "BT":
+            scale_a, scale_b, scale_c, scale_d = 1.0, 0.0, 0.0, 1.0
+            x_point = y_point = leading = 0.0
+        elif token == "Tm" and len(operands) >= 6:
+            scale_a = _number(operands[-6])
+            scale_b = _number(operands[-5])
+            scale_c = _number(operands[-4])
+            scale_d = _number(operands[-3])
+            x_point = _number(operands[-2])
+            y_point = _number(operands[-1])
+        elif token == "Tf" and len(operands) >= 2 and isinstance(operands[-2], str):
+            name = operands[-2]
+            if name.startswith("/"):
+                encoding = fonts.get(name[1:])
         elif token in {"Td", "TD"} and len(operands) >= 2:
-            x_point += _whole(operands[-2])
-            y_point += _whole(operands[-1])
+            move_x = _number(operands[-2])
+            move_y = _number(operands[-1])
+            x_point = scale_a * move_x + scale_c * move_y + x_point
+            y_point = scale_b * move_x + scale_d * move_y + y_point
+            if token == "TD":
+                leading = move_y
+        elif token == "T*":
+            x_point = scale_c * -leading + x_point
+            y_point = scale_d * -leading + y_point
         elif token == "Tj" and operands:
-            text = _decode(operands[-1])
-            items.append((x_point, y_point, text))
+            _append_glyph(glyphs, x_point, y_point, _shown(operands[-1], encoding))
         elif token == "TJ" and operands and isinstance(operands[-1], list):
-            text = "".join(
-                _decode(part)
+            shown = "".join(
+                _shown(part, encoding)
                 for part in operands[-1]
                 if isinstance(part, str) and part.startswith(("<", "("))
             )
-            items.append((x_point, y_point, text))
+            _append_glyph(glyphs, x_point, y_point, shown)
         operands = []
-    return tuple(items)
+    return _baselines(glyphs)
+
+
+def _append_glyph(
+    glyphs: list[tuple[int, int, str, int]], x_point: float, y_point: float, text: str
+) -> None:
+    if text:
+        glyphs.append((int(round(x_point)), int(round(y_point)), text, len(glyphs)))
+
+
+def _baselines(
+    glyphs: Sequence[tuple[int, int, str, int]],
+) -> tuple[tuple[int, int, str], ...]:
+    lines: dict[int, list[tuple[int, int, str, int]]] = {}
+    for glyph in glyphs:
+        lines.setdefault(glyph[1], []).append(glyph)
+    spans: list[tuple[int, int, str]] = []
+    for y_point in sorted(lines, reverse=True):
+        ordered = sorted(lines[y_point], key=lambda item: (item[0], item[3]))
+        run_x: int | None = None
+        run: list[str] = []
+        last_x: int | None = None
+        for x_point, _y_point, text, _order in ordered:
+            if last_x is not None and x_point - last_x > _BASELINE_GAP:
+                spans.append(
+                    (run_x if run_x is not None else x_point, y_point, "".join(run))
+                )
+                run = []
+                run_x = None
+            if run_x is None:
+                run_x = x_point
+            run.append(text)
+            last_x = x_point
+        if run and run_x is not None:
+            spans.append((run_x, y_point, "".join(run)))
+    return tuple(spans)
+
+
+def _shown(token: object, encoding: Mapping[bytes, str] | None) -> str:
+    if encoding is None:
+        return _decode(token)
+    if not encoding or not isinstance(token, str) or not token.startswith("<"):
+        return ""
+    if not token.endswith(">"):
+        return ""
+    try:
+        raw = bytes.fromhex(token[1:-1])
+    except ValueError:
+        return ""
+    width = len(next(iter(encoding)))
+    if width == 0 or len(raw) % width:
+        return ""
+    return "".join(
+        encoding.get(raw[index : index + width], "")
+        for index in range(0, len(raw), width)
+    )
 
 
 def _tokenize(content: str) -> list[str]:
@@ -269,7 +485,10 @@ def _decode(token: object) -> str:
     return ""
 
 
-def _whole(token: object) -> int:
+def _number(token: object) -> float:
     if not isinstance(token, str):
         raise DocumentFormatError("document tool is unavailable")
-    return int(round(float(token)))
+    try:
+        return float(token)
+    except ValueError:
+        raise DocumentFormatError("document tool is unavailable") from None

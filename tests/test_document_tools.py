@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from asterion.documents import (
@@ -89,3 +90,106 @@ class DocumentToolTests(unittest.TestCase):
                 search_documents(
                     root, "4.1.2", tools="docx,pdf", path="../outside/secret.docx"
                 )
+
+    def test_docx_keeps_text_when_numbering_is_inactive(self) -> None:
+        document = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="1"/><w:numId w:val="1"/></w:numPr></w:pPr>
+<w:r><w:t>CLAUSE-ON</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="2"/><w:numId w:val="0"/></w:numPr></w:pPr>
+<w:r><w:t>CLAUSE-OFF</w:t></w:r></w:p>
+<w:p><w:pPr><w:numPr><w:ilvl w:val="1"/></w:numPr></w:pPr>
+<w:r><w:t>CLAUSE-HALF</w:t></w:r></w:p>
+</w:body></w:document>
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            with zipfile.ZipFile(root / "rules.docx", "w") as package:
+                package.writestr("word/document.xml", document)
+            on_hit = search_documents(root, "CLAUSE-ON", tools="docx")[0]
+            off_hit = search_documents(root, "CLAUSE-OFF", tools="docx")[0]
+            half_hit = search_documents(root, "CLAUSE-HALF", tools="docx")[0]
+            self.assertEqual(
+                on_hit["position"],
+                {"numbering_id": 1, "numbering_level": 1, "paragraph": 0},
+            )
+            self.assertEqual(off_hit["position"], {"paragraph": 1})
+            self.assertEqual(half_hit["position"], {"paragraph": 2})
+            self.assertEqual(read_span(root, off_hit), "CLAUSE-OFF")
+
+    def test_pdf_tounicode_joins_a_baseline_and_keeps_a_distant_glyph(self) -> None:
+        cmap = b"""begincmap
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+4 beginbfchar
+<0001> <6761>
+<0002> <6B3E>
+<0003> <7532>
+<0004> <4E59>
+endbfchar
+1 beginbfrange
+<0010> <0011> <0041>
+endbfrange
+1 beginbfrange
+<0020> <0021> [<0043> <0044>]
+endbfrange
+endcmap
+"""
+        content = (
+            b"BT /F1 200 Tf 0.05 0 0 -0.05 72 700 Tm "
+            b"<0001> Tj 100 0 TD <00EE> Tj 100 0 TD <0002> Tj 100 0 TD <0003> Tj ET "
+            b"BT /F1 200 Tf 0.05 0 0 -0.05 400 700 Tm <0004> Tj ET "
+            b"BT /F1 200 Tf 0.05 0 0 -0.05 72 640 Tm <0010> Tj 100 0 TD <0011> Tj ET "
+            b"BT /F1 200 Tf 0.05 0 0 -0.05 72 600 Tm <00200021> Tj ET"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "clause.pdf").write_bytes(_identity_pdf(content, cmap))
+            phrase = search_documents(root, "\u6761\u6b3e\u7532", tools="pdf")
+            other = search_documents(root, "\u4e59", tools="pdf")
+            letters = search_documents(root, "AB", tools="pdf")
+            array_letters = search_documents(root, "CD", tools="pdf")
+            self.assertEqual(len(phrase), 1)
+            self.assertEqual(
+                phrase[0]["position"], {"item": 0, "page": 1, "x": 72, "y": 700}
+            )
+            self.assertEqual(read_span(root, phrase[0]), "\u6761\u6b3e\u7532")
+            self.assertNotIn("\u4e59", read_span(root, phrase[0]))
+            self.assertEqual(other[0]["position"]["x"], 400)
+            self.assertEqual(other[0]["position"]["item"], 1)
+            self.assertEqual(
+                letters[0]["position"], {"item": 2, "page": 1, "x": 72, "y": 640}
+            )
+            self.assertEqual(array_letters[0]["position"]["y"], 600)
+            self.assertEqual(search_documents(root, "\u7532\u4e59", tools="pdf"), ())
+
+
+def _identity_pdf(content: bytes, cmap: bytes) -> bytes:
+    def obj(object_id: int, body: bytes) -> bytes:
+        return f"{object_id} 0 obj\n".encode() + body + b"\nendobj\n"
+
+    def stream(object_id: int, payload: bytes) -> bytes:
+        header = f"<< /Length {len(payload)} >>\nstream\n".encode()
+        return obj(object_id, header + payload + b"\nendstream")
+
+    parts = [
+        b"%PDF-1.4\n",
+        obj(1, b"<< /Type /Catalog /Pages 2 0 R >>"),
+        obj(2, b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+        obj(
+            3,
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>",
+        ),
+        stream(4, content),
+        obj(
+            5,
+            b"<< /Type /Font /Subtype /Type0 /BaseFont /CID "
+            b"/Encoding /Identity-H /ToUnicode 6 0 R >>",
+        ),
+        stream(6, cmap),
+        b"%%EOF\n",
+    ]
+    return b"".join(parts)
