@@ -1,7 +1,8 @@
 """Provider-free citation demo for fictional grid-regulation documents.
 
-The demo does not start Pi and does not call a model. Document tools are
-selected here; the framework default remains plain text.
+The operator desk is the single file `page.html`, served by
+`python -m asterion.applications.grid_regulation.page`. This demo does not
+start Pi and does not call a model.
 """
 
 import asyncio

@@ -3861,3 +3861,4 @@
 - 19:51 Installed provider dci-agent-lite is removed. asterion-dci describe and acceptance stay. The Judge key and paper ablation row keep that name. native.dci-complete is not built. No model call.
 - 21:12 PDF Identity-H ToUnicode maps join one baseline into one span. Inactive DOCX numbering no longer rejects the file. Untracked regulation files now yield CJK spans. No model call.
 - 22:14 Grid citation assembles a dotted clause across ordered spans. It records the file version, the heading, and the spans that hold the finding. A private probe cited one such clause in each of three DOCX files and three PDFs. Text was not recorded. Search still stops above 32 hits. No model call.
+- 22:51 The grid regulation desk is one HTML file served on 127.0.0.1. It lists the corpus and shows cited spans. Headless Chrome completed one fictional query. No model call.
