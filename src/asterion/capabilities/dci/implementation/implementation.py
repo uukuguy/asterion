@@ -47,15 +47,19 @@ class DciLocalResearchImplementation:
             requested_capabilities=required,
         )
         try:
-            events = event_mappings([
-                event
-                async for event in cast(Any, invocation.runtime).run(
-                    request, signal=invocation.signal
-                )
-            ])
+            events = event_mappings(
+                [
+                    event
+                    async for event in cast(Any, invocation.runtime).run(
+                        request, signal=invocation.signal
+                    )
+                ]
+            )
             answer_uri, locations, trajectory = _core_evidence(events)
         except (RuntimeEventError, TypeError, ValueError, RuntimeError):
-            raise CapabilityExecutionError("research runtime execution failed") from None
+            raise CapabilityExecutionError(
+                "research runtime execution failed"
+            ) from None
         return CapabilityExecutionResult(
             events=(
                 {"type": "research.completed", "payload": {"status": "completed"}},
@@ -91,32 +95,122 @@ def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
     return root
 
 
+_LOCATION_TOOLS = frozenset({"read", "grep"})
+_PATH_KEYS = ("path", "file_path", "file")
+
+
 def _core_evidence(
     events: Sequence[Mapping[str, object]],
 ) -> tuple[str, Mapping[str, object], Mapping[str, object]]:
     answer_uri: str | None = None
-    paths: list[str] = []
-    calls: list[str] = []
+    artifact_paths: list[str] = []
+    artifact_calls: list[str] = []
+    calls_by_id: dict[str, tuple[str, Mapping[str, object]]] = {}
+    call_order: list[str] = []
+    result_ids: set[str] = set()
     for event in events:
-        if event.get("type") != "artifact.created":
-            continue
+        event_type = event.get("type")
         payload = event.get("payload")
         if not isinstance(payload, Mapping):
             continue
-        artifact = payload.get("artifact")
-        if not isinstance(artifact, Mapping):
-            continue
-        uri = artifact.get("uri")
-        if not isinstance(uri, str) or not uri:
-            continue
-        kind = artifact.get("kind")
-        if kind == "answer":
-            if answer_uri is None:
-                answer_uri = uri
-        elif kind == "locations":
-            paths.append(uri)
-        elif kind == "trajectory":
-            calls.append(uri)
+        if event_type == "artifact.created":
+            artifact = payload.get("artifact")
+            if not isinstance(artifact, Mapping):
+                continue
+            uri = artifact.get("uri")
+            if not isinstance(uri, str) or not uri:
+                continue
+            kind = artifact.get("kind")
+            if kind == "answer":
+                if answer_uri is None:
+                    answer_uri = uri
+            elif kind == "locations":
+                artifact_paths.append(uri)
+            elif kind == "trajectory":
+                artifact_calls.append(uri)
+        elif event_type == "tool.call":
+            call_id, name, arguments = _tool_call(payload)
+            if call_id in calls_by_id:
+                raise CapabilityExecutionError(
+                    "research runtime evidence is unavailable"
+                )
+            calls_by_id[call_id] = (name, arguments)
+            call_order.append(call_id)
+        elif event_type == "tool.result":
+            call_id = payload.get("call_id")
+            if (
+                not isinstance(call_id, str)
+                or call_id not in calls_by_id
+                or call_id in result_ids
+            ):
+                raise CapabilityExecutionError(
+                    "research runtime evidence is unavailable"
+                )
+            result_ids.add(call_id)
+    if call_order:
+        if set(call_order) != result_ids:
+            raise CapabilityExecutionError("research runtime evidence is unavailable")
+        paths: list[str] = []
+        calls: list[str] = []
+        for call_id in call_order:
+            name, arguments = calls_by_id[call_id]
+            calls.append(name)
+            location = _tool_location(name, arguments)
+            if location is not None:
+                paths.append(location)
+    else:
+        paths = artifact_paths
+        calls = artifact_calls
     if answer_uri is None or not paths or not calls:
         raise CapabilityExecutionError("research runtime evidence is unavailable")
     return answer_uri, {"paths": tuple(paths)}, {"calls": tuple(calls)}
+
+
+def _tool_call(
+    payload: Mapping[str, object],
+) -> tuple[str, str, Mapping[str, object]]:
+    call_id = payload.get("call_id")
+    name = payload.get("name")
+    arguments = payload.get("arguments")
+    if (
+        not isinstance(call_id, str)
+        or not call_id
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(arguments, Mapping)
+    ):
+        raise CapabilityExecutionError("research runtime evidence is unavailable")
+    return call_id, name, arguments
+
+
+def _tool_location(name: str, arguments: Mapping[str, object]) -> str | None:
+    kind = name.casefold()
+    if kind not in _LOCATION_TOOLS:
+        return None
+    raw = _argument_path(arguments)
+    if raw is None:
+        if kind == "grep":
+            return "."
+        raise CapabilityExecutionError("research runtime evidence is unavailable")
+    if not _corpus_relative(raw):
+        raise CapabilityExecutionError("research runtime evidence is unavailable")
+    return raw
+
+
+def _argument_path(arguments: Mapping[str, object]) -> str | None:
+    for key in _PATH_KEYS:
+        if key not in arguments:
+            continue
+        value = arguments[key]
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped:
+                return stripped
+            continue
+        raise CapabilityExecutionError("research runtime evidence is unavailable")
+    return None
+
+
+def _corpus_relative(value: str) -> bool:
+    path = Path(value)
+    return not path.is_absolute() and ".." not in path.parts

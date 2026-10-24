@@ -8,7 +8,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.capabilities.catalog import CapabilityRef
-from asterion.capabilities.execution import CapabilityExecutionError, CapabilityInvocation
+from asterion.capabilities.execution import (
+    CapabilityExecutionError,
+    CapabilityInvocation,
+)
 from asterion.runtime.host import RunEvent, RunRequest, RuntimeManifest
 from asterion.runtime.working_directory import ProcessWorkingDirectory
 from asterion.capabilities.dci.implementation.implementation import (
@@ -22,9 +25,7 @@ from asterion.capabilities.dci.implementation._runtime import (
 
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
-MANIFEST_PATH = (
-    SOURCE / "capabilities/dci/payload/capabilities/dci-research.json"
-)
+MANIFEST_PATH = SOURCE / "capabilities/dci/payload/capabilities/dci-research.json"
 
 
 class FixtureRuntime:
@@ -87,6 +88,80 @@ class FixtureRuntime:
         yield RunEvent(request.run_id, 5, "run.completed", {"status": "completed"})
 
 
+class ToolStreamRuntime(FixtureRuntime):
+    def __init__(
+        self,
+        tools: tuple[tuple[str, dict[str, object], object, bool], ...],
+        *,
+        labeled: tuple[tuple[str, str], ...] = (),
+    ) -> None:
+        super().__init__()
+        self.tools = tools
+        self.labeled = labeled
+
+    async def run(
+        self,
+        request: RunRequest,
+        *,
+        signal: object | None = None,
+    ) -> AsyncIterator[RunEvent]:
+        self.requests.append(request)
+        self.signals.append(signal)
+        sequence = 1
+        yield RunEvent(request.run_id, sequence, "run.started", {"capabilities": []})
+        for index, (name, arguments, output, is_error) in enumerate(
+            self.tools, start=1
+        ):
+            call_id = f"c{index}"
+            sequence += 1
+            yield RunEvent(
+                request.run_id,
+                sequence,
+                "tool.call",
+                {"call_id": call_id, "name": name, "arguments": arguments},
+            )
+            sequence += 1
+            yield RunEvent(
+                request.run_id,
+                sequence,
+                "tool.result",
+                {"call_id": call_id, "output": output, "is_error": is_error},
+            )
+        sequence += 1
+        yield RunEvent(
+            request.run_id,
+            sequence,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "answer",
+                    "kind": "answer",
+                    "media_type": "text/plain",
+                    "uri": "final.txt",
+                }
+            },
+        )
+        for kind, uri in self.labeled:
+            sequence += 1
+            yield RunEvent(
+                request.run_id,
+                sequence,
+                "artifact.created",
+                {
+                    "artifact": {
+                        "artifact_id": kind,
+                        "kind": kind,
+                        "media_type": "text/plain",
+                        "uri": uri,
+                    }
+                },
+            )
+        sequence += 1
+        yield RunEvent(
+            request.run_id, sequence, "run.completed", {"status": "completed"}
+        )
+
+
 class FailingRuntime(FixtureRuntime):
     async def run(
         self,
@@ -125,11 +200,13 @@ def invocation(
         manifest=json.loads(MANIFEST_PATH.read_text()),
         run_id="research-run",
         input_text="SECRET-APPLICATION-INPUT",
-        upstream_artifacts=({
-            "artifact_id": "question",
-            "media_type": "text/plain",
-            "value": {"text": "Read the corpus"},
-        },),
+        upstream_artifacts=(
+            {
+                "artifact_id": "question",
+                "media_type": "text/plain",
+                "value": {"text": "Read the corpus"},
+            },
+        ),
         runtime=runtime,
         host_services=(
             {"corpus.local-root": FixtureCorpusService()}
@@ -170,6 +247,83 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(result.artifacts[1]["value"]["paths"], ("doc.txt",))
         self.assertEqual(result.artifacts[2]["value"]["calls"], ("bash",))
+
+    async def test_launched_tools_supply_locations_and_trajectory(self) -> None:
+        runtime = ToolStreamRuntime(
+            (
+                ("read", {"path": "doc.txt"}, "SECRET-TOOL-OUTPUT", False),
+                ("grep", {"pattern": "clause"}, "SECRET-GREP-OUTPUT", False),
+                (
+                    "grep",
+                    {"path": "notes/a.md", "pattern": "clause"},
+                    "SECRET-GREP-FILE",
+                    False,
+                ),
+                (
+                    "bash",
+                    {"command": "cat /Users/sujiangwen/secret"},
+                    "SECRET-BASH",
+                    False,
+                ),
+                ("Read", {"file": "other.md"}, "SECRET-READ", False),
+            ),
+            labeled=(("locations", "ignored.txt"), ("trajectory", "ignored")),
+        )
+
+        result = await DciLocalResearchImplementation().execute(invocation(runtime))
+
+        self.assertEqual(
+            result.artifacts[1]["value"]["paths"],
+            ("doc.txt", ".", "notes/a.md", "other.md"),
+        )
+        self.assertEqual(
+            result.artifacts[2]["value"]["calls"],
+            ("read", "grep", "grep", "bash", "Read"),
+        )
+        self.assertEqual(
+            result.artifacts[0]["value"]["answer_artifact_uri"], "final.txt"
+        )
+        rendered = repr(result)
+        for secret in (
+            "SECRET-TOOL-OUTPUT",
+            "SECRET-GREP-OUTPUT",
+            "SECRET-GREP-FILE",
+            "SECRET-BASH",
+            "SECRET-READ",
+            "/Users/sujiangwen/secret",
+            "ignored.txt",
+            "cat ",
+        ):
+            self.assertNotIn(secret, rendered)
+
+    async def test_errored_read_still_records_its_location(self) -> None:
+        runtime = ToolStreamRuntime(
+            (("read", {"file_path": "doc.txt"}, "SECRET-ERR", True),)
+        )
+
+        result = await DciLocalResearchImplementation().execute(invocation(runtime))
+
+        self.assertEqual(result.artifacts[1]["value"]["paths"], ("doc.txt",))
+        self.assertEqual(result.artifacts[2]["value"]["calls"], ("read",))
+        self.assertNotIn("SECRET-ERR", repr(result))
+
+    async def test_unsafe_tool_locations_fail_closed(self) -> None:
+        cases = (
+            ("read", {}),
+            ("read", {"path": "/Users/sujiangwen/secret"}),
+            ("read", {"path": "../secret"}),
+            ("read", {"path": ["SECRET-LIST"]}),
+            ("bash", {"command": "ls SECRET-ONLY-BASH"}),
+        )
+        for name, arguments in cases:
+            with self.subTest(name=name, arguments=arguments):
+                runtime = ToolStreamRuntime(((name, arguments, "SECRET-OUT", False),))
+                with self.assertRaises(CapabilityExecutionError) as raised:
+                    await DciLocalResearchImplementation().execute(invocation(runtime))
+                message = str(raised.exception)
+                self.assertEqual(message, "research runtime execution failed")
+                self.assertNotIn("SECRET", message)
+                self.assertNotIn("/Users", message)
 
     async def test_missing_corpus_service_fails_before_runtime_invocation(
         self,
@@ -222,7 +376,9 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
 
 
 class DciResearchCapabilityBoundaryTests(unittest.TestCase):
-    def test_application_and_capability_sources_do_not_import_batch_orchestration(self) -> None:
+    def test_application_and_capability_sources_do_not_import_batch_orchestration(
+        self,
+    ) -> None:
         roots = (
             SOURCE / "applications",
             SOURCE / "capabilities",
