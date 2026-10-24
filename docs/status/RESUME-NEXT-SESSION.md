@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-24 22:51. **Session remains active — not a final handoff.**
+> Updated: 2026-10-24 23:08. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`, served on `127.0.0.1`. It cites a dotted clause and shows the span text to the operator.
+- The grid regulation desk is one HTML file, `page.html`. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
@@ -44,7 +44,7 @@
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
 2. Do not run `make native-dci-example` or any dataset or model call.
-3. Do not commit the regulation originals. Open the desk with `--corpus` pointed at their directory. A citation still needs a clause, a version string, and a finding.
+3. Do not commit the regulation originals. Open the desk with `make grid-regulation`. A citation still needs a clause, a version string, and a finding.
 
 ## Ready-to-paste command
 

@@ -5,6 +5,8 @@ ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- nod
 ASTERION_PROMOTION_NPM_CACHE ?=
 PRIME_ORB_MACHINE ?= ubuntu
 P7_CONSOLE_PORT ?= 57515
+GRID_CORPUS ?= $(CURDIR)/docs
+GRID_PORT ?= 8765
 
 .DEFAULT_GOAL := help
 
@@ -19,7 +21,7 @@ P7_CONSOLE_PORT ?= 57515
 .PHONY: asterion-run
 .PHONY: dci-list dci-describe dci-preflight dci-basic dci-complete
 .PHONY: dci-run dci-benchmark
-.PHONY: dci-basic-example dci-runtime-context-example native-dci-example
+.PHONY: dci-basic-example dci-runtime-context-example native-dci-example grid-regulation
 .PHONY: test-typescript test-rust check-rust
 .PHONY: asterion-prime-p1-run
 .PHONY: asterion-prime-p2-run
@@ -140,6 +142,7 @@ help:
 	@echo "bounded provider-backed presets: asterion-verify-basic asterion-verify-complete"
 	@echo "DCI adapter: dci-list dci-describe dci-preflight dci-basic dci-complete dci-run dci-benchmark"
 	@echo "DCI bounded examples: dci-basic-example dci-runtime-context-example native-dci-example"
+	@echo "Grid regulation desk: grid-regulation (http://127.0.0.1:$(GRID_PORT)/, GRID_CORPUS defaults to docs)"
 	@echo "Cross-language provider-free: test-typescript test-rust check-rust"
 	@echo "Asterion Prime fixed small verification: asterion-prime-p1-run"
 	@echo "Asterion Prime bounded live applications: asterion-prime-p3-run p4-run p5-run p6-run"
@@ -849,3 +852,7 @@ dci-runtime-context-example:
 
 native-dci-example:
 	$(UV_BIN) run --with "python-dotenv>=1.0.0" python examples/applications/native_dci.py --live
+
+# Local PDF and DOCX desk. It does not start Pi and does not call a model.
+grid-regulation:
+	exec $(UV_BIN) run python -m asterion.applications.grid_regulation.page --corpus "$(GRID_CORPUS)" --port "$(GRID_PORT)" --open

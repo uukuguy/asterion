@@ -71,6 +71,26 @@ class GridRegulationPageTests(unittest.TestCase):
             )
             self.assertNotIn("SECRET", missed.text)
 
+    def test_makefile_serves_the_desk_on_loopback(self) -> None:
+        makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("\n.PHONY: dci-basic-example", makefile)
+        self.assertIn(" grid-regulation\n", makefile)
+        self.assertIn("\ngrid-regulation:\n", makefile)
+        self.assertIn(
+            "python -m asterion.applications.grid_regulation.page "
+            '--corpus "$(GRID_CORPUS)" --port "$(GRID_PORT)" --open',
+            makefile,
+        )
+        self.assertIn("GRID_CORPUS ?= $(CURDIR)/docs", makefile)
+        self.assertIn("GRID_PORT ?= 8765", makefile)
+        self.assertIn(
+            "Grid regulation desk: grid-regulation (http://127.0.0.1:$(GRID_PORT)/",
+            makefile,
+        )
+        self.assertNotIn("0.0.0.0", makefile[makefile.find("grid-regulation:") :])
+
 
 def _get(url: str) -> _Body:
     return _open(urllib.request.Request(url))
