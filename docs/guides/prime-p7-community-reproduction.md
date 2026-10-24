@@ -12,7 +12,7 @@ From a checkout with Python 3.10+ and `uv`:
 ```bash
 uv sync --frozen
 uv run asterion list
-uv run asterion describe --provider dci-agent-lite
+uv run asterion-dci describe
 ```
 
 The producing P7 application is under [`src/asterion/applications/prime/p7/`](../../src/asterion/applications/prime/p7). The exact registered tools are `ipython`, `p7_workspace`, and `p7_execute_plan`. Read the [prompt](../../src/asterion/applications/prime/p7/prompt.py), [research workspace](../../src/asterion/applications/prime/p7/research.py), [broker](../../src/asterion/applications/prime/p7/broker.py), and [experience loader](../../src/asterion/applications/prime/p7/experience.py) to inspect the general method rather than a per-game answer table.

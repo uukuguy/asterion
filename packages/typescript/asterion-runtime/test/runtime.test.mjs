@@ -103,7 +103,7 @@ const agentClientFixtures = new URL(
 );
 const referenceAssemblyRoots = [
   new URL(
-    "../../../../src/asterion/applications/dci_agent_lite/assemblies/",
+    "../../../../src/asterion/applications/dci/assemblies/",
     import.meta.url,
   ),
   new URL(

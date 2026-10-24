@@ -1,5 +1,4 @@
 UV_BIN ?= uv
-ASTERION_PROVIDER ?= dci-agent-lite
 ASTERION_ARGS ?=
 DCI_ARGS ?=
 ASTERION_PRIME_NODE ?= $(shell npm exec --offline --yes --package=node@22 -- node -p 'process.execPath' 2>/dev/null)
@@ -200,7 +199,7 @@ test.cross-language-contracts:
 test.extension-wheels: test.public-extension test.cross-package-extension test.cross-runtime-extension
 
 test.provider-integration:
-	$(UV_BIN) run asterion verify --provider dci-agent-lite --level acceptance
+	$(UV_BIN) run asterion-dci acceptance
 
 test.framework-provider-free: test.framework-core test.cross-language-contracts test.extension-wheels test.provider-integration
 
@@ -240,25 +239,25 @@ check-resources-benchmark:
 	$(UV_BIN) run python tools/setup_resources.py --profile benchmark --check
 
 doctor:
-	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level preflight --env-file "$(CURDIR)/.env" $(ASTERION_ARGS)
+	$(UV_BIN) run asterion-dci preflight --env-file "$(CURDIR)/.env" $(ASTERION_ARGS)
 
 asterion-list:
 	$(UV_BIN) run asterion list $(ASTERION_ARGS)
 
 asterion-describe:
-	$(UV_BIN) run asterion describe --provider $(ASTERION_PROVIDER) $(ASTERION_ARGS)
+	$(UV_BIN) run asterion-dci describe $(ASTERION_ARGS)
 
 asterion-verify-preflight:
-	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level preflight $(ASTERION_ARGS)
+	$(UV_BIN) run asterion-dci preflight $(ASTERION_ARGS)
 
 asterion-verify-basic:
-	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level basic $(ASTERION_ARGS)
+	$(UV_BIN) run asterion-dci basic $(ASTERION_ARGS)
 
 asterion-verify-acceptance:
-	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level acceptance $(ASTERION_ARGS)
+	$(UV_BIN) run asterion-dci acceptance $(ASTERION_ARGS)
 
 asterion-verify-complete:
-	$(UV_BIN) run asterion verify --provider $(ASTERION_PROVIDER) --level complete $(ASTERION_ARGS)
+	$(UV_BIN) run asterion-dci complete $(ASTERION_ARGS)
 
 asterion-run:
 	$(UV_BIN) run asterion run $(ASTERION_ARGS)

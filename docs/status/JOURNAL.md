@@ -3858,3 +3858,4 @@
 - 15:48 pi.reference launches any canonical subset of read, grep, and bash and advertises only those tools. Optional context_policy loads the runtime extension. level0-level4 stay in the comparison package. Claude's public factory no longer accepts a context level. No model call.
 - 16:07 Local research derives locations and trajectory from launched tool calls. A stream without tool calls still accepts pre-labeled artifacts. No model call. 52 focused tests passed.
 - 16:49 Optional docx and pdf citation anchors are framework tools. The grid-regulation demo cites a fictional clause through dci.research without starting Pi. Default document tools stay off. No model call.
+- 19:51 Installed provider dci-agent-lite is removed. asterion-dci describe and acceptance stay. The Judge key and paper ablation row keep that name. native.dci-complete is not built. No model call.

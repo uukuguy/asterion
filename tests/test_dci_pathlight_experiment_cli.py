@@ -15,18 +15,18 @@ from types import SimpleNamespace
 from typing import cast
 from unittest.mock import patch
 
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
 )
-from asterion.applications.dci_agent_lite.cli import main
-from asterion.applications.dci_agent_lite import pathlight_experiment_cli as experiment_cli
-from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+from asterion.applications.dci.cli import main
+from asterion.applications.dci import pathlight_experiment_cli as experiment_cli
+from asterion.applications.dci.pathlight_experiment_cli import (
     _read_coverage_recovered_run,
     _seal_completed_native_task,
     _selected_native_run_root,
     read_completed_coverage_experiment,
 )
-from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
+from asterion.applications.dci.operator_config import DciOperatorConfig
 from asterion.benchmarks.cli import BenchmarkCommandHost
 from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
 from asterion.capabilities.dci.implementation.evaluation.artifacts import (
@@ -371,7 +371,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
 
     def setUp(self) -> None:
         self._native_seal_patch = patch(
-            "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+            "asterion.applications.dci.pathlight_experiment_cli."
             "_seal_completed_native_task",
             side_effect=lambda **kwargs: _exact_observation(
                 str(kwargs["task"]["task_id"])
@@ -768,7 +768,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 "--output-root", str(output),
             ]
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_seal_completed_native_task",
                 side_effect=ValueError("observation invalid"),
             ):
@@ -798,7 +798,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 [event for event in events if event.startswith("run:")]
             )
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_seal_completed_native_task",
                 side_effect=AssertionError("must not retry terminal observation"),
             ):
@@ -833,7 +833,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 "--output-root", str(output),
             ]
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_seal_completed_native_task",
                 side_effect=ValueError("old reader rejected native evidence"),
             ):
@@ -854,7 +854,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             }
             stdout = io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_read_native_dataset_observation",
                 side_effect=lambda *, task, **_kwargs: _exact_observation(
                     str(task["task_id"])
@@ -1103,7 +1103,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             )
             stdout = io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_seal_completed_native_task",
                 side_effect=ValueError("tampered native"),
             ):
@@ -1174,7 +1174,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             evidence_sha256=hashlib.sha256(b"exact-native").hexdigest(),
         )
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+            "asterion.applications.dci.pathlight_experiment_cli."
             "_read_native_dataset_observation",
             return_value=exact,
         ) as reader:
@@ -1288,7 +1288,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 )
 
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_read_native_dataset_observation",
                 side_effect=observed,
             ):
@@ -1395,7 +1395,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
                 0,
             )
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "_read_native_dataset_observation",
                 side_effect=RuntimeError("SENTINEL_PRIVATE_NATIVE_PATH"),
             ):
@@ -1548,7 +1548,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             stdout, stderr = io.StringIO(), io.StringIO()
 
             with patch(
-                "asterion.applications.dci_agent_lite.benchmark_host."
+                "asterion.applications.dci.benchmark_host."
                 "DciBenchmarkHost.run"
             ) as run:
                 code = main(
@@ -1643,7 +1643,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             (
                 "executor-profile",
                 lambda: patch(
-                    "asterion.applications.dci_agent_lite.benchmark_host."
+                    "asterion.applications.dci.benchmark_host."
                     "_REAL_AGENT_EXECUTOR_PROFILE",
                     "changed-real-profile",
                     create=True,
@@ -1652,7 +1652,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             (
                 "runtime-context",
                 lambda: patch(
-                    "asterion.applications.dci_agent_lite.benchmark_host."
+                    "asterion.applications.dci.benchmark_host."
                     "_REAL_AGENT_RUNTIME_OVERRIDES",
                     fixed_overrides,
                 ),
@@ -1660,7 +1660,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             (
                 "native-attempts",
                 lambda: patch.dict(
-                    "asterion.applications.dci_agent_lite.benchmark_executor."
+                    "asterion.applications.dci.benchmark_executor."
                     "_REAL_TASK_NATIVE_ATTEMPTS",
                     {"bright.biology": 4},
                 ),
@@ -1668,7 +1668,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             (
                 "effective-tools",
                 lambda: patch(
-                    "asterion.applications.dci_agent_lite.benchmark_executor."
+                    "asterion.applications.dci.benchmark_executor."
                     "_COVERAGE_EFFECTIVE_TOOLS",
                     "read",
                     create=True,
@@ -2093,7 +2093,7 @@ class TestDciPathlightExperimentCli(unittest.TestCase):
             ]
 
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "write_private_file",
                 side_effect=RuntimeError("SENTINEL_PRIVATE_PLAN"),
             ):

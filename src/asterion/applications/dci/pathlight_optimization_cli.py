@@ -21,24 +21,24 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TextIO, cast
 
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     select_benchmark_instance,
 )
-from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+from asterion.applications.dci.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
-from asterion.applications.dci_agent_lite.benchmark_host import (
+from asterion.applications.dci.benchmark_host import (
     optimization_execution_config_sha256,
 )
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
 )
 from asterion.benchmarks.cli import BenchmarkCommandHost
 from asterion.benchmarks.evidence import BenchmarkRunResult
 from asterion.capability_packages.sources.base import CapabilityPackageSource
 from asterion.capabilities.dci.implementation.operator_inputs import DciBenchmarkOperatorInputs
-from asterion.applications.dci_agent_lite.operator_config import (
+from asterion.applications.dci.operator_config import (
     DciOperatorConfig,
     load_operator_config,
 )
@@ -818,7 +818,7 @@ def _create_host(
         if not isinstance(candidate, BenchmarkCommandHost):
             raise ValueError
         return candidate
-    from asterion.applications.dci_agent_lite.benchmark_host import DciBenchmarkHost
+    from asterion.applications.dci.benchmark_host import DciBenchmarkHost
     return DciBenchmarkHost(
         instance=instance, operator_config=config,
         package_sources=cast(Sequence[CapabilityPackageSource] | None, package_sources),
@@ -1304,7 +1304,7 @@ def _publish_finalization(output_root: Path, closure: object, report: str) -> No
         # pre-existing byte-identical outputs and leaving no partial closure.
         missing = tuple(name for name in names if not (output_root / name).exists())
         if missing:
-            from asterion.applications.dci_agent_lite.pathlight_cli import _publish_staged_outputs
+            from asterion.applications.dci.pathlight_cli import _publish_staged_outputs
             _publish_staged_outputs(output_root, staging, missing)
     finally:
         try:
@@ -1760,22 +1760,22 @@ def _diagnosis_report_path(value: str) -> Path:
 
 
 def _operator_root(value: str) -> Path:
-    from asterion.applications.dci_agent_lite.pathlight_cli import _operator_root as validate
+    from asterion.applications.dci.pathlight_cli import _operator_root as validate
     return validate(value)
 
 
 def _create_staging_root(root: Path) -> Path:
-    from asterion.applications.dci_agent_lite.pathlight_cli import _create_staging_root as create
+    from asterion.applications.dci.pathlight_cli import _create_staging_root as create
     return create(root)
 
 
 def _publish_staged_tree(root: Path, staging: Path) -> None:
-    from asterion.applications.dci_agent_lite.pathlight_cli import _publish_staged_tree as publish
+    from asterion.applications.dci.pathlight_cli import _publish_staged_tree as publish
     publish(root, staging)
 
 
 def _cleanup_staging_tree(root: Path, staging: Path) -> None:
-    from asterion.applications.dci_agent_lite.pathlight_cli import _cleanup_staging_tree as cleanup
+    from asterion.applications.dci.pathlight_cli import _cleanup_staging_tree as cleanup
     cleanup(root, staging)
 
 

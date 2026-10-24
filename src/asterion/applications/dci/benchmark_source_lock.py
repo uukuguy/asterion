@@ -7,7 +7,7 @@ import os
 from collections.abc import Sequence
 from pathlib import Path
 
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
 )
 from asterion.capability_packages import (

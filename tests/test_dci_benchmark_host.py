@@ -6,21 +6,21 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from asterion.applications.dci_agent_lite.benchmark_host import (
+from asterion.applications.dci.benchmark_host import (
     DciBenchmarkHost,
     DciBenchmarkHostError,
     DciLoadedBenchmarkProviders,
     coverage_execution_config_sha256,
     optimization_execution_config_sha256,
 )
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     select_benchmark_instance,
 )
-from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+from asterion.applications.dci.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
-from asterion.applications.dci_agent_lite.operator_config import load_operator_config
+from asterion.applications.dci.operator_config import load_operator_config
 from asterion.benchmarks import (
     BenchmarkHostError,
     BenchmarkTaskExecutor,
@@ -121,7 +121,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
     def test_coverage_config_digest_binds_dci_implementation_identity(self) -> None:
         environment = {"DEEPSEEK_API_KEY": "SENTINEL-PRIVATE-KEY"}
         with patch(
-            "asterion.applications.dci_agent_lite.benchmark_executor."
+            "asterion.applications.dci.benchmark_executor."
             "dci_complete_implementation_identity",
             side_effect=["a" * 64, "b" * 64],
             create=True,
@@ -267,7 +267,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
             host = DciBenchmarkHost(instance=instance, operator_config=None)
 
             with patch(
-                "asterion.applications.dci_agent_lite.benchmark_host."
+                "asterion.applications.dci.benchmark_host."
                 "load_prepared_capability_source",
                 side_effect=AssertionError("provider load must wait for authorization"),
             ):
@@ -430,7 +430,7 @@ class DciBenchmarkHostTests(unittest.TestCase):
             )
             sentinel = object()
             with patch(
-                "asterion.applications.dci_agent_lite.benchmark_host.RealDciBenchmarkExecutor",
+                "asterion.applications.dci.benchmark_host.RealDciBenchmarkExecutor",
                 return_value=sentinel,
             ) as executor:
                 selected = DciBenchmarkHost(

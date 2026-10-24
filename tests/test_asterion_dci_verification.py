@@ -15,12 +15,13 @@ from unittest.mock import patch
 from asterion.applications.controlled_code import (
     create_provider as create_controlled_provider,
 )
-from asterion.applications.dci_agent_lite import create_provider as create_dci_provider
-from asterion.applications.dci_agent_lite.acceptance import (
+from asterion.applications.dci.acceptance import (
     create_dci_package,
     installed_acceptance_checks,
+    operator_provider as create_dci_provider,
 )
 from asterion.applications.product import VerificationRequest
+from asterion.applications.discovery import load_application_provider
 from asterion.applications.provider import (
     ApplicationProviderError,
     compose_installed_provider,
@@ -264,6 +265,8 @@ class InstalledAcceptanceTests(unittest.TestCase):
         )
 
     def test_builtin_provider_and_resource_closure_has_exact_counts(self) -> None:
+        with self.assertRaises(ApplicationProviderError):
+            load_application_provider("dci-agent-lite")
         providers = (
             validate_installed_provider(
                 create_controlled_provider(), selected_id="controlled-code"
@@ -292,7 +295,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                 len(tuple((package_root / directory).glob("*.json")))
                 for directory in (
                     "applications/controlled_code/assemblies",
-                    "applications/dci_agent_lite/assemblies",
+                    "applications/dci/assemblies",
                 )
             ),
             8,
@@ -310,7 +313,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
                     )
                 )
             ),
-            11,
+            12,
         )
 
     def test_acceptance_is_package_owned_exact_and_provider_free(self) -> None:
@@ -326,9 +329,9 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             {check.check_id: dict(check.counts) for check in result.checks},
             {
-                "application-providers": {"actual": 2, "expected": 2},
+                "application-providers": {"actual": 1, "expected": 1},
                 "bound-assemblies": {"actual": 7, "expected": 7},
-                "capability-manifests": {"actual": 11, "expected": 11},
+                "capability-manifests": {"actual": 12, "expected": 12},
                 "composed-assemblies": {"actual": 7, "expected": 7},
                 "context-profiles": {"actual": 5, "expected": 5},
                 "executable-assemblies": {"actual": 7, "expected": 7},
@@ -342,7 +345,7 @@ class InstalledAcceptanceTests(unittest.TestCase):
         self.assertEqual(
             checks["packaged-assemblies"].unbound_resources,
             (
-                "applications/dci_agent_lite/assemblies/"
+                "applications/dci/assemblies/"
                 "dci-local-research.json",
             ),
         )
@@ -803,7 +806,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         with self.subTest(layer="packaged"), tempfile.TemporaryDirectory() as temp_dir:
             package_root = Path(temp_dir) / "asterion"
             shutil.copytree(SOURCE, package_root)
-            assembly_root = package_root / "applications/dci_agent_lite/assemblies"
+            assembly_root = package_root / "applications/dci/assemblies"
             (assembly_root / "dci-local-research.json").rename(
                 assembly_root / "same-count-substitute.json"
             )
@@ -841,7 +844,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 installed, applications=(installed.applications[0],)
             )
             with patch(
-                "asterion.applications.dci_agent_lite.create_provider",
+                "asterion.applications.dci.acceptance.operator_provider",
                 return_value=damaged,
             ):
                 result = verifier(acceptance_request())
@@ -864,7 +867,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
             )
 
         with self.subTest(layer="composed"), patch(
-            "asterion.applications.dci_agent_lite.acceptance.compose_installed_provider",
+            "asterion.applications.dci.acceptance.compose_installed_provider",
             side_effect=fail_dci_composition,
         ):
             result = verifier(acceptance_request())
@@ -886,7 +889,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 ),
             )
             with patch(
-                "asterion.applications.dci_agent_lite.acceptance.create_dci_package",
+                "asterion.applications.dci.acceptance.create_dci_package",
                 return_value=damaged_package,
             ):
                 result = verifier(acceptance_request())
@@ -961,7 +964,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
                 else {"return_value": outcome}
             )
             with self.subTest(case=case), patch(
-                f"asterion.applications.dci_agent_lite.acceptance.{target}",
+                f"asterion.applications.dci.acceptance.{target}",
                 **kwargs,
             ):
                 result = verifier(acceptance_request())
@@ -976,7 +979,7 @@ class InstalledAcceptanceBoundaryTests(unittest.TestCase):
         verifier = _dci_verifier(repo_root=PROJECT, backend=ExplodingBackend())
         with (
             patch(
-                "asterion.applications.dci_agent_lite.acceptance.default_runtime_factory_registry",
+                "asterion.applications.dci.acceptance.default_runtime_factory_registry",
                 side_effect=RuntimeFactoryError(
                     "runtime factory binding is invalid"
                 ),

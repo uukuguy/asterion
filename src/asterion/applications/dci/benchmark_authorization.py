@@ -7,7 +7,7 @@ import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
 )
 from asterion.benchmarks import (

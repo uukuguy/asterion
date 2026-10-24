@@ -6,10 +6,10 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     select_benchmark_instance,
 )
-from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+from asterion.applications.dci.benchmark_source_lock import (
     DciBenchmarkSourceLockError,
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,

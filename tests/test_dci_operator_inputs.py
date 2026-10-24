@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 from typing import cast
 
-from asterion.applications.dci_agent_lite.operator_config import load_operator_config
+from asterion.applications.dci.operator_config import load_operator_config
 from asterion.benchmarks.model import BenchmarkTaskImplementation, BenchmarkTaskRequest
 from asterion.capabilities.dci.implementation.benchmark_bindings import (
     create_benchmark_bindings,

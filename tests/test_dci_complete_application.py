@@ -14,7 +14,7 @@ from unittest.mock import patch
 
 from asterion.assembly.protocol import resolve_assembly
 from asterion.adapters.claude_code import ClaudeCodeProtocolAdapter
-from asterion.applications.dci_agent_lite.provider import create_provider
+from asterion.applications.dci.acceptance import operator_provider as create_provider
 from asterion.cli import main
 from asterion.capabilities.dci.implementation.complete import (
     DciCompleteAnalysisImplementation,
@@ -39,7 +39,7 @@ from asterion.capabilities.dci.implementation.reproduction.provenance import (
 )
 from tests.test_application_discovery import FakeEntryPoint
 from tests.test_asterion_cli import transitional_dci_package
-from asterion.applications.dci_agent_lite.acceptance import (
+from asterion.applications.dci.acceptance import (
     create_dci_package as installed_dci_package,
 )
 from asterion.capabilities.dci.implementation.reproduction.dual_runtime_verification import (
@@ -62,7 +62,7 @@ from asterion.runtime.working_directory import ProcessWorkingDirectory
 PROJECT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT / "src/asterion"
 MANIFESTS = SOURCE / "capabilities/dci/payload/capabilities"
-ASSEMBLIES = SOURCE / "applications/dci_agent_lite/assemblies"
+ASSEMBLIES = SOURCE / "applications/dci/assemblies"
 
 STAGES = (
     "dci.research",
@@ -632,9 +632,7 @@ class DciCompleteApplicationContractTests(unittest.TestCase):
 
 class DciCompleteApplicationBindingTests(unittest.TestCase):
     def test_provider_creation_is_metadata_only(self) -> None:
-        provider_source = (
-            SOURCE / "applications/dci_agent_lite/provider.py"
-        ).read_text()
+        provider_source = (SOURCE / "applications/dci/acceptance.py").read_text()
         with (
             patch(
                 "asterion.capabilities.dci.implementation.runtime.application_executor.EnvironmentDciRunExecutor.__init__",
@@ -676,7 +674,7 @@ class DciCompleteApplicationBindingTests(unittest.TestCase):
 
     def test_builtin_dci_package_replaces_transitional_acceptance_source(self) -> None:
         acceptance_source = (
-            SOURCE / "applications/dci_agent_lite/acceptance.py"
+            SOURCE / "applications/dci/acceptance.py"
         ).read_text()
         package = installed_dci_package()
         transitional = transitional_dci_package()

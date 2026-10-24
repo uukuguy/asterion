@@ -50,7 +50,7 @@ SOURCE = PROJECT / "src/asterion"
 MANIFEST_ROOT = SOURCE / "capabilities/dci/payload/capabilities"
 ASSEMBLY = (
     SOURCE
-    / "applications/dci_agent_lite/assemblies/dci-local-research.json"
+    / "applications/dci/assemblies/dci-local-research.json"
 )
 SCAFFOLD_PAYLOAD = PROJECT / "tests/fixtures/extensions/minimal/payload"
 

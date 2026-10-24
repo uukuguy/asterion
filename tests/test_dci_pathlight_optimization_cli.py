@@ -22,10 +22,10 @@ from unittest.mock import Mock, patch
 
 from asterion.benchmarks import BenchmarkTaskExecutor
 from asterion.benchmarks.evidence import BenchmarkRunResult, BenchmarkTaskResult
-from asterion.applications.dci_agent_lite.benchmark_host import DciBenchmarkHost
-from asterion.applications.dci_agent_lite.benchmark_instances import DciBenchmarkInstance
+from asterion.applications.dci.benchmark_host import DciBenchmarkHost
+from asterion.applications.dci.benchmark_instances import DciBenchmarkInstance
 from asterion.capability_packages.sources.base import CapabilityPackageSource
-from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
+from asterion.applications.dci.operator_config import DciOperatorConfig
 from asterion.capabilities.dci.implementation.operator_inputs import DciBenchmarkOperatorInputs
 from asterion.capabilities.dci.implementation.pathlight.recovery import (
     read_completed_dci_run,
@@ -38,7 +38,7 @@ from asterion.workflow_evidence import read_workflow_observation_bundle, write_w
 from asterion.pathlight.protocol import TraceEvent, TraceGraph
 from asterion.capabilities.dci.implementation.research.query_planning import QueryPlanningContract
 
-from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
+from asterion.applications.dci.pathlight_optimization_cli import (
     PLAN_FILENAME,
     _AUTHORIZATION_SCHEMA,
     _canonical_bytes,
@@ -201,20 +201,20 @@ class _OptimizationFixture:
         stdout, stderr = io.StringIO(), io.StringIO()
         provider = Mock()
         with (
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli._proposal_scope", return_value=self.query_scope),
+            patch("asterion.applications.dci.pathlight_optimization_cli._proposal_scope", return_value=self.query_scope),
             patch(
-                "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+                "asterion.applications.dci.pathlight_optimization_cli.load_operator_config",
                 return_value=self.config,
             ),
             (nullcontext() if real_source_lock else patch(
-                "asterion.applications.dci_agent_lite.pathlight_optimization_cli.resolve_benchmark_source_lock",
+                "asterion.applications.dci.pathlight_optimization_cli.resolve_benchmark_source_lock",
                 return_value=object(),
             )),
             (nullcontext() if real_source_lock else patch(
-                "asterion.applications.dci_agent_lite.pathlight_optimization_cli.write_benchmark_source_lock",
+                "asterion.applications.dci.pathlight_optimization_cli.write_benchmark_source_lock",
                 side_effect=_write_lock,
             )),
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.DciBenchmarkHost", provider, create=True),
+            patch("asterion.applications.dci.pathlight_optimization_cli.DciBenchmarkHost", provider, create=True),
         ):
             code = main(
                 (
@@ -269,7 +269,7 @@ def _authorization(plan: dict[str, object]) -> dict[str, object]:
 
 class TestPrepare(unittest.TestCase):
     def test_prepare_coordinator_has_a_closed_public_surface(self) -> None:
-        from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
+        from asterion.applications.dci.pathlight_optimization_cli import (
             PLAN_FILENAME,
             read_optimization_authorization,
         )
@@ -531,7 +531,7 @@ class TestStatus(unittest.TestCase):
         self.assertEqual(code, 0)
         stdout, stderr = io.StringIO(), io.StringIO()
         provider = Mock()
-        with patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.DciBenchmarkHost", provider, create=True):
+        with patch("asterion.applications.dci.pathlight_optimization_cli.DciBenchmarkHost", provider, create=True):
             code = main(
                 ("status", "--plan-file", str(fixture.output / PLAN_FILENAME), "--output-root", str(fixture.output)),
                 stdout=stdout, stderr=stderr, repo_root=fixture.root, env_file=None, environment={},
@@ -744,7 +744,7 @@ def _execute_optimization(
 
     stdout, stderr = io.StringIO(), io.StringIO()
     with patch(
-        "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+        "asterion.applications.dci.pathlight_optimization_cli.load_operator_config",
         return_value=fixture.config,
     ):
         code = main(
@@ -782,9 +782,9 @@ def _finalize_real_native(
             cursor += duration
     calls: list[tuple[str, Decimal | None]] = []
     with (
-        patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+        patch("asterion.applications.dci.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
         patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls, candidate_score=candidate_score, actual_cost=actual_cost, candidate_cost=candidate_cost, regression_dataset=regression_dataset)),
-        patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.time.monotonic_ns", side_effect=clock),
+        patch("asterion.applications.dci.pathlight_optimization_cli.time.monotonic_ns", side_effect=clock),
     ):
         stderr = io.StringIO()
         if main(("execute", "--plan-file", str(fixture.output / PLAN_FILENAME), "--authorization-file", str(authorization), "--output-root", str(fixture.output)), stdout=io.StringIO(), stderr=stderr, repo_root=fixture.root, env_file=None, environment={}, host_factory=host_factory) != 0:
@@ -856,7 +856,7 @@ class TestExecute(unittest.TestCase):
             )
 
         with (
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch("asterion.applications.dci.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
             patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls, fail_first=True)),
         ):
             self.assertEqual(main(
@@ -893,7 +893,7 @@ class TestExecute(unittest.TestCase):
 
         stdout, stderr = io.StringIO(), io.StringIO()
         with (
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch("asterion.applications.dci.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
             patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls)),
         ):
             code = main(
@@ -948,7 +948,7 @@ class TestExecute(unittest.TestCase):
             )
 
         with (
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch("asterion.applications.dci.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
             patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls)),
         ):
             self.assertEqual(main(
@@ -1001,7 +1001,7 @@ class TestExecute(unittest.TestCase):
 
         stdout, stderr = io.StringIO(), io.StringIO()
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            "asterion.applications.dci.pathlight_optimization_cli.load_operator_config",
             return_value=fixture.config,
         ):
             code = main(
@@ -1051,7 +1051,7 @@ class TestExecute(unittest.TestCase):
             return _RecordingOptimizationHost(getattr(task, "get")("task_id"), events, outcomes)
 
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            "asterion.applications.dci.pathlight_optimization_cli.load_operator_config",
             return_value=fixture.config,
         ):
             code = main(
@@ -1081,7 +1081,7 @@ class TestExecute(unittest.TestCase):
             return _RecordingOptimizationHost(getattr(task, "get")("task_id"), events, outcomes)
 
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            "asterion.applications.dci.pathlight_optimization_cli.load_operator_config",
             return_value=fixture.config,
         ):
             self.assertEqual(main(
@@ -1105,7 +1105,7 @@ class TestExecute(unittest.TestCase):
         authorization = fixture.root / "authorization.json"
         write_private_file(authorization, _canonical_bytes(_authorization(plan)))
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config",
+            "asterion.applications.dci.pathlight_optimization_cli.load_operator_config",
             return_value=fixture.config,
         ):
             self.assertEqual(main(
@@ -1527,9 +1527,9 @@ class TestFinalize(unittest.TestCase):
 
         calls: list[tuple[str, Decimal | None]] = []
         with (
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
+            patch("asterion.applications.dci.pathlight_optimization_cli.load_operator_config", return_value=fixture.config),
             patch.object(DciBenchmarkHost, "_default_executor", return_value=_NativeEvidenceExecutor(calls, candidate_score=1.0, actual_cost=100)),
-            patch("asterion.applications.dci_agent_lite.pathlight_optimization_cli.time.monotonic_ns", side_effect=range(0, 16_000, 1_000)),
+            patch("asterion.applications.dci.pathlight_optimization_cli.time.monotonic_ns", side_effect=range(0, 16_000, 1_000)),
         ):
             execute_stdout, execute_stderr = io.StringIO(), io.StringIO()
             self.assertEqual(main(
@@ -1668,7 +1668,7 @@ class TestFinalize(unittest.TestCase):
             original_link(*args, **kwargs)
 
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.os.link",
+            "asterion.applications.dci.pathlight_optimization_cli.os.link",
             side_effect=fail_third_publish,
         ):
             stdout, stderr = io.StringIO(), io.StringIO()
@@ -1703,7 +1703,7 @@ class TestFinalize(unittest.TestCase):
         for name in names:
             (stage.output / name).unlink()
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.write_optimization_bundle",
+            "asterion.applications.dci.pathlight_optimization_cli.write_optimization_bundle",
             side_effect=OSError("injected staging write fault"),
         ):
             self.assertEqual(main(
@@ -1718,7 +1718,7 @@ class TestFinalize(unittest.TestCase):
         _finalize_real_native(cleanup, candidate_score=1.0)
         for name in names:
             (cleanup.output / name).unlink()
-        from asterion.applications.dci_agent_lite import pathlight_optimization_cli
+        from asterion.applications.dci import pathlight_optimization_cli
         original_cleanup = pathlight_optimization_cli._cleanup_staging_tree
         calls = 0
 
@@ -1730,7 +1730,7 @@ class TestFinalize(unittest.TestCase):
             original_cleanup(root, staging)
 
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli._cleanup_staging_tree",
+            "asterion.applications.dci.pathlight_optimization_cli._cleanup_staging_tree",
             side_effect=fail_cleanup_once,
         ):
             self.assertEqual(main(
@@ -1744,12 +1744,12 @@ class TestFinalize(unittest.TestCase):
 
 class TestRouting(unittest.TestCase):
     def test_pathlight_cli_routes_optimization_to_product_coordinator(self) -> None:
-        from asterion.applications.dci_agent_lite import pathlight_cli
+        from asterion.applications.dci import pathlight_cli
 
         stdout, stderr = io.StringIO(), io.StringIO()
         coordinator = Mock(return_value=17)
         with patch(
-            "asterion.applications.dci_agent_lite.pathlight_optimization_cli.main",
+            "asterion.applications.dci.pathlight_optimization_cli.main",
             coordinator,
         ):
             code = pathlight_cli.main(

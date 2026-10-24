@@ -140,7 +140,7 @@ Framework inspection requires Python 3.10+ and `uv`, with no model credentials:
 ```bash
 uv sync --frozen
 uv run asterion list
-uv run asterion describe --provider dci-agent-lite
+uv run asterion-dci describe
 ```
 
 After preparing your own Pi runtime/profile, ARC game assets and SDK wheels, operator credentials, and guest paths, run one bounded local research attempt:

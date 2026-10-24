@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import unittest
 
-from asterion.applications.dci_agent_lite.native_small_verification import (
+from asterion.applications.dci.native_small_verification import (
     NativeSmallVerificationApplicationError,
     NativeSmallVerificationOperatorResolver,
     PrimeNativeSmallVerificationHost,

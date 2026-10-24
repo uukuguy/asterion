@@ -217,12 +217,11 @@ class ApplicationDiscoveryTests(unittest.TestCase):
         for selector in (
             "dci.complete-application@1.0.0",
             "dci.research-capability@1.0.0",
+            "dci.local-benchmark-application@1.0.0",
         ):
             with self.subTest(selector=selector):
-                self.assertEqual(
-                    select_application_provider_id(selector),
-                    "dci-agent-lite",
-                )
+                with self.assertRaises(ApplicationProviderError):
+                    select_application_provider_id(selector)
 
 
 if __name__ == "__main__":

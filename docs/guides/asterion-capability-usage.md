@@ -9,11 +9,11 @@
 ```bash
 uv sync --frozen
 uv run asterion list
-uv run asterion describe --provider dci-agent-lite
-uv run asterion verify --provider dci-agent-lite --level acceptance
+uv run asterion-dci describe
+uv run asterion-dci acceptance
 ```
 
-这四条命令不调用 Agent/Judge，不运行数据集。`acceptance` 检查 wheel/source 中实际安装的 provider、application、assembly、capability manifests、context profiles、benchmark identities 和 paper scopes。
+这四条命令不调用 Agent/Judge，不运行数据集。`acceptance` 检查已安装 provider `controlled-code`、operator 持有的 DCI 应用、assembly、capability manifests、context profiles、benchmark identities 和 paper scopes。
 
 开发者还可以运行：
 
@@ -57,20 +57,18 @@ make doctor
 
 ```bash
 uv run asterion list
-uv run asterion describe --provider dci-agent-lite
-uv run asterion describe --provider dci-agent-lite --json
+uv run asterion-dci describe
+uv run asterion-dci describe --json
 ```
 
-`list` 是纯元数据发现，不加载 provider。`describe` 只加载被精确选择的 provider，列出 application、assembly、命令、配置、验证级别与费用边界。
+`list` 是纯元数据发现，不加载 provider。`asterion-dci describe` 读取 DCI 产品说明，列出命令、配置、验证级别与费用边界。它不选择已安装 provider。
 
 ## 四种验证级别
 
 ### `preflight`：只检查外部准备
 
 ```bash
-uv run asterion verify \
-  --provider dci-agent-lite \
-  --level preflight \
+uv run asterion-dci preflight \
   --env-file .env \
   --corpus-root "$ASTERION_DCI_RESOURCE_ROOT/corpus"
 ```
@@ -80,9 +78,7 @@ uv run asterion verify \
 ### `acceptance`：已安装产品闭包
 
 ```bash
-uv run asterion verify \
-  --provider dci-agent-lite \
-  --level acceptance
+uv run asterion-dci acceptance
 ```
 
 该级别为 package-owned，在源码和 isolated wheel 中都可运行。它忽略邻接源码树，不依赖父工作区 verifier，provider-backed operations 固定为 0。
@@ -90,9 +86,7 @@ uv run asterion verify \
 ### `basic`：有界 Agent/Judge 案例
 
 ```bash
-uv run asterion verify \
-  --provider dci-agent-lite \
-  --level basic \
+uv run asterion-dci basic \
   --env-file .env \
   --corpus-root "$ASTERION_DCI_RESOURCE_ROOT/corpus" \
   --output-root "$PWD/outputs/asterion-verification"
@@ -103,9 +97,7 @@ uv run asterion verify \
 ### `complete`：有界路径加安装闭包
 
 ```bash
-uv run asterion verify \
-  --provider dci-agent-lite \
-  --level complete \
+uv run asterion-dci complete \
   --env-file .env \
   --corpus-root "$ASTERION_DCI_RESOURCE_ROOT/corpus" \
   --output-root "$PWD/outputs/asterion-verification"
@@ -125,22 +117,25 @@ make asterion-verify-complete
 ## DCI 产品命令
 
 ```bash
-uv run asterion-dci list
 uv run asterion-dci describe
 uv run asterion-dci preflight
 uv run asterion-dci basic
 uv run asterion-dci complete
+uv run asterion-dci acceptance
 uv run asterion-dci benchmark plan --case-limit 1
 ```
 
+`asterion-dci list` 和 `asterion-dci run` 直接失败。产品说明和验收走上面的命令。
+
 | 功能 | 主入口 | 验证重点 |
 |---|---|---|
-| 安装清单 | `asterion-dci list` / `describe` | 元数据读取、无 provider 操作 |
+| 产品说明 | `asterion-dci describe` | 元数据读取、无 provider 操作 |
 | 主机预检 | `asterion-dci preflight` | 私有 operator 配置就绪、无执行授权 |
 | 有界验证 | `asterion-dci basic` / `complete` | 有限 Agent/Judge 操作 |
+| 安装闭包 | `asterion-dci acceptance` | 已安装 provider 与 operator 应用、无模型请求 |
 | QA/IR/BC+/BRIGHT/BEIR | `asterion-dci benchmark plan` | 精确 suite、不可变 plan、body-free 输出 |
 | 执行与恢复 | `asterion-dci benchmark run|resume` | 外部授权、顺序失败即停、私有证据 |
-| 通用安装应用 | `asterion run --provider dci-agent-lite ...` | 精确 application/runtime 选择与 body-free projection |
+| 已安装检索 | `asterion run --provider native --application native.dci-research@1.0.0 --runtime pi.reference` | 精确 application/runtime 选择与 body-free projection |
 
 ### 顺序运行 DCI benchmark 清单
 
@@ -152,14 +147,7 @@ DCI 提供三个精确 suite：`dci.github@1.0.0`（12 项）、
 uv run asterion-dci benchmark plan --case-limit 1
 ```
 
-通用 CLI 可显式选择应用和 suite：
-
-```bash
-uv run asterion benchmark plan \
-  --application dci.complete-application@1.0.0 \
-  --suite dci.github@1.0.0 \
-  --case-limit 1
-```
+`dci.complete-application` 没有安装入口。产品级 plan 使用上面的 `asterion-dci benchmark`。
 
 执行和恢复只能由嵌入式 operator host 注入显式授权、精确 source lock、
 实现、executor、取消信号和私有 evidence service。`--execute`、source lock

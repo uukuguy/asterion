@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from asterion.applications.dci_agent_lite.benchmark_executor import (
+from asterion.applications.dci.benchmark_executor import (
     LocalDciBenchmarkExecutor,
 )
 from asterion.benchmarks import BenchmarkTaskInvocation

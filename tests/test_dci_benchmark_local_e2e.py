@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from asterion.applications.dci_agent_lite.cli import main
+from asterion.applications.dci.cli import main
 
 
 class DciBenchmarkLocalE2ETests(unittest.TestCase):

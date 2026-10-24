@@ -397,7 +397,7 @@ class DciResearchCapabilityBoundaryTests(unittest.TestCase):
         )
         self.assertEqual(
             offenders,
-            ("applications/dci_agent_lite/benchmark_executor.py",),
+            ("applications/dci/benchmark_executor.py",),
         )
 
     def test_package_runtime_artifact_event_accepts_only_canonical_keys_and_sha256(

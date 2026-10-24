@@ -6,18 +6,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from asterion.applications.dci_agent_lite.benchmark_executor import (
+from asterion.applications.dci.benchmark_executor import (
     RealDciBenchmarkExecutor,
 )
-from asterion.applications.dci_agent_lite.benchmark_host import DciBenchmarkHost
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_host import DciBenchmarkHost
+from asterion.applications.dci.benchmark_instances import (
     select_benchmark_instance,
 )
-from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+from asterion.applications.dci.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
-from asterion.applications.dci_agent_lite.operator_config import (
+from asterion.applications.dci.operator_config import (
     load_operator_config,
 )
 from asterion.capabilities.dci.implementation.config import (

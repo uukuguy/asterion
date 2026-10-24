@@ -137,19 +137,19 @@ expected = {
         'asterion.application-assembly/v1',
     'applications/controlled_code/assemblies/controlled-code-validation.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-complete-application-claude.json':
+    'applications/dci/assemblies/dci-complete-application-claude.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-complete-application-pi.json':
+    'applications/dci/assemblies/dci-complete-application-pi.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-local-benchmark-application-claude.json':
+    'applications/dci/assemblies/dci-local-benchmark-application-claude.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-local-benchmark-application-pi.json':
+    'applications/dci/assemblies/dci-local-benchmark-application-pi.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-local-research.json':
+    'applications/dci/assemblies/dci-local-research.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-research-capability-claude.json':
+    'applications/dci/assemblies/dci-research-capability-claude.json':
         'asterion.application-assembly/v1',
-    'applications/dci_agent_lite/assemblies/dci-research-capability.json':
+    'applications/dci/assemblies/dci-research-capability.json':
         'asterion.application-assembly/v1',
     'applications/native/assemblies/native-packages.json':
         'asterion.application-assembly/v1',
@@ -694,10 +694,8 @@ def _run_quick(copy_root: Path, runner: Runner) -> int:
         (
             "uv",
             "run",
-            "asterion",
+            "asterion-dci",
             "describe",
-            "--provider",
-            "dci-agent-lite",
             "--json",
         ),
         ("uv", "run", "python", "tools/check_docs.py"),
@@ -709,11 +707,7 @@ def _run_quick(copy_root: Path, runner: Runner) -> int:
         (
             "uv",
             "run",
-            "asterion",
-            "verify",
-            "--provider",
-            "dci-agent-lite",
-            "--level",
+            "asterion-dci",
             "acceptance",
             "--json",
         ),
@@ -806,18 +800,14 @@ def _run_full(
             "validate",
             str(copy_root / ".wheel-capability-template/payload"),
         ),
-        (str(asterion), "describe", "--provider", "dci-agent-lite", "--json"),
+        (str(asterion.with_name("asterion-dci")), "describe", "--json"),
     )
     for command in installed_commands:
         _run(runner, command, copy_root)
     acceptance = _run(
         runner,
         (
-            str(asterion),
-            "verify",
-            "--provider",
-            "dci-agent-lite",
-            "--level",
+            str(asterion.with_name("asterion-dci")),
             "acceptance",
             "--json",
         ),

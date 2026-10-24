@@ -1,31 +1,31 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-24 16:49. **Session remains active — not a final handoff.**
+> Updated: 2026-10-24 19:51. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- Framework document tools are optional. Empty configuration keeps plain-text `read`, `grep`, and `bash`. `docx`, `pdf`, and `docx,pdf` add citation anchors.
-- The grid-regulation demo cites one fictional clause from a DOCX or PDF span and records the anchor through `dci.research`. It does not start Pi and does not call a model.
-- `dci-agent-lite` is still the in-repo product provider. Do not run `make native-dci-example`.
+- Installed provider `dci-agent-lite` is gone. Command `asterion-dci` describes and verifies the DCI product directly. `list` and `run` on that command fail closed.
+- The string `dci-agent-lite` remains the Judge factory key, the unregistered operator composition id, and the paper ablation row. `native.dci-complete` is not built.
+- Document tools stay opt-in. The PDF reader was not extended. No model call ran.
 
 ## Verified facts
 
-- `search_documents` returns public anchors only: corpus-relative document, source sha256, kind, position, and span sha256. `read_span` re-reads the span for the caller. Absolute paths, `..`, and symlinks fail closed.
-- DOCX anchors are body paragraphs, with numbering level and id when `w:numPr` is present, or table cells. PDF anchors are page, item, x, and y for FlateDecode content streams whose text is UTF-16 hex or a literal string.
-- `document-read` in a research stream verifies the anchor against the corpus. The locations artifact gains `anchors`. Plain `read` and `grep` streams still have only `paths`.
-- `uv run python -m unittest tests.test_document_tools tests.test_grid_regulation tests.test_dci_research_capability tests.test_native_application` passed: 27 tests. Ruff check passed on the edited Python files.
-- `examples/applications/grid_regulation.py` exits 0 and prints the `4.1.2` anchor for `grounding.docx`. The fictional corpus is `DL/T 9000-2024`. Span text is not in the output.
-- The shipped native retrieval preset still launches `read,grep`.
+- Entry point `dci-agent-lite` and the three `dci.*__1.0.0` application index rows are removed. Installed providers are `controlled-code`, `native`, and `prime-applications`.
+- `operator_provider()` in `src/asterion/applications/dci/acceptance.py` still uses `provider_id="dci-agent-lite"`. It is not exported and not an entry point. `load_application_provider("dci-agent-lite")` fails.
+- Acceptance counts one installed provider, `controlled-code`. The in-memory operator object keeps the DCI assembly closure: 7 bound, 8 packaged, 1 unbound local-research file. Capability manifests are 12, including `policy.context-management`.
+- `uv run python -m unittest tests.test_asterion_cli tests.test_asterion_dci_verification tests.test_dci_application_adapter` passed: 84 tests. An earlier focused set of discovery, promotion, package ownership, research, and capability execution tests passed aside from the acceptance count, which was then aligned to 12.
+- Ruff check passed on the edited Python. No model call. `make promotion-check` was not run. `make native-dci-example` was not run.
 
 ## Current judgment
 
-- The demo shows the citation contract on documents this writer can round-trip. It does not show a live model choosing tools, and it does not read arbitrary enterprise PDFs that use CID fonts or scanned images.
-- Removing `dci-agent-lite` remains a separate change. `native.dci-complete@1.0.0` is still not built.
+- Removing the installed provider does not finish the provider-conversion spec. `native.dci-complete` and `native.dci-benchmark` are still absent.
+- CLI research fixtures now emit a location and a trajectory because the shipped local-research contract rejects an answer-only stream. That is test alignment with the existing contract.
 
 ## Historical archive
 
 - Do not remove `--mode rpc`. Do not return the one-shot stdout line cap to 64KB.
 - Do not rewrite the paper ablation row name `dci-agent-lite`.
+- Do not retarget the Judge factory until `native.dci-complete` exists.
 - Do not move `level0`–`level4`, the ablation matrix, judges, or dataset targets onto the public runtime.
 - D-2026-07-31-02 remains active. A full dataset run still needs its own authorization.
 
@@ -34,17 +34,18 @@
 - CID-font PDFs, scanned pages, text boxes, and headers are not citation anchors yet.
 - The grid demo is not registered on provider `native` and does not satisfy the shipped preset's missing `shell` advertisement.
 - Claude's static manifest still advertises `shell` when the launched tools are Read, Grep, and Glob.
-- `make promotion-check` has not been run since `context-policy-extension.mjs` was added. This change does not alter that extension.
+- `make promotion-check` has not been run since `context-policy-extension.mjs` was added.
 - Worktrees `asterion-p1-workload`, `asterion-p2-worker`, and `asterion-p3-real-rlm` remain. They are unrelated.
+- Untracked regulation files under `docs/` stay untracked.
 
 ## Next action
 
 1. Keep document tools opt-in. Extend the PDF reader only when a real regulation file is in scope.
-2. Remove provider `dci-agent-lite` as its own change. Keep command `asterion-dci`. Leave the paper ablation row name unchanged.
+2. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
 3. Do not run `make native-dci-example` or any dataset or model call.
 
 ## Ready-to-paste command
 
 ```bash
-uv run python -m unittest tests.test_document_tools tests.test_grid_regulation tests.test_dci_research_capability
+uv run python -m unittest tests.test_dci_application_adapter tests.test_asterion_dci_verification
 ```

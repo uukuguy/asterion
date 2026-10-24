@@ -6,11 +6,11 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
-from asterion.applications.dci_agent_lite.benchmark_authorization import (
+from asterion.applications.dci.benchmark_authorization import (
     DciBenchmarkAuthorizationError,
     DciBenchmarkExecutionAuthorizer,
 )
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     select_benchmark_instance,
 )
 from asterion.benchmarks import ApplicationRef

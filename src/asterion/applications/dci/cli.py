@@ -16,11 +16,11 @@ from asterion.capability_packages.sources.distribution import (
     DistributionCapabilityPackageSource,
 )
 from asterion.applications.first_party_packages import builtin_capability_registrations
-from asterion.applications.dci_agent_lite.operator_config import (
+from asterion.applications.dci.operator_config import (
     DciOperatorConfig,
     load_operator_config,
 )
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
     DciBenchmarkInstanceError,
     benchmark_instances,
@@ -28,21 +28,20 @@ from asterion.applications.dci_agent_lite.benchmark_instances import (
     resolve_case_limit,
     select_benchmark_instance,
 )
-from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+from asterion.applications.dci.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
 
 
-DCI_PROVIDER_ID = "dci-agent-lite"
-DCI_APPLICATION_SELECTOR = "dci.complete-application@1.0.0"
 DCI_BENCHMARK_SUITE_SELECTOR = "dci.all@1.0.0"
-_RUNTIME_ALIASES = {
-    "claude-code": "claude-code.reference",
-    "claude-code.reference": "claude-code.reference",
-    "pi": "pi.reference",
-    "pi.reference": "pi.reference",
-}
+_PRODUCT_LEVELS = frozenset({"acceptance", "basic", "complete", "preflight"})
+_PRODUCT_PATH_OPTIONS = (
+    "--acceptance-root",
+    "--corpus-root",
+    "--env-file",
+    "--output-root",
+)
 _ApplicationMain = Callable[..., int]
 _BenchmarkMain = Callable[..., int]
 _BenchmarkHostFactory = Callable[[DciOperatorConfig], BenchmarkCommandHost]
@@ -75,7 +74,7 @@ def main(
     assert stderr is not None
     arguments = list(sys.argv[1:] if argv is None else argv)
     if arguments and arguments[0] == "pathlight":
-        from asterion.applications.dci_agent_lite.pathlight_cli import main as pathlight_main
+        from asterion.applications.dci.pathlight_cli import main as pathlight_main
 
         return pathlight_main(
             arguments[1:],
@@ -88,21 +87,16 @@ def main(
             experiment_host_factory=experiment_host_factory,
         )
 
+    del application_main
     from asterion.benchmarks.cli import main as default_benchmark_main
-    from asterion.applications.first_party_cli import main as default_application_main
 
-    application_host = (
-        default_application_main
-        if application_main is None
-        else application_main
-    )
     benchmark_host_main = (
         default_benchmark_main if benchmark_main is None else benchmark_main
     )
     if not arguments or arguments == ["--help"]:
         stdout.write(
             "usage: asterion-dci "
-            "{list,describe,preflight,basic,complete,run,benchmark}\n"
+            "{describe,preflight,basic,complete,acceptance,benchmark}\n"
         )
         return 0
     command, *remainder = arguments
@@ -176,7 +170,7 @@ def main(
                         )
                     )
                 else:
-                    from asterion.applications.dci_agent_lite.benchmark_host import (
+                    from asterion.applications.dci.benchmark_host import (
                         DciBenchmarkHost,
                     )
 
@@ -212,57 +206,136 @@ def main(
             stdout=stdout,
             stderr=stderr,
         )
-    if command == "list":
-        delegated = ["list", "--provider", DCI_PROVIDER_ID, *remainder]
-    elif command == "describe":
-        delegated = ["describe", "--provider", DCI_PROVIDER_ID, *remainder]
-    elif command in {"preflight", "basic", "complete"}:
-        delegated = [
-            "verify",
-            "--provider",
-            DCI_PROVIDER_ID,
-            "--level",
-            command,
-            *remainder,
-        ]
-    elif command == "run":
-        runtime, forwarded = _runtime(remainder)
-        if runtime is None:
-            stderr.write("asterion-dci: command failed\n")
-            return 2
-        delegated = [
-            "run",
-            "--provider",
-            DCI_PROVIDER_ID,
-            "--application",
-            DCI_APPLICATION_SELECTOR,
-            "--runtime",
-            runtime,
-            *forwarded,
-        ]
-    else:
+    if command == "describe":
+        return _describe_product(
+            remainder, stdout=stdout, stderr=stderr, repo_root=repo_root
+        )
+    if command in _PRODUCT_LEVELS:
+        return _verify_product(
+            command, remainder, stdout=stdout, stderr=stderr, repo_root=repo_root
+        )
+    stderr.write("asterion-dci: command failed\n")
+    return 2
+
+
+def _describe_product(
+    remainder: list[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    repo_root: Path | None,
+) -> int:
+    if tuple(remainder) not in {(), ("--json",)}:
         stderr.write("asterion-dci: command failed\n")
         return 2
-    return application_host(
-        delegated,
-        stdin=stdin,
-        stdout=stdout,
-        stderr=stderr,
+    from asterion.cli import _description_payload, _render_description
+
+    try:
+        description = _dci_product(repo_root).description
+    except Exception:
+        stderr.write("asterion-dci: command failed\n")
+        return 2
+    if remainder == ["--json"]:
+        stdout.write(
+            json.dumps(_description_payload(description), sort_keys=True) + "\n"
+        )
+    else:
+        _render_description(description, stdout)
+    return 0
+
+
+def _verify_product(
+    level: str,
+    remainder: list[str],
+    *,
+    stdout: TextIO,
+    stderr: TextIO,
+    repo_root: Path | None,
+) -> int:
+    parsed = _product_options(remainder)
+    if parsed is None:
+        stderr.write("asterion-dci: command failed\n")
+        return 2
+    json_output, options = parsed
+    from asterion.applications.product import (
+        VerificationRequest,
+        validate_verification_result,
+    )
+    from asterion.cli import (
+        _optional_absolute_path,
+        _render_verification,
+        _verification_payload,
+    )
+
+    try:
+        product = _dci_product(repo_root)
+        if level not in {profile.level for profile in product.description.profiles}:
+            raise ValueError
+        result = validate_verification_result(
+            product.verifier(
+                VerificationRequest(
+                    level=level,
+                    env_file=_optional_absolute_path(options["--env-file"]),
+                    corpus_root=_optional_absolute_path(options["--corpus-root"]),
+                    output_root=_optional_absolute_path(options["--output-root"]),
+                    acceptance_root=_optional_absolute_path(
+                        options["--acceptance-root"]
+                    ),
+                )
+            ),
+            product.description,
+        )
+    except Exception:
+        stderr.write("asterion-dci: command failed\n")
+        return 2
+    if json_output:
+        stdout.write(json.dumps(_verification_payload(result), sort_keys=True) + "\n")
+    else:
+        _render_verification(result, stdout)
+    return 0 if result.status == "PASS" else 1
+
+
+def _dci_product(repo_root: Path | None):
+    from asterion.applications.dci.acceptance import installed_acceptance_checks
+    from asterion.capabilities.dci.implementation.reproduction.verification import (
+        create_dci_product,
+    )
+
+    return create_dci_product(
+        repo_root=Path.cwd() if repo_root is None else repo_root,
+        acceptance_checks=installed_acceptance_checks,
     )
 
 
-def _runtime(arguments: list[str]) -> tuple[str | None, list[str]]:
-    try:
-        index = arguments.index("--runtime")
-        value = arguments[index + 1]
-    except (ValueError, IndexError):
-        return None, arguments
-    if arguments.count("--runtime") != 1:
-        return None, arguments
-    runtime = _RUNTIME_ALIASES.get(value)
-    if runtime is None:
-        return None, arguments
-    return runtime, [*arguments[:index], *arguments[index + 2 :]]
+def _product_options(
+    arguments: list[str],
+) -> tuple[bool, dict[str, str | None]] | None:
+    json_output = False
+    values = {option: None for option in _PRODUCT_PATH_OPTIONS}
+    index = 0
+    while index < len(arguments):
+        item = arguments[index]
+        if item == "--json":
+            if json_output:
+                return None
+            json_output = True
+            index += 1
+            continue
+        option = item.split("=", 1)[0]
+        if option not in values:
+            return None
+        if item.startswith(option + "="):
+            raw = item.removeprefix(option + "=")
+            index += 1
+        else:
+            if index + 1 >= len(arguments):
+                return None
+            raw = arguments[index + 1]
+            index += 2
+        if not raw or raw.startswith("--") or values[option] is not None:
+            return None
+        values[option] = raw
+    return json_output, values
 
 
 def _has_option(arguments: Sequence[str], option: str) -> bool:
@@ -438,8 +511,6 @@ def _has_option_value(arguments: Sequence[str], option: str) -> bool:
 
 
 __all__ = (
-    "DCI_APPLICATION_SELECTOR",
     "DCI_BENCHMARK_SUITE_SELECTOR",
-    "DCI_PROVIDER_ID",
     "main",
 )

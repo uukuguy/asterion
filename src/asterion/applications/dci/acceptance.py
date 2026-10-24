@@ -8,9 +8,13 @@ from pathlib import Path
 from asterion.applications.discovery import load_application_provider
 from asterion.applications.product import VerificationCheckResult
 from asterion.applications.provider import (
+    APPLICATION_PROVIDER_PROTOCOL,
     ApplicationProviderError,
+    InstalledApplication,
+    InstalledApplicationProvider,
     compose_installed_provider,
 )
+from asterion.capability_packages import CapabilityPackageRef
 from asterion.applications.first_party_packages import (
     create_controlled_code_package,
 )
@@ -44,21 +48,21 @@ from asterion.runtime.protocol import ProtocolError
 
 _EXPECTED_PACKAGED_ASSEMBLIES = (
     "applications/controlled_code/assemblies/controlled-code-validation.json",
-    "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
-    "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
-    "applications/dci_agent_lite/assemblies/"
+    "applications/dci/assemblies/dci-complete-application-claude.json",
+    "applications/dci/assemblies/dci-complete-application-pi.json",
+    "applications/dci/assemblies/"
     "dci-local-benchmark-application-claude.json",
-    "applications/dci_agent_lite/assemblies/dci-local-benchmark-application-pi.json",
-    "applications/dci_agent_lite/assemblies/dci-local-research.json",
-    "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
-    "applications/dci_agent_lite/assemblies/dci-research-capability.json",
+    "applications/dci/assemblies/dci-local-benchmark-application-pi.json",
+    "applications/dci/assemblies/dci-local-research.json",
+    "applications/dci/assemblies/dci-research-capability-claude.json",
+    "applications/dci/assemblies/dci-research-capability.json",
 )
 _EXPECTED_UNBOUND_ASSEMBLIES = (
-    "applications/dci_agent_lite/assemblies/dci-local-research.json",
+    "applications/dci/assemblies/dci-local-research.json",
 )
 _PACKAGE_OWNED_ASSEMBLY_DIRECTORIES = (
     "applications/controlled_code/assemblies",
-    "applications/dci_agent_lite/assemblies",
+    "applications/dci/assemblies",
 )
 _EXPECTED_BOUND_ASSEMBLIES = tuple(
     identity
@@ -138,18 +142,78 @@ def _acceptance_check(
     )
 
 
+
+def operator_provider() -> InstalledApplicationProvider:
+    """Return the operator-owned DCI applications.
+
+    The object is not an installed entry point. Its id remains the Judge
+    factory key until ``native.dci-complete`` exists.
+    """
+
+    from asterion.capabilities.dci.implementation.reproduction.verification import (
+        create_dci_product,
+    )
+
+    root = Path(str(resources.files("asterion"))).resolve()
+    application_root = root / "applications/dci"
+    package = CapabilityPackageRef("dci", "1.0.0")
+    return InstalledApplicationProvider(
+        protocol=APPLICATION_PROVIDER_PROTOCOL,
+        provider_id="dci-agent-lite",
+        resource_root=root,
+        applications=(
+            InstalledApplication(
+                application_id="dci.research-capability",
+                version="1.0.0",
+                assembly_paths=(
+                    application_root
+                    / "assemblies/dci-research-capability-claude.json",
+                    application_root / "assemblies/dci-research-capability.json",
+                ),
+                capability_packages=(package,),
+                runtime_ids=("claude-code.reference", "pi.reference"),
+            ),
+            InstalledApplication(
+                application_id="dci.complete-application",
+                version="1.0.0",
+                assembly_paths=(
+                    application_root / "assemblies/dci-complete-application-claude.json",
+                    application_root / "assemblies/dci-complete-application-pi.json",
+                ),
+                capability_packages=(package,),
+                runtime_ids=("claude-code.reference", "pi.reference"),
+            ),
+            InstalledApplication(
+                application_id="dci.local-benchmark-application",
+                version="1.0.0",
+                assembly_paths=(
+                    application_root
+                    / "assemblies/dci-local-benchmark-application-claude.json",
+                    application_root
+                    / "assemblies/dci-local-benchmark-application-pi.json",
+                ),
+                capability_packages=(package,),
+                runtime_ids=("claude-code.reference", "pi.reference"),
+            ),
+        ),
+        product=create_dci_product(
+            repo_root=root,
+            acceptance_checks=installed_acceptance_checks,
+        ),
+    )
+
+
 def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     """Validate the exact installed provider and packaged-resource closure."""
 
     controlled_package = create_controlled_code_package()
     dci_package = create_dci_package()
-    providers = (
-        load_application_provider("controlled-code"),
-        load_application_provider("dci-agent-lite"),
-    )
+    installed_providers = (load_application_provider("controlled-code"),)
+    operator = operator_provider()
+    providers = (*installed_providers, operator)
     installed_packages_by_provider = {
         "controlled-code": (controlled_package,),
-        "dci-agent-lite": (dci_package,),
+        operator.provider_id: (dci_package,),
     }
     installed_packages = (controlled_package, dci_package)
     applications = tuple(
@@ -314,10 +378,12 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                 _acceptance_check(
                     "application-providers",
                     "Installed provider closure is valid",
-                    actual=len(providers),
-                    expected=2,
-                    exact=tuple(provider.provider_id for provider in providers)
-                    == ("controlled-code", "dci-agent-lite"),
+                    actual=len(installed_providers),
+                    expected=1,
+                    exact=tuple(
+                        provider.provider_id for provider in installed_providers
+                    )
+                    == ("controlled-code",),
                 ),
                 _acceptance_check(
                     "bound-assemblies",
@@ -330,7 +396,7 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
                     "capability-manifests",
                     "Capability manifest closure is valid",
                     actual=len(manifests),
-                    expected=11,
+                    expected=12,
                 ),
                 _acceptance_check(
                     "composed-assemblies",
@@ -387,4 +453,8 @@ def installed_acceptance_checks() -> tuple[VerificationCheckResult, ...]:
     )
 
 
-__all__ = ("create_dci_package", "installed_acceptance_checks")
+__all__ = (
+    "create_dci_package",
+    "installed_acceptance_checks",
+    "operator_provider",
+)

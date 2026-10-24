@@ -9,14 +9,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
 
-from asterion.applications.dci_agent_lite.benchmark_authorization import (
+from asterion.applications.dci.benchmark_authorization import (
     DciBenchmarkExecutionAuthorization,
     DciBenchmarkExecutionAuthorizer,
 )
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
 )
-from asterion.applications.dci_agent_lite.operator_config import DciOperatorConfig
+from asterion.applications.dci.operator_config import DciOperatorConfig
 from asterion.benchmarks import (
     ApplicationRef,
     BenchmarkExecutionAuthorization,
@@ -52,7 +52,7 @@ from asterion.capabilities.dci.implementation.operator_inputs import (
     DciBenchmarkOperatorInputs,
     create_local_fixture_operator_inputs,
 )
-from asterion.applications.dci_agent_lite.benchmark_executor import (
+from asterion.applications.dci.benchmark_executor import (
     _coverage_execution_config_sha256,
     LocalDciBenchmarkExecutor,
     RealDciBenchmarkExecutor,

@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from asterion.applications.dci_agent_lite.benchmark_executor import (
+from asterion.applications.dci.benchmark_executor import (
     DciBenchmarkExecutorError,
     RealDciBenchmarkExecutor,
 )
@@ -1416,7 +1416,7 @@ class RealDciBenchmarkExecutorTests(unittest.TestCase):
                 benchmark_runner=runner,
             )
             with patch(
-                "asterion.applications.dci_agent_lite.benchmark_executor.resolve_node_bin",
+                "asterion.applications.dci.benchmark_executor.resolve_node_bin",
                 return_value="/fixture/node",
             ):
                 ready = executor.execute(

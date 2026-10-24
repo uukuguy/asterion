@@ -92,7 +92,7 @@ def main(
         if not values:
             raise ValueError
         if values[0] == "experiment":
-            from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+            from asterion.applications.dci.pathlight_experiment_cli import (
                 main as experiment_main,
             )
 
@@ -110,7 +110,7 @@ def main(
                 host_factory=experiment_host_factory,
             )
         if values[0] == "optimization":
-            from asterion.applications.dci_agent_lite.pathlight_optimization_cli import (
+            from asterion.applications.dci.pathlight_optimization_cli import (
                 main as optimization_main,
             )
 
@@ -242,7 +242,7 @@ def _diagnose(
     if coverage_paths is not None:
         if coverage_experiment is not None:
             raise ValueError
-        from asterion.applications.dci_agent_lite.pathlight_experiment_cli import (
+        from asterion.applications.dci.pathlight_experiment_cli import (
             read_completed_coverage_experiment,
         )
 

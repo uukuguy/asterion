@@ -14,18 +14,18 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TextIO
 
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstance,
     select_benchmark_instance,
 )
-from asterion.applications.dci_agent_lite.benchmark_host import (
+from asterion.applications.dci.benchmark_host import (
     coverage_execution_config_sha256,
 )
-from asterion.applications.dci_agent_lite.benchmark_source_lock import (
+from asterion.applications.dci.benchmark_source_lock import (
     resolve_benchmark_source_lock,
     write_benchmark_source_lock,
 )
-from asterion.applications.dci_agent_lite.operator_config import (
+from asterion.applications.dci.operator_config import (
     DciOperatorConfig,
     load_operator_config,
 )
@@ -1665,7 +1665,7 @@ def _create_host(
             operator_config=config,
             package_sources=package_sources,
         )
-    from asterion.applications.dci_agent_lite.benchmark_host import DciBenchmarkHost
+    from asterion.applications.dci.benchmark_host import DciBenchmarkHost
 
     return DciBenchmarkHost(
         instance=instance,
@@ -2476,7 +2476,7 @@ def _absolute_path(value: str) -> Path:
 
 
 def _operator_root(value: str) -> Path:
-    from asterion.applications.dci_agent_lite.pathlight_cli import _operator_root
+    from asterion.applications.dci.pathlight_cli import _operator_root
 
     return _operator_root(value)
 
@@ -2498,7 +2498,7 @@ def _operator_root_binding_sha256(root: Path) -> str:
 
 
 def _create_staging_root(root: Path) -> Path:
-    from asterion.applications.dci_agent_lite.pathlight_cli import (
+    from asterion.applications.dci.pathlight_cli import (
         _create_staging_root,
     )
 
@@ -2506,7 +2506,7 @@ def _create_staging_root(root: Path) -> Path:
 
 
 def _publish_staged_tree(root: Path, staging: Path) -> None:
-    from asterion.applications.dci_agent_lite.pathlight_cli import (
+    from asterion.applications.dci.pathlight_cli import (
         _publish_staged_tree,
     )
 
@@ -2514,7 +2514,7 @@ def _publish_staged_tree(root: Path, staging: Path) -> None:
 
 
 def _cleanup_staging_tree(root: Path, staging: Path) -> None:
-    from asterion.applications.dci_agent_lite.pathlight_cli import (
+    from asterion.applications.dci.pathlight_cli import (
         _cleanup_staging_tree,
     )
 
@@ -2522,7 +2522,7 @@ def _cleanup_staging_tree(root: Path, staging: Path) -> None:
 
 
 def _publish_staged_outputs(root: Path, staging: Path, names: Sequence[str]) -> None:
-    from asterion.applications.dci_agent_lite.pathlight_cli import (
+    from asterion.applications.dci.pathlight_cli import (
         _publish_staged_outputs,
     )
 
@@ -2530,7 +2530,7 @@ def _publish_staged_outputs(root: Path, staging: Path, names: Sequence[str]) -> 
 
 
 def _cleanup_staging(root: Path, staging: Path, names: Sequence[str]) -> None:
-    from asterion.applications.dci_agent_lite.pathlight_cli import _cleanup_staging
+    from asterion.applications.dci.pathlight_cli import _cleanup_staging
 
     _cleanup_staging(root, staging, names)
 

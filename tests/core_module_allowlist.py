@@ -188,7 +188,7 @@ CORE_MODULES = (
 
 NON_CORE_MODULE_PREFIXES = (
     "asterion.applications.controlled_code",
-    "asterion.applications.dci_agent_lite",
+    "asterion.applications.dci",
     "asterion.applications.first_party_cli",
     "asterion.applications.first_party_packages",
     "asterion.applications.native",

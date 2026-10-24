@@ -126,7 +126,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
 
     def test_package_does_not_depend_on_application_or_old_owner(self) -> None:
         forbidden = (
-            "asterion.applications.dci_agent_lite",
+            "asterion.applications.dci",
             "asterion.capabilities.dci_research",
             "asterion.dci",
             "asterion.capability_packages",
@@ -150,7 +150,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
                     path.read_text(encoding="utf-8"),
                 )
                 self.assertNotIn(
-                    "applications/dci_agent_lite",
+                    "applications/dci",
                     path.read_text(encoding="utf-8"),
                 )
 
@@ -190,7 +190,7 @@ class DciPackageOwnershipTests(unittest.TestCase):
             for path in SOURCE.rglob("*.py")
             if "dci" in path.relative_to(SOURCE).as_posix().lower()
             and not path.is_relative_to(PACKAGE)
-            and not path.is_relative_to(SOURCE / "applications/dci_agent_lite")
+            and not path.is_relative_to(SOURCE / "applications/dci")
         }
 
         self.assertEqual(offenders, set())

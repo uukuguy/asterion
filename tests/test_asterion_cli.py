@@ -23,11 +23,9 @@ from asterion.applications.first_party_packages import builtin_capability_regist
 from asterion.capability_packages.sources.builtin import BuiltinCapabilitySource
 from asterion.client import AgentClient, ClientCursor, ClientEvent
 from asterion.client.session import ClientSessionEndpoint
-from asterion.applications.dci_agent_lite.provider import (
-    create_provider as create_dci_provider,
-)
-from asterion.applications.dci_agent_lite.acceptance import (
+from asterion.applications.dci.acceptance import (
     installed_acceptance_checks,
+    operator_provider as create_dci_provider,
 )
 from asterion.applications.provider import (
     ApplicationProviderError,
@@ -131,7 +129,33 @@ class DciClaudeFixtureRuntime:
                 }
             },
         )
-        yield RunEvent(request.run_id, 3, "run.completed", {"status": "completed"})
+        yield RunEvent(
+            request.run_id,
+            3,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "locations",
+                    "kind": "locations",
+                    "media_type": "text/plain",
+                    "uri": "fixture.txt",
+                }
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            4,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "trajectory",
+                    "kind": "trajectory",
+                    "media_type": "text/plain",
+                    "uri": "read",
+                }
+            },
+        )
+        yield RunEvent(request.run_id, 5, "run.completed", {"status": "completed"})
 
 
 class DciPiFixtureRuntime:
@@ -173,7 +197,33 @@ class DciPiFixtureRuntime:
                 }
             },
         )
-        yield RunEvent(request.run_id, 4, "run.completed", {"status": "completed"})
+        yield RunEvent(
+            request.run_id,
+            4,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "locations",
+                    "kind": "locations",
+                    "media_type": "text/plain",
+                    "uri": "fixture.txt",
+                }
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            5,
+            "artifact.created",
+            {
+                "artifact": {
+                    "artifact_id": "trajectory",
+                    "kind": "trajectory",
+                    "media_type": "text/plain",
+                    "uri": "read",
+                }
+            },
+        )
+        yield RunEvent(request.run_id, 6, "run.completed", {"status": "completed"})
 
 
 class DciPiPathlightFixtureRuntime(DciPiFixtureRuntime):
@@ -197,6 +247,26 @@ class DciPiPathlightFixtureRuntime(DciPiFixtureRuntime):
             3,
             "tool.call",
             {
+                "call_id": "fixture-read",
+                "name": "read",
+                "arguments": {"path": "fixture.txt"},
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            4,
+            "tool.result",
+            {
+                "call_id": "fixture-read",
+                "output": {"value": ""},
+                "is_error": False,
+            },
+        )
+        yield RunEvent(
+            request.run_id,
+            5,
+            "tool.call",
+            {
                 "call_id": "SENTINEL_PRIVATE_CALL",
                 "name": "private.tool",
                 "arguments": {
@@ -207,7 +277,7 @@ class DciPiPathlightFixtureRuntime(DciPiFixtureRuntime):
         )
         yield RunEvent(
             request.run_id,
-            4,
+            6,
             "tool.result",
             {
                 "call_id": "SENTINEL_PRIVATE_CALL",
@@ -220,7 +290,7 @@ class DciPiPathlightFixtureRuntime(DciPiFixtureRuntime):
         )
         yield RunEvent(
             request.run_id,
-            5,
+            7,
             "artifact.created",
             {
                 "artifact": {
@@ -231,7 +301,7 @@ class DciPiPathlightFixtureRuntime(DciPiFixtureRuntime):
                 }
             },
         )
-        yield RunEvent(request.run_id, 6, "run.completed", {"status": "completed"})
+        yield RunEvent(request.run_id, 8, "run.completed", {"status": "completed"})
 
 
 class ControlledFixtureRuntime(FixtureRuntime):
@@ -1260,7 +1330,7 @@ class AsterionCliTests(unittest.TestCase):
         self.assertEqual(
             packaged["unbound_resources"],
             [
-                "applications/dci_agent_lite/assemblies/dci-local-research.json",
+                "applications/dci/assemblies/dci-local-research.json",
             ],
         )
 

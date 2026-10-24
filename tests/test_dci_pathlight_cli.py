@@ -12,8 +12,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.applications.dci_agent_lite.cli import main
-from asterion.applications.dci_agent_lite.pathlight_cli import (
+from asterion.applications.dci.cli import main
+from asterion.applications.dci.pathlight_cli import (
     main as pathlight_main,
 )
 from asterion.capabilities.dci.implementation.pathlight.conversion import (
@@ -86,7 +86,7 @@ class TestDciPathlightCli(unittest.TestCase):
                 return 0
 
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli.main",
+                "asterion.applications.dci.pathlight_experiment_cli.main",
                 side_effect=record_experiment,
             ):
                 self.assertEqual(
@@ -167,7 +167,7 @@ class TestDciPathlightCli(unittest.TestCase):
             ]
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_cli.write_experiment_bundle",
+                "asterion.applications.dci.pathlight_cli.write_experiment_bundle",
                 side_effect=RuntimeError("SENTINEL_PRIVATE_PATH"),
             ):
                 code = main(arguments, stdout=stdout, stderr=stderr)
@@ -196,7 +196,7 @@ class TestDciPathlightCli(unittest.TestCase):
             arguments.extend(("--output-root", str(output)))
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_cli.write_private_file",
+                "asterion.applications.dci.pathlight_cli.write_private_file",
                 side_effect=RuntimeError("SENTINEL_PRIVATE_PATH"),
             ):
                 code = main(arguments, stdout=stdout, stderr=stderr)
@@ -286,7 +286,7 @@ class TestDciPathlightCli(unittest.TestCase):
             )
 
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "read_completed_coverage_experiment",
                 return_value=_coverage_pack(),
             ) as loader:
@@ -338,7 +338,7 @@ class TestDciPathlightCli(unittest.TestCase):
             ]
             stdout, stderr = io.StringIO(), io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_experiment_cli."
+                "asterion.applications.dci.pathlight_experiment_cli."
                 "read_completed_coverage_experiment",
                 side_effect=RuntimeError("SENTINEL_PRIVATE_NATIVE_PATH"),
             ):
@@ -373,7 +373,7 @@ class TestDciPathlightCli(unittest.TestCase):
                 raise RuntimeError("SENTINEL_PRIVATE_PATH")
 
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_cli.write_experiment_bundle",
+                "asterion.applications.dci.pathlight_cli.write_experiment_bundle",
                 side_effect=race_then_fail,
             ):
                 code = main(
@@ -423,7 +423,7 @@ class TestDciPathlightCli(unittest.TestCase):
                 arguments.extend(("--recovery-root", str(recovery_root)))
             arguments.extend(("--output-root", str(output)))
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_cli.write_private_file",
+                "asterion.applications.dci.pathlight_cli.write_private_file",
                 side_effect=race_then_fail,
             ):
                 code = main(
@@ -478,7 +478,7 @@ class TestDciPathlightCli(unittest.TestCase):
                 )
 
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_cli.os.link",
+                "asterion.applications.dci.pathlight_cli.os.link",
                 side_effect=racing_link,
             ):
                 code = main(
@@ -544,7 +544,7 @@ class TestDciPathlightCli(unittest.TestCase):
                 arguments.extend(("--recovery-root", str(recovery_root)))
             arguments.extend(("--output-root", str(output)))
             with patch(
-                "asterion.applications.dci_agent_lite.pathlight_cli.os.link",
+                "asterion.applications.dci.pathlight_cli.os.link",
                 side_effect=racing_link,
             ):
                 code = main(

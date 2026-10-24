@@ -53,7 +53,7 @@ class DefaultBenchmarkHostTests(unittest.TestCase):
         self.assertFalse(
             any(
                 name.startswith("asterion.capabilities.dci")
-                or name.startswith("asterion.applications.dci_agent_lite")
+                or name.startswith("asterion.applications.dci")
                 for name in imports
             )
         )

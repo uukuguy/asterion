@@ -39,13 +39,15 @@ checkout.
 
 ```bash
 uv run asterion list
-uv run asterion describe --provider dci-agent-lite
-uv run asterion verify --provider dci-agent-lite --level acceptance
+uv run asterion-dci describe
+uv run asterion-dci acceptance
 ```
 
-`list` is metadata-only. `describe` loads only the selected application
-provider. `acceptance` validates packaged providers, assemblies, capability
-manifests, suites, resources, implementation bindings, and conformance assets.
+`list` is metadata-only. `asterion-dci describe` reads the DCI product and
+does not select an installed provider. `acceptance` validates the installed
+`controlled-code` provider, the operator-owned DCI applications, assemblies,
+capability manifests, suites, resources, implementation bindings, and
+conformance assets.
 All three paths are provider-free and must expose no prompt, answer,
 credential, private path, or provider payload.
 

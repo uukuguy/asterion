@@ -8,8 +8,8 @@ from dataclasses import FrozenInstanceError
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.applications.dci_agent_lite.cli import main
-from asterion.applications.dci_agent_lite.benchmark_instances import (
+from asterion.applications.dci.cli import main
+from asterion.applications.dci.benchmark_instances import (
     DciBenchmarkInstanceError,
     benchmark_instances,
     public_instance_dict,
@@ -380,7 +380,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                "asterion.applications.dci.cli.load_operator_config",
                 side_effect=AssertionError("plan must not read operator config"),
             ), patch(
                 "asterion.capability_packages.sources.builtin."
@@ -442,7 +442,7 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                "asterion.applications.dci.cli.load_operator_config",
                 side_effect=AssertionError("plan must not read operator config"),
             ), patch(
                 "asterion.capability_packages.sources.builtin."
@@ -502,10 +502,10 @@ class TestDciBenchmarkInstances(unittest.TestCase):
             stdout = io.StringIO()
             stderr = io.StringIO()
             with patch(
-                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                "asterion.applications.dci.cli.load_operator_config",
                 side_effect=AssertionError("plan must not read operator config"),
             ), patch(
-                "asterion.applications.dci_agent_lite.cli."
+                "asterion.applications.dci.cli."
                 "InstalledBenchmarkCommandHost",
                 side_effect=RuntimeError("PRIVATE-CONSTRUCTOR-SENTINEL"),
             ):

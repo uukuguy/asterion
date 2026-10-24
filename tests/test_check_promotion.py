@@ -615,13 +615,13 @@ class PromotionCheckTests(unittest.TestCase):
             self.assertIn(schema_path, smoke_source)
         for expected in (
             "applications/controlled_code/assemblies/controlled-code-validation.json",
-            "applications/dci_agent_lite/assemblies/dci-complete-application-claude.json",
-            "applications/dci_agent_lite/assemblies/dci-complete-application-pi.json",
-            "applications/dci_agent_lite/assemblies/dci-local-benchmark-application-claude.json",
-            "applications/dci_agent_lite/assemblies/dci-local-benchmark-application-pi.json",
-            "applications/dci_agent_lite/assemblies/dci-local-research.json",
-            "applications/dci_agent_lite/assemblies/dci-research-capability-claude.json",
-            "applications/dci_agent_lite/assemblies/dci-research-capability.json",
+            "applications/dci/assemblies/dci-complete-application-claude.json",
+            "applications/dci/assemblies/dci-complete-application-pi.json",
+            "applications/dci/assemblies/dci-local-benchmark-application-claude.json",
+            "applications/dci/assemblies/dci-local-benchmark-application-pi.json",
+            "applications/dci/assemblies/dci-local-research.json",
+            "applications/dci/assemblies/dci-research-capability-claude.json",
+            "applications/dci/assemblies/dci-research-capability.json",
             "capabilities/controlled_code/capability-package.json",
             "capabilities/controlled_code/manifests/code-quality-evaluation.json",
             "capabilities/controlled_code/manifests/code-quality-workflow.json",
@@ -637,20 +637,16 @@ class PromotionCheckTests(unittest.TestCase):
             "capabilities/dci/payload/capabilities/protocol-observability.json",
         ):
             self.assertIn(expected, smoke_source)
-        for suffix in (
-            ("list",),
-            ("describe", "--provider", "dci-agent-lite", "--json"),
-            (
-                "verify",
-                "--provider",
-                "dci-agent-lite",
-                "--level",
-                "acceptance",
-                "--json",
-            ),
+        for executable, suffix in (
+            ("/asterion", ("list",)),
+            ("/asterion-dci", ("describe", "--json")),
+            ("/asterion-dci", ("acceptance", "--json")),
         ):
             self.assertTrue(
-                any(command[0].endswith("/asterion") and command[1:] == suffix for command in commands),
+                any(
+                    command[0].endswith(executable) and command[1:] == suffix
+                    for command in commands
+                ),
                 suffix,
             )
         self.assertEqual(len(set(roots)), 1)
@@ -1019,10 +1015,8 @@ class PromotionCheckTests(unittest.TestCase):
             (
                 "uv",
                 "run",
-                "asterion",
+                "asterion-dci",
                 "describe",
-                "--provider",
-                "dci-agent-lite",
                 "--json",
             ),
             commands,
@@ -1062,7 +1056,10 @@ class PromotionCheckTests(unittest.TestCase):
 
 
 def is_acceptance(command: tuple[str, ...]) -> bool:
-    return "verify" in command and "acceptance" in command
+    parts = tuple(str(part) for part in command)
+    return "acceptance" in parts and any(
+        part.endswith("asterion-dci") for part in parts
+    )
 
 
 def acceptance_stdout(command: tuple[str, ...]) -> str:

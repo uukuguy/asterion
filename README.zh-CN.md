@@ -140,7 +140,7 @@ AR25 本地研究的游戏场景、WorldMap 与回放时间线；官方结果以
 ```bash
 uv sync --frozen
 uv run asterion list
-uv run asterion describe --provider dci-agent-lite
+uv run asterion-dci describe
 ```
 
 准备好自己的 Pi 运行时与 profile、ARC 游戏资源和 SDK wheels、操作者凭据及 guest 路径后，执行一次有限本地研究：

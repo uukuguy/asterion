@@ -10,12 +10,9 @@ from pathlib import Path
 from typing import cast
 from unittest.mock import patch
 
-from asterion.applications.dci_agent_lite import provider
-from asterion.applications.dci_agent_lite.cli import (
-    DCI_APPLICATION_SELECTOR,
-    main,
-)
-from asterion.applications.dci_agent_lite.operator_config import (
+from asterion.applications.dci.acceptance import operator_provider
+from asterion.applications.dci.cli import main
+from asterion.applications.dci.operator_config import (
     DciOperatorConfig,
     load_operator_config,
 )
@@ -23,9 +20,9 @@ from asterion.benchmarks.cli import BenchmarkCommandHost
 
 
 PROJECT = Path(__file__).resolve().parents[1]
-ADAPTER = PROJECT / "src/asterion/applications/dci_agent_lite/cli.py"
+ADAPTER = PROJECT / "src/asterion/applications/dci/cli.py"
 ASSEMBLIES = (
-    PROJECT / "src/asterion/applications/dci_agent_lite/assemblies"
+    PROJECT / "src/asterion/applications/dci/assemblies"
 ).glob("*.json")
 
 
@@ -34,7 +31,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
         self,
     ) -> None:
         with patch(
-            "asterion.applications.dci_agent_lite.cli.load_operator_config",
+            "asterion.applications.dci.cli.load_operator_config",
             side_effect=AssertionError("private config must not load"),
         ):
             code = main(
@@ -64,7 +61,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
             with (
                 self.subTest(value=value),
                 patch(
-                    "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                    "asterion.applications.dci.cli.load_operator_config",
                     side_effect=AssertionError("private config must not load"),
                 ),
             ):
@@ -95,7 +92,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
             with (
                 self.subTest(value=value),
                 patch(
-                    "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                    "asterion.applications.dci.cli.load_operator_config",
                     side_effect=AssertionError("private config must not load"),
                 ),
             ):
@@ -123,7 +120,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "source-lock.json"
             with patch(
-                "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                "asterion.applications.dci.cli.load_operator_config",
                 side_effect=AssertionError("private config must not load"),
             ):
                 code = main(
@@ -144,7 +141,7 @@ class TestDciApplicationAdapter(unittest.TestCase):
             self.assertTrue(output.is_file())
 
     def test_provider_declares_exact_application_package_and_runtimes(self) -> None:
-        installed = provider.create_provider()
+        installed = operator_provider()
         complete = next(
             item
             for item in installed.applications
@@ -172,11 +169,10 @@ class TestDciApplicationAdapter(unittest.TestCase):
     def test_distribution_indexes_local_benchmark_application(self) -> None:
         value = (PROJECT / "pyproject.toml").read_text(encoding="utf-8")
 
-        self.assertIn(
-            '"dci.local-benchmark-application__1.0.0" = '
-            '"asterion.applications.dci_agent_lite:create_provider"',
-            value,
-        )
+        self.assertNotIn("dci-agent-lite", value)
+        self.assertNotIn("dci.local-benchmark-application__1.0.0", value)
+        self.assertNotIn("dci.complete-application__1.0.0", value)
+        self.assertNotIn("dci.research-capability__1.0.0", value)
 
     def test_all_dci_assemblies_use_public_protocol_and_exact_package(self) -> None:
         for path in ASSEMBLIES:
@@ -455,11 +451,11 @@ class TestDciApplicationAdapter(unittest.TestCase):
             source_lock.write_text("{}\n", encoding="utf-8")
             with (
                 patch(
-                    "asterion.applications.dci_agent_lite.cli.load_operator_config",
+                    "asterion.applications.dci.cli.load_operator_config",
                     side_effect=AssertionError("local config must not load"),
                 ),
                 patch(
-                    "asterion.applications.dci_agent_lite.benchmark_host.DciBenchmarkHost",
+                    "asterion.applications.dci.benchmark_host.DciBenchmarkHost",
                     return_value=host,
                 ) as host_type,
             ):
@@ -509,74 +505,52 @@ class TestDciApplicationAdapter(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertIn("requires --execute", stderr.getvalue())
 
-    def test_metadata_and_preflight_delegate_without_provider_loading_here(self) -> None:
-        calls: list[list[str]] = []
-
+    def test_product_commands_do_not_delegate_to_a_provider(self) -> None:
         def application_main(argv, **kwargs):
-            del kwargs
-            calls.append(list(argv))
-            return 0
+            del argv, kwargs
+            raise AssertionError("provider command")
 
-        for argv in (["list"], ["describe", "--json"], ["preflight", "--json"]):
+        for argv in (["list"], ["run", "--runtime", "pi", "--input", "{}"]):
             with self.subTest(argv=argv):
+                stderr = io.StringIO()
                 self.assertEqual(
                     main(
                         argv,
                         application_main=application_main,
                         stdout=io.StringIO(),
-                        stderr=io.StringIO(),
+                        stderr=stderr,
                     ),
-                    0,
+                    2,
                 )
+                self.assertEqual(stderr.getvalue(), "asterion-dci: command failed\n")
 
+        stdout = io.StringIO()
         self.assertEqual(
-            calls,
-            [
-                ["list", "--provider", "dci-agent-lite"],
-                ["describe", "--provider", "dci-agent-lite", "--json"],
-                [
-                    "verify",
-                    "--provider",
-                    "dci-agent-lite",
-                    "--level",
-                    "preflight",
-                    "--json",
-                ],
-            ],
+            main(
+                ["describe", "--json"],
+                application_main=application_main,
+                stdout=stdout,
+                stderr=io.StringIO(),
+            ),
+            0,
         )
+        described = json.loads(stdout.getvalue())
+        self.assertEqual(described["product_id"], "asterion-dci")
+        self.assertNotIn("dci-agent-lite", stdout.getvalue())
 
-    def test_run_selects_exact_application_and_allowed_runtime(self) -> None:
-        calls: list[list[str]] = []
-
-        def application_main(argv, **kwargs):
-            del kwargs
-            calls.append(list(argv))
-            return 0
-
+        stdout = io.StringIO()
         code = main(
-            ["run", "--runtime", "pi", "--input", "{}"],
+            ["preflight", "--json"],
             application_main=application_main,
-            stdout=io.StringIO(),
+            repo_root=PROJECT,
+            stdout=stdout,
             stderr=io.StringIO(),
         )
-
-        self.assertEqual(code, 0)
-        self.assertEqual(
-            calls,
-            [
-                [
-                    "run",
-                    "--provider",
-                    "dci-agent-lite",
-                    "--application",
-                    DCI_APPLICATION_SELECTOR,
-                    "--runtime",
-                    "pi.reference",
-                    "--input",
-                    "{}",
-                ]
-            ],
-        )
+        payload = json.loads(stdout.getvalue())
+        self.assertIn(code, {0, 1})
+        self.assertEqual(payload["product_id"], "asterion-dci")
+        self.assertEqual(payload["level"], "preflight")
+        self.assertEqual(payload["provider_backed_operation_count"], 0)
 
     def test_adapter_ast_contains_no_framework_or_execution_implementation(self) -> None:
         tree = ast.parse(ADAPTER.read_text(encoding="utf-8"))
