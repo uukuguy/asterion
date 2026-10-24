@@ -3847,3 +3847,10 @@
 - 23:06 The Native entry is one standard for every package. native.dci-research and native.controlled-code share prepare and run. Implementation has not started.
 - 23:46 Native application entry plan written. Implementation has not started.
 - 00:41 Native application entry is in. The live preset exited 2. Reason: pi checkout is unavailable. The model was not called.
+
+## 2026-10-24
+
+- 13:04 Retrieval preset completed. Captured stdout run native-dci-23b1b537ac504926bd2fb253e4c6d72b, status completed, exit 0. Exit 0 is not a judged answer. Command uses --mode rpc [0a96a31e]. One-shot stdout line cap is 1MB [18808a14].
+- 13:04 Later evidence run native-dci-f4c9df9acea44c419e76c21a666f9532 ends run.completed. One read result is an error. Two grep results are not errors.
+- 13:04 Complete example and provider conversion remain specs [0fca6e23, ee0e0ef3]. Product provider dci-agent-lite is still live. No plan.
+- 13:04 Final handoff. No example process remains. origin/main was 18808a14. This handoff commit stays local.
