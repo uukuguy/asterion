@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from asterion.assembly.protocol import AssemblyPlan
+from asterion.assembly.protocol import AssemblyPlan, required_runtime_capabilities
 from asterion.runtime.host import (
     AgentRuntimeClient,
     CancellationSignal,
@@ -47,7 +47,7 @@ async def run_application(
         raise ApplicationRunError("application runtime identity does not match")
     if any(
         capability not in runtime.manifest.capabilities
-        for capability in plan.runtime_capabilities
+        for capability in required_runtime_capabilities(plan)
     ):
         raise ApplicationRunError("application runtime capability is unavailable")
     if any(capability not in host_services for capability in plan.host_capabilities):
@@ -58,7 +58,7 @@ async def run_application(
     request = RunRequest(
         run_id=run_id,
         input_text=input_text,
-        requested_capabilities=plan.runtime_capabilities,
+        requested_capabilities=required_runtime_capabilities(plan),
     )
     try:
         request.to_mapping()

@@ -190,6 +190,20 @@ def resolve_assembly(
     )
 
 
+def required_runtime_capabilities(plan: AssemblyPlan) -> tuple[str, ...]:
+    """Return catalog capabilities the selected manifests actually require."""
+
+    catalog = set(plan.runtime_capabilities)
+    required: set[str] = set()
+    for manifest in plan.capability_manifests:
+        edges = manifest["requires_capabilities"]
+        if isinstance(edges, (list, tuple)):
+            for capability in edges:
+                if isinstance(capability, str) and capability in catalog:
+                    required.add(capability)
+    return tuple(sorted(required))
+
+
 def _validate_refs(value: object, *, identity_field: str, label: str) -> None:
     if not isinstance(value, list) or not value:
         raise AssemblyError(f"assembly {label} refs must be a non-empty array")

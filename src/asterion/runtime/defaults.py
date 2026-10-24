@@ -9,8 +9,11 @@ import re
 import shutil
 import stat
 from collections.abc import Mapping
+from importlib import resources
 from pathlib import Path
 
+from asterion.adapters.pi import map_pi_capabilities
+from asterion.runtime.context_policy import ContextPolicyError, parse_context_policy
 from asterion.runtime.factory import (
     RuntimeFactoryBinding,
     RuntimeFactoryContext,
@@ -28,13 +31,7 @@ from asterion.runtimes.pi_extensions import (
 
 
 PI_CAPABILITIES = ("filesystem.read", "pi.tool.grep", "shell")
-_PI_TOOL_SETS = {
-    "read,bash": ("read", "bash"),
-    "read,grep": ("read", "grep"),
-}
-_PI_CONTEXT_PROFILES = frozenset(
-    {None, "level0", "level1", "level2", "level3", "level4"}
-)
+_PI_TOOL_ORDER = ("read", "grep", "bash")
 CLAUDE_CAPABILITIES = (
     "claude.tool.glob",
     "claude.tool.grep",
@@ -100,7 +97,7 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         raise RuntimeFactoryError("runtime factory context is invalid")
     allowed = {
         "command",
-        "context_profile",
+        "context_policy",
         "cwd",
         "cwd_host_capability",
         "environment",
@@ -141,17 +138,12 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
         context.options["evidence_root"], require_directory=False
     )
     environment = _pi_environment(context.options["environment"])
-    tools = context.options["tools"]
-    if type(tools) is not str or tools not in _PI_TOOL_SETS:
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    normalized_tools = _PI_TOOL_SETS[tools]
+    normalized_tools = _pi_tools(context.options["tools"])
     provider = _pi_identity_option(context.options.get("provider"))
     model = _pi_identity_option(context.options.get("model"))
     if (provider is None) != (model is None):
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
-    context_profile = context.options.get("context_profile")
-    if context_profile not in _PI_CONTEXT_PROFILES:
-        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    context_policy = _pi_context_policy(context.options.get("context_policy"))
     raw_max_turns = context.options["max_turns"]
     if type(raw_max_turns) is not str:
         raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
@@ -187,13 +179,22 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
     ):
         if value is not None:
             command.extend((option, value))
-    capabilities = PI_CAPABILITIES
+    capabilities = tuple(map_pi_capabilities(",".join(normalized_tools)))
     inherited_fds: tuple[int, ...] = ()
     if extension is not None:
         assert extension_lease is not None
         command.extend(extension_lease.command_args())
-        capabilities = tuple(sorted((*PI_CAPABILITIES, *extension.capabilities)))
+        capabilities = tuple(sorted((*capabilities, *extension.capabilities)))
         inherited_fds = extension_lease.inherited_fds
+    if context_policy is not None:
+        command.extend(
+            (
+                "--extension",
+                str(_context_policy_extension_path()),
+                "--context-policy",
+                context.options["context_policy"],
+            )
+        )
     try:
         return PiRuntimeClient(
             command=command,
@@ -208,12 +209,44 @@ def _create_pi_runtime(context: RuntimeFactoryContext) -> PiRuntimeClient:
             provider=provider,
             model=model,
             tools=normalized_tools,
-            context_profile=context_profile,
+            context_policy=context_policy,
         )
     except Exception:
         if extension_lease is not None:
             extension_lease.close()
         raise
+
+
+def _pi_tools(value: object) -> tuple[str, ...]:
+    if type(value) is not str or not value:
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    parts = tuple(value.split(","))
+    if (
+        any(part not in _PI_TOOL_ORDER for part in parts)
+        or len(set(parts)) != len(parts)
+        or ",".join(tool for tool in _PI_TOOL_ORDER if tool in parts) != value
+    ):
+        raise RuntimeFactoryError("Pi reference runtime configuration is invalid")
+    return tuple(tool for tool in _PI_TOOL_ORDER if tool in parts)
+
+
+def _pi_context_policy(value: str | None) -> Mapping[str, int] | None:
+    try:
+        return parse_context_policy(value)
+    except ContextPolicyError:
+        raise RuntimeFactoryError(
+            "Pi reference runtime configuration is invalid"
+        ) from None
+
+
+def _context_policy_extension_path() -> Path:
+    candidate = resources.files("asterion.runtimes").joinpath(
+        "resources/context-policy-extension.mjs"
+    )
+    path = Path(str(candidate))
+    if not path.is_file():
+        raise RuntimeFactoryError("Pi context policy extension is unavailable")
+    return path
 
 
 def _host_pi_extension_binding(
@@ -405,7 +438,6 @@ def _create_claude_code_runtime(
         raise RuntimeFactoryError("runtime factory context is invalid")
     allowed = {
         "authentication_mode",
-        "context_profile",
         "cwd",
         "cwd_host_capability",
         "evidence_root",
@@ -483,9 +515,6 @@ def _create_claude_code_runtime(
     reasoning = _option_text(context, "thinking_level")
     if reasoning not in {None, "low", "medium", "high"}:
         raise RuntimeFactoryError("Claude Code reasoning configuration is invalid")
-    context_profile = _option_text(context, "context_profile")
-    if context_profile not in {None, "level3"}:
-        raise RuntimeFactoryError("Claude Code context configuration is invalid")
     return ClaudeCodeRuntimeClient(
         executable=executable,
         cwd=runtime_cwd,
@@ -498,7 +527,6 @@ def _create_claude_code_runtime(
         agent_provider=provider,
         agent_model=model,
         reasoning=reasoning,
-        context_profile=context_profile,
     )
 
 

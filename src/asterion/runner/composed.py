@@ -11,7 +11,7 @@ from types import MappingProxyType
 from typing import Callable
 from uuid import uuid4
 
-from asterion.assembly.protocol import AssemblyPlan
+from asterion.assembly.protocol import AssemblyPlan, required_runtime_capabilities
 from asterion.capability_packages import CapabilityPackageRef
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
@@ -645,7 +645,7 @@ def _preflight(
         raise ApplicationRunError("application runtime identity does not match")
     if any(
         capability not in runtime.manifest.capabilities
-        for capability in plan.runtime_capabilities
+        for capability in required_runtime_capabilities(plan)
     ):
         raise ApplicationRunError("application runtime capability is unavailable")
     if any(capability not in host_services for capability in plan.host_capabilities):

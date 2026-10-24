@@ -345,7 +345,6 @@ class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
                 max_turns=100,
                 agent_model="claude-sonnet-4-6",
                 reasoning="medium",
-                context_profile="level3",
                 run_process=process,
             )
             _ = [event async for event in runtime.run(RunRequest("exact-profile", "q"))]
@@ -353,14 +352,14 @@ class ClaudeCodeRuntimeClientTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(command[command.index("--model") + 1], "claude-sonnet-4-6")
             self.assertEqual(command[command.index("--effort") + 1], "medium")
             self.assertEqual(command[command.index("--tools") + 1], "Read,Grep")
-            self.assertIn("level3", command[command.index("--append-system-prompt") + 1])
+            self.assertNotIn("--append-system-prompt", command)
             run_dir = runtime.completed_run_dir("exact-profile")
             assert run_dir is not None
             policy = json.loads((run_dir / "runtime-policy.json").read_text())
             self.assertEqual(policy["agent_model"], "claude-sonnet-4-6")
             self.assertEqual(policy["reasoning"], "medium")
             self.assertEqual(policy["tools"], ["Read", "Grep"])
-            self.assertEqual(policy["context_profile"], "level3")
+            self.assertNotIn("context_profile", policy)
 
     async def test_projects_fixture_events_without_retaining_secret_environment(self) -> None:
         process = Mock(

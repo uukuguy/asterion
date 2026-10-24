@@ -119,14 +119,12 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                         model="claude-sonnet-4-6",
                         tools="read,grep",
                         thinking_level="medium",
-                        context_profile="level3",
                     )
                 )
                 )
         self.assertEqual(runtime._agent_model, "claude-sonnet-4-6")
         self.assertEqual(runtime._tools, ("Read", "Grep"))
         self.assertEqual(runtime._reasoning, "medium")
-        self.assertEqual(runtime._context_profile, "level3")
 
     def test_claude_rejects_pi_default_pair(self) -> None:
         with self.assertRaisesRegex(RuntimeFactoryError, "unsupported"):
@@ -483,7 +481,6 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                             "model": "fixture-model",
                             "tools": "read,grep",
                             "max_turns": "100",
-                            "context_profile": "level3",
                         },
                     )
                 )
@@ -492,25 +489,34 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             binding.capabilities, ("filesystem.read", "pi.tool.grep", "shell")
         )
         self.assertEqual(runtime.manifest.runtime_id, "pi.reference")
-        self.assertEqual(runtime.manifest.capabilities, binding.capabilities)
+        self.assertEqual(
+            runtime.manifest.capabilities, ("filesystem.read", "pi.tool.grep")
+        )
         self.assertEqual(runtime._cwd, corpus.resolve())
         self.assertEqual(runtime._env, {"SENTINEL_RUNTIME_VALUE": "private"})
         self.assertEqual(runtime._max_turns, 100)
         self.assertEqual(runtime._provider, "fixture-provider")
         self.assertEqual(runtime._model, "fixture-model")
         self.assertEqual(runtime._tools, ("read", "grep"))
-        self.assertEqual(runtime._context_profile, "level3")
+        self.assertIsNone(runtime._context_policy)
+        self.assertNotIn("--context-policy", runtime._command)
         self.assertEqual(runtime._evidence_root, (root / "evidence").resolve())
 
-    def test_pi_reference_factory_accepts_core_bash_and_context_levels(self) -> None:
+    def test_pi_reference_factory_launches_the_requested_tools_and_context_bounds(self) -> None:
         from asterion.runtime.defaults import default_runtime_factory_registry
         from asterion.runtime.factory import RuntimeFactoryError
 
+        policy = '{"compact_chars":240000,"retain_turns":12,"tool_result_chars":20000}'
         cases = (
-            ("read,bash", "level0", ("read", "bash")),
-            ("read,bash", "level4", ("read", "bash")),
-            ("read,grep", "level1", ("read", "grep")),
-            ("read,grep", "level2", ("read", "grep")),
+            ("read,bash", None, ("read", "bash"), ("filesystem.read", "shell")),
+            (
+                "read,grep,bash",
+                policy,
+                ("read", "grep", "bash"),
+                ("filesystem.read", "pi.tool.grep", "shell"),
+            ),
+            ("grep", None, ("grep",), ("pi.tool.grep",)),
+            ("bash", None, ("bash",), ("shell",)),
         )
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir).resolve()
@@ -518,8 +524,21 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
             corpus.mkdir()
             executable = Path(sys.executable).resolve()
             binding = default_runtime_factory_registry().select("pi.reference")
-            for tools, profile, expected in cases:
-                with self.subTest(tools=tools, profile=profile):
+            for tools, context_policy, expected_tools, expected_capabilities in cases:
+                with self.subTest(tools=tools):
+                    options = {
+                        "command": json.dumps(
+                            [str(executable), "-u", "-c", "pass"],
+                            separators=(",", ":"),
+                        ),
+                        "cwd": str(corpus),
+                        "environment": "{}",
+                        "evidence_root": str(root / "evidence"),
+                        "tools": tools,
+                        "max_turns": "6",
+                    }
+                    if context_policy is not None:
+                        options["context_policy"] = context_policy
                     runtime = binding.factory(
                         RuntimeFactoryContext(
                             provider_id="native",
@@ -527,33 +546,46 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                             application_version="1.0.0",
                             runtime_id="pi.reference",
                             assembly_path=root / "assembly.json",
-                            options={
-                                "command": json.dumps(
-                                    [str(executable), "-u", "-c", "pass"],
-                                    separators=(",", ":"),
-                                ),
-                                "cwd": str(corpus),
-                                "environment": "{}",
-                                "evidence_root": str(root / "evidence"),
-                                "tools": tools,
-                                "max_turns": "6",
-                                "context_profile": profile,
-                            },
+                            options=options,
                         )
                     )
-                    self.assertEqual(runtime._tools, expected)
-                    self.assertEqual(runtime._context_profile, profile)
-                    self.assertIn(("--tools", tools), tuple(zip(runtime._command, runtime._command[1:])))
-                    self.assertEqual(
-                        runtime.manifest.capabilities,
-                        ("filesystem.read", "pi.tool.grep", "shell"),
+                    self.assertEqual(runtime._tools, expected_tools)
+                    self.assertEqual(runtime.manifest.capabilities, expected_capabilities)
+                    self.assertIn(
+                        ("--tools", tools),
+                        tuple(zip(runtime._command, runtime._command[1:])),
                     )
-            for tools, profile in (
+                    if context_policy is None:
+                        self.assertIsNone(runtime._context_policy)
+                        self.assertNotIn("--context-policy", runtime._command)
+                    else:
+                        self.assertEqual(dict(runtime._context_policy), json.loads(context_policy))
+                        self.assertIn(
+                            ("--context-policy", context_policy),
+                            tuple(zip(runtime._command, runtime._command[1:])),
+                        )
+                        extension = runtime._command[runtime._command.index("--extension") + 1]
+                        self.assertTrue(extension.endswith("context-policy-extension.mjs"))
+            for tools, context_policy in (
+                ("bash,read", None),
                 ("read,bash,grep", "level3"),
-                ("read,bash", "level5"),
-                ("bash", "level0"),
+                ("read", '{"tool_result_chars": 20000}'),
+                ("read", '{"profile":"level3"}'),
             ):
-                with self.subTest(rejected_tools=tools, rejected_profile=profile):
+                with self.subTest(rejected_tools=tools, rejected_policy=context_policy):
+                    options = {
+                        "command": json.dumps(
+                            [str(executable), "-u", "-c", "pass"],
+                            separators=(",", ":"),
+                        ),
+                        "cwd": str(corpus),
+                        "environment": "{}",
+                        "evidence_root": str(root / "evidence"),
+                        "tools": tools,
+                        "max_turns": "6",
+                    }
+                    if context_policy is not None:
+                        options["context_policy"] = context_policy
                     with self.assertRaises(RuntimeFactoryError):
                         binding.factory(
                             RuntimeFactoryContext(
@@ -562,18 +594,7 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                                 application_version="1.0.0",
                                 runtime_id="pi.reference",
                                 assembly_path=root / "assembly.json",
-                                options={
-                                    "command": json.dumps(
-                                        [str(executable), "-u", "-c", "pass"],
-                                        separators=(",", ":"),
-                                    ),
-                                    "cwd": str(corpus),
-                                    "environment": "{}",
-                                    "evidence_root": str(root / "evidence"),
-                                    "tools": tools,
-                                    "max_turns": "6",
-                                    "context_profile": profile,
-                                },
+                                options=options,
                             )
                         )
 
@@ -949,7 +970,6 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 "model": "fixture-model",
                 "tools": "read,grep",
                 "max_turns": "4",
-                "context_profile": "level3",
             }
             non_executable = root / "SECRET-NON-EXECUTABLE"
             non_executable.write_text("#!/bin/sh\n")
@@ -964,7 +984,9 @@ class DefaultRuntimeFactoryTests(unittest.TestCase):
                 {"tools": " read,grep"},
                 {"provider": " fixture-provider"},
                 {"model": "fixture-model "},
-                {"context_profile": "level3 "},
+                {"context_profile": "level3"},
+                {"context_policy": "level3"},
+                {"context_policy": '{"tool_result_chars": 20000}'},
                 {"max_turns": "04"},
                 {"cwd": str(cwd / ".." / "cwd")},
                 {"evidence_root": str(symlink_root)},

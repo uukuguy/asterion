@@ -3855,3 +3855,4 @@
 - 13:04 Complete example and provider conversion remain specs [0fca6e23, ee0e0ef3]. Product provider dci-agent-lite is still live. No plan.
 - 13:04 Final handoff. No example process remains. origin/main was 18808a14. This handoff commit stays local.
 - 15:10 DCI research contract requires filesystem.read, shell, policy.context-management, and policy.local-corpus, and declares answer, location, and trajectory artifacts. pi.reference accepts read,bash or read,grep and context profiles level0-level4. The profile is stored and the context extension is not loaded. No model call. dci-agent-lite remains.
+- 15:48 pi.reference launches any canonical subset of read, grep, and bash and advertises only those tools. Optional context_policy loads the runtime extension. level0-level4 stay in the comparison package. Claude's public factory no longer accepts a context level. No model call.

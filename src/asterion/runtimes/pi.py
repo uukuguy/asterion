@@ -96,7 +96,7 @@ class PiRuntimeClient:
         provider: str | None = None,
         model: str | None = None,
         tools: tuple[str, ...] = (),
-        context_profile: str | None = None,
+        context_policy: Mapping[str, int] | None = None,
     ) -> None:
         if not command:
             raise ValueError("Pi runtime command must not be empty")
@@ -149,7 +149,17 @@ class PiRuntimeClient:
         self._provider = provider
         self._model = model
         self._tools = tuple(tools)
-        self._context_profile = context_profile
+        if context_policy is not None and (
+            not isinstance(context_policy, Mapping)
+            or any(
+                type(key) is not str or isinstance(item, bool) or type(item) is not int
+                for key, item in context_policy.items()
+            )
+        ):
+            raise ValueError("Pi runtime context policy is invalid")
+        self._context_policy = (
+            None if context_policy is None else dict(context_policy)
+        )
         self._running = False
 
     @property

@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from asterion.runtime.defaults import PI_CAPABILITIES, default_runtime_factory_registry
+from asterion.runtime.defaults import default_runtime_factory_registry
 from asterion.runtime.factory import RuntimeFactoryContext, RuntimeFactoryError
 from asterion.runtime.host import RunRequest
 from asterion.runtime.protocol import ProtocolError
@@ -282,7 +282,7 @@ class PiExtensionFactoryTests(unittest.TestCase):
         self.assertNotIn(str(extension), runtime._command)
         self.assertEqual(
             runtime.manifest.capabilities,
-            tuple(sorted((*PI_CAPABILITIES, "prime.tool.ipython"))),
+            ("filesystem.read", "pi.tool.grep", "prime.tool.ipython"),
         )
         self.assertNotIn(descriptor, runtime._inherited_fds)
         self.assertEqual(len(runtime._inherited_fds), 2)
@@ -691,7 +691,9 @@ export default function registerPrimeIpython(pi) {
                 )
             )
 
-        self.assertEqual(runtime.manifest.capabilities, PI_CAPABILITIES)
+        self.assertEqual(
+            runtime.manifest.capabilities, ("filesystem.read", "pi.tool.grep")
+        )
         self.assertNotIn("--extension", runtime._command)
         self.assertEqual(runtime._inherited_fds, ())
         self.assertEqual(runtime._env, {"BASE_RUNTIME_VALUE": "base"})

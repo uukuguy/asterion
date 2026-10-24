@@ -63,7 +63,6 @@ class ClaudeCodeRuntimeClient:
         agent_provider: str | None = None,
         agent_model: str | None = None,
         reasoning: str | None = None,
-        context_profile: str | None = None,
         run_process: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     ) -> None:
         self._executable = executable
@@ -80,14 +79,11 @@ class ClaudeCodeRuntimeClient:
             raise ValueError("Claude Code tools are invalid")
         if reasoning not in {None, "low", "medium", "high"}:
             raise ValueError("Claude Code reasoning is invalid")
-        if context_profile not in {None, "level3"}:
-            raise ValueError("Claude Code context profile is invalid")
         self._tools = tuple(tools)
         self._evidence_root = Path(evidence_root) if evidence_root is not None else None
         self._agent_provider = agent_provider
         self._agent_model = agent_model
         self._reasoning = reasoning
-        self._context_profile = context_profile
         self._run_process = run_process
         self._completed_runs: dict[str, Path] = {}
         self._pathlight_observations: dict[str, dict[str, object]] = {}
@@ -166,7 +162,6 @@ class ClaudeCodeRuntimeClient:
                         agent_provider=self._agent_provider,
                         agent_model=self._agent_model,
                         reasoning=self._reasoning,
-                        context_profile=self._context_profile,
                         run_process=self._run_process,
                         cancelled=lambda: local_cancel.is_set()
                         or (signal is not None and signal.cancelled),
@@ -260,7 +255,6 @@ def build_claude_command(
     max_turns: int = 4,
     agent_model: str | None = None,
     reasoning: str | None = None,
-    context_profile: str | None = None,
 ) -> list[str]:
     if isinstance(max_turns, bool) or not isinstance(max_turns, int) or max_turns <= 0:
         raise ValueError("Claude Code max turns is invalid")
@@ -295,17 +289,6 @@ def build_claude_command(
         command.extend(("--model", agent_model))
     if reasoning:
         command.extend(("--effort", reasoning))
-    if context_profile:
-        if context_profile != "level3":
-            raise ValueError("Claude Code context profile is invalid")
-        command.extend(
-            (
-                "--append-system-prompt",
-                "DCI context profile level3 is active: cap tool results at 20000 "
-                "characters; at 240000 context characters compact earlier context "
-                "while retaining the 12 most recent turns.",
-            )
-        )
     return command
 
 
@@ -351,7 +334,6 @@ def run_claude_code(
     agent_provider: str | None = None,
     agent_model: str | None = None,
     reasoning: str | None = None,
-    context_profile: str | None = None,
     run_process: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
     cancelled: Callable[[], bool] | None = None,
 ) -> dict[str, Any]:
@@ -389,7 +371,6 @@ def run_claude_code(
             "agent_provider": agent_provider,
             "agent_model": agent_model,
             "reasoning": reasoning,
-            "context_profile": context_profile,
             "tools": tools,
             "allowed_tools": tools,
             "max_turns": max_turns,
@@ -409,7 +390,6 @@ def run_claude_code(
         max_turns=max_turns,
         agent_model=agent_model,
         reasoning=reasoning,
-        context_profile=context_profile,
     )
     if run_process is subprocess.run:
         completed = _run_owned_process(
