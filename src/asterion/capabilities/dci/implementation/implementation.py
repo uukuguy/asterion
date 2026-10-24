@@ -16,6 +16,7 @@ from asterion.capabilities.dci.implementation._runtime import (
     RuntimeRequest,
     event_mappings,
 )
+from asterion.documents.tools import DocumentToolError, verify_public_anchor
 
 
 ANSWER_MEDIA_TYPE = "application/vnd.dci.research.answer+json"
@@ -36,7 +37,7 @@ class DciLocalResearchImplementation:
     async def execute(
         self, invocation: CapabilityInvocation
     ) -> CapabilityExecutionResult:
-        _require_local_corpus(invocation)
+        corpus = _require_local_corpus(invocation)
         required = invocation.manifest["requires_capabilities"]
         policies = invocation.manifest["requires_policies"]
         if required != _REQUIRED_CAPABILITIES or policies != _REQUIRED_POLICIES:
@@ -55,7 +56,7 @@ class DciLocalResearchImplementation:
                     )
                 ]
             )
-            answer_uri, locations, trajectory = _core_evidence(events)
+            answer_uri, locations, trajectory = _core_evidence(events, corpus)
         except (RuntimeEventError, TypeError, ValueError, RuntimeError):
             raise CapabilityExecutionError(
                 "research runtime execution failed"
@@ -101,13 +102,14 @@ _PATH_KEYS = ("path", "file_path", "file")
 
 def _core_evidence(
     events: Sequence[Mapping[str, object]],
+    corpus: Path,
 ) -> tuple[str, Mapping[str, object], Mapping[str, object]]:
     answer_uri: str | None = None
     artifact_paths: list[str] = []
     artifact_calls: list[str] = []
     calls_by_id: dict[str, tuple[str, Mapping[str, object]]] = {}
     call_order: list[str] = []
-    result_ids: set[str] = set()
+    result_errors: dict[str, bool] = {}
     for event in events:
         event_type = event.get("type")
         payload = event.get("payload")
@@ -138,23 +140,33 @@ def _core_evidence(
             call_order.append(call_id)
         elif event_type == "tool.result":
             call_id = payload.get("call_id")
+            is_error = payload.get("is_error")
             if (
                 not isinstance(call_id, str)
                 or call_id not in calls_by_id
-                or call_id in result_ids
+                or call_id in result_errors
+                or not isinstance(is_error, bool)
             ):
                 raise CapabilityExecutionError(
                     "research runtime evidence is unavailable"
                 )
-            result_ids.add(call_id)
+            result_errors[call_id] = is_error
+    anchors: list[Mapping[str, object]] = []
     if call_order:
-        if set(call_order) != result_ids:
+        if set(call_order) != set(result_errors):
             raise CapabilityExecutionError("research runtime evidence is unavailable")
         paths: list[str] = []
         calls: list[str] = []
         for call_id in call_order:
             name, arguments = calls_by_id[call_id]
             calls.append(name)
+            if name.casefold() == "document-read":
+                if result_errors[call_id]:
+                    continue
+                document, anchor = _verified_document_anchor(arguments, corpus)
+                paths.append(document)
+                anchors.append(anchor)
+                continue
             location = _tool_location(name, arguments)
             if location is not None:
                 paths.append(location)
@@ -163,7 +175,27 @@ def _core_evidence(
         calls = artifact_calls
     if answer_uri is None or not paths or not calls:
         raise CapabilityExecutionError("research runtime evidence is unavailable")
-    return answer_uri, {"paths": tuple(paths)}, {"calls": tuple(calls)}
+    locations: dict[str, object] = {"paths": tuple(paths)}
+    if anchors:
+        locations["anchors"] = tuple(anchors)
+    return answer_uri, locations, {"calls": tuple(calls)}
+
+
+def _verified_document_anchor(
+    arguments: Mapping[str, object], corpus: Path
+) -> tuple[str, Mapping[str, object]]:
+    if set(arguments) != {"anchor"} or not isinstance(arguments["anchor"], Mapping):
+        raise CapabilityExecutionError("research runtime evidence is unavailable")
+    try:
+        anchor = verify_public_anchor(corpus, arguments["anchor"])
+    except DocumentToolError:
+        raise CapabilityExecutionError(
+            "research runtime evidence is unavailable"
+        ) from None
+    document = anchor["document"]
+    if not isinstance(document, str):
+        raise CapabilityExecutionError("research runtime evidence is unavailable")
+    return document, anchor
 
 
 def _tool_call(

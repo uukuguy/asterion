@@ -283,6 +283,7 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             result.artifacts[0]["value"]["answer_artifact_uri"], "final.txt"
         )
+        self.assertNotIn("anchors", result.artifacts[1]["value"])
         rendered = repr(result)
         for secret in (
             "SECRET-TOOL-OUTPUT",
