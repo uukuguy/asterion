@@ -638,6 +638,8 @@ class GridLiveOptionTests(unittest.IsolatedAsyncioTestCase):
                 str(tree["cli"]),
                 "--mode",
                 "rpc",
+                "--thinking",
+                "off",
             ]
             self.assertEqual(
                 options.runtime_options["command"],

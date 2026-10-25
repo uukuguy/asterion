@@ -139,7 +139,7 @@ def build_grid_options(
     environment["PI_CODING_AGENT_DIR"] = agent
     runtime_options = {
         "command": json.dumps(
-            [node, str(cli), "--mode", "rpc"],
+            [node, str(cli), "--mode", "rpc", "--thinking", "off"],
             ensure_ascii=False,
             separators=(",", ":"),
         ),
