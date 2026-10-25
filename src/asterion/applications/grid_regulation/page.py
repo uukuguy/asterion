@@ -184,13 +184,29 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--open", action="store_true")
     args = parser.parse_args(argv)
+    from dotenv import load_dotenv
+
+    from asterion.applications.grid_regulation.live import (
+        LiveGridResearch,
+        operator_evidence_root,
+        repository_root,
+    )
+
     try:
+        repo = repository_root()
+        env_file = repo / ".env"
+        if env_file.is_file():
+            load_dotenv(env_file, override=False)
         server = serve(
             args.corpus,
             port=args.port,
-            research=UnavailableResearch(),
+            research=LiveGridResearch(
+                os.environ,
+                evidence_root=operator_evidence_root(repo),
+                repo=repo,
+            ),
         )
-    except GridRegulationPageError:
+    except (GridRegulationPageError, RegulationCitationError):
         return 2
     url = f"http://{_HOST}:{server.server_address[1]}/"
     print(url)
