@@ -7,27 +7,27 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f3f6fa;
+      --bg: #f1f5f9;
       --chrome: #ffffff;
-      --sheet: #fffbf5;
-      --ink: #0f172a;
-      --muted: #475569;
+      --sheet: #ffffff;
+      --ink: #1e293b;
+      --muted: #334155;
       --line: #e2e8f0;
-      --sheet-line: #e6ddd0;
+      --sheet-line: #e2e8f0;
+      --head: #eff6ff;
       --primary: #1e3a8a;
-      --primary-press: #172e6e;
+      --primary-press: #172554;
       --on-primary: #ffffff;
       --gold: #92400e;
       --gold-bg: #fef3c7;
-      --mark: #f6d98a;
+      --mark: #fde68a;
       --mark-ink: #1c1917;
       --danger: #b91c1c;
       --danger-bg: #fef2f2;
       --focus: #1e3a8a;
-      --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 12px 32px rgba(15, 23, 42, 0.05);
-      --sans: "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
-      --serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", "PMingLiU", serif;
-      --mono: "SF Mono", "Sarasa Mono SC", ui-monospace, monospace;
+      --shadow: 0 1px 2px rgba(15, 23, 42, 0.05), 0 8px 24px rgba(15, 23, 42, 0.04);
+      --sans: "PingFang SC", "Hiragino Sans GB", "Heiti SC", "Noto Sans SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif;
+      --mono: "SF Mono", "Maple Mono NF CN", ui-monospace, monospace;
     }
 
     @media (prefers-color-scheme: dark) {
@@ -35,11 +35,12 @@
         color-scheme: dark;
         --bg: #0b1220;
         --chrome: #111827;
-        --sheet: #17140f;
+        --sheet: #0f172a;
         --ink: #f8fafc;
         --muted: #cbd5e1;
         --line: #334155;
-        --sheet-line: #3f382e;
+        --sheet-line: #334155;
+        --head: #1e293b;
         --primary: #dbeafe;
         --primary-press: #eff6ff;
         --on-primary: #0f172a;
@@ -68,7 +69,8 @@
         var(--bg);
       font-family: var(--sans);
       font-size: 16px;
-      line-height: 1.5;
+      font-weight: 400;
+      line-height: 1.6;
       padding-top: env(safe-area-inset-top);
     }
 
@@ -114,24 +116,25 @@
 
     h1 {
       margin: 2px 0 0;
-      font-family: var(--serif);
-      font-size: 36px;
+      font-size: 32px;
       font-weight: 600;
-      line-height: 1.2;
+      line-height: 1.25;
     }
 
     .lead {
       max-width: 40em;
       margin-top: 12px;
       font-size: 16px;
+      line-height: 1.7;
     }
 
     .guide { margin-top: 28px; }
 
     .guide-head h2, .panel h2, .sheet h2 {
       margin: 0;
-      font-size: 13px;
+      font-size: 20px;
       font-weight: 600;
+      line-height: 1.35;
     }
 
     .guide-head p {
@@ -269,7 +272,7 @@
     select:focus-visible,
     button:focus-visible,
     .check:focus-within {
-      outline: 2px solid var(--focus);
+      outline: 3px solid var(--focus);
       outline-offset: 2px;
     }
 
@@ -417,16 +420,15 @@
     .sheet:focus { outline: none; }
 
     .sheet:focus-visible {
-      outline: 2px solid var(--focus);
+      outline: 3px solid var(--focus);
       outline-offset: 2px;
     }
 
     .lede {
-      max-width: 38em;
+      max-width: 40em;
       margin: 16px 0 0;
-      font-family: var(--serif);
-      font-size: 20px;
-      line-height: 1.7;
+      font-size: 17px;
+      line-height: 1.75;
     }
 
     .sample-mark {
@@ -437,17 +439,17 @@
 
     .clause-title {
       margin: 8px 0 0;
-      font-family: var(--serif);
-      font-size: 28px;
+      font-size: 24px;
       font-weight: 600;
-      line-height: 1.3;
+      line-height: 1.35;
     }
 
     .role {
-      margin: 18px 0 8px;
+      margin: 24px 0 8px;
       color: var(--muted);
-      font-size: 13px;
+      font-size: 14px;
       font-weight: 600;
+      line-height: 1.4;
     }
 
     .recover {
@@ -494,11 +496,10 @@
       font-variant-numeric: tabular-nums;
     }
 
-    .answer, .passages { display: grid; gap: 14px; }
+    .answer, .passages { display: grid; gap: 16px; }
 
     .answer h3, .answer h4 {
-      margin: 8px 0 0;
-      font-family: var(--serif);
+      margin: 16px 0 0;
       font-weight: 600;
       line-height: 1.4;
     }
@@ -509,10 +510,9 @@
 
     .answer p, .answer li, .passage p {
       margin: 0;
-      max-width: 46em;
-      font-family: var(--serif);
-      font-size: 18px;
-      line-height: 1.8;
+      max-width: 40em;
+      font-size: 17px;
+      line-height: 1.75;
       overflow-wrap: anywhere;
     }
 
@@ -520,34 +520,55 @@
 
     .answer li + li, .passage p + p { margin-top: 8px; }
 
+    .table-scroll {
+      max-width: 100%;
+      overflow-x: auto;
+    }
+
     .answer table, .passage table {
-      width: 100%;
+      width: max-content;
+      min-width: 100%;
       border-collapse: collapse;
-      font-size: 15px;
-      line-height: 1.6;
+      font-size: 16px;
+      line-height: 1.65;
+      font-variant-numeric: tabular-nums;
     }
 
     .answer th, .answer td, .passage th, .passage td {
       border: 1px solid var(--sheet-line);
-      padding: 8px 10px;
+      padding: 10px 12px;
       text-align: left;
       vertical-align: top;
+      min-width: 5.5em;
     }
 
-    .answer th, .passage th { background: var(--gold-bg); font-weight: 600; }
+    .answer th, .passage th { background: var(--head); font-weight: 600; }
 
-    .passage { margin: 0; }
+    .passage {
+      margin: 0;
+      padding: 16px;
+      background: var(--bg);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+    }
 
     .passage figcaption {
-      margin: 0 0 6px;
-      color: var(--muted);
-      font-size: 13px;
+      margin: 0 0 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--line);
+      color: var(--ink);
+      font-size: 14px;
       font-weight: 600;
+      line-height: 1.4;
     }
 
-    .passage td.is-key { font-weight: 700; }
+    .answer td.is-key, .passage td.is-key {
+      background: var(--mark);
+      color: var(--mark-ink);
+      font-weight: 700;
+    }
 
-    mark, .passage td.is-key {
+    mark {
       background: var(--mark);
       color: var(--mark-ink);
       padding: 0 0.12em;
@@ -574,7 +595,7 @@
     }
 
     @media (max-width: 719px) {
-      h1 { font-size: 32px; }
+      h1 { font-size: 28px; }
       .panel, .sheet, .specimen { padding: 16px; }
       .lede, .answer p, .answer li, .passage p { font-size: 17px; }
     }
@@ -784,7 +805,7 @@
           });
           element.append(tr);
         });
-        root.append(element);
+        mountTable(root, element);
         table = null;
       }
 
@@ -923,8 +944,15 @@
         }
         element.append(tr);
       });
-      figure.append(element);
+      mountTable(figure, element);
       return figure;
+    }
+
+    function mountTable(parent, element) {
+      const scroller = document.createElement("div");
+      scroller.className = "table-scroll";
+      scroller.append(element);
+      parent.append(scroller);
     }
 
     function heading(text) {
