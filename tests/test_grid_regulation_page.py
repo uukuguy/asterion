@@ -39,6 +39,10 @@ class GridRegulationPageTests(unittest.TestCase):
         self.assertIn("查找处置规定", html)
         self.assertIn("正在阅读… ", html)
         self.assertIn("正在阅读这本规程。", html)
+        self.assertIn("renderMarkdown", html)
+        self.assertIn("groupEvidence", html)
+        self.assertIn("is-key", html)
+        self.assertNotIn("innerHTML", html)
         self.assertIn("这次查找没有完成", html)
         self.assertIn("可以写在答复里", html)
         self.assertIn("主变 冷却全停", html)
@@ -244,14 +248,17 @@ class GridRegulationPageTests(unittest.TestCase):
                 [item["kind"] for item in evidence],
                 ["docx-cell", "docx-cell", "docx-paragraph"],
             )
-            self.assertEqual(set(evidence[0]), {"document", "kind", "position"})
-            self.assertEqual(set(evidence[1]), {"document", "kind", "position"})
+            self.assertEqual(set(evidence[0]), {"document", "kind", "position", "text"})
+            self.assertEqual(set(evidence[1]), {"document", "kind", "position", "text"})
+            self.assertEqual(evidence[0]["text"], "雨天")
+            self.assertIn("不应大于4欧姆", evidence[1]["text"])
             self.assertNotIn("label", evidence[0])
             self.assertEqual(evidence[2]["label"], "5.2")
             self.assertEqual(
                 set(evidence[2]),
-                {"document", "kind", "label", "position"},
+                {"document", "kind", "label", "position", "text"},
             )
+            self.assertNotIn(question, evidence[2]["text"])
             empty = _post(
                 base + "/api/measures",
                 {

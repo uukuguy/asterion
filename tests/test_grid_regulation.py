@@ -387,6 +387,9 @@ class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
             "Do not use sed, awk, head, grep, or echo to print passages.txt", prompt
         )
         self.assertIn(f"This run allows {GRID_MAX_TURNS} tool turns", prompt)
+        self.assertIn("Write the answer in Chinese Markdown", prompt)
+        self.assertIn("Do not narrate the search in English or in Chinese", prompt)
+        self.assertIn("Bold the handling and each numeric limit", prompt)
         self.assertIn("rg -n", prompt)
         self.assertIn("minus at least one", prompt)
         self.assertIn("never below 1", prompt)
@@ -414,8 +417,10 @@ class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
         for item in found.evidence:
             self.assertEqual(
                 set(item) - {"label"},
-                {"document", "kind", "position"},
+                {"document", "kind", "position", "text"},
             )
+        self.assertEqual(found.evidence[0]["text"], "雨天")
+        self.assertIn("不应大于4欧姆", found.evidence[1]["text"])
         rendered = repr(research.result)
         self.assertNotIn("不应大于4欧姆", rendered)
         self.assertNotIn("雨天", rendered)

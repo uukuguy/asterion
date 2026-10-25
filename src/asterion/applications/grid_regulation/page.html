@@ -494,17 +494,60 @@
       font-variant-numeric: tabular-nums;
     }
 
-    blockquote {
+    .answer, .passages { display: grid; gap: 14px; }
+
+    .answer h3, .answer h4 {
+      margin: 8px 0 0;
+      font-family: var(--serif);
+      font-weight: 600;
+      line-height: 1.4;
+    }
+
+    .answer h3 { font-size: 22px; }
+
+    .answer h4 { font-size: 18px; }
+
+    .answer p, .answer li, .passage p {
       margin: 0;
-      max-width: 40em;
+      max-width: 46em;
       font-family: var(--serif);
       font-size: 18px;
       line-height: 1.8;
-      white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
 
-    mark {
+    .answer ul, .answer ol { margin: 0; padding-left: 1.3em; }
+
+    .answer li + li, .passage p + p { margin-top: 8px; }
+
+    .answer table, .passage table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .answer th, .answer td, .passage th, .passage td {
+      border: 1px solid var(--sheet-line);
+      padding: 8px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .answer th, .passage th { background: var(--gold-bg); font-weight: 600; }
+
+    .passage { margin: 0; }
+
+    .passage figcaption {
+      margin: 0 0 6px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .passage td.is-key { font-weight: 700; }
+
+    mark, .passage td.is-key {
       background: var(--mark);
       color: var(--mark-ink);
       padding: 0 0.12em;
@@ -533,7 +576,7 @@
     @media (max-width: 719px) {
       h1 { font-size: 32px; }
       .panel, .sheet, .specimen { padding: 16px; }
-      .lede, blockquote { font-size: 17px; }
+      .lede, .answer p, .answer li, .passage p { font-size: 17px; }
     }
 
     @media (prefers-reduced-motion: reduce) {
@@ -648,12 +691,6 @@
     const button = document.querySelector("#search");
     const buttonLabel = document.querySelector("#search-label");
 
-    const kinds = {
-      "docx-paragraph": "段落",
-      "docx-cell": "表格",
-      "pdf-text": "页面",
-    };
-
     function toolsFor(name) {
       if (!name || name === "*") return "docx,pdf";
       if (name.endsWith(".pdf")) return "pdf";
@@ -666,25 +703,228 @@
       return (bytes / (1024 * 1024)).toFixed(1) + " MB";
     }
 
-    function where(anchor) {
-      const position = anchor.position;
-      if (anchor.kind === "docx-paragraph") {
-        const bits = ["序号 " + position.paragraph];
-        if (Object.prototype.hasOwnProperty.call(position, "numbering_id")) {
-          bits.push("编号 " + position.numbering_id);
-        }
-        return bits.join(" · ");
+    function visibleReply(text) {
+      const withoutIds = String(text || "")
+        .replace(/[（(]\s*P\d{6}(?:\s*[–—-]\s*P\d{6})?\s*[）)]/g, "")
+        .replace(/P\d{6}(?:\s*[–—-]\s*P\d{6})?/g, "")
+        .replace(/[（(]\s*[）)]/g, "");
+      const lines = withoutIds.split("\n");
+      if (lines.length) {
+        lines[0] = lines[0].replace(
+          /^(?:[A-Za-z][A-Za-z']*(?:[ \t]+[A-Za-z][A-Za-z']*){2,})[ \t]*[.。]?[ \t]*/,
+          ""
+        );
       }
-      if (anchor.kind === "docx-cell") {
-        return "表 " + position.table + " · 行 " + position.row + " · 格 " + position.cell;
-      }
-      return "第 " + position.page + " 页 · 行 " + position.item;
+      return lines.filter((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || /[\u4e00-\u9fff]/.test(trimmed)) return true;
+        const words = trimmed.match(/[A-Za-z][A-Za-z']*/g) || [];
+        return words.length < 3;
+      }).join("\n");
     }
 
-    function excerpt(text) {
-      const block = document.createElement("blockquote");
-      block.textContent = text || "";
-      return block;
+    function appendInline(parent, text) {
+      const pattern = /\*\*([^*]+)\*\*/g;
+      let last = 0;
+      let match = pattern.exec(text);
+      while (match) {
+        if (match.index > last) parent.append(text.slice(last, match.index));
+        const marked = document.createElement("mark");
+        marked.textContent = match[1];
+        parent.append(marked);
+        last = match.index + match[0].length;
+        match = pattern.exec(text);
+      }
+      if (last < text.length) parent.append(text.slice(last));
+    }
+
+    function tableCells(line) {
+      return line.trim().replace(/^\|/, "").replace(/\|$/, "").split("|").map((cell) => cell.trim());
+    }
+
+    function isTableLine(line) {
+      const trimmed = line.trim();
+      return trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.includes("|", 1);
+    }
+
+    function isTableRule(line) {
+      return /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(line.trim());
+    }
+
+    function renderMarkdown(text) {
+      const root = document.createElement("div");
+      root.className = "answer";
+      const lines = visibleReply(text).split("\n");
+      let paragraph = [];
+      let list = null;
+      let table = null;
+
+      function flushParagraph() {
+        if (!paragraph.length) return;
+        const block = document.createElement("p");
+        appendInline(block, paragraph.join(" "));
+        root.append(block);
+        paragraph = [];
+      }
+
+      function flushList() {
+        list = null;
+      }
+
+      function flushTable() {
+        if (!table) return;
+        const element = document.createElement("table");
+        table.forEach((row, rowNumber) => {
+          const tr = document.createElement("tr");
+          row.forEach((value, index) => {
+            const cell = document.createElement(rowNumber === 0 ? "th" : "td");
+            appendInline(cell, value);
+            if (rowNumber > 0 && index === table.keyColumn) cell.className = "is-key";
+            tr.append(cell);
+          });
+          element.append(tr);
+        });
+        root.append(element);
+        table = null;
+      }
+
+      lines.forEach((line) => {
+        const trimmed = line.trim();
+        if (!trimmed) {
+          flushParagraph();
+          flushList();
+          flushTable();
+          return;
+        }
+        if (isTableLine(trimmed)) {
+          flushParagraph();
+          flushList();
+          if (isTableRule(trimmed)) return;
+          const cells = tableCells(trimmed);
+          if (!table) {
+            const named = cells.findIndex((cell) => cell.includes("处置"));
+            table = [];
+            table.keyColumn = named >= 0 ? named : (cells.length > 1 ? cells.length - 1 : -1);
+          }
+          table.push(cells);
+          return;
+        }
+        flushTable();
+        const heading = /^(#{1,3})\s+(.+)$/.exec(trimmed);
+        if (heading) {
+          flushParagraph();
+          flushList();
+          const title = document.createElement(heading[1].length === 1 ? "h3" : "h4");
+          appendInline(title, heading[2]);
+          root.append(title);
+          return;
+        }
+        const item = /^(?:[-*]|\d+\.)\s+(.+)$/.exec(trimmed);
+        if (item) {
+          flushParagraph();
+          if (!list) {
+            list = document.createElement(trimmed.startsWith("-") || trimmed.startsWith("*") ? "ul" : "ol");
+            root.append(list);
+          }
+          const li = document.createElement("li");
+          appendInline(li, item[1]);
+          list.append(li);
+          return;
+        }
+        flushList();
+        paragraph.push(trimmed);
+      });
+      flushParagraph();
+      flushList();
+      flushTable();
+      return root;
+    }
+
+    function groupEvidence(items) {
+      const groups = [];
+      let table = null;
+      let prose = null;
+
+      function push(group) {
+        if (group) groups.push(group);
+      }
+
+      (items || []).forEach((item) => {
+        if (item.kind === "docx-cell") {
+          push(prose);
+          prose = null;
+          const key = item.document + "\0" + item.position.table;
+          if (!table || table.key !== key) {
+            push(table);
+            table = { type: "table", key: key, document: item.document, label: "", rows: [] };
+          }
+          if (item.label) table.label = item.label;
+          let row = table.rows.find((candidate) => candidate.index === item.position.row);
+          if (!row) {
+            row = { index: item.position.row, cells: [] };
+            table.rows.push(row);
+          }
+          row.cells.push({ index: item.position.cell, text: item.text || "" });
+          return;
+        }
+        push(table);
+        table = null;
+        const label = item.label || "";
+        if (prose && prose.document === item.document && prose.label === label && prose.kind === item.kind) {
+          prose.parts.push(item.text || "");
+          return;
+        }
+        push(prose);
+        prose = { type: "text", document: item.document, label: label, kind: item.kind, parts: [item.text || ""] };
+      });
+      push(table);
+      push(prose);
+      return groups;
+    }
+
+    function passageCaption(group) {
+      const bits = [];
+      if (group.label) bits.push("条款 " + group.label);
+      bits.push(group.type === "table" ? "表格" : "正文");
+      return bits.join(" · ");
+    }
+
+    function renderPassage(group) {
+      const figure = document.createElement("figure");
+      figure.className = "passage";
+      const caption = document.createElement("figcaption");
+      caption.textContent = passageCaption(group);
+      figure.append(caption);
+      if (group.type === "text") {
+        group.parts.forEach((part) => {
+          const paragraph = document.createElement("p");
+          paragraph.textContent = part;
+          figure.append(paragraph);
+        });
+        return figure;
+      }
+      const rows = group.rows.slice().sort((left, right) => left.index - right.index);
+      const width = rows.reduce((max, row) => {
+        return Math.max(max, row.cells.reduce((end, cell) => Math.max(end, cell.index + 1), 0));
+      }, 0);
+      const header = rows[0] ? rows[0].cells.map((cell) => cell.text).join("") : "";
+      const named = (rows[0] ? rows[0].cells : []).findIndex((cell) => (cell.text || "").includes("处置"));
+      const keyColumn = named >= 0 ? named : (width > 1 ? width - 1 : -1);
+      const useHead = header.includes("处置") || header.includes("条件");
+      const element = document.createElement("table");
+      rows.forEach((row, rowNumber) => {
+        const tr = document.createElement("tr");
+        const byIndex = new Map(row.cells.map((cell) => [cell.index, cell.text]));
+        for (let index = 0; index < width; index += 1) {
+          const cell = document.createElement(useHead && rowNumber === 0 ? "th" : "td");
+          cell.textContent = byIndex.get(index) || "";
+          if (index === keyColumn && !(useHead && rowNumber === 0)) cell.className = "is-key";
+          tr.append(cell);
+        }
+        element.append(tr);
+      });
+      figure.append(element);
+      return figure;
     }
 
     function heading(text) {
@@ -728,20 +968,15 @@
       const role = document.createElement("p");
       role.className = "role";
       role.textContent = "答复";
-      result.append(role, excerpt(payload.reply));
       const evidenceTitle = document.createElement("p");
       evidenceTitle.className = "role";
       evidenceTitle.textContent = "引用证据";
-      result.append(evidenceTitle);
-      payload.evidence.forEach((item) => {
-        const line = document.createElement("p");
-        line.className = "where";
-        const kind = kinds[item.kind] || item.kind;
-        let text = item.document + " · " + kind + " · " + where(item);
-        if (item.label) text += " · 条款 " + item.label;
-        line.textContent = text;
-        result.append(line);
-      });
+      const passages = document.createElement("div");
+      passages.className = "passages";
+      const groups = groupEvidence(payload.evidence);
+      groups.forEach((group) => passages.append(renderPassage(group)));
+      result.append(role, renderMarkdown(payload.reply), evidenceTitle, passages);
+      return groups.length;
     }
 
     async function loadCorpus() {
@@ -847,8 +1082,8 @@
           formStatus.textContent = "没有找到。请按处置回复里的说明改完再查。";
           return;
         }
-        render(payload);
-        formStatus.textContent = "已写出答复，并附 " + payload.evidence.length + " 处引用。";
+        const cites = render(payload);
+        formStatus.textContent = "已写出答复，并附 " + cites + " 处引用。";
       } catch {
         clearResult("本地服务没有返回结果。请确认页面是从本地服务打开的，然后重新点「查找处置规定」。");
         formStatus.classList.add("is-alert");

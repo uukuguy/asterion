@@ -175,10 +175,15 @@ def fault_prompt(document: str, question: str) -> str:
                 "has not shown."
             ),
             (
-                "In the answer, clause numbers appear only as citations to "
-                "lines that were read. They may appear in that answer. They "
-                "are also marked on the evidence line when the passage is a "
-                "titled heading. They are not a second search key."
+                "Write the answer in Chinese Markdown. Do not narrate the "
+                "search in English or in Chinese. Do not write passage ids, "
+                "tool names, or file names. Use a heading for each part of "
+                "the handling. Use paragraphs and lists for prose. When the "
+                "handling is a table, write that table in Markdown, header "
+                "row included, with only the rows this question needs. Bold "
+                "the handling and each numeric limit. A clause number is a "
+                "citation beside the statement it supports. It is not a "
+                "second search key."
             ),
         )
     )
@@ -410,11 +415,13 @@ def _evidence(
                 run.append(nxt)
                 cursor += 1
             label = _row_label(source_root, run)
-            evidence.extend(_item(item, label) for item in run)
+            evidence.extend(
+                _item(item, label, read_span(source_root, item)) for item in run
+            )
             index = cursor
             continue
-        label = _heading_id(read_span(source_root, anchor))
-        evidence.append(_item(anchor, label))
+        text = read_span(source_root, anchor)
+        evidence.append(_item(anchor, _heading_id(text), text))
         index += 1
     return tuple(evidence)
 
@@ -439,11 +446,16 @@ def _cell(item: Mapping[str, object]) -> int:
     return cell if type(cell) is int else 0
 
 
-def _item(anchor: Mapping[str, object], label: str | None) -> dict[str, object]:
+def _item(
+    anchor: Mapping[str, object], label: str | None, text: str
+) -> dict[str, object]:
+    if type(text) is not str:
+        raise RegulationCitationError("regulation measures are unavailable")
     item = {
         "document": anchor["document"],
         "kind": anchor["kind"],
         "position": anchor["position"],
+        "text": text,
     }
     if type(label) is str:
         item["label"] = label
