@@ -447,11 +447,13 @@ class GridRegulationPageTests(unittest.TestCase):
         self.assertIn("\n.PHONY: dci-basic-example", makefile)
         self.assertIn(" grid-regulation\n", makefile)
         self.assertIn("\ngrid-regulation:\n", makefile)
+        recipe = makefile.split("\ngrid-regulation:\n", 1)[1].split("\n", 1)[0]
         self.assertIn(
             "python -m asterion.applications.grid_regulation.page "
-            '--corpus "$(GRID_CORPUS)" --port "$(GRID_PORT)" --open',
-            makefile,
+            '--corpus "$(GRID_CORPUS)" --port "$(GRID_PORT)"',
+            recipe,
         )
+        self.assertNotIn("--open", recipe)
         self.assertIn("GRID_CORPUS ?= $(CURDIR)/docs", makefile)
         self.assertIn("GRID_PORT ?= 8765", makefile)
         self.assertIn(

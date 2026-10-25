@@ -853,6 +853,6 @@ dci-runtime-context-example:
 native-dci-example:
 	$(UV_BIN) run --with "python-dotenv>=1.0.0" python examples/applications/native_dci.py --live
 
-# Local PDF and DOCX desk. It does not start Pi and does not call a model.
+# Local PDF and DOCX desk. It does not start Pi, call a model, or open a browser.
 grid-regulation:
-	exec $(UV_BIN) run python -m asterion.applications.grid_regulation.page --corpus "$(GRID_CORPUS)" --port "$(GRID_PORT)" --open
+	exec $(UV_BIN) run python -m asterion.applications.grid_regulation.page --corpus "$(GRID_CORPUS)" --port "$(GRID_PORT)"
