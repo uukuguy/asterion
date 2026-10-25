@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import shutil
@@ -27,13 +26,11 @@ from asterion.applications.grid_regulation.answer import (
     fault_prompt,
 )
 from asterion.applications.grid_regulation.live import (
-    GRID_CANCEL_SECONDS,
     GRID_CONTEXT_POLICY,
     GRID_MAX_TURNS,
     LiveGridResearch,
     _Cancel,
     answer_evidence_path,
-    arm_grid_cancel,
     build_grid_options,
     exact_directory,
     grid_run_id,
@@ -884,19 +881,20 @@ class GridLiveOptionTests(unittest.IsolatedAsyncioTestCase):
             / "final.txt",
         )
 
-    async def test_cancel_is_armed_for_300_seconds(self) -> None:
+    def test_desk_does_not_stop_on_a_clock(self) -> None:
+        source = (
+            PROJECT / "src/asterion/applications/grid_regulation/live.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("call_later", source)
+        self.assertNotIn("GRID_CANCEL_SECONDS", source)
+        self.assertNotIn("arm_grid_cancel", source)
+        self.assertIn('GRID_MAX_TURNS = "32"', source)
         cancel = _Cancel()
         self.assertFalse(cancel.cancelled)
-        loop = asyncio.get_running_loop()
-        handle = arm_grid_cancel(cancel)
-        self.assertEqual(GRID_CANCEL_SECONDS, 300)
-        self.assertAlmostEqual(
-            handle.when() - loop.time(), GRID_CANCEL_SECONDS, delta=1
-        )
-        handle.cancel()
-        self.assertFalse(cancel.cancelled)
+        other = _Cancel()
         cancel.cancel()
         self.assertTrue(cancel.cancelled)
+        self.assertFalse(other.cancelled)
 
 
 def _pi_tree(base: Path) -> dict[str, Path]:

@@ -8,6 +8,7 @@ import errno
 import hashlib
 import json
 import os
+import re
 import secrets
 import stat
 import sys
@@ -42,44 +43,190 @@ from asterion.runtimes.pi_extensions import PiExtensionLease
 from asterion.runtimes.pi_rpc import PiChildProcess, PiStdoutLimitExceeded
 
 
-# Operator progress sees a turn number or a tool name. It does not see arguments,
-# results, or answer text. Unset, the runtime stays silent.
+# Operator progress sees a turn, the sentence written before a tool, or a
+# read/bash/grep start. A read names a safe file and its line window. A search
+# names passages.txt or contents.txt when that name is a whole token. The
+# command, pattern, tool result, and final answer stay off this channel.
+# Unset, the runtime stays silent.
 PI_PROGRESS: ContextVar[Callable[[str, str], None] | None] = ContextVar(
     "asterion_pi_progress",
     default=None,
 )
+_PROGRESS_NOTE: ContextVar[dict[str, str] | None] = ContextVar(
+    "asterion_pi_progress_note",
+    default=None,
+)
 _PROGRESS_TOOLS = frozenset({"read", "bash", "grep"})
+_PROGRESS_FILES = ("passages.txt", "contents.txt")
+_PROGRESS_BLOCKED = ("key", "token", "secret", "authorization")
+_SAFE_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,40}\Z")
+_DECISION_KEEP = 240
+_DECISION_LIMIT = 77
+_MAX_PROGRESS_LINE = 999_999
 
 
 def _report_pi_progress(
     event: Mapping[str, object], *, turn: int | None = None
 ) -> None:
-    """Tell the operator that one turn or one named tool started."""
+    """Tell the operator that one turn, one decision, or one tool started."""
 
     event_type = event.get("type")
     if event_type == "turn_start":
+        _clear_decision()
         if type(turn) is int and turn > 0:
             _notify_progress("turn", str(turn))
         return
+    if PI_PROGRESS.get() is None:
+        return
+    if event_type == "message_update":
+        _remember_decision(event)
+        return
     if event_type != "tool_execution_start":
         return
+    note = _take_decision()
+    if note:
+        _notify_progress("decision", note)
     name = event.get("toolName")
-    if type(name) is str:
-        _notify_progress("tool", name)
+    if type(name) is str and name in _PROGRESS_TOOLS:
+        _notify_progress("tool", _tool_progress_detail(name, event.get("args")))
 
 
 def _notify_progress(kind: str, detail: str) -> None:
     callback = PI_PROGRESS.get()
-    if callback is None or kind not in {"turn", "tool"}:
+    if callback is None or kind not in {"turn", "tool", "decision"}:
         return
-    if kind == "tool" and detail not in _PROGRESS_TOOLS:
-        return
-    if kind == "turn" and not detail.isdigit():
+    if kind == "tool":
+        if detail.split(" ", 1)[0] not in _PROGRESS_TOOLS:
+            return
+    elif kind == "turn":
+        if not detail.isdigit():
+            return
+    elif not detail or "\n" in detail or "\r" in detail:
         return
     try:
         callback(kind, detail)
     except Exception:
         return
+
+
+def _note_state() -> dict[str, str]:
+    state = _PROGRESS_NOTE.get()
+    if state is None:
+        state = {"thinking": "", "text": ""}
+        _PROGRESS_NOTE.set(state)
+    return state
+
+
+def _clear_decision() -> None:
+    state = _PROGRESS_NOTE.get()
+    if state is not None:
+        state["thinking"] = ""
+        state["text"] = ""
+
+
+def _remember_decision(event: Mapping[str, object]) -> None:
+    value = event.get("assistantMessageEvent")
+    if not isinstance(value, Mapping):
+        return
+    kind = value.get("type")
+    delta = value.get("delta")
+    if kind not in {"thinking_delta", "text_delta"} or type(delta) is not str:
+        return
+    slot = "thinking" if kind == "thinking_delta" else "text"
+    state = _note_state()
+    current = state[slot]
+    if len(current) >= _DECISION_KEEP:
+        return
+    state[slot] = current + delta[: _DECISION_KEEP - len(current)]
+
+
+def _take_decision() -> str:
+    state = _PROGRESS_NOTE.get()
+    if state is None:
+        return ""
+    raw = state["thinking"].strip() or state["text"]
+    state["thinking"] = ""
+    state["text"] = ""
+    flat = " ".join(raw.split())
+    if not flat:
+        return ""
+    if len(flat) > _DECISION_LIMIT:
+        flat = flat[: _DECISION_LIMIT - 1].rstrip() + "…"
+    if any(word in flat.casefold() for word in _PROGRESS_BLOCKED):
+        return ""
+    return flat
+
+
+def _tool_progress_detail(name: str, args: object) -> str:
+    if not isinstance(args, Mapping):
+        return name
+    if name == "read":
+        return _read_progress_detail(args)
+    return _search_progress_detail(name, args)
+
+
+def _read_progress_detail(args: Mapping[str, object]) -> str:
+    base = _progress_basename(args.get("path", args.get("file_path")))
+    if base is None:
+        return "read"
+    offset = _progress_line(args.get("offset"))
+    limit = _progress_line(args.get("limit"))
+    if offset is None and limit is None:
+        return f"read {base}"
+    if offset is None:
+        offset = 1
+    if limit is None:
+        return f"read {base} {offset}"
+    return f"read {base} {offset} {limit}"
+
+
+def _search_progress_detail(name: str, args: Mapping[str, object]) -> str:
+    texts = [
+        value for key in ("command", "path") if type(value := args.get(key)) is str
+    ]
+    for filename in _PROGRESS_FILES:
+        if any(_filename_present(text, filename) for text in texts):
+            return f"{name} {filename}"
+    return name
+
+
+def _filename_present(text: str, filename: str) -> bool:
+    start = 0
+    length = len(filename)
+    while True:
+        found = text.find(filename, start)
+        if found < 0:
+            return False
+        before = text[found - 1] if found else ""
+        after_index = found + length
+        after = text[after_index] if after_index < len(text) else ""
+        if _name_boundary(before) and _name_boundary(after):
+            return True
+        start = found + 1
+
+
+def _name_boundary(char: str) -> bool:
+    return not char or not (char.isalnum() or char in "._-")
+
+
+def _progress_basename(value: object) -> str | None:
+    if type(value) is not str or not value or "\n" in value or "\r" in value:
+        return None
+    parts = value.replace("\\", "/").split("/")
+    if any(part == ".." for part in parts):
+        return None
+    segment = parts[-1]
+    if ".." in segment or _SAFE_BASENAME.fullmatch(segment) is None:
+        return None
+    if any(word in segment.casefold() for word in _PROGRESS_BLOCKED):
+        return None
+    return segment
+
+
+def _progress_line(value: object) -> int | None:
+    if type(value) is not int or not 1 <= value <= _MAX_PROGRESS_LINE:
+        return None
+    return value
 
 
 # One Pi tool event repeats the tool's own truncated body in details.
@@ -518,6 +665,7 @@ async def _collect_runtime_snapshot(
                 adapter.consume(event)
                 continue
             if event_type == "message_update":
+                _report_pi_progress(event)
                 delta = _assistant_delta(event)
                 if delta is not None:
                     answer_bytes += len(delta.encode())

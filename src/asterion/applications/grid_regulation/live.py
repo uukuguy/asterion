@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 import os
@@ -20,7 +19,6 @@ from uuid import uuid4
 from asterion.applications.grid_regulation.retrieve import RegulationCitationError
 from asterion.runtime.host import CancellationSignal
 
-GRID_CANCEL_SECONDS = 300
 GRID_MAX_TURNS = "32"
 GRID_CONTEXT_POLICY = '{"tool_result_chars":20000}'
 _IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
@@ -48,11 +46,38 @@ def write_desk_log(line: str) -> None:
         sys.stderr.flush()
 
 
+_LOG_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,40}\Z")
+
+
 def _desk_progress(kind: str, detail: str) -> None:
     if kind == "turn":
         write_desk_log(f"第 {detail} 轮")
+    elif kind == "decision":
+        write_desk_log(f"决定 {detail}")
     elif kind == "tool":
-        write_desk_log(f"打开 {detail}")
+        write_desk_log(_tool_log_line(detail))
+
+
+def _tool_log_line(detail: str) -> str:
+    parts = detail.split(" ")
+    if not parts or parts[0] not in {"read", "bash", "grep"}:
+        return ""
+    tool = parts[0]
+    name = parts[1] if len(parts) > 1 and _LOG_NAME.fullmatch(parts[1]) else ""
+    if tool == "read" and name:
+        if len(parts) == 3 and parts[2].isdigit():
+            return f"读 {name} 第 {int(parts[2])} 行起"
+        if len(parts) == 4 and parts[2].isdigit() and parts[3].isdigit():
+            start = int(parts[2])
+            limit = int(parts[3])
+            end = start + limit - 1
+            if limit == 1:
+                return f"读 {name} 第 {start} 行"
+            return f"读 {name} 第 {start}-{end} 行"
+        return f"读 {name}"
+    if tool in {"bash", "grep"}:
+        return f"搜索 {name}" if name else "搜索"
+    return f"打开 {tool}"
 
 
 @dataclass(frozen=True)
@@ -135,11 +160,6 @@ def answer_evidence_path(evidence_root: str, run_id: str) -> Path:
     return Path(evidence_root) / digest / "final.txt"
 
 
-def arm_grid_cancel(cancel: _Cancel) -> asyncio.TimerHandle:
-    loop = asyncio.get_running_loop()
-    return loop.call_later(GRID_CANCEL_SECONDS, cancel.cancel)
-
-
 def build_grid_options(
     corpus: Path | str,
     env: Mapping[str, str],
@@ -220,7 +240,6 @@ class LiveGridResearch:
     ) -> tuple[str, Mapping[str, object], tuple[str, ...]]:
         if signal is not None and signal.cancelled:
             _fail()
-        handle: asyncio.TimerHandle | None = None
         progress_var = None
         progress_token = None
         try:
@@ -231,8 +250,7 @@ class LiveGridResearch:
                 which=self._which,
                 repo=self._repo,
             )
-            cancel = _Cancel()
-            handle = arm_grid_cancel(cancel)
+            cancel = signal if signal is not None else _Cancel()
             from asterion.agents.native.application import (
                 NativeApplicationSpec,
                 NativeOperatorContext,
@@ -264,12 +282,8 @@ class LiveGridResearch:
         except Exception:
             _fail()
         finally:
-            try:
-                if progress_var is not None and progress_token is not None:
-                    progress_var.reset(progress_token)
-            finally:
-                if handle is not None:
-                    handle.cancel()
+            if progress_var is not None and progress_token is not None:
+                progress_var.reset(progress_token)
 
 
 def _fail() -> NoReturn:

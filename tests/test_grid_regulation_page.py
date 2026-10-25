@@ -11,7 +11,10 @@ from pathlib import Path
 from unittest.mock import patch
 
 from asterion.applications.grid_regulation.answer import ScriptedGridResearch
-from asterion.applications.grid_regulation.live import write_desk_log
+from asterion.applications.grid_regulation.live import (
+    _desk_progress,
+    write_desk_log,
+)
 from asterion.applications.grid_regulation.page import (
     desk_request_line,
     page_bytes,
@@ -78,29 +81,125 @@ class GridRegulationPageTests(unittest.TestCase):
             _report_pi_progress({"type": "turn_start"}, turn=1)
             _report_pi_progress(
                 {
+                    "type": "message_update",
+                    "assistantMessageEvent": {
+                        "type": "thinking_delta",
+                        "delta": "先看目录",
+                    },
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {
+                        "type": "text_delta",
+                        "delta": "SECRET-SPAN-BODY",
+                    },
+                }
+            )
+            _report_pi_progress(
+                {
                     "type": "tool_execution_start",
                     "toolName": "read",
-                    "args": {"path": "SECRET-SPAN-BODY"},
+                    "args": {
+                        "path": "/tmp/SECRET-SPAN-BODY/passages.txt",
+                        "offset": 12,
+                        "limit": 40,
+                    },
                 }
             )
             _report_pi_progress(
                 {
                     "type": "tool_execution_start",
                     "toolName": "bash",
-                    "args": {"command": "SECRET-SPAN-BODY"},
+                    "args": {"command": "rg -n SECRET-SPAN-BODY passages.txt"},
                 }
             )
             _report_pi_progress({"type": "tool_execution_start", "toolName": "sed"})
             _report_pi_progress(
                 {
                     "type": "message_update",
-                    "assistantMessageEvent": {"delta": "SECRET-SPAN-BODY"},
+                    "assistantMessageEvent": {
+                        "type": "text_delta",
+                        "delta": "这是最终答复不应出现",
+                    },
                 }
             )
             _report_pi_progress({"type": "turn_start"}, turn=0)
         finally:
             PI_PROGRESS.reset(token)
-        self.assertEqual(seen, [("turn", "1"), ("tool", "read"), ("tool", "bash")])
+        self.assertEqual(
+            seen,
+            [
+                ("turn", "1"),
+                ("decision", "先看目录"),
+                ("tool", "read passages.txt 12 40"),
+                ("tool", "bash passages.txt"),
+            ],
+        )
+        self.assertNotIn("SECRET", " ".join(detail for _, detail in seen))
+        later: list[tuple[str, str]] = []
+        token = PI_PROGRESS.set(lambda kind, detail: later.append((kind, detail)))
+        try:
+            _report_pi_progress({"type": "turn_start"}, turn=2)
+            _report_pi_progress(
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {
+                        "type": "text_delta",
+                        "delta": "打开叶子" + "甲" * 200,
+                    },
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "read",
+                    "args": {"path": "passages.txt", "offset": 12},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "grep",
+                    "args": {"path": "contents.txt", "pattern": "SECRET-SPAN-BODY"},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "bash",
+                    "args": {"command": "rg passages.txt.bak SECRET-SPAN-BODY"},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "read",
+                    "args": {
+                        "path": "../SECRET-SPAN-BODY",
+                        "offset": True,
+                        "limit": 4,
+                    },
+                }
+            )
+        finally:
+            PI_PROGRESS.reset(token)
+        self.assertEqual(later[0], ("turn", "2"))
+        self.assertEqual(later[1][0], "decision")
+        self.assertTrue(later[1][1].startswith("打开叶子"))
+        self.assertLessEqual(len(later[1][1]), 77)
+        self.assertTrue(later[1][1].endswith("…"))
+        self.assertEqual(
+            later[2:],
+            [
+                ("tool", "read passages.txt 12"),
+                ("tool", "grep contents.txt"),
+                ("tool", "bash"),
+                ("tool", "read"),
+            ],
+        )
+        self.assertNotIn("SECRET", " ".join(detail for _, detail in later))
 
         def _reject(kind: str, detail: str) -> None:
             raise RuntimeError(detail)
@@ -118,7 +217,27 @@ class GridRegulationPageTests(unittest.TestCase):
             write_desk_log("第 1 轮")
             write_desk_log("token SECRET-SPAN-BODY")
             write_desk_log("打开 read\nSECRET-SPAN-BODY")
-        self.assertEqual(captured.getvalue(), "第 1 轮\n")
+            _desk_progress("tool", "read passages.txt 12 40")
+            _desk_progress("tool", "read passages.txt 12")
+            _desk_progress("tool", "read passages.txt")
+            _desk_progress("tool", "read")
+            _desk_progress("tool", "bash passages.txt")
+            _desk_progress("tool", "grep contents.txt")
+            _desk_progress("tool", "bash")
+            _desk_progress("decision", "先看目录")
+            _desk_progress("decision", "secret plan")
+        self.assertEqual(
+            captured.getvalue(),
+            "第 1 轮\n"
+            "读 passages.txt 第 12-51 行\n"
+            "读 passages.txt 第 12 行起\n"
+            "读 passages.txt\n"
+            "打开 read\n"
+            "搜索 passages.txt\n"
+            "搜索 contents.txt\n"
+            "搜索\n"
+            "决定 先看目录\n",
+        )
         self.assertNotIn("SECRET", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
