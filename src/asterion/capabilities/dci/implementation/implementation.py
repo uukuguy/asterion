@@ -16,6 +16,7 @@ from asterion.capabilities.dci.implementation._runtime import (
     RuntimeRequest,
     event_mappings,
 )
+from asterion.documents.projection import anchors_for_passage_read
 from asterion.documents.tools import DocumentToolError, verify_public_anchor
 
 
@@ -110,6 +111,7 @@ def _core_evidence(
     calls_by_id: dict[str, tuple[str, Mapping[str, object]]] = {}
     call_order: list[str] = []
     result_errors: dict[str, bool] = {}
+    result_outputs: dict[str, object] = {}
     for event in events:
         event_type = event.get("type")
         payload = event.get("payload")
@@ -151,6 +153,7 @@ def _core_evidence(
                     "research runtime evidence is unavailable"
                 )
             result_errors[call_id] = is_error
+            result_outputs[call_id] = payload.get("output")
     anchors: list[Mapping[str, object]] = []
     if call_order:
         if set(call_order) != set(result_errors):
@@ -167,6 +170,17 @@ def _core_evidence(
                 paths.append(document)
                 anchors.append(anchor)
                 continue
+            if name.casefold() == "read":
+                recorded = _passage_anchors(
+                    corpus,
+                    arguments,
+                    result_outputs.get(call_id),
+                    result_errors[call_id],
+                )
+                if recorded is not None:
+                    paths.append(recorded[0])
+                    anchors.extend(recorded[1])
+                    continue
             location = _tool_location(name, arguments)
             if location is not None:
                 paths.append(location)
@@ -179,6 +193,28 @@ def _core_evidence(
     if anchors:
         locations["anchors"] = tuple(anchors)
     return answer_uri, locations, {"calls": tuple(calls)}
+
+
+def _passage_anchors(
+    corpus: Path,
+    arguments: Mapping[str, object],
+    output: object,
+    is_error: bool,
+) -> tuple[str, tuple[Mapping[str, object], ...]] | None:
+    raw = _argument_path(arguments)
+    if raw is None or not _corpus_relative(raw):
+        return None
+    try:
+        resolved = anchors_for_passage_read(
+            corpus, path=raw, output=output, is_error=is_error
+        )
+    except DocumentToolError:
+        raise CapabilityExecutionError(
+            "research runtime evidence is unavailable"
+        ) from None
+    if resolved is None:
+        return None
+    return raw, resolved
 
 
 def _verified_document_anchor(

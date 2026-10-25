@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 import unittest
 from collections.abc import AsyncIterator
 from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
+
+from asterion.documents import project_document, write_docx
 
 from asterion.capabilities.catalog import CapabilityRef
 from asterion.capabilities.execution import (
@@ -175,6 +178,11 @@ class FailingRuntime(FixtureRuntime):
         raise RuntimeError("SECRET-PROVIDER-PAYLOAD")
 
 
+class _Root:
+    def __init__(self, root: Path) -> None:
+        self.root = root
+
+
 class FixtureCorpusService:
     root = PROJECT
     directory_path = PROJECT
@@ -307,6 +315,55 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.artifacts[1]["value"]["paths"], ("doc.txt",))
         self.assertEqual(result.artifacts[2]["value"]["calls"], ("read",))
         self.assertNotIn("SECRET-ERR", repr(result))
+
+    async def test_passage_read_records_anchors_and_bash_does_not(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "corpus"
+            source.mkdir()
+            write_docx(
+                source / "desk.docx",
+                (("4.1.2 接地限值", None), ("5.2 随后的复测。", None)),
+                ((("雨天", "不应大于4欧姆。见5.2。"),),),
+            )
+            view = root / "view"
+            view.mkdir()
+            project_document(source, "desk.docx", view)
+            row = (view / "passages.txt").read_text(encoding="utf-8").splitlines()[2]
+            cited = (view / "passages.txt").read_text(encoding="utf-8").splitlines()[1]
+            runtime = ToolStreamRuntime(
+                (
+                    ("bash", {"command": "rg -n 雨天 passages.txt"}, row, False),
+                    ("read", {"path": "passages.txt"}, row + "\n", False),
+                    ("read", {"path": "passages.txt"}, cited + "\n", False),
+                )
+            )
+            result = await DciLocalResearchImplementation().execute(
+                invocation(
+                    runtime,
+                    host_services={"corpus.local-root": _Root(view)},
+                )
+            )
+            locations = result.artifacts[1]["value"]
+            self.assertEqual(locations["paths"], ("passages.txt", "passages.txt"))
+            self.assertEqual(len(locations["anchors"]), 3)
+            self.assertEqual(locations["anchors"][0]["kind"], "docx-cell")
+            self.assertEqual(locations["anchors"][2]["kind"], "docx-paragraph")
+            self.assertEqual(
+                result.artifacts[2]["value"]["calls"], ("bash", "read", "read")
+            )
+            self.assertNotIn("不应大于4欧姆", repr(result))
+            self.assertNotIn("雨天", repr(result))
+            bash_only = ToolStreamRuntime(
+                (("bash", {"command": "rg -n 雨天 passages.txt"}, row, False),)
+            )
+            with self.assertRaises(CapabilityExecutionError):
+                await DciLocalResearchImplementation().execute(
+                    invocation(
+                        bash_only,
+                        host_services={"corpus.local-root": _Root(view)},
+                    )
+                )
 
     async def test_unsafe_tool_locations_fail_closed(self) -> None:
         cases = (

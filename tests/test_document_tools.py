@@ -5,10 +5,14 @@ import unittest
 import zipfile
 from pathlib import Path
 
+import json
+
 from asterion.documents import (
     DocumentToolError,
+    anchors_for_passage_read,
     document_spans,
     parse_document_tools,
+    project_document,
     read_span,
     search_documents,
     write_docx,
@@ -241,6 +245,114 @@ endcmap
             self.assertEqual(search_documents(root, "4.1.2", tools="docx"), (anchor,))
             with self.assertRaises(DocumentToolError):
                 document_spans(root, tools=None)
+
+
+class DocumentProjectionTests(unittest.TestCase):
+    def test_projects_a_table_row_without_dropping_other_lines(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "corpus"
+            source.mkdir()
+            write_docx(
+                source / "desk.docx",
+                (("4.1.2 接地限值", None), ("5.2 随后的复测。", None)),
+                ((("雨天", "不应大于4欧姆。见5.2。"),),),
+            )
+            destination = root / "view"
+            destination.mkdir()
+            index = project_document(source, "desk.docx", destination)
+            written = json.loads(
+                (destination / "passage-index.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(written, index)
+            self.assertEqual(index["origin"], "desk.docx")
+            self.assertEqual(
+                [item["id"] for item in index["passages"]],
+                ["P000001", "P000002", "P000003"],
+            )
+            self.assertEqual(
+                [item["unit"] for item in index["passages"]],
+                ["paragraph", "paragraph", "table-row"],
+            )
+            self.assertEqual(len(index["passages"][2]["anchors"]), 2)
+            self.assertNotIn("雨天", json.dumps(index))
+            self.assertNotIn("接地限值", json.dumps(index))
+            lines = (destination / "passages.txt").read_text(encoding="utf-8")
+            self.assertIn("P000001\t4.1.2 接地限值\n", lines)
+            self.assertIn("P000003\t雨天\t不应大于4欧姆。见5.2。\n", lines)
+            row = lines.splitlines()[2]
+            anchors = anchors_for_passage_read(
+                destination, path="passages.txt", output=row + "\n", is_error=False
+            )
+            self.assertEqual(len(anchors), 2)
+            self.assertEqual(anchors[0]["kind"], "docx-cell")
+            self.assertEqual(anchors[0]["document"], "source/desk.docx")
+
+    def test_marks_outline_depth_without_storing_it_on_the_anchor(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "corpus"
+            source.mkdir()
+            _styled_docx(source / "outline.docx", (("2", "接地限值"),))
+            destination = root / "view"
+            destination.mkdir()
+            index = project_document(source, "outline.docx", destination)
+            self.assertEqual(index["passages"][0]["depth"], 2)
+            self.assertNotIn("depth", index["passages"][0]["anchors"][0])
+            line = (destination / "passages.txt").read_text(encoding="utf-8")
+            self.assertTrue(line.startswith("P000001\tH2\t接地限值\n"))
+
+    def test_truncated_read_keeps_complete_lines_only(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "corpus"
+            source.mkdir()
+            write_docx(
+                source / "desk.docx",
+                (("4.1.2 接地限值", None), ("5.2 随后的复测。", None)),
+            )
+            destination = root / "view"
+            destination.mkdir()
+            project_document(source, "desk.docx", destination)
+            shown = (
+                "P000001\t4.1.2 接地限值\n"
+                "P000002\t5.2 随后的复测。\n"
+                "P000003\t被截断"
+                "\n[tool result truncated]"
+            )
+            anchors = anchors_for_passage_read(
+                destination, path="passages.txt", output=shown, is_error=False
+            )
+            self.assertEqual(len(anchors), 2)
+            self.assertIsNone(
+                anchors_for_passage_read(
+                    source, path="passages.txt", output=shown, is_error=False
+                )
+            )
+            self.assertEqual(
+                anchors_for_passage_read(
+                    destination, path="passages.txt", output="", is_error=True
+                ),
+                (),
+            )
+
+    def test_rejects_a_line_over_the_cap_and_a_nested_copy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "corpus"
+            nested = source / "fold"
+            nested.mkdir(parents=True)
+            write_docx(nested / "desk.docx", (("短", None),))
+            destination = root / "view"
+            destination.mkdir()
+            index = project_document(source, "fold/desk.docx", destination)
+            self.assertEqual(index["origin"], "fold/desk.docx")
+            self.assertTrue((destination / "source" / "fold" / "desk.docx").is_file())
+            write_docx(source / "long.docx", (("甲" * 9000, None),))
+            other = root / "other"
+            other.mkdir()
+            with self.assertRaises(DocumentToolError):
+                project_document(source, "long.docx", other)
 
 
 def _styled_docx(path: Path, paragraphs: tuple[tuple[str, str], ...]) -> None:

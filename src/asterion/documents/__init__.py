@@ -2,6 +2,10 @@
 
 from asterion.documents.docx import write_docx
 from asterion.documents.pdf import write_pdf
+from asterion.documents.projection import (
+    anchors_for_passage_read,
+    project_document,
+)
 from asterion.documents.tools import (
     DocumentToolError,
     document_spans,
@@ -13,8 +17,10 @@ from asterion.documents.tools import (
 
 __all__ = (
     "DocumentToolError",
+    "anchors_for_passage_read",
     "document_spans",
     "parse_document_tools",
+    "project_document",
     "read_span",
     "search_documents",
     "verify_public_anchor",

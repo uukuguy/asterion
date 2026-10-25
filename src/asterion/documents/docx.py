@@ -70,6 +70,36 @@ def write_docx(
         package.writestr("word/document.xml", document)
 
 
+def docx_outline_depths(path: Path) -> dict[int, int]:
+    """Return paragraph index to outline depth for styles 1, 2, and 3.
+
+    The depth is not a public anchor field. Empty paragraphs are omitted.
+    """
+
+    try:
+        with zipfile.ZipFile(path) as package:
+            payload = package.read("word/document.xml")
+    except (KeyError, OSError, zipfile.BadZipFile):
+        raise DocumentFormatError("document tool is unavailable") from None
+    try:
+        root = ElementTree.fromstring(payload)
+    except ElementTree.ParseError:
+        raise DocumentFormatError("document tool is unavailable") from None
+    body = root.find(f"{_W}body")
+    if body is None:
+        raise DocumentFormatError("document tool is unavailable")
+    depths: dict[int, int] = {}
+    paragraph_index = 0
+    for child in list(body):
+        if child.tag != f"{_W}p":
+            continue
+        match = _HEADING_LEVEL.fullmatch(_paragraph_style(child))
+        if match is not None and _text(child).strip():
+            depths[paragraph_index] = int(match.group(1))
+        paragraph_index += 1
+    return depths
+
+
 def docx_spans(
     path: Path,
 ) -> tuple[tuple[str, Mapping[str, int], str], ...]:
