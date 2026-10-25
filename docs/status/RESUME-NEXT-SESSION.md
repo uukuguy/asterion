@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-26 03:22. **Session remains active — not a final handoff.**
+> Updated: 2026-10-26 03:35. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -29,7 +29,7 @@
 ## Current judgment
 
 - Citation checks that the version string occurs in the file and that the finding occurs inside the assembled clause. It does not decide legal applicability.
-- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` starts Pi when the form is submitted. The third attempt of the one authorized question rendered a 1917-character reply from 18 reads. That reply is not an applicability judgment. Another model call is not authorized. The desk does not open another model client. `prepare_prime_application` stays the Prime door. Operator progress is elapsed seconds on the button. stderr adds the turn, the sentence written before a tool, and the file and line window, or the projection file and the search text. It does not include the question, the command, the path, the tool result, or the final answer. There is no clock cancel. `max_turns` stays `"32"`. The operator interrupts a long search.
+- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` starts Pi when the form is submitted. The third attempt of the one authorized question rendered a 1917-character reply from 18 reads. That reply is not an applicability judgment. Another model call is not authorized. The desk does not open another model client. `prepare_prime_application` stays the Prime door. Operator progress is elapsed seconds on the button. stderr adds the turn, the sentence written before a tool, and the file and line window, or the projection file and the search text. It does not include the question, the command, the path, the tool result, or the final answer. There is no clock cancel and no 60-second cancel. `阅读没有完成 N 秒` is elapsed time. `max_turns` stays `"32"`. A read whose path is the projection's own `passages.txt` or `contents.txt` counts even when that path is absolute. A path outside that directory still fails. The operator interrupts a long search. The desk process on 8765 is still the previous code until it is restarted.
 - The 36-point gap remains a reader constant, not a layout proof.
 
 ## Historical archive
@@ -53,8 +53,8 @@
 ## Next action
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
-2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, no clock cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. The make target does not open a browser. An already running desk process does not reload `b6f29c24`; the operator restarts it. That restart is not a new authorization. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
-3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"`. There is no clock cancel; the operator interrupts. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. Two run directories are there: the unrendered bash-only run `d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b` and the rendered run `fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. Progress lines do not name those directories.
+2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, no clock cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. The make target does not open a browser. The desk process on 8765 started at 03:10, before `ab856b5c` and `c1525efd`, and does not load them until the operator restarts it. That restart is not a new authorization. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
+3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"`. There is no clock cancel and no 60-second cancel; `阅读没有完成 N 秒` is elapsed time. The operator interrupts. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. Two run directories are there: the unrendered bash-only run `d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b` and the rendered run `fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. Progress lines do not name those directories.
 
 ## Ready-to-paste command
 
