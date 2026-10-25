@@ -354,6 +354,48 @@ class DciResearchCapabilityTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertNotIn("不应大于4欧姆", repr(result))
             self.assertNotIn("雨天", repr(result))
+            absolute = ToolStreamRuntime(
+                (
+                    (
+                        "read",
+                        {"path": str((view / "contents.txt").resolve())},
+                        "目录\n",
+                        False,
+                    ),
+                    (
+                        "read",
+                        {"path": str((view / "passages.txt").resolve())},
+                        row + "\n\n[3 more lines in file. Use offset=4 to continue.]\n",
+                        False,
+                    ),
+                )
+            )
+            absolute_result = await DciLocalResearchImplementation().execute(
+                invocation(
+                    absolute,
+                    host_services={"corpus.local-root": _Root(view)},
+                )
+            )
+            absolute_locations = absolute_result.artifacts[1]["value"]
+            self.assertEqual(
+                absolute_locations["paths"], ("contents.txt", "passages.txt")
+            )
+            self.assertEqual(len(absolute_locations["anchors"]), 2)
+            self.assertNotIn(str(view), repr(absolute_result))
+            outside = root / "elsewhere"
+            outside.mkdir()
+            outside_file = outside / "passages.txt"
+            outside_file.write_text(row + "\n", encoding="utf-8")
+            escaped = ToolStreamRuntime(
+                (("read", {"path": str(outside_file.resolve())}, row + "\n", False),)
+            )
+            with self.assertRaises(CapabilityExecutionError):
+                await DciLocalResearchImplementation().execute(
+                    invocation(
+                        escaped,
+                        host_services={"corpus.local-root": _Root(view)},
+                    )
+                )
             bash_only = ToolStreamRuntime(
                 (("bash", {"command": "rg -n 雨天 passages.txt"}, row, False),)
             )

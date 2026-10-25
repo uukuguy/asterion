@@ -99,6 +99,7 @@ def _require_local_corpus(invocation: CapabilityInvocation) -> Path:
 
 _LOCATION_TOOLS = frozenset({"read", "grep"})
 _PATH_KEYS = ("path", "file_path", "file")
+_PROJECTION_NAMES = frozenset({"passages.txt", "contents.txt"})
 
 
 def _core_evidence(
@@ -181,7 +182,7 @@ def _core_evidence(
                     paths.append(recorded[0])
                     anchors.extend(recorded[1])
                     continue
-            location = _tool_location(name, arguments)
+            location = _tool_location(corpus, name, arguments)
             if location is not None:
                 paths.append(location)
     else:
@@ -202,11 +203,12 @@ def _passage_anchors(
     is_error: bool,
 ) -> tuple[str, tuple[Mapping[str, object], ...]] | None:
     raw = _argument_path(arguments)
-    if raw is None or not _corpus_relative(raw):
+    name = None if raw is None else _corpus_file(corpus, raw)
+    if name is None:
         return None
     try:
         resolved = anchors_for_passage_read(
-            corpus, path=raw, output=output, is_error=is_error
+            corpus, path=name, output=output, is_error=is_error
         )
     except DocumentToolError:
         raise CapabilityExecutionError(
@@ -214,7 +216,7 @@ def _passage_anchors(
         ) from None
     if resolved is None:
         return None
-    return raw, resolved
+    return name, resolved
 
 
 def _verified_document_anchor(
@@ -251,7 +253,9 @@ def _tool_call(
     return call_id, name, arguments
 
 
-def _tool_location(name: str, arguments: Mapping[str, object]) -> str | None:
+def _tool_location(
+    corpus: Path, name: str, arguments: Mapping[str, object]
+) -> str | None:
     kind = name.casefold()
     if kind not in _LOCATION_TOOLS:
         return None
@@ -260,9 +264,30 @@ def _tool_location(name: str, arguments: Mapping[str, object]) -> str | None:
         if kind == "grep":
             return "."
         raise CapabilityExecutionError("research runtime evidence is unavailable")
-    if not _corpus_relative(raw):
+    located = _corpus_file(corpus, raw)
+    if located is None:
         raise CapabilityExecutionError("research runtime evidence is unavailable")
-    return raw
+    return located
+
+
+def _corpus_file(corpus: Path, raw: str) -> str | None:
+    """Projection names may be absolute. Every other path stays relative."""
+
+    if _corpus_relative(raw):
+        return raw
+    candidate = Path(raw)
+    if not candidate.is_absolute() or candidate.name not in _PROJECTION_NAMES:
+        return None
+    try:
+        if candidate.is_symlink():
+            return None
+        parent = candidate.parent.resolve(strict=True)
+        root = corpus.resolve(strict=True)
+    except OSError:
+        return None
+    if parent != root:
+        return None
+    return candidate.name
 
 
 def _argument_path(arguments: Mapping[str, object]) -> str | None:
