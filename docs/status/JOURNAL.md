@@ -3875,3 +3875,11 @@
 - 22:49 Scripted answer_fault writes the application directory and cites opened passages. The page still uses the word chain. No model call. [101af61d]
 - 23:08 The desk calls answer_fault. The shipped page returns 422 and does not start Pi. Headless Chrome opened the empty page, one scripted hit, and a miss on a fictional file. No model call. [3a41d145]
 - 23:47 The live option builder is in. page.main passes LiveGridResearch. Tests check the options and do not call run. make grid-regulation was not run. No model call. [98dfed8a]
+
+## 2026-10-26
+
+- 00:28 An unchanged regulation file is parsed once while anchors resolve. A new inode, mtime, or size still reads it. Focused document tests passed. [55a8f2e9]
+- 00:37 The reference Pi event cap is 65536. The 1MB line cap stays. Line-cap tests passed. [f70808ea]
+- 00:40 The reference Pi stdout total is 64MB. The 1MB line cap stays. Line-cap tests passed. [c72cb556]
+- 00:43 The grid command passes --thinking off. examples/applications/native_dci.py stays --mode rpc only. GridLiveOptionTests passed (5). [4ee65704]
+- 00:45 One authorized question on the 2023 stability DOCX stopped at Pi runtime turn limit exceeded after 83.6 seconds. 32 tool-use turns and one aborted turn. 23 reads of passages.txt at distinct offsets and 12 bash commands. Reasoning tokens 0. Queued stdout 4445835 bytes. No final.txt. outputs/grid-regulation is empty. No reply was rendered. Regulation sentences were not recorded. Another model call is not authorized.

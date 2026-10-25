@@ -1,16 +1,19 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-25 23:47. **Session remains active — not a final handoff.**
+> Updated: 2026-10-26 00:50. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
 - The grid regulation desk is one HTML file, `page.html`. POST `/api/measures` calls `answer_fault`. `page.main` passes `LiveGridResearch`. `serve` with no research object still returns 422 and does not start Pi. `make grid-regulation` stays on `127.0.0.1`. It was not run. Submitting the form would start Pi.
+- One authorized question on the 2023 stability DOCX used `max_turns` `"32"`, a 300-second cancel, and `--thinking off`. It stopped at `Pi runtime turn limit exceeded` after 83.6 seconds. No `final.txt`. `outputs/grid-regulation` is empty. Another model call is not authorized.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
 ## Verified facts
 
-- `tests.test_document_tools`, `tests.test_dci_research_capability`, `tests.test_grid_regulation`, `tests.test_grid_regulation_page`, and `tests.test_native_application` passed: 57 tests. Ruff check passed on the edited Python. Commit `98dfed8a` is local and not pushed. The same five modules passed at 52 tests for `3a41d145`. Headless Chrome opened the empty page, one scripted hit, and a miss. The server used a temporary fictional file, not `docs/`. No model call.
+- One authorized question on the 2023 stability DOCX, first edition, ran through `answer_fault` and `LiveGridResearch`. Bounds stayed `max_turns` `"32"` and 300 seconds. The grid command passed `--thinking off`. The runtime raised `Pi runtime turn limit exceeded` at 83.6 seconds. The child exit recorded by the runtime was -15. Queued stdout was 4445835 bytes. The Pi session had 33 assistant messages: 32 `toolUse` and 1 `aborted`. Tool calls were 23 reads of `passages.txt` at distinct offsets and 12 bash commands. Reasoning tokens were 0. Output tokens were 3550. No `final.txt`. `outputs/grid-regulation` has no run directory. No reply and no clause labels were rendered. Regulation sentences were not copied into this record.
+- Earlier attempts of that same question, still inside the one authorization, stopped on `Pi runtime output limit exceeded`. With thinking on, queued stdout reached 4194073 bytes under the old 4MB total, then 67094958 bytes under the 64MB total. `f70808ea` sets the event cap to 65536. `c72cb556` sets the stdout total to 64MB. The 1MB line cap is unchanged. `4ee65704` adds `--thinking off` to the grid command only. `55a8f2e9` parses an unchanged regulation file once. Those four commits are local and not pushed. `GridLiveOptionTests` passed (5) after the thinking flag. The two Pi line-cap tests passed after the total was raised. `make promotion-check`, `make docs-check`, `make grid-regulation`, and `make native-dci-example` were not run for those commits.
+- `tests.test_document_tools`, `tests.test_dci_research_capability`, `tests.test_grid_regulation`, `tests.test_grid_regulation_page`, and `tests.test_native_application` passed: 57 tests at `98dfed8a`. Ruff check passed on the edited Python. That commit is local and not pushed. The same five modules passed at 52 tests for `3a41d145`. Headless Chrome opened the empty page, one scripted hit, and a miss. The server used a temporary fictional file, not `docs/`. That check did not call a model.
 - The removed word chain opened a paragraph or a whole table row that contained the situation words, then one passage whose label was a clause number written in that row. On the 2023 stability file, one spaced fault query opened two unlabeled paragraphs of 78 characters each. `主变 冷却` and `冷却 全停` missed that chain because those characters do not occur in one passage. That chain is not the page.
 - A span that is only a clause number does not start a clause. A titled cell still does. On the 2023 stability file the one bare cell stays inside clause 28.1.1 (1753 characters). Clause 5.8 is not opened. The older clause assembler for that spaced fault query is unchanged: 6.2.5 (546 characters) and 26.1 (1427 characters). The page does not return those clauses.
 - DOCX reader: when nonempty TOC1–TOC3 levels equal heading styles 1–3, the clause number is prefixed to the heading and the TOC paragraphs are omitted. Paragraph indexes of the remaining paragraphs stay the original indexes. Public position keys are unchanged. A mismatch does not rewrite the file.
@@ -24,7 +27,7 @@
 ## Current judgment
 
 - Citation checks that the version string occurs in the file and that the finding occurs inside the assembled clause. It does not decide legal applicability.
-- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` would start Pi when the form is submitted. That run is not authorized. The desk does not open another model client. `prepare_prime_application` stays the Prime door.
+- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` would start Pi when the form is submitted. The one authorized question stopped while still opening passages. The task text keeps each read to a few lines and continues while a depended-on citation is unread. The session matches that shape: small limits, distinct offsets, no final answer. Whether a different instruction or a higher turn bound would finish the question is not measured. The desk does not open another model client. `prepare_prime_application` stays the Prime door.
 - The 36-point gap remains a reader constant, not a layout proof.
 
 ## Historical archive
@@ -48,8 +51,8 @@
 ## Next action
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
-2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, a 300-second cancel, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. That run is not authorized.
-3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"` and a 300-second cancel. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. A real run against a regulation file needs a separate authorization.
+2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, a 300-second cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. The one authorized question already used that bound and did not answer. Another model call needs a new authorization. Do not raise `max_turns` without that decision.
+3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"` and a 300-second cancel until the user changes them. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. That directory is empty because the turn-cap stop published no evidence.
 
 ## Ready-to-paste command
 
