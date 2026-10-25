@@ -45,9 +45,9 @@ from asterion.runtimes.pi_rpc import PiChildProcess, PiStdoutLimitExceeded
 
 # Operator progress sees a turn, the sentence written before a tool, or a
 # read/bash/grep start. A read names a safe file and its line window. A search
-# names passages.txt or contents.txt when that name is a whole token. The
-# command, pattern, tool result, and final answer stay off this channel.
-# Unset, the runtime stays silent.
+# names passages.txt or contents.txt and the rg or grep text. The command, the
+# path, the tool result, and the final answer stay off this channel. Unset, the
+# runtime stays silent.
 PI_PROGRESS: ContextVar[Callable[[str, str], None] | None] = ContextVar(
     "asterion_pi_progress",
     default=None,
@@ -62,7 +62,27 @@ _PROGRESS_BLOCKED = ("key", "token", "secret", "authorization")
 _SAFE_BASENAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,40}\Z")
 _DECISION_KEEP = 240
 _DECISION_LIMIT = 77
+_QUERY_LIMIT = 48
 _MAX_PROGRESS_LINE = 999_999
+_RG_VALUE_FLAGS = frozenset(
+    {
+        "-A",
+        "-B",
+        "-C",
+        "-M",
+        "-e",
+        "-f",
+        "-g",
+        "-m",
+        "-t",
+        "-T",
+        "--file",
+        "--glob",
+        "--max-columns",
+        "--max-count",
+        "--regexp",
+    }
+)
 
 
 def _report_pi_progress(
@@ -184,10 +204,171 @@ def _search_progress_detail(name: str, args: Mapping[str, object]) -> str:
     texts = [
         value for key in ("command", "path") if type(value := args.get(key)) is str
     ]
-    for filename in _PROGRESS_FILES:
-        if any(_filename_present(text, filename) for text in texts):
-            return f"{name} {filename}"
+    filename = ""
+    for candidate in _PROGRESS_FILES:
+        if any(_filename_present(text, candidate) for text in texts):
+            filename = candidate
+            break
+    query = _search_query(name, args)
+    if filename and query:
+        return f"{name} {filename} {query}"
+    if filename:
+        return f"{name} {filename}"
+    if query:
+        return f"{name} {query}"
     return name
+
+
+def _search_query(name: str, args: Mapping[str, object]) -> str:
+    if name == "grep":
+        raw = args.get("pattern")
+        terms = [raw] if type(raw) is str else []
+    else:
+        command = args.get("command")
+        terms = _rg_patterns(command) if type(command) is str else []
+    kept: list[str] = []
+    for term in terms:
+        shown = _show_query(term)
+        if shown and shown not in kept:
+            kept.append(shown)
+    return _clip_query(" / ".join(kept))
+
+
+def _show_query(term: str) -> str:
+    flat = " ".join(term.split())
+    if not flat or "/" in flat or flat.startswith("..") or flat in _PROGRESS_FILES:
+        return ""
+    if any(word in flat.casefold() for word in _PROGRESS_BLOCKED):
+        return ""
+    return _clip_query(flat)
+
+
+def _clip_query(text: str) -> str:
+    if len(text) <= _QUERY_LIMIT:
+        return text
+    return text[: _QUERY_LIMIT - 1].rstrip() + "…"
+
+
+def _rg_patterns(command: str) -> list[str]:
+    found: list[str] = []
+    for segment in _unquoted_splits(command):
+        pattern = _rg_pattern(_shell_words(segment))
+        if pattern:
+            found.append(pattern)
+    return found
+
+
+def _unquoted_splits(command: str) -> list[str]:
+    parts: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    index = 0
+    length = len(command)
+    while index < length:
+        char = command[index]
+        if quote:
+            buf.append(char)
+            if char == "\\" and quote == '"' and index + 1 < length:
+                buf.append(command[index + 1])
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            index += 1
+            continue
+        if char in "\"'":
+            quote = char
+            buf.append(char)
+            index += 1
+            continue
+        if command.startswith("&&", index) or command.startswith("||", index):
+            parts.append("".join(buf))
+            buf = []
+            index += 2
+            continue
+        if char in "|;":
+            parts.append("".join(buf))
+            buf = []
+            index += 1
+            continue
+        buf.append(char)
+        index += 1
+    parts.append("".join(buf))
+    return parts
+
+
+def _shell_words(text: str) -> list[str]:
+    words: list[str] = []
+    buf: list[str] = []
+    quote = ""
+    index = 0
+    length = len(text)
+    while index < length:
+        char = text[index]
+        if quote:
+            if char == "\\" and quote == '"' and index + 1 < length:
+                nxt = text[index + 1]
+                if nxt in '$`"\\':
+                    buf.append(nxt)
+                else:
+                    buf.append("\\")
+                    buf.append(nxt)
+                index += 2
+                continue
+            if char == quote:
+                quote = ""
+            else:
+                buf.append(char)
+            index += 1
+            continue
+        if char in "\"'":
+            quote = char
+        elif char.isspace():
+            if buf:
+                words.append("".join(buf))
+                buf = []
+        elif char == "\\" and index + 1 < length:
+            buf.append(text[index + 1])
+            index += 1
+        else:
+            buf.append(char)
+        index += 1
+    if buf:
+        words.append("".join(buf))
+    return words
+
+
+def _rg_pattern(words: list[str]) -> str | None:
+    start = next(
+        (
+            index
+            for index, word in enumerate(words)
+            if word == "rg" or word.endswith("/rg")
+        ),
+        None,
+    )
+    if start is None:
+        return None
+    index = start + 1
+    while index < len(words):
+        word = words[index]
+        if word == "--":
+            return words[index + 1] if index + 1 < len(words) else None
+        if word in {"-e", "--regexp"}:
+            return words[index + 1] if index + 1 < len(words) else None
+        if word.startswith("-e") and not word.startswith("--") and len(word) > 2:
+            return word[2:]
+        if word.startswith("--") and "=" in word:
+            index += 1
+            continue
+        if word in _RG_VALUE_FLAGS:
+            index += 2
+            continue
+        if word.startswith("-"):
+            index += 1
+            continue
+        return word
+    return None
 
 
 def _filename_present(text: str, filename: str) -> bool:

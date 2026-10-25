@@ -169,7 +169,47 @@ class GridRegulationPageTests(unittest.TestCase):
                 {
                     "type": "tool_execution_start",
                     "toolName": "bash",
-                    "args": {"command": "rg passages.txt.bak SECRET-SPAN-BODY"},
+                    "args": {"command": "ls"},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "bash",
+                    "args": {
+                        "command": (
+                            'cd /tmp/SECRET-SPAN-BODY && rg -n "断面" '
+                            'passages.txt | rg "限额"'
+                        )
+                    },
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "grep",
+                    "args": {"path": "contents.txt", "pattern": "停运"},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "bash",
+                    "args": {"command": 'rg -n "甲|乙" passages.txt | head -20'},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "bash",
+                    "args": {"command": 'rg -n "断面 限额" passages.txt'},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "bash",
+                    "args": {"command": 'rg -n "甲\\s乙" passages.txt'},
                 }
             )
             _report_pi_progress(
@@ -196,6 +236,11 @@ class GridRegulationPageTests(unittest.TestCase):
                 ("tool", "read passages.txt 12"),
                 ("tool", "grep contents.txt"),
                 ("tool", "bash"),
+                ("tool", "bash passages.txt 断面 / 限额"),
+                ("tool", "grep contents.txt 停运"),
+                ("tool", "bash passages.txt 甲|乙"),
+                ("tool", "bash passages.txt 断面 限额"),
+                ("tool", "bash passages.txt 甲\\s乙"),
                 ("tool", "read"),
             ],
         )
@@ -222,8 +267,11 @@ class GridRegulationPageTests(unittest.TestCase):
             _desk_progress("tool", "read passages.txt")
             _desk_progress("tool", "read")
             _desk_progress("tool", "bash passages.txt")
+            _desk_progress("tool", "bash passages.txt 断面 / 限额")
+            _desk_progress("tool", "bash passages.txt 断面 限额")
             _desk_progress("tool", "grep contents.txt")
             _desk_progress("tool", "bash")
+            _desk_progress("tool", "bash passages.txt " + "甲" * 70)
             _desk_progress("decision", "先看目录")
             _desk_progress("decision", "secret plan")
         self.assertEqual(
@@ -234,10 +282,17 @@ class GridRegulationPageTests(unittest.TestCase):
             "读 passages.txt\n"
             "打开 read\n"
             "搜索 passages.txt\n"
+            "搜索 passages.txt 断面 / 限额\n"
+            "搜索 passages.txt 断面 限额\n"
             "搜索 contents.txt\n"
             "搜索\n"
+            "搜索 passages.txt " + "甲" * 63 + "…\n"
             "决定 先看目录\n",
         )
+        logged = captured.getvalue().splitlines()
+        self.assertLessEqual(len(logged[-2]), 80)
+        self.assertTrue(logged[-2].startswith("搜索 passages.txt 甲"))
+        self.assertTrue(logged[-2].endswith("…"))
         self.assertNotIn("SECRET", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)

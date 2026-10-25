@@ -76,8 +76,32 @@ def _tool_log_line(detail: str) -> str:
             return f"读 {name} 第 {start}-{end} 行"
         return f"读 {name}"
     if tool in {"bash", "grep"}:
-        return f"搜索 {name}" if name else "搜索"
+        filename, query = _search_log_parts(
+            detail.split(" ", 1)[1] if " " in detail else ""
+        )
+        if filename and query:
+            return _fit_log(f"搜索 {filename} {query}")
+        if query:
+            return _fit_log(f"搜索 {query}")
+        if filename:
+            return f"搜索 {filename}"
+        return "搜索"
     return f"打开 {tool}"
+
+
+def _search_log_parts(rest: str) -> tuple[str, str]:
+    if not rest:
+        return "", ""
+    head, separator, tail = rest.partition(" ")
+    if separator and _LOG_NAME.fullmatch(head):
+        return head, tail
+    return "", rest
+
+
+def _fit_log(line: str) -> str:
+    if len(line) <= 80:
+        return line
+    return line[:79].rstrip() + "…"
 
 
 @dataclass(frozen=True)
