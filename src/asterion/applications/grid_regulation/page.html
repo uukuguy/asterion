@@ -793,10 +793,28 @@
       }
     }
 
+    let readingClock = 0;
+
     function setBusy(busy) {
       button.disabled = busy;
       button.setAttribute("aria-busy", busy ? "true" : "false");
-      buttonLabel.textContent = busy ? "正在阅读…" : "查找处置规定";
+      if (readingClock) {
+        clearInterval(readingClock);
+        readingClock = 0;
+      }
+      if (!busy) {
+        buttonLabel.textContent = "查找处置规定";
+        return;
+      }
+      formStatus.className = "status";
+      formStatus.textContent = "正在阅读这本规程。";
+      const started = Date.now();
+      const show = () => {
+        const seconds = Math.floor((Date.now() - started) / 1000);
+        buttonLabel.textContent = "正在阅读… " + seconds + " 秒";
+      };
+      show();
+      readingClock = setInterval(show, 1000);
     }
 
     form.addEventListener("submit", async (event) => {

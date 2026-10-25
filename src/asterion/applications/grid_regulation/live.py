@@ -9,6 +9,8 @@ import os
 import re
 import shutil
 import stat
+import sys
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,6 +25,34 @@ GRID_MAX_TURNS = "32"
 GRID_CONTEXT_POLICY = '{"tool_result_chars":20000}'
 _IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:/+-]*")
 _UNAVAILABLE = "regulation measures are unavailable"
+_LOG_LOCK = threading.Lock()
+_LOG_BLOCKED = ("key", "token", "secret", "authorization")
+
+
+def write_desk_log(line: str) -> None:
+    """Write one operator progress line. It carries no passage text."""
+
+    if (
+        type(line) is not str
+        or not line
+        or len(line) > 80
+        or "\n" in line
+        or "\r" in line
+    ):
+        return
+    lowered = line.casefold()
+    if any(word in lowered for word in _LOG_BLOCKED):
+        return
+    with _LOG_LOCK:
+        sys.stderr.write(line + "\n")
+        sys.stderr.flush()
+
+
+def _desk_progress(kind: str, detail: str) -> None:
+    if kind == "turn":
+        write_desk_log(f"第 {detail} 轮")
+    elif kind == "tool":
+        write_desk_log(f"打开 {detail}")
 
 
 @dataclass(frozen=True)
@@ -191,6 +221,8 @@ class LiveGridResearch:
         if signal is not None and signal.cancelled:
             _fail()
         handle: asyncio.TimerHandle | None = None
+        progress_var = None
+        progress_token = None
         try:
             plan = build_grid_options(
                 corpus,
@@ -220,6 +252,10 @@ class LiveGridResearch:
                     managed_host_services={},
                 ),
             )
+            from asterion.runtimes.pi import PI_PROGRESS
+
+            progress_var = PI_PROGRESS
+            progress_token = progress_var.set(_desk_progress)
             result = await application.run(prompt, run_id=plan.run_id, signal=cancel)
             reply = plan.evidence_file.read_text(encoding="utf-8")
             return _opened(reply, result)
@@ -228,8 +264,12 @@ class LiveGridResearch:
         except Exception:
             _fail()
         finally:
-            if handle is not None:
-                handle.cancel()
+            try:
+                if progress_var is not None and progress_token is not None:
+                    progress_var.reset(progress_token)
+            finally:
+                if handle is not None:
+                    handle.cancel()
 
 
 def _fail() -> NoReturn:

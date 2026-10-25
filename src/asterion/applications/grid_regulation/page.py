@@ -6,6 +6,8 @@ import argparse
 import asyncio
 import json
 import os
+import threading
+import time
 import webbrowser
 from collections.abc import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -18,6 +20,7 @@ from asterion.applications.grid_regulation.answer import (
     UnavailableResearch,
     answer_fault,
 )
+from asterion.applications.grid_regulation.live import write_desk_log
 from asterion.applications.grid_regulation.retrieve import (
     RegulationCitationError,
     RegulationQuery,
@@ -209,7 +212,8 @@ def main(argv: list[str] | None = None) -> int:
     except (GridRegulationPageError, RegulationCitationError):
         return 2
     url = f"http://{_HOST}:{server.server_address[1]}/"
-    print(url)
+    print(url, flush=True)
+    write_desk_log("等待查找")
     if args.open:
         webbrowser.open(url)
     try:
@@ -244,11 +248,23 @@ class _Handler(BaseHTTPRequestHandler):
         if path not in {"/api/cite", "/api/measures"}:
             self._json(404, {"error": "not-found"})
             return
+        reading: threading.Event | None = None
+        started = time.monotonic()
+        completed = False
+        status = 200
         try:
             payload = _payload(self)
             if path == "/api/cite":
                 body = asyncio.run(cite_for_page(self._corpus(), payload))
             else:
+                reading = threading.Event()
+                started = time.monotonic()
+                write_desk_log("开始阅读")
+                threading.Thread(
+                    target=_reading_pulse,
+                    args=(reading, started),
+                    daemon=True,
+                ).start()
                 body = asyncio.run(
                     measures_for_page(
                         self._corpus(),
@@ -256,11 +272,20 @@ class _Handler(BaseHTTPRequestHandler):
                         research=self._research(),
                     )
                 )
+                completed = True
         except GridRegulationPageError as exc:
             status = 400 if str(exc) == "request is invalid" else 422
-            self._json(status, {"error": str(exc)})
-            return
-        self._json(200, body)
+            body = {"error": str(exc)}
+        finally:
+            if reading is not None:
+                reading.set()
+                label = "阅读结束" if completed else "阅读没有完成"
+                write_desk_log(f"{label} {_elapsed(started)} 秒")
+        self._json(status, body)
+
+    def log_request(self, code: object = "-", size: object = "-") -> None:
+        del size
+        write_desk_log(desk_request_line(self.command, self.path, code))
 
     def log_message(self, format: str, *args: object) -> None:
         del format, args
@@ -291,6 +316,32 @@ class _Handler(BaseHTTPRequestHandler):
         if not isinstance(self.server, _Server):
             raise GridRegulationPageError("request is invalid")
         return self.server
+
+
+def desk_request_line(command: str, raw_path: str, code: object) -> str:
+    """Access line with the path only. The query string stays off the log."""
+
+    path = urlparse(raw_path).path
+    if path not in {"/", "/api/corpus", "/api/measures", "/api/cite"}:
+        path = "/"
+    if command not in {"GET", "POST"}:
+        command = "REQUEST"
+    if type(code) is int:
+        status = str(code)
+    elif type(code) is str and code.isdigit():
+        status = code
+    else:
+        status = "-"
+    return f"{command} {path} {status}"
+
+
+def _elapsed(started: float) -> int:
+    return max(0, int(time.monotonic() - started))
+
+
+def _reading_pulse(stop: threading.Event, started: float) -> None:
+    while not stop.wait(5):
+        write_desk_log(f"仍在阅读 {_elapsed(started)} 秒")
 
 
 def _directory(root: Path) -> None:

@@ -13,8 +13,9 @@ import stat
 import sys
 import time
 import weakref
-from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
+from collections.abc import AsyncIterator, Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from copy import deepcopy
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,6 +40,46 @@ from asterion.pathlight.runtime_observation import (
 from asterion.runtimes.pi_observation import PiObservationBuilder
 from asterion.runtimes.pi_extensions import PiExtensionLease
 from asterion.runtimes.pi_rpc import PiChildProcess, PiStdoutLimitExceeded
+
+
+# Operator progress sees a turn number or a tool name. It does not see arguments,
+# results, or answer text. Unset, the runtime stays silent.
+PI_PROGRESS: ContextVar[Callable[[str, str], None] | None] = ContextVar(
+    "asterion_pi_progress",
+    default=None,
+)
+_PROGRESS_TOOLS = frozenset({"read", "bash", "grep"})
+
+
+def _report_pi_progress(
+    event: Mapping[str, object], *, turn: int | None = None
+) -> None:
+    """Tell the operator that one turn or one named tool started."""
+
+    event_type = event.get("type")
+    if event_type == "turn_start":
+        if type(turn) is int and turn > 0:
+            _notify_progress("turn", str(turn))
+        return
+    if event_type != "tool_execution_start":
+        return
+    name = event.get("toolName")
+    if type(name) is str:
+        _notify_progress("tool", name)
+
+
+def _notify_progress(kind: str, detail: str) -> None:
+    callback = PI_PROGRESS.get()
+    if callback is None or kind not in {"turn", "tool"}:
+        return
+    if kind == "tool" and detail not in _PROGRESS_TOOLS:
+        return
+    if kind == "turn" and not detail.isdigit():
+        return
+    try:
+        callback(kind, detail)
+    except Exception:
+        return
 
 
 # One Pi tool event repeats the tool's own truncated body in details.
@@ -140,9 +181,7 @@ class PiRuntimeClient:
         ):
             raise ValueError("Pi runtime max turns is invalid")
         self._max_turns = max_turns
-        self._evidence_root = (
-            Path(evidence_root) if evidence_root is not None else None
-        )
+        self._evidence_root = Path(evidence_root) if evidence_root is not None else None
         self._completed_runs: dict[str, Path] = {}
         self._completed_run_identities: dict[
             str, tuple[tuple[int, int], tuple[int, int]]
@@ -159,9 +198,7 @@ class PiRuntimeClient:
             )
         ):
             raise ValueError("Pi runtime context policy is invalid")
-        self._context_policy = (
-            None if context_policy is None else dict(context_policy)
-        )
+        self._context_policy = None if context_policy is None else dict(context_policy)
         self._running = False
 
     @property
@@ -191,9 +228,7 @@ class PiRuntimeClient:
             return None
         return path
 
-    def pathlight_runtime_observation(
-        self, run_id: str
-    ) -> Mapping[str, object] | None:
+    def pathlight_runtime_observation(self, run_id: str) -> Mapping[str, object] | None:
         """Return a copied safe observation for one completed, owned run."""
 
         if type(run_id) is not str or run_id not in self._completed_runs:
@@ -289,18 +324,14 @@ class PiRuntimeClient:
 
                     if root is not None:
                         root_fd, root_identity = root
-                        _assert_pinned_root(
-                            self._evidence_root, root_fd, root_identity
-                        )
+                        _assert_pinned_root(self._evidence_root, root_fd, root_identity)
                         staged = _stage_evidence(
                             root_fd,
                             request.run_id,
                             final_text=snapshot.final_text,
                             events=snapshot.events,
                         )
-                        _assert_pinned_root(
-                            self._evidence_root, root_fd, root_identity
-                        )
+                        _assert_pinned_root(self._evidence_root, root_fd, root_identity)
                         target_identity = _publish_evidence(root_fd, staged)
                         try:
                             _assert_pinned_root(
@@ -323,11 +354,7 @@ class PiRuntimeClient:
                                 observation.to_mapping()
                             )
                 finally:
-                    if (
-                        root is not None
-                        and staged is not None
-                        and not staged.published
-                    ):
+                    if root is not None and staged is not None and not staged.published:
                         try:
                             _cleanup_evidence(root[0], staged.name)
                         except OSError:
@@ -426,10 +453,7 @@ async def _collect_runtime_snapshot(
             else None
         )
         while True:
-            if (
-                deadline is not None
-                and asyncio.get_running_loop().time() >= deadline
-            ):
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
                 raise ProtocolError("Pi runtime request deadline expired")
             if signal is not None and signal.cancelled:
                 await _send_abort(child)
@@ -443,9 +467,7 @@ async def _collect_runtime_snapshot(
                     raw,
                     (ValueError, asyncio.LimitOverrunError, PiStdoutLimitExceeded),
                 ):
-                    raise ProtocolError(
-                        "Pi runtime output limit exceeded"
-                    ) from None
+                    raise ProtocolError("Pi runtime output limit exceeded") from None
                 raise raw
             if not raw:
                 raise ProtocolError("Pi runtime process ended before completion")
@@ -489,6 +511,7 @@ async def _collect_runtime_snapshot(
                 continue
             if event_type == "turn_start":
                 turns += 1
+                _report_pi_progress(event, turn=turns)
                 if turns > max_turns:
                     await _send_abort(child)
                     raise ProtocolError("Pi runtime turn limit exceeded")
@@ -520,9 +543,7 @@ async def _collect_runtime_snapshot(
                 continue
             if event_type in {"agent_end", "agent_settled"}:
                 if not acknowledged:
-                    raise ProtocolError(
-                        "Pi runtime completed before acknowledgement"
-                    )
+                    raise ProtocolError("Pi runtime completed before acknowledgement")
                 if event_type == "agent_end" and event.get("willRetry") is True:
                     del emitted[attempt_event_start:]
                     adapter.sequence = len(emitted)
@@ -555,13 +576,13 @@ async def _collect_runtime_snapshot(
                 )
                 graceful = True
                 break
+            if event_type == "tool_execution_start":
+                _report_pi_progress(event)
             adapter.consume(event)
     except (BrokenPipeError, ConnectionResetError, TimeoutError):
         raise ProtocolError("Pi runtime execution failed") from None
     finally:
-        returncode = await _finalize_process_uninterruptibly(
-            child, graceful=graceful
-        )
+        returncode = await _finalize_process_uninterruptibly(child, graceful=graceful)
 
     if returncode != 0:
         raise ProtocolError("Pi runtime execution failed")
@@ -619,9 +640,7 @@ def _redact_sensitive(
     return redacted
 
 
-def _redact_freeform(
-    value: object, sensitive_values: tuple[str | int, ...]
-) -> object:
+def _redact_freeform(value: object, sensitive_values: tuple[str | int, ...]) -> object:
     if isinstance(value, dict):
         return {
             _redact_freeform(key, sensitive_values): _redact_freeform(
@@ -647,18 +666,14 @@ def _redact_message_content(
     for block in value:
         if isinstance(block, Mapping) and "text" in block:
             redacted_block = dict(block)
-            redacted_block["text"] = _redact_text(
-                block["text"], sensitive_values
-            )
+            redacted_block["text"] = _redact_text(block["text"], sensitive_values)
             redacted.append(redacted_block)
         else:
             redacted.append(block)
     return redacted
 
 
-def _redact_text(
-    value: object, sensitive_values: tuple[str | int, ...]
-) -> object:
+def _redact_text(value: object, sensitive_values: tuple[str | int, ...]) -> object:
     if not isinstance(value, str):
         return value
     redacted = value
@@ -769,10 +784,7 @@ def _pin_evidence_root(
     try:
         value = _canonical_absolute_path(path)
         flags = (
-            os.O_RDONLY
-            | os.O_DIRECTORY
-            | os.O_NOFOLLOW
-            | getattr(os, "O_CLOEXEC", 0)
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0)
         )
         current = os.open("/", flags)
         try:
@@ -782,11 +794,7 @@ def _pin_evidence_root(
                 try:
                     next_fd = os.open(component, flags, dir_fd=current)
                 except OSError as error:
-                    if (
-                        create
-                        and final
-                        and error.errno == errno.ENOENT
-                    ):
+                    if create and final and error.errno == errno.ENOENT:
                         os.mkdir(component, 0o700, dir_fd=current)
                         next_fd = os.open(component, flags, dir_fd=current)
                     else:
@@ -797,10 +805,7 @@ def _pin_evidence_root(
             if (
                 not stat.S_ISDIR(details.st_mode)
                 or stat.S_IMODE(details.st_mode) != 0o700
-                or (
-                    hasattr(os, "getuid")
-                    and details.st_uid != os.getuid()
-                )
+                or (hasattr(os, "getuid") and details.st_uid != os.getuid())
             ):
                 raise OSError("invalid evidence root")
             identity = (details.st_dev, details.st_ino)
@@ -877,18 +882,12 @@ def _stage_evidence(
             os.close(directory_fd)
 
 
-def _publish_evidence(
-    root_fd: int, staged: _StagedEvidence
-) -> tuple[int, int]:
+def _publish_evidence(root_fd: int, staged: _StagedEvidence) -> tuple[int, int]:
     _validate_staged_evidence(root_fd, staged.name)
-    if _rename_exclusive(
-        root_fd, staged.name, root_fd, staged.target
-    ):
+    if _rename_exclusive(root_fd, staged.name, root_fd, staged.target):
         try:
             os.fsync(root_fd)
-            details = os.stat(
-                staged.target, dir_fd=root_fd, follow_symlinks=False
-            )
+            details = os.stat(staged.target, dir_fd=root_fd, follow_symlinks=False)
             if (
                 not stat.S_ISDIR(details.st_mode)
                 or stat.S_IMODE(details.st_mode) != 0o700
@@ -919,13 +918,8 @@ def _publish_evidence(
         os.fsync(target_fd)
         os.rmdir(staged.name, dir_fd=root_fd)
         os.fsync(root_fd)
-        details = os.stat(
-            staged.target, dir_fd=root_fd, follow_symlinks=False
-        )
-        if (
-            not stat.S_ISDIR(details.st_mode)
-            or stat.S_IMODE(details.st_mode) != 0o700
-        ):
+        details = os.stat(staged.target, dir_fd=root_fd, follow_symlinks=False)
+        if not stat.S_ISDIR(details.st_mode) or stat.S_IMODE(details.st_mode) != 0o700:
             raise OSError("invalid published evidence")
         staged.published = True
         return details.st_dev, details.st_ino
@@ -947,9 +941,7 @@ def _validate_staged_evidence(root_fd: int, name: str) -> None:
         if sorted(os.listdir(directory_fd)) != ["events.jsonl", "final.txt"]:
             raise OSError("invalid staged evidence")
         for child in ("events.jsonl", "final.txt"):
-            details = os.stat(
-                child, dir_fd=directory_fd, follow_symlinks=False
-            )
+            details = os.stat(child, dir_fd=directory_fd, follow_symlinks=False)
             if (
                 not stat.S_ISREG(details.st_mode)
                 or stat.S_IMODE(details.st_mode) != 0o600
@@ -1007,10 +999,7 @@ def _rename_exclusive(
 def _open_directory_at(parent_fd: int, name: str) -> int:
     return os.open(
         name,
-        os.O_RDONLY
-        | os.O_DIRECTORY
-        | os.O_NOFOLLOW
-        | getattr(os, "O_CLOEXEC", 0),
+        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | getattr(os, "O_CLOEXEC", 0),
         dir_fd=parent_fd,
     )
 

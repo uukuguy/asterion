@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import tempfile
 import threading
@@ -7,11 +8,18 @@ import unittest
 import urllib.error
 import urllib.request
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.grid_regulation.answer import ScriptedGridResearch
-from asterion.applications.grid_regulation.page import page_bytes, serve
+from asterion.applications.grid_regulation.live import write_desk_log
+from asterion.applications.grid_regulation.page import (
+    desk_request_line,
+    page_bytes,
+    serve,
+)
 from asterion.applications.grid_regulation.retrieve import write_demo_corpus
 from asterion.documents import write_docx
+from asterion.runtimes.pi import PI_PROGRESS, _report_pi_progress
 
 
 class _Body:
@@ -29,6 +37,8 @@ class GridRegulationPageTests(unittest.TestCase):
         self.assertIn("2023年稳规", html)
         self.assertIn("引用证据", html)
         self.assertIn("查找处置规定", html)
+        self.assertIn("正在阅读… ", html)
+        self.assertIn("正在阅读这本规程。", html)
         self.assertIn("这次查找没有完成", html)
         self.assertIn("可以写在答复里", html)
         self.assertIn("主变 冷却全停", html)
@@ -46,6 +56,61 @@ class GridRegulationPageTests(unittest.TestCase):
         self.assertNotIn("prepare_native_application", page_source)
         self.assertNotIn("lookup_chain", page_source)
         self.assertNotIn("asterion.runtimes", page_source)
+        self.assertEqual(
+            desk_request_line("GET", "/?situation=SECRET-SPAN-BODY", 200),
+            "GET / 200",
+        )
+        self.assertNotIn(
+            "SECRET",
+            desk_request_line("POST", "/api/measures?situation=SECRET", 422),
+        )
+        seen: list[tuple[str, str]] = []
+        token = PI_PROGRESS.set(lambda kind, detail: seen.append((kind, detail)))
+        try:
+            _report_pi_progress({"type": "turn_start"}, turn=1)
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "read",
+                    "args": {"path": "SECRET-SPAN-BODY"},
+                }
+            )
+            _report_pi_progress(
+                {
+                    "type": "tool_execution_start",
+                    "toolName": "bash",
+                    "args": {"command": "SECRET-SPAN-BODY"},
+                }
+            )
+            _report_pi_progress({"type": "tool_execution_start", "toolName": "sed"})
+            _report_pi_progress(
+                {
+                    "type": "message_update",
+                    "assistantMessageEvent": {"delta": "SECRET-SPAN-BODY"},
+                }
+            )
+            _report_pi_progress({"type": "turn_start"}, turn=0)
+        finally:
+            PI_PROGRESS.reset(token)
+        self.assertEqual(seen, [("turn", "1"), ("tool", "read"), ("tool", "bash")])
+
+        def _reject(kind: str, detail: str) -> None:
+            raise RuntimeError(detail)
+
+        token = PI_PROGRESS.set(_reject)
+        try:
+            _report_pi_progress({"type": "turn_start"}, turn=2)
+        finally:
+            PI_PROGRESS.reset(token)
+        captured = io.StringIO()
+        with patch(
+            "asterion.applications.grid_regulation.live.sys.stderr",
+            captured,
+        ):
+            write_desk_log("第 1 轮")
+            write_desk_log("token SECRET-SPAN-BODY")
+            write_desk_log("打开 read\nSECRET-SPAN-BODY")
+        self.assertEqual(captured.getvalue(), "第 1 轮\n")
         self.assertNotIn("SECRET", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
@@ -146,16 +211,28 @@ class GridRegulationPageTests(unittest.TestCase):
             self.addCleanup(server.shutdown)
             self.addCleanup(server.server_close)
             base = f"http://127.0.0.1:{server.server_address[1]}"
-            found = json.loads(
-                _post(
-                    base + "/api/measures",
-                    {
-                        "situation": question,
-                        "document": "desk.docx",
-                        "document_tools": "docx",
-                    },
-                ).text
-            )
+            captured = io.StringIO()
+            with patch(
+                "asterion.applications.grid_regulation.live.sys.stderr",
+                captured,
+            ):
+                found = json.loads(
+                    _post(
+                        base + "/api/measures",
+                        {
+                            "situation": question,
+                            "document": "desk.docx",
+                            "document_tools": "docx",
+                        },
+                    ).text
+                )
+            progress = captured.getvalue()
+            self.assertIn("开始阅读\n", progress)
+            self.assertIn("阅读结束", progress)
+            self.assertIn("POST /api/measures 200\n", progress)
+            self.assertNotIn(question, progress)
+            self.assertNotIn("不应大于4欧姆", progress)
+            self.assertNotIn("雨天", progress)
             self.assertEqual(set(found), {"document", "reply", "evidence"})
             self.assertEqual(found["document"], "desk.docx")
             self.assertEqual(found["reply"], "示范答复：按打开的行处理，并见所引位置。")
