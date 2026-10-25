@@ -4,6 +4,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 import json
 
@@ -18,6 +19,7 @@ from asterion.documents import (
     write_docx,
     write_pdf,
 )
+from asterion.documents.docx import docx_spans
 from asterion.documents.tools import verify_public_anchor
 
 
@@ -353,6 +355,29 @@ class DocumentProjectionTests(unittest.TestCase):
             other.mkdir()
             with self.assertRaises(DocumentToolError):
                 project_document(source, "long.docx", other)
+
+    def test_unchanged_file_is_parsed_once_and_a_rewrite_is_read_again(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_docx(root / "rules.docx", (("一次解析。UNIQUE-PARSE-ONCE", None),))
+            observed: list[int] = []
+
+            def counting(file_path: Path):
+                observed.append(1)
+                return docx_spans(file_path)
+
+            with patch("asterion.documents.tools.docx_spans", counting):
+                spans = document_spans(root, tools="docx", path="rules.docx")
+                anchor = spans[0][0]
+                self.assertEqual(read_span(root, anchor), "一次解析。UNIQUE-PARSE-ONCE")
+                self.assertEqual(verify_public_anchor(root, anchor), anchor)
+                self.assertEqual(read_span(root, anchor), "一次解析。UNIQUE-PARSE-ONCE")
+                self.assertEqual(observed, [1])
+            write_docx(root / "rules.docx", (("改写之后。UNIQUE-PARSE-AGAIN", None),))
+            rewritten = document_spans(root, tools="docx", path="rules.docx")
+            self.assertEqual(
+                read_span(root, rewritten[0][0]), "改写之后。UNIQUE-PARSE-AGAIN"
+            )
 
 
 def _styled_docx(path: Path, paragraphs: tuple[tuple[str, str], ...]) -> None:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections import OrderedDict
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -15,6 +16,16 @@ _ANCHOR_KINDS = ("docx-cell", "docx-paragraph", "pdf-text")
 _ANCHOR_KEYS = ("document", "kind", "position", "source_sha256", "span_sha256")
 _MAX_FILE_BYTES = 32 * 1024 * 1024
 _MAX_HITS = 32
+# One unchanged file is parsed once. A new inode, mtime, or size reads it again.
+_CACHE_MAX = 4
+_FILE_HASHES: OrderedDict[tuple[int, int, int, int], str] = OrderedDict()
+_EXTRACTED: OrderedDict[str, tuple[tuple[str, Mapping[str, int], str], ...]] = (
+    OrderedDict()
+)
+_SPAN_INDEX: OrderedDict[
+    tuple[str, str],
+    dict[tuple[object, ...], tuple[Mapping[str, object], str]],
+] = OrderedDict()
 
 
 class DocumentToolError(ValueError):
@@ -55,7 +66,7 @@ def search_documents(
     needle = query.strip()
     hits: list[Mapping[str, object]] = []
     for relative, file_path in _files(root, enabled, path):
-        source_sha256 = _sha256(_read_bytes(file_path))
+        source_sha256 = _file_sha256(file_path)
         for anchor, text in _spans(file_path, relative, source_sha256):
             if needle in text:
                 hits.append(anchor)
@@ -80,7 +91,7 @@ def document_spans(
         raise DocumentToolError("document tool is unavailable")
     found: list[tuple[Mapping[str, object], str]] = []
     for relative, file_path in _files(root, enabled, path):
-        source_sha256 = _sha256(_read_bytes(file_path))
+        source_sha256 = _file_sha256(file_path)
         found.extend(_spans(file_path, relative, source_sha256))
     return tuple(found)
 
@@ -104,28 +115,22 @@ def _resolve(
     root: Path, anchor: Mapping[str, object]
 ) -> tuple[Mapping[str, object], str]:
     file_path = _resolve_file(root, str(anchor["document"]))
-    source_sha256 = _sha256(_read_bytes(file_path))
+    source_sha256 = _file_sha256(file_path)
     if source_sha256 != anchor["source_sha256"]:
         raise DocumentToolError("document anchor is unavailable")
-    for found, text in _spans(file_path, str(anchor["document"]), source_sha256):
-        if found == anchor:
-            return found, text
-    raise DocumentToolError("document anchor is unavailable")
+    found = _span_index(file_path, str(anchor["document"]), source_sha256).get(
+        _anchor_token(anchor)
+    )
+    if found is None:
+        raise DocumentToolError("document anchor is unavailable")
+    matched, text = found
+    return _copy_anchor(matched), text
 
 
 def _spans(
     file_path: Path, relative: str, source_sha256: str
 ) -> tuple[tuple[Mapping[str, object], str], ...]:
-    suffix = file_path.suffix.casefold()
-    try:
-        if suffix == ".docx":
-            extracted = docx_spans(file_path)
-        elif suffix == ".pdf":
-            extracted = pdf_spans(file_path)
-        else:
-            raise DocumentToolError("document tool is unavailable")
-    except (OSError, ValueError):
-        raise DocumentToolError("document tool is unavailable") from None
+    extracted = _extracted(file_path, source_sha256)
     return tuple(
         (
             _make_anchor(relative, source_sha256, kind, position, text),
@@ -256,6 +261,88 @@ def _resolve_file(root: Path, relative: str) -> Path:
     if not resolved.is_file():
         raise DocumentToolError("document anchor is unavailable")
     return resolved
+
+
+def _file_sha256(path: Path) -> str:
+    details = path.stat(follow_symlinks=False)
+    key = (details.st_dev, details.st_ino, details.st_mtime_ns, details.st_size)
+    cached = _FILE_HASHES.get(key)
+    if cached is not None:
+        _FILE_HASHES.move_to_end(key)
+        return cached
+    digest = _sha256(_read_bytes(path))
+    _remember(_FILE_HASHES, key, digest)
+    return digest
+
+
+def _extracted(
+    file_path: Path, source_sha256: str
+) -> tuple[tuple[str, Mapping[str, int], str], ...]:
+    cached = _EXTRACTED.get(source_sha256)
+    if cached is not None:
+        _EXTRACTED.move_to_end(source_sha256)
+        return cached
+    suffix = file_path.suffix.casefold()
+    try:
+        if suffix == ".docx":
+            extracted = docx_spans(file_path)
+        elif suffix == ".pdf":
+            extracted = pdf_spans(file_path)
+        else:
+            raise DocumentToolError("document tool is unavailable")
+    except (OSError, ValueError):
+        raise DocumentToolError("document tool is unavailable") from None
+    _remember(_EXTRACTED, source_sha256, extracted)
+    return extracted
+
+
+def _span_index(
+    file_path: Path, relative: str, source_sha256: str
+) -> dict[tuple[object, ...], tuple[Mapping[str, object], str]]:
+    key = (source_sha256, relative)
+    cached = _SPAN_INDEX.get(key)
+    if cached is not None:
+        _SPAN_INDEX.move_to_end(key)
+        return cached
+    index = {
+        _anchor_token(anchor): (anchor, text)
+        for anchor, text in _spans(file_path, relative, source_sha256)
+    }
+    _remember(_SPAN_INDEX, key, index)
+    return index
+
+
+def _anchor_token(anchor: Mapping[str, object]) -> tuple[object, ...]:
+    position = anchor["position"]
+    if not isinstance(position, Mapping):
+        raise DocumentToolError("document anchor is unavailable")
+    return (
+        anchor["document"],
+        anchor["source_sha256"],
+        anchor["kind"],
+        tuple(sorted(position.items())),
+        anchor["span_sha256"],
+    )
+
+
+def _copy_anchor(anchor: Mapping[str, object]) -> dict[str, object]:
+    position = anchor["position"]
+    if not isinstance(position, Mapping):
+        raise DocumentToolError("document anchor is unavailable")
+    return {
+        "document": anchor["document"],
+        "source_sha256": anchor["source_sha256"],
+        "kind": anchor["kind"],
+        "position": dict(position),
+        "span_sha256": anchor["span_sha256"],
+    }
+
+
+def _remember(cache: OrderedDict[object, object], key: object, value: object) -> None:
+    cache[key] = value
+    cache.move_to_end(key)
+    while len(cache) > _CACHE_MAX:
+        cache.popitem(last=False)
 
 
 def _read_bytes(path: Path) -> bytes:
