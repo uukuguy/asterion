@@ -302,6 +302,51 @@ class GridRegulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(found.limited)
         self.assertEqual(found.calls, ("document-read", "document-read"))
 
+    async def test_a_bare_clause_number_does_not_start_a_clause(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _bare_number_docx(root / "table.docx")
+            kept = await lookup_measures(
+                root,
+                "不应大于4欧姆",
+                document="table.docx",
+                document_tools="docx",
+            )
+            titled = await lookup_measures(
+                root,
+                "两端接地",
+                document="table.docx",
+                document_tools="docx",
+            )
+        self.assertEqual(
+            tuple(item["clause_id"] for item in kept.clauses),
+            ("4.1.2",),
+        )
+        self.assertEqual(
+            kept.clauses[0]["measures"],
+            "4.1.2 接地限值不应大于4欧姆。5.82.10.后续仍属本条。",
+        )
+        self.assertEqual(titled.clauses[0]["clause_id"], "4.2.1")
+        self.assertEqual(titled.clauses[0]["basis"]["kind"], "docx-cell")
+        self.assertEqual(titled.clauses[0]["measures"], "4.2.1 两端接地。")
+
+
+def _bare_number_docx(path: Path) -> None:
+    document = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:body>
+<w:p><w:r><w:t>4.1.2 接地限值</w:t></w:r></w:p>
+<w:p><w:r><w:t>不应大于4欧姆。</w:t></w:r></w:p>
+<w:tbl><w:tr><w:tc><w:p><w:r><w:t>5.8</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+<w:p><w:r><w:t>2.10.</w:t></w:r></w:p>
+<w:p><w:r><w:t>后续仍属本条。</w:t></w:r></w:p>
+<w:p><w:r><w:t>4.1.3 其他条款</w:t></w:r></w:p>
+<w:tbl><w:tr><w:tc><w:p><w:r><w:t>4.2.1 两端接地。</w:t></w:r></w:p></w:tc></w:tr></w:tbl>
+</w:body></w:document>
+"""
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr("word/document.xml", document)
+
 
 def _outline_docx(path: Path) -> None:
     paragraphs = (

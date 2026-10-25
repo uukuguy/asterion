@@ -29,6 +29,7 @@ from asterion.runtime.host import RunEvent, RunRequest
 # A longer dotted id is not a shorter clause: 2.10 is not 2.1, and 2.1.1 is not 2.1.
 _CLAUSE_ID = re.compile(r"^([0-9]{1,2}(?:\.[0-9]{1,2}){1,4})(?!\d|\.[0-9])")
 _CLAUSE_REF = re.compile(r"(?<![0-9.])([0-9]{1,2}(?:\.[0-9]{1,2}){1,4})(?!\d|\.[0-9])")
+_HEADING_TAIL = re.compile(r"^[\s.．。:：、]+")
 _MAX_CLAUSES = 8
 _MAX_SITUATION = 200
 
@@ -538,8 +539,12 @@ def _finding_anchors(
 
 
 def _heading_id(text: str) -> str | None:
-    match = _CLAUSE_ID.match(text.strip())
+    stripped = text.strip()
+    match = _CLAUSE_ID.match(stripped)
     if match is None:
+        return None
+    # A span that is only the number points at a clause. It does not start one.
+    if not _HEADING_TAIL.sub("", stripped[match.end() :]):
         return None
     return match.group(1)
 

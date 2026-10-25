@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-25 18:16. **Session remains active — not a final handoff.**
+> Updated: 2026-10-25 18:38. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -10,7 +10,8 @@
 
 ## Verified facts
 
-- `tests.test_document_tools`, `tests.test_grid_regulation`, and `tests.test_grid_regulation_page` passed: 16 tests. Ruff check passed on the edited Python.
+- `tests.test_document_tools`, `tests.test_grid_regulation`, and `tests.test_grid_regulation_page` passed: 17 tests. Ruff check passed on the edited Python.
+- A span that is only a clause number does not start a clause. A titled cell still does. On the 2023 stability file the one bare cell stays inside clause 28.1.1 (1753 characters). Clause 5.8 is not opened. The spaced fault query is unchanged: 6.2.5 (546 characters) and 26.1 (1427 characters).
 - DOCX reader: when nonempty TOC1–TOC3 levels equal heading styles 1–3, the clause number is prefixed to the heading and the TOC paragraphs are omitted. Paragraph indexes of the remaining paragraphs stay the original indexes. Public position keys are unchanged. A mismatch does not rewrite the file.
 - Private re-probe of the 2023 stability DOCX, sentence text not recorded: 8539 nonempty spans. Clause 1.17 is 30 characters. One spaced fault query returned 6.2.5 (546 characters) and 26.1 (1427 characters) and was not limited. `主变 冷却`, `冷却 全停`, and the unspaced form missed. Parent sections 4.2 and 2.4 remain 10697 and 9298 characters because they still include descendants.
 - Headless Chrome opened the empty desk, one fictional measures hit, and a miss. A 390px layout was reviewed.
@@ -42,7 +43,6 @@
 - `make promotion-check` has not been run since `context-policy-extension.mjs` was added.
 - Worktrees `asterion-p1-workload`, `asterion-p2-worker`, and `asterion-p3-real-rlm` remain. They are unrelated.
 - Untracked regulation files under `docs/` stay untracked.
-- A table cell whose text is only a dotted number can still open a clause. One cell in the 2023 stability file carried 1566 characters under such a number.
 
 ## Next action
 
