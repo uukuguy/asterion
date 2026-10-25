@@ -3874,3 +3874,4 @@
 - 22:48 One selected PDF or DOCX projects to passages.txt. A read of that file records verified anchors. bash does not. No model call. [34f3644f]
 - 22:49 Scripted answer_fault writes the application directory and cites opened passages. The page still uses the word chain. No model call. [101af61d]
 - 23:08 The desk calls answer_fault. The shipped page returns 422 and does not start Pi. Headless Chrome opened the empty page, one scripted hit, and a miss on a fictional file. No model call. [3a41d145]
+- 23:47 The live option builder is in. page.main passes LiveGridResearch. Tests check the options and do not call run. make grid-regulation was not run. No model call. [98dfed8a]
