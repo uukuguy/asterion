@@ -20,8 +20,6 @@
       --on-primary: #ffffff;
       --gold: #92400e;
       --gold-bg: #fef3c7;
-      --mark: #fde68a;
-      --mark-ink: #1c1917;
       --danger: #b91c1c;
       --danger-bg: #fef2f2;
       --focus: #1e3a8a;
@@ -46,8 +44,6 @@
         --on-primary: #0f172a;
         --gold: #fde68a;
         --gold-bg: #3a2a10;
-        --mark: #f6d98a;
-        --mark-ink: #1c1917;
         --danger: #fecaca;
         --danger-bg: #3f1d1d;
         --focus: #dbeafe;
@@ -564,15 +560,11 @@
     }
 
     .answer td.is-key, .passage td.is-key {
-      background: var(--mark);
-      color: var(--mark-ink);
-      font-weight: 700;
+      font-weight: 600;
     }
 
-    mark {
-      background: var(--mark);
-      color: var(--mark-ink);
-      padding: 0 0.12em;
+    .answer strong {
+      font-weight: 700;
     }
 
     .note { margin-top: 16px; font-size: 14px; }
@@ -751,9 +743,9 @@
       let match = pattern.exec(text);
       while (match) {
         if (match.index > last) parent.append(text.slice(last, match.index));
-        const marked = document.createElement("mark");
-        marked.textContent = match[1];
-        parent.append(marked);
+        const strong = document.createElement("strong");
+        strong.textContent = match[1];
+        parent.append(strong);
         last = match.index + match[0].length;
         match = pattern.exec(text);
       }
