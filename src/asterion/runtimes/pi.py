@@ -42,9 +42,10 @@ from asterion.runtimes.pi_rpc import PiChildProcess, PiStdoutLimitExceeded
 
 
 # One Pi tool event repeats the tool's own truncated body in details.
-# One research turn also streams one event per token. The cap matches Pi RPC.
+# One research turn also streams one JSON event per token. A 32-turn read
+# does not fit in 4MB. The total matches Pi RPC's compact cap. The line cap stays.
 _MAX_STDOUT_LINE_BYTES = 1024 * 1024
-_MAX_STDOUT_BYTES = 4 * 1024 * 1024
+_MAX_STDOUT_BYTES = 64 * 1024 * 1024
 _MAX_STDERR_BYTES = 64 * 1024
 _MAX_EVENT_COUNT = 65536
 _MAX_FINAL_TEXT_BYTES = 1024 * 1024
