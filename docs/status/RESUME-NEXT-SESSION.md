@@ -1,10 +1,10 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-26 01:06. **Session remains active — not a final handoff.**
+> Updated: 2026-10-26 01:37. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`. POST `/api/measures` calls `answer_fault`. `page.main` passes `LiveGridResearch`. `serve` with no research object still returns 422 and does not start Pi. `make grid-regulation` stays on `127.0.0.1`. It was not run. Submitting the form would start Pi.
+- The grid regulation desk is one HTML file, `page.html`. POST `/api/measures` calls `answer_fault`. `page.main` passes `LiveGridResearch`. `serve` with no research object still returns 422 and does not start Pi. `make grid-regulation` stays on `127.0.0.1`. While a search runs, the button counts seconds and stderr prints a turn number or the tool name `read`, `bash`, or `grep`. The question, tool arguments, and passage text stay off that log. `e5e9a2bc` was checked with a fictional file and did not start Pi. Submitting the form would start Pi.
 - One authorized question on the 2023 stability DOCX was run three times at `max_turns` `"32"`, a 300-second cancel, and `--thinking off`. The first stopped at the turn cap. The second wrote bash-only `final.txt` and was not rendered. The third, after `06b2893e`, completed in 33.1 seconds: 6 bash and 18 read, 835 anchors, reply 1917 characters. Evidence is `outputs/grid-regulation/fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. That reply is not an applicability judgment. Another model call is not authorized.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
@@ -29,7 +29,7 @@
 ## Current judgment
 
 - Citation checks that the version string occurs in the file and that the finding occurs inside the assembled clause. It does not decide legal applicability.
-- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` would start Pi when the form is submitted. The one authorized question stopped while still opening passages. The task text keeps each read to a few lines and continues while a depended-on citation is unread. The session matches that shape: small limits, distinct offsets, no final answer. Whether a different instruction or a higher turn bound would finish the question is not measured. The desk does not open another model client. `prepare_prime_application` stays the Prime door.
+- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` starts Pi when the form is submitted. The third attempt of the one authorized question rendered a 1917-character reply from 18 reads. That reply is not an applicability judgment. Another model call is not authorized. The desk does not open another model client. `prepare_prime_application` stays the Prime door. Operator progress is elapsed seconds on the button, plus a turn number or a tool name on stderr. It does not include the question or passage text.
 - The 36-point gap remains a reader constant, not a layout proof.
 
 ## Historical archive
@@ -53,8 +53,8 @@
 ## Next action
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
-2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, a 300-second cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
-3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"` and a 300-second cancel until the user changes them. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. That directory is empty because the turn-cap stop published no evidence.
+2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, a 300-second cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. An already running desk process does not reload `e5e9a2bc`; the operator restarts it. That restart is not a new authorization. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
+3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"` and a 300-second cancel until the user changes them. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. Two run directories are there: the unrendered bash-only run `d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b` and the rendered run `fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. Progress lines do not name those directories.
 
 ## Ready-to-paste command
 
