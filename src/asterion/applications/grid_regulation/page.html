@@ -556,12 +556,12 @@
           <h1>规程检索</h1>
         </div>
       </div>
-      <p class="lead">指定一本规程，例如 2023年稳规，顺着正文和表格把处置办法串成一条答复。条款号只写在条款依据里。</p>
+      <p class="lead">指定一本规程，例如 2023年稳规。答复从打开的段落和表格行写出。条款号只作为引用：可以写在答复里，指向已经打开的位置；标题行的引用证据上也会标出条款号。</p>
     </header>
     <section class="guide" aria-labelledby="guide-title">
       <div class="guide-head">
         <h2 id="guide-title">怎么查</h2>
-        <p>先指定一本规程，再写下故障或事项。答复按打开的段落和表格行往下串，并附上引用位置。</p>
+        <p>先指定一本规程，再写下故障或事项。答复从打开的段落和表格行写出，并附上引用。</p>
       </div>
       <ol class="steps">
         <li>
@@ -575,14 +575,14 @@
           <span class="num">2</span>
           <div>
             <h3>写下事项</h3>
-            <p>用规程里的说法写出设备名和故障现象，中间用空格分开，例如「主变 冷却全停」。这些字用来打开对应的段落或表格行，不要写「应如何处置」。</p>
+            <p>用规程里的说法描述设备和故障。不必凑齐条款里的每一个字，也不要先写条款号。</p>
           </div>
         </li>
         <li>
           <span class="num">3</span>
           <div>
             <h3>顺着表格和引用继续</h3>
-            <p>表格的一行从左到右读，条件和处置留在同一行。文中指向的其它位置会继续打开。条款号只写在条款依据里。</p>
+            <p>答复来自实际打开的段落和表格行。表格一行从左到右读。文中指向的其它位置会继续打开。条款号只作为引用：可以写在答复里，指向已经打开的位置；标题行的引用证据上也会标出条款号。</p>
           </div>
         </li>
       </ol>
@@ -591,7 +591,7 @@
         <dl>
           <div><dt>规程</dt><dd>2023年稳规</dd></div>
           <div><dt>事项</dt><dd>主变 冷却全停</dd></div>
-          <div><dt>得到</dt><dd>按阅读顺序串起的处置答复和引用证据</dd></div>
+          <div><dt>得到</dt><dd>根据打开的段落和表格行写出的处置答复，并附引用证据</dd></div>
         </dl>
         <p class="specimen-note">这只说明格式。请改成你要查的设备和故障现象，页面不会替你检索。</p>
       </div>
@@ -610,7 +610,7 @@
           <div class="field">
             <label for="situation">事项<span class="req">必填</span></label>
             <input id="situation" name="situation" type="text" required autocomplete="off" placeholder="例如 主变 冷却全停" aria-describedby="situation-hint">
-            <p class="hint" id="situation-hint">每个词至少两个字。先打开写出这些字的段落或表格行，再继续打开其中指向的位置。</p>
+            <p class="hint" id="situation-hint">写下设备名和故障现象。这一次只读所选的那一本，从打开的段落和表格行写出处置，并附上引用。</p>
           </div>
           <button id="search" type="submit">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -632,12 +632,12 @@
       </section>
       <section class="sheet" id="result" tabindex="-1" aria-live="polite">
         <h2>处置回复</h2>
-        <p class="lede" id="lede">指定一本规程并写下故障或事项后，这里按阅读顺序串起打开的段落和表格行，并附上引用证据。</p>
-        <p class="sample-mark">表格的一行整行保留。条款号只出现在引用证据里。</p>
+        <p class="lede" id="lede">指定一本规程并写下故障或事项后，这里给出据此写出的处置答复，并附上引用证据。</p>
+        <p class="sample-mark">表格的一行整行保留。条款号只作为引用，可以出现在答复里，并标在标题那一行的引用证据上。</p>
       </section>
     </main>
   </div>
-  <footer>答复按打开的段落和表格行串起，并附上位置。条款号只作为引用。这里不判断现场应当如何处置。</footer>
+  <footer>答复只根据打开的段落和表格行写出。条款号只作为引用，可以写在答复里。文件里没有的处置不会被补上。标题行的引用证据会再标一次条款号。</footer>
   <script>
     const form = document.querySelector("#query");
     const result = document.querySelector("#result");
@@ -681,34 +681,9 @@
       return "第 " + position.page + " 页 · 行 " + position.item;
     }
 
-    function excerpt(text, terms) {
+    function excerpt(text) {
       const block = document.createElement("blockquote");
-      const words = (terms || []).filter((term) => term);
-      let rest = text || "";
-      if (!words.length) {
-        block.textContent = rest;
-        return block;
-      }
-      while (rest) {
-        let at = -1;
-        let word = "";
-        words.forEach((term) => {
-          const index = rest.indexOf(term);
-          if (index !== -1 && (at === -1 || index < at || (index === at && term.length > word.length))) {
-            at = index;
-            word = term;
-          }
-        });
-        if (at === -1) {
-          block.append(document.createTextNode(rest));
-          break;
-        }
-        if (at > 0) block.append(document.createTextNode(rest.slice(0, at)));
-        const mark = document.createElement("mark");
-        mark.textContent = word;
-        block.append(mark);
-        rest = rest.slice(at + word.length);
-      }
+      block.textContent = text || "";
       return block;
     }
 
@@ -730,12 +705,11 @@
       result.replaceChildren();
       const copy = document.createElement("p");
       copy.className = "lede";
-      copy.textContent = "没有在这本规程里找到这些字。";
+      copy.textContent = "这次查找没有完成。";
       const list = document.createElement("ol");
       list.className = "recover";
       [
-        "事项要写成规程里会用的设备名和故障现象。",
-        "用空格分开，每个词至少两个字，不要写「应如何处置」。",
+        "事项写成设备和故障现象。",
         "确认选的是那一本规程，例如 2023年稳规。",
       ].forEach((text) => {
         const item = document.createElement("li");
@@ -751,16 +725,10 @@
     function render(payload) {
       result.replaceChildren();
       result.append(heading("处置回复"));
-      if (payload.limited) {
-        const more = document.createElement("p");
-        more.className = "note";
-        more.textContent = "还有更多处也写出这些字。请补上设备名称，缩小范围。";
-        result.append(more);
-      }
       const role = document.createElement("p");
       role.className = "role";
       role.textContent = "答复";
-      result.append(role, excerpt(payload.reply, payload.terms));
+      result.append(role, excerpt(payload.reply));
       const evidenceTitle = document.createElement("p");
       evidenceTitle.className = "role";
       evidenceTitle.textContent = "引用证据";
@@ -828,7 +796,7 @@
     function setBusy(busy) {
       button.disabled = busy;
       button.setAttribute("aria-busy", busy ? "true" : "false");
-      buttonLabel.textContent = busy ? "正在查找…" : "查找处置规定";
+      buttonLabel.textContent = busy ? "正在阅读…" : "查找处置规定";
     }
 
     form.addEventListener("submit", async (event) => {
@@ -862,7 +830,7 @@
           return;
         }
         render(payload);
-        formStatus.textContent = "已按阅读顺序串起答复，并附 " + payload.evidence.length + " 处引用。";
+        formStatus.textContent = "已写出答复，并附 " + payload.evidence.length + " 处引用。";
       } catch {
         clearResult("本地服务没有返回结果。请确认页面是从本地服务打开的，然后重新点「查找处置规定」。");
         formStatus.classList.add("is-alert");

@@ -8,8 +8,10 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from asterion.applications.grid_regulation.answer import ScriptedGridResearch
 from asterion.applications.grid_regulation.page import page_bytes, serve
 from asterion.applications.grid_regulation.retrieve import write_demo_corpus
+from asterion.documents import write_docx
 
 
 class _Body:
@@ -24,12 +26,26 @@ class GridRegulationPageTests(unittest.TestCase):
         html = page_bytes().decode()
         self.assertIn("规程检索", html)
         self.assertIn("怎么查", html)
-        self.assertIn("条款依据", html)
         self.assertIn("2023年稳规", html)
         self.assertIn("引用证据", html)
         self.assertIn("查找处置规定", html)
+        self.assertIn("这次查找没有完成", html)
+        self.assertIn("可以写在答复里", html)
+        self.assertIn("主变 冷却全停", html)
         self.assertNotIn("全部已列出的规程", html)
         self.assertNotIn("按条款号找出原句的位置", html)
+        self.assertNotIn("按阅读顺序串起", html)
+        self.assertNotIn("条款号只写在条款依据里", html)
+        self.assertNotIn("每个词至少两个字", html)
+        self.assertNotIn("条款号只出现在引用证据里", html)
+        self.assertNotIn("没有在这本规程里找到这些字", html)
+        page_source = (
+            Path(__file__).resolve().parents[1]
+            / "src/asterion/applications/grid_regulation/page.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("prepare_native_application", page_source)
+        self.assertNotIn("lookup_chain", page_source)
+        self.assertNotIn("asterion.runtimes", page_source)
         self.assertNotIn("SECRET", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
@@ -78,25 +94,22 @@ class GridRegulationPageTests(unittest.TestCase):
                 "regulation citation is unavailable",
             )
             self.assertNotIn("SECRET", missed.text)
-            found = json.loads(
-                _post(
-                    base + "/api/measures",
-                    {
-                        "situation": "不应大于4欧姆",
-                        "document": "grounding.docx",
-                        "document_tools": "docx",
-                    },
-                ).text
+            question = "示范设备发生故障后如何处置"
+            unavailable = _post(
+                base + "/api/measures",
+                {
+                    "situation": question,
+                    "document": "grounding.docx",
+                    "document_tools": "docx",
+                },
             )
-            self.assertIn("依据「grounding.docx」", found["reply"])
-            self.assertIn("按阅读顺序串起", found["reply"])
-            self.assertIn("不应大于4欧姆", found["reply"])
-            self.assertNotIn("关联条款", found["reply"])
-            evidence = found["evidence"][0]
-            self.assertEqual(evidence["label"], "4.1.2")
-            self.assertEqual(evidence["document"], "grounding.docx")
-            self.assertEqual(set(evidence), {"document", "kind", "label", "position"})
-            self.assertEqual(evidence["kind"], "docx-paragraph")
+            self.assertEqual(unavailable.status, 422)
+            self.assertEqual(
+                json.loads(unavailable.text)["error"],
+                "regulation measures are unavailable",
+            )
+            self.assertNotIn(question, unavailable.text)
+            self.assertNotIn("SECRET", unavailable.text)
             blank = _post(
                 base + "/api/measures",
                 {
@@ -107,21 +120,6 @@ class GridRegulationPageTests(unittest.TestCase):
             )
             self.assertEqual(blank.status, 400)
             self.assertEqual(json.loads(blank.text)["error"], "request is invalid")
-            unavailable = _post(
-                base + "/api/measures",
-                {
-                    "situation": "应如何处置",
-                    "document": "grounding.docx",
-                    "document_tools": "docx",
-                },
-            )
-            self.assertEqual(unavailable.status, 422)
-            self.assertEqual(
-                json.loads(unavailable.text)["error"],
-                "regulation measures are unavailable",
-            )
-            self.assertNotIn("SECRET", unavailable.text)
-            self.assertNotIn("应如何处置", unavailable.text)
             rejected = _post(
                 base + "/api/measures",
                 {
@@ -132,6 +130,108 @@ class GridRegulationPageTests(unittest.TestCase):
             )
             self.assertEqual(rejected.status, 400)
             self.assertEqual(json.loads(rejected.text)["error"], "request is invalid")
+
+    def test_scripted_measures_cite_the_opened_row_and_paragraph(self) -> None:
+        question = "示范设备发生故障后如何处置"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_docx(
+                root / "desk.docx",
+                (("4.1.2 接地限值", None), ("5.2 随后的复测。", None)),
+                ((("雨天", "不应大于4欧姆。见5.2。"),),),
+            )
+            server = serve(root, research=ScriptedGridResearch())
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(server.shutdown)
+            self.addCleanup(server.server_close)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            found = json.loads(
+                _post(
+                    base + "/api/measures",
+                    {
+                        "situation": question,
+                        "document": "desk.docx",
+                        "document_tools": "docx",
+                    },
+                ).text
+            )
+            self.assertEqual(set(found), {"document", "reply", "evidence"})
+            self.assertEqual(found["document"], "desk.docx")
+            self.assertEqual(found["reply"], "示范答复：按打开的行处理，并见所引位置。")
+            self.assertNotIn("不应大于4欧姆", found["reply"])
+            self.assertNotIn("雨天", found["reply"])
+            self.assertNotIn(question, found["reply"])
+            evidence = found["evidence"]
+            self.assertEqual(
+                [item["kind"] for item in evidence],
+                ["docx-cell", "docx-cell", "docx-paragraph"],
+            )
+            self.assertEqual(set(evidence[0]), {"document", "kind", "position"})
+            self.assertEqual(set(evidence[1]), {"document", "kind", "position"})
+            self.assertNotIn("label", evidence[0])
+            self.assertEqual(evidence[2]["label"], "5.2")
+            self.assertEqual(
+                set(evidence[2]),
+                {"document", "kind", "label", "position"},
+            )
+            empty = _post(
+                base + "/api/measures",
+                {
+                    "situation": "",
+                    "document": "desk.docx",
+                    "document_tools": "docx",
+                },
+            )
+            self.assertEqual(empty.status, 422)
+            self.assertEqual(
+                json.loads(empty.text)["error"],
+                "regulation measures are unavailable",
+            )
+            long_question = "设" * 201
+            too_long = _post(
+                base + "/api/measures",
+                {
+                    "situation": long_question,
+                    "document": "desk.docx",
+                    "document_tools": "docx",
+                },
+            )
+            self.assertEqual(too_long.status, 422)
+            self.assertEqual(
+                json.loads(too_long.text)["error"],
+                "regulation measures are unavailable",
+            )
+            self.assertNotIn(long_question, too_long.text)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_docx(
+                root / "desk.docx",
+                (("4.1.2 接地限值", None), ("5.2 随后的复测。", None)),
+                ((("雨天", "不应大于4欧姆。见5.2。"),),),
+            )
+            server = serve(root, research=ScriptedGridResearch(passage_lines=()))
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            self.addCleanup(server.shutdown)
+            self.addCleanup(server.server_close)
+            base = f"http://127.0.0.1:{server.server_address[1]}"
+            unread = "示范设备故障"
+            missed = _post(
+                base + "/api/measures",
+                {
+                    "situation": unread,
+                    "document": "desk.docx",
+                    "document_tools": "docx",
+                },
+            )
+            self.assertEqual(missed.status, 422)
+            self.assertEqual(
+                json.loads(missed.text)["error"],
+                "regulation measures are unavailable",
+            )
+            self.assertNotIn(unread, missed.text)
+            self.assertNotIn("雨天", missed.text)
 
     def test_makefile_serves_the_desk_on_loopback(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(

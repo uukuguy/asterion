@@ -271,6 +271,20 @@ class ScriptedGridResearch:
         return self.reply, locations, calls
 
 
+class UnavailableResearch:
+    """Refuse the desk question. This object does not start Pi."""
+
+    async def run(
+        self,
+        *,
+        corpus: Path,
+        prompt: str,
+        signal: CancellationSignal | None,
+    ) -> tuple[str, Mapping[str, object], tuple[str, ...]]:
+        del corpus, prompt, signal
+        raise RegulationCitationError("regulation measures are unavailable")
+
+
 def _check(document: object, question: object, document_tools: object) -> None:
     if (
         type(question) is not str
