@@ -5,6 +5,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 
 from asterion.applications.grid_regulation import (
@@ -275,6 +276,57 @@ class GridRegulationTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("station.pdf", {item["document"] for item in opened.clauses})
         self.assertNotIn("不应大于4欧姆", repr(both.clauses[0]["basis"]))
+
+    async def test_measures_follow_body_headings_named_by_the_outline(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _outline_docx(root / "outline.docx")
+            found = await lookup_measures(
+                root,
+                "不应大于4欧姆",
+                document="outline.docx",
+                document_tools="docx",
+            )
+        self.assertEqual(
+            tuple((item["relation"], item["clause_id"]) for item in found.clauses),
+            (("measure", "4.1.2"), ("child", "4.1.2.1")),
+        )
+        measure = found.clauses[0]
+        self.assertEqual(measure["basis"]["position"], {"paragraph": 5})
+        self.assertEqual(
+            measure["measures"],
+            "4.1.2 接地限值不应大于4欧姆。附注留在本条款内",
+        )
+        self.assertEqual(found.clauses[1]["measures"], "4.1.2.1 雨天复测")
+        self.assertNotIn("接地限值 9", measure["measures"])
+        self.assertFalse(found.limited)
+        self.assertEqual(found.calls, ("document-read", "document-read"))
+
+
+def _outline_docx(path: Path) -> None:
+    paragraphs = (
+        ("TOC1", "1. 总则 1"),
+        ("TOC2", "4.1.2. 接地限值 9"),
+        ("TOC3", "4.1.2.1. 雨天复测 2"),
+        ("TOC2", "4.2.1. 其他条款 3"),
+        ("1", "总则"),
+        ("2", "接地限值"),
+        ("", "不应大于4欧姆。"),
+        ("4", "附注留在本条款内"),
+        ("3", "雨天复测"),
+        ("2", "其他条款"),
+    )
+    body: list[str] = []
+    for style, text in paragraphs:
+        properties = f'<w:pPr><w:pStyle w:val="{style}"/></w:pPr>' if style else ""
+        body.append(f"<w:p>{properties}<w:r><w:t>{text}</w:t></w:r></w:p>")
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{''.join(body)}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr("word/document.xml", document)
 
 
 def _station(root: Path) -> None:

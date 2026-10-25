@@ -119,6 +119,70 @@ class DocumentToolTests(unittest.TestCase):
             self.assertEqual(half_hit["position"], {"paragraph": 2})
             self.assertEqual(read_span(root, off_hit), "CLAUSE-OFF")
 
+    def test_docx_outline_moves_clause_ids_onto_body_headings(self) -> None:
+        paragraphs = (
+            ("TOC1", "1. 总则 1"),
+            ("TOC2", "4.1.2. 接地限值 9"),
+            ("TOC3", "4.1.2.1. 雨天复测 2"),
+            ("TOC2", "4.2.1. 其他条款 3"),
+            ("1", "总则"),
+            ("2", "接地限值"),
+            ("", "不应大于4欧姆。"),
+            ("4", "附注留在本条款内"),
+            ("3", "雨天复测"),
+            ("2", "其他条款"),
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _styled_docx(root / "outline.docx", paragraphs)
+            spans = document_spans(root, tools="docx")
+        texts = tuple(text for _anchor, text in spans)
+        indexes = tuple(anchor["position"]["paragraph"] for anchor, _text in spans)
+        self.assertEqual(
+            texts,
+            (
+                "总则",
+                "4.1.2 接地限值",
+                "不应大于4欧姆。",
+                "附注留在本条款内",
+                "4.1.2.1 雨天复测",
+                "4.2.1 其他条款",
+            ),
+        )
+        self.assertEqual(indexes, (4, 5, 6, 7, 8, 9))
+        self.assertEqual(set(spans[1][0]["position"]), {"paragraph"})
+        self.assertNotIn("接地限值 9", "".join(texts))
+
+    def test_docx_outline_stays_put_when_levels_do_not_line_up(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _styled_docx(
+                root / "mismatch.docx",
+                (
+                    ("TOC2", "4.1.2. 接地限值 9"),
+                    ("2", "接地限值"),
+                    ("2", "其他条款"),
+                ),
+            )
+            _styled_docx(
+                root / "unnumbered.docx",
+                (("TOC2", "接地限值"), ("2", "接地限值")),
+            )
+            mismatch = document_spans(root, tools="docx", path="mismatch.docx")
+            unnumbered = document_spans(root, tools="docx", path="unnumbered.docx")
+        self.assertEqual(
+            tuple(text for _anchor, text in mismatch),
+            ("4.1.2. 接地限值 9", "接地限值", "其他条款"),
+        )
+        self.assertEqual(
+            tuple(anchor["position"]["paragraph"] for anchor, _text in mismatch),
+            (0, 1, 2),
+        )
+        self.assertEqual(
+            tuple(text for _anchor, text in unnumbered),
+            ("接地限值", "接地限值"),
+        )
+
     def test_pdf_tounicode_joins_a_baseline_and_keeps_a_distant_glyph(self) -> None:
         cmap = b"""begincmap
 1 begincodespacerange
@@ -177,6 +241,20 @@ endcmap
             self.assertEqual(search_documents(root, "4.1.2", tools="docx"), (anchor,))
             with self.assertRaises(DocumentToolError):
                 document_spans(root, tools=None)
+
+
+def _styled_docx(path: Path, paragraphs: tuple[tuple[str, str], ...]) -> None:
+    body: list[str] = []
+    for style, text in paragraphs:
+        properties = f'<w:pPr><w:pStyle w:val="{style}"/></w:pPr>' if style else ""
+        body.append(f"<w:p>{properties}<w:r><w:t>{text}</w:t></w:r></w:p>")
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{''.join(body)}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr("word/document.xml", document)
 
 
 def _identity_pdf(content: bytes, cmap: bytes) -> bytes:

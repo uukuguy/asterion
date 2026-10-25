@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import zipfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -9,6 +10,10 @@ from xml.etree import ElementTree
 from xml.sax.saxutils import escape
 
 _W = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
+# The outline number lives on the TOC entry. Heading styles 1–3 carry the title.
+_TOC_LEVEL = re.compile(r"^TOC([123])$")
+_HEADING_LEVEL = re.compile(r"^([123])$")
+_OUTLINE_ID = re.compile(r"^([0-9]{1,2}(?:\.[0-9]{1,2}){1,4})(?!\d|\.[0-9])")
 _CONTENT_TYPES = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -82,35 +87,87 @@ def docx_spans(
     body = root.find(f"{_W}body")
     if body is None:
         raise DocumentFormatError("document tool is unavailable")
-    spans: list[tuple[str, Mapping[str, int], str]] = []
+    blocks: list[tuple[str, int, ElementTree.Element]] = []
     paragraph_index = 0
     table_index = 0
     for child in list(body):
         if child.tag == f"{_W}p":
-            spans.append(
-                (
-                    "docx-paragraph",
-                    _paragraph_position(child, paragraph_index),
-                    _text(child),
-                )
-            )
+            blocks.append(("p", paragraph_index, child))
             paragraph_index += 1
         elif child.tag == f"{_W}tbl":
-            for row_index, row in enumerate(child.findall(f"{_W}tr")):
-                for cell_index, cell in enumerate(row.findall(f"{_W}tc")):
-                    spans.append(
-                        (
-                            "docx-cell",
-                            {
-                                "table": table_index,
-                                "row": row_index,
-                                "cell": cell_index,
-                            },
-                            _text(cell),
-                        )
-                    )
+            blocks.append(("t", table_index, child))
             table_index += 1
+    omit, labels = _outline_labels(
+        [(index, element) for kind, index, element in blocks if kind == "p"]
+    )
+    spans: list[tuple[str, Mapping[str, int], str]] = []
+    for kind, index, element in blocks:
+        if kind == "p":
+            if index in omit:
+                continue
+            text = _text(element)
+            label = labels.get(index)
+            if label is not None and _OUTLINE_ID.match(text.strip()) is None:
+                text = f"{label} {text.strip()}"
+            spans.append(("docx-paragraph", _paragraph_position(element, index), text))
+            continue
+        for row_index, row in enumerate(element.findall(f"{_W}tr")):
+            for cell_index, cell in enumerate(row.findall(f"{_W}tc")):
+                spans.append(
+                    (
+                        "docx-cell",
+                        {"table": index, "row": row_index, "cell": cell_index},
+                        _text(cell),
+                    )
+                )
     return tuple(spans)
+
+
+def _outline_labels(
+    paragraphs: Sequence[tuple[int, ElementTree.Element]],
+) -> tuple[set[int], dict[int, str]]:
+    """Move TOC clause numbers onto the matching headings, or change nothing.
+
+    TOC entries are omitted only when every level-1–3 entry lines up with a
+    heading of the same level. A deeper entry without a dotted number keeps
+    the original paragraphs, so the number is not dropped.
+    """
+
+    toc: list[tuple[int, int, str]] = []
+    headings: list[tuple[int, int]] = []
+    for index, paragraph in paragraphs:
+        style = _paragraph_style(paragraph)
+        text = _text(paragraph).strip()
+        if not text:
+            continue
+        toc_match = _TOC_LEVEL.fullmatch(style)
+        if toc_match is not None:
+            toc.append((index, int(toc_match.group(1)), text))
+            continue
+        heading_match = _HEADING_LEVEL.fullmatch(style)
+        if heading_match is not None:
+            headings.append((index, int(heading_match.group(1))))
+    if not toc or [level for _index, level, _text in toc] != [
+        level for _index, level in headings
+    ]:
+        return set(), {}
+    labels: dict[int, str] = {}
+    paired = zip(toc, headings, strict=True)
+    for (_toc_index, level, text), (heading_index, _level) in paired:
+        found = _OUTLINE_ID.match(text)
+        if found is None:
+            if level > 1:
+                return set(), {}
+            continue
+        labels[heading_index] = found.group(1)
+    return {index for index, _level, _text in toc}, labels
+
+
+def _paragraph_style(paragraph: ElementTree.Element) -> str:
+    style = paragraph.find(f"{_W}pPr/{_W}pStyle")
+    if style is None:
+        return ""
+    return style.attrib.get(f"{_W}val", "")
 
 
 def _paragraph_position(
