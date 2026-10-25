@@ -12,6 +12,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Protocol
 
+from asterion.applications.grid_regulation.live import GRID_MAX_TURNS
 from asterion.applications.grid_regulation.retrieve import (
     RegulationCitationError,
     _heading_id,
@@ -118,9 +119,9 @@ def fault_prompt(document: str, question: str) -> str:
                 "name only this one device. Read each of those passages in "
                 "full. A chapter opening is not a substitute for the leaf, and "
                 "the leaf is not a substitute for the chapter opening. Combine "
-                "them. Follow a citation with another search, then read that "
-                "passage the same way. Continue while an opened passage cites "
-                "a passage in this file that has not been read."
+                "them. Follow a citation with another search only when this "
+                "question depends on that cited passage, then read that "
+                "passage the same way."
             ),
             (
                 "Search with rg -n through bash. Use pipelines when more than "
@@ -134,18 +135,20 @@ def fault_prompt(document: str, question: str) -> str:
             (
                 "Read hits with the read tool. The read offset is that line "
                 "number minus at least one, and never below 1, so the previous "
-                "line is inside the window when one exists. Keep limit small "
-                "enough to cover that previous line, the hit, and the next few "
-                "lines. Do not set offset to the hit itself when the heading "
-                "is the line above. Do not read the whole file."
+                "line is inside the window when one exists. One read covers "
+                "the leaf, the ancestor opening, or the cited passage being "
+                "opened. Set limit to that span's line count. If the result "
+                "ends with [tool result truncated], continue that same span "
+                "from the first unread line. Do not set offset to the hit "
+                "itself when the heading is the line above. Do not read the "
+                "whole file."
             ),
             (
                 "A clause number or chapter number inside a line that was "
-                "opened is a citation, not the answer. Search that number, "
-                "then read it with offset equal to that line number minus at "
-                "least one, and never below 1. Continue while a line the "
-                "answer depends on cites a passage in this file that has not "
-                "been read."
+                "opened is a citation, not the answer. Search that number "
+                "only when this question depends on it, then read it with "
+                "offset equal to that line number minus at least one, and "
+                "never below 1."
             ),
             (
                 "A clause number in the question is not the search key. Search "
@@ -153,9 +156,14 @@ def fault_prompt(document: str, question: str) -> str:
                 "the question named its number."
             ),
             (
-                "Write the answer only from lines actually returned by read, "
-                "and only after each leaf the answer depends on has been read "
-                "through. If this file does not state a handling, say so. Do "
+                f"This run allows {GRID_MAX_TURNS} tool turns. Write the "
+                "answer as soon as each leaf this question needs, each "
+                "ancestor opening, and the class rules this question needs "
+                "are open. Leave passages this question does not depend on "
+                "unread. Write the answer only from lines actually returned "
+                "by read, and only after each leaf the answer depends on has "
+                "been read through. If this file does not state a handling, "
+                "say so. Do "
                 "not invent a handling and do not import a rule from another "
                 "edition. A name in the question may not match the file. "
                 "Continue with a shorter fragment, or with a spelling that "
