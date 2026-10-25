@@ -253,7 +253,8 @@
       font-weight: 500;
     }
 
-    input[type="text"] {
+    input[type="text"],
+    select {
       width: 100%;
       min-height: 48px;
       padding: 12px 14px;
@@ -265,13 +266,15 @@
     }
 
     input[type="text"]:focus-visible,
+    select:focus-visible,
     button:focus-visible,
     .check:focus-within {
       outline: 2px solid var(--focus);
       outline-offset: 2px;
     }
 
-    input[type="text"]:focus-visible { border-color: var(--primary); }
+    input[type="text"]:focus-visible,
+    select:focus-visible { border-color: var(--primary); }
 
     input::placeholder { color: var(--muted); opacity: 1; }
 
@@ -440,6 +443,13 @@
       line-height: 1.3;
     }
 
+    .role {
+      margin: 18px 0 8px;
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 600;
+    }
+
     .recover {
       max-width: 40em;
       margin: 16px 0 0;
@@ -532,7 +542,7 @@
   </style>
 </head>
 <body>
-  <a class="skip" href="#result">跳到原文位置</a>
+  <a class="skip" href="#result">跳到处置回复</a>
   <div class="frame">
     <header class="mast">
       <div class="brand">
@@ -546,44 +556,44 @@
           <h1>规程检索</h1>
         </div>
       </div>
-      <p class="lead">在这个目录的 PDF 和 DOCX 里，按条款号找出原句的位置。</p>
+      <p class="lead">指定一本规程，例如 2023年稳规，查出某项故障应当如何处置。回复使用该规程原文，并附上条款依据。</p>
     </header>
     <section class="guide" aria-labelledby="guide-title">
       <div class="guide-head">
-        <h2 id="guide-title">怎么填</h2>
-        <p>三项都要出现在同一份文件里。缺一项，或分属两份文件，就找不到。</p>
+        <h2 id="guide-title">怎么查</h2>
+        <p>先指定一本规程，再写下故障或事项。回复由查到的条款和关联条款组成，并附上引用位置。</p>
       </div>
       <ol class="steps">
         <li>
           <span class="num">1</span>
           <div>
-            <h3>条款号</h3>
-            <p>照抄正文里的编号，例如 2.1 或 4.1.2。不要写成“第 2.1 条”。2.1.1 不会被当成 2.1。</p>
+            <h3>选择规程</h3>
+            <p>一次只选一本。例如 2023年稳规，就选文件名里有 2023 和稳定规定的那一版。</p>
           </div>
         </li>
         <li>
           <span class="num">2</span>
           <div>
-            <h3>版本字样</h3>
-            <p>写这份文件里看得到的年份或标准号，例如 2024。它必须和条款号在同一份文件中。</p>
+            <h3>写下事项</h3>
+            <p>用规程里的说法写出设备名和故障现象，中间用空格分开，例如「主变 冷却全停」。不要写「应如何处置」。</p>
           </div>
         </li>
         <li>
           <span class="num">3</span>
           <div>
-            <h3>原句</h3>
-            <p>从该条款里连续抄几个字，不必抄完整句。这里只核对它是否出现在这个条款中。</p>
+            <h3>看处置和依据</h3>
+            <p>回复写出规程对这件事的规定，并带上关联条款。引用证据给出条款号、文件名和位置。</p>
           </div>
         </li>
       </ol>
       <div class="specimen">
         <p class="specimen-label">填法示例</p>
         <dl>
-          <div><dt>条款号</dt><dd>4.1.2</dd></div>
-          <div><dt>版本字样</dt><dd>2024</dd></div>
-          <div><dt>原句</dt><dd>连续的几个字</dd></div>
+          <div><dt>规程</dt><dd>2023年稳规</dd></div>
+          <div><dt>事项</dt><dd>主变 冷却全停</dd></div>
+          <div><dt>得到</dt><dd>处置回复和引用证据</dd></div>
         </dl>
-        <p class="specimen-note">这只说明格式。请改成你正在看的那一页，页面不会替你检索。</p>
+        <p class="specimen-note">这只说明格式。请改成你要查的设备和故障现象，页面不会替你检索。</p>
       </div>
     </section>
     <main class="layout">
@@ -591,33 +601,23 @@
         <h2 id="form-title">查找</h2>
         <form id="query">
           <div class="field">
-            <label for="clause">条款号<span class="req">必填</span></label>
-            <input id="clause" name="clause_id" type="text" required autocomplete="off" spellcheck="false" placeholder="例如 4.1.2" aria-describedby="clause-hint">
-            <p class="hint" id="clause-hint">只写编号本身。</p>
+            <label for="document">规程<span class="req">必填</span></label>
+            <select id="document" name="document" required aria-describedby="document-hint">
+              <option value="">选择一本规程</option>
+            </select>
+            <p class="hint" id="document-hint">一次只查一本。文件名里有年份和规程名称。</p>
           </div>
           <div class="field">
-            <label for="version">版本字样<span class="req">必填</span></label>
-            <input id="version" name="version" type="text" required autocomplete="off" placeholder="例如 2024" aria-describedby="version-hint">
-            <p class="hint" id="version-hint">年份或标准号，须在同一份文件里。</p>
+            <label for="situation">事项<span class="req">必填</span></label>
+            <input id="situation" name="situation" type="text" required autocomplete="off" placeholder="例如 主变 冷却全停" aria-describedby="situation-hint">
+            <p class="hint" id="situation-hint">每个词至少两个字。这些字要能在规程原文里找到。</p>
           </div>
-          <div class="field">
-            <label for="finding">原句<span class="req">必填</span></label>
-            <input id="finding" name="finding" type="text" required autocomplete="off" placeholder="从该条款连续抄几个字" aria-describedby="finding-hint">
-            <p class="hint" id="finding-hint">连续的几个字即可。</p>
-          </div>
-          <fieldset>
-            <legend>查找范围</legend>
-            <div class="checks">
-              <label class="check"><input id="tool-docx" type="checkbox" checked> DOCX</label>
-              <label class="check"><input id="tool-pdf" type="checkbox" checked> PDF</label>
-            </div>
-          </fieldset>
           <button id="search" type="submit">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="11" cy="11" r="6.25" fill="none" stroke="currentColor" stroke-width="1.5"></circle>
               <path d="M16 16.5 20 20.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
             </svg>
-            <span id="search-label">查找原文位置</span>
+            <span id="search-label">查找处置规定</span>
           </button>
           <p class="status" id="form-status" role="status"></p>
         </form>
@@ -631,13 +631,13 @@
         </section>
       </section>
       <section class="sheet" id="result" tabindex="-1" aria-live="polite">
-        <h2>原文位置</h2>
-        <p class="lede" id="lede">填好三项后，点「查找原文位置」。结果按文件排列，并标出你抄的那几个字。</p>
-        <p class="sample-mark">标出的样子：<mark>这几个字</mark></p>
+        <h2>处置回复</h2>
+        <p class="lede" id="lede">指定一本规程并写下故障或事项后，这里给出按该规程整理的回复，并附上引用证据。</p>
+        <p class="sample-mark">回复使用规程原文，并包含关联条款。引用证据写成条款号和位置。</p>
       </section>
     </main>
   </div>
-  <footer>引用只说明这句话出现在该条款中。</footer>
+  <footer>回复由指定规程的原文和关联条款组成，并附上条款位置。这里不判断现场应当如何处置。</footer>
   <script>
     const form = document.querySelector("#query");
     const result = document.querySelector("#result");
@@ -654,11 +654,10 @@
       "pdf-text": "页面",
     };
 
-    function tools() {
-      const selected = [];
-      if (document.querySelector("#tool-docx").checked) selected.push("docx");
-      if (document.querySelector("#tool-pdf").checked) selected.push("pdf");
-      return selected.join(",");
+    function toolsFor(name) {
+      if (!name || name === "*") return "docx,pdf";
+      if (name.endsWith(".pdf")) return "pdf";
+      return "docx";
     }
 
     function sizeLabel(bytes) {
@@ -682,21 +681,34 @@
       return "第 " + position.page + " 页 · 行 " + position.item;
     }
 
-    function excerpt(text, finding) {
+    function excerpt(text, terms) {
       const block = document.createElement("blockquote");
-      if (!finding || !text.includes(finding)) {
-        block.textContent = text;
+      const words = (terms || []).filter((term) => term);
+      let rest = text || "";
+      if (!words.length) {
+        block.textContent = rest;
         return block;
       }
-      const parts = text.split(finding);
-      parts.forEach((part, index) => {
-        block.append(document.createTextNode(part));
-        if (index < parts.length - 1) {
-          const mark = document.createElement("mark");
-          mark.textContent = finding;
-          block.append(mark);
+      while (rest) {
+        let at = -1;
+        let word = "";
+        words.forEach((term) => {
+          const index = rest.indexOf(term);
+          if (index !== -1 && (at === -1 || index < at || (index === at && term.length > word.length))) {
+            at = index;
+            word = term;
+          }
+        });
+        if (at === -1) {
+          block.append(document.createTextNode(rest));
+          break;
         }
-      });
+        if (at > 0) block.append(document.createTextNode(rest.slice(0, at)));
+        const mark = document.createElement("mark");
+        mark.textContent = word;
+        block.append(mark);
+        rest = rest.slice(at + word.length);
+      }
       return block;
     }
 
@@ -711,20 +723,20 @@
       const copy = document.createElement("p");
       copy.className = "lede";
       copy.textContent = message;
-      result.append(heading("原文位置"), copy);
+      result.append(heading("处置回复"), copy);
     }
 
     function showMiss() {
       result.replaceChildren();
       const copy = document.createElement("p");
       copy.className = "lede";
-      copy.textContent = "没有找到这句原文。";
+      copy.textContent = "没有在这本规程里找到这些字。";
       const list = document.createElement("ol");
       list.className = "recover";
       [
-        "条款号要和正文编号一致，例如 4.1.2。不要写成“第 4.1.2 条”。",
-        "版本字样必须出现在同一份文件里，例如年份 2024。",
-        "原句要落在这个条款里面。别的条款里的句子不会被列出。",
+        "事项要写成规程里会用的设备名和故障现象。",
+        "用空格分开，每个词至少两个字，不要写「应如何处置」。",
+        "确认选的是那一本规程，例如 2023年稳规。",
       ].forEach((text) => {
         const item = document.createElement("li");
         item.textContent = text;
@@ -732,52 +744,41 @@
       });
       const again = document.createElement("p");
       again.className = "note";
-      again.textContent = "改完后，再点「查找原文位置」。";
-      result.append(heading("原文位置"), copy, list, again);
+      again.textContent = "改完后，再点「查找处置规定」。";
+      result.append(heading("处置回复"), copy, list, again);
     }
 
-    function render(payload, finding) {
+    const relations = {
+      measure: "规程规定",
+      parent: "上级条款",
+      child: "下属条款",
+      reference: "条文提及",
+    };
+
+    function render(payload) {
       result.replaceChildren();
-      const clause = document.createElement("p");
-      clause.className = "clause-title";
-      clause.textContent = payload.clause_id + " · " + payload.anchors.length + " 处";
-      result.append(heading("原文位置"), clause);
-      const complete = payload.anchors.some((anchor) => anchor.text.includes(finding));
-      if (!complete) {
-        const note = document.createElement("p");
-        note.className = "note";
-        note.textContent = "这句话跨在下面几处，单处没有写全。";
-        result.append(note);
+      result.append(heading("处置回复"));
+      if (payload.limited) {
+        const more = document.createElement("p");
+        more.className = "note";
+        more.textContent = "还有更多条款也包含这些字。请补上设备名称，缩小范围。";
+        result.append(more);
       }
-      const groups = new Map();
-      payload.anchors.forEach((anchor) => {
-        if (!groups.has(anchor.document)) groups.set(anchor.document, []);
-        groups.get(anchor.document).push(anchor);
-      });
-      groups.forEach((anchors, name) => {
-        const group = document.createElement("section");
-        group.className = "group";
-        const header = document.createElement("header");
-        const nameHeading = document.createElement("h3");
-        nameHeading.textContent = name;
-        const count = document.createElement("p");
-        count.className = "meta";
-        count.textContent = anchors.length + " 处";
-        header.append(nameHeading, count);
-        group.append(header);
-        anchors.forEach((anchor) => {
-          const article = document.createElement("article");
-          const place = document.createElement("p");
-          place.className = "where";
-          const kind = document.createElement("span");
-          kind.textContent = kinds[anchor.kind] || anchor.kind;
-          const position = document.createElement("span");
-          position.textContent = where(anchor);
-          place.append(kind, position);
-          article.append(place, excerpt(anchor.text, finding));
-          group.append(article);
-        });
-        result.append(group);
+      const role = document.createElement("p");
+      role.className = "role";
+      role.textContent = "回复";
+      result.append(role, excerpt(payload.reply, payload.terms));
+      const evidenceTitle = document.createElement("p");
+      evidenceTitle.className = "role";
+      evidenceTitle.textContent = "引用证据";
+      result.append(evidenceTitle);
+      payload.evidence.forEach((item) => {
+        const line = document.createElement("p");
+        line.className = "where";
+        const kind = kinds[item.basis.kind] || item.basis.kind;
+        const relation = relations[item.relation] || item.relation;
+        line.textContent = relation + " · 条款 " + item.clause_id + " · " + item.document + " · " + kind + " · " + where(item.basis);
+        result.append(line);
       });
     }
 
@@ -802,6 +803,22 @@
           item.append(pill, name, meta);
           fileList.append(item);
         });
+        const select = document.querySelector("#document");
+        const chosen = select.value;
+        const placeholder = select.options[0];
+        select.replaceChildren(placeholder);
+        payload.files.forEach((file) => {
+          const option = document.createElement("option");
+          option.value = file.document;
+          option.textContent = file.document;
+          select.append(option);
+        });
+        const preset = new URLSearchParams(location.search).get("document");
+        if (preset && [...select.options].some((option) => option.value === preset)) {
+          select.value = preset;
+        } else if (chosen) {
+          select.value = chosen;
+        }
         if (payload.files.length === 0) {
           const item = document.createElement("li");
           item.textContent = "目录里没有 PDF 或 DOCX。";
@@ -817,44 +834,43 @@
     function setBusy(busy) {
       button.disabled = busy;
       button.setAttribute("aria-busy", busy ? "true" : "false");
-      buttonLabel.textContent = busy ? "正在查找…" : "查找原文位置";
+      buttonLabel.textContent = busy ? "正在查找…" : "查找处置规定";
     }
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const finding = document.querySelector("#finding").value;
-      const selected = tools();
+      const situation = document.querySelector("#situation").value;
+      const selected = document.querySelector("#document").value;
       formStatus.className = "status";
       formStatus.textContent = "";
       if (!selected) {
         formStatus.classList.add("is-alert");
-        formStatus.textContent = "请至少选择一种文件。";
-        document.querySelector("#tool-docx").focus();
+        formStatus.textContent = "请先选择规程。";
+        document.querySelector("#document").focus();
         return;
       }
       setBusy(true);
       try {
-        const response = await fetch("/api/cite", {
+        const response = await fetch("/api/measures", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            clause_id: document.querySelector("#clause").value,
-            version: document.querySelector("#version").value,
-            finding: finding,
-            document_tools: selected,
+            situation: situation,
+            document: selected === "*" ? "" : selected,
+            document_tools: toolsFor(selected),
           }),
         });
         const payload = await response.json();
         if (!response.ok) {
           showMiss();
           formStatus.classList.add("is-alert");
-          formStatus.textContent = "没有找到。请按原文位置里的三项改完再查。";
+          formStatus.textContent = "没有找到。请按处置回复里的说明改完再查。";
           return;
         }
-        render(payload, finding);
-        formStatus.textContent = "已列出 " + payload.anchors.length + " 处原文。";
+        render(payload);
+        formStatus.textContent = "已写出处置回复，并附 " + payload.evidence.length + " 条引用。";
       } catch {
-        clearResult("本地服务没有返回结果。请确认页面是从本地服务打开的，然后重新查找。");
+        clearResult("本地服务没有返回结果。请确认页面是从本地服务打开的，然后重新点「查找处置规定」。");
         formStatus.classList.add("is-alert");
         formStatus.textContent = "检索没有完成。";
       } finally {
@@ -863,16 +879,14 @@
     });
 
     const params = new URLSearchParams(location.search);
-    const presetClause = params.get("clause");
-    const presetVersion = params.get("version");
-    const presetFinding = params.get("finding");
-    if (presetClause) document.querySelector("#clause").value = presetClause;
-    if (presetVersion) document.querySelector("#version").value = presetVersion;
-    if (presetFinding) document.querySelector("#finding").value = presetFinding;
-    loadCorpus();
-    if (params.get("run") === "1" && presetClause && presetVersion && presetFinding) {
-      form.requestSubmit();
-    }
+    const presetSituation = params.get("situation");
+    if (presetSituation) document.querySelector("#situation").value = presetSituation;
+    loadCorpus().then(() => {
+      const presetDocument = params.get("document");
+      if (params.get("run") === "1" && presetDocument && presetSituation) {
+        form.requestSubmit();
+      }
+    });
   </script>
 </body>
 </html>

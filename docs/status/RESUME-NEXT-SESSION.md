@@ -1,17 +1,17 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-25 00:54. **Session remains active — not a final handoff.**
+> Updated: 2026-10-25 17:06. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`. It explains the three fields before search. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
+- The grid regulation desk is one HTML file, `page.html`. It asks for one regulation file, such as the 2023 stability regulation, and the fault or matter. The reply uses the matching clause plus parent, child, and mentioned clauses, then lists citation locations. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
 ## Verified facts
 
-- `tests.test_grid_regulation_page` and `tests.test_grid_regulation` passed: 6 tests. Ruff check passed on the edited Python.
-- Headless Chrome opened the desk, submitted one fictional query, and the result contained the marked span. Desktop and a 390px layout were reviewed.
+- `tests.test_grid_regulation_page` and `tests.test_grid_regulation` passed: 8 tests. Ruff check passed on the edited Python.
+- Headless Chrome opened the empty desk, one fictional measures hit, and a miss. A 390px layout was reviewed.
 - The fictional demo still cites one `grounding.docx` anchor for `4.1.2` and one `patrol.pdf` anchor for `5.2`.
 - A split synthetic clause cites the cover, the heading, and the two spans that join the finding. A child span is cited only when the finding is in that child. A repeated clause id does not keep the earlier section.
 - Local probe, text not recorded: each of the six regulation PDF and DOCX files returned 3 or 5 anchors for one dotted clause. The finding span was among them. `.doc` and the dsl file were not read.
@@ -44,7 +44,7 @@
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
 2. Do not run `make native-dci-example` or any dataset or model call.
-3. Do not commit the regulation originals. Open the desk with `make grid-regulation`. A citation still needs a clause, a version string, and a finding.
+3. Do not commit the regulation originals. Open the desk with `make grid-regulation`. Choose one file, for example the 2023 stability regulation, then write the equipment name and the fault, separated by spaces. A question such as 应如何处置 does not match unless those characters occur in a clause. The reply is regulation text plus related clauses and their locations. It does not call a model.
 
 ## Ready-to-paste command
 

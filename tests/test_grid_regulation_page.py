@@ -23,9 +23,13 @@ class GridRegulationPageTests(unittest.TestCase):
     def test_page_is_one_local_file_and_cites_the_demo_clause(self) -> None:
         html = page_bytes().decode()
         self.assertIn("规程检索", html)
-        self.assertIn("怎么填", html)
-        self.assertIn("同一份文件", html)
-        self.assertIn("查找原文位置", html)
+        self.assertIn("怎么查", html)
+        self.assertIn("条款依据", html)
+        self.assertIn("2023年稳规", html)
+        self.assertIn("引用证据", html)
+        self.assertIn("查找处置规定", html)
+        self.assertNotIn("全部已列出的规程", html)
+        self.assertNotIn("按条款号找出原句的位置", html)
         self.assertNotIn("SECRET", html)
         self.assertNotIn("http://", html)
         self.assertNotIn("https://", html)
@@ -74,6 +78,60 @@ class GridRegulationPageTests(unittest.TestCase):
                 "regulation citation is unavailable",
             )
             self.assertNotIn("SECRET", missed.text)
+            found = json.loads(
+                _post(
+                    base + "/api/measures",
+                    {
+                        "situation": "不应大于4欧姆",
+                        "document": "grounding.docx",
+                        "document_tools": "docx",
+                    },
+                ).text
+            )
+            self.assertIn("依据「grounding.docx」", found["reply"])
+            self.assertIn("不应大于4欧姆", found["reply"])
+            self.assertIn("4.1.2", found["reply"])
+            evidence = found["evidence"][0]
+            self.assertEqual(evidence["clause_id"], "4.1.2")
+            self.assertEqual(evidence["document"], "grounding.docx")
+            self.assertEqual(evidence["relation"], "measure")
+            self.assertEqual(set(evidence["basis"]), {"kind", "position"})
+            self.assertEqual(evidence["basis"]["kind"], "docx-paragraph")
+            blank = _post(
+                base + "/api/measures",
+                {
+                    "situation": "不应大于4欧姆",
+                    "document": "",
+                    "document_tools": "docx",
+                },
+            )
+            self.assertEqual(blank.status, 400)
+            self.assertEqual(json.loads(blank.text)["error"], "request is invalid")
+            unavailable = _post(
+                base + "/api/measures",
+                {
+                    "situation": "应如何处置",
+                    "document": "grounding.docx",
+                    "document_tools": "docx",
+                },
+            )
+            self.assertEqual(unavailable.status, 422)
+            self.assertEqual(
+                json.loads(unavailable.text)["error"],
+                "regulation measures are unavailable",
+            )
+            self.assertNotIn("SECRET", unavailable.text)
+            self.assertNotIn("应如何处置", unavailable.text)
+            rejected = _post(
+                base + "/api/measures",
+                {
+                    "situation": "不应大于4欧姆",
+                    "document": "grounding.docx",
+                    "document_tools": "pdf,docx",
+                },
+            )
+            self.assertEqual(rejected.status, 400)
+            self.assertEqual(json.loads(rejected.text)["error"], "request is invalid")
 
     def test_makefile_serves_the_desk_on_loopback(self) -> None:
         makefile = (Path(__file__).resolve().parents[1] / "Makefile").read_text(

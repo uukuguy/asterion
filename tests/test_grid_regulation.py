@@ -12,6 +12,7 @@ from asterion.applications.grid_regulation import (
     RegulationCitationError,
     RegulationQuery,
     cite_regulation,
+    lookup_measures,
     write_demo_corpus,
 )
 from asterion.documents import write_docx, write_pdf
@@ -206,6 +207,100 @@ class GridRegulationTests(unittest.IsolatedAsyncioTestCase):
                     RegulationQuery("4.1.2", "DL/T 9000-2024", "不应大于4欧姆"),
                     document_tools="docx",
                 )
+
+    async def test_measures_keep_the_narrowest_matching_clause(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _station(root)
+            child = await lookup_measures(
+                root,
+                "雨天复测",
+                document="station.docx",
+                document_tools="docx",
+            )
+            parent = await lookup_measures(
+                root,
+                "限值 雨天复测",
+                document="station.docx",
+                document_tools="docx",
+            )
+            both = await lookup_measures(
+                root,
+                "不应大于4欧姆",
+                document="station.docx",
+                document_tools="docx",
+            )
+            opened = await lookup_measures(
+                root,
+                "不应大于4欧姆",
+                document=None,
+                document_tools="docx,pdf",
+            )
+            with self.assertRaises(RegulationCitationError):
+                await lookup_measures(
+                    root,
+                    "应如何处置",
+                    document="station.docx",
+                    document_tools="docx",
+                )
+            with self.assertRaises(RegulationCitationError):
+                await lookup_measures(
+                    root,
+                    "封面",
+                    document="station.docx",
+                    document_tools="docx",
+                )
+        self.assertEqual(
+            tuple((item["relation"], item["clause_id"]) for item in child.clauses),
+            (("measure", "4.1.2.1"), ("parent", "4.1.2"), ("reference", "2.10")),
+        )
+        self.assertNotIn("雨天复测", child.clauses[1]["measures"])
+        self.assertEqual(child.clauses[0]["basis"]["position"]["paragraph"], 4)
+        self.assertEqual(
+            child.calls, ("document-read", "document-read", "document-read")
+        )
+        self.assertNotIn("text", child.clauses[0]["basis"])
+        self.assertNotIn("雨天复测", repr(child.clauses[0]["basis"]))
+        self.assertEqual(
+            tuple((item["relation"], item["clause_id"]) for item in parent.clauses),
+            (("measure", "4.1.2"), ("reference", "2.10")),
+        )
+        self.assertEqual(
+            tuple((item["relation"], item["clause_id"]) for item in both.clauses),
+            (("measure", "4.1.2"), ("measure", "2.10"), ("child", "4.1.2.1")),
+        )
+        self.assertEqual(both.calls, ("document-read",) * 3)
+        self.assertTrue(
+            all(item["document"] == "station.docx" for item in both.clauses)
+        )
+        self.assertIn("station.pdf", {item["document"] for item in opened.clauses})
+        self.assertNotIn("不应大于4欧姆", repr(both.clauses[0]["basis"]))
+
+
+def _station(root: Path) -> None:
+    write_docx(
+        root / "station.docx",
+        (
+            ("封面 DL/T 9000-2024", None),
+            ("4.1.2 接地电阻", None),
+            ("（1）限值不应大于", None),
+            ("4欧姆。", None),
+            ("4.1.2.1 雨天复测，见2.10。", None),
+            ("4.1.3 其他条款", None),
+            ("2.10 编号不应大于4欧姆。", None),
+        ),
+    )
+    write_pdf(
+        root / "station.pdf",
+        (
+            (
+                (72, 740, "封面 DL/T 9000-2024"),
+                (72, 700, "4.1.2 接地电阻"),
+                (72, 680, "限值不应大于4欧姆。"),
+                (72, 660, "4.1.3 其他条款"),
+            ),
+        ),
+    )
 
 
 def _paragraphs(citation: RegulationCitation) -> tuple[int, ...]:

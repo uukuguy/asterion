@@ -17,11 +17,18 @@ from asterion.applications.grid_regulation.retrieve import (
     RegulationCitationError,
     RegulationQuery,
     cite_regulation,
+    lookup_measures,
 )
 from asterion.documents import DocumentToolError, read_span
 
 _HOST = "127.0.0.1"
 _TOOLS = frozenset({"docx", "pdf", "docx,pdf"})
+_RELATIONS = {
+    "measure": "规程规定",
+    "parent": "上级条款",
+    "child": "下属条款",
+    "reference": "条文提及",
+}
 _MAX_BODY = 64 * 1024
 _PAGE = "text/html; charset=utf-8"
 _JSON = "application/json; charset=utf-8"
@@ -118,6 +125,83 @@ async def cite_for_page(root: Path, payload: Mapping[str, object]) -> dict[str, 
     }
 
 
+async def measures_for_page(
+    root: Path, payload: Mapping[str, object]
+) -> dict[str, object]:
+    """Return one regulation's reply and the clause locations it uses."""
+
+    situation = payload.get("situation")
+    document = payload.get("document", "")
+    tools = payload.get("document_tools", "docx,pdf")
+    if (
+        type(situation) is not str
+        or type(document) is not str
+        or document == ""
+        or type(tools) is not str
+        or tools not in _TOOLS
+    ):
+        raise GridRegulationPageError("request is invalid")
+    try:
+        found = await lookup_measures(
+            root,
+            situation,
+            document=document,
+            document_tools=tools,
+        )
+    except RegulationCitationError as exc:
+        if str(exc) == "request is invalid":
+            raise GridRegulationPageError("request is invalid") from None
+        raise GridRegulationPageError("regulation measures are unavailable") from None
+    clauses: list[dict[str, object]] = []
+    evidence: list[dict[str, object]] = []
+    for item in found.clauses:
+        basis = item["basis"]
+        relation = item["relation"]
+        if (
+            not isinstance(basis, Mapping)
+            or type(relation) is not str
+            or relation not in _RELATIONS
+        ):
+            raise GridRegulationPageError("regulation measures are unavailable")
+        clauses.append(
+            {
+                "clause_id": item["clause_id"],
+                "relation": relation,
+                "measures": item["measures"],
+            }
+        )
+        evidence.append(
+            {
+                "document": item["document"],
+                "clause_id": item["clause_id"],
+                "relation": relation,
+                "basis": {"kind": basis["kind"], "position": basis["position"]},
+            }
+        )
+    return {
+        "terms": list(found.terms),
+        "document": document,
+        "limited": found.limited,
+        "reply": _reply(document, situation, clauses),
+        "evidence": evidence,
+    }
+
+
+def _reply(document: str, situation: str, clauses: list[dict[str, object]]) -> str:
+    measures = [item for item in clauses if item["relation"] == "measure"]
+    related = [item for item in clauses if item["relation"] != "measure"]
+    lines = [f"依据「{document}」，对「{situation}」的规定如下。", ""]
+    for item in measures:
+        lines.extend((str(item["clause_id"]), str(item["measures"]), ""))
+    if related:
+        lines.extend(("关联条款", ""))
+        for item in related:
+            label = _RELATIONS[str(item["relation"])]
+            lines.extend((f"{item['clause_id']}（{label}）", str(item["measures"]), ""))
+    lines.append("以上是该规程的原文，不判断现场应当如何处置。")
+    return "\n".join(lines).strip()
+
+
 def serve(root: Path, *, port: int = 0) -> _Server:
     """Bind a loopback server for one corpus directory."""
 
@@ -170,12 +254,16 @@ class _Handler(BaseHTTPRequestHandler):
         self._json(404, {"error": "not-found"})
 
     def do_POST(self) -> None:
-        if urlparse(self.path).path != "/api/cite":
+        path = urlparse(self.path).path
+        if path not in {"/api/cite", "/api/measures"}:
             self._json(404, {"error": "not-found"})
             return
         try:
             payload = _payload(self)
-            body = asyncio.run(cite_for_page(self._corpus(), payload))
+            if path == "/api/cite":
+                body = asyncio.run(cite_for_page(self._corpus(), payload))
+            else:
+                body = asyncio.run(measures_for_page(self._corpus(), payload))
         except GridRegulationPageError as exc:
             status = 400 if str(exc) == "request is invalid" else 422
             self._json(status, {"error": str(exc)})
