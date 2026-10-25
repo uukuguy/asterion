@@ -1,16 +1,16 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-25 19:48. **Session remains active — not a final handoff.**
+> Updated: 2026-10-25 22:49. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`. It asks for one regulation file, such as the 2023 stability regulation, and the fault or matter. The reply is a reading chain: the opened paragraph or whole table row, then the passage that text points to. Clause numbers are citation labels. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
+- The grid regulation desk is one HTML file, `page.html`. It still opens a passage by the words in the situation, then one cited passage. `answer_fault` is beside that path: it projects the one file, writes the application's directory text, and cites lines a scripted `read` opened. The page does not call it yet. `make grid-regulation` serves the word-chain desk on `127.0.0.1` and does not start Pi.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
 ## Verified facts
 
-- `tests.test_grid_regulation` and `tests.test_grid_regulation_page` passed: 11 tests. Ruff check passed on the edited Python.
+- `tests.test_document_tools`, `tests.test_dci_research_capability`, `tests.test_grid_regulation`, `tests.test_grid_regulation_page`, and `tests.test_native_application` passed: 52 tests. Ruff check passed on the edited Python. Commits `34f3644f` and `101af61d` are local and not pushed.
 - The desk chain opens a paragraph or a whole table row that contains the situation words, then opens a passage whose label is a clause number written in that row. It does not paste parent or child clause text. On the 2023 stability file, one spaced fault query opened two unlabeled paragraphs of 78 characters each. `主变 冷却` and `冷却 全停` still miss because those characters do not occur in one passage. The chain does not yet turn to the next table unless that table contains the words or is cited by number.
 - A span that is only a clause number does not start a clause. A titled cell still does. On the 2023 stability file the one bare cell stays inside clause 28.1.1 (1753 characters). Clause 5.8 is not opened. The older clause assembler for that spaced fault query is unchanged: 6.2.5 (546 characters) and 26.1 (1427 characters). The page does not return those clauses.
 - DOCX reader: when nonempty TOC1–TOC3 levels equal heading styles 1–3, the clause number is prefixed to the heading and the TOC paragraphs are omitted. Paragraph indexes of the remaining paragraphs stay the original indexes. Public position keys are unchanged. A mismatch does not rewrite the file.
@@ -24,7 +24,7 @@
 ## Current judgment
 
 - Citation checks that the version string occurs in the file and that the finding occurs inside the assembled clause. It does not decide legal applicability.
-- Application model access uses `prepare_prime_application` and the Pi runtime, as Prime P7 does. The grid desk does not start Pi and does not open another model client.
+- A later model-written grid answer uses native-dci through `prepare_native_application`. The desk does not start Pi and does not open another model client. `prepare_prime_application` stays the Prime door.
 - The 36-point gap remains a reader constant, not a layout proof.
 
 ## Historical archive
@@ -48,11 +48,11 @@
 ## Next action
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
-2. Do not run `make native-dci-example` or any dataset. Do not start a model from this desk. A later model-written answer uses the Pi runtime through `prepare_prime_application`, as Prime P7 does.
-3. Do not commit the regulation originals. The page chain still opens passages by the words in the situation. The reader that decides the next page, the way a person follows a table from condition to disposition, uses the Pi runtime through `prepare_prime_application`, as Prime P7 does. That reader is not connected. Do not start it from this desk until the user asks for that run.
+2. Do not run `make native-dci-example`, `make grid-regulation` as a live model run, or any dataset. Do not start Pi. The next code change switches `/api/measures` from `lookup_chain` to `answer_fault`. `page.main` passes an unavailable research object that does not spawn. The live option builder comes after that and tests must not call `run`.
+3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"` and a 300-second cancel. The live evidence directory is retained for the operator and stays off HTTP, logs, and git. That live path is not built yet.
 
 ## Ready-to-paste command
 
 ```bash
-uv run python -m unittest tests.test_document_tools tests.test_grid_regulation_page tests.test_grid_regulation
+uv run python -m unittest tests.test_document_tools tests.test_dci_research_capability tests.test_grid_regulation tests.test_grid_regulation_page tests.test_native_application
 ```

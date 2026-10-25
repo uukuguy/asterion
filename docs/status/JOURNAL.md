@@ -3871,3 +3871,5 @@
 - 18:16 DOCX outline levels 1–3 copy the TOC clause number onto the matching heading and omit the TOC paragraphs. A private re-probe of the 2023 stability file, text not recorded, kept clause 1.17 to 30 characters. No model call.
 - 18:38 A span that is only a clause number does not start a clause. On the 2023 stability file the one such cell stays inside clause 28.1.1. No model call.
 - 19:48 The desk reply is a reading chain. A table row stays one step, and a clause number in that step opens the passage it points to. Clause numbers are citation labels. No model call.
+- 22:48 One selected PDF or DOCX projects to passages.txt. A read of that file records verified anchors. bash does not. No model call. [34f3644f]
+- 22:49 Scripted answer_fault writes the application directory and cites opened passages. The page still uses the word chain. No model call. [101af61d]
