@@ -1,6 +1,6 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-26 02:55. **Session remains active — not a final handoff.**
+> Updated: 2026-10-26 03:11. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
@@ -53,7 +53,7 @@
 ## Next action
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
-2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, no clock cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. An already running desk process does not reload `b6f29c24`; the operator restarts it. That restart is not a new authorization. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
+2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, no clock cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. The make target does not open a browser. An already running desk process does not reload `b6f29c24`; the operator restarts it. That restart is not a new authorization. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
 3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"`. There is no clock cancel; the operator interrupts. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. Two run directories are there: the unrendered bash-only run `d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b` and the rendered run `fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. Progress lines do not name those directories.
 
 ## Ready-to-paste command
