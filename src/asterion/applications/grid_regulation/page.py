@@ -17,18 +17,12 @@ from asterion.applications.grid_regulation.retrieve import (
     RegulationCitationError,
     RegulationQuery,
     cite_regulation,
-    lookup_measures,
+    lookup_chain,
 )
 from asterion.documents import DocumentToolError, read_span
 
 _HOST = "127.0.0.1"
 _TOOLS = frozenset({"docx", "pdf", "docx,pdf"})
-_RELATIONS = {
-    "measure": "规程规定",
-    "parent": "上级条款",
-    "child": "下属条款",
-    "reference": "条文提及",
-}
 _MAX_BODY = 64 * 1024
 _PAGE = "text/html; charset=utf-8"
 _JSON = "application/json; charset=utf-8"
@@ -128,7 +122,7 @@ async def cite_for_page(root: Path, payload: Mapping[str, object]) -> dict[str, 
 async def measures_for_page(
     root: Path, payload: Mapping[str, object]
 ) -> dict[str, object]:
-    """Return one regulation's reply and the clause locations it uses."""
+    """Return one regulation's reading chain and the locations it opened."""
 
     situation = payload.get("situation")
     document = payload.get("document", "")
@@ -142,7 +136,7 @@ async def measures_for_page(
     ):
         raise GridRegulationPageError("request is invalid")
     try:
-        found = await lookup_measures(
+        found = await lookup_chain(
             root,
             situation,
             document=document,
@@ -152,53 +146,42 @@ async def measures_for_page(
         if str(exc) == "request is invalid":
             raise GridRegulationPageError("request is invalid") from None
         raise GridRegulationPageError("regulation measures are unavailable") from None
-    clauses: list[dict[str, object]] = []
     evidence: list[dict[str, object]] = []
-    for item in found.clauses:
-        basis = item["basis"]
-        relation = item["relation"]
-        if (
-            not isinstance(basis, Mapping)
-            or type(relation) is not str
-            or relation not in _RELATIONS
-        ):
+    texts: list[str] = []
+    for step in found.steps:
+        anchors = step["anchors"]
+        text = step["text"]
+        label = step["label"]
+        if type(text) is not str or not isinstance(anchors, tuple) or not anchors:
             raise GridRegulationPageError("regulation measures are unavailable")
-        clauses.append(
-            {
-                "clause_id": item["clause_id"],
-                "relation": relation,
-                "measures": item["measures"],
+        texts.append(text)
+        for anchor in anchors:
+            if not isinstance(anchor, Mapping):
+                raise GridRegulationPageError("regulation measures are unavailable")
+            item = {
+                "document": anchor["document"],
+                "kind": anchor["kind"],
+                "position": anchor["position"],
             }
-        )
-        evidence.append(
-            {
-                "document": item["document"],
-                "clause_id": item["clause_id"],
-                "relation": relation,
-                "basis": {"kind": basis["kind"], "position": basis["position"]},
-            }
-        )
+            if type(label) is str:
+                item["label"] = label
+            evidence.append(item)
     return {
         "terms": list(found.terms),
         "document": document,
         "limited": found.limited,
-        "reply": _reply(document, situation, clauses),
+        "reply": _reply(document, situation, texts),
         "evidence": evidence,
     }
 
 
-def _reply(document: str, situation: str, clauses: list[dict[str, object]]) -> str:
-    measures = [item for item in clauses if item["relation"] == "measure"]
-    related = [item for item in clauses if item["relation"] != "measure"]
-    lines = [f"依据「{document}」，对「{situation}」的规定如下。", ""]
-    for item in measures:
-        lines.extend((str(item["clause_id"]), str(item["measures"]), ""))
-    if related:
-        lines.extend(("关联条款", ""))
-        for item in related:
-            label = _RELATIONS[str(item["relation"])]
-            lines.extend((f"{item['clause_id']}（{label}）", str(item["measures"]), ""))
-    lines.append("以上是该规程的原文，不判断现场应当如何处置。")
+def _reply(document: str, situation: str, texts: list[str]) -> str:
+    lines = [f"依据「{document}」，对「{situation}」按阅读顺序串起如下。", ""]
+    for text in texts:
+        lines.extend((text, ""))
+    lines.append(
+        "以上按打开的段落和表格行串起。条款号只作为引用。这里不判断现场应当如何处置。"
+    )
     return "\n".join(lines).strip()
 
 

@@ -556,12 +556,12 @@
           <h1>规程检索</h1>
         </div>
       </div>
-      <p class="lead">指定一本规程，例如 2023年稳规，查出某项故障应当如何处置。回复使用该规程原文，并附上条款依据。</p>
+      <p class="lead">指定一本规程，例如 2023年稳规，顺着正文和表格把处置办法串成一条答复。条款号只写在条款依据里。</p>
     </header>
     <section class="guide" aria-labelledby="guide-title">
       <div class="guide-head">
         <h2 id="guide-title">怎么查</h2>
-        <p>先指定一本规程，再写下故障或事项。回复由查到的条款和关联条款组成，并附上引用位置。</p>
+        <p>先指定一本规程，再写下故障或事项。答复按打开的段落和表格行往下串，并附上引用位置。</p>
       </div>
       <ol class="steps">
         <li>
@@ -575,14 +575,14 @@
           <span class="num">2</span>
           <div>
             <h3>写下事项</h3>
-            <p>用规程里的说法写出设备名和故障现象，中间用空格分开，例如「主变 冷却全停」。不要写「应如何处置」。</p>
+            <p>用规程里的说法写出设备名和故障现象，中间用空格分开，例如「主变 冷却全停」。这些字用来打开对应的段落或表格行，不要写「应如何处置」。</p>
           </div>
         </li>
         <li>
           <span class="num">3</span>
           <div>
-            <h3>看处置和依据</h3>
-            <p>回复写出规程对这件事的规定，并带上关联条款。引用证据给出条款号、文件名和位置。</p>
+            <h3>顺着表格和引用继续</h3>
+            <p>表格的一行从左到右读，条件和处置留在同一行。文中指向的其它位置会继续打开。条款号只写在条款依据里。</p>
           </div>
         </li>
       </ol>
@@ -591,7 +591,7 @@
         <dl>
           <div><dt>规程</dt><dd>2023年稳规</dd></div>
           <div><dt>事项</dt><dd>主变 冷却全停</dd></div>
-          <div><dt>得到</dt><dd>处置回复和引用证据</dd></div>
+          <div><dt>得到</dt><dd>按阅读顺序串起的处置答复和引用证据</dd></div>
         </dl>
         <p class="specimen-note">这只说明格式。请改成你要查的设备和故障现象，页面不会替你检索。</p>
       </div>
@@ -610,7 +610,7 @@
           <div class="field">
             <label for="situation">事项<span class="req">必填</span></label>
             <input id="situation" name="situation" type="text" required autocomplete="off" placeholder="例如 主变 冷却全停" aria-describedby="situation-hint">
-            <p class="hint" id="situation-hint">每个词至少两个字。这些字要能在规程原文里找到。</p>
+            <p class="hint" id="situation-hint">每个词至少两个字。先打开写出这些字的段落或表格行，再继续打开其中指向的位置。</p>
           </div>
           <button id="search" type="submit">
             <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -632,12 +632,12 @@
       </section>
       <section class="sheet" id="result" tabindex="-1" aria-live="polite">
         <h2>处置回复</h2>
-        <p class="lede" id="lede">指定一本规程并写下故障或事项后，这里给出按该规程整理的回复，并附上引用证据。</p>
-        <p class="sample-mark">回复使用规程原文，并包含关联条款。引用证据写成条款号和位置。</p>
+        <p class="lede" id="lede">指定一本规程并写下故障或事项后，这里按阅读顺序串起打开的段落和表格行，并附上引用证据。</p>
+        <p class="sample-mark">表格的一行整行保留。条款号只出现在引用证据里。</p>
       </section>
     </main>
   </div>
-  <footer>回复由指定规程的原文和关联条款组成，并附上条款位置。这里不判断现场应当如何处置。</footer>
+  <footer>答复按打开的段落和表格行串起，并附上位置。条款号只作为引用。这里不判断现场应当如何处置。</footer>
   <script>
     const form = document.querySelector("#query");
     const result = document.querySelector("#result");
@@ -748,25 +748,18 @@
       result.append(heading("处置回复"), copy, list, again);
     }
 
-    const relations = {
-      measure: "规程规定",
-      parent: "上级条款",
-      child: "下属条款",
-      reference: "条文提及",
-    };
-
     function render(payload) {
       result.replaceChildren();
       result.append(heading("处置回复"));
       if (payload.limited) {
         const more = document.createElement("p");
         more.className = "note";
-        more.textContent = "还有更多条款也包含这些字。请补上设备名称，缩小范围。";
+        more.textContent = "还有更多处也写出这些字。请补上设备名称，缩小范围。";
         result.append(more);
       }
       const role = document.createElement("p");
       role.className = "role";
-      role.textContent = "回复";
+      role.textContent = "答复";
       result.append(role, excerpt(payload.reply, payload.terms));
       const evidenceTitle = document.createElement("p");
       evidenceTitle.className = "role";
@@ -775,9 +768,10 @@
       payload.evidence.forEach((item) => {
         const line = document.createElement("p");
         line.className = "where";
-        const kind = kinds[item.basis.kind] || item.basis.kind;
-        const relation = relations[item.relation] || item.relation;
-        line.textContent = relation + " · 条款 " + item.clause_id + " · " + item.document + " · " + kind + " · " + where(item.basis);
+        const kind = kinds[item.kind] || item.kind;
+        let text = item.document + " · " + kind + " · " + where(item);
+        if (item.label) text += " · 条款 " + item.label;
+        line.textContent = text;
         result.append(line);
       });
     }
@@ -868,7 +862,7 @@
           return;
         }
         render(payload);
-        formStatus.textContent = "已写出处置回复，并附 " + payload.evidence.length + " 条引用。";
+        formStatus.textContent = "已按阅读顺序串起答复，并附 " + payload.evidence.length + " 处引用。";
       } catch {
         clearResult("本地服务没有返回结果。请确认页面是从本地服务打开的，然后重新点「查找处置规定」。");
         formStatus.classList.add("is-alert");

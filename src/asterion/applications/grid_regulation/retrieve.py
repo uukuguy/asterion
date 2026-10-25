@@ -61,6 +61,14 @@ class RegulationMeasures:
     calls: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RegulationChain:
+    terms: tuple[str, ...]
+    limited: bool
+    steps: tuple[Mapping[str, object], ...]
+    calls: tuple[str, ...]
+
+
 async def cite_regulation(
     corpus: Path,
     query: RegulationQuery,
@@ -153,6 +161,191 @@ async def lookup_measures(
         clauses=clauses,
         calls=tuple(calls),
     )
+
+
+async def lookup_chain(
+    corpus: Path,
+    situation: str,
+    *,
+    document: str | None,
+    document_tools: str,
+) -> RegulationChain:
+    """Open matching passages, then the passages those passages point to.
+
+    A table row stays one step, in cell order. A clause number is a label on
+    the passage it heads, and a citation when that passage is opened. The
+    choice of which page to open is still the words in the situation.
+    """
+
+    terms = _terms(situation)
+    if document is not None and type(document) is not str:
+        raise RegulationCitationError("request is invalid")
+    try:
+        spans = document_spans(
+            corpus,
+            tools=document_tools,
+            path=document or None,
+        )
+    except DocumentToolError:
+        raise RegulationCitationError("regulation measures are unavailable") from None
+    passages = _passages(spans)
+    chosen, limited = _chain_indexes(passages, terms)
+    if not chosen:
+        raise RegulationCitationError("regulation measures are unavailable")
+    accepted = tuple(
+        anchor for index in chosen for anchor, _text in passages[index]["anchors"]
+    )
+    try:
+        result = await DciLocalResearchImplementation().execute(
+            _invocation(corpus, accepted)
+        )
+    except CapabilityExecutionError:
+        raise RegulationCitationError("regulation measures are unavailable") from None
+    anchors = result.artifacts[1]["value"]["anchors"]
+    calls = result.artifacts[2]["value"]["calls"]
+    if anchors != accepted or calls != tuple("document-read" for _item in accepted):
+        raise RegulationCitationError("regulation measures are unavailable")
+    steps: list[Mapping[str, object]] = []
+    cursor = 0
+    for index in chosen:
+        passage = passages[index]
+        count = len(passage["anchors"])
+        recorded = tuple(_thaw(anchor) for anchor in anchors[cursor : cursor + count])
+        cursor += count
+        steps.append(
+            {
+                "text": passage["text"],
+                "label": passage["label"],
+                "anchors": recorded,
+            }
+        )
+    return RegulationChain(
+        terms=terms,
+        limited=limited,
+        steps=tuple(steps),
+        calls=tuple(calls),
+    )
+
+
+def _passages(
+    spans: tuple[tuple[Mapping[str, object], str], ...]
+    | list[tuple[Mapping[str, object], str]],
+) -> tuple[dict[str, object], ...]:
+    passages: list[dict[str, object]] = []
+    index = 0
+    while index < len(spans):
+        anchor, text = spans[index]
+        if anchor["kind"] == "docx-cell":
+            position = anchor["position"]
+            if not isinstance(position, Mapping):
+                index += 1
+                continue
+            table = position.get("table")
+            row = position.get("row")
+            cells = [(anchor, text)]
+            cursor = index + 1
+            while cursor < len(spans):
+                nxt, nxt_text = spans[cursor]
+                nxt_position = nxt["position"]
+                if (
+                    nxt["kind"] != "docx-cell"
+                    or not isinstance(nxt_position, Mapping)
+                    or nxt_position.get("table") != table
+                    or nxt_position.get("row") != row
+                ):
+                    break
+                cells.append((nxt, nxt_text))
+                cursor += 1
+            passages.append(_row_passage(cells))
+            index = cursor
+            continue
+        passages.append(_text_passage(anchor, text))
+        index += 1
+    return tuple(passages)
+
+
+def _text_passage(anchor: Mapping[str, object], text: str) -> dict[str, object]:
+    label = _heading_id(text)
+    return {
+        "text": text,
+        "anchors": ((anchor, text),),
+        "label": label,
+        "references": _passage_refs(text, label),
+    }
+
+
+def _row_passage(
+    cells: list[tuple[Mapping[str, object], str]],
+) -> dict[str, object]:
+    label = None
+    for _anchor, text in cells:
+        heading = _heading_id(text)
+        if heading is not None:
+            label = heading
+            break
+    refs: list[str] = []
+    seen: set[str] = set()
+    for _anchor, text in cells:
+        for ref in _passage_refs(text, label):
+            if ref not in seen:
+                seen.add(ref)
+                refs.append(ref)
+    return {
+        "text": "｜".join(text for _anchor, text in cells),
+        "anchors": tuple(cells),
+        "label": label,
+        "references": tuple(refs),
+    }
+
+
+def _passage_refs(text: str, label: str | None) -> tuple[str, ...]:
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in _CLAUSE_REF.finditer(text):
+        ref = match.group(1)
+        if ref == label or ref in seen:
+            continue
+        seen.add(ref)
+        found.append(ref)
+    return tuple(found)
+
+
+def _chain_indexes(
+    passages: tuple[dict[str, object], ...],
+    terms: tuple[str, ...],
+) -> tuple[tuple[int, ...], bool]:
+    labels: dict[str, int] = {}
+    for index, passage in enumerate(passages):
+        label = passage["label"]
+        if type(label) is str and label not in labels:
+            labels[label] = index
+    hits = [
+        index
+        for index, passage in enumerate(passages)
+        if all(term in str(passage["text"]) for term in terms)
+    ]
+    opened: list[int] = []
+    seen: set[int] = set()
+    limited = False
+    for index in hits:
+        if len(opened) >= _MAX_CLAUSES:
+            limited = True
+            break
+        opened.append(index)
+        seen.add(index)
+        references = passages[index]["references"]
+        if not isinstance(references, tuple):
+            continue
+        for ref in references:
+            target = labels.get(str(ref))
+            if target is None or target in seen:
+                continue
+            if len(opened) >= _MAX_CLAUSES:
+                limited = True
+                break
+            opened.append(target)
+            seen.add(target)
+    return tuple(opened), limited
 
 
 def _thaw(value: object) -> object:

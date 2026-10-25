@@ -3870,3 +3870,4 @@
 - 17:06 The desk takes one regulation file, such as the 2023 stability regulation, and the fault or matter. The reply uses the matching clause plus parent, child, and mentioned clauses, then lists citation locations. Headless Chrome reviewed the empty page, one fictional hit, and a miss. No model call.
 - 18:16 DOCX outline levels 1–3 copy the TOC clause number onto the matching heading and omit the TOC paragraphs. A private re-probe of the 2023 stability file, text not recorded, kept clause 1.17 to 30 characters. No model call.
 - 18:38 A span that is only a clause number does not start a clause. On the 2023 stability file the one such cell stays inside clause 28.1.1. No model call.
+- 19:48 The desk reply is a reading chain. A table row stays one step, and a clause number in that step opens the passage it points to. Clause numbers are citation labels. No model call.

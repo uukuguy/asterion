@@ -1,19 +1,20 @@
 # Live Session Checkpoint
 
-> Updated: 2026-10-25 18:38. **Session remains active — not a final handoff.**
+> Updated: 2026-10-25 19:48. **Session remains active — not a final handoff.**
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`. It asks for one regulation file, such as the 2023 stability regulation, and the fault or matter. The reply uses the matching clause plus parent, child, and mentioned clauses, then lists citation locations. DOCX contents numbers at levels 1–3 are copied onto the matching headings. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
+- The grid regulation desk is one HTML file, `page.html`. It asks for one regulation file, such as the 2023 stability regulation, and the fault or matter. The reply is a reading chain: the opened paragraph or whole table row, then the passage that text points to. Clause numbers are citation labels. `make grid-regulation` serves it on `127.0.0.1` and opens a browser. The corpus defaults to `docs`.
 - A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
 - `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
 
 ## Verified facts
 
-- `tests.test_document_tools`, `tests.test_grid_regulation`, and `tests.test_grid_regulation_page` passed: 17 tests. Ruff check passed on the edited Python.
-- A span that is only a clause number does not start a clause. A titled cell still does. On the 2023 stability file the one bare cell stays inside clause 28.1.1 (1753 characters). Clause 5.8 is not opened. The spaced fault query is unchanged: 6.2.5 (546 characters) and 26.1 (1427 characters).
+- `tests.test_grid_regulation` and `tests.test_grid_regulation_page` passed: 11 tests. Ruff check passed on the edited Python.
+- The desk chain opens a paragraph or a whole table row that contains the situation words, then opens a passage whose label is a clause number written in that row. It does not paste parent or child clause text. On the 2023 stability file, one spaced fault query opened two unlabeled paragraphs of 78 characters each. `主变 冷却` and `冷却 全停` still miss because those characters do not occur in one passage. The chain does not yet turn to the next table unless that table contains the words or is cited by number.
+- A span that is only a clause number does not start a clause. A titled cell still does. On the 2023 stability file the one bare cell stays inside clause 28.1.1 (1753 characters). Clause 5.8 is not opened. The older clause assembler for that spaced fault query is unchanged: 6.2.5 (546 characters) and 26.1 (1427 characters). The page does not return those clauses.
 - DOCX reader: when nonempty TOC1–TOC3 levels equal heading styles 1–3, the clause number is prefixed to the heading and the TOC paragraphs are omitted. Paragraph indexes of the remaining paragraphs stay the original indexes. Public position keys are unchanged. A mismatch does not rewrite the file.
-- Private re-probe of the 2023 stability DOCX, sentence text not recorded: 8539 nonempty spans. Clause 1.17 is 30 characters. One spaced fault query returned 6.2.5 (546 characters) and 26.1 (1427 characters) and was not limited. `主变 冷却`, `冷却 全停`, and the unspaced form missed. Parent sections 4.2 and 2.4 remain 10697 and 9298 characters because they still include descendants.
+- Private re-probe of the 2023 stability DOCX, sentence text not recorded: 8539 nonempty spans. Clause 1.17 is 30 characters. The older clause assembler returned 6.2.5 (546 characters) and 26.1 (1427 characters) and was not limited. `主变 冷却`, `冷却 全停`, and the unspaced form missed. Parent sections 4.2 and 2.4 remain 10697 and 9298 characters because they still include descendants. That assembler is not the page reply.
 - Headless Chrome opened the empty desk, one fictional measures hit, and a miss. A 390px layout was reviewed.
 - The fictional demo still cites one `grounding.docx` anchor for `4.1.2` and one `patrol.pdf` anchor for `5.2`.
 - A split synthetic clause cites the cover, the heading, and the two spans that join the finding. A child span is cited only when the finding is in that child. A repeated clause id does not keep the earlier section.
@@ -48,7 +49,7 @@
 
 1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
 2. Do not run `make native-dci-example` or any dataset. Do not start a model from this desk. A later model-written answer uses the Pi runtime through `prepare_prime_application`, as Prime P7 does.
-3. Do not commit the regulation originals. Open the desk with `make grid-regulation`. Choose one file, for example the 2023 stability regulation, then write the equipment name and the fault, separated by spaces. A question such as 应如何处置 does not match unless those characters occur in a clause. The reply is still the regulation's own text plus related clauses and their locations.
+3. Do not commit the regulation originals. The page chain still opens passages by the words in the situation. The reader that decides the next page, the way a person follows a table from condition to disposition, uses the Pi runtime through `prepare_prime_application`, as Prime P7 does. That reader is not connected. Do not start it from this desk until the user asks for that run.
 
 ## Ready-to-paste command
 

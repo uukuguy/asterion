@@ -13,6 +13,7 @@ from asterion.applications.grid_regulation import (
     RegulationCitationError,
     RegulationQuery,
     cite_regulation,
+    lookup_chain,
     lookup_measures,
     write_demo_corpus,
 )
@@ -329,6 +330,38 @@ class GridRegulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(titled.clauses[0]["clause_id"], "4.2.1")
         self.assertEqual(titled.clauses[0]["basis"]["kind"], "docx-cell")
         self.assertEqual(titled.clauses[0]["measures"], "4.2.1 两端接地。")
+
+    async def test_chain_keeps_a_table_row_and_follows_its_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            write_docx(
+                root / "desk.docx",
+                (
+                    ("4.1.2 接地限值", None),
+                    ("5.2 随后的复测。", None),
+                ),
+                ((("雨天", "不应大于4欧姆。见5.2。"),),),
+            )
+            found = await lookup_chain(
+                root,
+                "不应大于4欧姆",
+                document="desk.docx",
+                document_tools="docx",
+            )
+        self.assertEqual(
+            tuple(step["text"] for step in found.steps),
+            ("雨天｜不应大于4欧姆。见5.2。", "5.2 随后的复测。"),
+        )
+        self.assertIsNone(found.steps[0]["label"])
+        self.assertEqual(found.steps[1]["label"], "5.2")
+        self.assertEqual(
+            tuple(anchor["kind"] for anchor in found.steps[0]["anchors"]),
+            ("docx-cell", "docx-cell"),
+        )
+        self.assertEqual(found.steps[1]["anchors"][0]["kind"], "docx-paragraph")
+        self.assertEqual(found.calls, ("document-read",) * 3)
+        self.assertFalse(found.limited)
+        self.assertNotIn("4.1.2 接地限值", found.steps[0]["text"])
 
 
 def _bare_number_docx(path: Path) -> None:

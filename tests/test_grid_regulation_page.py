@@ -89,14 +89,14 @@ class GridRegulationPageTests(unittest.TestCase):
                 ).text
             )
             self.assertIn("依据「grounding.docx」", found["reply"])
+            self.assertIn("按阅读顺序串起", found["reply"])
             self.assertIn("不应大于4欧姆", found["reply"])
-            self.assertIn("4.1.2", found["reply"])
+            self.assertNotIn("关联条款", found["reply"])
             evidence = found["evidence"][0]
-            self.assertEqual(evidence["clause_id"], "4.1.2")
+            self.assertEqual(evidence["label"], "4.1.2")
             self.assertEqual(evidence["document"], "grounding.docx")
-            self.assertEqual(evidence["relation"], "measure")
-            self.assertEqual(set(evidence["basis"]), {"kind", "position"})
-            self.assertEqual(evidence["basis"]["kind"], "docx-paragraph")
+            self.assertEqual(set(evidence), {"document", "kind", "label", "position"})
+            self.assertEqual(evidence["kind"], "docx-paragraph")
             blank = _post(
                 base + "/api/measures",
                 {
