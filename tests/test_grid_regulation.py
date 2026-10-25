@@ -7,6 +7,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from asterion.applications.grid_regulation import (
     RegulationCitation,
@@ -16,6 +17,11 @@ from asterion.applications.grid_regulation import (
     lookup_chain,
     lookup_measures,
     write_demo_corpus,
+)
+from asterion.applications.grid_regulation.answer import (
+    ScriptedGridResearch,
+    answer_fault,
+    fault_prompt,
 )
 from asterion.documents import write_docx, write_pdf
 
@@ -362,6 +368,219 @@ class GridRegulationTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(found.calls, ("document-read",) * 3)
         self.assertFalse(found.limited)
         self.assertNotIn("4.1.2 接地限值", found.steps[0]["text"])
+
+
+class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
+    async def test_opened_passages_keep_heading_labels_and_drop_digests(self) -> None:
+        question = "示范设备发生故障后如何处置"
+        reply = "示范答复：按打开的行处理，并见所引位置。\n"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _desk(root / "desk.docx")
+            research = ScriptedGridResearch(reply)
+            found = await answer_fault(
+                root,
+                document="desk.docx",
+                question=question,
+                research=research,
+                document_tools="docx",
+            )
+        self.assertIsNotNone(research.corpus)
+        assert research.corpus is not None
+        self.assertFalse(research.corpus.exists())
+        self.assertEqual(research.mode, 0o700)
+        self.assertIsNone(research.contents)
+        prompt = fault_prompt("desk.docx", question)
+        self.assertEqual(research.prompt, prompt)
+        self.assertEqual(research.input_text, prompt)
+        self.assertIn("Follow a citation with another search", prompt)
+        self.assertIn("rg -n", prompt)
+        self.assertIn("minus at least one", prompt)
+        self.assertIn("never below 1", prompt)
+        self.assertNotIn("six-digit id itself is the read offset", prompt)
+        self.assertNotIn("P###### is the read offset", prompt)
+        self.assertNotIn(str(root), prompt)
+        self.assertEqual(found.document, "desk.docx")
+        self.assertEqual(found.reply, reply[:-1])
+        self.assertEqual(found.calls, ("bash", "read", "read"))
+        self.assertEqual(
+            tuple(item["document"] for item in found.evidence),
+            ("desk.docx", "desk.docx", "desk.docx"),
+        )
+        self.assertEqual(
+            tuple(item["kind"] for item in found.evidence),
+            ("docx-cell", "docx-cell", "docx-paragraph"),
+        )
+        self.assertNotIn("label", found.evidence[0])
+        self.assertNotIn("label", found.evidence[1])
+        self.assertEqual(found.evidence[2]["label"], "5.2")
+        self.assertEqual(found.evidence[0]["position"]["cell"], 0)
+        self.assertEqual(found.evidence[1]["position"]["cell"], 1)
+        for item in found.evidence:
+            self.assertEqual(
+                set(item) - {"label"},
+                {"document", "kind", "position"},
+            )
+        rendered = repr(research.result)
+        self.assertNotIn("不应大于4欧姆", rendered)
+        self.assertNotIn("雨天", rendered)
+        self.assertNotIn(question, rendered)
+
+    async def test_a_repeated_read_stays_one_evidence_row(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _desk(root / "desk.docx")
+            research = ScriptedGridResearch(passage_lines=(3, 3, 2))
+            found = await answer_fault(
+                root,
+                document="desk.docx",
+                question="示范设备故障",
+                research=research,
+                document_tools="docx",
+            )
+        self.assertEqual(len(found.evidence), 3)
+        self.assertEqual(found.calls, ("bash", "read", "read", "read"))
+
+    async def test_no_passage_read_is_unavailable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _desk(root / "desk.docx")
+            research = ScriptedGridResearch(passage_lines=())
+            with self.assertRaises(RegulationCitationError) as raised:
+                await answer_fault(
+                    root,
+                    document="desk.docx",
+                    question="示范设备故障",
+                    research=research,
+                    document_tools="docx",
+                )
+        self.assertEqual(str(raised.exception), "regulation measures are unavailable")
+        self.assertIsNotNone(research.corpus)
+        assert research.corpus is not None
+        self.assertFalse(research.corpus.exists())
+        self.assertEqual(research.input_text, research.prompt)
+
+        class _NoAnchors:
+            async def run(self, *, corpus, prompt, signal):
+                del corpus, prompt, signal
+                return ("未见处置。", {"paths": ("contents.txt",)}, ("read",))
+
+        with self.assertRaises(RegulationCitationError) as raised:
+            await answer_fault(
+                root,
+                document="desk.docx",
+                question="示范设备故障",
+                research=_NoAnchors(),
+                document_tools="docx",
+            )
+        self.assertEqual(str(raised.exception), "regulation measures are unavailable")
+
+    async def test_checks_run_before_a_projection_directory_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _desk(root / "desk.docx")
+            cases = (
+                (None, "desk.docx", "docx", "request is invalid"),
+                ("", "desk.docx", "docx", "regulation measures are unavailable"),
+                ("   ", "desk.docx", "docx", "regulation measures are unavailable"),
+                (
+                    "测" * 201,
+                    "desk.docx",
+                    "docx",
+                    "regulation measures are unavailable",
+                ),
+                ("示范设备故障", "", "docx", "request is invalid"),
+                (
+                    "示范设备故障",
+                    "desk.docx",
+                    "pdf",
+                    "regulation measures are unavailable",
+                ),
+                (
+                    "示范设备故障",
+                    "../desk.docx",
+                    "docx",
+                    "regulation measures are unavailable",
+                ),
+                ("示范设备故障", "desk.docx", "pdf,docx", "request is invalid"),
+            )
+            for question, document, tools, message in cases:
+                with self.subTest(question=question, document=document, tools=tools):
+                    with patch(
+                        "asterion.applications.grid_regulation.answer.tempfile.mkdtemp"
+                    ) as made:
+                        with self.assertRaises(RegulationCitationError) as raised:
+                            await answer_fault(
+                                root,
+                                document=document,
+                                question=question,
+                                research=ScriptedGridResearch(),
+                                document_tools=tools,
+                            )
+                    self.assertEqual(str(raised.exception), message)
+                    made.assert_not_called()
+
+    async def test_directory_file_is_the_navigation_text(self) -> None:
+        question = "示范设备故障"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _heading_docx(root / "desk.docx")
+            research = ScriptedGridResearch(passage_lines=(1,))
+            found = await answer_fault(
+                root,
+                document="desk.docx",
+                question=question,
+                research=research,
+                document_tools="docx",
+            )
+        self.assertEqual(
+            research.contents,
+            "P000001\tH1\t4.1.2 接地限值\topening-ends P000002\n"
+            "P000003\tH2\t5.2 随后的复测。\topening-ends P000003\n",
+        )
+        self.assertNotIn("正文一句。", research.contents or "")
+        self.assertEqual(found.evidence[0]["label"], "4.1.2")
+        self.assertNotIn("正文一句。", repr(research.result))
+
+    def test_answer_module_does_not_search_or_walk_clauses(self) -> None:
+        source = (
+            PROJECT / "src/asterion/applications/grid_regulation/answer.py"
+        ).read_text(encoding="utf-8")
+        chain = (
+            PROJECT
+            / "src/asterion/capabilities/dci/implementation/research/directive.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("lookup_chain", source)
+        self.assertNotIn("search_documents", source)
+        self.assertNotIn("search_documents", chain)
+        self.assertNotIn("grid_regulation", chain)
+
+
+def _desk(path: Path) -> None:
+    write_docx(
+        path,
+        (("4.1.2 接地限值", None), ("5.2 随后的复测。", None)),
+        ((("雨天", "不应大于4欧姆。见5.2。"),),),
+    )
+
+
+def _heading_docx(path: Path) -> None:
+    paragraphs = (
+        ("1", "4.1.2 接地限值"),
+        ("", "正文一句。"),
+        ("2", "5.2 随后的复测。"),
+    )
+    body: list[str] = []
+    for style, text in paragraphs:
+        properties = f'<w:pPr><w:pStyle w:val="{style}"/></w:pPr>' if style else ""
+        body.append(f"<w:p>{properties}<w:r><w:t>{text}</w:t></w:r></w:p>")
+    document = (
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
+        f"<w:body>{''.join(body)}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(path, "w") as package:
+        package.writestr("word/document.xml", document)
 
 
 def _bare_number_docx(path: Path) -> None:
