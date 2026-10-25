@@ -130,10 +130,13 @@ def fault_prompt(document: str, question: str) -> str:
                 "number from rg -n, or strip P and read the six digits as a "
                 "base-10 integer. That number is not the read offset. Do not "
                 "guess a line number from the order of hits. Do not pass those "
-                "six digits as the read offset."
+                "six digits as the read offset. Search output is not an "
+                "opened passage. Do not use sed, awk, head, grep, or echo to "
+                "print passages.txt."
             ),
             (
-                "Read hits with the read tool. The read offset is that line "
+                "Read hits with the read tool. The read tool is the only way "
+                "a passage is opened. The read offset is that line "
                 "number minus at least one, and never below 1, so the previous "
                 "line is inside the window when one exists. One read covers "
                 "the leaf, the ancestor opening, or the cited passage being "

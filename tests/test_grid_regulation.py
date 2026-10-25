@@ -381,6 +381,11 @@ class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("Follow a citation with another search", prompt)
         self.assertIn("only when this question depends on", prompt)
         self.assertIn("One read covers the leaf", prompt)
+        self.assertIn("The read tool is the only way a passage is opened", prompt)
+        self.assertIn("Search output is not an opened passage", prompt)
+        self.assertIn(
+            "Do not use sed, awk, head, grep, or echo to print passages.txt", prompt
+        )
         self.assertIn(f"This run allows {GRID_MAX_TURNS} tool turns", prompt)
         self.assertIn("rg -n", prompt)
         self.assertIn("minus at least one", prompt)
