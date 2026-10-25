@@ -175,15 +175,22 @@ def fault_prompt(document: str, question: str) -> str:
                 "has not shown."
             ),
             (
-                "Write the answer in Chinese Markdown. Do not narrate the "
-                "search in English or in Chinese. Do not write passage ids, "
-                "tool names, or file names. Use a heading for each part of "
-                "the handling. Use paragraphs and lists for prose. When the "
-                "handling is a table, write that table in Markdown, header "
-                "row included, with only the rows this question needs. Bold "
-                "the handling and each numeric limit. A clause number is a "
-                "citation beside the statement it supports. It is not a "
-                "second search key."
+                "Write the answer in Chinese Markdown. The answer is what "
+                "this regulation requires for the question. It is not a "
+                "description of the passages you opened, and it is not a "
+                "catalogue of related clauses. The desk lists every opened "
+                "passage under its section heading, so do not retell those "
+                "passages. The first paragraph must stand alone as the "
+                "answer: what changes, which limits or actions apply, and "
+                "to which equipment. Then write the handling in the file's "
+                "order. Use paragraphs for prose. When the handling is a "
+                "table, write that table in Markdown, header row included, "
+                "with only the rows this question needs. Bold the handling "
+                "and each numeric limit. Put a clause number in parentheses "
+                "after the statement it supports. Do not use a clause number "
+                "as a heading or as the subject of a sentence. Do not "
+                "narrate the search in English or in Chinese. Do not write "
+                "passage ids, tool names, or file names."
             ),
         )
     )
@@ -216,7 +223,7 @@ async def answer_fault(
             prompt=prompt,
             signal=signal,
         )
-        return _render(source_root, document, reply, locations, calls)
+        return _render(source_root, document, reply, locations, calls, destination)
     except RegulationCitationError:
         raise
     except Exception:
@@ -333,6 +340,7 @@ def _render(
     reply: object,
     locations: object,
     calls: object,
+    projection: Path,
 ) -> FaultAnswer:
     if type(reply) is not str or not isinstance(locations, Mapping):
         raise RegulationCitationError("regulation measures are unavailable")
@@ -345,7 +353,7 @@ def _render(
     if not chosen:
         raise RegulationCitationError("regulation measures are unavailable")
     try:
-        evidence = _evidence(source_root, chosen)
+        evidence = _evidence(source_root, chosen, _section_titles(projection))
     except (DocumentToolError, OSError, TypeError, ValueError):
         raise RegulationCitationError("regulation measures are unavailable") from None
     text = reply[:-1] if reply.endswith("\n") else reply
@@ -388,7 +396,9 @@ def _dedupe(document: str, anchors: tuple[object, ...]) -> list[dict[str, object
 
 
 def _evidence(
-    source_root: Path, chosen: Sequence[Mapping[str, object]]
+    source_root: Path,
+    chosen: Sequence[Mapping[str, object]],
+    titles: Mapping[tuple[object, ...], str],
 ) -> tuple[Mapping[str, object], ...]:
     evidence: list[dict[str, object]] = []
     index = 0
@@ -416,12 +426,17 @@ def _evidence(
                 cursor += 1
             label = _row_label(source_root, run)
             evidence.extend(
-                _item(item, label, read_span(source_root, item)) for item in run
+                _item(
+                    item, label, read_span(source_root, item), titles.get(_place(item))
+                )
+                for item in run
             )
             index = cursor
             continue
         text = read_span(source_root, anchor)
-        evidence.append(_item(anchor, _heading_id(text), text))
+        evidence.append(
+            _item(anchor, _heading_id(text), text, titles.get(_place(anchor)))
+        )
         index += 1
     return tuple(evidence)
 
@@ -447,7 +462,10 @@ def _cell(item: Mapping[str, object]) -> int:
 
 
 def _item(
-    anchor: Mapping[str, object], label: str | None, text: str
+    anchor: Mapping[str, object],
+    label: str | None,
+    text: str,
+    heading: str | None = None,
 ) -> dict[str, object]:
     if type(text) is not str:
         raise RegulationCitationError("regulation measures are unavailable")
@@ -459,7 +477,67 @@ def _item(
     }
     if type(label) is str:
         item["label"] = label
+    if type(heading) is str and heading != "":
+        item["heading"] = heading
     return item
+
+
+def _section_titles(projection: Path) -> dict[tuple[object, ...], str]:
+    """Map each passage anchor to the outline path that contains it."""
+
+    try:
+        loaded = json.loads(
+            (projection / "passage-index.json").read_text(encoding="utf-8")
+        )
+        lines = (projection / "passages.txt").read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}
+    passages = loaded.get("passages") if isinstance(loaded, dict) else None
+    if not isinstance(passages, list) or len(passages) != len(lines):
+        return {}
+    stack: list[tuple[int, str]] = []
+    found: dict[tuple[object, ...], str] = {}
+    for passage, line in zip(passages, lines, strict=True):
+        if not isinstance(passage, Mapping):
+            continue
+        depth = passage.get("depth")
+        if type(depth) is int and depth in (1, 2, 3):
+            title = _line_title(line, depth)
+            if title:
+                while stack and stack[-1][0] >= depth:
+                    stack.pop()
+                stack.append((depth, title))
+        if not stack:
+            continue
+        path = " / ".join(title for _depth, title in stack)
+        anchors = passage.get("anchors")
+        if not isinstance(anchors, list):
+            continue
+        for anchor in anchors:
+            if not isinstance(anchor, Mapping):
+                continue
+            place = _place(anchor)
+            if place:
+                found[place] = path
+    return found
+
+
+def _line_title(line: str, depth: int) -> str:
+    fields = line.split("\t")
+    if len(fields) < 3 or fields[1] != f"H{depth}":
+        return ""
+    return "\t".join(fields[2:]).strip()
+
+
+def _place(anchor: Mapping[str, object]) -> tuple[object, ...]:
+    kind = anchor.get("kind")
+    position = anchor.get("position")
+    if type(kind) is not str or not isinstance(position, Mapping):
+        return ()
+    if any(type(position[key]) is not int for key in position):
+        return ()
+    pairs = tuple(sorted((str(key), position[key]) for key in position))
+    return (kind, pairs)
 
 
 class _Corpus:

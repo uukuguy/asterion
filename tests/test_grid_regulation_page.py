@@ -41,6 +41,7 @@ class GridRegulationPageTests(unittest.TestCase):
         self.assertIn("正在阅读这本规程。", html)
         self.assertIn("renderMarkdown", html)
         self.assertIn("groupEvidence", html)
+        self.assertIn("item.heading", html)
         self.assertIn("is-key", html)
         self.assertIn("PingFang SC", html)
         self.assertIn("table-scroll", html)

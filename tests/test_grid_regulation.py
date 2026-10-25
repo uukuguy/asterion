@@ -388,6 +388,9 @@ class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn(f"This run allows {GRID_MAX_TURNS} tool turns", prompt)
         self.assertIn("Write the answer in Chinese Markdown", prompt)
+        self.assertIn("It is not a description of the passages you opened", prompt)
+        self.assertIn("The first paragraph must stand alone as the answer", prompt)
+        self.assertIn("Do not use a clause number as a heading", prompt)
         self.assertIn("Do not narrate the search in English or in Chinese", prompt)
         self.assertIn("Bold the handling and each numeric limit", prompt)
         self.assertIn("rg -n", prompt)
@@ -525,7 +528,7 @@ class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             _heading_docx(root / "desk.docx")
-            research = ScriptedGridResearch(passage_lines=(1,))
+            research = ScriptedGridResearch(passage_lines=(1, 2))
             found = await answer_fault(
                 root,
                 document="desk.docx",
@@ -540,6 +543,10 @@ class GridFaultAnswerTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertNotIn("正文一句。", research.contents or "")
         self.assertEqual(found.evidence[0]["label"], "4.1.2")
+        self.assertEqual(found.evidence[0]["heading"], "4.1.2 接地限值")
+        self.assertEqual(found.evidence[1]["text"], "正文一句。")
+        self.assertEqual(found.evidence[1]["heading"], "4.1.2 接地限值")
+        self.assertNotIn("label", found.evidence[1])
         self.assertNotIn("正文一句。", repr(research.result))
 
     def test_answer_module_does_not_search_or_walk_clauses(self) -> None:

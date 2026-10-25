@@ -557,9 +557,10 @@
       padding-bottom: 8px;
       border-bottom: 1px solid var(--line);
       color: var(--ink);
-      font-size: 14px;
+      font-size: 16px;
       font-weight: 600;
-      line-height: 1.4;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
     }
 
     .answer td.is-key, .passage td.is-key {
@@ -863,68 +864,81 @@
 
     function groupEvidence(items) {
       const groups = [];
-      let table = null;
-      let prose = null;
+      const headed = new Map();
+      let loose = null;
 
-      function push(group) {
-        if (group) groups.push(group);
+      function pushLoose() {
+        if (loose) groups.push(loose);
+        loose = null;
+      }
+
+      function addCell(group, item) {
+        let table = group.blocks.find((block) => block.type === "table" && block.table === item.position.table);
+        if (!table) {
+          table = { type: "table", table: item.position.table, rows: [] };
+          group.blocks.push(table);
+        }
+        let row = table.rows.find((candidate) => candidate.index === item.position.row);
+        if (!row) {
+          row = { index: item.position.row, cells: [] };
+          table.rows.push(row);
+        }
+        row.cells.push({ index: item.position.cell, text: item.text || "" });
+      }
+
+      function addProse(group, item) {
+        const index = item.position && (item.position.paragraph ?? item.position.item ?? 0);
+        let prose = group.blocks.length ? group.blocks[group.blocks.length - 1] : null;
+        if (!prose || prose.type !== "text") {
+          prose = { type: "text", parts: [] };
+          group.blocks.push(prose);
+        }
+        prose.parts.push({ index: index, text: item.text || "" });
       }
 
       (items || []).forEach((item) => {
-        if (item.kind === "docx-cell") {
-          push(prose);
-          prose = null;
-          const key = item.document + "\0" + item.position.table;
-          if (!table || table.key !== key) {
-            push(table);
-            table = { type: "table", key: key, document: item.document, label: "", rows: [] };
+        if (item.heading) {
+          pushLoose();
+          const key = item.document + "\0" + item.heading;
+          let section = headed.get(key);
+          if (!section) {
+            section = { type: "section", key: key, heading: item.heading, label: "", blocks: [] };
+            headed.set(key, section);
+            groups.push(section);
           }
-          if (item.label) table.label = item.label;
-          let row = table.rows.find((candidate) => candidate.index === item.position.row);
-          if (!row) {
-            row = { index: item.position.row, cells: [] };
-            table.rows.push(row);
-          }
-          row.cells.push({ index: item.position.cell, text: item.text || "" });
+          if (item.label) section.label = item.label;
+          if (item.kind === "docx-cell") addCell(section, item);
+          else addProse(section, item);
           return;
         }
-        push(table);
-        table = null;
         const label = item.label || "";
-        if (prose && prose.document === item.document && prose.label === label && prose.kind === item.kind) {
-          prose.parts.push(item.text || "");
-          return;
+        const looseKey = item.kind === "docx-cell"
+          ? item.document + "\0" + item.position.table
+          : item.document + "\0" + label + "\0" + item.kind;
+        if (!loose || loose.key !== looseKey) {
+          pushLoose();
+          loose = { type: item.kind === "docx-cell" ? "table" : "text", key: looseKey, document: item.document, label: label, blocks: [] };
         }
-        push(prose);
-        prose = { type: "text", document: item.document, label: label, kind: item.kind, parts: [item.text || ""] };
+        if (item.label) loose.label = item.label;
+        if (item.kind === "docx-cell") addCell(loose, item);
+        else addProse(loose, item);
       });
-      push(table);
-      push(prose);
+      pushLoose();
       return groups;
     }
 
     function passageCaption(group) {
+      if (group.heading) return group.heading;
       const bits = [];
       if (group.label) bits.push("条款 " + group.label);
-      bits.push(group.type === "table" ? "表格" : "正文");
+      const table = group.type === "table" || (group.blocks || []).some((block) => block.type === "table");
+      const prose = group.type === "text" || (group.blocks || []).some((block) => block.type === "text");
+      bits.push(table && !prose ? "表格" : "正文");
       return bits.join(" · ");
     }
 
-    function renderPassage(group) {
-      const figure = document.createElement("figure");
-      figure.className = "passage";
-      const caption = document.createElement("figcaption");
-      caption.textContent = passageCaption(group);
-      figure.append(caption);
-      if (group.type === "text") {
-        group.parts.forEach((part) => {
-          const paragraph = document.createElement("p");
-          paragraph.textContent = part;
-          figure.append(paragraph);
-        });
-        return figure;
-      }
-      const rows = group.rows.slice().sort((left, right) => left.index - right.index);
+    function renderTable(block) {
+      const rows = block.rows.slice().sort((left, right) => left.index - right.index);
       const width = rows.reduce((max, row) => {
         return Math.max(max, row.cells.reduce((end, cell) => Math.max(end, cell.index + 1), 0));
       }, 0);
@@ -944,7 +958,31 @@
         }
         element.append(tr);
       });
-      mountTable(figure, element);
+      return element;
+    }
+
+    function renderBlocks(figure, blocks) {
+      (blocks || []).forEach((block) => {
+        if (block.type === "text") {
+          block.parts.slice().sort((left, right) => left.index - right.index).forEach((part) => {
+            if (!part.text) return;
+            const paragraph = document.createElement("p");
+            paragraph.textContent = part.text;
+            figure.append(paragraph);
+          });
+          return;
+        }
+        mountTable(figure, renderTable(block));
+      });
+    }
+
+    function renderPassage(group) {
+      const figure = document.createElement("figure");
+      figure.className = "passage";
+      const caption = document.createElement("figcaption");
+      caption.textContent = passageCaption(group);
+      figure.append(caption);
+      renderBlocks(figure, group.blocks);
       return figure;
     }
 
