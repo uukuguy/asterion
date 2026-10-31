@@ -3902,3 +3902,4 @@
 - 21:14 Handoff. Nothing is listening on 8765. Operator runs 56aebc05, 64691eb6, and 64cf15f7 completed with relative reads. No new model call. Regulation originals stay untracked.
 
 - 21:30 PR59 maintainer installation feedback verified; reproduction guide adds Node/npm and locked development dependencies. docs-check passed (337 files).
+- 21:26 Documented source-install prerequisites for PR59 maintainer feedback. [60ef66e6]
