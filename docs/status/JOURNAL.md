@@ -3896,3 +3896,7 @@
 - 03:22 The desk log shows the rg or grep text after the projection file. A quoted phrase stays one term, and a regex escape stays. The command, the path, the tool result, and the final answer stay off that log. A pattern containing key, token, secret, or authorization is omitted. Grid page tests and Pi runtime tests passed (27). No model call. [ab856b5c]
 - 03:31 The desk has no 60-second cancel. `阅读没有完成 60 秒` is elapsed time. That search reached turn 32, wrote final.txt, and was rejected because every read path was absolute. A read of the projection's own passages.txt or contents.txt now counts. A path outside that directory still fails. Two research tests passed. No model call. The desk process on 8765 is still the previous code. [c1525efd]
 - 03:59 The handling column and bold text no longer use a yellow fill. Both stay heavier type. A page source test passed. Headless Chrome checked a fictional reply: no mark elements, and the key cells had a transparent background. No model call. Refreshing the open page loads this file. [9182ee82]
+
+## 2026-10-31
+
+- 21:14 Handoff. Nothing is listening on 8765. Operator runs 56aebc05, 64691eb6, and 64cf15f7 completed with relative reads. No new model call. Regulation originals stay untracked.

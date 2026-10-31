@@ -1,60 +1,48 @@
-# Live Session Checkpoint
+# Next-Session Handoff
 
-> Updated: 2026-10-26 03:59. **Session remains active — not a final handoff.**
+> Updated: 2026-10-31 21:14. End of session.
 
 ## TL;DR
 
-- The grid regulation desk is one HTML file, `page.html`. POST `/api/measures` calls `answer_fault`. `page.main` passes `LiveGridResearch`. `serve` with no research object still returns 422 and does not start Pi. `make grid-regulation` stays on `127.0.0.1`. While a search runs, the button counts seconds. stderr prints the turn, then the sentence the model wrote before the tool, then the file and line window being read, or the projection file and the search text. The question, the command, the path, the tool result, and the final answer stay off that log. `e5e9a2bc` was checked with a fictional file and did not start Pi. The reply renders as Chinese Markdown. English search narration and passage ids are omitted. Evidence is one paragraph or one table. The handling column is heavier type. Bold text is weight only, with no yellow fill. The reading face is PingFang SC, with installed gothic fallbacks and no remote font. A desk process started before `38029c7e` still omits span text, so the evidence grid stays empty until that process is restarted. The task text requires the first paragraph to answer the question. Evidence under a styled heading is one section card titled with that outline path. An answer already written does not change until the next authorized search. Headless Chrome checked the type and a fictional reply. An answer already written stays as it is until the next authorized search. Submitting the form would start Pi.
-- One authorized question on the 2023 stability DOCX was run three times at `max_turns` `"32"`, a 300-second cancel, and `--thinking off`. The first stopped at the turn cap. The second wrote bash-only `final.txt` and was not rendered. The third, after `06b2893e`, completed in 33.1 seconds: 6 bash and 18 read, 835 anchors, reply 1917 characters. Evidence is `outputs/grid-regulation/fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. That reply is not an applicability judgment. Another model call is not authorized.
-- A private probe cited one clause in each of the three untracked DOCX files and three PDFs. The originals stay untracked. No model call ran.
-- `native.dci-complete` is not built. Installed provider `dci-agent-lite` stays removed.
+- The grid regulation desk is the active work. Prime/P7 stays closed. `native.dci-complete` is not built. Another model call is not authorized.
+- Local `main` and the recorded `origin/main` are both `1bfe73db`. This handoff did not fetch. Untracked regulation originals under `docs/` stay untracked.
+- Nothing is listening on `127.0.0.1:8765`. The last operator search finished on 2026-10-27 00:23 with relative `passages.txt` reads and `run.completed`. It is not an applicability judgment.
 
-## Verified facts
+## 已验证事实
 
-- One authorized question on the 2023 stability DOCX, first edition, ran through `answer_fault` and `LiveGridResearch`. Bounds stayed `max_turns` `"32"` and 300 seconds. The grid command passed `--thinking off`. The first runtime raised `Pi runtime turn limit exceeded` at 83.6 seconds. The child exit recorded by the runtime was -15. Queued stdout was 4445835 bytes. The Pi session had 33 assistant messages: 32 `toolUse` and 1 `aborted`. Tool calls were 23 reads of `passages.txt` at distinct offsets and 12 bash commands. Reasoning tokens were 0. Output tokens were 3550. No `final.txt` for that attempt. No reply and no clause labels were rendered. Regulation sentences were not copied into this record.
-- `af68936b` changes the task text: one read covers a leaf, and a citation is followed only when this question depends on it. Grid tests passed (22). The same question then ran again. Child exit 0 at 45.4 seconds. Queued stdout was 10385357 bytes. Evidence events show 23 bash calls and 0 read calls. `final.txt` is 4909 bytes at `outputs/grid-regulation/d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b`. The desk returned `regulation measures are unavailable` because bash does not record passage anchors. No clause labels. The reply was not rendered.
-- `06b2893e` says the read tool is the only way a passage is opened, and sed, awk, head, grep, and echo must not print `passages.txt`. Grid tests passed (22). The same question then completed. Child exit 0 at 33.1 seconds. Queued stdout was 7328739 bytes. Calls were 6 bash and 18 read. Evidence has 835 anchors: 148 `docx-paragraph` and 687 `docx-cell`. Clause labels are 6.1, 6.1.1, 6.1.2, 6.1.3, 6.2, 6.2.1, 4.1, 4.1.1, 23.3, 23.4, 27.1, 27.1.1, 5.1, 5.1.1, 5.1.2, 9.2.2, 9.3, 10.2.2, 11.2.2, 24.1.2, 24.2, 24.2.2, 24.3, and 27.1.2. The reply is 1917 characters. Evidence directory `outputs/grid-regulation/fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf` is mode 0700. `final.txt` is 3903 bytes. Regulation sentences were not copied into this record. The reply is not an applicability judgment.
-- Earlier attempts of that same question, still inside the one authorization, stopped on `Pi runtime output limit exceeded`. With thinking on, queued stdout reached 4194073 bytes under the old 4MB total, then 67094958 bytes under the 64MB total. `f70808ea` sets the event cap to 65536. `c72cb556` sets the stdout total to 64MB. The 1MB line cap is unchanged. `4ee65704` adds `--thinking off` to the grid command only. `55a8f2e9` parses an unchanged regulation file once. Those four commits are local and not pushed. `GridLiveOptionTests` passed (5) after the thinking flag. The two Pi line-cap tests passed after the total was raised. `make promotion-check`, `make docs-check`, `make grid-regulation`, and `make native-dci-example` were not run for those commits.
-- `tests.test_document_tools`, `tests.test_dci_research_capability`, `tests.test_grid_regulation`, `tests.test_grid_regulation_page`, and `tests.test_native_application` passed: 57 tests at `98dfed8a`. Ruff check passed on the edited Python. That commit is local and not pushed. The same five modules passed at 52 tests for `3a41d145`. Headless Chrome opened the empty page, one scripted hit, and a miss. The server used a temporary fictional file, not `docs/`. That check did not call a model.
-- The removed word chain opened a paragraph or a whole table row that contained the situation words, then one passage whose label was a clause number written in that row. On the 2023 stability file, one spaced fault query opened two unlabeled paragraphs of 78 characters each. `主变 冷却` and `冷却 全停` missed that chain because those characters do not occur in one passage. That chain is not the page.
-- A span that is only a clause number does not start a clause. A titled cell still does. On the 2023 stability file the one bare cell stays inside clause 28.1.1 (1753 characters). Clause 5.8 is not opened. The older clause assembler for that spaced fault query is unchanged: 6.2.5 (546 characters) and 26.1 (1427 characters). The page does not return those clauses.
-- DOCX reader: when nonempty TOC1–TOC3 levels equal heading styles 1–3, the clause number is prefixed to the heading and the TOC paragraphs are omitted. Paragraph indexes of the remaining paragraphs stay the original indexes. Public position keys are unchanged. A mismatch does not rewrite the file.
-- Private re-probe of the 2023 stability DOCX, sentence text not recorded: 8539 nonempty spans. Clause 1.17 is 30 characters. The older clause assembler returned 6.2.5 (546 characters) and 26.1 (1427 characters) and was not limited. `主变 冷却`, `冷却 全停`, and the unspaced form missed. Parent sections 4.2 and 2.4 remain 10697 and 9298 characters because they still include descendants. That assembler is not the page reply.
-- Headless Chrome opened the empty desk, one fictional measures hit, and a miss. A 390px layout was reviewed.
-- The fictional demo still cites one `grounding.docx` anchor for `4.1.2` and one `patrol.pdf` anchor for `5.2`.
-- A split synthetic clause cites the cover, the heading, and the two spans that join the finding. A child span is cited only when the finding is in that child. A repeated clause id does not keep the earlier section.
-- Local probe, text not recorded: each of the six regulation PDF and DOCX files returned 3 or 5 anchors for one dotted clause. The finding span was among them. `.doc` and the dsl file were not read.
-- `make promotion-check` was not run. `make native-dci-example` was not run.
+- The desk is `src/asterion/applications/grid_regulation/page.html`. POST `/api/measures` calls `answer_fault`. `page.main` passes `LiveGridResearch`. `serve` with no research object returns 422 and does not start Pi. Tools are `read,bash`. `max_turns` is `"32"`. The command passes `--thinking off` and canonical L2 `{"tool_result_chars":20000}`. There is no clock cancel and no 60-second cancel. `阅读没有完成 N 秒` is elapsed time. `make grid-regulation` serves `127.0.0.1` and does not pass `--open`.
+- stderr prints the turn, the sentence written before a tool, then the file and line window, or the projection file and the search text. The question, the command, the path, the tool result, and the final answer stay off that log [`b6f29c24`, `ab856b5c`].
+- A read of the projection's own `passages.txt` or `contents.txt` counts when the path is absolute. The recorded name is the file name. A path outside that directory still fails [`c1525efd`].
+- The handling column and bold text are heavier type. There is no yellow fill [`9182ee82`].
+- One authorized question on the 2023 stability DOCX ran three times. The first stopped at `Pi runtime turn limit exceeded` after 83.6 seconds. The second wrote bash-only `final.txt` and was not rendered (`d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b`). The third completed in 33.1 seconds: 6 bash, 18 read, 835 anchors, reply 1917 characters (`fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`). That reply is not an applicability judgment.
+- Later operator searches, read from event metadata only: `c924eeea5811` at 2026-10-26 03:12 completed with 28 absolute reads and was rejected by the desk process then running. `56aebc056464` at 03:41 completed with 27 relative reads and 0 tool errors, `final.txt` 5633 bytes. `64691eb61365` at 04:04 completed with 8 relative reads and 2 tool errors, `final.txt` 4076 bytes. `64cf15f748f9` at 2026-10-27 00:23 completed with 18 relative reads and 0 tool errors, `final.txt` 3738 bytes. Reply text was not copied into this record. These runs are not applicability judgments. The page status is not stored in those directories.
+- At 2026-10-31 21:14 nothing is listening on 8765, and no `grid_regulation.page` process is running.
 
-## Current judgment
+## 当前判断
 
-- Citation checks that the version string occurs in the file and that the finding occurs inside the assembled clause. It does not decide legal applicability.
-- A model-written grid answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. `serve` with no research object does not start Pi. `page.main` starts Pi when the form is submitted. The third attempt of the one authorized question rendered a 1917-character reply from 18 reads. That reply is not an applicability judgment. Another model call is not authorized. The desk does not open another model client. `prepare_prime_application` stays the Prime door. Operator progress is elapsed seconds on the button. stderr adds the turn, the sentence written before a tool, and the file and line window, or the projection file and the search text. It does not include the question, the command, the path, the tool result, or the final answer. There is no clock cancel and no 60-second cancel. `阅读没有完成 N 秒` is elapsed time. `max_turns` stays `"32"`. A read whose path is the projection's own `passages.txt` or `contents.txt` counts even when that path is absolute. A path outside that directory still fails. The operator interrupts a long search. The desk process on 8765 is still the previous code until it is restarted.
-- The 36-point gap remains a reader constant, not a layout proof.
+- A model-written answer uses native-dci through `prepare_native_application` inside `LiveGridResearch.run`. Tests do not call `run`. The first paragraph is supposed to state what the regulation requires. Clause numbers are citations. Evidence is one paragraph or one table under the section heading. Whether the later completed runs do that has not been judged.
+- Do not raise `max_turns`. Do not add a timeout. The operator stops a long search with Ctrl-C. Do not start Pi, `make grid-regulation`, or a dataset unless the user asks. Submitting the form starts Pi.
+- `prepare_prime_application` stays the Prime door. The desk does not open a second model client.
 
-## Historical archive
+## 历史归档
 
-- Do not remove `--mode rpc`. Do not return the one-shot stdout line cap to 64KB.
-- Do not rewrite the paper ablation row name `dci-agent-lite`.
-- Do not retarget the Judge factory until `native.dci-complete` exists.
-- Do not move `level0`–`level4`, the ablation matrix, judges, or dataset targets onto the public runtime.
-- D-2026-07-31-02 remains active. A full dataset run still needs its own authorization.
-- The same-span citation rule is retired. A clause id, its version, and its finding may sit on different spans.
+- The 300-second cancel is removed. Thinking stays off. An earlier thinking-on run hit the stdout cap.
+- A bash-only stream has no passage anchors, so the desk returns `regulation measures are unavailable` even when `final.txt` exists.
+- The word-match chain and `lookup_chain` are removed. `lookup_measures` and POST `/api/cite` stay. The JSON example still uses the fictional corpus.
+- Do not build `native.dci-complete`. Do not reinstall provider `dci-agent-lite`. Do not change `examples/applications/native_dci.py` off `read,grep`. D-2026-07-31-02 stays. Do not commit regulation originals. Do not push unless the user asks.
 
-## Open boundary
+## 未完成边界
 
 - Scanned pages, CID fonts without a ToUnicode map, OLE `.doc`, and `docs/guodiao_2023_2.0_1.0-utf8.dsl` are not citation anchors.
-- The grid application is not registered on provider `native`. The JSON example still uses the fictional corpus. The desk shows span text only to the local operator.
-- The shipped retrieval preset still launches `read,grep` and does not advertise `shell`.
-- `make promotion-check` has not been run since `context-policy-extension.mjs` was added.
+- `make promotion-check` has not been run since `context-policy-extension.mjs` was added. `make native-dci-example` was not run.
 - Worktrees `asterion-p1-workload`, `asterion-p2-worker`, and `asterion-p3-real-rlm` remain. They are unrelated.
-- Untracked regulation files under `docs/` stay untracked.
+- Evidence stays under `outputs/grid-regulation`, mode `0700`, off HTTP and off git.
 
-## Next action
+## 下一动作
 
-1. Do not build `native.dci-complete` unless the user asks. Do not reinstall provider `dci-agent-lite`.
-2. Do not run `make native-dci-example`, `make grid-regulation`, or any dataset. Do not start Pi. The live option builder exists: tools `read,bash`, `max_turns` `"32"`, no clock cancel, `--thinking off`, and canonical L2 JSON. Tests inspect those options and must not call `run` or `prepare_native_application`. Submitting the form through `make grid-regulation` would start Pi. The make target does not open a browser. The desk process on 8765 started at 03:10, before `ab856b5c` and `c1525efd`, and does not load them until the operator restarts it. That restart is not a new authorization. The third attempt rendered a reply from 18 reads. Another question or another model call needs a new authorization. The rendered reply is not an applicability judgment. Do not raise `max_turns` without that decision.
-3. Do not commit the regulation originals. Desk bounds stay `max_turns` `"32"`. There is no clock cancel and no 60-second cancel; `阅读没有完成 N 秒` is elapsed time. The operator interrupts. Live evidence is `outputs/grid-regulation`, mode `0700`, retained for the operator, and kept off HTTP, logs, and git. Two run directories are there: the unrendered bash-only run `d5dda80f234f977549a32dfd4e1651894ad3a646eef00ead8a32e767f673051b` and the rendered run `fea0a888146c18809eef767690e411f05b2acd6756c0b080c4a7c784085a01bf`. Progress lines do not name those directories.
+1. Do not start the desk or Pi. Read this file, then `git status --short` and `git log -1`.
+2. Do not commit the regulation originals. Do not treat `64cf15f748f9` or the earlier rendered reply as an applicability judgment.
+3. A new search is a new model call and needs a new authorization.
 
 ## Ready-to-paste command
 
