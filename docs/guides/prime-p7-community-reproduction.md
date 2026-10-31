@@ -7,9 +7,12 @@ see the [private research archive guide](prime-p7-private-research-archive.md).
 
 ## 1. Inspect without calling a model
 
-From a checkout with Python 3.10+ and `uv`:
+From a checkout with Python 3.10+, `uv`, and Node.js 22.x with npm on `PATH` (the extension requires Node >=20):
+
+Source installation runs a build hook that invokes npm to type-check and bundle the Prime extension. Install its locked dependencies, including development dependencies (TypeScript and esbuild), before `uv sync`. These steps need no model credentials and apply to the published `P7-2026-10-07` checkout too.
 
 ```bash
+npm ci --include=dev --prefix packages/typescript/asterion-prime-extension
 uv sync --frozen
 uv run asterion list
 uv run asterion-dci describe
