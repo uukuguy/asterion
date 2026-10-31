@@ -9,13 +9,12 @@ see the [private research archive guide](prime-p7-private-research-archive.md).
 
 From a checkout with Python 3.10+, `uv`, and Node.js 22.x with npm on `PATH` (the extension requires Node >=20):
 
-Source installation runs a build hook that invokes npm to type-check and bundle the Prime extension. Install its locked dependencies, including development dependencies (TypeScript and esbuild), before `uv sync`. These steps need no model credentials and apply to the published `P7-2026-10-07` checkout too.
+Source installation runs a build hook that invokes npm to type-check and bundle the Prime extension. Install its locked dependencies, including development dependencies (TypeScript and esbuild), before `uv sync`. The `prime` extra installs P7's Python dependencies, including IPython and python-dotenv. These steps need no model credentials and apply to the published `P7-2026-10-07` checkout too.
 
 ```bash
 npm ci --include=dev --prefix packages/typescript/asterion-prime-extension
-uv sync --frozen
+uv sync --frozen --extra prime
 uv run asterion list
-uv run asterion-dci describe
 ```
 
 The producing P7 application is under [`src/asterion/applications/prime/p7/`](../../src/asterion/applications/prime/p7). The exact registered tools are `ipython`, `p7_workspace`, and `p7_execute_plan`. Read the [prompt](../../src/asterion/applications/prime/p7/prompt.py), [research workspace](../../src/asterion/applications/prime/p7/research.py), [broker](../../src/asterion/applications/prime/p7/broker.py), and [experience loader](../../src/asterion/applications/prime/p7/experience.py) to inspect the general method rather than a per-game answer table.
